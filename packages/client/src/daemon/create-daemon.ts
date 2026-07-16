@@ -26,7 +26,7 @@ export interface DaemonConfig {
 export interface DaemonStatus {
   paired: boolean;
   connected: boolean;
-  /** True once the connection has fallen back to long-poll (protocol §8) — new task offers are declined `retryable:true` while this holds (no daemon->server HTTP path exists in that mode). */
+  /** True once the connection has fallen back to long-poll (protocol §8) — transport info only (finding F6): long-poll is a full transport, so work still proceeds normally while this holds; outbound envelopes POST to /byok/messages instead of going out over WS. */
   degraded: boolean;
   /** True once the server has revoked this device (401 on challenge/token, protocol §6.3). The only recourse is calling `pair()` again — the daemon does not keep retrying on its own. */
   revoked: boolean;
