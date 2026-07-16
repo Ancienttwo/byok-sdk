@@ -85,6 +85,120 @@ behavior — not a bug — and is exactly what the M0 acceptance run's fake-pi
 fixture path also exercises (see the SDK repo's M0 report), just without
 needing a real key.
 
+## Testing with z.ai GLM
+
+`pi` (the `@earendil-works/pi-coding-agent@^0.74.2`, `legacy-node20`-dist-tag
+version this SDK's optionalDependency pins — see
+`packages/client/src/adapters/pi/resolve-bin.ts`) already ships a **built-in**
+`zai` provider — no extension, no `models.json`, no code change anywhere in
+this SDK is needed. Empirically confirmed (2026-07-16) against the actually
+installed 0.74.2, and cross-checked against the current `latest` (0.80.7,
+`@earendil-works/pi-ai`'s bundled `providers/zai.models.js`): both versions
+define it identically —
+
+```
+provider: "zai", api: "openai-completions", baseUrl: "https://api.z.ai/api/coding/paas/v4"
+```
+
+— i.e. the OpenAI-completions-compatible z.ai coding-plan endpoint the task
+brief called out, not the Anthropic-compatible one (`api.z.ai/api/anthropic`);
+there was no need to touch the latter, since a ready-made provider already
+exists for the former. **0.74.2 fully suffices** — no Node-baseline bump is
+needed for this. The only difference in `latest` (0.80.7) is one newer model
+(`glm-5.2`, 1M context) and a separate `zai-coding-cn` region-variant
+provider (`ZAI_CODING_CN_API_KEY`) for the mainland-China z.ai endpoint;
+neither changes the mechanism below.
+
+### Exact model IDs (from the installed 0.74.2's own bundled registry)
+
+```
+zai/glm-4.5-air   (131K context,  98K max output)
+zai/glm-4.7       (204.8K context, 131K max output)
+zai/glm-5-turbo   (200K context,  131K max output)
+zai/glm-5.1       (200K context,  131K max output)
+zai/glm-5v-turbo  (200K context,  131K max output, vision)
+```
+
+(`glm-4.6`, sometimes mentioned elsewhere as a z.ai coding-plan model, is not
+in this registry snapshot — already superseded. `glm-4.7` is current and is
+this doc's recommended default.)
+
+### Config mechanism
+
+The byok-sdk `PiAdapter` never passes `--model`/`--provider` on pi's command
+line (`pi-adapter.ts` only adds `--mode rpc --session-id <ref>` plus
+permission-mapping flags) — so GLM has to be pi's own **default** model, set
+once, rather than something byok selects per task:
+
+1. **API key** — the installed pi's env-var-to-provider map
+   (`@earendil-works/pi-ai`'s `env-api-keys.ts`) recognizes exactly
+   `ZAI_API_KEY` for the `zai` provider. None of `Z_AI_API_KEY`,
+   `ZHIPUAI_API_KEY`, `ZHIPU_API_KEY`, `GLM_API_KEY`, or `BIGMODEL_API_KEY`
+   are recognized by pi itself (they're other tools' conventions for the same
+   underlying z.ai/Zhipu/GLM account) — only `ZAI_API_KEY` works here:
+
+   ```sh
+   export ZAI_API_KEY=your-z.ai-coding-plan-api-key
+   ```
+
+2. **Default model** — write (or merge into) `~/.pi/agent/settings.json`:
+
+   ```json
+   {
+     "defaultProvider": "zai",
+     "defaultModel": "glm-4.7"
+   }
+   ```
+
+   (Want full isolation from your real `~/.pi/agent/`? Run the daemon with
+   `HOME` pointed at a scratch directory instead, e.g.
+   `HOME=/tmp/byok-glm-home node packages/client/dist/bin/byok-agent.js start ...`,
+   and put `.pi/agent/settings.json` under that scratch `HOME` instead.)
+
+3. **Do not set `BYOK_PI_BIN`** for this — that env var swaps in the
+   fake-pi test fixture; leave it unset so `resolvePiBin()` resolves the real
+   installed `@earendil-works/pi-coding-agent` optionalDependency.
+
+4. Run the daemon exactly as in "Run it" above (`pair` then `start`) with
+   `ZAI_API_KEY` exported and the settings file in place, then dispatch:
+
+   ```sh
+   curl -s -X POST http://localhost:8787/api/tasks \
+     -H 'content-type: application/json' \
+     -d '{"instruction": "Create a file named hello.txt containing '"'"'hello from GLM'"'"'", "runtime": "pi"}'
+   ```
+
+   or use the web UI's dispatch form with that same instruction. Verify via
+   the task's SSE feed / `GET /api/tasks/:taskId`: `state: "Complete"`, and
+   `hello.txt` actually written into that task's workspace dir
+   (`<workspaceRoot>/<taskId>/hello.txt`) containing `hello from GLM`.
+
+### Verified mechanism, blocked on a real key
+
+Empirically verified end-to-end **except** the final live-inference call
+(no `ZAI_API_KEY`-shaped key was present in the environment this was
+verified in — checked presence-only: `ZAI_API_KEY`, `Z_AI_API_KEY`,
+`ZHIPUAI_API_KEY`, `ZHIPU_API_KEY`, `GLM_API_KEY`, `BIGMODEL_API_KEY` were
+all absent):
+
+- `pi --list-models` (offline, with a dummy `ZAI_API_KEY` and the
+  `defaultProvider`/`defaultModel` settings above) correctly lists exactly
+  the 5 `zai` models above — confirms the config is recognized.
+- `pi -p "say hi"` (same setup, no `--provider`/`--model` flags, dummy key)
+  produced `401 token expired or incorrect` — a genuine response from the
+  real `api.z.ai` endpoint, confirming the request really is routed to z.ai
+  by default, authenticated with the configured key, with no further config
+  needed. A real key in place of the dummy one is the only missing piece.
+
+Note also: pi-adapter.ts's own `authPresent` heuristic (surfaced in this
+example's "runtime chips") only recognizes a fixed list of common provider
+env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc. — see
+`KNOWN_PROVIDER_ENV_VARS` in `pi-adapter.ts`); `ZAI_API_KEY` isn't in that
+list, so a GLM-configured device's runtime chip will show `✗auth` in this
+demo's UI even when correctly configured — cosmetic only, not a functional
+gap (this is a deliberately non-exhaustive, "common providers" list per its
+own doc comment, not a bug).
+
 ## Policy mode
 
 The dispatch form only asks for an instruction + runtime (per the M0 spec);
