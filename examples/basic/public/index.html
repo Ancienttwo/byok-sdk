@@ -1,0 +1,184 @@
+<title>BYOK SDK — basic example</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.3rem; }
+  h2 { font-size: 1rem; margin-top: 2rem; }
+  section { border: 1px solid #ddd; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+  textarea, select, button { font: inherit; }
+  textarea { width: 100%; box-sizing: border-box; }
+  #pairing-info { font-family: ui-monospace, monospace; margin-top: 0.5rem; }
+  #machine-list { list-style: none; padding: 0; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+  #machine-list li.empty { color: #888; }
+  #feed { background: #111; color: #ddd; padding: 0.75rem; height: 16rem; overflow-y: auto; font-size: 0.85rem; white-space: pre-wrap; }
+  #result { margin-top: 0.5rem; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+  .controls { margin-bottom: 0.5rem; }
+  .hint { color: #666; font-size: 0.85rem; }
+  .hint code { background: #f0f0f0; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+
+<h1>BYOK SDK — basic example</h1>
+<p class="hint">Demo UI for <code>@byok/example-basic</code>: pair a machine, dispatch a task to its local coding agent, watch it run.</p>
+
+<section id="pairing">
+  <h2>1. Pair a machine</h2>
+  <button id="create-code" type="button">Create pairing code</button>
+  <div id="pairing-info"></div>
+  <p class="hint">In another terminal: <code>byok-agent pair &lt;code&gt; --server http://localhost:8787</code>, then <code>byok-agent start</code></p>
+</section>
+
+<section id="machines">
+  <h2>2. Connected machines</h2>
+  <ul id="machine-list"><li class="empty">none yet</li></ul>
+</section>
+
+<section id="dispatch">
+  <h2>3. Dispatch a task</h2>
+  <form id="task-form">
+    <textarea id="instruction" rows="3" required
+      placeholder="Create a file named hello.txt containing 'hello from pi' in the workspace"></textarea>
+    <p>
+      <label>Runtime
+        <select id="runtime">
+          <option value="pi" selected>pi</option>
+          <option value="claude">claude (not implemented in M0)</option>
+          <option value="codex">codex (not implemented in M0)</option>
+        </select>
+      </label>
+    </p>
+    <button type="submit">Dispatch</button>
+  </form>
+</section>
+
+<section id="task" hidden>
+  <h2>4. Task <span id="task-id"></span></h2>
+  <div class="controls">
+    <button id="approve" type="button">Approve</button>
+    <button id="cancel" type="button">Cancel</button>
+  </div>
+  <pre id="feed"></pre>
+  <div id="result"></div>
+</section>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let currentTaskId = null;
+  let currentSource = null;
+
+  function logLine(text) {
+    const feed = $('feed');
+    feed.textContent += text + '\n';
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  function describeAgentEvent(e) {
+    switch (e.type) {
+      case 'progress': return `progress: ${e.text}`;
+      case 'tool_use': return `tool_use ${e.tool} ${JSON.stringify(e.input ?? {})}`;
+      case 'tool_result': return `tool_result ${e.tool} ${JSON.stringify(e.output ?? {})}`;
+      case 'artifact': return `artifact ${e.name} (${e.contentType})`;
+      case 'needs_approval': return `needs_approval: ${e.summary}`;
+      case 'turn_end': return 'turn_end';
+      case 'error': return `error: ${e.message}`;
+      default: return JSON.stringify(e);
+    }
+  }
+
+  function describeServerEvent(event) {
+    switch (event.kind) {
+      case 'state': return `[state] ${event.state}`;
+      case 'agent': return `[agent] ${describeAgentEvent(event.event)}`;
+      case 'artifact': return `[artifact] ${event.artifact.name} (${event.artifact.contentType})`;
+      case 'await_approval': return `[await_approval] ${event.summary}`;
+      case 'error': return `[error] ${event.reason}${event.retryable ? ' (retryable)' : ''}`;
+      default: return `[?] ${JSON.stringify(event)}`;
+    }
+  }
+
+  $('create-code').addEventListener('click', async () => {
+    const res = await fetch('/api/pair', { method: 'POST' });
+    const info = await res.json();
+    $('pairing-info').textContent = `code: ${info.code}   (expires ${new Date(info.expiresAt).toLocaleTimeString()})`;
+  });
+
+  async function refreshMachines() {
+    const machines = await (await fetch('/api/machines')).json();
+    const list = $('machine-list');
+    list.innerHTML = '';
+    if (machines.length === 0) {
+      list.innerHTML = '<li class="empty">none yet</li>';
+      return;
+    }
+    for (const m of machines) {
+      const li = document.createElement('li');
+      const runtimes = m.runtimes ? ` — runtimes: ${m.runtimes.join(',')}` : '';
+      li.textContent = `${m.deviceName} (${m.deviceId}) — ${m.connected ? 'connected' : 'disconnected'}${runtimes}`;
+      list.appendChild(li);
+    }
+  }
+  refreshMachines();
+  setInterval(refreshMachines, 2000);
+
+  function subscribeToTask(taskId) {
+    currentSource?.close();
+    const source = new EventSource(`/api/tasks/${taskId}/events`);
+    currentSource = source;
+    source.onmessage = (ev) => {
+      const event = JSON.parse(ev.data);
+      logLine(describeServerEvent(event));
+      if (event.kind === 'state' && ['Complete', 'Failed', 'Cancelled'].includes(event.state)) {
+        source.close();
+        void showResult(taskId);
+      }
+    };
+    source.onerror = () => logLine('[stream] connection error');
+  }
+
+  async function showResult(taskId) {
+    const snapshot = await (await fetch(`/api/tasks/${taskId}`)).json();
+    const r = snapshot.result;
+    const lines = [`Final state: ${snapshot.state}`];
+    if (r?.summary) lines.push(`Summary: ${r.summary}`);
+    if (r?.reason) lines.push(`Reason: ${r.reason}`);
+    if (r?.artifactRefs?.length) lines.push(`Artifacts: ${JSON.stringify(r.artifactRefs)}`);
+    $('result').textContent = lines.join('\n');
+  }
+
+  $('task-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const instruction = $('instruction').value.trim();
+    const runtime = $('runtime').value;
+    if (!instruction) return;
+
+    $('feed').textContent = '';
+    $('result').textContent = '';
+
+    const res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction, runtime }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      $('task').hidden = false;
+      $('task-id').textContent = '';
+      logLine(`dispatch failed: ${body.error}`);
+      return;
+    }
+
+    currentTaskId = body.taskId;
+    $('task').hidden = false;
+    $('task-id').textContent = currentTaskId;
+    subscribeToTask(currentTaskId);
+  });
+
+  async function actOnTask(action) {
+    if (!currentTaskId) return;
+    const res = await fetch(`/api/tasks/${currentTaskId}/${action}`, { method: 'POST' });
+    const body = await res.json();
+    logLine(`[${action}] ${res.ok ? 'ok' : body.error}`);
+  }
+  $('approve').addEventListener('click', () => actOnTask('approve'));
+  $('cancel').addEventListener('click', () => actOnTask('cancel'));
+</script>

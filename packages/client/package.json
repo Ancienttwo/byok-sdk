@@ -1,0 +1,45 @@
+{
+  "name": "@byok/client",
+  "version": "0.0.1",
+  "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "byok-agent": "./dist/bin/byok-agent.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@byok/protocol": "workspace:*",
+    "ws": "^8.21.1"
+  },
+  "optionalDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.2"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  }
+}

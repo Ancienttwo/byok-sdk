@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.*
+.DS_Store
+*.log
+.turbo/
+coverage/
+
+# external reference material & local ops state (root contract)
+_ref/
+_ops/
