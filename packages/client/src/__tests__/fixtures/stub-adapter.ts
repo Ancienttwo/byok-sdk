@@ -2,15 +2,35 @@ import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
 import type { RuntimeAdapter, RuntimeCapabilities, RuntimeDetectResult, Session, TaskContext } from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
 
-/** In-memory Session double: tests push AgentEvents and record interrupt/steer/close calls. */
+/** In-memory Session double: tests push AgentEvents and record interrupt/steer/close/resolveApproval calls. */
 export class StubSession implements Session {
   readonly queue = new AsyncQueue<AgentEvent>();
   interruptCalled = false;
   closeCalled = false;
   readonly steerCalls: string[] = [];
   readonly followUpCalls: TaskOfferPayload[] = [];
+  readonly resolveApprovalCalls: Array<{ approved: boolean; reason?: string }> = [];
+  private closeGate: Promise<void> | undefined;
 
   constructor(public readonly sessionRef: string) {}
+
+  /**
+   * Test hook: widen the window `TaskRunner.finish()` spends inside
+   * `await session.close()` — `finish()` deletes the task from its active
+   * map *before* awaiting close(), so this lets a test deterministically
+   * reproduce "an event arrives while the task is already gone from the map
+   * but the session hasn't finished tearing down yet" (the exact shape of
+   * the post-cancel stray-turn_end race `TaskRunner.pump`'s guard exists
+   * for) instead of depending on real interprocess-timing luck. Returns the
+   * release function; close() resolves once it's called.
+   */
+  blockClose(): () => void {
+    let release!: () => void;
+    this.closeGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    return release;
+  }
 
   get events(): AsyncIterable<AgentEvent> {
     return this.queue;
@@ -29,8 +49,14 @@ export class StubSession implements Session {
   }
 
   async close(): Promise<void> {
+    if (this.closeGate) await this.closeGate;
     this.closeCalled = true;
     this.queue.end();
+  }
+
+  /** Records the resolution; the test drives what "resuming" looks like by calling `emit()` afterward — `TaskRunner.pump()` is already waiting on `events`, so pushed events flow through exactly like normal progress. */
+  async resolveApproval(approved: boolean, reason?: string): Promise<void> {
+    this.resolveApprovalCalls.push(reason === undefined ? { approved } : { approved, reason });
   }
 
   /** Test helper: push a normalized event as if the runtime produced it. */

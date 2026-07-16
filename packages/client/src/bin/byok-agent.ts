@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
-import { createDaemon, type DaemonConfig } from '../index';
+import { createDaemon, DeviceRevokedError, type DaemonConfig } from '../index';
 
 const REQUIRED_FIELDS = ['productName', 'productId', 'serverUrl', 'workspaceRoot'] as const;
 
@@ -77,6 +77,14 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
+  if (err instanceof DeviceRevokedError) {
+    // A cold `daemon.start()` against an already-revoked device fails fast
+    // with this typed error (see ConnectionManager.waitForAck) instead of
+    // hanging for the ack timeout — give the operator a clear, actionable
+    // message instead of a generic one.
+    console.error('device revoked — re-pair needed (run: byok-agent pair <code> --server <url>)');
+    process.exit(1);
+  }
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

@@ -28,7 +28,6 @@ async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<TaskContex
 }
 
 const baseTask: TaskOfferPayload = {
-  taskId: 't1',
   instruction: 'say hi',
   policy: { mode: 'auto' },
 };
@@ -70,13 +69,87 @@ describe('PiAdapter against the fake-pi fixture', () => {
     ]);
   });
 
-  it('a follow-up offer with an explicit sessionRef resumes that session id (--session-id)', async () => {
+  it('FAKE_PI_ARTIFACT_NAME drives a >64KB file write + an artifact AgentEvent (M1-4 blob-path e2e fixture)', async () => {
     const adapter = fakePiAdapter();
-    const ctx = await makeCtx();
+    const artifactName = 'big-artifact.bin';
+    const size = 70000; // > the 64KB inline-artifact limit
+    const ctx = await makeCtx({
+      ...process.env,
+      FAKE_PI_ARTIFACT_NAME: artifactName,
+      FAKE_PI_ARTIFACT_SIZE: String(size),
+    });
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+
+    const events = await takeEvents(session, 7);
+    expect(events).toEqual([
+      { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' } },
+      {
+        type: 'tool_result',
+        tool: 'bash',
+        output: { result: { content: [{ type: 'text', text: 'hi\n' }] }, isError: false },
+      },
+      { type: 'tool_use', tool: 'write', input: { path: artifactName, content: `<${size} bytes written by fake-pi>` } },
+      {
+        type: 'tool_result',
+        tool: 'write',
+        output: { result: { content: [{ type: 'text', text: `Successfully wrote ${size} bytes to ${artifactName}` }] }, isError: false },
+      },
+      { type: 'artifact', name: artifactName, contentType: 'application/octet-stream' },
+      { type: 'progress', text: 'Hello ' },
+      { type: 'progress', text: 'world' },
+    ]);
+
+    const written = await fs.readFile(path.join(ctx.workspaceDir, artifactName));
+    expect(written.length).toBe(size);
+  });
+
+  it('FAKE_PI_HANG_AFTER_TOOL keeps the session Running past the tool call; interrupt()+close() still tear it down cleanly (M1-4 cancel-path e2e fixture)', async () => {
+    const adapter = fakePiAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_PI_HANG_AFTER_TOOL: '1' });
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+
+    const events = await takeEvents(session, 2);
+    expect(events).toEqual([
+      { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' } },
+      {
+        type: 'tool_result',
+        tool: 'bash',
+        output: { result: { content: [{ type: 'text', text: 'hi\n' }] }, isError: false },
+      },
+    ]);
+
+    // No turn_end ever arrives on its own — the daemon's cancel path doesn't
+    // wait on it; interrupt() (best-effort) + close() (SIGTERM) must still
+    // resolve cleanly, exactly as `TaskRunner.handleCancel`/`finish` rely on.
+    await expect(session.interrupt()).resolves.toBeUndefined();
+    await expect(session.close()).resolves.toBeUndefined();
+  });
+
+  it('start() with no sessionRef resolves pi\'s real minted session id via get_state (not a locally-generated UUID)', async () => {
+    const adapter = fakePiAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_PI_SESSION_ID: 'fixture-minted-session-xyz' });
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+    expect(session.sessionRef).toBe('fixture-minted-session-xyz');
+  });
+
+  it('a task.offer carrying a known sessionRef resumes it via the real `--session <id>` flag', async () => {
+    const adapter = fakePiAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_PI_SESSION_ID: 'resume-me-123' });
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
     const session = await adapter.start(task, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('resume-me-123');
+  });
+
+  it('an unresolvable sessionRef surfaces pi\'s real resume rejection as a clean start() failure, not a hang (empirically confirmed against real pi: "No session found matching ...", exit 1)', async () => {
+    const adapter = fakePiAdapter();
+    // FAKE_PI_SESSION_ID defaults to 'fake-session-1' — this ref never matches it.
+    const ctx = await makeCtx();
+    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    await expect(adapter.start(task, ctx)).rejects.toThrow(/No session found matching/);
   });
 
   it('interrupt() sends abort and the fake pi settles afterward', async () => {

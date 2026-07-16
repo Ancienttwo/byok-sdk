@@ -11,7 +11,7 @@ import {
 } from '../../types';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
-import { mapPiMessageToAgentEvent } from './events';
+import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type SpawnFn } from './rpc-client';
 
 const execFileAsync = promisify(execFile);
@@ -34,6 +34,11 @@ const KNOWN_PROVIDER_ENV_VARS = [
   'MISTRAL_API_KEY',
   'OPENROUTER_API_KEY',
   'XAI_API_KEY',
+  // Confirmed against the installed pi's own docs/providers.md ("ZAI |
+  // `ZAI_API_KEY` | `zai`") and exercised live against real GLM traffic
+  // during this task's acceptance run — omitting it made `authPresent`
+  // silently false for a perfectly valid, working z.ai/GLM setup.
+  'ZAI_API_KEY',
 ] as const;
 
 export interface PiAdapterOptions {
@@ -79,12 +84,43 @@ export class PiAdapter implements RuntimeAdapter {
     }
 
     const bin = this.resolveBin();
-    // sessionRef doubles as pi's own `--session-id`: a follow-up offer
-    // carrying a previously-reported sessionRef resumes that exact pi
-    // session; a fresh task mints a new id up front so `sessionRef` is known
-    // before any event streams back.
-    const sessionRef = task.sessionRef ?? crypto.randomUUID();
-    const args = ['--mode', 'rpc', '--session-id', sessionRef, ...mapping.args];
+    // BLOCKING BUG FOUND + FIXED DURING THE 2026-07-16 LIVE pi x GLM e2e run:
+    // this used to pass `--session-id <ref>` to `pi --mode rpc`, but that flag
+    // does not exist on the real installed pi CLI (confirmed against both
+    // `pi --help` and the package's own bundled `docs/rpc.md` for 0.74.2 —
+    // only `--session <path|id>` (resume-only, errors "No session found..."
+    // for a fresh/unknown id), `--session-dir`, `--no-session`, `--continue`,
+    // `--resume` exist). It crashed EVERY real pi invocation unconditionally
+    // (`Error: Unknown option: --session-id`, exit code 1) before reaching any
+    // model call — never caught by this repo's own test suite because
+    // `fake-pi.mjs` never inspected argv beyond `--version` (now fixed
+    // alongside this task — see fake-pi.mjs). Not GLM/z.ai specific; this
+    // broke 100% of real-pi task dispatch for any provider.
+    //
+    // Finding #3 (session/workspace continuity) follow-up, now implemented:
+    // `task.sessionRef` is only ever non-empty here when `task-runner.ts`
+    // has (a) found a recorded workspace for this exact sessionRef in its
+    // `SessionWorkspaceStore` and (b) spawned this adapter with
+    // `ctx.workspaceDir` set to that SAME directory — see task-runner.ts's
+    // `handleOffer`. That matters because pi's real `--session <id>` resume
+    // is scoped to the cwd/project a session was created under: resuming
+    // from a *different* cwd prompts an interactive "Session found in
+    // different project: ... Fork this session into current directory?
+    // [y/N]" pi cannot answer headlessly, and resuming an id pi never
+    // minted fails outright (`No session found matching '<id>'`, exit 1 —
+    // empirically confirmed against real pi, both live-probed during this
+    // task). An absent `sessionRef` always means "start fresh" — pi mints
+    // its own session id, which this adapter reads back via `get_state`
+    // below and reports as `Session.sessionRef` so a *future* follow-up can
+    // resume it. `TaskOfferPayload.workspaceHint` remains unimplemented (no
+    // caller populates `DispatchInput` with it yet, and its intended
+    // semantics — e.g. does it override or merely suggest a workspace
+    // relative to the sessionRef mapping? — are undocumented in
+    // docs/protocol.md beyond the wire field existing); a real
+    // implementation is a genuine follow-on design task, not a mechanical
+    // fix, and is intentionally left alone here.
+    const resumeSessionId = task.sessionRef;
+    const args = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
 
     const rpc = new PiRpcClient({
       command: bin.command,
@@ -100,12 +136,41 @@ export class PiAdapter implements RuntimeAdapter {
       throw new Error(typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt');
     }
 
+    const sessionRef = resumeSessionId ?? (await resolveFreshSessionId(rpc));
     return new PiSession(sessionRef, rpc);
   }
 
   private resolveBin(): ResolvedBin {
     return (this.options.resolveBin ?? resolvePiBin)();
   }
+}
+
+/**
+ * Learn pi's own real session id for a freshly-started (non-resume) run, so
+ * `Session.sessionRef` reports something a *future* follow-up can actually
+ * resume via `--session <id>` — replaces this adapter's old
+ * `crypto.randomUUID()` placeholder, which minted an id pi itself never knew
+ * about and so could never be resumed. `get_state.data.sessionId` is
+ * populated from the moment pi's RPC process boots (confirmed live: present
+ * even before any prompt is sent, with `messageCount: 0`), so this is safe
+ * to call right after the initial prompt is accepted.
+ */
+async function resolveFreshSessionId(rpc: PiRpcClient): Promise<string> {
+  try {
+    const state = await rpc.send({ type: 'get_state' });
+    const data = state.success !== false ? (state.data as { sessionId?: unknown } | undefined) : undefined;
+    if (typeof data?.sessionId === 'string' && data.sessionId.length > 0) {
+      return data.sessionId;
+    }
+  } catch {
+    // best-effort — fall through to the local fallback below
+  }
+  // Defensive fallback only: real pi (0.74.2/0.80.7) always reports a
+  // sessionId in practice, live-confirmed. Falling back here just means
+  // *this* session can never be resumed by a later follow-up (identical
+  // degradation to before this feature existed) rather than failing start()
+  // outright over a missing diagnostic field.
+  return crypto.randomUUID();
 }
 
 class PiSession implements Session {
@@ -126,8 +191,14 @@ class PiSession implements Session {
               if (done) return { value: undefined as never, done: true };
               const mapped = mapPiMessageToAgentEvent(value);
               if (mapped) return { value: mapped, done: false };
-              // Unmapped pi message (compaction/retry bookkeeping, extension
-              // UI dialogs) — keep pulling instead of surfacing it.
+              // Unmapped pi message: routine bookkeeping (compaction/retry/
+              // session events — see ROUTINE_PI_EVENT_TYPES) is silently
+              // ignored, same as before; anything else is genuinely
+              // unexpected traffic worth flagging (see recordUnmappedFrame's
+              // doc comment) — keep pulling either way, never surfaced.
+              if (!ROUTINE_PI_EVENT_TYPES.has(value.type)) {
+                rpc.recordUnmappedFrame(value.type);
+              }
             }
           },
         };
@@ -152,5 +223,14 @@ class PiSession implements Session {
 
   async close(): Promise<void> {
     this.rpc.kill();
+  }
+
+  async resolveApproval(): Promise<void> {
+    // pi has no built-in per-call approval gate (see permission-mapping.ts)
+    // and never emits `needs_approval` in M0/M1, so this should be
+    // unreachable in practice. Kept as an explicit, descriptive failure
+    // rather than a silent no-op so a future caller (or a misbehaving
+    // server) gets a clear error instead of a hang.
+    throw new Error('pi adapter does not support approval resume: pi never emits needs_approval in M0/M1');
   }
 }
