@@ -10,3 +10,4 @@ coverage/
 # external reference material & local ops state (root contract)
 _ref/
 _ops/
+.gstack/
