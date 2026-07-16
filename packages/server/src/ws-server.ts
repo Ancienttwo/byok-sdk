@@ -136,7 +136,7 @@ function handleConnection(ws: WebSocket, deviceId: string, deps: AttachDeps): vo
         console.warn(`[byok/server] dropping unparsable frame from device ${deviceId}:`, err);
         return;
       }
-      deps.hub.handleEnvelope(deviceId, msg);
+      deps.hub.handleInbound(deviceId, msg);
     });
   });
 

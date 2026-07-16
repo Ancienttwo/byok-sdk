@@ -182,7 +182,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     let cursor = 0;
     if (cursorRaw !== undefined) {
       const parsedCursor = Number(cursorRaw);
-      if (!Number.isInteger(parsedCursor)) return c.json({ error: 'invalid cursor' }, 400);
+      if (!Number.isInteger(parsedCursor) || parsedCursor < 0) return c.json({ error: 'invalid cursor' }, 400);
       cursor = parsedCursor;
     }
 
@@ -195,9 +195,14 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // Finding F6: daemon->server send while long-polling (§8). A device
   // long-polling for S->D traffic has no live WS to carry its own outbound
   // envelopes — this batches them over authed HTTP instead. Each envelope is
-  // routed through the exact same inbound path a WS connection's messages
-  // get (`hub.handleEnvelope`), so claim/progress/complete/etc. behave
-  // identically regardless of which transport carried them.
+  // routed through the exact same inbound gate a WS connection's messages
+  // get (`hub.handleInbound`), so claim/progress/complete/etc. behave
+  // identically regardless of which transport carried them. The batch itself
+  // stays tolerant at the schema level (one malformed/wrong-direction
+  // envelope does not 400 the whole request, finding P2) — `handleInbound`
+  // rejects per-envelope; only a structurally invalid `Envelope` (fails
+  // `EnvelopeSchema`) or an oversized batch (`MessagesSendRequestSchema`'s
+  // cap) 400s here.
   // -------------------------------------------------------------------
 
   app.post('/byok/messages', async (c) => {
@@ -207,11 +212,20 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     const parsed = MessagesSendRequestSchema.safeParse(await readJsonBody(c));
     if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
 
+    let accepted = 0;
+    let rejected = 0;
     for (const envelope of parsed.data.messages) {
-      deps.hub.handleEnvelope(deviceId, envelope);
+      const result = deps.hub.handleInbound(deviceId, envelope);
+      // A duplicate is still a wire-level success (§8.2/§9's idempotency
+      // window) — it just didn't re-run a handler. Only a gate rejection
+      // (wrong-direction type, or an ownership mismatch, N2) is excluded.
+      if (result === 'rejected') rejected++;
+      else accepted++;
     }
 
-    const response: MessagesSendResponse = { accepted: parsed.data.messages.length };
+    // `rejected` is additive and omitted entirely when zero, so a batch with
+    // nothing rejected keeps the pre-P2 `{ accepted }` response shape.
+    const response: MessagesSendResponse = rejected > 0 ? { accepted, rejected } : { accepted };
     return c.json(response, 200);
   });
 

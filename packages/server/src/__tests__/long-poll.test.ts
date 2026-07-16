@@ -143,8 +143,8 @@ describe('long-poll fallback (§8)', () => {
  * Finding F6: `POST /byok/messages` is the daemon's outbound send path while
  * long-polling — a device has no live WS to carry `task.claim`/`progress`/
  * etc in that mode. Each accepted envelope must be routed through the exact
- * same inbound handling (`hub.handleEnvelope`) a WS connection's messages
- * get, not some parallel/lesser path.
+ * same inbound gate (`hub.handleInbound`) a WS connection's messages get,
+ * not some parallel/lesser path.
  */
 describe('POST /byok/messages (§8, finding F6)', () => {
   let server: HttpServer | undefined;

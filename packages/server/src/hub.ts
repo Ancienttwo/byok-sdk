@@ -2,10 +2,12 @@ import type { WebSocket } from 'ws';
 import {
   canTransition,
   createEnvelope,
+  DAEMON_TO_SERVER_TYPES,
   encodeEnvelope,
   PROTOCOL_VERSION,
   type CreateEnvelopeOptions,
   type Envelope,
+  type MessageType,
   type PermissionPolicy,
   type RuntimeInfo,
   type TaskArtifactPayload,
@@ -44,6 +46,9 @@ const DEFAULT_POLICY: PermissionPolicy = { mode: 'confirm' };
 /** Per-device redelivery ring buffer size (§9: "keep the last K envelopes per device"). */
 const OUTBOX_RING_CAPACITY = 500;
 
+/** Per-device idempotency window (N3): how many recent inbound envelope ids {@link ConnectionHub.handleInbound} remembers for dedup, oldest evicted first once full. */
+const DEDUP_RING_CAPACITY = 1024;
+
 function isTerminal(state: TaskState): state is Extract<TaskState, 'Complete' | 'Failed' | 'Cancelled'> {
   return state === 'Complete' || state === 'Failed' || state === 'Cancelled';
 }
@@ -62,6 +67,18 @@ interface OutboxEntry {
   /** Absent for `conn.ack` (not task-scoped) — such entries are never redelivered/polled. */
   taskId?: string;
   envelope: Envelope;
+  /**
+   * N1/F4: `task.cancel`/`task.reject` move their task to a terminal state
+   * *before* being queued here (`cancelTask`/`rejectTask`'s own
+   * mark-terminal-then-send order) — without this flag, `collectRelevant`'s
+   * terminal-task filter would always exclude them, so a daemon that missed
+   * the live send (e.g. dropped mid-cancel) could never have it
+   * redelivered. Only those two types set this (see `sendToDevice`);
+   * `task.approve`/`task.steer` never fire on an already-terminal task in
+   * the first place (`approveTask`/`steerTask` both require a specific
+   * non-terminal state), so the exemption would be moot for them.
+   */
+  redeliverThroughTerminal?: boolean;
 }
 
 /** Per-device outbound sequence counter + bounded history (§1.2, §9). */
@@ -95,6 +112,20 @@ type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'
  * it, and none of the handlers below need to guard against a missing one
  * (the wire schema already rejects such an envelope before it reaches here).
  *
+ * Inbound gate ({@link handleInbound}): the single choke point both
+ * transports (`ws-server.ts`'s WS message handler, `http.ts`'s
+ * `POST /byok/messages`) call instead of reaching into per-type handlers
+ * directly. Runs, in order: (1) type-allow — only `DAEMON_TO_SERVER_TYPES`
+ * may pass, a server -> daemon type arriving inbound is rejected (P2); (2)
+ * ownership (N2) — an envelope for a task already owned by a *different*
+ * device is dropped and logged, never force-failed (force-failing on an
+ * authz mismatch would let an attacker who merely guesses a `taskId` kill
+ * the real owner's task); (3) dedup (N3) — an envelope `id` already seen
+ * from this device is a no-op, making the at-least-once wire (§9)
+ * effectively at-most-once server-side; (4) dispatch to the per-type
+ * handler. Because ownership is enforced once, centrally, here, the
+ * handlers below no longer carry their own device-mismatch checks.
+ *
  * Outbound delivery (M1, §1.2/§9): every server -> daemon envelope
  * (`conn.ack`, `task.offer/approve/reject/cancel/steer`) gets a fresh
  * per-device monotonic `seq` and is retained in a capped ring buffer
@@ -103,6 +134,11 @@ type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'
  * on reconnect (`redeliverAfterReconnect`) or long-poll
  * (`pollEvents`/`collectRelevant`). `conn.ack` has no task association, so
  * it's retained (for seq-counting purposes only) but never redelivered.
+ * Exception (N1/F4): `task.cancel`/`task.reject` are exempt from the
+ * terminal-task skip (`OutboxEntry.redeliverThroughTerminal`) because both
+ * move their own task to a terminal state before being queued — without the
+ * exemption they could never qualify for redelivery even when the original
+ * send never reached the daemon.
  *
  * State-machine (M1): `task.claim` only claims (`Offered -> Claimed`); it no
  * longer implies `Running`. The daemon reports `Claimed -> Running`
@@ -120,6 +156,8 @@ type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'
 export class ConnectionHub {
   private readonly connections = new Map<string, ConnectionState>();
   private readonly outboxes = new Map<string, DeviceOutbox>();
+  /** Idempotency window per device (N3) — recent inbound envelope ids, capped at {@link DEDUP_RING_CAPACITY}. */
+  private readonly dedupRings = new Map<string, Set<string>>();
   private readonly longPollWaiters = new Map<string, LongPollWaiter>();
   private readonly runtimes = new Map<string, TaskRuntime>();
   private readonly serverEvents = new AsyncEventQueue<ByokServerEvent>();
@@ -277,16 +315,95 @@ export class ConnectionHub {
   // inbound envelopes from a connected daemon
   // ---------------------------------------------------------------------
 
-  handleEnvelope(deviceId: string, envelope: Envelope): void {
+  /**
+   * Single inbound choke point for every daemon -> server envelope (N2/N3/
+   * P2) — called by both the WS path (`ws-server.ts`) and the long-poll send
+   * path (`POST /byok/messages`, `http.ts`) in place of reaching into
+   * per-type handlers directly. Runs a fixed gate, in order:
+   *
+   * 1. **type-allow (P2)** — only {@link DAEMON_TO_SERVER_TYPES} may pass; a
+   *    server -> daemon type (or anything unrecognized, e.g. a stale/future
+   *    `conn.hello` outside the handshake) arriving inbound is rejected
+   *    before it's dispatched or counted accepted.
+   * 2. **ownership (N2)** — an envelope for a task already owned by a
+   *    *different* device is dropped (logged), never force-failed:
+   *    force-failing on an authz mismatch would let an attacker who merely
+   *    guesses a `taskId` kill the real owner's task (a DoS). A task with no
+   *    owner yet, or that doesn't exist at all, is not rejected here — the
+   *    per-type handler's own no-op-on-missing-record behavior covers the
+   *    latter.
+   * 3. **dedup (N3)** — an envelope `id` already seen from this device is a
+   *    no-op: the wire is at-least-once (§9), this makes server-side
+   *    processing at-most-once. Check-and-record is synchronous (Node is
+   *    single-threaded), so it's atomic with respect to any other envelope
+   *    for this device.
+   * 4. **dispatch** — handed to the existing per-type `on*` handler.
+   *
+   * Returns which outcome applied. A duplicate still counts as `accepted` on
+   * the `POST /byok/messages` wire (§8.2) — an idempotent replay is a
+   * wire-level success even though no handler ran a second time; only
+   * `rejected` (gate steps 1-2) is excluded from that count.
+   */
+  handleInbound(deviceId: string, envelope: Envelope): 'accepted' | 'duplicate' | 'rejected' {
+    if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) {
+      return 'rejected';
+    }
+
+    const taskId = envelope.task_id;
+    if (taskId === undefined) return 'rejected'; // schema guarantees every DAEMON_TO_SERVER_TYPES member carries task_id; defensive only.
+
+    const record = this.taskStore.get(taskId);
+    if (record && record.deviceId !== undefined && record.deviceId !== deviceId) {
+      console.warn(`[byok/server] dropping ${envelope.type} for ${taskId}: owned by a different device`);
+      return 'rejected';
+    }
+
+    if (this.checkAndRecordDuplicate(deviceId, envelope.id)) {
+      return 'duplicate';
+    }
+
+    this.dispatchToHandler(deviceId, envelope);
+    return 'accepted';
+  }
+
+  /**
+   * Idempotency check-and-record (N3): `true` (duplicate) if `id` was
+   * already seen for `deviceId`; otherwise records it and returns `false`.
+   * Bounded to {@link DEDUP_RING_CAPACITY} ids per device — a ring, not an
+   * unbounded set — evicting the oldest once full.
+   */
+  private checkAndRecordDuplicate(deviceId: string, id: string): boolean {
+    let seen = this.dedupRings.get(deviceId);
+    if (!seen) {
+      seen = new Set<string>();
+      this.dedupRings.set(deviceId, seen);
+    }
+    if (seen.has(id)) return true;
+    seen.add(id);
+    if (seen.size > DEDUP_RING_CAPACITY) {
+      const oldest = seen.values().next().value;
+      if (oldest !== undefined) seen.delete(oldest);
+    }
+    return false;
+  }
+
+  /**
+   * Route one already-gated envelope (see {@link handleInbound}) to its
+   * per-type handler. Type-allow/ownership/dedup have already run by the
+   * time this executes, so the handlers below no longer need their own
+   * device-mismatch checks — that authz decision now lives solely in
+   * `handleInbound` (N2).
+   */
+  private dispatchToHandler(deviceId: string, envelope: Envelope): void {
     switch (envelope.type) {
       case 'task.claim':
         this.onClaim(deviceId, envelope.task_id, envelope.payload);
         return;
       case 'task.started':
-        this.onStarted(deviceId, envelope.task_id, envelope.payload);
+        this.onStarted(envelope.task_id, envelope.payload);
         return;
       case 'task.decline':
-        this.onDecline(deviceId, envelope.task_id, envelope.payload);
+        this.onDecline(envelope.task_id, envelope.payload);
         return;
       case 'task.progress':
         this.onProgress(envelope.task_id, envelope.payload);
@@ -304,24 +421,23 @@ export class ConnectionHub {
         this.onFail(envelope.task_id, envelope.payload);
         return;
       case 'task.cancelled':
-        this.onCancelled(deviceId, envelope.task_id, envelope.payload);
+        this.onCancelled(envelope.task_id, envelope.payload);
         return;
       default:
         // conn.hello is handled during the handshake (ws-server.ts); the
         // remaining types (conn.ack/task.offer/approve/reject/cancel/steer)
-        // are server->daemon only. Ignore rather than crash the connection —
-        // additive future message types must be tolerated too.
+        // are server->daemon only, and handleInbound's type-allow gate
+        // already rejects those before this is ever reached. Kept as a safe
+        // no-op default (rather than throwing) purely so this switch stays
+        // exhaustive over the full MessageType union — not a live path.
         return;
     }
   }
 
-  private onClaim(deviceId: string, taskId: string, payload: TaskClaimPayload): void {
+  /** Ownership (record.deviceId matching the connection's authenticated deviceId) is enforced centrally by {@link handleInbound} (N2) before this runs; only the idempotent-claim CAS and the first-claim device patch happen here. */
+  private onClaim(deviceId: string, taskId: string, _payload: TaskClaimPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
-    if (record.deviceId !== deviceId || payload.deviceId !== deviceId) {
-      this.forceFailOrDrop(taskId, 'claim from unexpected device');
-      return;
-    }
     // Claim is an idempotent CAS: a retried claim from the device that
     // already owns this task (e.g. the daemon didn't see the first claim's
     // effect land before retrying) is a no-op, not an illegal-transition
@@ -333,27 +449,27 @@ export class ConnectionHub {
     // runtime session actually starts.
   }
 
-  /** `Claimed -> Running` (§3.1) — a daemon actually starting the runtime session, distinct from merely claiming. */
-  private onStarted(deviceId: string, taskId: string, _payload: TaskStartedPayload): void {
+  /**
+   * `Claimed -> Running` (§3.1) — a daemon actually starting the runtime
+   * session, distinct from merely claiming. Ownership is already enforced
+   * by {@link handleInbound} (N2) before this runs.
+   */
+  private onStarted(taskId: string, _payload: TaskStartedPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
-    if (record.deviceId !== deviceId) {
-      this.forceFailOrDrop(taskId, 'task.started from unexpected device');
-      return;
-    }
     if (record.state === 'Running') return; // idempotent (§3.1): already running, no-op.
     if (isTerminal(record.state)) return; // stale/duplicate — task already moved on.
     this.applyOrFail(taskId, 'Running', {});
   }
 
-  /** `Offered -> Failed` (§3.2) — a fail-closed pre-claim rejection. Only ever legal from `Offered`; anything else is stale. */
-  private onDecline(deviceId: string, taskId: string, payload: TaskDeclinePayload): void {
+  /**
+   * `Offered -> Failed` (§3.2) — a fail-closed pre-claim rejection. Only
+   * ever legal from `Offered`; anything else is stale. Ownership is already
+   * enforced by {@link handleInbound} (N2) before this runs.
+   */
+  private onDecline(taskId: string, payload: TaskDeclinePayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
-    if (record.deviceId !== deviceId) {
-      this.forceFailOrDrop(taskId, 'task.decline from unexpected device');
-      return;
-    }
     if (record.state !== 'Offered') return;
     this.applyOrFail(taskId, 'Failed', {
       result: { state: 'Failed', reason: payload.reason, retryable: payload.retryable },
@@ -387,6 +503,15 @@ export class ConnectionHub {
   }
 
   private onAwaitApproval(taskId: string, payload: TaskAwaitApprovalPayload): void {
+    const record = this.taskStore.get(taskId);
+    if (!record) return;
+    // Idempotent no-op (N3), mirroring onStarted's already-Running guard: a
+    // repeat task.await_approval while already AwaitApproval must not be
+    // treated as an illegal self-transition and force-failed.
+    // AwaitApproval -> AwaitApproval is deliberately NOT in TASK_TRANSITIONS
+    // (task-state.ts) — this early return is where the idempotency lives
+    // instead.
+    if (record.state === 'AwaitApproval') return;
     this.applyOrFail(taskId, 'AwaitApproval', {});
     const after = this.taskStore.get(taskId);
     if (after?.state !== 'AwaitApproval') return; // fell back to Failed, or task was unknown
@@ -426,14 +551,12 @@ export class ConnectionHub {
    * not a warning (this is the other half of the M0 gatekeeper finding this
    * change resolves). Otherwise it's the authoritative trigger for a
    * cancellation the daemon observed that the server didn't initiate.
+   * Ownership is already enforced by {@link handleInbound} (N2) before this
+   * runs.
    */
-  private onCancelled(deviceId: string, taskId: string, payload: TaskCancelledPayload): void {
+  private onCancelled(taskId: string, payload: TaskCancelledPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
-    if (record.deviceId !== deviceId) {
-      this.forceFailOrDrop(taskId, 'task.cancelled from unexpected device');
-      return;
-    }
     if (record.state === 'Cancelled') return;
     if (isTerminal(record.state)) return; // Complete/Failed already reached — stale (§9), drop silently.
     this.applyOrFail(taskId, 'Cancelled', { result: { state: 'Cancelled', reason: payload.reason } });
@@ -660,7 +783,16 @@ export class ConnectionHub {
     const combinedOpts = { ...opts, seq } as CreateEnvelopeOptions<T>;
     const envelope = createEnvelope(type, payload, combinedOpts);
     const taskId = (opts as { taskId?: string }).taskId;
-    outbox.ring.push({ seq, taskId, envelope });
+    // N1/F4: task.cancel/task.reject move their task to Cancelled/Failed
+    // (terminal) before this call — see cancelTask/rejectTask's own
+    // mark-terminal-then-send order — so without this exemption
+    // collectRelevant's terminal-task filter would always exclude them.
+    // task.approve/task.steer never fire on an already-terminal task in the
+    // first place (approveTask/steerTask both require a specific
+    // non-terminal state), so the exemption is moot — and correctly
+    // omitted — for them.
+    const redeliverThroughTerminal = type === 'task.cancel' || type === 'task.reject';
+    outbox.ring.push({ seq, taskId, envelope, redeliverThroughTerminal });
     if (outbox.ring.length > OUTBOX_RING_CAPACITY) outbox.ring.shift();
     this.deliverToDevice(deviceId, envelope);
     return envelope;
@@ -677,12 +809,25 @@ export class ConnectionHub {
     this.settleLongPollWaiter(deviceId);
   }
 
-  /** Retained envelopes for `deviceId` with `seq > cursor` that still belong to a non-terminal task, in `seq` order. */
+  /**
+   * Retained envelopes for `deviceId` with `seq > cursor` that still belong
+   * to a non-terminal task — OR are explicitly exempted from that filter
+   * (`redeliverThroughTerminal`, N1/F4: `task.cancel`/`task.reject`) — in
+   * `seq` order. The `seq > cursor` bound is what naturally stops an
+   * exempted entry from redelivering forever: once the daemon acks it (its
+   * reported cursor advances past that `seq`), it no longer qualifies here
+   * on any future reconnect/poll.
+   */
   private collectRelevant(deviceId: string, cursor: number): Envelope[] {
     const outbox = this.outboxes.get(deviceId);
     if (!outbox) return [];
     return outbox.ring
-      .filter((entry) => entry.seq > cursor && entry.taskId !== undefined && !this.isTaskTerminal(entry.taskId))
+      .filter(
+        (entry) =>
+          entry.seq > cursor &&
+          entry.taskId !== undefined &&
+          (!this.isTaskTerminal(entry.taskId) || entry.redeliverThroughTerminal),
+      )
       .map((entry) => entry.envelope);
   }
 

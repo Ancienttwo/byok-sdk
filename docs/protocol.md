@@ -232,6 +232,23 @@ never be able to block the server's own state machine, and a dedicated ack
 message would only restate information the existing terminal/progress
 messages already carry.
 
+**`task.cancel`/`task.reject` stay individually redeliverable even though
+their task is already terminal server-side by the time they're queued.**
+`cancelTask`/`rejectTask` move the record to `Cancelled`/`Failed` *before*
+queuing the notification for delivery — that ordering is what makes the
+server's own state authoritative immediately, per the rule above — but it
+also means the notification's task has already reached a terminal state
+before it ever enters the redelivery backlog. The redelivery procedure's
+normal rule of skipping anything that belongs to an already-terminal task
+(§9) is therefore explicitly exempted for these two types: without the
+exemption, a `task.cancel`/`task.reject` that never reached the daemon (the
+connection dropped mid-send, say) could never be redelivered on reconnect —
+by definition, its task was terminal from the moment it was queued.
+`task.approve`/`task.steer` need no such exemption: neither is ever sent
+while its task is already terminal in the first place (both require a
+specific non-terminal state to send at all), so the ordinary terminal-task
+skip never wrongly catches them.
+
 ## 5. Approval flow (M1 gap #8)
 
 The full round trip from a runtime pausing for human input to it resuming:
@@ -370,19 +387,44 @@ values regardless of transport.
 
 ```
 POST /byok/messages
-  Request  (MessagesSendRequestSchema):  { messages: Envelope[] }
-  Response (MessagesSendResponseSchema): { accepted: number }
+  Request  (MessagesSendRequestSchema):  { messages: Envelope[] }   // capped at 256 per batch
+  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number }
 ```
 
 Authed (bearer access token). A device long-polling for S→D traffic (§8.1)
 has no live WSS connection to carry its own D→S envelopes (`task.claim`,
 `task.progress`, `task.complete`, etc.) — this endpoint is that path while
-in that mode. Each envelope in `messages` is routed through the exact same
-inbound handling a WSS connection's messages get (validated the same way,
-processed by the same per-task-id logic); `accepted` is the number of
-envelopes the server took in from this batch. A daemon that has fallen back
-to long-poll must send every D→S envelope this way instead of queueing them
-for a WSS connection that isn't coming back on its own.
+in that mode. Each envelope in `messages` is routed through the server's
+single inbound gate (the reference implementation's `handleInbound`) — the
+exact same gate a WSS connection's messages get, not a parallel or
+lesser-validated path.
+
+**Only daemon → server `task.*` types are accepted here.** A `type` outside
+that set — a server → daemon type (`task.offer`, `conn.ack`, etc.) arriving
+inbound, or anything unrecognized — is rejected per-envelope: not dispatched
+to any handler, and not counted toward `accepted`. This never 400s the rest
+of the batch: a *structurally* invalid `Envelope` (fails schema validation
+outright) still 400s the whole request as before, but a *wrong-direction*
+type is schema-valid — a `task.offer` is a well-formed envelope regardless
+of which side sent it — and only fails this endpoint's semantic type-allow
+check, which is per-envelope. The batch itself is also capped at 256
+envelopes (`MessagesSendRequestSchema`); exceeding the cap 400s the whole
+request.
+
+**`accepted` counts every envelope the server took in and will not ask the
+daemon to resend** — including one it recognized as an already-processed
+duplicate ([§9](#9-at-least-once-delivery--idempotency)'s per-`(deviceId,
+id)` dedup window). It does not mean "freshly processed": a redelivered or
+retried envelope this device already sent once is counted `accepted` again
+on retry, even though no handler reran for it that second time. `rejected`
+is a separate, additive count — envelopes that failed the type-allow check
+above, or the ownership check (§9) — present in the response only when
+nonzero, so a batch with nothing rejected keeps the `{ accepted }`-only
+shape.
+
+A daemon that has fallen back to long-poll must send every D→S envelope
+this way instead of queueing them for a WSS connection that isn't coming
+back on its own.
 
 ## 9. At-least-once delivery & idempotency
 
@@ -398,10 +440,13 @@ already processed) a redelivered envelope.
 2. Server responds `conn.ack` as usual.
 3. Server then redelivers, in `seq` order, every server → daemon envelope it
    sent with `seq > cursor` that is **still relevant** — i.e. belongs to a
-   task that has not since reached a terminal state on the server. Envelopes
-   for tasks that are already `Complete`/`Failed`/`Cancelled` by the time of
-   reconnection are not redelivered; there is nothing left for the daemon to
-   act on.
+   task that has not since reached a terminal state on the server, **or is a
+   `task.cancel`/`task.reject` notification** ([§4](#4-cancelapprovereject-wire-semantics-m1-gap-3)
+   exempts these two from the terminal-task check specifically because their
+   own task is *always* already terminal by the time they're queued).
+   Envelopes for tasks that are already `Complete`/`Failed`/`Cancelled` by
+   the time of reconnection are not redelivered — with that one exemption —
+   because there is nothing left for the daemon to act on.
 4. Normal traffic resumes.
 
 This requires the server to retain enough state per device to reconstruct
@@ -434,14 +479,67 @@ redelivery re-attempts starting from the last envelope that actually
 succeeded, relying on the idempotency guarantees below for anything at or
 above it that had already succeeded once.
 
+### Ownership
+
+**Every inbound daemon → server envelope is checked against the task's
+recorded owner before it's dispatched to anything.** If `task_id` names a
+task that exists and already has an owning device on record, and that
+owner is a *different* device than the one the envelope arrived from, the
+server drops the envelope (and logs it) instead of processing it. A task
+with no owner on record yet, or that doesn't exist at all, is not rejected
+by this check — the latter is already covered by every handler's own
+no-op-on-missing-task behavior.
+
+**The mismatch is dropped, never force-failed.** Forcing the task to
+`Failed` on an ownership mismatch would turn this authorization check into
+a denial-of-service primitive: any client that can merely *guess* or observe
+another device's `taskId` could kill that device's real, legitimate task by
+sending one bogus envelope for it — no valid credential for the victim
+device required, since the attack only needs the id, not the victim's
+token. Dropping is side-effect-free and closes that hole; the legitimate
+owner's task is completely unaffected by a mismatched envelope arriving for
+it from elsewhere.
+
+This check applies uniformly to all nine daemon → server types (§2) — it is
+not specific to `task.claim` or any other single type — and runs ahead of
+both the dedup window and the per-type handler described below.
+
 ### Idempotency
+
+**Per-`(deviceId, id)` dedup window.** Every envelope carries a
+schema-validated, unique `id` ([§1](#1-envelope)). The server retains a
+bounded, per-device window of recently-seen envelope ids (the reference
+implementation: a capped ring, oldest evicted first once full) and checks
+it before dispatching an inbound envelope to any handler. An `id` already
+in that window is a no-op the second (and every subsequent) time it
+arrives: no handler reruns, no state changes, nothing is re-emitted. This is
+what turns the wire's at-least-once guarantee (this section's opening rule)
+into **at-most-once processing on the server side** — a daemon that resends
+an envelope it isn't sure landed (a dropped connection mid-send, an
+ambiguous timeout, a redelivered backlog entry it re-derives locally, etc.)
+never risks a second application of its effect, no matter which of the nine
+daemon → server types it is.
+
+This dedup window is a generic, id-level mechanism and is complementary to
+— not a replacement for — the per-type semantic idempotency rules below,
+which protect against a *logically* repeated action arriving under a
+*different* envelope `id` (e.g. two independent `task.claim` attempts from
+the same already-owning device, or a daemon-side retry that regenerates a
+fresh envelope rather than resending the exact original bytes):
 
 - **`task.claim` is an idempotent CAS**: a claim from the device that already
   owns the task (state `Claimed` or `Running`) is a no-op, not an
-  illegal-transition error. A claim from any other device is rejected. This
-  was already true pre-M1 and is unchanged.
+  illegal-transition error. A claim from any other device is rejected (see
+  "Ownership" above). This was already true pre-M1 and is unchanged.
 - **`task.started` is idempotent** the same way (§3.1): repeated from the
   owning device while already `Running`, it's a no-op.
+- **`task.await_approval` is idempotent** the same way: repeated while the
+  task is already `AwaitApproval` is a no-op, not an illegal self-transition
+  forced to `Failed`. (`AwaitApproval → AwaitApproval` is deliberately not a
+  transition in [§3](#3-task-state-machine-m1-gap-2-5-6)'s table — this
+  idempotency is handled as an explicit guard ahead of the transition
+  attempt, the same shape as `task.started`'s, not by adding a self-loop to
+  the state machine.)
 - **`task.cancelled` is idempotent** (§3.3): if the server already moved to
   `Cancelled` on its own action, a `task.cancelled` arriving afterward is a
   no-op ack, not an error.

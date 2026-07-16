@@ -113,8 +113,8 @@ export type BlobDownloadUrlResponse = z.infer<typeof BlobDownloadUrlResponseSche
 // ---------------------------------------------------------------------------
 
 export const EventsPollQuerySchema = z.object({
-  /** Last `seq` this client has seen; omitted on a client's first-ever poll. */
-  cursor: z.number().int().optional(),
+  /** Last `seq` this client has seen; omitted on a client's first-ever poll. Never negative — `seq` is a monotonically increasing counter starting at 1. */
+  cursor: z.number().int().nonnegative().optional(),
 });
 export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;
 
@@ -134,12 +134,25 @@ export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
 // docs/protocol.md §8.
 // ---------------------------------------------------------------------------
 
+/** Batch size ceiling for a single `POST /byok/messages` call — generous for normal redelivery-catchup bursts, but bounded so one request can't force the server to process an unbounded batch. */
+const MAX_MESSAGES_PER_BATCH = 256;
+
 export const MessagesSendRequestSchema = z.object({
-  messages: z.array(EnvelopeSchema),
+  messages: z.array(EnvelopeSchema).max(MAX_MESSAGES_PER_BATCH),
 });
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 
+/**
+ * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
+ * `'accepted'` *or* `'duplicate'` for (finding P2) — a dedup'd replay is a
+ * wire-level success (§9's idempotency window), even though no handler ran
+ * for it a second time. `rejected` (a type outside `DAEMON_TO_SERVER_TYPES`,
+ * or an ownership mismatch — N2) is a separate, additive count: omitted
+ * entirely when zero, so a batch with nothing rejected keeps the pre-P2
+ * `{ accepted }` shape callers already depend on.
+ */
 export const MessagesSendResponseSchema = z.object({
   accepted: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative().optional(),
 });
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;

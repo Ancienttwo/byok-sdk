@@ -17,6 +17,7 @@ export {
   MESSAGE_TYPES,
   MESSAGE_PAYLOAD_SCHEMAS,
   SERVER_TO_DAEMON_TYPES,
+  DAEMON_TO_SERVER_TYPES,
   RuntimeIdSchema,
   RuntimeInfoSchema,
   ConnHelloPayloadSchema,

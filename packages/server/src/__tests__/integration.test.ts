@@ -418,7 +418,7 @@ describe('redelivery after reconnect (§9)', () => {
     ws = undefined;
   });
 
-  it('redelivers non-terminal envelopes in seq order, honoring the cursor, and skips envelopes for terminal tasks', async () => {
+  it('redelivers non-terminal envelopes in seq order, honoring the cursor, skips envelopes for terminal tasks except exempted cancel/reject (N1/F4)', async () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
@@ -437,8 +437,13 @@ describe('redelivery after reconnect (§9)', () => {
     await claimAndStart(ws, daemon.deviceId, handle1);
     await handle1.steer('keep going'); // assigns the next seq; deliberately never read off `ws`
 
-    // task2 is cancelled before reconnect — terminal by the time redelivery runs, so its
-    // offer/cancel envelopes (both with seq > cursor) must NOT be redelivered.
+    // task2 is cancelled before reconnect — terminal by the time redelivery
+    // runs. Its task.offer is NOT exempt from the terminal-task filter and
+    // must not be redelivered; its task.cancel IS exempt (N1/F4 — see
+    // OutboxEntry.redeliverThroughTerminal/collectRelevant) precisely
+    // because cancelTask moves the task to Cancelled *before* queuing that
+    // notification, so without the exemption a dropped cancel send could
+    // never be redelivered.
     const handle2 = await byok.dispatch({ instruction: 'short task' });
     await handle2.cancel('not needed after all');
     await handle2.result();
@@ -462,8 +467,14 @@ describe('redelivery after reconnect (§9)', () => {
     if (redelivered.type !== 'task.steer') throw new Error('unreachable');
     expect(redelivered.payload.text).toBe('keep going');
 
-    // Nothing else should follow: task2's offer/cancel belonged to a task
-    // that's since gone terminal and must not be redelivered.
+    // task2's task.cancel follows — exempted from the terminal-task filter
+    // even though task2 is Cancelled by now.
+    const redelivered2 = await nextEnvelope(ws2);
+    expect(redelivered2.type).toBe('task.cancel');
+    expect(redelivered2.task_id).toBe(handle2.taskId);
+
+    // Nothing else should follow: task2's task.offer is not exempt and must
+    // not reappear.
     const raced = await Promise.race([
       nextEnvelope(ws2).then(() => 'more' as const),
       new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 200)),

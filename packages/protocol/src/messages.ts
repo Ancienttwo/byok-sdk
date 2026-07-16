@@ -295,3 +295,27 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.cancel',
   'task.steer',
 ] as const satisfies readonly MessageType[];
+
+/**
+ * Message types the daemon sends to the server — the flip side of
+ * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
+ * only ever valid as the first frame of a WS handshake (`ws-server.ts`), not
+ * as ongoing inbound traffic through `ConnectionHub.handleInbound`.
+ *
+ * Used by `handleInbound` (`@byok/server`'s `hub.ts`) as the type-allow gate
+ * for every inbound envelope, WS and `POST /byok/messages` alike (finding
+ * P2): a `type` outside this set — a server -> daemon type arriving inbound,
+ * or anything unrecognized — is rejected before it's dispatched to any
+ * handler or counted `accepted` on the `/byok/messages` wire.
+ */
+export const DAEMON_TO_SERVER_TYPES = [
+  'task.claim',
+  'task.started',
+  'task.decline',
+  'task.progress',
+  'task.artifact',
+  'task.await_approval',
+  'task.complete',
+  'task.fail',
+  'task.cancelled',
+] as const satisfies readonly MessageType[];
