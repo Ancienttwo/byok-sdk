@@ -396,64 +396,70 @@ does not fix server/client**; that is M1-2/M1-3's job against this document.
 | 10 | `TASK_TRANSITIONS.Offered` | `['Claimed', 'Cancelled']` | `['Claimed', 'Cancelled', 'Failed']` |
 | 11 | `src/http-api.ts` | Did not exist | **New module**: pair/challenge/token/blob/events-poll HTTP schemas (§6–8) |
 
-### Verified fallout: `pnpm -r typecheck` against these schemas
+### Fallout at the time (since resolved by M1-2/M1-3)
 
-Ran from the repo root after this change; `@byok/protocol` itself is green.
-Both `@byok/client` and `@byok/server` fail to compile (verified by running
+This subsection is a historical migration record, not a statement of current
+build health. At the time this change landed, `pnpm -r typecheck` was run
+from the repo root: `@byok/protocol` itself was green, but both
+`@byok/client` and `@byok/server` failed to compile (verified by running
 each package's `typecheck` script in isolation — the concurrent `pnpm -r`
 run's failure-abort behavior truncates one package's output when both fail
-around the same time, so isolate per-package to see the full list).
+around the same time, so isolating per-package was needed to see the full
+list). M1-2 and M1-3 subsequently fixed both packages against this document;
+none of the items below reflect the state of `packages/server` or
+`packages/client` at PR tip.
 
-**`packages/server`** (4 files):
+**`packages/server`** (4 files) — fixed by M1-2:
 
-- `src/hub.ts` — `onClaim` reads `payload.taskId` (now removed) at four call
-  sites (`get`, `forceFailOrDrop`, two `applyOrFail` calls); `dispatch()`
-  builds a `task.offer` payload literal that still includes `taskId`. Once
-  fixed for the field removal, every server→daemon `createEnvelope` call in
-  this file (`dispatch`, `cancelTask`, `approveTask`, `rejectTask`,
-  `steerTask`) also needs a `seq` value threaded through `opts` — i.e. the
-  hub needs a new per-device monotonic counter, not just a one-line fix.
+- `src/hub.ts` — `onClaim` read `payload.taskId` (removed by this change) at
+  four call sites (`get`, `forceFailOrDrop`, two `applyOrFail` calls);
+  `dispatch()` built a `task.offer` payload literal that still included
+  `taskId`. Fixing the field removal also required threading a `seq` value
+  through every server→daemon `createEnvelope` call in this file (`dispatch`,
+  `cancelTask`, `approveTask`, `rejectTask`, `steerTask`) — i.e. a new
+  per-device monotonic counter, not just a one-line fix.
   `registerConnection`'s `agents: unknown` parameter (and the
-  `normalizeRuntimes` helper that reads it) no longer receives anything
-  meaningful — `ws-server.ts` no longer has an `agents` field to pass it. The
-  class-level doc comment (describing "no distinct task-started message" and
-  "payloads carry no taskId of their own") is now stale.
-- `src/ws-server.ts` — passes `payload.agents` (removed field) into
-  `registerConnection`.
+  `normalizeRuntimes` helper that read it) no longer received anything
+  meaningful once `ws-server.ts` dropped its `agents` field. The class-level
+  doc comment (describing "no distinct task-started message" and "payloads
+  carry no taskId of their own") had gone stale.
+- `src/ws-server.ts` — passed `payload.agents` (a field this change removed)
+  into `registerConnection`.
 - `src/__tests__/test-support.ts` — `connectFakeDaemon`'s `conn.hello`
-  fixture passes `agents: opts.agents`; the `opts` parameter type itself
-  (`{ agents?: unknown }`) should become `{ runtimes?: RuntimeInfo[] }`.
-- `src/__tests__/integration.test.ts` — five call sites construct
-  `task.offer`/`task.claim` payloads with a `taskId` field that no longer
-  exists.
+  fixture passed `agents: opts.agents`; the `opts` parameter type itself
+  (`{ agents?: unknown }`) needed to become `{ runtimes?: RuntimeInfo[] }`.
+- `src/__tests__/integration.test.ts` — five call sites constructed
+  `task.offer`/`task.claim` payloads with a `taskId` field this change
+  removed.
 
-**`packages/client`** (3 files):
+**`packages/client`** (3 files) — fixed by M1-3:
 
-- `src/daemon/task-runner.ts` — `handleOffer` reads `payload.taskId` (now
-  removed); the `task.claim` it sends still includes `taskId` in the
+- `src/daemon/task-runner.ts` — `handleOffer` read `payload.taskId` (removed
+  by this change); the `task.claim` it sent still included `taskId` in the
   payload literal. Beyond the compile fix, this file's whole fail-closed
-  path needs rework against the new contract: its own header comment
-  explicitly documents claim-then-fail and `task.fail(reason:'cancelled')`
-  as deliberate workarounds for gaps this change closes. Concretely: the
+  path needed rework against the new contract: its own header comment had
+  explicitly documented claim-then-fail and `task.fail(reason:'cancelled')`
+  as deliberate workarounds for gaps this change closed. Concretely: the
   pre-claim rejection branches in `handleOffer` (unsupported instruction
-  shape, unknown/disallowed runtime, rejected policy) should send
-  `task.decline` instead of claiming first; a successful claim should be
-  followed by `task.started` once the adapter session actually starts;
-  `handleCancel` should send `task.cancelled` instead of
+  shape, unknown/disallowed runtime, rejected policy) needed to send
+  `task.decline` instead of claiming first; a successful claim needed to be
+  followed by `task.started` once the adapter session actually started;
+  `handleCancel` needed to send `task.cancelled` instead of
   `task.fail({reason:'cancelled'})`.
-- `src/__tests__/daemon-task-loop.test.ts` — seven call sites construct
-  `task.offer` payloads with a `taskId` field that no longer exists.
-- `src/__tests__/pi-adapter.test.ts` — one fixture does the same.
+- `src/__tests__/daemon-task-loop.test.ts` — seven call sites constructed
+  `task.offer` payloads with a `taskId` field this change removed.
+- `src/__tests__/pi-adapter.test.ts` — one fixture did the same.
 
-**Not broken, but worth a look once the above lands:**
-`packages/client/src/daemon/ws-transport.ts` constructs `conn.hello` without
-an `agents` field even in M0 (so it doesn't newly break), but it also never
-populates the new `runtimes`/`cursor` fields — its own doc comment already
-flags "at-least-once redelivery with cursors is M1," i.e. this is exactly
-the gap M1-3 is expected to close, not a regression from this change.
-`examples/basic` currently typechecks clean, but only because it consumes
-`@byok/server`'s prebuilt (stale) `dist/`, not its source — it doesn't
-construct any envelope/payload directly (it only touches
-`TaskHandle.taskId`, an unrelated server-side identifier), so it is expected
-to remain unaffected once `@byok/server` is fixed and rebuilt, but that has
-not been verified against a rebuilt `dist/`.
+**Flagged at the time as not broken, but worth a look once the above
+landed:** `packages/client/src/daemon/ws-transport.ts` constructed
+`conn.hello` without an `agents` field even under M0 (so it didn't newly
+break), but it also never populated the new `runtimes`/`cursor` fields — its
+own doc comment already flagged "at-least-once redelivery with cursors is
+M1," i.e. this was exactly the gap M1-3 was expected to close, not a
+regression from this change. `examples/basic` typechecked clean at the time,
+but only because it consumed `@byok/server`'s prebuilt (stale) `dist/`, not
+its source — it didn't construct any envelope/payload directly (it only
+touched `TaskHandle.taskId`, an unrelated server-side identifier), so it was
+expected to remain unaffected once `@byok/server` was fixed and rebuilt.
+M1-2, M1-3, and the subsequent examples adaptation have since landed,
+closing this out.

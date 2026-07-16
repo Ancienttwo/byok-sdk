@@ -105,7 +105,7 @@ app.post('/api/tasks', async (c) => {
     // Optional follow-up-turn pass-through: a caller that already has a
     // prior task's reported `sessionRef` (see GET /api/tasks/:taskId) can
     // carry it into a new dispatch so the runtime adapter resumes that same
-    // runtime session (e.g. pi's own `--session-id`) instead of starting a
+    // runtime session (e.g. pi's own `--session`) instead of starting a
     // fresh one. `DispatchInput.sessionRef` already exists at the SDK level
     // (packages/server/src/types.ts) — this demo just didn't expose it yet.
     sessionRef: body.sessionRef as string | undefined,

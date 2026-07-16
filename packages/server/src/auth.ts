@@ -131,9 +131,29 @@ interface NonceRecord {
 export class NonceStore {
   private readonly nonces = new Map<string, NonceRecord>();
 
+  /** Number of nonce records currently held (post-sweep). Exposed for tests only. */
+  get size(): number {
+    return this.nonces.size;
+  }
+
+  /**
+   * Drop every used or expired record. A long-lived server never calls this
+   * on a timer, so `issue()` sweeps inline — a full-Map scan is fine at
+   * reference-impl scale (single-digit nonces per device, ~5min TTL).
+   */
+  private sweep(now: number): void {
+    for (const [nonce, record] of this.nonces) {
+      if (record.used || record.expiresAt <= now) {
+        this.nonces.delete(nonce);
+      }
+    }
+  }
+
   issue(deviceId: string): string {
+    const now = Date.now();
+    this.sweep(now);
     const nonce = randomBytes(24).toString('base64url');
-    this.nonces.set(nonce, { deviceId, expiresAt: Date.now() + NONCE_TTL_MS, used: false });
+    this.nonces.set(nonce, { deviceId, expiresAt: now + NONCE_TTL_MS, used: false });
     return nonce;
   }
 
