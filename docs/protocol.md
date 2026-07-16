@@ -72,6 +72,21 @@ Two different counters happen to share the field name `seq` at two different
 levels (envelope vs. payload) for two different purposes; keep them separate
 in your head and in any redelivery/ordering code.
 
+**`conn.*` envelopes never advance the redelivery cursor.** `conn.ack`
+carries a `seq` (required, like every other server → daemon type) purely for
+schema uniformity — it is not tied to any task and must never be treated as
+"the highest seq processed so far" for the purposes of the `cursor` a daemon
+reports back in a future `conn.hello` (§9). A daemon that advances its
+cursor from `conn.ack`'s `seq` breaks redelivery outright: on reconnect, the
+server always assigns `conn.ack` the *next* (i.e. currently highest)
+per-device `seq` value, sent immediately before replaying any backlog still
+queued for this device (§9) — so `conn.ack`'s `seq` is always higher than
+every backlog envelope about to follow it. Advancing the cursor to
+`conn.ack`'s value before that backlog even arrives makes every one of those
+(necessarily lower) backlog `seq`s look already-delivered, and a
+cursor-dedupe check silently drops all of them. Cursor accounting covers
+`task.*` envelopes only.
+
 ### 1.3 `session_ref`
 
 Opaque server-issued token the daemon maps to a runtime session id (`claude
@@ -311,14 +326,30 @@ GET /byok/blobs/:id/url
 ```
 
 `contentHash` enables content-addressed dedup on the server side (out of
-scope for this doc — server implementation detail). Inline payloads stay
-under the existing 64KB limit (`task.artifact.inline`,
+scope for this doc — server implementation detail) and is pinned to a single
+canonical format: **`sha256:<64 lowercase hex characters>`** — a SHA-256
+digest, explicit algorithm prefix, lowercase hex digits, no other form
+accepted. This is enforced at the schema level on both `BlobRefSchema`'s and
+`CreateBlobRequestSchema`'s `contentHash` field; the server rejects anything
+else outright (`POST /byok/blobs` 400s on a malformed `contentHash`) with no
+normalization step for alternate forms (bare hex, uppercase, a different
+algorithm prefix) — the wire is still pre-freeze, so this was tightened in
+place rather than given a compatibility shim. A client must always emit this
+exact form when declaring or referencing a blob.
+
+Inline payloads stay under the existing 64KB limit (`task.artifact.inline`,
 `task.offer.instruction` string form); anything larger goes through blobs.
 Default per-product size ceiling: 100MB (server-enforced, not schema-enforced).
 
 ## 8. Long-poll fallback
 
-For environments where an outbound WSS connection isn't viable:
+For environments where an outbound WSS connection isn't viable, long-poll is
+a full transport — both directions, not receive-only. A daemon that has
+fallen back to long-poll keeps making normal progress on tasks; "degraded"
+describes the transport, not a reason to decline new work or stop reporting
+task state.
+
+### 8.1 Receive — `GET /byok/events?cursor=N`
 
 ```
 GET /byok/events?cursor=N
@@ -334,6 +365,24 @@ using long-poll instead of WSS still sends `conn.hello` semantics implicitly
 by however the reference server's HTTP layer establishes the equivalent
 per-device session; the event *shapes* returned are identical `Envelope`
 values regardless of transport.
+
+### 8.2 Send — `POST /byok/messages`
+
+```
+POST /byok/messages
+  Request  (MessagesSendRequestSchema):  { messages: Envelope[] }
+  Response (MessagesSendResponseSchema): { accepted: number }
+```
+
+Authed (bearer access token). A device long-polling for S→D traffic (§8.1)
+has no live WSS connection to carry its own D→S envelopes (`task.claim`,
+`task.progress`, `task.complete`, etc.) — this endpoint is that path while
+in that mode. Each envelope in `messages` is routed through the exact same
+inbound handling a WSS connection's messages get (validated the same way,
+processed by the same per-task-id logic); `accepted` is the number of
+envelopes the server took in from this batch. A daemon that has fallen back
+to long-poll must send every D→S envelope this way instead of queueing them
+for a WSS connection that isn't coming back on its own.
 
 ## 9. At-least-once delivery & idempotency
 
@@ -359,6 +408,31 @@ This requires the server to retain enough state per device to reconstruct
 "everything sent since seq N" (e.g. keep the last K envelopes per device, or
 regenerate from current task state) — an implementation detail for the M1-2
 server worker, not specified further here.
+
+**Cursor scope (client-side rule — see §1.2).** Only `task.*` envelopes count
+toward the cursor a daemon reports as `conn.hello.cursor` in step 1 —
+`conn.ack` never does, even though it also carries a `seq`. Step 2 (server
+sends `conn.ack`) always happens immediately before step 3 (server
+redelivers the backlog) on the same reconnection, and `conn.ack`'s `seq` is
+always higher than everything in that backlog; a client that doesn't
+observe this scoping rule will drop its own redelivered backlog as
+already-seen.
+
+**Cursor advance timing (client-side rule).** A daemon must persist its
+redelivery cursor only *after* it has finished successfully whatever a
+`task.*` envelope asked for — never before receiving it, and never for an
+envelope whose handling raised an error. Persisting eagerly (e.g. the moment
+the envelope arrives, before its handler even runs or resolves) turns a
+single failed or still-in-flight handler into a permanent gap: the daemon's
+own reported cursor tells the server that envelope no longer needs
+redelivering, yet the daemon never actually completed it, and it is not
+redelivered on any future reconnect either. Inbound envelope processing for
+one device is expected to happen one at a time, in arrival order (a
+per-connection FIFO) — this is what makes "a handler failed, leave the
+cursor where it was" a safe, sufficient recovery: the next reconnection's
+redelivery re-attempts starting from the last envelope that actually
+succeeded, relying on the idempotency guarantees below for anything at or
+above it that had already succeeded once.
 
 ### Idempotency
 

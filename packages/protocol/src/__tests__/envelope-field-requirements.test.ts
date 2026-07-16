@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EnvelopeSchema,
+  EnvelopeValidationError,
   MESSAGE_TYPES,
   SERVER_TO_DAEMON_TYPES,
   createEnvelope,
@@ -120,5 +121,79 @@ describe('SERVER_TO_DAEMON_TYPES / isServerToDaemonType agree, and partition MES
       expect(isServerToDaemonType(type)).toBe(serverToDaemon);
     }
     expect(SERVER_TO_DAEMON_TYPES.length + DAEMON_TO_SERVER_TYPES.length).toBe(MESSAGE_TYPES.length);
+  });
+});
+
+/**
+ * Finding F1 (createEnvelope type-unsound): before this fix, `taskId`/`seq`
+ * were uniformly optional on `createEnvelope`'s `opts` regardless of `type`
+ * — a call site missing a required field (e.g. `createEnvelope('task.offer',
+ * payload)` with no `taskId`/`seq` at all) type-checked cleanly and only
+ * surfaced as a runtime `EnvelopeValidationError` wherever the malformed
+ * envelope happened to get decoded, often on the *other* side of the wire.
+ * Two independent nets now exist and are tested separately below: the type
+ * system rejects an under-specified call at the call site itself (compile
+ * time), and `createEnvelope` validates its own output against
+ * `EnvelopeSchema` before returning (runtime) — a caller that bypasses the
+ * type system (e.g. `as any`) still can't get a malformed envelope out.
+ */
+describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
+  /**
+   * Type-only assertions — this function is defined (so `tsc --noEmit`
+   * checks its body) but deliberately never called (see the `it` below):
+   * nothing in here should ever execute, only compile-check. Each
+   * `@ts-expect-error` line asserts a genuine type error is produced right
+   * there; if the call actually type-checked, the directive itself becomes
+   * an "Unused '@ts-expect-error' directive" compile error, failing
+   * `pnpm -r typecheck` — i.e. this whole block IS the test, enforced by
+   * the project's typecheck script rather than by anything vitest runs.
+   */
+  function typeOnlyRejectedShapes(): void {
+    // @ts-expect-error task.offer requires both taskId and seq — opts omitted entirely
+    createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } });
+    // @ts-expect-error task.offer requires taskId
+    createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { seq: 1 });
+    // @ts-expect-error task.offer requires seq (server->daemon type)
+    createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-1' });
+    // @ts-expect-error task.claim requires taskId — every task.* type routes by it, daemon->server or not
+    createEnvelope('task.claim', { deviceId: 'device-1' });
+    // @ts-expect-error task.approve requires seq (server->daemon type), even though taskId alone would be enough for most task.* types
+    createEnvelope('task.approve', {}, { taskId: 'task-1' });
+    // @ts-expect-error conn.ack requires seq (server->daemon type)
+    createEnvelope('conn.ack', { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() });
+    // @ts-expect-error conn.ack's taskId/seq shape doesn't accept a plain seq-less object either
+    createEnvelope('conn.ack', { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() }, {});
+  }
+
+  it('rejects under-specified call sites at compile time (see the @ts-expect-error assertions above this test)', () => {
+    // Never invoked (see the function's own doc comment) — referencing it
+    // here is just to keep it from looking unused to a linter/reader.
+    expect(typeof typeOnlyRejectedShapes).toBe('function');
+  });
+
+  it('still refuses to hand back a malformed envelope at runtime if a caller bypasses the type system (e.g. `as any`)', () => {
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, {} as any),
+    ).toThrow(EnvelopeValidationError);
+
+    expect(() =>
+      createEnvelope(
+        'conn.ack',
+        { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        {} as any,
+      ),
+    ).toThrow(EnvelopeValidationError);
+  });
+
+  it('compiles and constructs cleanly for every message type using exactly the fields its own direction requires', () => {
+    expect(() => {
+      createEnvelope('conn.hello', { protocolVersions: [1], capabilities: [], deviceId: 'd', productId: 'p' }); // no opts at all
+      createEnvelope('conn.ack', { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() }, { seq: 1 });
+      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 't', seq: 1 });
+      createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't' }); // seq optional, may be omitted
+      createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't', seq: 1 }); // seq optional, may also be supplied
+    }).not.toThrow();
   });
 });

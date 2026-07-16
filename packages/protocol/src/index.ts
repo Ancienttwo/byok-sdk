@@ -1,7 +1,7 @@
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS } from './version';
 export type { CapabilityFlag } from './version';
 
-export { BlobRefSchema } from './blob';
+export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
 
 export { PermissionPolicySchema, PERMISSION_MODES } from './permission';
@@ -83,6 +83,8 @@ export {
   BlobDownloadUrlResponseSchema,
   EventsPollQuerySchema,
   EventsPollResponseSchema,
+  MessagesSendRequestSchema,
+  MessagesSendResponseSchema,
 } from './http-api';
 export type {
   PairRequest,
@@ -96,4 +98,6 @@ export type {
   BlobDownloadUrlResponse,
   EventsPollQuery,
   EventsPollResponse,
+  MessagesSendRequest,
+  MessagesSendResponse,
 } from './http-api';

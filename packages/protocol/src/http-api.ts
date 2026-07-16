@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONTENT_HASH_RE } from './blob';
 import { EnvelopeSchema } from './envelope';
 
 /**
@@ -83,11 +84,11 @@ export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 // the presigned URLs a `BlobRef` points at.
 // ---------------------------------------------------------------------------
 
-/** POST /byok/blobs request: declare a blob before uploading it. */
+/** POST /byok/blobs request: declare a blob before uploading it. `contentHash` must be the canonical `sha256:<64 lowercase hex>` form (finding F9) — the server rejects anything else outright, no normalization. */
 export const CreateBlobRequestSchema = z.object({
   size: z.number().int().nonnegative(),
   contentType: z.string(),
-  contentHash: z.string(),
+  contentHash: z.string().regex(CONTENT_HASH_RE, 'contentHash must be "sha256:<64 lowercase hex>"'),
 });
 export type CreateBlobRequest = z.infer<typeof CreateBlobRequestSchema>;
 
@@ -122,3 +123,23 @@ export const EventsPollResponseSchema = z.object({
   cursor: z.number().int(),
 });
 export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// POST /byok/messages — finding F6: long-poll is now a full transport, not
+// receive-only. While a device is long-polling for S->D traffic (§8), it has
+// no live WS to carry its own D->S envelopes (task.claim, task.progress,
+// task.complete, etc.) — this endpoint is that path: a batch of envelopes,
+// authed the same way as every other bearer-authed route, routed through the
+// identical inbound handling a WS connection's messages get. See
+// docs/protocol.md §8.
+// ---------------------------------------------------------------------------
+
+export const MessagesSendRequestSchema = z.object({
+  messages: z.array(EnvelopeSchema),
+});
+export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
+
+export const MessagesSendResponseSchema = z.object({
+  accepted: z.number().int().nonnegative(),
+});
+export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;

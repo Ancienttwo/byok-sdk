@@ -95,7 +95,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           instruction: {
             blobRef: {
               blobId: 'blob-1',
-              contentHash: 'sha256:deadbeef',
+              contentHash: `sha256:${'deadbeef'.repeat(8)}`, // finding F9: must be 64 lowercase hex chars
               size: 4096,
               contentType: 'text/markdown',
             },
@@ -215,7 +215,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           contentType: 'application/zip',
           blobRef: {
             blobId: 'blob-2',
-            contentHash: 'sha256:cafebabe',
+            contentHash: `sha256:${'cafebabe'.repeat(8)}`, // finding F9: must be 64 lowercase hex chars
             size: 10_485_760,
             contentType: 'application/zip',
             url: 'https://blobs.example.com/blob-2',
@@ -248,7 +248,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           artifactRefs: [
             {
               blobId: 'blob-3',
-              contentHash: 'sha256:0123',
+              contentHash: `sha256:${'0123'.repeat(16)}`, // finding F9: must be 64 lowercase hex chars
               size: 2048,
               contentType: 'text/plain',
             },
