@@ -43,7 +43,8 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         capabilities: ['steer', 'blob-upload'],
         deviceId: 'device-1',
         productId: 'acme-agent',
-        agents: { claude: { authPresent: true } },
+        runtimes: [{ id: 'claude', authPresent: true }],
+        cursor: 41,
       }),
     );
   });
@@ -53,11 +54,15 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     testedTypes.push(type);
     roundTrip(
       type,
-      createEnvelope(type, {
-        protocolVersion: 1,
-        capabilities: ['steer'],
-        serverTime: new Date().toISOString(),
-      }),
+      createEnvelope(
+        type,
+        {
+          protocolVersion: 1,
+          capabilities: ['steer'],
+          serverTime: new Date().toISOString(),
+        },
+        { seq: 1 },
+      ),
     );
   });
 
@@ -69,14 +74,13 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       createEnvelope(
         type,
         {
-          taskId: 'task-1',
           instruction: 'refactor the widget module',
           policy: { mode: 'auto', workspaceRoot: '/home/user/project' },
           runtime: 'claude',
           workspaceHint: '/home/user/project',
           limits: { maxDurationMs: 60_000, maxTokens: 100_000 },
         },
-        { taskId: 'task-1' },
+        { taskId: 'task-1', seq: 1 },
       ),
     );
   });
@@ -88,7 +92,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       createEnvelope(
         type,
         {
-          taskId: 'task-2',
           instruction: {
             blobRef: {
               blobId: 'blob-1',
@@ -99,7 +102,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           },
           policy: { mode: 'confirm' },
         },
-        { taskId: 'task-2' },
+        { taskId: 'task-2', seq: 2 },
       ),
     );
   });
@@ -107,25 +110,34 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);
-    roundTrip(type, createEnvelope(type, {}, { taskId: 'task-1' }));
+    roundTrip(type, createEnvelope(type, {}, { taskId: 'task-1', seq: 1 }));
   });
 
   it('task.reject', () => {
     const type = 'task.reject' as const;
     testedTypes.push(type);
-    roundTrip(type, createEnvelope(type, { reason: 'budget exceeded' }, { taskId: 'task-1' }));
+    roundTrip(
+      type,
+      createEnvelope(type, { reason: 'budget exceeded' }, { taskId: 'task-1', seq: 1 }),
+    );
   });
 
   it('task.cancel', () => {
     const type = 'task.cancel' as const;
     testedTypes.push(type);
-    roundTrip(type, createEnvelope(type, { reason: 'user cancelled' }, { taskId: 'task-1' }));
+    roundTrip(
+      type,
+      createEnvelope(type, { reason: 'user cancelled' }, { taskId: 'task-1', seq: 1 }),
+    );
   });
 
   it('task.steer', () => {
     const type = 'task.steer' as const;
     testedTypes.push(type);
-    roundTrip(type, createEnvelope(type, { text: 'also update the README' }, { taskId: 'task-1' }));
+    roundTrip(
+      type,
+      createEnvelope(type, { text: 'also update the README' }, { taskId: 'task-1', seq: 1 }),
+    );
   });
 
   it('task.claim', () => {
@@ -133,9 +145,24 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     testedTypes.push(type);
     roundTrip(
       type,
+      createEnvelope(type, { deviceId: 'device-1', agentId: 'agent-1' }, { taskId: 'task-1' }),
+    );
+  });
+
+  it('task.started', () => {
+    const type = 'task.started' as const;
+    testedTypes.push(type);
+    roundTrip(type, createEnvelope(type, {}, { taskId: 'task-1' }));
+  });
+
+  it('task.decline', () => {
+    const type = 'task.decline' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
       createEnvelope(
         type,
-        { taskId: 'task-1', deviceId: 'device-1', agentId: 'agent-1' },
+        { reason: 'no compatible runtime available', retryable: true },
         { taskId: 'task-1' },
       ),
     );
@@ -241,6 +268,12 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('task.cancelled', () => {
+    const type = 'task.cancelled' as const;
+    testedTypes.push(type);
+    roundTrip(type, createEnvelope(type, { reason: 'user cancelled' }, { taskId: 'task-1' }));
+  });
+
   it('covers every declared message type', () => {
     expect([...new Set(testedTypes)].sort()).toEqual([...MESSAGE_TYPES].sort());
   });
@@ -248,7 +281,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 
 describe('createEnvelope defaults', () => {
   it('fills v, id, ts when not supplied', () => {
-    const envelope = createEnvelope('task.steer', { text: 'hi' }, { taskId: 'task-1' });
+    const envelope = createEnvelope('task.steer', { text: 'hi' }, { taskId: 'task-1', seq: 1 });
     expect(envelope.v).toBe(1);
     expect(envelope.id).toMatch(UUID_RE);
     expect(() => new Date(envelope.ts).toISOString()).not.toThrow();

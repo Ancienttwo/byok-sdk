@@ -17,7 +17,9 @@ describe('malformed payload rejection', () => {
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.offer',
-      payload: { taskId: 'task-1', instruction: 'do it' /* missing policy */ },
+      task_id: 'task-1',
+      seq: 1,
+      payload: { instruction: 'do it' /* missing policy */ },
     };
     expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
   });
@@ -28,6 +30,8 @@ describe('malformed payload rejection', () => {
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.steer',
+      task_id: 'task-1',
+      seq: 1,
       payload: { text: 42 }, // should be string
     };
     expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
@@ -39,6 +43,8 @@ describe('malformed payload rejection', () => {
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
+      task_id: 'task-1',
+      seq: 1,
       payload: {},
     };
     expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
@@ -50,6 +56,8 @@ describe('malformed payload rejection', () => {
       id: '11111111-1111-4111-8111-111111111111',
       ts: 'yesterday',
       type: 'task.approve',
+      task_id: 'task-1',
+      seq: 1,
       payload: {},
     };
     expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
@@ -65,6 +73,8 @@ describe('malformed payload rejection', () => {
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
+      task_id: 'task-1',
+      seq: 1,
       payload: {},
     };
     try {
@@ -81,7 +91,7 @@ describe('malformed payload rejection', () => {
 
 describe('unknown-field tolerance (forward-compat)', () => {
   it('tolerates an unknown top-level envelope field', () => {
-    const envelope = createEnvelope('task.approve', {}, { taskId: 'task-1' });
+    const envelope = createEnvelope('task.approve', {}, { taskId: 'task-1', seq: 1 });
     const raw = { ...envelope, fromTheFuture: 'ignore me' };
     const decoded = parseMessage(raw);
     expect(decoded).toEqual(envelope);
@@ -89,7 +99,7 @@ describe('unknown-field tolerance (forward-compat)', () => {
   });
 
   it('tolerates an unknown field inside a known payload', () => {
-    const envelope = createEnvelope('task.reject', { reason: 'no' }, { taskId: 'task-1' });
+    const envelope = createEnvelope('task.reject', { reason: 'no' }, { taskId: 'task-1', seq: 1 });
     const raw = { ...envelope, payload: { ...envelope.payload, futureField: 123 } };
     const decoded = parseMessage(raw);
     expect(decoded).toEqual(envelope);
@@ -121,7 +131,7 @@ describe('unknown message type handling', () => {
 
   it('is distinguishable so a daemon can skip-and-continue instead of crashing', () => {
     const line = encodeEnvelope(
-      createEnvelope('task.approve', {}, { taskId: 'task-1' }),
+      createEnvelope('task.approve', {}, { taskId: 'task-1', seq: 1 }),
     );
     const futureLine = line.replace('"task.approve"', '"task.some_new_v2_message"');
 
