@@ -41,7 +41,19 @@ export class CursorStore {
     }
     try {
       const parsed = JSON.parse(raw) as { cursor?: unknown };
-      return typeof parsed.cursor === 'number' ? parsed.cursor : undefined;
+      const v = parsed.cursor;
+      // Wave 2 hardening: a corrupt/tampered/hand-edited cursor file (a
+      // negative number, a float, NaN/Infinity via a prior bad write, etc.)
+      // must not be trusted as a redelivery cursor — reporting a bogus value
+      // as `conn.hello.cursor` could make the server's `seq > cursor` filter
+      // behave unpredictably. Falling back to `undefined` (treated the same
+      // as "no cursor file yet") is always safe under at-least-once delivery
+      // (protocol §9): worst case, more gets redelivered than strictly
+      // necessary, never less. Mirrors the nonnegative-integer guard Wave 1
+      // already added server-side for `EventsPollQuerySchema`/`GET
+      // /byok/events`'s `cursor` query param (`http.ts`) — this is the
+      // client-file half of the same hardening.
+      return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined;
     } catch {
       return undefined;
     }

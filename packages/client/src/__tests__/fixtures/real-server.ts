@@ -82,6 +82,48 @@ export async function startRealServerWithoutWebSocket(opts: CreateByokServerOpti
   });
 }
 
+export interface DeferredWebSocketServerHandle extends RealServerHandle {
+  /**
+   * Wire up the `GET /byok/ws` upgrade now (previously deferred) — the exact
+   * same call {@link startRealServer} makes eagerly at startup, just made
+   * available on demand. Used by the Wave 2 outbox-not-stranded-on-switch
+   * test (finding N4) to simulate WS becoming available partway through a
+   * test: before this is called, any WS upgrade attempt gets Node's default
+   * behavior for an unhandled `'upgrade'` event (the raw socket is
+   * destroyed) — a genuine WS failure, same as {@link startRealServerWithoutWebSocket}
+   * — so the daemon starts out long-poll-only exactly as it would against a
+   * real deployment with no reachable WS endpoint yet, and can then
+   * genuinely recover once this is called.
+   */
+  enableWebSocket(): void;
+}
+
+/**
+ * Same as {@link startRealServer}, but the WS upgrade handler isn't wired up
+ * until the caller explicitly calls {@link DeferredWebSocketServerHandle.enableWebSocket} —
+ * lets a test start a device long-poll-only (like
+ * {@link startRealServerWithoutWebSocket}) and then flip WS availability on
+ * later, against the SAME real server/task state, to exercise a genuine
+ * long-poll -> WS transport recovery mid-test (finding N4's
+ * outbox-not-stranded-on-switch coverage).
+ */
+export async function startRealServerWithDeferredWebSocket(
+  opts: CreateByokServerOptions,
+): Promise<DeferredWebSocketServerHandle> {
+  const byok = createByokServer(opts);
+  return new Promise((resolve) => {
+    const httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+      resolve({
+        byok,
+        httpServer: httpServer as HttpServer,
+        url: `http://127.0.0.1:${info.port}`,
+        close: () => closeServer(httpServer as HttpServer),
+        enableWebSocket: () => byok.attachWebSocket(httpServer as HttpServer),
+      });
+    });
+  });
+}
+
 /** Wait for `handle.events()` to produce an event matching `predicate` (mirrors `packages/server`'s own test-support helper, which isn't importable across the package boundary). */
 export async function waitForTaskEvent(
   handle: TaskHandle,

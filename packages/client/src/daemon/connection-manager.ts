@@ -54,11 +54,12 @@ export interface ConnectionManagerOptions {
  * given envelope — including during the brief overlap window when handing
  * off between them.
  *
- * `send()` goes to whichever transport is currently active: the WS
- * transport (queues while disconnected, flushes on the next successful
- * handshake) normally, or `LongPollClient.send` (`POST /byok/messages`)
- * while in long-poll mode (finding F6) — long-poll is a full transport, not
- * receive-only; see docs/protocol.md §8.
+ * `send()` (Design B, finding N4) pushes onto a single shared outbox this
+ * class owns and drains through whichever transport is currently active —
+ * WS raw-sends while acked, `POST /byok/messages` while long-polling
+ * (finding F6, long-poll is a full transport, not receive-only; see
+ * docs/protocol.md §8) — so a transport switch mid-flight never strands a
+ * queued envelope. See `drainOutbox`.
  */
 export class ConnectionManager {
   private readonly ws: WsTransport;
@@ -80,8 +81,38 @@ export class ConnectionManager {
    * guarantees in docs/protocol.md §9.
    */
   private stalledAtSeq: number | undefined;
+  /**
+   * Design A (Wave 2, F3-on-long-poll): the second, in-memory watermark
+   * alongside the durable `cursor`. `cursor` only ever advances AFTER a
+   * `task.*` handler's side effects resolve successfully, and is persisted
+   * (see `advanceCursor`) — that semantics is unchanged. `deliveredSeq`
+   * advances eagerly, the instant a `task.*` envelope is admitted past
+   * dedup (see `deliver`/`noteDelivered`), independent of whether its
+   * handler has even started, let alone succeeded. It exists so a
+   * long-poll re-query (`LongPollClient`'s `getCursor`) doesn't re-pull an
+   * envelope that's already been delivered once and is still in flight —
+   * `handleOffer` is NOT idempotent and must never be re-pulled while a
+   * first attempt is still running. On WS this same field is written the
+   * same way, but since a live WS connection only ever pushes a given `seq`
+   * once, it never has an observable effect there beyond mirroring
+   * `cursor` (see `dedupWatermark`'s doc comment for why redelivery
+   * correctness doesn't depend on resetting it anywhere).
+   */
+  private deliveredSeq: number | undefined;
   /** Finding F3: serializes `onEnvelope` calls into a per-connection FIFO — one envelope's handler always fully settles before the next one starts. */
   private processingChain: Promise<void> = Promise.resolve();
+  /**
+   * Design B (finding N4): the ONE outbound queue both transports drain
+   * from — holds `Envelope` OBJECTS, never re-encoded/rebuilt strings, so a
+   * resend after a failed send attempt is byte-identical to the original
+   * (same `id`), which is what lets the server's per-(deviceId,id) dedup
+   * (Wave 1) recognize it as a safe no-op retry rather than a second
+   * application (protocol §9). A transport switch (long-poll <-> WS) never
+   * touches this queue — see `drainOutbox` — so nothing queued while one
+   * transport was active is ever stranded when the other takes over.
+   */
+  private readonly outbox: Envelope[] = [];
+  private draining = false;
   private stopped = false;
   private revoked = false;
   private settledWaiters: Array<(err?: unknown) => void> = [];
@@ -109,9 +140,14 @@ export class ConnectionManager {
     this.longPoll = new LongPollClient({
       serverUrl: opts.serverUrl,
       auth: opts.auth,
-      getCursor: () => this.cursor,
+      // Design A: the query cursor for the NEXT `GET /byok/events` is the
+      // same watermark `deliver()` dedupes against (see `dedupWatermark`) —
+      // normally the eager `deliveredSeq` (so an in-flight envelope isn't
+      // re-pulled), but the durable `cursor` while `stalledAtSeq` is set, so
+      // the failed envelope (and everything after it) IS re-pulled and
+      // re-attempted.
+      getCursor: () => this.dedupWatermark(),
       onEnvelope: (envelope) => this.deliver(envelope),
-      onCursorAdvance: (cursor) => this.advanceCursor(cursor),
       onRevoked: () => this.enterRevoked(),
       retryDelayMs: opts.longPollRetryDelayMs,
       idleDelayMs: opts.longPollIdleDelayMs,
@@ -124,18 +160,65 @@ export class ConnectionManager {
   }
 
   /**
-   * While long-polling (protocol §8, finding F6), outbound envelopes POST
-   * via `LongPollClient.send` instead of queueing on the (dead) WS outbox —
-   * there is no live WS to flush onto in this mode. Otherwise, hands off to
-   * the WS transport as usual, which itself queues while disconnected and
-   * flushes on the next successful handshake.
+   * Design B (finding N4): push onto the single shared outbox and try to
+   * drain it now. Never routes directly to either transport itself — see
+   * `drainOutbox`.
    */
   send(envelope: Envelope): void {
-    if (this.mode === 'long-poll') {
-      this.longPoll.send(envelope);
-      return;
+    this.outbox.push(envelope);
+    void this.drainOutbox();
+  }
+
+  /**
+   * Design B (finding N4): drain the shared outbox through whichever
+   * transport is currently active, re-checking `this.mode` fresh on every
+   * iteration so a transport switch mid-drain is picked up immediately
+   * rather than fighting a stale decision made before the switch.
+   *
+   * WS: a synchronous, one-at-a-time `sendNow` per envelope while open+
+   * acked; stops (without dropping anything — the remainder stays queued)
+   * the moment it isn't, and is re-invoked once `onAcked` fires.
+   *
+   * Long-poll: POSTs the entire current queue as one batch
+   * (`LongPollClient.postBatch`, protocol §8.2). On failure the batch is
+   * unshifted back (order-preserving, same Envelope objects/ids — never
+   * rebuilt, so a retry is exactly the resend Wave 1's server-side dedup
+   * expects) and retried after a short backoff, re-reading `this.mode` each
+   * time so a WS recovery that happens mid-retry is honored on the very
+   * next loop iteration instead of only after this attempt's backoff
+   * chain gives up.
+   *
+   * Re-entrancy is guarded by `draining`: a call arriving while a drain is
+   * already in progress just returns — the in-progress loop's own
+   * `while (this.outbox.length > 0)` check will pick up anything newly
+   * pushed (or left over after a mode switch) on its very next iteration.
+   */
+  private async drainOutbox(): Promise<void> {
+    if (this.draining) return;
+    this.draining = true;
+    try {
+      while (this.outbox.length > 0) {
+        if (this.stopped) return;
+
+        if (this.mode === 'ws') {
+          if (!this.ws.isOpen) return; // onAcked() re-invokes drainOutbox() once it is
+          const envelope = this.outbox[0]!;
+          if (!this.ws.sendNow(envelope)) return; // defensive; isOpen already checked above
+          this.outbox.shift();
+          continue;
+        }
+
+        const batch = this.outbox.splice(0);
+        const ok = await this.longPoll.postBatch(batch);
+        if (ok) continue; // loop back around in case more was pushed while this POST was in flight
+
+        this.outbox.unshift(...batch); // retry, preserving order — same objects, same ids (finding F1)
+        if (this.stopped) return;
+        await sleep(this.opts.longPollRetryDelayMs ?? 2000);
+      }
+    } finally {
+      this.draining = false;
     }
-    this.ws.send(envelope);
   }
 
   isTransportDegraded(): boolean {
@@ -219,9 +302,45 @@ export class ConnectionManager {
    */
   private deliver(envelope: Envelope): void {
     const tracked = isTaskEnvelopeType(envelope.type) && typeof envelope.seq === 'number';
-    if (tracked && this.cursor !== undefined && envelope.seq! <= this.cursor) return; // redelivered — idempotent skip (protocol §9)
+    const watermark = this.dedupWatermark();
+    if (tracked && watermark !== undefined && envelope.seq! <= watermark) return; // redelivered — idempotent skip (protocol §9)
+    if (tracked) this.noteDelivered(envelope.seq!);
 
     this.processingChain = this.processingChain.then(() => this.process(envelope, tracked));
+  }
+
+  /**
+   * Design A: the watermark `deliver()` dedupes inbound `task.*` envelopes
+   * against, and the same value `LongPollClient` queries the next
+   * `GET /byok/events` cursor with (see the constructor). Normally this is
+   * `deliveredSeq` — which is always >= `cursor` (every envelope that
+   * reaches `advanceCursor` already passed through `noteDelivered` first,
+   * see `deliver`) — so this is the literal `max(cursor, deliveredSeq)` the
+   * design calls for, just expressed via that invariant rather than an
+   * explicit `Math.max`.
+   *
+   * While `stalledAtSeq` is set, this collapses to the durable `cursor`
+   * alone, deliberately ignoring however far `deliveredSeq` had already run
+   * ahead before the failure was known: that's what lets the stalled
+   * envelope's own redelivery (and everything after it, right up to a
+   * fresh success) get past this same dedup check instead of being
+   * self-deduped by the client's own earlier eager tracking of envelopes
+   * whose outcome wasn't known yet. No separate "reset deliveredSeq on
+   * reconnect" step is needed for this to be correct — collapsing to
+   * `cursor` exactly while stalled already produces the right answer on
+   * every redelivery path (long-poll re-query AND a WS reconnect's
+   * backlog replay alike), and NOT resetting it unconditionally on every
+   * reconnect is what lets `deliveredSeq` keep doing its job of not
+   * re-pulling/re-dispatching something already in flight across a
+   * reconnect that happens to land while a handler is still running.
+   */
+  private dedupWatermark(): number | undefined {
+    return this.stalledAtSeq !== undefined ? this.cursor : (this.deliveredSeq ?? this.cursor);
+  }
+
+  /** Design A: eagerly advance the in-memory delivery watermark — called for every `task.*` envelope `deliver()` admits past dedup, regardless of transport or of whether its handler has even started yet. */
+  private noteDelivered(seq: number): void {
+    if (this.deliveredSeq === undefined || seq > this.deliveredSeq) this.deliveredSeq = seq;
   }
 
   private async process(envelope: Envelope, tracked: boolean): Promise<void> {
@@ -278,6 +397,7 @@ export class ConnectionManager {
     this.consecutiveFailures = 0;
     this.notifySettled();
     if (this.mode === 'long-poll') this.exitLongPoll();
+    void this.drainOutbox(); // Design B: pick up anything queued while WS was (re)connecting
   }
 
   private onWsOutcome(acked: boolean, err?: unknown): void {
@@ -315,6 +435,7 @@ export class ConnectionManager {
     this.opts.onStateChange?.('degraded');
     this.longPoll.start();
     this.notifySettled();
+    void this.drainOutbox(); // Design B: anything already queued now drains over the freshly-started long-poll POST path
 
     const intervalMs = this.opts.wsRetryIntervalMs ?? 5 * 60 * 1000;
     const timer = setInterval(() => {
@@ -333,6 +454,7 @@ export class ConnectionManager {
     this.mode = 'ws';
     this.consecutiveFailures = 0;
     this.ws.resumeAutoReconnect();
+    void this.drainOutbox(); // Design B: anything still queued from long-poll now drains over WS
   }
 
   private enterRevoked(): void {
@@ -348,4 +470,8 @@ export class ConnectionManager {
     // — e.g. revocation discovered while already connected/running.
     this.notifySettled(new DeviceRevokedError());
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

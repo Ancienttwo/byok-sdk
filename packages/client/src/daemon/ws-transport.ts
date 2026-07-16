@@ -63,11 +63,14 @@ export interface WsTransportOptions {
 /**
  * The daemon's outbound-only WS connection: opens, sends `conn.hello`, waits
  * for `conn.ack`, and reconnects with capped exponential backoff + jitter on
- * drop. Frames not yet ack'd (or sent while disconnected) are queued and
- * flushed on the next successful handshake — this is also how a message
- * "sent" while the connection manager has fallen back to long-poll actually
- * leaves the device: it queues here until WS recovers (protocol §8 has no
- * daemon->server HTTP path).
+ * drop.
+ *
+ * Design B (finding N4): this transport is a stateless drainer — it holds no
+ * outbound queue of its own. `ConnectionManager` owns the single shared
+ * outbox both transports drain from (so a transport switch never strands a
+ * queued envelope); `sendNow` just attempts to hand one envelope to the
+ * live socket right now and reports back whether that actually happened,
+ * leaving all queueing/retry policy to the caller.
  *
  * Auto-reconnect can be paused (`stopAutoReconnect`) and single attempts
  * made on demand (`connect({ auto: false })`) — used by `ConnectionManager`
@@ -85,7 +88,6 @@ export class WsTransport {
   private livenessTimer: ReturnType<typeof setInterval> | undefined;
   private lastActivity = 0;
   private lastUnexpectedStatus: number | undefined;
-  private readonly outbox: string[] = [];
   private ackWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
 
   constructor(private readonly opts: WsTransportOptions) {}
@@ -114,13 +116,19 @@ export class WsTransport {
     return this.acked;
   }
 
-  send(envelope: Envelope): void {
-    const line = encodeEnvelope(envelope);
+  /**
+   * Attempt to send ONE envelope right now; returns whether it actually went
+   * out. `false` means the socket isn't currently open+acked — the caller
+   * (`ConnectionManager.drainOutbox`, Design B/finding N4) owns re-queueing
+   * and retrying later (e.g. on the next `onAcked`), since this transport no
+   * longer buffers anything itself.
+   */
+  sendNow(envelope: Envelope): boolean {
     if (this.socket && this.socket.readyState === WebSocket.OPEN && this.acked) {
-      this.socket.send(line);
-    } else {
-      this.outbox.push(line);
+      this.socket.send(encodeEnvelope(envelope));
+      return true;
     }
+    return false;
   }
 
   waitForAck(timeoutMs = 10_000): Promise<void> {
@@ -199,7 +207,6 @@ export class WsTransport {
         this.acked = true;
         this.everAckedThisAttempt = true;
         this.opts.onStateChange?.('open');
-        this.flushOutbox();
         for (const waiter of this.ackWaiters.splice(0)) waiter.resolve();
         this.opts.onAcked?.();
       }
@@ -252,12 +259,6 @@ export class WsTransport {
     if (this.livenessTimer) {
       clearInterval(this.livenessTimer);
       this.livenessTimer = undefined;
-    }
-  }
-
-  private flushOutbox(): void {
-    for (const line of this.outbox.splice(0)) {
-      this.socket?.send(line);
     }
   }
 }

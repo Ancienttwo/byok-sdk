@@ -10,6 +10,18 @@ export class StubSession implements Session {
   readonly steerCalls: string[] = [];
   readonly followUpCalls: TaskOfferPayload[] = [];
   readonly resolveApprovalCalls: Array<{ approved: boolean; reason?: string }> = [];
+  /**
+   * Test hook: when set, the NEXT `steer()` call throws this instead of
+   * recording the call, then clears itself so subsequent calls succeed
+   * normally. `TaskRunner.handleSteer` has no try/catch around its
+   * `session.steer()` call (unlike cancel/approve/reject, which all
+   * swallow a failing session call and report a terminal message instead)
+   * — this is the one handler whose failure genuinely propagates all the
+   * way up through `handleEnvelope` to `ConnectionManager.process()`, which
+   * is what a test needing a real "the handler throws" case (e.g. the
+   * long-poll cursor-not-advanced-before-handler regression test) needs.
+   */
+  steerError: Error | undefined;
   private closeGate: Promise<void> | undefined;
 
   constructor(public readonly sessionRef: string) {}
@@ -37,6 +49,11 @@ export class StubSession implements Session {
   }
 
   async steer(text: string): Promise<void> {
+    if (this.steerError) {
+      const err = this.steerError;
+      this.steerError = undefined;
+      throw err;
+    }
     this.steerCalls.push(text);
   }
 
