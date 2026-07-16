@@ -1,6 +1,6 @@
-import { generateDeviceId, generateDeviceToken, generatePairingCode } from './ids';
+import { generatePairingCode } from './ids';
 
-const PAIRING_CODE_TTL_MS = 10 * 60 * 1000; // ~10min, per M0 spec
+const PAIRING_CODE_TTL_MS = 10 * 60 * 1000; // ~10min, per spec
 
 export interface PairingCodeInfo {
   code: string;
@@ -13,12 +13,6 @@ interface PairingCodeRecord {
   used: boolean;
 }
 
-interface DeviceIdentity {
-  deviceId: string;
-  deviceName: string;
-  token: string;
-}
-
 /** Thrown when a pairing code is missing, expired, or already used. */
 export class PairingCodeInvalidError extends Error {
   constructor(reason: string) {
@@ -28,16 +22,17 @@ export class PairingCodeInvalidError extends Error {
 }
 
 /**
- * In-memory device pairing: single-use, ~10min TTL pairing codes exchanged
- * for an opaque bearer device token (M0 simplification — no device
- * keypairs/JWT until M1). Also holds the device identity directory
- * (deviceId/deviceName) so the connection hub can join it against live
- * connection state for `machines.list()`.
+ * In-memory pairing-code lifecycle: single-use, ~10min TTL codes minted
+ * out-of-band (by the SaaS's own auth/device-flow UI) and redeemed exactly
+ * once by `POST /byok/pair`.
+ *
+ * Device identity (deviceId/deviceName/devicePublicKey/revocation) and
+ * token issuance moved to `auth.ts`'s `DeviceRegistry`/`TokenSigner` as of
+ * Auth v2 (docs/protocol.md §6) — this class no longer knows about devices
+ * at all, only about the codes themselves.
  */
 export class PairingManager {
   private readonly codes = new Map<string, PairingCodeRecord>();
-  private readonly devicesByToken = new Map<string, DeviceIdentity>();
-  private readonly devicesById = new Map<string, DeviceIdentity>();
 
   createPairingCode(): PairingCodeInfo {
     const code = generatePairingCode();
@@ -47,11 +42,13 @@ export class PairingManager {
   }
 
   /**
-   * Redeem a pairing code for a new device identity. Throws
-   * {@link PairingCodeInvalidError} if the code is unknown, expired, or
-   * already used — callers (the HTTP handler) map that to a 401.
+   * Validate and consume a pairing code. Throws {@link PairingCodeInvalidError}
+   * if the code is unknown, expired, or already used — callers (the HTTP
+   * handler) map that to a 401. Does not itself know anything about the
+   * device being paired; the caller registers device identity separately
+   * (see `auth.ts`'s `DeviceRegistry`) once the code checks out.
    */
-  redeemPairingCode(code: string, deviceName: string): { deviceId: string; deviceToken: string } {
+  redeemPairingCode(code: string): void {
     const record = this.codes.get(code);
     if (!record) {
       throw new PairingCodeInvalidError('unknown code');
@@ -63,25 +60,5 @@ export class PairingManager {
       throw new PairingCodeInvalidError('code expired');
     }
     record.used = true;
-
-    const deviceId = generateDeviceId();
-    const token = generateDeviceToken();
-    const identity: DeviceIdentity = { deviceId, deviceName, token };
-    this.devicesByToken.set(token, identity);
-    this.devicesById.set(deviceId, identity);
-    return { deviceId, deviceToken: token };
-  }
-
-  /** Resolve a bearer token (from the WS upgrade `Authorization` header) to a deviceId. */
-  deviceIdForToken(token: string): string | undefined {
-    return this.devicesByToken.get(token)?.deviceId;
-  }
-
-  getDeviceName(deviceId: string): string | undefined {
-    return this.devicesById.get(deviceId)?.deviceName;
-  }
-
-  listDeviceIds(): string[] {
-    return [...this.devicesById.keys()];
   }
 }

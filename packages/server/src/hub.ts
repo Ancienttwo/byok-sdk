@@ -3,20 +3,24 @@ import {
   canTransition,
   createEnvelope,
   encodeEnvelope,
+  PROTOCOL_VERSION,
   type Envelope,
   type PermissionPolicy,
-  type RuntimeId,
+  type RuntimeInfo,
   type TaskArtifactPayload,
   type TaskAwaitApprovalPayload,
+  type TaskCancelledPayload,
   type TaskClaimPayload,
   type TaskCompletePayload,
+  type TaskDeclinePayload,
   type TaskFailPayload,
   type TaskProgressPayload,
+  type TaskStartedPayload,
   type TaskState,
 } from '@byok/protocol';
+import type { DeviceRegistry } from './auth';
 import { AsyncEventQueue } from './event-queue';
 import { generateTaskId } from './ids';
-import type { PairingManager } from './pairing';
 import { TaskStore } from './task-store';
 import type {
   ByokServerEvent,
@@ -36,26 +40,39 @@ import type {
  */
 const DEFAULT_POLICY: PermissionPolicy = { mode: 'confirm' };
 
-const KNOWN_RUNTIMES = new Set<RuntimeId>(['pi', 'claude', 'codex']);
-
-/** Best-effort normalization of `conn.hello`'s untyped `agents` field into RuntimeIds. */
-function normalizeRuntimes(agents: unknown): RuntimeId[] | undefined {
-  if (!Array.isArray(agents)) return undefined;
-  const runtimes = agents.filter(
-    (a): a is RuntimeId => typeof a === 'string' && KNOWN_RUNTIMES.has(a as RuntimeId),
-  );
-  return runtimes.length > 0 ? runtimes : undefined;
-}
+/** Per-device redelivery ring buffer size (§9: "keep the last K envelopes per device"). */
+const OUTBOX_RING_CAPACITY = 500;
 
 function isTerminal(state: TaskState): state is Extract<TaskState, 'Complete' | 'Failed' | 'Cancelled'> {
   return state === 'Complete' || state === 'Failed' || state === 'Cancelled';
 }
 
+/** A device's live transport (WS or long-poll — never both, §8) plus last-known metadata. */
 interface ConnectionState {
-  ws: WebSocket;
+  ws?: WebSocket;
   connected: boolean;
   lastSeen: string;
-  runtimes?: RuntimeId[];
+  runtimes?: RuntimeInfo[];
+}
+
+/** One envelope this server has sent (or would have sent) to a device, retained for redelivery. */
+interface OutboxEntry {
+  seq: number;
+  /** Absent for `conn.ack` (not task-scoped) — such entries are never redelivered/polled. */
+  taskId?: string;
+  envelope: Envelope;
+}
+
+/** Per-device outbound sequence counter + bounded history (§1.2, §9). */
+interface DeviceOutbox {
+  nextSeq: number;
+  ring: OutboxEntry[];
+}
+
+interface LongPollWaiter {
+  cursor: number;
+  resolve: (result: { events: Envelope[]; cursor: number }) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface TaskRuntime {
@@ -68,32 +85,47 @@ interface TaskRuntime {
 type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'>>;
 
 /**
- * The connection hub: tracks live per-device WebSocket connections, routes
- * `dispatch()`'d tasks to a device, and processes inbound task.* envelopes
- * from daemons.
+ * The connection hub: tracks each device's live transport (WS or long-poll —
+ * never both at once, see {@link takeOverAsLongPoll}), routes `dispatch()`'d
+ * tasks to a device, and processes inbound task.* envelopes from daemons.
  *
- * Protocol note (see also errors surfaced in the M0 report): `task.progress`
- * / `task.artifact` / `task.await_approval` / `task.complete` / `task.fail`
- * payloads carry no `taskId` of their own — only the envelope's *optional*
- * `task_id` field identifies which task they belong to. A daemon that omits
- * `task_id` on these produces a validly-parsed envelope this server cannot
- * route; see `withEnvelopeTaskId` below.
+ * Routing (M1): every `task.*` envelope carries a *required* envelope
+ * `task_id` — the sole routing key, both directions. No payload duplicates
+ * it, and none of the handlers below need to guard against a missing one
+ * (the wire schema already rejects such an envelope before it reaches here).
  *
- * State-machine note: the wire has no distinct "task started running"
- * message. This hub treats `task.claim` as claiming *and* immediately
- * starting the task (`Offered -> Claimed -> Running`, two legal hops applied
- * back to back) rather than waiting for the first `task.progress` — simpler
- * than special-casing a Claimed->Running bump in every subsequent handler,
- * and just as protocol-legal.
+ * Outbound delivery (M1, §1.2/§9): every server -> daemon envelope
+ * (`conn.ack`, `task.offer/approve/reject/cancel/steer`) gets a fresh
+ * per-device monotonic `seq` and is retained in a capped ring buffer
+ * ({@link OUTBOX_RING_CAPACITY} entries) so it can be redelivered — in `seq`
+ * order, skipping anything whose task has since reached a terminal state —
+ * on reconnect (`redeliverAfterReconnect`) or long-poll
+ * (`pollEvents`/`collectRelevant`). `conn.ack` has no task association, so
+ * it's retained (for seq-counting purposes only) but never redelivered.
+ *
+ * State-machine (M1): `task.claim` only claims (`Offered -> Claimed`); it no
+ * longer implies `Running`. The daemon reports `Claimed -> Running`
+ * explicitly via `task.started` once its runtime session actually starts
+ * (§3.1). `task.decline` reports a pre-claim fail-closed rejection
+ * (`Offered -> Failed`, §3.2). `task.cancelled` is dual-purpose: an
+ * idempotent ack when the server already cancelled the task itself, or the
+ * authoritative trigger when the daemon observed the cancellation first
+ * (§3.3). Per §9, `task.complete`/`task.fail`/`task.cancelled` arriving for
+ * an already-terminal task are silently dropped as stale/duplicate — not a
+ * warning; this is what naturally resolves the M0 gatekeeper's cancel-race
+ * `console.warn` finding (a late `task.fail`/`task.cancelled` racing a
+ * server-initiated cancel is exactly this case).
  */
 export class ConnectionHub {
   private readonly connections = new Map<string, ConnectionState>();
+  private readonly outboxes = new Map<string, DeviceOutbox>();
+  private readonly longPollWaiters = new Map<string, LongPollWaiter>();
   private readonly runtimes = new Map<string, TaskRuntime>();
   private readonly serverEvents = new AsyncEventQueue<ByokServerEvent>();
 
   constructor(
     private readonly taskStore: TaskStore,
-    private readonly pairing: PairingManager,
+    private readonly devices: DeviceRegistry,
   ) {}
 
   /** The top-level `events` feed returned by `createByokServer` — see {@link ByokServerEvent}. */
@@ -102,46 +134,137 @@ export class ConnectionHub {
   }
 
   // ---------------------------------------------------------------------
-  // connection lifecycle — called from ws-server.ts
+  // connection lifecycle — called from ws-server.ts / http.ts
   // ---------------------------------------------------------------------
 
-  registerConnection(deviceId: string, ws: WebSocket, agents: unknown): void {
+  /** A daemon completed the WS handshake (`conn.hello`). Does not itself send `conn.ack` or redeliver — see {@link sendConnAck}/{@link redeliverAfterReconnect}. */
+  registerConnection(deviceId: string, ws: WebSocket, runtimes: RuntimeInfo[] | undefined): void {
     const at = new Date().toISOString();
-    this.connections.set(deviceId, {
-      ws,
-      connected: true,
-      lastSeen: at,
-      runtimes: normalizeRuntimes(agents),
-    });
+    this.connections.set(deviceId, { ws, connected: true, lastSeen: at, runtimes });
     this.serverEvents.push({ kind: 'device.connected', deviceId, at });
+    // Last-transport-wins (§8): a WS connection supersedes any long-poll
+    // request currently held open for this device — let it complete now
+    // instead of leaving it hanging until its own timeout.
+    this.settleLongPollWaiter(deviceId);
+  }
+
+  sendConnAck(deviceId: string, capabilities: string[]): void {
+    this.sendToDevice(deviceId, 'conn.ack', {
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities,
+      serverTime: new Date().toISOString(),
+    });
   }
 
   /**
-   * M0 simplification: no redelivery cursor. A task still in flight for a
-   * device that just disconnected can't be resumed, so it's terminated:
-   * `Offered` (never claimed) -> `Cancelled` (Failed isn't a legal target
-   * from `Offered`); anything already claimed -> `Failed` with
-   * `retryable: true`, per the M0 spec.
+   * Reconnection procedure step 3 (§9): redeliver, in `seq` order, every
+   * retained envelope with `seq > cursor` that still belongs to a
+   * non-terminal task. Called after `conn.ack` (step 2), per the spec.
    */
-  handleDisconnect(deviceId: string): void {
+  redeliverAfterReconnect(deviceId: string, cursor: number): void {
     const conn = this.connections.get(deviceId);
-    if (conn) {
-      conn.connected = false;
-      conn.lastSeen = new Date().toISOString();
-      this.serverEvents.push({ kind: 'device.disconnected', deviceId, at: conn.lastSeen });
+    if (!conn?.ws || !conn.connected) return;
+    for (const envelope of this.collectRelevant(deviceId, cursor)) {
+      conn.ws.send(encodeEnvelope(envelope));
     }
-    for (const record of this.taskStore.list()) {
-      if (record.deviceId !== deviceId) continue;
-      if (record.state === 'Offered') {
-        this.applyOrFail(record.taskId, 'Cancelled', {
-          result: { state: 'Cancelled', reason: 'device disconnected before claim' },
-        });
-      } else if (record.state === 'Claimed' || record.state === 'Running' || record.state === 'AwaitApproval') {
-        this.applyOrFail(record.taskId, 'Failed', {
-          result: { state: 'Failed', reason: 'device disconnected', retryable: true },
-        });
-      }
+  }
+
+  /**
+   * A device's WS socket closed. `ws` identifies *which* socket closed: if
+   * it's no longer the one this device's connection state points at (a
+   * newer WS reconnected, or long-poll took over — "last transport wins"),
+   * this close is for a stale/superseded socket and the device isn't
+   * actually gone, so the bookkeeping below is skipped entirely.
+   *
+   * M1 note: the M0 server force-failed/cancelled every in-flight task for a
+   * device the instant it disconnected, on the stated premise that "a task
+   * still in flight for a device that just disconnected can't be resumed, so
+   * it's terminated" — true only in the absence of a redelivery cursor. M1
+   * adds exactly that (§9): a task's in-flight state is retained
+   * independently of any one connection, specifically so it can survive a
+   * disconnect and resume via redelivery once the device reconnects. Failing
+   * tasks here would make that feature unreachable in practice (nothing
+   * would ever still be non-terminal by the time a reconnect happened), so
+   * this now only updates connection bookkeeping and leaves task state
+   * alone. A task left in-flight by a device that never reconnects stays
+   * that way until the SaaS embedder explicitly cancels it — no
+   * disconnect-timeout is specified by the protocol, so none is invented
+   * here (see the M1-2 report's contract-gap notes).
+   */
+  handleDisconnect(deviceId: string, ws: WebSocket): void {
+    const conn = this.connections.get(deviceId);
+    if (!conn || conn.ws !== ws) return;
+
+    conn.connected = false;
+    conn.ws = undefined;
+    conn.lastSeen = new Date().toISOString();
+    this.serverEvents.push({ kind: 'device.disconnected', deviceId, at: conn.lastSeen });
+    this.settleLongPollWaiter(deviceId);
+  }
+
+  // ---------------------------------------------------------------------
+  // long-poll fallback (§8) — GET /byok/events, called from http.ts
+  // ---------------------------------------------------------------------
+
+  /**
+   * Resolve immediately if there are already-relevant events past `cursor`;
+   * otherwise hold for up to `holdMs` and resolve with an empty result if
+   * nothing arrives. A device may be connected via WS or long-poll, not
+   * both simultaneously — a poll here supersedes (closes) any live WS for
+   * this device ("last one wins", documented at the type level on
+   * {@link ConnectionState}).
+   */
+  async pollEvents(deviceId: string, cursor: number, holdMs: number): Promise<{ events: Envelope[]; cursor: number }> {
+    this.takeOverAsLongPoll(deviceId);
+    this.settleLongPollWaiter(deviceId); // in case a previous poll for this device is still outstanding
+
+    const immediate = this.collectRelevant(deviceId, cursor);
+    if (immediate.length > 0) {
+      return { events: immediate, cursor: this.currentCursor(deviceId) };
     }
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.longPollWaiters.delete(deviceId);
+        resolve({ events: [], cursor: this.currentCursor(deviceId) });
+      }, holdMs);
+      timer.unref?.();
+      this.longPollWaiters.set(deviceId, { cursor, resolve, timer });
+    });
+  }
+
+  /** Make long-poll this device's active transport, closing any live WS ("last one wins", §8). */
+  private takeOverAsLongPoll(deviceId: string): void {
+    const conn = this.connections.get(deviceId);
+    const at = new Date().toISOString();
+    const wasFreshlyConnected = !conn || conn.ws !== undefined || !conn.connected;
+
+    if (conn?.ws) {
+      const ws = conn.ws;
+      // Detach first so the 'close' event this triggers sees a connection
+      // state that's already moved on and skips handleDisconnect's
+      // task-failure logic — the device isn't gone, it's switching transport.
+      this.connections.set(deviceId, { connected: true, lastSeen: at, runtimes: conn.runtimes });
+      ws.close(1000, 'superseded by long-poll connection');
+    } else if (!conn) {
+      this.connections.set(deviceId, { connected: true, lastSeen: at });
+    } else {
+      conn.connected = true;
+      conn.lastSeen = at;
+    }
+
+    if (wasFreshlyConnected) {
+      this.serverEvents.push({ kind: 'device.connected', deviceId, at });
+    }
+  }
+
+  /** Resolve (settle) any long-poll request currently held open for `deviceId`, if one exists. */
+  private settleLongPollWaiter(deviceId: string): void {
+    const waiter = this.longPollWaiters.get(deviceId);
+    if (!waiter) return;
+    this.longPollWaiters.delete(deviceId);
+    clearTimeout(waiter.timer);
+    waiter.resolve({ events: this.collectRelevant(deviceId, waiter.cursor), cursor: this.currentCursor(deviceId) });
   }
 
   // ---------------------------------------------------------------------
@@ -151,22 +274,31 @@ export class ConnectionHub {
   handleEnvelope(deviceId: string, envelope: Envelope): void {
     switch (envelope.type) {
       case 'task.claim':
-        this.onClaim(deviceId, envelope.payload);
+        this.onClaim(deviceId, envelope.task_id, envelope.payload);
+        return;
+      case 'task.started':
+        this.onStarted(deviceId, envelope.task_id, envelope.payload);
+        return;
+      case 'task.decline':
+        this.onDecline(deviceId, envelope.task_id, envelope.payload);
         return;
       case 'task.progress':
-        this.withEnvelopeTaskId(envelope, (taskId) => this.onProgress(taskId, envelope.payload));
+        this.onProgress(envelope.task_id, envelope.payload);
         return;
       case 'task.artifact':
-        this.withEnvelopeTaskId(envelope, (taskId) => this.onArtifact(taskId, envelope.payload));
+        this.onArtifact(envelope.task_id, envelope.payload);
         return;
       case 'task.await_approval':
-        this.withEnvelopeTaskId(envelope, (taskId) => this.onAwaitApproval(taskId, envelope.payload));
+        this.onAwaitApproval(envelope.task_id, envelope.payload);
         return;
       case 'task.complete':
-        this.withEnvelopeTaskId(envelope, (taskId) => this.onComplete(taskId, envelope.payload));
+        this.onComplete(envelope.task_id, envelope.payload);
         return;
       case 'task.fail':
-        this.withEnvelopeTaskId(envelope, (taskId) => this.onFail(taskId, envelope.payload));
+        this.onFail(envelope.task_id, envelope.payload);
+        return;
+      case 'task.cancelled':
+        this.onCancelled(deviceId, envelope.task_id, envelope.payload);
         return;
       default:
         // conn.hello is handled during the handshake (ws-server.ts); the
@@ -177,31 +309,49 @@ export class ConnectionHub {
     }
   }
 
-  private withEnvelopeTaskId(envelope: Envelope, fn: (taskId: string) => void): void {
-    const taskId = envelope.task_id;
-    if (!taskId) {
-      console.warn(
-        `[byok/server] dropping ${envelope.type}: envelope.task_id is missing (this payload type carries no taskId of its own)`,
-      );
-      return;
-    }
-    fn(taskId);
-  }
-
-  private onClaim(deviceId: string, payload: TaskClaimPayload): void {
-    const record = this.taskStore.get(payload.taskId);
+  private onClaim(deviceId: string, taskId: string, payload: TaskClaimPayload): void {
+    const record = this.taskStore.get(taskId);
     if (!record) return;
     if (record.deviceId !== deviceId || payload.deviceId !== deviceId) {
-      this.forceFailOrDrop(payload.taskId, 'claim from unexpected device');
+      this.forceFailOrDrop(taskId, 'claim from unexpected device');
       return;
     }
-    // Claim is an idempotent CAS (plan: "claim 为幂等 CAS"): a retried claim
-    // from the device that already owns this task (e.g. the daemon didn't
-    // see the first claim's effect land before retrying) is a no-op, not an
-    // illegal-transition failure.
+    // Claim is an idempotent CAS: a retried claim from the device that
+    // already owns this task (e.g. the daemon didn't see the first claim's
+    // effect land before retrying) is a no-op, not an illegal-transition
+    // failure.
     if (record.state === 'Claimed' || record.state === 'Running') return;
-    this.applyOrFail(payload.taskId, 'Claimed', { deviceId });
-    this.applyOrFail(payload.taskId, 'Running', {});
+    this.applyOrFail(taskId, 'Claimed', { deviceId });
+    // NOTE (M1 gap #2): claiming no longer implies Running — the daemon
+    // reports that explicitly via task.started (see onStarted) once its
+    // runtime session actually starts.
+  }
+
+  /** `Claimed -> Running` (§3.1) — a daemon actually starting the runtime session, distinct from merely claiming. */
+  private onStarted(deviceId: string, taskId: string, _payload: TaskStartedPayload): void {
+    const record = this.taskStore.get(taskId);
+    if (!record) return;
+    if (record.deviceId !== deviceId) {
+      this.forceFailOrDrop(taskId, 'task.started from unexpected device');
+      return;
+    }
+    if (record.state === 'Running') return; // idempotent (§3.1): already running, no-op.
+    if (isTerminal(record.state)) return; // stale/duplicate — task already moved on.
+    this.applyOrFail(taskId, 'Running', {});
+  }
+
+  /** `Offered -> Failed` (§3.2) — a fail-closed pre-claim rejection. Only ever legal from `Offered`; anything else is stale. */
+  private onDecline(deviceId: string, taskId: string, payload: TaskDeclinePayload): void {
+    const record = this.taskStore.get(taskId);
+    if (!record) return;
+    if (record.deviceId !== deviceId) {
+      this.forceFailOrDrop(taskId, 'task.decline from unexpected device');
+      return;
+    }
+    if (record.state !== 'Offered') return;
+    this.applyOrFail(taskId, 'Failed', {
+      result: { state: 'Failed', reason: payload.reason, retryable: payload.retryable },
+    });
   }
 
   private onProgress(taskId: string, payload: TaskProgressPayload): void {
@@ -238,6 +388,11 @@ export class ConnectionHub {
   }
 
   private onComplete(taskId: string, payload: TaskCompletePayload): void {
+    const record = this.taskStore.get(taskId);
+    if (!record) return;
+    // Terminal messages arriving for an already-terminal task are stale/
+    // duplicate (§9) — drop silently, not a warning.
+    if (isTerminal(record.state)) return;
     const result: TaskResult = {
       state: 'Complete',
       summary: payload.summary,
@@ -248,8 +403,34 @@ export class ConnectionHub {
   }
 
   private onFail(taskId: string, payload: TaskFailPayload): void {
+    const record = this.taskStore.get(taskId);
+    if (!record) return;
+    // Same stale-terminal-message rule as onComplete (§9) — this is what
+    // resolves the M0 gatekeeper's cancel-race finding: a task.fail racing a
+    // server-initiated cancel that already landed is now a silent drop.
+    if (isTerminal(record.state)) return;
     const result: TaskResult = { state: 'Failed', reason: payload.reason, retryable: payload.retryable };
     this.applyOrFail(taskId, 'Failed', { result });
+  }
+
+  /**
+   * Dual-purpose on receipt (§3.3): if the server already moved this task to
+   * `Cancelled` on its own action (the common case — `cancelTask()` is
+   * authoritative immediately, §4), this is a late idempotent ack — silent,
+   * not a warning (this is the other half of the M0 gatekeeper finding this
+   * change resolves). Otherwise it's the authoritative trigger for a
+   * cancellation the daemon observed that the server didn't initiate.
+   */
+  private onCancelled(deviceId: string, taskId: string, payload: TaskCancelledPayload): void {
+    const record = this.taskStore.get(taskId);
+    if (!record) return;
+    if (record.deviceId !== deviceId) {
+      this.forceFailOrDrop(taskId, 'task.cancelled from unexpected device');
+      return;
+    }
+    if (record.state === 'Cancelled') return;
+    if (isTerminal(record.state)) return; // Complete/Failed already reached — stale (§9), drop silently.
+    this.applyOrFail(taskId, 'Cancelled', { result: { state: 'Cancelled', reason: payload.reason } });
   }
 
   // ---------------------------------------------------------------------
@@ -338,19 +519,16 @@ export class ConnectionHub {
     queue.push({ kind: 'state', state: record.state, at: record.createdAt });
     this.serverEvents.push({ kind: 'task.created', taskId, at: record.createdAt });
 
-    this.sendEnvelope(
+    this.sendToDevice(
       deviceId,
-      createEnvelope(
-        'task.offer',
-        {
-          taskId,
-          instruction: input.instruction,
-          policy,
-          runtime: input.runtime,
-          sessionRef: input.sessionRef,
-        },
-        { taskId, sessionRef: input.sessionRef },
-      ),
+      'task.offer',
+      {
+        instruction: input.instruction,
+        policy,
+        runtime: input.runtime,
+        sessionRef: input.sessionRef,
+      },
+      { taskId, sessionRef: input.sessionRef },
     );
 
     return this.buildTaskHandle(taskId);
@@ -395,7 +573,7 @@ export class ConnectionHub {
     // as a best-effort notification for the daemon to stop local work.
     this.applyOrFail(taskId, 'Cancelled', { result: { state: 'Cancelled', reason } });
     if (record.deviceId) {
-      this.sendEnvelope(record.deviceId, createEnvelope('task.cancel', { reason }, { taskId }));
+      this.sendToDevice(record.deviceId, 'task.cancel', { reason }, { taskId });
     }
   }
 
@@ -407,7 +585,7 @@ export class ConnectionHub {
     }
     this.applyOrFail(taskId, 'Running', {});
     if (record.deviceId) {
-      this.sendEnvelope(record.deviceId, createEnvelope('task.approve', {}, { taskId }));
+      this.sendToDevice(record.deviceId, 'task.approve', {}, { taskId });
     }
   }
 
@@ -421,7 +599,7 @@ export class ConnectionHub {
       result: { state: 'Failed', reason: reason ?? 'approval rejected', retryable: false },
     });
     if (record.deviceId) {
-      this.sendEnvelope(record.deviceId, createEnvelope('task.reject', { reason }, { taskId }));
+      this.sendToDevice(record.deviceId, 'task.reject', { reason }, { taskId });
     }
   }
 
@@ -431,9 +609,10 @@ export class ConnectionHub {
     if (record.state !== 'Running') {
       throw new Error(`cannot steer task ${taskId}: not running (state ${record.state})`);
     }
-    if (!record.deviceId || !this.sendEnvelope(record.deviceId, createEnvelope('task.steer', { text }, { taskId }))) {
+    if (!record.deviceId || !this.connections.get(record.deviceId)?.connected) {
       throw new Error(`device for task ${taskId} is not connected`);
     }
+    this.sendToDevice(record.deviceId, 'task.steer', { text }, { taskId });
   }
 
   private pickFirstConnectedDevice(): string | undefined {
@@ -443,11 +622,68 @@ export class ConnectionHub {
     return undefined;
   }
 
-  private sendEnvelope(deviceId: string, envelope: Envelope): boolean {
+  // ---------------------------------------------------------------------
+  // outbound envelope delivery + per-device seq/redelivery bookkeeping (§1.2, §9)
+  // ---------------------------------------------------------------------
+
+  /**
+   * Build a server -> daemon envelope with a fresh per-device `seq`, retain
+   * it in that device's outbox ring buffer, and deliver it now if a live
+   * transport is available (WS send, or wake a pending long-poll).
+   */
+  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer'>(
+    deviceId: string,
+    type: T,
+    payload: Parameters<typeof createEnvelope<T>>[1],
+    opts: { taskId?: string; sessionRef?: string } = {},
+  ): Extract<Envelope, { type: T }> {
+    const outbox = this.getOrCreateOutbox(deviceId);
+    const seq = outbox.nextSeq++;
+    const envelope = createEnvelope(type, payload, { ...opts, seq });
+    outbox.ring.push({ seq, taskId: opts.taskId, envelope });
+    if (outbox.ring.length > OUTBOX_RING_CAPACITY) outbox.ring.shift();
+    this.deliverToDevice(deviceId, envelope);
+    return envelope;
+  }
+
+  private deliverToDevice(deviceId: string, envelope: Envelope): void {
     const conn = this.connections.get(deviceId);
-    if (!conn || !conn.connected) return false;
-    conn.ws.send(encodeEnvelope(envelope));
-    return true;
+    if (conn?.connected && conn.ws) {
+      conn.ws.send(encodeEnvelope(envelope));
+    }
+    // A device might be long-polling instead of WS-connected — wake it so
+    // the new envelope is delivered immediately rather than at the next
+    // poll's timeout.
+    this.settleLongPollWaiter(deviceId);
+  }
+
+  /** Retained envelopes for `deviceId` with `seq > cursor` that still belong to a non-terminal task, in `seq` order. */
+  private collectRelevant(deviceId: string, cursor: number): Envelope[] {
+    const outbox = this.outboxes.get(deviceId);
+    if (!outbox) return [];
+    return outbox.ring
+      .filter((entry) => entry.seq > cursor && entry.taskId !== undefined && !this.isTaskTerminal(entry.taskId))
+      .map((entry) => entry.envelope);
+  }
+
+  private isTaskTerminal(taskId: string): boolean {
+    const record = this.taskStore.get(taskId);
+    return !record || isTerminal(record.state);
+  }
+
+  /** The highest `seq` assigned to `deviceId` so far — the redelivery cursor to hand back on a poll/reconnect. */
+  private currentCursor(deviceId: string): number {
+    const outbox = this.outboxes.get(deviceId);
+    return outbox ? outbox.nextSeq - 1 : 0;
+  }
+
+  private getOrCreateOutbox(deviceId: string): DeviceOutbox {
+    let outbox = this.outboxes.get(deviceId);
+    if (!outbox) {
+      outbox = { nextSeq: 1, ring: [] };
+      this.outboxes.set(deviceId, outbox);
+    }
+    return outbox;
   }
 
   // ---------------------------------------------------------------------
@@ -455,11 +691,11 @@ export class ConnectionHub {
   // ---------------------------------------------------------------------
 
   listMachines(): MachineInfo[] {
-    return this.pairing.listDeviceIds().map((deviceId) => {
+    return this.devices.listIds().map((deviceId) => {
       const conn = this.connections.get(deviceId);
       return {
         deviceId,
-        deviceName: this.pairing.getDeviceName(deviceId) ?? '(unknown)',
+        deviceName: this.devices.getName(deviceId) ?? '(unknown)',
         connected: conn?.connected ?? false,
         lastSeen: conn?.lastSeen,
         runtimes: conn?.runtimes,

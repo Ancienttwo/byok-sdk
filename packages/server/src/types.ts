@@ -3,9 +3,12 @@ import type {
   BlobRef,
   PermissionPolicy,
   RuntimeId,
+  RuntimeInfo,
   TaskArtifactPayload,
   TaskState,
 } from '@byok/protocol';
+import type { BlobStore } from './blob-store';
+import type { TokenSigner } from './auth';
 
 /** Options for {@link createByokServer}. */
 export interface CreateByokServerOptions {
@@ -16,6 +19,16 @@ export interface CreateByokServerOptions {
    * mismatched daemon is rejected at handshake time.
    */
   productId: string;
+  /** WS-native ping interval, ms (§ heartbeat). Default 30s. */
+  heartbeatIntervalMs?: number;
+  /** How long `GET /byok/events` holds an empty poll open before returning, ms (§8). Default ~50s; override for tests. */
+  longPollHoldMs?: number;
+  /** Per-product blob size ceiling in bytes (§7). Default 100MB. */
+  maxBlobSizeBytes?: number;
+  /** Override the reference {@link BlobStore} (e.g. a real object-store-backed implementation). */
+  blobStore?: BlobStore;
+  /** Override the reference {@link TokenSigner} (e.g. an org-wide/KMS-backed signer). */
+  tokenSigner?: TokenSigner;
 }
 
 /** Input to {@link ByokServer.dispatch}. */
@@ -66,7 +79,8 @@ export interface MachineInfo {
   deviceName: string;
   connected: boolean;
   lastSeen?: string;
-  runtimes?: RuntimeId[];
+  /** Runtimes detected on this device, as reported in its last `conn.hello` (M1: typed, replaces the old untyped `agents`). */
+  runtimes?: RuntimeInfo[];
 }
 
 /** Snapshot of a task as tracked by the in-memory {@link TaskStore}. */
