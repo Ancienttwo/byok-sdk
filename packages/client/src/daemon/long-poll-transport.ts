@@ -10,7 +10,21 @@ export interface LongPollClientOptions {
   onEnvelope: (envelope: Envelope) => void;
   /** Called once the device is found to be revoked (401 surfaced through {@link AuthManager}) — the loop stops itself rather than retrying. */
   onRevoked?: () => void;
-  /** Backoff between failed poll attempts (network/HTTP errors). The reference server holds each successful request open ~50s itself (protocol §8), so this only matters when a request errors outright. Default 2s. */
+  /**
+   * Finding P2 (Fix 2a): true while a `task.*` envelope's handler has failed
+   * and hasn't yet been successfully reprocessed
+   * (`ConnectionManager.stalledAtSeq`). While true, `getCursor()` stays
+   * frozen below the actual delivery watermark (see
+   * `ConnectionManager.dedupWatermark`'s own doc comment) — so a non-empty
+   * response here doesn't mean "new events arrived", it can just as well
+   * mean "the whole post-cursor backlog got re-pulled again with no
+   * progress". Without a backoff for that case (distinct from "zero
+   * events"), a persistently-failing handler made this loop spin at RTT
+   * against the server. Optional only for constructor/test convenience —
+   * `ConnectionManager` always supplies it.
+   */
+  isStalled?: () => boolean;
+  /** Backoff between failed poll attempts (network/HTTP errors), AND between cycles that made no cursor progress while stalled (finding P2/Fix 2a — see {@link isStalled}). The reference server holds each successful, non-stalled request open ~50s itself (protocol §8), so this only matters when a request errors outright or is stalled. Default 2s. */
   retryDelayMs?: number;
   /**
    * Minimum delay before the next request when a poll comes back with zero
@@ -114,6 +128,13 @@ export class LongPollClient {
 
         if (parsed.events.length === 0) {
           await sleep(this.opts.idleDelayMs ?? 250);
+        } else if (this.opts.isStalled?.()) {
+          // Finding P2 (Fix 2a): a non-empty batch while stalled means this
+          // cycle just re-pulled the whole post-cursor backlog again
+          // without making any cursor progress — apply the same backoff a
+          // failed HTTP attempt gets, instead of looping back immediately
+          // at RTT (see `isStalled`'s own doc comment).
+          await sleep(this.opts.retryDelayMs ?? 2000);
         }
       } catch (err) {
         if (err instanceof DeviceRevokedError) {

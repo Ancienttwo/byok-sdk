@@ -1,4 +1,4 @@
-import type { CapabilityFlag, Envelope, RuntimeInfo } from '@byok/protocol';
+import { MAX_MESSAGES_PER_BATCH, type CapabilityFlag, type Envelope, type RuntimeInfo } from '@byok/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import { LongPollClient } from './long-poll-transport';
@@ -117,6 +117,45 @@ export class ConnectionManager {
   private revoked = false;
   private settledWaiters: Array<(err?: unknown) => void> = [];
   private pendingCursorSave: Promise<void> = Promise.resolve();
+  /**
+   * Finding P2 (Fix 2b): seqs currently admitted into `processingChain` but
+   * not yet settled — added in `deliver()` the moment a `task.*` envelope is
+   * accepted past the ordinary watermark check, removed in `process()`'s
+   * `finally` once that specific attempt resolves (success OR failure).
+   * While stalled, `dedupWatermark()` deliberately stays frozen below
+   * already-delivered seqs (see its own doc comment) so the failed seq's own
+   * redelivery can get through — but that same frozen watermark also means
+   * every OTHER seq above it rides along on every re-poll too. Without this,
+   * a seq already mid-flight (e.g. a `task.offer` whose `adapter.start()`
+   * hasn't resolved yet) would be re-enqueued into `processingChain` on
+   * every such re-poll, piling up duplicate copies that — once the first
+   * finally resolves and the chain unwinds through them — run its handler
+   * again; for `task.offer` specifically, a second adapter session
+   * orphaning the first (`TaskRunner`'s own `this.tasks.has` guard, finding
+   * P2c, is the second, independent layer against exactly that).
+   */
+  private readonly inFlightSeqs = new Set<number>();
+  /**
+   * Finding P2 (Fix 2b): seqs whose handler has already resolved
+   * successfully at least once this session, tracked only while a stall is
+   * in effect — cleared the moment `stalledAtSeq` itself clears (see
+   * `process()`), since once unstalled the ordinary watermark check via
+   * `deliveredSeq` already covers everything delivered so far, making this
+   * redundant. Needed because the stall-gap-prevention rule in `process()`
+   * deliberately does NOT advance `cursor` past a seq above the
+   * still-unresolved `stalledAtSeq`, even once that seq's own handler
+   * succeeds — so `dedupWatermark()` alone can't distinguish "already
+   * succeeded, don't re-run" from "never yet attempted" for anything in
+   * that gap.
+   */
+  private readonly processedSeqs = new Set<number>();
+  /**
+   * Finding P3: the pending `drainOutbox` long-poll retry backoff, if any —
+   * cancellable so `enterRevoked()` can unblock it immediately instead of
+   * waiting out the rest of the delay before the loop notices `revoked` and
+   * exits. See `drainRetryDelay`.
+   */
+  private cancelPendingDrainRetry: (() => void) | undefined;
 
   constructor(private readonly opts: ConnectionManagerOptions) {
     this.ws = new WsTransport({
@@ -149,6 +188,12 @@ export class ConnectionManager {
       getCursor: () => this.dedupWatermark(),
       onEnvelope: (envelope) => this.deliver(envelope),
       onRevoked: () => this.enterRevoked(),
+      // Finding P2 (Fix 2a): lets the long-poll loop distinguish "this
+      // non-empty batch was a stalled backlog re-pull, no cursor progress
+      // was made" from ordinary forward progress, so it can back off
+      // instead of spinning at RTT — see `LongPollClient`'s own doc comment
+      // on `isStalled`.
+      isStalled: () => this.stalledAtSeq !== undefined,
       retryDelayMs: opts.longPollRetryDelayMs,
       idleDelayMs: opts.longPollIdleDelayMs,
     });
@@ -179,14 +224,21 @@ export class ConnectionManager {
    * acked; stops (without dropping anything — the remainder stays queued)
    * the moment it isn't, and is re-invoked once `onAcked` fires.
    *
-   * Long-poll: POSTs the entire current queue as one batch
-   * (`LongPollClient.postBatch`, protocol §8.2). On failure the batch is
-   * unshifted back (order-preserving, same Envelope objects/ids — never
-   * rebuilt, so a retry is exactly the resend Wave 1's server-side dedup
-   * expects) and retried after a short backoff, re-reading `this.mode` each
-   * time so a WS recovery that happens mid-retry is honored on the very
-   * next loop iteration instead of only after this attempt's backoff
-   * chain gives up.
+   * Long-poll: POSTs the outbox in chunks of at most
+   * `MAX_MESSAGES_PER_BATCH` (finding P1) — the server hard-caps a single
+   * `/byok/messages` batch there (`MessagesSendRequestSchema`, protocol
+   * §8.2) and 400s the WHOLE request if it's exceeded, which — before this
+   * fix — meant more than that queued during an outage produced an oversize
+   * batch that the server would reject forever, since the client re-queued
+   * and retried the identical (still oversize) batch unchanged. Each chunk
+   * is one `LongPollClient.postBatch` call; on success the loop continues
+   * (more may still be queued, or the next chunk still needs sending), on
+   * failure that SAME chunk is unshifted back (order-preserving, same
+   * Envelope objects/ids — never rebuilt, so a retry is exactly the resend
+   * Wave 1's server-side dedup expects) and retried after a short backoff,
+   * re-reading `this.mode` each time so a WS recovery that happens
+   * mid-retry is honored on the very next loop iteration instead of only
+   * after this attempt's backoff chain gives up.
    *
    * Re-entrancy is guarded by `draining`: a call arriving while a drain is
    * already in progress just returns — the in-progress loop's own
@@ -198,7 +250,7 @@ export class ConnectionManager {
     this.draining = true;
     try {
       while (this.outbox.length > 0) {
-        if (this.stopped) return;
+        if (this.stopped || this.revoked) return;
 
         if (this.mode === 'ws') {
           if (!this.ws.isOpen) return; // onAcked() re-invokes drainOutbox() once it is
@@ -208,17 +260,49 @@ export class ConnectionManager {
           continue;
         }
 
-        const batch = this.outbox.splice(0);
+        const batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
         const ok = await this.longPoll.postBatch(batch);
-        if (ok) continue; // loop back around in case more was pushed while this POST was in flight
+        if (ok) continue; // loop back around — more may be queued, or the next chunk still needs sending
 
         this.outbox.unshift(...batch); // retry, preserving order — same objects, same ids (finding F1)
-        if (this.stopped) return;
-        await sleep(this.opts.longPollRetryDelayMs ?? 2000);
+        // Finding P3: a revoked device can never recover without a fresh
+        // pair() — retrying (and thus scheduling another backoff timer)
+        // would spin forever and keep the process alive for no reason.
+        // `postBatch`'s own DeviceRevokedError handling has already called
+        // `enterRevoked()` (synchronously, before `postBatch` resolves) by
+        // the time `ok` is `false` for that reason, so this check catches
+        // it on the very next iteration rather than sleeping first.
+        if (this.stopped || this.revoked) return;
+        await this.drainRetryDelay(this.opts.longPollRetryDelayMs ?? 2000);
       }
     } finally {
       this.draining = false;
     }
+  }
+
+  /**
+   * Finding P3: backoff delay for `drainOutbox`'s long-poll retry loop.
+   * Unlike a plain `setTimeout`-based wait, this is (a) cancellable —
+   * `enterRevoked()` calls `cancelPendingDrainRetry()` to unblock an
+   * in-flight wait immediately instead of leaving `drainOutbox` parked here
+   * for up to the rest of the delay before it next checks `this.revoked` —
+   * and (b) unref'd, so the timer never keeps the Node process alive by
+   * itself while nothing else (a live long-poll GET, an open WS connection)
+   * legitimately is.
+   */
+  private drainRetryDelay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.cancelPendingDrainRetry = undefined;
+        resolve();
+      }, ms);
+      timer.unref?.();
+      this.cancelPendingDrainRetry = () => {
+        clearTimeout(timer);
+        this.cancelPendingDrainRetry = undefined;
+        resolve();
+      };
+    });
   }
 
   isTransportDegraded(): boolean {
@@ -304,7 +388,22 @@ export class ConnectionManager {
     const tracked = isTaskEnvelopeType(envelope.type) && typeof envelope.seq === 'number';
     const watermark = this.dedupWatermark();
     if (tracked && watermark !== undefined && envelope.seq! <= watermark) return; // redelivered — idempotent skip (protocol §9)
-    if (tracked) this.noteDelivered(envelope.seq!);
+
+    if (tracked) {
+      const seq = envelope.seq!;
+      // Finding P2 (Fix 2b): a redelivery of a seq already in flight (its
+      // prior attempt hasn't settled yet) or already succeeded this session
+      // — both possible even though `seq > watermark` while stalled (see
+      // `dedupWatermark`'s doc comment) — must not be re-appended to
+      // `processingChain`. The stalled seq itself is deliberately NOT
+      // excluded by this check once its prior attempt has settled (removed
+      // from `inFlightSeqs` in `process()`'s `finally`, never added to
+      // `processedSeqs` since it failed) — that's exactly the redelivery
+      // this whole mechanism exists to let through for a fresh retry.
+      if (this.inFlightSeqs.has(seq) || this.processedSeqs.has(seq)) return;
+      this.inFlightSeqs.add(seq);
+      this.noteDelivered(seq);
+    }
 
     this.processingChain = this.processingChain.then(() => this.process(envelope, tracked));
   }
@@ -344,15 +443,18 @@ export class ConnectionManager {
   }
 
   private async process(envelope: Envelope, tracked: boolean): Promise<void> {
+    const seq = tracked ? envelope.seq! : undefined;
     try {
       await this.opts.onEnvelope(envelope);
       if (!tracked) return;
+      this.processedSeqs.add(seq!); // finding P2 (Fix 2b) — see its own doc comment
       // Still behind an earlier, not-yet-resolved failure: this envelope
       // (even though it just succeeded) is not the one unblocking the
       // cursor. Advancing here would create a gap a future redelivery could
       // never fill (the skipped-over failed seq would look already-seen).
       if (this.stalledAtSeq !== undefined && envelope.seq !== this.stalledAtSeq) return;
       this.stalledAtSeq = undefined;
+      this.processedSeqs.clear(); // no longer needed once unstalled — deliveredSeq/watermark already covers everything delivered so far
       this.advanceCursor(envelope.seq!);
     } catch (err) {
       if (tracked && this.stalledAtSeq === undefined) this.stalledAtSeq = envelope.seq;
@@ -362,6 +464,8 @@ export class ConnectionManager {
         }; cursor left unadvanced so a reconnect redelivers it:`,
         err,
       );
+    } finally {
+      if (tracked) this.inFlightSeqs.delete(seq!);
     }
   }
 
@@ -463,6 +567,15 @@ export class ConnectionManager {
     if (this.wsRetryTimer) clearInterval(this.wsRetryTimer);
     this.longPoll.stop();
     this.ws.close(); // stop all reconnection attempts entirely — never a retry loop (protocol §6.3)
+    // Finding P3: the outbox drain must stop too, not just the receive
+    // side — otherwise a queued send keeps retrying (and re-arming a
+    // backoff timer) forever, since a revoked device can never recover
+    // without a fresh pair(). `drainOutbox`'s own `this.revoked` check
+    // (now true) stops it from scheduling another retry, but if it's
+    // ALREADY parked inside `drainRetryDelay` from a previous cycle,
+    // cancel that wait immediately rather than leaving it queued for up to
+    // the rest of the delay.
+    this.cancelPendingDrainRetry?.();
     this.opts.onStateChange?.('revoked');
     // Unblock a cold start()'s pending waitForAck() immediately with the
     // typed error instead of leaving it to time out (see waitForAck doc). A
@@ -470,8 +583,4 @@ export class ConnectionManager {
     // — e.g. revocation discovered while already connected/running.
     this.notifySettled(new DeviceRevokedError());
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

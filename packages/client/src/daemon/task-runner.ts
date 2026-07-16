@@ -73,34 +73,46 @@ type OpenArtifactResult = { ok: true; handle: FileHandle } | { ok: false; reason
  * passed but before the read caused the daemon to read and upload
  * `/etc/hosts` as the task artifact.
  *
- * Fix: the pathname containment check below is now only a fast,
- * well-messaged early reject (defense in depth — rejects absolute `name`s
- * and `../` traversal before touching the filesystem at all). The actual
- * security boundary is `O_NOFOLLOW` on the `open()` call itself, which
- * fails atomically (`ELOOP`) if the final path component is a symlink —
- * there is no window between "check" and "use" because there is no
- * separate check for symlink-ness, just an open that refuses to follow one
- * — plus an `fstat` on the resulting *file descriptor* (not the path) to
- * confirm it's a regular file. `sendArtifact` reads from that same handle
- * and closes it when done; the bytes it hashes/inlines/uploads are the
- * exact bytes that passed both checks, not a re-read of whatever exists at
- * the path afterward.
+ * Fix: the LEXICAL pathname containment check below (`path.resolve` +
+ * string-prefix) is only a fast, well-messaged early reject (defense in
+ * depth — rejects absolute `name`s and `../` traversal before touching the
+ * filesystem at all). It is followed by a SECOND, filesystem-resolving
+ * containment check (finding P4/Codex): `fs.realpath` the full candidate
+ * path and re-check containment against the realpath'd workspace root. This
+ * exists because the lexical check alone cannot catch an INTERMEDIATE path
+ * component that's actually a symlink pointing outside the workspace — e.g.
+ * `name = "sublink/secret.txt"` where `<workspace>/sublink` is a symlink to
+ * an outside directory: `<workspace>/sublink/secret.txt` lexically starts
+ * with `<workspace>/` regardless of what `sublink` points at, and
+ * `O_NOFOLLOW` (below) only guards the *final* path component per POSIX
+ * `open(2)` semantics — it has nothing to reject when the final component,
+ * once the intermediate symlink is followed, is itself a perfectly ordinary
+ * regular file. Resolving the realpath of the WHOLE candidate and checking
+ * containment against it catches this: the resolved path lands outside the
+ * workspace root regardless of which component in the middle was the
+ * symlink. After both containment checks pass, the actual TOCTOU security
+ * boundary is still `O_NOFOLLOW` on the `open()` call itself, which fails
+ * atomically (`ELOOP`) if the FINAL path component is a symlink — there is
+ * no window between "check" and "use" for that component specifically,
+ * just an open that refuses to follow one — plus an `fstat` on the
+ * resulting *file descriptor* (not the path) to confirm it's a regular
+ * file. `sendArtifact` reads from that same handle and closes it when done;
+ * the bytes it hashes/inlines/uploads are the exact bytes that passed every
+ * check, not a re-read of whatever exists at the path afterward.
  *
- * Residual (documented, not fixed here): `O_NOFOLLOW` only guards the
- * *final* path component (POSIX `open(2)` semantics) — an intermediate
- * directory swapped for a symlink between the realpath below and the
- * `open()` call is not defended against cross-platform; that needs Linux's
- * `openat2`/`RESOLVE_BENEATH`, which Node's stdlib doesn't expose. Out of
- * scope here: that would require an attacker already able to write into the
- * daemon's directory tree above the per-task workspace — a much stronger
- * position than "the runtime reports a crafted artifact name" — whereas the
- * realistic threat this closes (the runtime's own workspace naming a
- * symlinked artifact file) is the one actually reproduced above.
+ * Residual (documented, not fixed here): a *static* intermediate symlink
+ * (created ahead of time, no race needed) is now closed by the realpath
+ * containment check above. The only gap left is a genuine RACE: an
+ * intermediate directory component swapped for a symlink AFTER the
+ * candidate's realpath call above resolves but BEFORE the subsequent
+ * `open()`. Closing that fully needs Linux's `openat2`/`RESOLVE_BENEATH`
+ * (resolve-and-open as one atomic, symlink-constrained operation), which
+ * Node's stdlib doesn't expose, and isn't implemented cross-platform here.
  *
  * M3 TODO (Windows): `fs.constants.O_NOFOLLOW` is `undefined` on Windows,
  * so the `?? 0` below no-ops the flag there (reparse-point/symlink handling
  * for that platform isn't implemented yet) — the realpath+prefix
- * containment check remains the floor of protection on Windows until it
+ * containment checks remain the floor of protection on Windows until it
  * is.
  */
 async function openArtifact(workspaceDir: string, name: string): Promise<OpenArtifactResult> {
@@ -112,6 +124,29 @@ async function openArtifact(workspaceDir: string, name: string): Promise<OpenArt
 
   const prefix = realWorkspaceDir.endsWith(path.sep) ? realWorkspaceDir : realWorkspaceDir + path.sep;
   if (candidate !== realWorkspaceDir && !candidate.startsWith(prefix)) {
+    return { ok: false, reason: `artifact name "${name}" resolves outside the task workspace — rejected` };
+  }
+
+  // Finding P4/Codex: the check above is LEXICAL and does not catch an
+  // intermediate path component that's actually a symlink pointing outside
+  // the workspace (`O_NOFOLLOW` below only guards the final component).
+  // Resolve the full candidate's real path and re-check containment against
+  // it — this fails closed whenever any intermediate component resolves
+  // outside the workspace root, even though the final component (once
+  // resolved) is an ordinary regular file. A realpath failure here (ENOENT,
+  // a broken intermediate link, etc.) falls through to the `open()` below
+  // unchanged, so that call produces the natural, consistent "could not be
+  // opened" error instead of a differently-worded one — it doesn't grant
+  // any additional access, since `open()` would fail for the same
+  // underlying reason (and still can't follow a symlinked final component
+  // either way).
+  let realCandidate = candidate;
+  try {
+    realCandidate = await fs.realpath(candidate);
+  } catch {
+    // handled by the open() call below
+  }
+  if (realCandidate !== realWorkspaceDir && !realCandidate.startsWith(prefix)) {
     return { ok: false, reason: `artifact name "${name}" resolves outside the task workspace — rejected` };
   }
 
@@ -172,6 +207,20 @@ export class TaskRunner {
    * nothing will ever consult.
    */
   private readonly pendingCancelled = new Map<string, string | undefined>();
+  /**
+   * Finding P2 (Fix 2c): taskIds that have reached a terminal outcome
+   * (Complete/Failed/Cancelled) this session — populated in `finish()`.
+   * While `ConnectionManager`'s stalled-cursor long-poll re-pull is frozen
+   * behind an unrelated failing seq, it can legitimately redeliver an
+   * ALREADY-succeeded `task.offer` — the client's own cursor hasn't advanced
+   * past it yet (docs/protocol.md §9's "cursor advance timing" rule
+   * explicitly relies on redelivered handlers being idempotent for exactly
+   * this reason). `handleOffer` must treat a redelivered offer for a taskId
+   * that's already active (`this.tasks`) or already finished (this set) as
+   * a no-op — never a second `adapter.start()` call, which would orphan the
+   * first session.
+   */
+  private readonly finishedTaskIds = new Set<string>();
 
   constructor(private readonly deps: TaskRunnerDeps) {}
 
@@ -202,6 +251,19 @@ export class TaskRunner {
   }
 
   private async handleOffer(taskId: string, payload: TaskOfferPayload): Promise<void> {
+    // Finding P2, Fix 2c (redelivered offer for an already-active/finished
+    // task): checked first, ahead of everything below — a redelivered
+    // `task.offer` for a taskId this device already claimed/started, or
+    // already finished, can never be "the first time" for it, so there is
+    // nothing left to decide. Without this, the stalled-cursor long-poll
+    // re-pull (see `ConnectionManager.dedupWatermark`) redelivering this
+    // same offer while its first `adapter.start()` is still in flight (or
+    // well after it already succeeded) would start a SECOND adapter session
+    // for the same task, orphaning the first.
+    if (this.tasks.has(taskId) || this.finishedTaskIds.has(taskId)) {
+      return;
+    }
+
     // Finding F4, checkpoint 1 ("before claim where possible -> decline
     // path"): a task.cancel already arrived for this exact taskId before
     // this offer was even looked at. Decline outright — never claim, never
@@ -585,6 +647,7 @@ export class TaskRunner {
     if (!active) return;
     active.batcher.stop();
     this.tasks.delete(taskId);
+    this.finishedTaskIds.add(taskId); // finding P2 (Fix 2c) — see its own doc comment
     try {
       await active.session.close();
     } catch {

@@ -86,6 +86,7 @@ export {
   EventsPollResponseSchema,
   MessagesSendRequestSchema,
   MessagesSendResponseSchema,
+  MAX_MESSAGES_PER_BATCH,
 } from './http-api';
 export type {
   PairRequest,

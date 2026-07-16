@@ -360,6 +360,65 @@ describe('blob client (protocol §7)', () => {
         expect(progressWithError).toBeDefined();
       });
 
+      it('rejects an artifact name whose INTERMEDIATE directory component is a symlink pointing outside the workspace (finding P4/Codex) — a lexical containment check alone would wrongly pass this', async () => {
+        const adapter = new StubRuntimeAdapter();
+        await setupDaemon(adapter);
+
+        server.send(
+          createEnvelope(
+            'task.offer',
+            { instruction: 'x', policy: { mode: 'auto' } },
+            { taskId: 'task-artifact-intermediate-symlink', seq: server.nextSeq() },
+          ),
+        );
+        await server.waitFor((e) => e.type === 'task.started');
+        await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+        const session = adapter.sessions[0]!;
+        const workspaceDir = adapter.startCalls[0]!.ctx.workspaceDir;
+
+        // A real, readable secret file in a directory the runtime should
+        // never be able to reach.
+        const outsideDir = await tmpDir('byok-outside-secret-');
+        const secretPath = path.join(outsideDir, 'secret.txt');
+        await fs.writeFile(secretPath, 'top secret, outside the workspace', 'utf8');
+
+        // The INTERMEDIATE path component ("sublink") is a symlink to that
+        // outside directory, created inside the workspace — exactly what a
+        // runtime could do on its own. The FINAL component ("secret.txt"),
+        // once the symlink is followed, is a perfectly ordinary regular
+        // file — `O_NOFOLLOW` (which POSIX only applies to the final path
+        // component) has nothing to reject here. Only a containment check
+        // that resolves the WHOLE candidate path (not just the workspace
+        // root) catches this — a purely lexical `path.resolve` +
+        // string-prefix check would wrongly pass it, since
+        // `<workspace>/sublink/secret.txt` lexically starts with
+        // `<workspace>/` regardless of what `sublink` actually points at.
+        await fs.symlink(outsideDir, path.join(workspaceDir, 'sublink'));
+        const artifactName = 'sublink/secret.txt';
+
+        session.emit({ type: 'artifact', name: artifactName, contentType: 'text/plain' });
+        session.emit({ type: 'turn_end' });
+
+        await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-artifact-intermediate-symlink');
+
+        expect(
+          server.received.some(
+            (e) => e.type === 'task.artifact' && e.task_id === 'task-artifact-intermediate-symlink',
+          ),
+        ).toBe(false);
+        expect(server.httpRequests.some((r) => r.pathname === '/byok/blobs')).toBe(false);
+
+        const progressWithError = server.received.find(
+          (e) =>
+            e.type === 'task.progress' &&
+            e.task_id === 'task-artifact-intermediate-symlink' &&
+            (e.payload as { events: Array<{ type: string; message?: string }> }).events.some(
+              (ev) => ev.type === 'error' && ev.message?.includes(artifactName),
+            ),
+        );
+        expect(progressWithError).toBeDefined();
+      });
+
       it('rejects an artifact swapped from a regular file to an outside-pointing symlink inside openArtifact\'s own internal gap — the narrowest TOCTOU window the fix leaves, still closed by O_NOFOLLOW', async () => {
         const adapter = new StubRuntimeAdapter();
         await setupDaemon(adapter);
@@ -382,35 +441,41 @@ describe('blob client (protocol §7)', () => {
         // exactly what a legitimately-behaving runtime would have written.
         await fs.writeFile(swapPath, 'benign content, at least at first', 'utf8');
 
-        // `openArtifact` calls `fs.realpath(workspaceDir)` exactly once,
-        // before computing the candidate path and calling `fs.open()` on
-        // it — that is the only internal gap left by the fix (see its doc
-        // comment in task-runner.ts). Spy on `fs.realpath` so the swap
-        // lands deterministically *inside* that exact gap — after the
-        // trusted workspace root has been realpath'd, but before the
-        // candidate is opened — instead of guessing microtask timing from
-        // outside (which, empirically, cannot land a swap there: pump()
-        // never even starts processing this event until after emit()'s
-        // continuation is scheduled, by which point openArtifact's own
-        // realpath call has already long since resolved). This targets the
-        // narrowest possible window the fix still has, proving the actual
-        // security boundary is the `O_NOFOLLOW` open — not this realpath
-        // step: a swap timed exactly here is still rejected.
+        // `openArtifact` now calls `fs.realpath` TWICE (finding P4/Codex):
+        // once on `workspaceDir` (unchanged), and once on the full candidate
+        // path (the new intermediate-symlink containment check). That
+        // second call closes what used to be the only remaining gap — a
+        // *static* intermediate symlink is now caught before `fs.open()` is
+        // ever reached. The one gap the fix still leaves (documented in
+        // task-runner.ts) is narrower still: an intermediate directory
+        // swapped to a symlink *after* that second realpath call resolves
+        // but *before* the subsequent `fs.open()`. Spy on `fs.realpath` so
+        // the swap lands deterministically inside exactly that gap — the
+        // first call (workspaceDir) behaves normally, the second call (the
+        // candidate) is where the swap is injected, right after it resolves
+        // — instead of guessing microtask timing from outside. This proves
+        // the actual security boundary for this narrowest window is the
+        // `O_NOFOLLOW` open, not either realpath step: a swap timed exactly
+        // here is still rejected.
         const originalRealpath = fs.realpath;
-        const realpathSpy = vi
-          .spyOn(fs, 'realpath')
-          .mockImplementationOnce(async (p: Parameters<typeof fs.realpath>[0]) => {
-            const result = await (originalRealpath as (p: unknown) => Promise<string>)(p);
-            unlinkSync(swapPath);
-            symlinkSync('/etc/hosts', swapPath);
-            return result;
-          });
+        const realpathSpy = vi.spyOn(fs, 'realpath');
+        realpathSpy.mockImplementationOnce(async (p: Parameters<typeof fs.realpath>[0]) =>
+          (originalRealpath as (p: unknown) => Promise<string>)(p),
+        );
+        realpathSpy.mockImplementationOnce(async (p: Parameters<typeof fs.realpath>[0]) => {
+          const result = await (originalRealpath as (p: unknown) => Promise<string>)(p);
+          unlinkSync(swapPath);
+          symlinkSync('/etc/hosts', swapPath);
+          return result;
+        });
 
         session.emit({ type: 'artifact', name: swapName, contentType: 'text/plain' });
         session.emit({ type: 'turn_end' });
 
         await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-artifact-toctou-swap');
-        expect(realpathSpy).toHaveBeenCalledTimes(1); // proves the swap really did land inside the spied call
+        // Both realpath calls happened (workspaceDir, then the candidate),
+        // and the swap landed inside the second one, exactly as targeted.
+        expect(realpathSpy).toHaveBeenCalledTimes(2);
         realpathSpy.mockRestore();
 
         expect(

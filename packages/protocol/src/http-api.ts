@@ -134,8 +134,15 @@ export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
 // docs/protocol.md §8.
 // ---------------------------------------------------------------------------
 
-/** Batch size ceiling for a single `POST /byok/messages` call — generous for normal redelivery-catchup bursts, but bounded so one request can't force the server to process an unbounded batch. */
-const MAX_MESSAGES_PER_BATCH = 256;
+/**
+ * Batch size ceiling for a single `POST /byok/messages` call — generous for
+ * normal redelivery-catchup bursts, but bounded so one request can't force
+ * the server to process an unbounded batch. Exported (not just a local
+ * const) so the client's own outbound drain (`ConnectionManager.drainOutbox`,
+ * finding P1) can chunk against the exact same number instead of a
+ * hard-coded, driftable copy of it.
+ */
+export const MAX_MESSAGES_PER_BATCH = 256;
 
 export const MessagesSendRequestSchema = z.object({
   messages: z.array(EnvelopeSchema).max(MAX_MESSAGES_PER_BATCH),

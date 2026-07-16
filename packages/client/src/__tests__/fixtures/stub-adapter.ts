@@ -22,9 +22,37 @@ export class StubSession implements Session {
    * long-poll cursor-not-advanced-before-handler regression test) needs.
    */
   steerError: Error | undefined;
+  /**
+   * Test hook (finding P2/Fix 2a): when set, EVERY `steer()` call throws this
+   * — unlike `steerError`, it never auto-clears. Used to simulate a
+   * persistently-failing handler (as opposed to `steerError`'s "fails once,
+   * then recovers") for the long-poll stalled-cursor backoff/dedup
+   * regression tests.
+   */
+  steerErrorPersistent: Error | undefined;
+  /** Test hook: counts every `steer()` invocation regardless of outcome (throw or success) — lets a test observe retry attempts even while `steerErrorPersistent` means `steerCalls` never gets appended to. */
+  steerAttempts = 0;
   private closeGate: Promise<void> | undefined;
+  private steerGate: Promise<void> | undefined;
 
   constructor(public readonly sessionRef: string) {}
+
+  /**
+   * Test hook (finding P2/Fix 2b-2c): pause a *successful* `steer()` call
+   * after it's already decided not to throw, before it records the call —
+   * lets a test deterministically hold a retried "in-flight" steer open long
+   * enough for a concurrent duplicate redelivery to attempt landing behind
+   * it, instead of depending on real network/microtask race timing. Returns
+   * the release function; the blocked `steer()` call resolves once it's
+   * called.
+   */
+  blockSteer(): () => void {
+    let release!: () => void;
+    this.steerGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    return release;
+  }
 
   /**
    * Test hook: widen the window `TaskRunner.finish()` spends inside
@@ -49,11 +77,16 @@ export class StubSession implements Session {
   }
 
   async steer(text: string): Promise<void> {
+    this.steerAttempts += 1;
+    if (this.steerErrorPersistent) {
+      throw this.steerErrorPersistent;
+    }
     if (this.steerError) {
       const err = this.steerError;
       this.steerError = undefined;
       throw err;
     }
+    if (this.steerGate) await this.steerGate;
     this.steerCalls.push(text);
   }
 

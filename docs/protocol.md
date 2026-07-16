@@ -426,6 +426,17 @@ A daemon that has fallen back to long-poll must send every D→S envelope
 this way instead of queueing them for a WSS connection that isn't coming
 back on its own.
 
+**Chunking an oversized outbound queue is a client-side implementation
+detail, not a new wire rule.** A daemon that has accumulated more than
+`MAX_MESSAGES_PER_BATCH` queued envelopes (e.g. after an extended outage)
+must split them across multiple `POST /byok/messages` calls, each within
+the cap, rather than send one oversized batch and have the server reject
+the whole thing outright — and then, if it naively retried the identical
+oversized batch unchanged, stall permanently. The reference client
+(`ConnectionManager.drainOutbox`) does this by importing the same
+`MAX_MESSAGES_PER_BATCH` constant the schema enforces (exported from
+`@byok/protocol`, not a hard-coded copy), so the two can never drift apart.
+
 ## 9. At-least-once delivery & idempotency
 
 **Delivery is at-least-once, never at-most-once, in the server → daemon
@@ -478,6 +489,29 @@ cursor where it was" a safe, sufficient recovery: the next reconnection's
 redelivery re-attempts starting from the last envelope that actually
 succeeded, relying on the idempotency guarantees below for anything at or
 above it that had already succeeded once.
+
+**Stalled-cursor re-poll backoff (client-side rule).** While a daemon has a
+`task.*` envelope whose handler failed and hasn't yet been successfully
+reprocessed, the cursor it reports (`conn.hello.cursor`, or the `cursor`
+query param on a long-poll `GET /byok/events`) stays frozen at the last
+successfully-advanced value — that's what makes the failed envelope's own
+redelivery possible at all (see the rule above). One consequence on
+long-poll specifically: every cycle re-pulls the WHOLE post-cursor backlog
+again, not just new events, for as long as the stall lasts. This is
+expected, not itself a bug, but a daemon must apply the same backoff a
+failed HTTP attempt gets to this case too — a non-empty response that made
+no cursor progress — not only to a genuinely empty one; otherwise a
+persistently-failing handler spins the poll loop at RTT against the
+server. A daemon must also not re-invoke a handler for a seq that's still
+in flight (its previous attempt hasn't settled yet) or that already
+succeeded this session, even though the frozen watermark alone can't
+distinguish either case from "never yet attempted" — the reference client
+tracks both in memory for exactly this reason. That in-memory bookkeeping
+resets on every reconnect/restart, though, so it is not a substitute for
+handlers themselves being safely repeatable against an already-active or
+already-finished target (e.g. a redelivered `task.offer` for a task the
+daemon already claimed or finished must be a no-op, not a second attempt) —
+see the per-type idempotency notes below.
 
 ### Ownership
 
