@@ -1,4 +1,5 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, constants as fsConstants } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import {
   createEnvelope,
@@ -52,36 +53,88 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-type ResolvedArtifactPath = { ok: true; path: string } | { ok: false; reason: string };
+type OpenArtifactResult = { ok: true; handle: FileHandle } | { ok: false; reason: string };
 
 /**
- * Finding F7 (artifact path traversal): resolve an artifact `name` against
- * `workspaceDir` and verify the result is genuinely still inside it before
- * ever reading it. `path.resolve` alone isn't enough — it happily produces
- * `../../etc/passwd`-style escapes, and an absolute `name` overrides the
- * base entirely per `path.resolve`'s own semantics — so this additionally
- * realpaths both sides (resolving symlinks) and does a `path.sep`-guarded
- * prefix check, matching how the daemon's other on-disk stores treat
- * untrusted-ish paths. A `name` that doesn't correspond to an existing file
- * at all (the runtime reported an artifact it never actually wrote) is
- * reported the same way a real read failure would be, not specially.
+ * Finding F7/N5 (artifact path traversal + TOCTOU symlink race): resolve an
+ * artifact `name` against `workspaceDir`, then **open it and verify the
+ * open file descriptor** — never a path-based check followed by a separate
+ * re-open by pathname.
+ *
+ * The prior version (`resolveArtifactPath`) realpath'd the candidate to
+ * verify containment and returned a *path string*; `sendArtifact` then
+ * reopened that path via `fs.readFile(path)`. That's a classic
+ * check-then-use race: between the realpath check and the later open, the
+ * final path component can be swapped for a symlink pointing outside the
+ * workspace (a compromised/buggy runtime, or something written by the very
+ * agent turn that reported this artifact name), and the reopen would
+ * silently follow it. Confirmed pre-fix: swapping the artifact's final
+ * component for a symlink to `/etc/hosts` after the containment check
+ * passed but before the read caused the daemon to read and upload
+ * `/etc/hosts` as the task artifact.
+ *
+ * Fix: the pathname containment check below is now only a fast,
+ * well-messaged early reject (defense in depth — rejects absolute `name`s
+ * and `../` traversal before touching the filesystem at all). The actual
+ * security boundary is `O_NOFOLLOW` on the `open()` call itself, which
+ * fails atomically (`ELOOP`) if the final path component is a symlink —
+ * there is no window between "check" and "use" because there is no
+ * separate check for symlink-ness, just an open that refuses to follow one
+ * — plus an `fstat` on the resulting *file descriptor* (not the path) to
+ * confirm it's a regular file. `sendArtifact` reads from that same handle
+ * and closes it when done; the bytes it hashes/inlines/uploads are the
+ * exact bytes that passed both checks, not a re-read of whatever exists at
+ * the path afterward.
+ *
+ * Residual (documented, not fixed here): `O_NOFOLLOW` only guards the
+ * *final* path component (POSIX `open(2)` semantics) — an intermediate
+ * directory swapped for a symlink between the realpath below and the
+ * `open()` call is not defended against cross-platform; that needs Linux's
+ * `openat2`/`RESOLVE_BENEATH`, which Node's stdlib doesn't expose. Out of
+ * scope here: that would require an attacker already able to write into the
+ * daemon's directory tree above the per-task workspace — a much stronger
+ * position than "the runtime reports a crafted artifact name" — whereas the
+ * realistic threat this closes (the runtime's own workspace naming a
+ * symlinked artifact file) is the one actually reproduced above.
+ *
+ * M3 TODO (Windows): `fs.constants.O_NOFOLLOW` is `undefined` on Windows,
+ * so the `?? 0` below no-ops the flag there (reparse-point/symlink handling
+ * for that platform isn't implemented yet) — the realpath+prefix
+ * containment check remains the floor of protection on Windows until it
+ * is.
  */
-async function resolveArtifactPath(workspaceDir: string, name: string): Promise<ResolvedArtifactPath> {
-  const candidate = path.resolve(workspaceDir, name);
+async function openArtifact(workspaceDir: string, name: string): Promise<OpenArtifactResult> {
+  // Workspace root is daemon-created (see `resolveWorkspaceDir`) and
+  // trusted — realpath'd exactly once, not derived from the untrusted
+  // `name`, so this step has no TOCTOU exposure of its own.
   const realWorkspaceDir = await fs.realpath(workspaceDir).catch(() => workspaceDir);
-
-  let realCandidate: string;
-  try {
-    realCandidate = await fs.realpath(candidate);
-  } catch (err) {
-    return { ok: false, reason: `artifact "${name}" not found: ${errorMessage(err)}` };
-  }
+  const candidate = path.resolve(realWorkspaceDir, name);
 
   const prefix = realWorkspaceDir.endsWith(path.sep) ? realWorkspaceDir : realWorkspaceDir + path.sep;
-  if (realCandidate !== realWorkspaceDir && !realCandidate.startsWith(prefix)) {
+  if (candidate !== realWorkspaceDir && !candidate.startsWith(prefix)) {
     return { ok: false, reason: `artifact name "${name}" resolves outside the task workspace — rejected` };
   }
-  return { ok: true, path: realCandidate };
+
+  const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
+  let handle: FileHandle;
+  try {
+    handle = await fs.open(candidate, fsConstants.O_RDONLY | O_NOFOLLOW);
+  } catch (err) {
+    return { ok: false, reason: `artifact "${name}" could not be opened: ${errorMessage(err)}` };
+  }
+
+  try {
+    const st = await handle.stat();
+    if (!st.isFile()) {
+      await handle.close().catch(() => {});
+      return { ok: false, reason: `artifact "${name}" is not a regular file` };
+    }
+  } catch (err) {
+    await handle.close().catch(() => {});
+    return { ok: false, reason: `artifact "${name}" could not be verified: ${errorMessage(err)}` };
+  }
+
+  return { ok: true, handle };
 }
 
 /**
@@ -375,32 +428,40 @@ export class TaskRunner {
    * `task.artifact` wire message — inline (base64) under 64KB, or via blob
    * upload above that, with a sha-256 `contentHash`.
    *
-   * Finding F7: `name` is untrusted (it's whatever the runtime/agent
+   * Finding F7/N5: `name` is untrusted (it's whatever the runtime/agent
    * reported — ultimately model-influenced) and used to be `path.join`'d
    * onto `workspaceDir` with no check that the result stayed inside it, so
    * `../../<anything>` (or an absolute `name`, which `path.resolve` accepts
    * verbatim as the whole path) could read and exfiltrate an arbitrary file
-   * on the host as a task artifact. `resolveArtifactPath` now verifies the
-   * *real* (symlink-resolved) target is still under the *real* workspaceDir
-   * before ever opening it. Read/upload failures (including a traversal
-   * attempt) are also no longer silent: they surface as a loud `error`
-   * `AgentEvent` batched into `task.progress`, and are logged — the task
-   * itself can still reach `task.complete` normally, but the dropped
-   * artifact is now visible in the event stream rather than swallowed.
+   * on the host as a task artifact. A later fix (`resolveArtifactPath`)
+   * closed the traversal case by realpath-checking containment, but still
+   * returned a path string that was reopened by pathname afterward — a
+   * check-then-use TOCTOU race letting the final component be swapped for
+   * an out-of-workspace symlink between the check and the read.
+   * `openArtifact` now opens the file (with `O_NOFOLLOW`) and verifies the
+   * resulting file descriptor directly; this reads from that same handle,
+   * never re-opening by pathname. Read/upload failures (including a
+   * rejected name or a blocked symlink swap) are also not silent: they
+   * surface as a loud `error` `AgentEvent` batched into `task.progress`,
+   * and are logged — the task itself can still reach `task.complete`
+   * normally, but the dropped artifact is now visible in the event stream
+   * rather than swallowed.
    */
   private async sendArtifact(active: ActiveTask, name: string, contentType: string): Promise<void> {
-    const resolved = await resolveArtifactPath(active.workspaceDir, name);
-    if (!resolved.ok) {
-      this.reportArtifactError(active, name, resolved.reason);
+    const opened = await openArtifact(active.workspaceDir, name);
+    if (!opened.ok) {
+      this.reportArtifactError(active, name, opened.reason);
       return;
     }
 
     let bytes: Buffer;
     try {
-      bytes = await fs.readFile(resolved.path);
+      bytes = await opened.handle.readFile();
     } catch (err) {
       this.reportArtifactError(active, name, `failed to read artifact "${name}": ${errorMessage(err)}`);
       return;
+    } finally {
+      await opened.handle.close().catch(() => {});
     }
 
     if (bytes.length <= MAX_INLINE_ARTIFACT_BYTES) {

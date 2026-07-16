@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, symlinkSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -159,8 +159,8 @@ describe('blob client (protocol §7)', () => {
     expect(uploaded?.equals(bigContent)).toBe(true);
   });
 
-  /** Finding F7: artifact path traversal + swallowed failures. */
-  describe('artifact path safety and failure visibility (finding F7)', () => {
+  /** Finding F7/N5: artifact path traversal, TOCTOU symlink race, + swallowed failures. */
+  describe('artifact path safety and failure visibility (finding F7/N5)', () => {
     it('rejects a "../../etc"-style traversal name — never reads or sends the escaped file, and surfaces a loud error event', async () => {
       const adapter = new StubRuntimeAdapter();
       await setupDaemon(adapter);
@@ -197,6 +197,45 @@ describe('blob client (protocol §7)', () => {
           e.task_id === 'task-artifact-traversal' &&
           (e.payload as { events: Array<{ type: string; message?: string }> }).events.some(
             (ev) => ev.type === 'error' && ev.message?.includes(traversalName),
+          ),
+      );
+      expect(progressWithError).toBeDefined();
+    });
+
+    it('rejects an absolute artifact name — path.resolve would otherwise let it override the workspace base entirely', async () => {
+      const adapter = new StubRuntimeAdapter();
+      await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { instruction: 'x', policy: { mode: 'auto' } },
+          { taskId: 'task-artifact-absolute', seq: server.nextSeq() },
+        ),
+      );
+      await server.waitFor((e) => e.type === 'task.started');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      const session = adapter.sessions[0]!;
+
+      // A real, readable file — same rationale as the traversal test above:
+      // a convincing exfiltration target, not merely a nonexistent path.
+      const absoluteName = '/etc/hosts';
+      session.emit({ type: 'artifact', name: absoluteName, contentType: 'text/plain' });
+      session.emit({ type: 'turn_end' });
+
+      await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-artifact-absolute');
+
+      expect(server.received.some((e) => e.type === 'task.artifact' && e.task_id === 'task-artifact-absolute')).toBe(
+        false,
+      );
+      expect(server.httpRequests.some((r) => r.pathname === '/byok/blobs')).toBe(false);
+
+      const progressWithError = server.received.find(
+        (e) =>
+          e.type === 'task.progress' &&
+          e.task_id === 'task-artifact-absolute' &&
+          (e.payload as { events: Array<{ type: string; message?: string }> }).events.some(
+            (ev) => ev.type === 'error' && ev.message?.includes(absoluteName),
           ),
       );
       expect(progressWithError).toBeDefined();
@@ -243,6 +282,152 @@ describe('blob client (protocol §7)', () => {
           ),
       );
       expect(progressWithError).toBeDefined();
+    });
+
+    it('still uploads a normal in-workspace regular-file artifact correctly (blobRef + sha-256 contentHash) — the open-then-verify fix does not regress the happy path', async () => {
+      const adapter = new StubRuntimeAdapter();
+      await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { instruction: 'x', policy: { mode: 'auto' } },
+          { taskId: 'task-artifact-regular-ok', seq: server.nextSeq() },
+        ),
+      );
+      await server.waitFor((e) => e.type === 'task.started');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      const session = adapter.sessions[0]!;
+      const workspaceDir = adapter.startCalls[0]!.ctx.workspaceDir;
+
+      // Force the blob-upload path (>64KB) so both `blobRef` and
+      // `contentHash` are exercised, not just the inline path.
+      const content = Buffer.from('ok-artifact-'.repeat(6000), 'utf8');
+      const expectedHash = `sha256:${createHash('sha256').update(content).digest('hex')}`;
+      await fs.writeFile(path.join(workspaceDir, 'regular.bin'), content);
+      session.emit({ type: 'artifact', name: 'regular.bin', contentType: 'application/octet-stream' });
+      session.emit({ type: 'turn_end' });
+
+      const artifact = await server.waitFor((e) => e.type === 'task.artifact' && e.task_id === 'task-artifact-regular-ok');
+      const payload = artifact.payload as {
+        blobRef?: { blobId: string; contentHash: string; size: number };
+      };
+      expect(payload.blobRef).toBeDefined();
+      expect(payload.blobRef?.contentHash).toBe(expectedHash);
+      expect(payload.blobRef?.size).toBe(content.length);
+
+      const uploaded = server.blobContent(payload.blobRef!.blobId);
+      expect(uploaded?.equals(content)).toBe(true);
+    });
+
+    describe('TOCTOU symlink race (finding F7/N5) — open-then-verify-on-fd', () => {
+      it('rejects an artifact name that is already a symlink pointing outside the workspace', async () => {
+        const adapter = new StubRuntimeAdapter();
+        await setupDaemon(adapter);
+
+        server.send(
+          createEnvelope(
+            'task.offer',
+            { instruction: 'x', policy: { mode: 'auto' } },
+            { taskId: 'task-artifact-symlink-outside', seq: server.nextSeq() },
+          ),
+        );
+        await server.waitFor((e) => e.type === 'task.started');
+        await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+        const session = adapter.sessions[0]!;
+        const workspaceDir = adapter.startCalls[0]!.ctx.workspaceDir;
+
+        const linkName = 'evil-link.txt';
+        await fs.symlink('/etc/hosts', path.join(workspaceDir, linkName));
+        session.emit({ type: 'artifact', name: linkName, contentType: 'text/plain' });
+        session.emit({ type: 'turn_end' });
+
+        await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-artifact-symlink-outside');
+
+        expect(
+          server.received.some((e) => e.type === 'task.artifact' && e.task_id === 'task-artifact-symlink-outside'),
+        ).toBe(false);
+        expect(server.httpRequests.some((r) => r.pathname === '/byok/blobs')).toBe(false);
+
+        const progressWithError = server.received.find(
+          (e) =>
+            e.type === 'task.progress' &&
+            e.task_id === 'task-artifact-symlink-outside' &&
+            (e.payload as { events: Array<{ type: string; message?: string }> }).events.some(
+              (ev) => ev.type === 'error' && ev.message?.includes(linkName),
+            ),
+        );
+        expect(progressWithError).toBeDefined();
+      });
+
+      it('rejects an artifact swapped from a regular file to an outside-pointing symlink inside openArtifact\'s own internal gap — the narrowest TOCTOU window the fix leaves, still closed by O_NOFOLLOW', async () => {
+        const adapter = new StubRuntimeAdapter();
+        await setupDaemon(adapter);
+
+        server.send(
+          createEnvelope(
+            'task.offer',
+            { instruction: 'x', policy: { mode: 'auto' } },
+            { taskId: 'task-artifact-toctou-swap', seq: server.nextSeq() },
+          ),
+        );
+        await server.waitFor((e) => e.type === 'task.started');
+        await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+        const session = adapter.sessions[0]!;
+        const workspaceDir = adapter.startCalls[0]!.ctx.workspaceDir;
+
+        const swapName = 'swap-target.txt';
+        const swapPath = path.join(workspaceDir, swapName);
+        // The artifact starts life as a perfectly benign regular file —
+        // exactly what a legitimately-behaving runtime would have written.
+        await fs.writeFile(swapPath, 'benign content, at least at first', 'utf8');
+
+        // `openArtifact` calls `fs.realpath(workspaceDir)` exactly once,
+        // before computing the candidate path and calling `fs.open()` on
+        // it — that is the only internal gap left by the fix (see its doc
+        // comment in task-runner.ts). Spy on `fs.realpath` so the swap
+        // lands deterministically *inside* that exact gap — after the
+        // trusted workspace root has been realpath'd, but before the
+        // candidate is opened — instead of guessing microtask timing from
+        // outside (which, empirically, cannot land a swap there: pump()
+        // never even starts processing this event until after emit()'s
+        // continuation is scheduled, by which point openArtifact's own
+        // realpath call has already long since resolved). This targets the
+        // narrowest possible window the fix still has, proving the actual
+        // security boundary is the `O_NOFOLLOW` open — not this realpath
+        // step: a swap timed exactly here is still rejected.
+        const originalRealpath = fs.realpath;
+        const realpathSpy = vi
+          .spyOn(fs, 'realpath')
+          .mockImplementationOnce(async (p: Parameters<typeof fs.realpath>[0]) => {
+            const result = await (originalRealpath as (p: unknown) => Promise<string>)(p);
+            unlinkSync(swapPath);
+            symlinkSync('/etc/hosts', swapPath);
+            return result;
+          });
+
+        session.emit({ type: 'artifact', name: swapName, contentType: 'text/plain' });
+        session.emit({ type: 'turn_end' });
+
+        await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-artifact-toctou-swap');
+        expect(realpathSpy).toHaveBeenCalledTimes(1); // proves the swap really did land inside the spied call
+        realpathSpy.mockRestore();
+
+        expect(
+          server.received.some((e) => e.type === 'task.artifact' && e.task_id === 'task-artifact-toctou-swap'),
+        ).toBe(false);
+        expect(server.httpRequests.some((r) => r.pathname === '/byok/blobs')).toBe(false);
+
+        const progressWithError = server.received.find(
+          (e) =>
+            e.type === 'task.progress' &&
+            e.task_id === 'task-artifact-toctou-swap' &&
+            (e.payload as { events: Array<{ type: string; message?: string }> }).events.some(
+              (ev) => ev.type === 'error' && ev.message?.includes(swapName),
+            ),
+        );
+        expect(progressWithError).toBeDefined();
+      });
     });
   });
 });
