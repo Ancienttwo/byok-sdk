@@ -24,14 +24,6 @@ export interface TaskRunnerDeps {
   deviceId: string;
   send: (envelope: Envelope) => void;
   blobClient: BlobResolver;
-  /**
-   * True while the connection has fallen back to long-poll (protocol §8):
-   * there is no daemon->server HTTP path in that mode, so new offers are
-   * declined immediately (`retryable: true`) rather than claimed — there is
-   * no way to make progress on them until WS recovers. See the M1-3
-   * contract-gap note in the task report.
-   */
-  isTransportDegraded: () => boolean;
   batcherOptions?: ProgressBatcherOptions;
   /**
    * Finding #3 (session/workspace continuity): persists `sessionRef ->
@@ -60,6 +52,38 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+type ResolvedArtifactPath = { ok: true; path: string } | { ok: false; reason: string };
+
+/**
+ * Finding F7 (artifact path traversal): resolve an artifact `name` against
+ * `workspaceDir` and verify the result is genuinely still inside it before
+ * ever reading it. `path.resolve` alone isn't enough — it happily produces
+ * `../../etc/passwd`-style escapes, and an absolute `name` overrides the
+ * base entirely per `path.resolve`'s own semantics — so this additionally
+ * realpaths both sides (resolving symlinks) and does a `path.sep`-guarded
+ * prefix check, matching how the daemon's other on-disk stores treat
+ * untrusted-ish paths. A `name` that doesn't correspond to an existing file
+ * at all (the runtime reported an artifact it never actually wrote) is
+ * reported the same way a real read failure would be, not specially.
+ */
+async function resolveArtifactPath(workspaceDir: string, name: string): Promise<ResolvedArtifactPath> {
+  const candidate = path.resolve(workspaceDir, name);
+  const realWorkspaceDir = await fs.realpath(workspaceDir).catch(() => workspaceDir);
+
+  let realCandidate: string;
+  try {
+    realCandidate = await fs.realpath(candidate);
+  } catch (err) {
+    return { ok: false, reason: `artifact "${name}" not found: ${errorMessage(err)}` };
+  }
+
+  const prefix = realWorkspaceDir.endsWith(path.sep) ? realWorkspaceDir : realWorkspaceDir + path.sep;
+  if (realCandidate !== realWorkspaceDir && !realCandidate.startsWith(prefix)) {
+    return { ok: false, reason: `artifact name "${name}" resolves outside the task workspace — rejected` };
+  }
+  return { ok: true, path: realCandidate };
+}
+
 /**
  * Per-connection task orchestration: offer -> (decline | claim -> adapter
  * session -> started) -> seq-ordered progress batches -> complete/fail/
@@ -77,6 +101,24 @@ function errorMessage(err: unknown): string {
  */
 export class TaskRunner {
   private readonly tasks = new Map<string, ActiveTask>();
+  /**
+   * Finding F4 (cancel lost during the offer-processing window): a
+   * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
+   * awaiting adapter detection / instruction resolution / workspace setup /
+   * `adapter.start()`) has no `this.tasks` entry to land on — it used to be
+   * silently dropped, and the runtime session `handleOffer` was about to
+   * register would then run an unsupervised ("zombie") turn nobody asked
+   * for anymore. Recording the taskId here lets `handleOffer` consult it at
+   * the two points where it can still safely react (see its body): before
+   * claiming at all (decline instead of ever starting a session), and right
+   * after `adapter.start()` resolves but before this task is registered as
+   * active (tear the just-started session down immediately, before its
+   * event loop ever pumps a single event). Consumed (deleted) at whichever
+   * checkpoint handles it; a cancel for a taskId that's already active,
+   * already finished, or never offered at all leaves a harmless entry that
+   * nothing will ever consult.
+   */
+  private readonly pendingCancelled = new Map<string, string | undefined>();
 
   constructor(private readonly deps: TaskRunnerDeps) {}
 
@@ -107,12 +149,16 @@ export class TaskRunner {
   }
 
   private async handleOffer(taskId: string, payload: TaskOfferPayload): Promise<void> {
-    if (this.deps.isTransportDegraded()) {
-      // Protocol §8: long-poll fallback has no daemon->server HTTP path, so
-      // even this decline just queues on the (currently down) WS transport
-      // until it recovers — see the connection manager's outbox and the
-      // M1-3 contract-gap note in the task report.
-      this.decline(taskId, 'no live WS connection to run tasks on (transport-degraded)', true);
+    // Finding F4, checkpoint 1 ("before claim where possible -> decline
+    // path"): a task.cancel already arrived for this exact taskId before
+    // this offer was even looked at. Decline outright — never claim, never
+    // spawn a runtime session for a task that's already dead. Checked first
+    // (ahead of every other pre-claim check below) so a pre-cancelled offer
+    // costs nothing beyond this map lookup.
+    if (this.pendingCancelled.has(taskId)) {
+      const reason = this.pendingCancelled.get(taskId);
+      this.pendingCancelled.delete(taskId);
+      this.decline(taskId, reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
       return;
     }
 
@@ -185,6 +231,31 @@ export class TaskRunner {
       // is treated as environmental and possibly transient.
       const retryable = !(err instanceof PolicyUnsupportedError);
       await this.fail(taskId, `adapter failed to start: ${errorMessage(err)}`, retryable);
+      return;
+    }
+
+    // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
+    // task.cancel arrived while adapter.start() was in flight — i.e. AFTER
+    // task.claim already went out above, so declining is no longer an
+    // option. Tear the just-started session down before it's ever
+    // registered as active (this.tasks.set below) or reported task.started,
+    // so pump() never begins and no zombie turn runs — then report the
+    // outcome exactly like a post-registration cancel would (M1 gap #6:
+    // task.cancelled, not task.fail).
+    if (this.pendingCancelled.has(taskId)) {
+      const reason = this.pendingCancelled.get(taskId);
+      this.pendingCancelled.delete(taskId);
+      try {
+        await session.interrupt();
+      } catch {
+        // best-effort — still report cancellation below
+      }
+      try {
+        await session.close();
+      } catch {
+        // best-effort teardown
+      }
+      this.deps.send(createEnvelope('task.cancelled', { reason }, { taskId }));
       return;
     }
 
@@ -303,13 +374,33 @@ export class TaskRunner {
    * content of its own); this reads it from disk and sends the actual
    * `task.artifact` wire message — inline (base64) under 64KB, or via blob
    * upload above that, with a sha-256 `contentHash`.
+   *
+   * Finding F7: `name` is untrusted (it's whatever the runtime/agent
+   * reported — ultimately model-influenced) and used to be `path.join`'d
+   * onto `workspaceDir` with no check that the result stayed inside it, so
+   * `../../<anything>` (or an absolute `name`, which `path.resolve` accepts
+   * verbatim as the whole path) could read and exfiltrate an arbitrary file
+   * on the host as a task artifact. `resolveArtifactPath` now verifies the
+   * *real* (symlink-resolved) target is still under the *real* workspaceDir
+   * before ever opening it. Read/upload failures (including a traversal
+   * attempt) are also no longer silent: they surface as a loud `error`
+   * `AgentEvent` batched into `task.progress`, and are logged — the task
+   * itself can still reach `task.complete` normally, but the dropped
+   * artifact is now visible in the event stream rather than swallowed.
    */
   private async sendArtifact(active: ActiveTask, name: string, contentType: string): Promise<void> {
+    const resolved = await resolveArtifactPath(active.workspaceDir, name);
+    if (!resolved.ok) {
+      this.reportArtifactError(active, name, resolved.reason);
+      return;
+    }
+
     let bytes: Buffer;
     try {
-      bytes = await fs.readFile(path.join(active.workspaceDir, name));
-    } catch {
-      return; // the runtime reported an artifact it never actually wrote — nothing to send
+      bytes = await fs.readFile(resolved.path);
+    } catch (err) {
+      this.reportArtifactError(active, name, `failed to read artifact "${name}": ${errorMessage(err)}`);
+      return;
     }
 
     if (bytes.length <= MAX_INLINE_ARTIFACT_BYTES) {
@@ -323,15 +414,29 @@ export class TaskRunner {
     try {
       const blobRef: BlobRef = await this.deps.blobClient.uploadArtifact(bytes, contentType);
       this.deps.send(createEnvelope('task.artifact', { name, contentType, blobRef }, { taskId: active.taskId }));
-    } catch {
-      // Best-effort: a failed artifact upload doesn't fail the whole task —
-      // the task's own completion/failure is reported independently by pump().
+    } catch (err) {
+      this.reportArtifactError(active, name, `failed to upload artifact "${name}": ${errorMessage(err)}`);
     }
+  }
+
+  /** Loud, non-silent artifact failure (finding F7): logged, and folded into this task's own progress stream as an `error` AgentEvent rather than swallowed — the task itself can still complete normally, but the omission is now visible. */
+  private reportArtifactError(active: ActiveTask, name: string, reason: string): void {
+    console.error(`[byok/client] artifact "${name}" for task ${active.taskId} dropped: ${reason}`);
+    active.batcher.push({ type: 'error', message: reason });
   }
 
   private async handleCancel(taskId: string, reason: string | undefined): Promise<void> {
     const active = this.tasks.get(taskId);
-    if (!active) return; // unknown or already-finished task
+    if (!active) {
+      // Finding F4: not registered yet — record it in case handleOffer is
+      // still in flight for this exact taskId (claimed but not yet started;
+      // see the class-level doc on `pendingCancelled` and the two
+      // checkpoints in handleOffer). A genuinely stale/unknown/already-
+      // finished taskId just leaves a harmless, never-consulted entry —
+      // identical in effect to the old silent-drop behavior for that case.
+      this.pendingCancelled.set(taskId, reason);
+      return;
+    }
     try {
       await active.session.interrupt();
     } catch {

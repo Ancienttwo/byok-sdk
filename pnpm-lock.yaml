@@ -52,6 +52,12 @@ importers:
         specifier: ^8.21.1
         version: 8.21.1
     devDependencies:
+      '@byok/server':
+        specifier: workspace:*
+        version: link:../server
+      '@hono/node-server':
+        specifier: ^2.0.10
+        version: 2.0.10(hono@4.12.30)
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1

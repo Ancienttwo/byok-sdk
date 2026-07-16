@@ -49,7 +49,12 @@ describe('blob client (protocol §7)', () => {
         'task.offer',
         {
           instruction: {
-            blobRef: { blobId: 'instr-blob-1', contentHash: 'sha256:whatever', size: bigInstruction.length, contentType: 'text/plain' },
+            blobRef: {
+              blobId: 'instr-blob-1',
+              contentHash: `sha256:${'a1'.repeat(32)}`, // finding F9: must be 64 lowercase hex chars
+              size: bigInstruction.length,
+              contentType: 'text/plain',
+            },
           },
           policy: { mode: 'auto' },
         },
@@ -71,7 +76,12 @@ describe('blob client (protocol §7)', () => {
         'task.offer',
         {
           instruction: {
-            blobRef: { blobId: 'no-such-blob', contentHash: 'sha256:x', size: 1, contentType: 'text/plain' },
+            blobRef: {
+              blobId: 'no-such-blob',
+              contentHash: `sha256:${'b2'.repeat(32)}`, // finding F9: must be 64 lowercase hex chars
+              size: 1,
+              contentType: 'text/plain',
+            },
           },
           policy: { mode: 'auto' },
         },
@@ -147,5 +157,92 @@ describe('blob client (protocol §7)', () => {
     const uploaded = server.blobContent(payload.blobRef!.blobId);
     expect(uploaded).toBeDefined();
     expect(uploaded?.equals(bigContent)).toBe(true);
+  });
+
+  /** Finding F7: artifact path traversal + swallowed failures. */
+  describe('artifact path safety and failure visibility (finding F7)', () => {
+    it('rejects a "../../etc"-style traversal name — never reads or sends the escaped file, and surfaces a loud error event', async () => {
+      const adapter = new StubRuntimeAdapter();
+      await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { instruction: 'x', policy: { mode: 'auto' } },
+          { taskId: 'task-artifact-traversal', seq: server.nextSeq() },
+        ),
+      );
+      await server.waitFor((e) => e.type === 'task.started');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      const session = adapter.sessions[0]!;
+
+      // Deep enough to escape the workspace regardless of its nesting depth
+      // under the OS tmp dir; /etc/hosts is a real, readable file on every
+      // POSIX test runner this suite targets — a convincing, concrete
+      // exfiltration target rather than a path that merely doesn't exist.
+      const traversalName = '../../../../../../../../../../etc/hosts';
+      session.emit({ type: 'artifact', name: traversalName, contentType: 'text/plain' });
+      session.emit({ type: 'turn_end' });
+
+      await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-artifact-traversal');
+
+      expect(server.received.some((e) => e.type === 'task.artifact' && e.task_id === 'task-artifact-traversal')).toBe(
+        false,
+      );
+      expect(server.httpRequests.some((r) => r.pathname === '/byok/blobs')).toBe(false);
+
+      const progressWithError = server.received.find(
+        (e) =>
+          e.type === 'task.progress' &&
+          e.task_id === 'task-artifact-traversal' &&
+          (e.payload as { events: Array<{ type: string; message?: string }> }).events.some(
+            (ev) => ev.type === 'error' && ev.message?.includes(traversalName),
+          ),
+      );
+      expect(progressWithError).toBeDefined();
+    });
+
+    it('surfaces a failed artifact upload as a loud error event instead of swallowing it — the task still completes', async () => {
+      const adapter = new StubRuntimeAdapter();
+      await setupDaemon(adapter);
+      server.setFailBlobUploads(true);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { instruction: 'x', policy: { mode: 'auto' } },
+          { taskId: 'task-artifact-upload-fail', seq: server.nextSeq() },
+        ),
+      );
+      await server.waitFor((e) => e.type === 'task.started');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      const session = adapter.sessions[0]!;
+      const workspaceDir = adapter.startCalls[0]!.ctx.workspaceDir;
+
+      const bigContent = Buffer.from('y'.repeat(64 * 1024 + 100), 'utf8'); // forces the blob-upload path
+      await fs.writeFile(path.join(workspaceDir, 'big-fail.bin'), bigContent);
+      session.emit({ type: 'artifact', name: 'big-fail.bin', contentType: 'application/octet-stream' });
+      session.emit({ type: 'turn_end' });
+
+      // Task still reaches Complete — an artifact failure doesn't fail the task.
+      const complete = await server.waitFor(
+        (e) => e.type === 'task.complete' && e.task_id === 'task-artifact-upload-fail',
+      );
+      expect(complete).toBeDefined();
+
+      expect(
+        server.received.some((e) => e.type === 'task.artifact' && e.task_id === 'task-artifact-upload-fail'),
+      ).toBe(false);
+
+      const progressWithError = server.received.find(
+        (e) =>
+          e.type === 'task.progress' &&
+          e.task_id === 'task-artifact-upload-fail' &&
+          (e.payload as { events: Array<{ type: string; message?: string }> }).events.some(
+            (ev) => ev.type === 'error' && ev.message?.includes('big-fail.bin'),
+          ),
+      );
+      expect(progressWithError).toBeDefined();
+    });
   });
 });

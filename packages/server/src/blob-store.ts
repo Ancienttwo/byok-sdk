@@ -62,23 +62,9 @@ export interface LocalDiskBlobStoreOptions {
 
 const DEFAULT_URL_TTL_MS = 15 * 60 * 1000;
 
+/** docs/protocol.md §7 now pins the canonical `contentHash` format (`sha256:<64 lowercase hex>`, finding F9 — `CONTENT_HASH_RE` in `@byok/protocol`'s `blob.ts`), enforced at the schema level on every inbound `CreateBlobRequest`/`BlobRef`. Comparison here is therefore a straight string match — no normalization, no compat shim; anything else was already rejected before reaching this store. */
 function sha256Hex(data: Buffer): string {
-  return createHash('sha256').update(data).digest('hex');
-}
-
-/**
- * docs/protocol.md §7 never pins the exact `contentHash` string format —
- * just that it "enables content-addressed dedup". The M1-3 client encodes
- * it as `sha256:<hex>` (an explicit algorithm prefix); this reference
- * server independently assumed bare `<hex>`. Normalize away an optional
- * `<algo>:` prefix before comparing so either convention verifies
- * correctly, instead of every real upload failing hash verification over a
- * cosmetic difference. Worth pinning explicitly in the spec before freeze
- * (see the M1-2 report's contract-gap notes).
- */
-function normalizeContentHash(hash: string): string {
-  const colonIndex = hash.indexOf(':');
-  return (colonIndex === -1 ? hash : hash.slice(colonIndex + 1)).toLowerCase();
+  return `sha256:${createHash('sha256').update(data).digest('hex')}`;
 }
 
 /** Local-disk reference {@link BlobStore}: in-memory metadata, content on disk, HMAC-signed expiring URLs. */
@@ -129,7 +115,7 @@ export class LocalDiskBlobStore implements BlobStore {
       return { ok: false, reason: `size mismatch: declared ${record.meta.size}, received ${data.length}` };
     }
     const actualHash = sha256Hex(data);
-    if (normalizeContentHash(actualHash) !== normalizeContentHash(record.meta.contentHash)) {
+    if (actualHash !== record.meta.contentHash) {
       return { ok: false, reason: 'contentHash mismatch' };
     }
     await writeFile(this.pathFor(blobId), data);

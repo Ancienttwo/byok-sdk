@@ -135,6 +135,12 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(session.sessionRef).toBe('fixture-minted-session-xyz');
   });
 
+  it('fails closed (never a fabricated UUID) when get_state cannot yield an authoritative session id (finding F8)', async () => {
+    const adapter = fakePiAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_PI_GET_STATE_FAIL: '1' });
+    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/did not yield an authoritative session id/);
+  });
+
   it('a task.offer carrying a known sessionRef resumes it via the real `--session <id>` flag', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_SESSION_ID: 'resume-me-123' });

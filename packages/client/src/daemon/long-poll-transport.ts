@@ -1,4 +1,4 @@
-import { EventsPollResponseSchema, type Envelope } from '@byok/protocol';
+import { EventsPollResponseSchema, MessagesSendResponseSchema, type Envelope } from '@byok/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
@@ -25,15 +25,15 @@ export interface LongPollClientOptions {
 
 /**
  * Protocol §8 long-poll fallback: `GET /byok/events?cursor=N` in a loop,
- * used while WS connectivity is unavailable (see `ConnectionManager`).
- *
- * Receive-only, by design — see docs/protocol.md §8 and the M1-3
- * contract-gap note in the task report: there is no daemon->server HTTP
- * endpoint, so this client never sends anything itself. Outbound traffic
- * queues on the WS transport's outbox until WS recovers.
+ * used while WS connectivity is unavailable (see `ConnectionManager`), plus
+ * `POST /byok/messages` for the daemon's own outbound envelopes while in
+ * this mode (finding F6 — long-poll is a full transport, not receive-only:
+ * see docs/protocol.md §8).
  */
 export class LongPollClient {
   private running = false;
+  private readonly outbox: Envelope[] = [];
+  private sending = false;
 
   constructor(private readonly opts: LongPollClientOptions) {}
 
@@ -45,6 +45,57 @@ export class LongPollClient {
 
   stop(): void {
     this.running = false;
+  }
+
+  /**
+   * Queue an envelope for `POST /byok/messages` (finding F6). Fire-and-forget
+   * from the caller's point of view — same shape as `WsTransport.send`,
+   * which also just queues and lets its own loop drain it — retried with
+   * `retryDelayMs` backoff on failure until it succeeds or this client is
+   * `stop()`'d or the device turns out to be revoked.
+   */
+  send(envelope: Envelope): void {
+    this.outbox.push(envelope);
+    void this.flushOutbox();
+  }
+
+  private async flushOutbox(): Promise<void> {
+    if (this.sending) return; // a flush is already draining the outbox; it will pick up this push too
+    this.sending = true;
+    try {
+      while (this.running && this.outbox.length > 0) {
+        const batch = this.outbox.splice(0);
+        try {
+          const base = toHttpBase(this.opts.serverUrl);
+          const res = await authedFetch(
+            new URL('/byok/messages', base),
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ messages: batch }),
+            },
+            this.opts.auth,
+          );
+          if (!res.ok) {
+            this.outbox.unshift(...batch); // retry, preserving order
+            await sleep(this.opts.retryDelayMs ?? 2000);
+            continue;
+          }
+          MessagesSendResponseSchema.parse(await res.json());
+        } catch (err) {
+          if (err instanceof DeviceRevokedError) {
+            this.running = false;
+            this.opts.onRevoked?.();
+            return;
+          }
+          this.outbox.unshift(...batch);
+          if (!this.running) return;
+          await sleep(this.opts.retryDelayMs ?? 2000);
+        }
+      }
+    } finally {
+      this.sending = false;
+    }
   }
 
   private async loop(): Promise<void> {

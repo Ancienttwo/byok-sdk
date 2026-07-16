@@ -4,6 +4,7 @@ import {
   createEnvelope,
   encodeEnvelope,
   PROTOCOL_VERSION,
+  type CreateEnvelopeOptions,
   type Envelope,
   type PermissionPolicy,
   type RuntimeInfo,
@@ -149,11 +150,16 @@ export class ConnectionHub {
   }
 
   sendConnAck(deviceId: string, capabilities: string[]): void {
-    this.sendToDevice(deviceId, 'conn.ack', {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities,
-      serverTime: new Date().toISOString(),
-    });
+    this.sendToDevice(
+      deviceId,
+      'conn.ack',
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities,
+        serverTime: new Date().toISOString(),
+      },
+      {}, // conn.ack needs neither taskId nor sessionRef
+    );
   }
 
   /**
@@ -630,17 +636,31 @@ export class ConnectionHub {
    * Build a server -> daemon envelope with a fresh per-device `seq`, retain
    * it in that device's outbox ring buffer, and deliver it now if a live
    * transport is available (WS send, or wake a pending long-poll).
+   *
+   * `opts`'s type mirrors `createEnvelope`'s own per-type conditional
+   * requiredness (finding F1) minus `seq` (computed fresh right here on
+   * every call, never caller-supplied) — so every one of this method's 6
+   * callers below must supply `taskId` for the 5 types that need it
+   * (everything except `conn.ack`), same as calling `createEnvelope`
+   * directly would require.
    */
   private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer'>(
     deviceId: string,
     type: T,
     payload: Parameters<typeof createEnvelope<T>>[1],
-    opts: { taskId?: string; sessionRef?: string } = {},
+    opts: Omit<CreateEnvelopeOptions<T>, 'seq' | 'v' | 'id' | 'ts'>,
   ): Extract<Envelope, { type: T }> {
     const outbox = this.getOrCreateOutbox(deviceId);
     const seq = outbox.nextSeq++;
-    const envelope = createEnvelope(type, payload, { ...opts, seq });
-    outbox.ring.push({ seq, taskId: opts.taskId, envelope });
+    // `createEnvelope`'s own public signature conditionally requires `opts`
+    // per-T via a rest-parameter tuple (see codec.ts) — that detail doesn't
+    // survive being re-forwarded through another generic function boundary
+    // here, so this cast just restates what `opts`'s type above already
+    // guarantees the caller supplied (taskId when T needs it).
+    const combinedOpts = { ...opts, seq } as CreateEnvelopeOptions<T>;
+    const envelope = createEnvelope(type, payload, combinedOpts);
+    const taskId = (opts as { taskId?: string }).taskId;
+    outbox.ring.push({ seq, taskId, envelope });
     if (outbox.ring.length > OUTBOX_RING_CAPACITY) outbox.ring.shift();
     this.deliverToDevice(deviceId, envelope);
     return envelope;

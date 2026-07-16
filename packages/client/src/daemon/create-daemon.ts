@@ -113,7 +113,19 @@ export function createDaemonWithAdapters(
   });
 
   async function pair(pairingCode: string): Promise<DeviceRecord> {
-    return auth.pair(pairingCode);
+    // Finding F5: capture whatever device is currently on disk for this
+    // serverUrl (if any) BEFORE pairing — `auth.pair()` mints/persists a
+    // brand new deviceId (the server always does, even on a same-keypair
+    // re-pair; see docs/protocol.md §6.3) and there would be no way to
+    // recover the outgoing deviceId afterward to know whose cursor to clear.
+    // Reading straight from `store` (not `auth.deviceId`) works whether or
+    // not `start()`/`loadExisting()` ran in this process before `pair()`.
+    const previous = await store.load();
+    const record = await auth.pair(pairingCode);
+    if (previous && previous.deviceId !== record.deviceId) {
+      await cursorStore.clear(config.serverUrl, previous.deviceId);
+    }
+    return record;
   }
 
   async function start(): Promise<void> {
@@ -136,7 +148,6 @@ export function createDaemonWithAdapters(
       deviceId: record.deviceId,
       send: (envelope) => connection?.send(envelope),
       blobClient,
-      isTransportDegraded: () => connection?.isTransportDegraded() ?? false,
       batcherOptions: overrides.batch,
       sessionWorkspaces,
     };
@@ -150,9 +161,10 @@ export function createDaemonWithAdapters(
       runtimes,
       auth,
       cursorStore,
-      onEnvelope: (envelope) => {
-        void runner?.handleEnvelope(envelope);
-      },
+      // Finding F3: return (not void-and-forget) so ConnectionManager can
+      // await this handler and only advance/persist its redelivery cursor
+      // once it actually resolves — see connection-manager.ts's `process`.
+      onEnvelope: (envelope) => runner?.handleEnvelope(envelope) ?? Promise.resolve(),
       onStateChange: (state) => {
         connectionState = state;
       },

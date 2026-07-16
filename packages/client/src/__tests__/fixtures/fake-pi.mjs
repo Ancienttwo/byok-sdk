@@ -31,6 +31,13 @@
 //                                    mismatch exits 1 with pi's real
 //                                    "No session found matching '<id>'"
 //                                    message (empirically confirmed).
+//   FAKE_PI_GET_STATE_FAIL=1     -> get_state responds success:false instead
+//                                    of reporting a sessionId — simulates pi
+//                                    failing to yield an authoritative
+//                                    session id on a fresh (non-resume)
+//                                    start(), which must now fail closed
+//                                    (finding F8) instead of falling back to
+//                                    a locally-generated UUID.
 //   FAKE_PI_CRASH_WITH_STDERR=<msg> -> write <msg> to stderr and exit 1
 //                                    immediately, before reading any stdin —
 //                                    simulates finding #1's "bad flag ->
@@ -160,6 +167,18 @@ rl.on('line', (line) => {
 async function handleCommand(msg) {
   switch (msg.type) {
     case 'get_state':
+      if (process.env.FAKE_PI_GET_STATE_FAIL === '1') {
+        // Simulates get_state failing/omitting sessionId (finding F8) —
+        // start() must fail closed here, not mint a fabricated session id.
+        send({
+          type: 'response',
+          command: 'get_state',
+          success: false,
+          id: msg.id,
+          error: 'fake get_state failure (test fixture)',
+        });
+        break;
+      }
       send({
         type: 'response',
         command: 'get_state',

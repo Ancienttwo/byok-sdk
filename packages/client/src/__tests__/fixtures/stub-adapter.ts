@@ -79,6 +79,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
   private sessionCounter = 0;
   /** When set, start() throws this instead of returning a session (for testing the daemon's failure paths). */
   startError: Error | undefined;
+  private startGate: Promise<void> | undefined;
 
   constructor(id = 'stub', detectResult: RuntimeDetectResult = { present: true, version: '0.0.0' }) {
     this.id = id;
@@ -93,9 +94,25 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     return { steer: true, resume: true, permissionModes: ['auto', 'readonly'] };
   }
 
+  /**
+   * Test hook (finding F4): pause `start()` right before it resolves its
+   * session, so a test can deterministically land a `task.cancel` in the
+   * window between `task.claim` and `ActiveTask` registration — i.e. while
+   * `start()` is still in flight — instead of depending on real timing.
+   * Returns the release function; `start()` resolves once it's called.
+   */
+  blockStart(): () => void {
+    let release!: () => void;
+    this.startGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    return release;
+  }
+
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
     this.startCalls.push({ task, ctx });
     if (this.startError) throw this.startError;
+    if (this.startGate) await this.startGate;
     this.sessionCounter += 1;
     const session = new StubSession(task.sessionRef ?? `stub-session-${this.sessionCounter}`);
     this.sessions.push(session);

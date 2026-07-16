@@ -6,6 +6,7 @@ import {
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  parseMessage,
   PROTOCOL_VERSION,
   type Envelope,
 } from '@byok/protocol';
@@ -63,6 +64,7 @@ export class TestServer {
   private seqCounter = 0;
   private tokenTtlMs = 60 * 60 * 1000;
   private rejectWs = false;
+  private failBlobUploads = false;
 
   private constructor(
     private readonly httpServer: http.Server,
@@ -105,6 +107,11 @@ export class TestServer {
   /** Reject every WS upgrade attempt (503) while `true` — used to force the client into its long-poll fallback (protocol §8). */
   setRejectWs(reject: boolean): void {
     this.rejectWs = reject;
+  }
+
+  /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
+  setFailBlobUploads(fail: boolean): void {
+    this.failBlobUploads = fail;
   }
 
   /** Mark a device revoked: its next `/byok/challenge`, `/byok/token`, or WS connect gets a 401 (protocol §6.3). */
@@ -231,11 +238,16 @@ export class TestServer {
         );
       }
 
-      this.received.push(envelope);
-      const matched = this.waiters.filter((w) => w.predicate(envelope));
-      this.waiters = this.waiters.filter((w) => !matched.includes(w));
-      for (const waiter of matched) waiter.resolve(envelope);
+      this.recordReceivedEnvelope(envelope);
     });
+  }
+
+  /** Shared by both transports an envelope can arrive over: a live WS message, or a `POST /byok/messages` batch entry (finding F6). */
+  private recordReceivedEnvelope(envelope: Envelope): void {
+    this.received.push(envelope);
+    const matched = this.waiters.filter((w) => w.predicate(envelope));
+    this.waiters = this.waiters.filter((w) => !matched.includes(w));
+    for (const waiter of matched) waiter.resolve(envelope);
   }
 
   // --- HTTP -----------------------------------------------------------------
@@ -254,6 +266,7 @@ export class TestServer {
         return void this.handleBlobUrl(req, res, url.pathname.split('/')[3] ?? '');
       }
       if (method === 'GET' && url.pathname === '/byok/events') return void (await this.handleEventsPoll(req, res));
+      if (method === 'POST' && url.pathname === '/byok/messages') return void (await this.handleMessagesSend(req, res));
       if (method === 'PUT' && url.pathname.startsWith('/_test/blob-upload/')) {
         return void (await this.handleBlobUpload(req, res, url.pathname.slice('/_test/blob-upload/'.length)));
       }
@@ -368,6 +381,11 @@ export class TestServer {
       res.writeHead(404).end();
       return;
     }
+    if (this.failBlobUploads) {
+      await readRawBody(req); // drain so the client's PUT doesn't hang on a full send buffer
+      res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'simulated upload failure' }));
+      return;
+    }
     blob.bytes = await readRawBody(req);
     res.writeHead(200).end();
   }
@@ -386,6 +404,25 @@ export class TestServer {
     if (!this.requireBearer(req, res)) return;
     const events = this.pendingLongPollEvents.splice(0);
     respondJson(res, 200, { events, cursor: this.longPollCursor });
+  }
+
+  /** `POST /byok/messages` (finding F6): the daemon's outbound send path while long-polling — same recording/waiter-resolution as a live WS message. */
+  private async handleMessagesSend(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!this.requireBearer(req, res)) return;
+    const body = (await readJsonBody(req)) as { messages?: unknown };
+    const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+    let accepted = 0;
+    for (const raw of rawMessages) {
+      let envelope: Envelope;
+      try {
+        envelope = parseMessage(raw);
+      } catch {
+        continue; // malformed entry — mirrors the real server's schema-validation gate
+      }
+      this.recordReceivedEnvelope(envelope);
+      accepted += 1;
+    }
+    respondJson(res, 200, { accepted });
   }
 
   private requireBearer(req: IncomingMessage, res: ServerResponse): boolean {

@@ -40,6 +40,8 @@
     "@earendil-works/pi-coding-agent": "^0.74.2"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "@byok/server": "workspace:*",
+    "@hono/node-server": "^2.0.10"
   }
 }

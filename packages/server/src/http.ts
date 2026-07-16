@@ -2,12 +2,14 @@ import { Hono, type Context } from 'hono';
 import {
   ChallengeRequestSchema,
   CreateBlobRequestSchema,
+  MessagesSendRequestSchema,
   PairRequestSchema,
   TokenRequestSchema,
   type BlobDownloadUrlResponse,
   type ChallengeResponse,
   type CreateBlobResponse,
   type EventsPollResponse,
+  type MessagesSendResponse,
   type PairResponse,
   type TokenResponse,
 } from '@byok/protocol';
@@ -186,6 +188,30 @@ export function buildHonoApp(deps: HttpDeps): Hono {
 
     const result = await deps.hub.pollEvents(deviceId, cursor, deps.longPollHoldMs);
     const response: EventsPollResponse = result;
+    return c.json(response, 200);
+  });
+
+  // -------------------------------------------------------------------
+  // Finding F6: daemon->server send while long-polling (§8). A device
+  // long-polling for S->D traffic has no live WS to carry its own outbound
+  // envelopes — this batches them over authed HTTP instead. Each envelope is
+  // routed through the exact same inbound path a WS connection's messages
+  // get (`hub.handleEnvelope`), so claim/progress/complete/etc. behave
+  // identically regardless of which transport carried them.
+  // -------------------------------------------------------------------
+
+  app.post('/byok/messages', async (c) => {
+    const deviceId = await authenticateBearer(c.req.header('authorization'), deps);
+    if (!deviceId) return c.json({ error: 'unauthorized' }, 401);
+
+    const parsed = MessagesSendRequestSchema.safeParse(await readJsonBody(c));
+    if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
+
+    for (const envelope of parsed.data.messages) {
+      deps.hub.handleEnvelope(deviceId, envelope);
+    }
+
+    const response: MessagesSendResponse = { accepted: parsed.data.messages.length };
     return c.json(response, 200);
   });
 

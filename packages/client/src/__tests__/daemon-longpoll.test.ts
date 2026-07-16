@@ -20,7 +20,7 @@ describe('long-poll fallback (protocol §8)', () => {
     await server.close();
   });
 
-  it('falls back to long-poll after N consecutive WS failures, receives events, declines offers as transport-degraded, and recovers WS periodically', async () => {
+  it('falls back to long-poll after N consecutive WS failures, runs a full task lifecycle over POST /byok/messages while degraded (finding F6), and recovers WS periodically', async () => {
     server = await TestServer.start();
     server.setRejectWs(true); // every WS upgrade fails from the very first attempt
 
@@ -58,28 +58,26 @@ describe('long-poll fallback (protocol §8)', () => {
       ),
     );
 
-    // Transport-degraded: never claims/runs the offer — declined immediately
-    // instead. The decline itself has nowhere to go over HTTP (protocol §8
-    // has no daemon->server send path), so it queues on the still-down WS
-    // outbox; we can't observe it on the wire yet, but we CAN observe that
-    // the adapter was never asked to run it.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(adapter.startCalls).toHaveLength(0);
+    // Finding F6: long-poll is now a full transport, not receive-only — the
+    // offer is claimed and run exactly as it would over WS, with every
+    // outbound envelope reaching the server over POST /byok/messages
+    // instead of queueing on the (dead) WS outbox / being declined outright.
+    await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-degraded-1');
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-degraded-1');
+    expect(server.httpRequests.some((r) => r.method === 'POST' && r.pathname === '/byok/messages')).toBe(true);
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+    expect(daemon.status().degraded).toBe(true); // still degraded the whole time — work proceeds regardless
+
+    adapter.sessions[0]?.emit({ type: 'progress', text: 'working while degraded' });
+    adapter.sessions[0]?.emit({ type: 'turn_end' });
+    const complete = await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-degraded-1');
+    expect(complete.payload).toMatchObject({ summary: 'working while degraded' });
+    expect(server.received.some((e) => e.type === 'task.decline' && e.task_id === 'task-degraded-1')).toBe(false);
 
     // --- WS recovery: the periodic probe must succeed once WS stops rejecting ---
     server.setRejectWs(false);
     await vi.waitFor(() => expect(daemon?.status().degraded).toBe(false), { timeout: 5000 });
     expect(daemon.status().connected).toBe(true);
-
-    // The queued decline (from the offer received while degraded) must have
-    // flushed once WS came back — the full round trip, not just "nothing crashed".
-    const decline = await server.waitFor(
-      (e) => e.type === 'task.decline' && e.task_id === 'task-degraded-1',
-      5000,
-    );
-    expect(decline.payload).toMatchObject({ retryable: true });
-    expect((decline.payload as { reason: string }).reason).toMatch(/transport-degraded/i);
-    expect(adapter.startCalls).toHaveLength(0);
 
     // Once WS is back, normal traffic resumes exactly as usual.
     const secondSeq = server.nextSeq();

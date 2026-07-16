@@ -1,9 +1,9 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Envelope } from '@byok/protocol';
+import { createEnvelope, type Envelope } from '@byok/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer } from '../index';
-import { connectFakeDaemon, connectFakeDaemonWs, pairFakeDaemon, startServer, stopServer } from './test-support';
+import { connectFakeDaemon, connectFakeDaemonWs, pairFakeDaemon, startServer, stopServer, waitForTaskEvent } from './test-support';
 
 const PRODUCT_ID = 'acme';
 /** Short injected hold so the empty-timeout case doesn't take the real ~50s default. */
@@ -136,5 +136,81 @@ describe('long-poll fallback (§8)', () => {
 
     const res = await fetch(`${started.baseUrl}/byok/events?cursor=0`);
     expect(res.status).toBe(401);
+  });
+});
+
+/**
+ * Finding F6: `POST /byok/messages` is the daemon's outbound send path while
+ * long-polling — a device has no live WS to carry `task.claim`/`progress`/
+ * etc in that mode. Each accepted envelope must be routed through the exact
+ * same inbound handling (`hub.handleEnvelope`) a WS connection's messages
+ * get, not some parallel/lesser path.
+ */
+describe('POST /byok/messages (§8, finding F6)', () => {
+  let server: HttpServer | undefined;
+
+  afterEach(async () => {
+    if (server) await stopServer(server);
+    server = undefined;
+  });
+
+  it('routes a batched task.claim through the same inbound path as WS, advancing real task state', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode();
+    const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
+
+    // A device only counts as "connected" (and thus dispatchable) once it
+    // has actually shown up over one of the two transports — simulate the
+    // long-poll equivalent of that with the same fire-and-forget-poll +
+    // waitUntil pattern the sibling GET /byok/events tests above use (not
+    // awaited directly: with nothing yet to deliver, it would otherwise
+    // hang for the full hold duration).
+    void fetch(`${started.baseUrl}/byok/events?cursor=0`, { headers: { authorization: `Bearer ${accessToken}` } });
+    await waitUntil(() => byok.machines.list().some((m) => m.deviceId === deviceId && m.connected));
+
+    const handle = await byok.dispatch({ instruction: 'x', deviceId });
+    const claim = createEnvelope('task.claim', { deviceId }, { taskId: handle.taskId });
+
+    const res = await fetch(`${started.baseUrl}/byok/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ messages: [claim] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ accepted: 1 });
+
+    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
+    expect(byok.tasks.get(handle.taskId)?.state).toBe('Claimed');
+  });
+
+  it('rejects an unauthenticated send', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+
+    const res = await fetch(`${started.baseUrl}/byok/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [] }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a malformed body (messages not an array of envelopes)', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode();
+    const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
+
+    const res = await fetch(`${started.baseUrl}/byok/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ messages: 'not-an-array' }),
+    });
+    expect(res.status).toBe(400);
   });
 });

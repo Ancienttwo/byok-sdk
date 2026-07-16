@@ -12,9 +12,13 @@ import {
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
-import { PiRpcClient, type SpawnFn } from './rpc-client';
+import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 
 const execFileAsync = promisify(execFile);
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 /**
  * Known provider credential env var *names* (never values) — see the
@@ -136,7 +140,21 @@ export class PiAdapter implements RuntimeAdapter {
       throw new Error(typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt');
     }
 
-    const sessionRef = resumeSessionId ?? (await resolveFreshSessionId(rpc));
+    let sessionRef: string;
+    if (resumeSessionId) {
+      sessionRef = resumeSessionId;
+    } else {
+      try {
+        sessionRef = await resolveFreshSessionId(rpc);
+      } catch (err) {
+        // Finding F8: fail closed, not a fabricated id — and don't leak the
+        // process this adapter just spawned (the `response.success===false`
+        // branch above already kills it on ITS failure path; this mirrors
+        // that for get_state's).
+        rpc.kill();
+        throw err;
+      }
+    }
     return new PiSession(sessionRef, rpc);
   }
 
@@ -148,29 +166,46 @@ export class PiAdapter implements RuntimeAdapter {
 /**
  * Learn pi's own real session id for a freshly-started (non-resume) run, so
  * `Session.sessionRef` reports something a *future* follow-up can actually
- * resume via `--session <id>` — replaces this adapter's old
- * `crypto.randomUUID()` placeholder, which minted an id pi itself never knew
- * about and so could never be resumed. `get_state.data.sessionId` is
- * populated from the moment pi's RPC process boots (confirmed live: present
- * even before any prompt is sent, with `messageCount: 0`), so this is safe
- * to call right after the initial prompt is accepted.
+ * resume via `--session <id>`. `get_state.data.sessionId` is populated from
+ * the moment pi's RPC process boots (confirmed live: present even before
+ * any prompt is sent, with `messageCount: 0`), so this is safe to call
+ * right after the initial prompt is accepted.
+ *
+ * Finding F8 (fabricated sessionRef): this used to fall back to
+ * `crypto.randomUUID()` whenever `get_state` failed, timed out, or omitted
+ * `sessionId` — minting an id pi itself never knew about, which could never
+ * actually be resumed and silently looked like a legitimate, resumable
+ * session to every caller (`TaskRunner`'s `SessionWorkspaceStore`, a future
+ * follow-up's `task.offer.sessionRef`, etc). Fail closed instead: if pi
+ * doesn't hand back an authoritative session id, `start()` itself fails
+ * with the real underlying error (stderr context is already folded in when
+ * the rejection comes from the process exiting — see
+ * `PiRpcClient.buildExitError`), exactly like any other adapter start()
+ * failure `task-runner.ts` already knows how to report as `task.fail`.
  */
 async function resolveFreshSessionId(rpc: PiRpcClient): Promise<string> {
+  let state: PiRpcMessage;
   try {
-    const state = await rpc.send({ type: 'get_state' });
-    const data = state.success !== false ? (state.data as { sessionId?: unknown } | undefined) : undefined;
-    if (typeof data?.sessionId === 'string' && data.sessionId.length > 0) {
-      return data.sessionId;
-    }
-  } catch {
-    // best-effort — fall through to the local fallback below
+    state = await rpc.send({ type: 'get_state' });
+  } catch (err) {
+    throw new Error(`pi did not yield an authoritative session id (get_state failed): ${errorMessage(err)}`, {
+      cause: err,
+    });
   }
-  // Defensive fallback only: real pi (0.74.2/0.80.7) always reports a
-  // sessionId in practice, live-confirmed. Falling back here just means
-  // *this* session can never be resumed by a later follow-up (identical
-  // degradation to before this feature existed) rather than failing start()
-  // outright over a missing diagnostic field.
-  return crypto.randomUUID();
+
+  if (state.success === false) {
+    const reason = typeof state.error === 'string' ? state.error : 'get_state reported failure';
+    throw new Error(`pi did not yield an authoritative session id (get_state failed): ${reason}`);
+  }
+
+  const data = state.data as { sessionId?: unknown } | undefined;
+  if (typeof data?.sessionId === 'string' && data.sessionId.length > 0) {
+    return data.sessionId;
+  }
+
+  throw new Error(
+    'pi did not yield an authoritative session id (get_state succeeded but reported no sessionId) — cannot mint a resumable session',
+  );
 }
 
 class PiSession implements Session {
