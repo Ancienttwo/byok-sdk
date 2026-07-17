@@ -5,10 +5,42 @@ import type { CodexRawEvent } from '../adapters/codex/process-runner';
 const WORKSPACE = '/workspace/task-1';
 
 describe('mapCodexEventToAgentEvents', () => {
-  it('maps turn.completed to turn_end (usage is real but has no AgentEvent wire slot — dropped)', () => {
+  it('maps turn.completed to a usage AgentEvent followed by turn_end, mapping every real usage field', () => {
     const evt: CodexRawEvent = {
       type: 'turn.completed',
-      usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, reasoning_output_tokens: 0 },
+      usage: { input_tokens: 10, cached_input_tokens: 3, output_tokens: 5, reasoning_output_tokens: 2 },
+    };
+    expect(mapCodexEventToAgentEvents(evt, WORKSPACE)).toEqual([
+      { type: 'usage', inputTokens: 10, cachedInputTokens: 3, outputTokens: 5, reasoningTokens: 2 },
+      { type: 'turn_end' },
+    ]);
+  });
+
+  it('maps turn.completed usage fields that are literally 0 (a real reported value, not absence)', () => {
+    const evt: CodexRawEvent = {
+      type: 'turn.completed',
+      usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 10, reasoning_output_tokens: 0 },
+    };
+    expect(mapCodexEventToAgentEvents(evt, WORKSPACE)).toEqual([
+      { type: 'usage', inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 },
+      { type: 'turn_end' },
+    ]);
+  });
+
+  it('maps turn.completed with an empty usage object to just turn_end (no content-free usage event)', () => {
+    const evt: CodexRawEvent = { type: 'turn.completed', usage: {} };
+    expect(mapCodexEventToAgentEvents(evt, WORKSPACE)).toEqual([{ type: 'turn_end' }]);
+  });
+
+  it('maps turn.completed with no usage field at all to just turn_end', () => {
+    const evt: CodexRawEvent = { type: 'turn.completed' };
+    expect(mapCodexEventToAgentEvents(evt, WORKSPACE)).toEqual([{ type: 'turn_end' }]);
+  });
+
+  it('ignores non-numeric/negative usage fields rather than coercing them', () => {
+    const evt: CodexRawEvent = {
+      type: 'turn.completed',
+      usage: { input_tokens: 'oops', cached_input_tokens: -1, output_tokens: 5.5, reasoning_output_tokens: null },
     };
     expect(mapCodexEventToAgentEvents(evt, WORKSPACE)).toEqual([{ type: 'turn_end' }]);
   });

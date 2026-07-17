@@ -325,10 +325,25 @@ function tryRealpath(candidate: string): string | undefined {
  * `is_error` (not `subtype`) is the field this switches on, since it is a
  * plain boolean rather than a string this adapter would otherwise need to
  * pattern-match against every observed/unobserved subtype spelling.
+ *
+ * `usage` (pre-freeze protocol addition — see `extractClaudeUsageEvent`'s
+ * doc comment) is extracted on BOTH branches, not just success: a real
+ * mid-generation API error could still carry partial usage, and an empty/
+ * absent `usage` (the confirmed shape on the pre-flight "no conversation
+ * found" failure — no model call was ever made) just yields no event, same
+ * as the success path. Ordering is load-bearing: `usage`, when present, is
+ * placed BEFORE `turn_end`/`error` in the returned array — `ClaudeSession`'s
+ * event iterator (`../claude-adapter.ts`) buffers this array and drains it
+ * in order, and `task-runner.ts`'s `pump()` returns the instant it sees
+ * `turn_end`, so anything queued after it would never be read. `error` does
+ * not end the read loop the same way, so the ordering there is for
+ * consistency rather than a delivery requirement.
  */
 function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
+  const usageEvent = extractClaudeUsageEvent(msg.usage);
   if (msg.is_error !== true) {
-    return { events: [{ type: 'turn_end' }] };
+    const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'turn_end' }] : [{ type: 'turn_end' }];
+    return { events };
   }
   const errors = Array.isArray(msg.errors) ? msg.errors.filter((e): e is string => typeof e === 'string') : [];
   const message =
@@ -337,7 +352,55 @@ function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
       : typeof msg.result === 'string' && msg.result.length > 0
         ? msg.result
         : 'claude reported an error result';
-  return { events: [{ type: 'error', message }] };
+  const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'error', message }] : [{ type: 'error', message }];
+  return { events };
+}
+
+/**
+ * Maps the `result` frame's `usage` object to a `usage` `AgentEvent`, or
+ * `undefined` when nothing usable is present. Field names and shape
+ * confirmed via a live minimal probe against the installed claude 2.1.212
+ * binary (same version this adapter's other captures were made against —
+ * see `claude-adapter.ts`'s class doc comment): a real `result.usage` looks
+ * like `{"input_tokens":2,"cache_creation_input_tokens":35649,
+ * "cache_read_input_tokens":0,"output_tokens":24,"server_tool_use":{...},
+ * "service_tier":"standard",...}` — the standard Anthropic Messages API
+ * usage shape, carried through verbatim by the Claude Code CLI.
+ *
+ * Mapping choices:
+ * - `inputTokens` <- `input_tokens` verbatim.
+ * - `cachedInputTokens` <- `cache_read_input_tokens` (tokens actually SERVED
+ *   from a prior cache — the same "reused, cheaper" semantic as codex's
+ *   `cached_input_tokens`). Deliberately NOT `cache_creation_input_tokens`
+ *   (the cost of WRITING a new cache entry — a distinct, more-expensive-not-
+ *   cheaper concept the wire schema has no separate slot for; dropped
+ *   rather than conflated).
+ * - `outputTokens` <- `output_tokens` verbatim.
+ * - `reasoningTokens` / `totalTokens`: never populated for claude — neither
+ *   a separate reasoning-token count nor a combined total appears anywhere
+ *   in real claude output (thinking-block content is folded into
+ *   `output_tokens`, not counted separately), so these stay absent rather
+ *   than fabricated.
+ */
+function extractClaudeUsageEvent(rawUsage: unknown): AgentEvent | undefined {
+  if (!rawUsage || typeof rawUsage !== 'object') return undefined;
+  const usage = rawUsage as Record<string, unknown>;
+  const inputTokens = toNonNegativeInt(usage.input_tokens);
+  const cachedInputTokens = toNonNegativeInt(usage.cache_read_input_tokens);
+  const outputTokens = toNonNegativeInt(usage.output_tokens);
+  if (inputTokens === undefined && cachedInputTokens === undefined && outputTokens === undefined) {
+    return undefined;
+  }
+  const event: Extract<AgentEvent, { type: 'usage' }> = { type: 'usage' };
+  if (inputTokens !== undefined) event.inputTokens = inputTokens;
+  if (cachedInputTokens !== undefined) event.cachedInputTokens = cachedInputTokens;
+  if (outputTokens !== undefined) event.outputTokens = outputTokens;
+  return event;
+}
+
+/** Matches `AgentEventSchema`'s `usage` fields (`z.number().int().nonnegative().optional()`) — anything else (missing, a string, a float, negative) is treated as not-reported rather than coerced. */
+function toNonNegativeInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 /**

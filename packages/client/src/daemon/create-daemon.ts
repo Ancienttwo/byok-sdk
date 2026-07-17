@@ -1,6 +1,6 @@
-import type { CapabilityFlag, RuntimeId, RuntimeInfo } from '@byok/protocol';
+import type { CapabilityFlag, RuntimeCapabilities as ProtocolRuntimeCapabilities, RuntimeId, RuntimeInfo } from '@byok/protocol';
 import type { PermissionPolicy } from '@byok/protocol';
-import type { RuntimeAdapter } from '../types';
+import type { RuntimeAdapter, RuntimeCapabilities } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
@@ -62,6 +62,37 @@ function isRuntimeId(id: string): id is RuntimeId {
   return id === 'pi' || id === 'claude' || id === 'codex';
 }
 
+/**
+ * Maps a `RuntimeAdapter`'s own internal `capabilities()` result
+ * (`../types.ts`'s `RuntimeCapabilities` — `{steer, resume,
+ * permissionModes}`, always-required fields) onto the wire's
+ * `RuntimeInfo.capabilities` shape (`@byok/protocol`'s `RuntimeCapabilities`
+ * — the same field names, but all-optional, plus `approvalInteractive`).
+ *
+ * `approvalInteractive` is hardcoded `false` rather than derived: none of
+ * the three bundled adapters (pi/claude/codex) has interactive approval —
+ * verified per-adapter, not assumed. Each one's own `resolveApproval()`
+ * either throws outright (codex: "codex exec never emits a
+ * needs_approval-equivalent event"; claude: "every permission decision ...
+ * resolved synchronously ... before this adapter ever sees the
+ * corresponding frame") or has no notion of pausing for approval at all
+ * (pi's `PiSession.resolveApproval` has the identical throwing contract —
+ * see `../types.ts`'s `Session.resolveApproval` doc comment for why an
+ * adapter with no `needs_approval` notion must throw here rather than
+ * silently no-op). There is no existing signal on `RuntimeAdapter` this
+ * could be read from instead — `interactive-approval` (`CAPABILITY_FLAGS`,
+ * `@byok/protocol`) is explicitly documented as RESERVED/unexercised until
+ * a later wave wires up the seam these adapters don't implement yet.
+ */
+function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRuntimeCapabilities {
+  return {
+    steer: caps.steer,
+    resume: caps.resume,
+    approvalInteractive: false,
+    permissionModes: caps.permissionModes,
+  };
+}
+
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
 async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]> {
   const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await adapter.detect() })));
@@ -71,6 +102,12 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
     const info: RuntimeInfo = { id: adapter.id };
     if (detected.version !== undefined) info.version = detected.version;
     if (detected.authPresent !== undefined) info.authPresent = detected.authPresent;
+    // Pre-freeze addition (`RuntimeInfo.capabilities`, `messages.ts`):
+    // surfaces this SAME adapter's own `capabilities()` (already used above
+    // by `computeCapabilities` for the connection-level `steer` flag) into
+    // the per-runtime wire field — see `toRuntimeInfoCapabilities`'s doc
+    // comment.
+    info.capabilities = toRuntimeInfoCapabilities(adapter.capabilities());
     runtimes.push(info);
   }
   return runtimes;

@@ -129,6 +129,41 @@ describe('mapClaudeMessageToAgentEvents', () => {
     expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({ events: [{ type: 'turn_end' }] });
   });
 
+  it('maps a successful result carrying usage to a usage AgentEvent followed by turn_end', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'done',
+      usage: { input_tokens: 2, cache_creation_input_tokens: 35649, cache_read_input_tokens: 7, output_tokens: 24 },
+    };
+    expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({
+      events: [
+        { type: 'usage', inputTokens: 2, cachedInputTokens: 7, outputTokens: 24 },
+        { type: 'turn_end' },
+      ],
+    });
+  });
+
+  it('maps a successful result with an empty usage object to just turn_end (no content-free usage event)', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', is_error: false, result: 'done', usage: {} };
+    expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({ events: [{ type: 'turn_end' }] });
+  });
+
+  it('never maps cache_creation_input_tokens onto cachedInputTokens (a distinct, more-expensive-not-cheaper concept)', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'done',
+      usage: { cache_creation_input_tokens: 35649 },
+    };
+    expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({ events: [{ type: 'turn_end' }] });
+  });
+
   it('maps a failed result (is_error:true) to an error event, preferring the errors array', () => {
     const correlation = createToolUseCorrelation();
     const msg: ClaudeStreamMessage = {
@@ -139,6 +174,23 @@ describe('mapClaudeMessageToAgentEvents', () => {
     };
     expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({
       events: [{ type: 'error', message: 'No conversation found with session ID: bogus' }],
+    });
+  });
+
+  it('maps a failed result that still carries partial usage to a usage AgentEvent followed by error', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = {
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      errors: ['model overloaded'],
+      usage: { input_tokens: 50, output_tokens: 0 },
+    };
+    expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({
+      events: [
+        { type: 'usage', inputTokens: 50, outputTokens: 0 },
+        { type: 'error', message: 'model overloaded' },
+      ],
     });
   });
 

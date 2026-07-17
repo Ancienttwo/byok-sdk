@@ -307,6 +307,20 @@ function runTurn(incomingText) {
     stop_reason: 'end_turn',
     session_id: sessionId,
     total_cost_usd: 0.001,
+    // Real shape (field names + nesting) confirmed via a live `claude -p
+    // --output-format stream-json` probe against the installed claude
+    // 2.1.212 binary — see events.ts's `extractClaudeUsageEvent` doc
+    // comment. Values here are fixed/small rather than the live probe's
+    // real (much larger) numbers, matching this fixture's existing
+    // convention of deterministic placeholder data (e.g. total_cost_usd
+    // above is also a fixed placeholder, not a real cost).
+    usage: {
+      input_tokens: 15,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      output_tokens: 20,
+      server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+    },
     result: finalText,
     permission_denials:
       process.env.FAKE_CLAUDE_DENY === '1'

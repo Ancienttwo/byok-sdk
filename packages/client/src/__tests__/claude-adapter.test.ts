@@ -78,11 +78,15 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(typeof session.sessionRef).toBe('string');
     expect(session.sessionRef).toBe('fake-claude-session-1');
 
-    const events = await takeEvents(session, 4);
+    const events = await takeEvents(session, 5);
     expect(events).toEqual([
       { type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' } },
       { type: 'tool_result', tool: 'Bash', output: { content: 'hi\n', isError: false } },
       { type: 'progress', text: 'reply-1:say hi' },
+      // Pre-freeze protocol addition: the result frame's usage now maps to
+      // a usage AgentEvent (emitted before turn_end — see events.ts's
+      // mapResult doc comment on why the ordering matters).
+      { type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 },
       { type: 'turn_end' },
     ]);
   });
@@ -152,11 +156,12 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
 
-    const events = await takeEvents(session, 4);
+    const events = await takeEvents(session, 5);
     expect(events[0]).toEqual({ type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' } });
     expect(events[1]).toMatchObject({ type: 'tool_result', tool: 'Bash', output: { isError: true } });
     expect(events[2]).toEqual({ type: 'progress', text: 'reply-1:say hi' });
-    expect(events[3]).toEqual({ type: 'turn_end' });
+    expect(events[3]).toEqual({ type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 });
+    expect(events[4]).toEqual({ type: 'turn_end' });
   });
 
   it('followUp() sends a new turn on the SAME persistent process/session, confirmed by an unchanged sessionRef and a second full event cycle', async () => {
@@ -165,17 +170,19 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
 
-    const firstTurn = await takeEvents(session, 4);
+    const firstTurn = await takeEvents(session, 5);
     expect(firstTurn[2]).toEqual({ type: 'progress', text: 'reply-1:say hi' });
-    expect(firstTurn[3]).toEqual({ type: 'turn_end' });
+    expect(firstTurn[3]).toEqual({ type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 });
+    expect(firstTurn[4]).toEqual({ type: 'turn_end' });
 
     await session.followUp({ instruction: 'say bye', policy: { mode: 'auto' } });
 
-    const secondTurn = await takeEvents(session, 4);
+    const secondTurn = await takeEvents(session, 5);
     expect(secondTurn).toEqual([
       { type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' } },
       { type: 'tool_result', tool: 'Bash', output: { content: 'hi\n', isError: false } },
       { type: 'progress', text: 'reply-2:say bye' },
+      { type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 },
       { type: 'turn_end' },
     ]);
 
@@ -187,7 +194,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const ctx = await makeCtx();
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
-    await takeEvents(session, 4);
+    await takeEvents(session, 5); // drain the full turn, including the trailing usage + turn_end
 
     await expect(
       session.followUp({ instruction: { blobRef: { blobId: 'b', contentHash: 'sha256:x', size: 1, contentType: 'text/plain' } }, policy: { mode: 'auto' } }),
@@ -215,7 +222,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     // same way here for the expected values.
     const realWorkspaceDir = await fs.realpath(ctx.workspaceDir);
 
-    const events = await takeEvents(session, 5);
+    const events = await takeEvents(session, 6);
     expect(events).toEqual([
       { type: 'tool_use', tool: 'Write', input: { file_path: path.join(realWorkspaceDir, 'out.txt'), content: 'artifact-body' } },
       {
@@ -225,6 +232,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       },
       { type: 'artifact', name: 'out.txt', contentType: 'text/plain' },
       { type: 'progress', text: 'reply-1:say hi' },
+      { type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 },
       { type: 'turn_end' },
     ]);
 
@@ -246,8 +254,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
 
-    const events = await takeEvents(session, 4);
-    expect(events.map((e) => e.type)).toEqual(['tool_use', 'tool_result', 'progress', 'turn_end']);
+    const events = await takeEvents(session, 5);
+    expect(events.map((e) => e.type)).toEqual(['tool_use', 'tool_result', 'progress', 'usage', 'turn_end']);
     expect(events.some((e) => e.type === 'artifact')).toBe(false);
   });
 
@@ -274,8 +282,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
 
-    const events = await takeEvents(session, 4);
-    expect(events.map((e) => e.type)).toEqual(['tool_use', 'tool_result', 'progress', 'turn_end']);
+    const events = await takeEvents(session, 5);
+    expect(events.map((e) => e.type)).toEqual(['tool_use', 'tool_result', 'progress', 'usage', 'turn_end']);
 
     const matching = warnSpy.mock.calls.filter((call) => String(call[0]).includes('top-level:totally_novel_top_level_frame'));
     expect(matching).toHaveLength(1);
@@ -287,7 +295,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_UNKNOWN_SYSTEM_SUBTYPE: '1' });
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
-    await takeEvents(session, 4);
+    await takeEvents(session, 5);
 
     const matching = warnSpy.mock.calls.filter((call) => String(call[0]).includes('system:totally_novel_subtype'));
     expect(matching).toHaveLength(1);
@@ -300,7 +308,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
 
-    const events = await takeEvents(session, 4);
+    const events = await takeEvents(session, 5);
     expect(events).toContainEqual({ type: 'progress', text: 'reply-1:say hi' });
 
     const matching = warnSpy.mock.calls.filter((call) => String(call[0]).includes('assistant-block:totally_novel_block_type'));

@@ -77,7 +77,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
 
     expect(session.sessionRef).toBe('fake-thread-1');
 
-    const events = await takeEvents(session, 6);
+    const events = await takeEvents(session, 7);
     expect(events).toEqual([
       { type: 'error', message: 'Exceeded skills context budget of 2%. All skill descriptions were removed and 54 additional skills were not included in the model-visible skills list.' },
       { type: 'progress', text: 'Running the command now.' },
@@ -88,6 +88,10 @@ describe('CodexAdapter against the fake-codex fixture', () => {
         output: { command: '/bin/sh -c "echo hi"', aggregatedOutput: 'hi\n', exitCode: 0, status: 'completed' },
       },
       { type: 'progress', text: 'Done.' },
+      // Pre-freeze protocol addition: turn.completed.usage now maps to a
+      // usage AgentEvent (emitted before turn_end — see events.ts's
+      // mapCodexEventToAgentEvents doc comment on why the ordering matters).
+      { type: 'usage', inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 },
       { type: 'turn_end' },
     ]);
   });
@@ -99,7 +103,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const session = await adapter.start(task, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('resume-me-123');
-    await takeEvents(session, 6);
+    await takeEvents(session, 7); // drain the full turn, including the trailing usage + turn_end
   });
 
   it('an unresolvable sessionRef surfaces codex\'s real resume rejection as a clean start() failure, not a hang', async () => {
@@ -145,10 +149,10 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
 
-    // 9 mapped events: skills-budget error, progress, tool_use+tool_result
+    // 10 mapped events: skills-budget error, progress, tool_use+tool_result
     // for the shell command, tool_use+(tool_result+artifact) for the file
-    // change, a final progress, then turn_end.
-    const events = await takeEvents(session, 9);
+    // change, a final progress, then usage, then turn_end.
+    const events = await takeEvents(session, 10);
     const artifactEvent = events.find((e) => e.type === 'artifact');
     expect(artifactEvent).toEqual({ type: 'artifact', name: artifactName, contentType: 'text/plain' });
     expect(events).toContainEqual({ type: 'turn_end' });
@@ -162,12 +166,13 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const ctx = await makeCtx();
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
-    await takeEvents(session, 6); // drain the first turn
+    await takeEvents(session, 7); // drain the first turn (including usage + turn_end)
 
     await session.followUp({ instruction: 'now do more', policy: { mode: 'auto' } });
-    const followUpEvents = await takeEvents(session, 6);
+    const followUpEvents = await takeEvents(session, 7);
     expect(followUpEvents).toContainEqual({ type: 'turn_end' });
     expect(followUpEvents.filter((e) => e.type === 'turn_end')).toHaveLength(1);
+    expect(followUpEvents).toContainEqual({ type: 'usage', inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 });
   });
 
   it('followUp() fails closed on a policy codex cannot express, without disturbing the already-open session', async () => {
@@ -175,7 +180,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const ctx = await makeCtx();
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
-    await takeEvents(session, 6);
+    await takeEvents(session, 7);
 
     await expect(session.followUp({ instruction: 'x', policy: { mode: 'confirm' } })).rejects.toThrow(/cannot express permission mode "confirm"/);
   });
@@ -185,7 +190,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const ctx = await makeCtx();
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
-    await takeEvents(session, 6);
+    await takeEvents(session, 7);
 
     await expect(
       session.followUp({
@@ -235,7 +240,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const ctx = await makeCtx();
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
-    await takeEvents(session, 6);
+    await takeEvents(session, 7);
     await session.close();
     await expect(session.close()).resolves.toBeUndefined();
   });
@@ -263,7 +268,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
 
-    const events = await takeEvents(session, 6); // the 2 unmapped frames are silently absorbed, not pushed
+    const events = await takeEvents(session, 7); // the 2 unmapped frames are silently absorbed, not pushed
     expect(events.every((e) => (e as { type: string }).type !== undefined)).toBe(true);
     expect(events).toContainEqual({ type: 'turn_end' });
 

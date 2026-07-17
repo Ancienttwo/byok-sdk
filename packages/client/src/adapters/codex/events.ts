@@ -37,13 +37,27 @@ import type { CodexRawEvent } from './process-runner';
  */
 export function mapCodexEventToAgentEvents(evt: CodexRawEvent, workspaceDir: string): AgentEvent[] {
   switch (evt.type) {
-    case 'turn.completed':
-      // `usage` (input/cached-input/output/reasoning-output token counts) is
-      // real and present here but has no `AgentEvent` wire slot in the
-      // current (frozen) protocol — dropped. See this adapter's top-level
-      // report / M2-c notes for the wire-gap writeup; `packages/protocol` is
-      // out of scope to edit for this task.
-      return [{ type: 'turn_end' }];
+    case 'turn.completed': {
+      // `usage` (input/cached-input/output/reasoning-output token counts) —
+      // pre-freeze protocol change (see `packages/protocol/src/agent-event.ts`)
+      // added a `usage` AgentEvent variant specifically for this data, which
+      // was real and present here but had no wire slot before that. Mapped
+      // 1:1 from codex's own field names (`extractCodexUsageEvent` below);
+      // no `total_tokens` field has ever been observed on real codex output,
+      // so `totalTokens` is never populated here — never synthesized by
+      // summing, per this adapter's "forward only what's actually reported"
+      // convention.
+      //
+      // Ordering is load-bearing, not stylistic: `usage` is placed BEFORE
+      // `turn_end` in the returned array. `codex-adapter.ts`'s `runCodexTurn`
+      // pushes each element of this array onto the session's queue in order,
+      // and `task-runner.ts`'s `pump()` returns immediately (ending the read
+      // loop) the instant it sees `turn_end` — an event queued AFTER it would
+      // never be drained. See `../claude/events.ts`'s `mapResult`, which has
+      // the identical ordering constraint for the same reason.
+      const usageEvent = extractCodexUsageEvent(evt.usage);
+      return usageEvent ? [usageEvent, { type: 'turn_end' }] : [{ type: 'turn_end' }];
+    }
 
     case 'turn.failed':
       // The real turn-level failure signal — NOT `item.completed{type:
@@ -81,6 +95,47 @@ export function mapCodexEventToAgentEvents(evt: CodexRawEvent, workspaceDir: str
     default:
       return []; // caller (codex-adapter.ts) records this as an unmapped frame unless isRoutineCodexEvent(evt)
   }
+}
+
+/**
+ * Maps `turn.completed.usage` to a `usage` `AgentEvent`, or `undefined` when
+ * nothing usable is present (e.g. `usage: {}`, empirically also seen on real
+ * codex — never emit a content-free `usage` event just because the key
+ * existed). Field names are verbatim from real codex output — confirmed live
+ * against the installed `codex-cli` binary while building this mapping
+ * (`turn.completed` -> `{"usage":{"input_tokens":24963,"cached_input_tokens":
+ * 9984,"output_tokens":5,"reasoning_output_tokens":0}}`), matching the
+ * shape this adapter's own fixture (`fake-codex.mjs`) and unit tests already
+ * encoded from the ORIGINAL M2-b capture. `0` is a real, reportable value
+ * (not absence) for every one of these fields — only a non-number/missing
+ * value is treated as "not reported".
+ */
+function extractCodexUsageEvent(rawUsage: unknown): AgentEvent | undefined {
+  if (!rawUsage || typeof rawUsage !== 'object') return undefined;
+  const usage = rawUsage as Record<string, unknown>;
+  const inputTokens = toNonNegativeInt(usage.input_tokens);
+  const cachedInputTokens = toNonNegativeInt(usage.cached_input_tokens);
+  const outputTokens = toNonNegativeInt(usage.output_tokens);
+  const reasoningTokens = toNonNegativeInt(usage.reasoning_output_tokens);
+  if (
+    inputTokens === undefined &&
+    cachedInputTokens === undefined &&
+    outputTokens === undefined &&
+    reasoningTokens === undefined
+  ) {
+    return undefined;
+  }
+  const event: Extract<AgentEvent, { type: 'usage' }> = { type: 'usage' };
+  if (inputTokens !== undefined) event.inputTokens = inputTokens;
+  if (cachedInputTokens !== undefined) event.cachedInputTokens = cachedInputTokens;
+  if (outputTokens !== undefined) event.outputTokens = outputTokens;
+  if (reasoningTokens !== undefined) event.reasoningTokens = reasoningTokens;
+  return event;
+}
+
+/** Matches `AgentEventSchema`'s `usage` fields (`z.number().int().nonnegative().optional()`) — anything else (missing, a string, a float, negative) is treated as not-reported rather than coerced. */
+function toNonNegativeInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 type ItemPhase = 'started' | 'completed';
