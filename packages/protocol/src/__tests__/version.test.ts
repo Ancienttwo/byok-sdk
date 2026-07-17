@@ -10,4 +10,8 @@ describe('protocol version and capability flags', () => {
     expect(CAPABILITY_FLAGS).toContain('steer');
     expect(CAPABILITY_FLAGS).toContain('blob-upload');
   });
+
+  it('includes the interactive-approval flag (RESERVED: gates routing an approval-requiring policy to a daemon)', () => {
+    expect(CAPABILITY_FLAGS).toContain('interactive-approval');
+  });
 });

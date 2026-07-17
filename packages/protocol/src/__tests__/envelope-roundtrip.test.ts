@@ -40,10 +40,23 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       type,
       createEnvelope(type, {
         protocolVersions: [1],
-        capabilities: ['steer', 'blob-upload'],
+        capabilities: ['steer', 'blob-upload', 'interactive-approval'],
         deviceId: 'device-1',
         productId: 'acme-agent',
-        runtimes: [{ id: 'claude', authPresent: true }],
+        runtimes: [
+          {
+            id: 'claude',
+            authPresent: true,
+            capabilities: {
+              steer: true,
+              resume: true,
+              approvalInteractive: false,
+              permissionModes: ['auto', 'confirm', 'plan'],
+            },
+          },
+          // Older/partial-detection shape: capabilities omitted entirely.
+          { id: 'pi' },
+        ],
         cursor: 41,
       }),
     );
@@ -58,7 +71,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           protocolVersion: 1,
-          capabilities: ['steer'],
+          capabilities: ['steer', 'interactive-approval'],
           serverTime: new Date().toISOString(),
         },
         { seq: 1 },
@@ -184,6 +197,13 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
             { type: 'needs_approval', summary: 'about to delete a file' },
             { type: 'turn_end' },
             { type: 'error', message: 'transient network error' },
+            // Additive `usage` variant (partial subset — runtimes report
+            // different subsets of these fields).
+            { type: 'usage', inputTokens: 120, outputTokens: 45, totalTokens: 165 },
+            // Pre-freeze tolerance: an unrecognized event type from a newer
+            // peer must still round-trip losslessly as an opaque event,
+            // not throw.
+            { type: 'future_event_v2', someField: 'from a newer minor version' },
           ],
         },
         { taskId: 'task-1', seq: 1 },

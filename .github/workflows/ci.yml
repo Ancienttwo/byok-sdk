@@ -1,0 +1,71 @@
+name: CI
+
+# First CI workflow for this repo. Runs the same three commands a local
+# `pnpm install && pnpm -r build && pnpm -r typecheck && pnpm -r test` would —
+# no separate lint/format job exists yet. `pnpm -r build` MUST run before
+# typecheck/test: @byok/protocol's package.json `exports` point at its built
+# `dist/`, not `src/`, so @byok/server and @byok/client can't even resolve
+# `@byok/protocol` (let alone typecheck or test against it) until it's been
+# built at least once in this checkout (empirically confirmed while wiring up
+# this workflow — deleting every package's `dist/` breaks
+# `pnpm -r typecheck` with "Cannot find module '@byok/protocol'").
+#
+# The freeze-guard test (packages/protocol/src/__tests__/freeze-guard.test.ts)
+# runs as an ordinary part of `pnpm -r test` — no separate step for it.
+#
+# Node matrix: `engines.node` in package.json pins a >=20 floor; this matrix
+# covers both that floor (20) and the version this repo is actually developed
+# against (22) so a floor regression doesn't hide behind a newer local Node.
+#
+# Note for anyone debugging a LOCAL sandbox run of this same test suite (not
+# a concern for these hosted runners): a couple of integration tests
+# (packages/server, packages/client) bind real HTTP/WS servers to
+# `127.0.0.1`. Some heavily network-restricted local sandboxes disallow
+# loopback socket binding and will flake those tests specifically; GitHub-
+# hosted runners have a normal network stack and don't hit this.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build, typecheck, test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # No `version:` pinned here on purpose — the repo's own root
+      # package.json `packageManager` field ("pnpm@10.33.4") is the single
+      # source of truth pnpm/action-setup reads by default when `version` is
+      # omitted; this workflow can never silently drift from the version the
+      # repo declares.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (required before typecheck/test — see note above)
+        run: pnpm -r build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test

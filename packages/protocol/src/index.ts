@@ -7,8 +7,15 @@ export type { BlobRef } from './blob';
 export { PermissionPolicySchema, PERMISSION_MODES } from './permission';
 export type { PermissionPolicy, PermissionMode } from './permission';
 
-export { AgentEventSchema } from './agent-event';
-export type { AgentEvent } from './agent-event';
+export {
+  AgentEventSchema,
+  UnknownAgentEventSchema,
+  AgentEventOrUnknownSchema,
+  KNOWN_AGENT_EVENT_TYPES,
+  isKnownAgentEvent,
+  partitionAgentEvents,
+} from './agent-event';
+export type { AgentEvent, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
 
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
@@ -20,6 +27,7 @@ export {
   DAEMON_TO_SERVER_TYPES,
   RuntimeIdSchema,
   RuntimeInfoSchema,
+  RuntimeCapabilitiesSchema,
   ConnHelloPayloadSchema,
   ConnAckPayloadSchema,
   TaskOfferPayloadSchema,
@@ -41,6 +49,7 @@ export type {
   MessageType,
   RuntimeId,
   RuntimeInfo,
+  RuntimeCapabilities,
   ConnHelloPayload,
   ConnAckPayload,
   TaskOfferPayload,

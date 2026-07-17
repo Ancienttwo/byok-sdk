@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { BlobRefSchema } from './blob';
 import { PermissionPolicySchema } from './permission';
-import { AgentEventSchema } from './agent-event';
+import { AgentEventOrUnknownSchema } from './agent-event';
 
 /** Max size of an inlined artifact payload, per the delivery-model spec (<=64KB). */
 const MAX_INLINE_BYTES = 64 * 1024;
@@ -18,6 +18,39 @@ export const RuntimeIdSchema = z.enum(['pi', 'claude', 'codex']);
 export type RuntimeId = z.infer<typeof RuntimeIdSchema>;
 
 /**
+ * Per-runtime feature flags reported in `conn.hello.runtimes[].capabilities`
+ * (pre-freeze addition). Distinct from the connection-level `CAPABILITY_FLAGS`
+ * (`version.ts`) / `conn.hello.capabilities` array: those are protocol-level
+ * flags negotiated for the whole connection, while this is what one specific
+ * detected runtime (pi/claude/codex) supports. The whole field is optional
+ * end-to-end — older daemons omit `capabilities` entirely — and every field
+ * inside it is itself optional, since detection can be partial.
+ *
+ * Per-tool allow/deny lists are deliberately NOT included here (noise).
+ * `permissionModes` mirrors `PERMISSION_MODES` (`permission.ts`) but is kept
+ * as a bare `string[]` rather than `z.enum(PERMISSION_MODES)`: this is a
+ * runtime's self-reported observability data, not a control/security field,
+ * so — per the freeze rule (tolerate unknown for observability, fail closed
+ * for control/security; see `agent-event.ts`'s unknown-variant tolerance for
+ * the same asymmetry applied to `task.progress` events) — it stays tolerant
+ * of a mode string a newer runtime might report that this schema doesn't
+ * enumerate yet, rather than rejecting the whole `conn.hello`.
+ *
+ * Unrecognized keys inside `capabilities` itself, by contrast, are silently
+ * stripped (zod's default object behavior — same as every other payload
+ * schema in this file) rather than passed through: this is a closed, typed
+ * shape consumers can rely on, and a genuinely new capability flag gets added
+ * here explicitly rather than round-tripped opaquely.
+ */
+export const RuntimeCapabilitiesSchema = z.object({
+  steer: z.boolean().optional(),
+  resume: z.boolean().optional(),
+  approvalInteractive: z.boolean().optional(),
+  permissionModes: z.array(z.string()).optional(),
+});
+export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
+
+/**
  * Runtime detection info reported in `conn.hello`. Supersedes the M0
  * `agents: unknown` field (M1 gap #4): typed, so the server no longer has to
  * best-effort-normalize an untyped blob.
@@ -26,6 +59,8 @@ export const RuntimeInfoSchema = z.object({
   id: RuntimeIdSchema,
   version: z.string().optional(),
   authPresent: z.boolean().optional(),
+  /** Optional: older daemons omit this entirely (pre-freeze addition). */
+  capabilities: RuntimeCapabilitiesSchema.optional(),
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
@@ -67,13 +102,30 @@ export type ConnAckPayload = z.infer<typeof ConnAckPayloadSchema>;
 // ---------------------------------------------------------------------------
 
 /**
+ * The out-of-band-reference form of `TaskOfferPayload.instruction` (the
+ * alternative to an inlined string). `.strict()`: like `PermissionPolicySchema`
+ * (`permission.ts`), this is control data — it's the task instruction itself,
+ * the thing that authorizes what work gets done — so per the freeze rule's
+ * observability-vs-control asymmetry (docs/protocol.md "Freeze rule") an
+ * unrecognized field here must be REJECTED, not silently stripped the way an
+ * ordinary payload's unknown field is. Without `.strict()`, a hypothetical
+ * future field riding along next to `blobRef` (e.g. a routing/priority
+ * override) would be silently discarded instead of failing the parse —
+ * exactly the kind of silent reinterpretation the freeze rule forbids for
+ * control/security payloads. Consequence: adding a field to this shape
+ * post-freeze is a BREAKING change (version bump required), not the usual
+ * non-breaking additive-optional-field case — same as `PermissionPolicySchema`.
+ */
+const InstructionBlobRefSchema = z.object({ blobRef: BlobRefSchema }).strict();
+
+/**
  * server -> daemon: offer a task for a device to claim.
  *
  * `taskId` used to be duplicated here; it is now carried only by the
  * envelope's `task_id` (M1 gap #7 — single source of truth for routing).
  */
 export const TaskOfferPayloadSchema = z.object({
-  instruction: z.union([z.string(), z.object({ blobRef: BlobRefSchema })]),
+  instruction: z.union([z.string(), InstructionBlobRefSchema]),
   policy: PermissionPolicySchema,
   runtime: RuntimeIdSchema.optional(),
   sessionRef: z.string().optional(),
@@ -189,10 +241,20 @@ export const TaskDeclinePayloadSchema = z.object({
 });
 export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
 
-/** daemon -> server: batch of normalized agent events. */
+/**
+ * daemon -> server: batch of normalized agent events.
+ *
+ * `events` elements are known-or-unknown (`AgentEventOrUnknownSchema` —
+ * `agent-event.ts`), not bare `AgentEventSchema`: pre-freeze, an unrecognized
+ * event `type` must not fail the whole batch, since a peer running a newer
+ * minor version may have emitted an additive event variant this schema
+ * doesn't know about yet. See `agent-event.ts` for the full rationale and
+ * `partitionAgentEvents`/`isKnownAgentEvent` for how consumers should skip
+ * unknowns instead of choking on them.
+ */
 export const TaskProgressPayloadSchema = z.object({
   seq: z.number().int(),
-  events: z.array(AgentEventSchema),
+  events: z.array(AgentEventOrUnknownSchema),
 });
 export type TaskProgressPayload = z.infer<typeof TaskProgressPayloadSchema>;
 

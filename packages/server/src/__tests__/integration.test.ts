@@ -653,3 +653,74 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     warnSpy.mockRestore();
   });
 });
+
+describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok/protocol agent-event.ts)', () => {
+  let server: HttpServer | undefined;
+  let ws: WebSocket | undefined;
+
+  afterEach(async () => {
+    ws?.terminate();
+    if (server) await stopServer(server);
+    server = undefined;
+    ws = undefined;
+  });
+
+  it('forwards an unknown-type event alongside a known one instead of dropping it or throwing, with no spurious state change', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode();
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
+    ws = daemon.ws;
+
+    const handle = await byok.dispatch({ instruction: 'x' });
+    await nextEnvelope(ws); // offer
+    await claimAndStart(ws, daemon.deviceId, handle);
+
+    // `future_thinking` is not a KNOWN_AGENT_EVENT_TYPES literal — it's the
+    // shape a newer daemon/runtime-adapter minor version might produce that
+    // this build doesn't recognize yet. It must still validate (as the
+    // UnknownAgentEventSchema passthrough) and must still reach the
+    // embedder, not be dropped.
+    send(
+      ws,
+      createEnvelope(
+        'task.progress',
+        {
+          seq: 1,
+          events: [
+            { type: 'progress', text: 'known' },
+            { type: 'future_thinking', budget: 42 },
+          ],
+        },
+        { taskId: handle.taskId },
+      ),
+    );
+
+    // Proves delivery without throwing: if handling the unknown event threw
+    // inside onProgress, this would never resolve.
+    await waitForTaskEvent(handle, (e) => e.kind === 'agent' && e.event.type === 'future_thinking');
+
+    // No spurious state change from the unknown event — still Running, and
+    // completes normally afterward, proving it didn't corrupt task state.
+    expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
+    send(
+      ws,
+      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_unknown_evt' }, { taskId: handle.taskId }),
+    );
+    const result = await handle.result();
+    expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_unknown_evt' });
+
+    const events: ServerTaskEvent[] = [];
+    for await (const event of handle.events()) events.push(event);
+    const agentEvents = events.filter((e) => e.kind === 'agent');
+    expect(agentEvents.map((e) => (e.kind === 'agent' ? e.event.type : null))).toEqual(['progress', 'future_thinking']);
+    // The unknown event's extra field survived passthrough intact — not
+    // stripped down to just `{ type }`.
+    const unknownEvent = agentEvents[1];
+    expect(unknownEvent?.kind === 'agent' ? unknownEvent.event : undefined).toEqual({
+      type: 'future_thinking',
+      budget: 42,
+    });
+  });
+});

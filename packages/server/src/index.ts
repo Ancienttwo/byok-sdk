@@ -46,6 +46,15 @@ export { LocalDiskBlobStore } from './blob-store';
 const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
 /** `GET /byok/events` hold duration (§8): ~50s unless overridden (e.g. for tests). */
 const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
+/**
+ * Task lease ceiling (M2, Decision: `Failed(retryable:true)` on dark-device
+ * timeout — no new task state, no new wire message; see `ConnectionHub`'s
+ * lease-reaper doc comment in `hub.ts` for the full design). Deliberately
+ * generous — 30 minutes, i.e. far larger than any realistic single task
+ * turn — since it exists purely as a backstop for a device that never
+ * reconnects at all, not a normal-latency timeout.
+ */
+const DEFAULT_TASK_LEASE_MS = 30 * 60_000;
 
 /** The object `createByokServer` returns — the SaaS-embedder-facing surface. */
 export interface ByokServer {
@@ -75,6 +84,13 @@ export interface ByokServer {
   devices: {
     revoke(deviceId: string): void;
   };
+  /**
+   * Stop background timers owned by this server instance — currently just
+   * the task-lease reaper (`ConnectionHub.stopLeaseReaper`, `hub.ts`). Call
+   * this on shutdown so nothing keeps the process alive or leaks a handle in
+   * tests; safe to call more than once.
+   */
+  stop(): void;
 }
 
 /**
@@ -94,9 +110,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const blobStore = opts.blobStore ?? new LocalDiskBlobStore();
   const maxBlobSizeBytes = opts.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES;
   const longPollHoldMs = opts.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS;
+  const taskLeaseMs = opts.taskLeaseMs ?? DEFAULT_TASK_LEASE_MS;
 
   const taskStore = new TaskStore();
-  const hub = new ConnectionHub(taskStore, devices);
+  const hub = new ConnectionHub(taskStore, devices, taskLeaseMs);
   const hono = buildHonoApp({ pairing, devices, nonces, tokenSigner, blobStore, maxBlobSizeBytes, longPollHoldMs, hub });
 
   return {
@@ -126,6 +143,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
     devices: {
       revoke: (deviceId: string) => devices.revoke(deviceId),
+    },
+    stop(): void {
+      hub.stopLeaseReaper();
     },
   };
 }
