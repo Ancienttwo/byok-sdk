@@ -11,6 +11,7 @@ export {
   AgentEventSchema,
   UnknownAgentEventSchema,
   AgentEventOrUnknownSchema,
+  KNOWN_AGENT_EVENT_TYPES,
   isKnownAgentEvent,
   partitionAgentEvents,
 } from './agent-event';

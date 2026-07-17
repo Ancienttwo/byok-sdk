@@ -8,8 +8,17 @@ import { z } from 'zod';
  * without reaching into zod's discriminated-union internals. Keep this in
  * sync with the `type` literals in {@link AgentEventSchema} — adding a new
  * known variant means adding it in both places.
+ *
+ * Exported (not module-private) so the freeze guard
+ * (`__tests__/freeze-guard.test.ts`) can assert this list exactly matches
+ * {@link AgentEventSchema}'s own variant `type` literals — a dual-authority
+ * drift guard: without it, forgetting to add a new variant here (while still
+ * adding it to the schema union) would silently fall through to
+ * {@link isKnownAgentEvent}/{@link partitionAgentEvents} misclassifying a
+ * well-formed known event as unknown, since those two functions only ever
+ * consult this list, never the schema directly.
  */
-const KNOWN_AGENT_EVENT_TYPES: readonly string[] = [
+export const KNOWN_AGENT_EVENT_TYPES: readonly string[] = [
   'progress',
   'tool_use',
   'tool_result',

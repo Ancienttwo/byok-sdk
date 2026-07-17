@@ -16,6 +16,7 @@ import {
   EnvelopeSchema,
   AgentEventSchema,
   AgentEventOrUnknownSchema,
+  KNOWN_AGENT_EVENT_TYPES,
   BlobRefSchema,
   CONTENT_HASH_RE,
   PairRequestSchema,
@@ -61,16 +62,25 @@ import {
  *   2. A golden NDJSON envelope corpus (`golden/v1.envelopes.ndjson`, one
  *      canonical line per message type) that must keep `decodeEnvelope`-
  *      parsing forever — the actual regression net: real historical wire
- *      bytes a v1 peer already sent, re-played against today's code.
+ *      bytes a v1 peer already sent, re-played against today's code. Beyond
+ *      "does it still parse", each decoded envelope is also asserted to
+ *      deep-equal the ORIGINAL committed JSON field-for-field — parsing
+ *      successfully isn't enough if a schema silently dropped or renamed an
+ *      optional field along the way.
  *   3. Explicit behavior assertions for the freeze rule's own asymmetry:
  *      unknown is TOLERATED for observability data, FAIL-CLOSED for
- *      control/security data (see docs/protocol.md).
+ *      control/security data (see docs/protocol.md) — including that an
+ *      unrecognized field on an otherwise well-formed `policy` or
+ *      `instruction` blob-ref is rejected outright (`.strict()`), not
+ *      silently stripped the way every other payload's unknown field is.
  *
  * Plus a dual-source cross-check between envelope.ts's `envelopeShape()`
  * calls and codec.ts's `EnvelopeShapeOptions`/`CreateEnvelopeOptions<T>` —
  * two independently hand-maintained descriptions of the exact same
- * `task_id`/`seq` requiredness rule (see codec.ts's own doc comment) — and a
- * standalone `PROTOCOL_VERSION === 1` pin.
+ * `task_id`/`seq` requiredness rule (see codec.ts's own doc comment); a
+ * second dual-authority check between agent-event.ts's hand-maintained
+ * `KNOWN_AGENT_EVENT_TYPES` and `AgentEventSchema`'s own variant `type`
+ * literals; and a standalone `PROTOCOL_VERSION === 1` pin.
  */
 
 const goldenDir = fileURLToPath(new URL('./golden/', import.meta.url));
@@ -169,9 +179,13 @@ function buildFrozenSnapshot() {
   }
 
   // The AgentEvent variant list, derived from AgentEventSchema's own JSON
-  // Schema output (`oneOf[].properties.type.const`) rather than needing
-  // agent-event.ts to export its internal KNOWN_AGENT_EVENT_TYPES constant —
-  // keeps this file from requiring any change to a frozen source module.
+  // Schema output (`oneOf[].properties.type.const`) rather than from
+  // agent-event.ts's hand-written KNOWN_AGENT_EVENT_TYPES constant — this
+  // fingerprint is specifically about the SCHEMA's own shape, independent of
+  // that constant. `KNOWN_AGENT_EVENT_TYPES` is exported and cross-checked
+  // against this same schema-derived variant list separately, in the
+  // "dual-authority cross-check (agent-event.ts)" describe block (Part 6)
+  // below.
   const agentEventJsonSchema = z.toJSONSchema(AgentEventSchema) as unknown as {
     oneOf: Array<{ properties: { type: { const: string } } }>;
   };
@@ -258,6 +272,26 @@ describe('freeze guard: v1 golden envelope corpus (golden/v1.envelopes.ndjson)',
     }
     expect(seenTypes).toEqual(new Set(MESSAGE_TYPES));
   });
+
+  it('each decoded envelope deep-equals the ORIGINAL committed JSON, field-for-field (catches a dropped/renamed field the round-trip check above can miss)', () => {
+    // The round-trip check above only proves decode -> encode -> decode is a
+    // fixed point; it says nothing about whether that fixed point still has
+    // every field the committed corpus line actually has. If a schema
+    // silently drops (or renames) an optional field, `decodeEnvelope` strips
+    // it on the way in, so decode -> encode -> decode stays internally
+    // consistent and the round-trip check above stays green — even though a
+    // real v1 peer that sent this exact committed line just had a field it
+    // relied on vanish. The committed raw JSON — not the schema's own
+    // output — is the source of truth for "what a v1 peer actually put on
+    // the wire", so comparing the decoded value against it (not just against
+    // itself, re-encoded) is what actually catches that regression.
+    for (const line of lines) {
+      const committed: unknown = JSON.parse(line);
+      const decoded = decodeEnvelope(line);
+      const type = (committed as { type?: string }).type;
+      expect(decoded, `decoded envelope must retain every field present in the committed golden line (type: ${type})`).toEqual(committed);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -330,6 +364,38 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
 
   it('an unknown `policy.mode` is REJECTED, fail-closed (control/security data, not observability)', () => {
     const result = PermissionPolicySchema.safeParse({ mode: 'some-future-mode' });
+    expect(result.success).toBe(false);
+  });
+
+  it('an unknown field on an otherwise well-formed `policy` is REJECTED, fail-closed (`.strict()` — unlike a plain `z.object()`, an unrecognized key is a validation error, not a silent strip)', () => {
+    const result = PermissionPolicySchema.safeParse({ mode: 'auto', futureConstraint: 'x' });
+    expect(result.success).toBe(false);
+  });
+
+  it('a well-formed policy with only known fields still parses successfully (the `.strict()` above rejects unknown keys, not known ones)', () => {
+    const result = PermissionPolicySchema.safeParse({
+      mode: 'auto',
+      allowTools: ['bash'],
+      denyTools: ['rm'],
+      workspaceRoot: '/tmp/ws',
+      network: false,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('an unknown field alongside an otherwise well-formed `instruction.blobRef` is REJECTED, fail-closed (same `.strict()` asymmetry applied to the blob-ref instruction variant)', () => {
+    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
+      instruction: {
+        blobRef: {
+          blobId: 'blob-1',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          size: 10,
+          contentType: 'text/plain',
+        },
+        futureControlField: 'from a hypothetical future variant',
+      },
+      policy: { mode: 'auto' },
+    });
     expect(result.success).toBe(false);
   });
 
@@ -445,5 +511,38 @@ describe('freeze guard: dual-source cross-check (envelope.ts vs. codec.ts)', () 
 describe('freeze guard: PROTOCOL_VERSION is pinned', () => {
   it('PROTOCOL_VERSION === 1 — a version bump must be a deliberate, visible edit, made alongside a golden update (see version.ts)', () => {
     expect(PROTOCOL_VERSION).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part 6 — dual-authority guard: KNOWN_AGENT_EVENT_TYPES vs. AgentEventSchema
+// ---------------------------------------------------------------------------
+
+describe('freeze guard: dual-authority cross-check (agent-event.ts)', () => {
+  it("KNOWN_AGENT_EVENT_TYPES exactly matches AgentEventSchema's own variant `type` literals", () => {
+    // `agent-event.ts` maintains TWO independent descriptions of "what counts
+    // as a known AgentEvent": the hand-written `KNOWN_AGENT_EVENT_TYPES` list
+    // (consulted by `isKnownAgentEvent`/`partitionAgentEvents`) and
+    // `AgentEventSchema`'s own discriminated-union variants (consulted by
+    // everything that actually parses an event). `buildFrozenSnapshot`'s
+    // `agentEventVariants` (Part 1) only snapshots the schema side against
+    // the golden file — it says nothing about whether the hand-written list
+    // still agrees with it. Adding a new variant to the schema without also
+    // adding its `type` literal to `KNOWN_AGENT_EVENT_TYPES` would NOT be
+    // caught there: the new variant would just fall through
+    // `isKnownAgentEvent` as "unknown" — a well-formed known event silently
+    // misclassified and routed to `partitionAgentEvents`'s `unknown` bucket
+    // instead of `known`. This test is the guard for exactly that drift.
+    const agentEventJsonSchema = z.toJSONSchema(AgentEventSchema) as unknown as {
+      oneOf: Array<{ properties: { type: { const: string } } }>;
+    };
+    const schemaVariantTypes = agentEventJsonSchema.oneOf.map((branch) => branch.properties.type.const);
+
+    expect(new Set(KNOWN_AGENT_EVENT_TYPES)).toEqual(new Set(schemaVariantTypes));
+    // Belt-and-suspenders: also pin the exact count, so a duplicate entry in
+    // `KNOWN_AGENT_EVENT_TYPES` masking a missing real one can't hide behind
+    // a `Set`-based equality check above (two different-length arrays can
+    // still produce equal Sets if one has a duplicate).
+    expect(KNOWN_AGENT_EVENT_TYPES.length).toBe(schemaVariantTypes.length);
   });
 });

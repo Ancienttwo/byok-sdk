@@ -23,6 +23,13 @@ following is non-breaking and may be added without a version bump, ever:
 - A new capability flag (`CAPABILITY_FLAGS`, or a new key inside
   `RuntimeInfo.capabilities`).
 
+**Exception:** the "new optional field is always non-breaking" bullet above
+does not apply to `PermissionPolicySchema` or the `instruction` blob-ref shape
+(`{ blobRef: BlobRef }`) — see the asymmetry below. Both are built with zod's
+`.strict()`, not the default strip-unknown-keys behavior every other schema in
+this bullet list gets, so adding a field to either is itself a breaking
+change requiring a version bump, by design.
+
 **What IS breaking, and requires a `v` bump instead:** changing an existing
 field's type, removing a field, making an optional field required (or vice
 versa in a way a receiver depends on), renaming a message type, or removing a
@@ -63,6 +70,24 @@ observability data, but FAIL-CLOSED for control/security data:
   validation loudly. This is the same fail-closed posture every runtime
   adapter already applies to a policy shape it can't honor (§11.1) — the
   wire-schema level and the adapter level agree on it end to end.
+
+  Concretely, `PermissionPolicySchema` and the `instruction` blob-ref variant
+  (`{ blobRef: BlobRef }`) are both built with zod's `.strict()`, rather than
+  the default strip-unknown-keys behavior every other payload schema in this
+  document gets: an unrecognized field on an otherwise well-formed policy or
+  blob-ref instruction is REJECTED outright, not silently discarded. Plain
+  `z.object()` — what every non-control payload uses — would have accepted a
+  policy or instruction carrying a field it didn't recognize and quietly
+  dropped that field from the parsed result, which is precisely the
+  silent-widening-or-narrowing failure mode this asymmetry exists to rule
+  out for control/security data: a stripped constraint is indistinguishable
+  from a constraint that was never sent. **Consequence:** adding a new field
+  to either schema post-freeze is therefore a BREAKING change requiring a
+  `PROTOCOL_VERSION` bump — the one explicit exception to "a new optional
+  field is always non-breaking" noted above. This is intentional: a new
+  security/control constraint must force a conscious version bump so an
+  unupgraded peer can never silently ignore it, the same way every other
+  field on these two schemas already can't be silently ignored.
 
 This asymmetry is enforced by the freeze-guard regression test
 (`packages/protocol/src/__tests__/freeze-guard.test.ts`), not just documented

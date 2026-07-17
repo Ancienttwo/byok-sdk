@@ -102,13 +102,30 @@ export type ConnAckPayload = z.infer<typeof ConnAckPayloadSchema>;
 // ---------------------------------------------------------------------------
 
 /**
+ * The out-of-band-reference form of `TaskOfferPayload.instruction` (the
+ * alternative to an inlined string). `.strict()`: like `PermissionPolicySchema`
+ * (`permission.ts`), this is control data — it's the task instruction itself,
+ * the thing that authorizes what work gets done — so per the freeze rule's
+ * observability-vs-control asymmetry (docs/protocol.md "Freeze rule") an
+ * unrecognized field here must be REJECTED, not silently stripped the way an
+ * ordinary payload's unknown field is. Without `.strict()`, a hypothetical
+ * future field riding along next to `blobRef` (e.g. a routing/priority
+ * override) would be silently discarded instead of failing the parse —
+ * exactly the kind of silent reinterpretation the freeze rule forbids for
+ * control/security payloads. Consequence: adding a field to this shape
+ * post-freeze is a BREAKING change (version bump required), not the usual
+ * non-breaking additive-optional-field case — same as `PermissionPolicySchema`.
+ */
+const InstructionBlobRefSchema = z.object({ blobRef: BlobRefSchema }).strict();
+
+/**
  * server -> daemon: offer a task for a device to claim.
  *
  * `taskId` used to be duplicated here; it is now carried only by the
  * envelope's `task_id` (M1 gap #7 — single source of truth for routing).
  */
 export const TaskOfferPayloadSchema = z.object({
-  instruction: z.union([z.string(), z.object({ blobRef: BlobRefSchema })]),
+  instruction: z.union([z.string(), InstructionBlobRefSchema]),
   policy: PermissionPolicySchema,
   runtime: RuntimeIdSchema.optional(),
   sessionRef: z.string().optional(),
