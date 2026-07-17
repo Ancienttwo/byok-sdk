@@ -4,11 +4,23 @@
  * do not require a bump — servers negotiate the highest common version and
  * daemons/servers must ignore unknown fields and unknown message types.
  *
- * Still `1` through M1: the wire is pre-freeze until the claude/codex
- * runtime adapters (M2) have both exercised it, per the plan. Breaking
- * changes are still allowed pre-freeze (this is why the M1 protocol gaps —
- * see docs/protocol.md — were fixed in place rather than added
- * additively). Freeze target: end of M2.
+ * FROZEN v1 (end of M2 — see docs/protocol.md "Freeze rule"): the pi, claude,
+ * and codex runtime adapters have all exercised the wire, and every M1/M2
+ * protocol gap has been closed. `PROTOCOL_VERSION` stays `1` from here
+ * forward; it does not bump for additive changes (new optional fields, new
+ * message types, new `AgentEvent` variants, new capability flags) — only for
+ * a breaking one (changing, removing, or retyping anything that already
+ * exists).
+ *
+ * IMPORTANT: changing this constant, or changing/removing/retyping any
+ * already-frozen schema in this package, requires a DELIBERATE update to the
+ * committed golden fixtures in `src/__tests__/golden/` (`v1.frozen.json`,
+ * `v1.envelopes.ndjson`) — see `src/__tests__/freeze-guard.test.ts`, which
+ * fails loudly on exactly that kind of drift. A passing freeze-guard run
+ * after such a change means either (a) the change was genuinely additive and
+ * the golden was regenerated with justification, or (b) this constant was
+ * bumped alongside a new golden generation for the new version — never a
+ * silent edit to either file to make the test pass.
  */
 export const PROTOCOL_VERSION = 1;
 
