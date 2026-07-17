@@ -49,8 +49,23 @@ const OUTBOX_RING_CAPACITY = 500;
 /** Per-device idempotency window (N3): how many recent inbound envelope ids {@link ConnectionHub.handleInbound} remembers for dedup, oldest evicted first once full. */
 const DEDUP_RING_CAPACITY = 1024;
 
+/**
+ * Upper bound on the task-lease reaper's sweep-tick period (see
+ * `ConnectionHub`'s constructor and its `sweepLeases` method, in the
+ * "task-lease reaper" section below). A short (e.g. test-injected)
+ * `taskLeaseMs` sweeps at its own granularity so it's still checked
+ * promptly; a realistic multi-minute lease sweeps at this fixed, cheap
+ * resolution instead of scaling the interval down with it.
+ */
+const MAX_LEASE_REAPER_SWEEP_INTERVAL_MS = 30_000;
+
 function isTerminal(state: TaskState): state is Extract<TaskState, 'Complete' | 'Failed' | 'Cancelled'> {
   return state === 'Complete' || state === 'Failed' || state === 'Cancelled';
+}
+
+/** Claimed/Running/AwaitApproval — the task-lease reaper's reapable set. `Offered` is excluded: it has no owning device yet, so there's nothing to be "dark". */
+function isClaimedState(state: TaskState): state is Extract<TaskState, 'Claimed' | 'Running' | 'AwaitApproval'> {
+  return state === 'Claimed' || state === 'Running' || state === 'AwaitApproval';
 }
 
 /** A device's live transport (WS or long-poll — never both, §8) plus last-known metadata. */
@@ -152,6 +167,14 @@ type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'
  * warning; this is what naturally resolves the M0 gatekeeper's cancel-race
  * `console.warn` finding (a late `task.fail`/`task.cancelled` racing a
  * server-initiated cancel is exactly this case).
+ *
+ * Task lease (M2): a periodic sweep (started in the constructor) reaps a
+ * `Claimed`/`Running`/`AwaitApproval` task to
+ * `Failed(retryable: true, reason: 'lease-expired')` once its owning device
+ * has been dark (disconnected, or long-poll-silent) AND the task itself has
+ * had no inbound activity for `taskLeaseMs` — see the "task-lease reaper"
+ * section further down for the full design, including why this does not
+ * reintroduce the disconnect-alone-fails-the-task bug M1 removed above.
  */
 export class ConnectionHub {
   private readonly connections = new Map<string, ConnectionState>();
@@ -161,11 +184,42 @@ export class ConnectionHub {
   private readonly longPollWaiters = new Map<string, LongPollWaiter>();
   private readonly runtimes = new Map<string, TaskRuntime>();
   private readonly serverEvents = new AsyncEventQueue<ByokServerEvent>();
+  /**
+   * Per-task last-inbound-activity timestamp (epoch ms) — the task-lease
+   * reaper's condition (c), see the "task-lease reaper" section below. Reset
+   * on every accepted inbound `task.*` envelope ({@link recordTaskActivity},
+   * called from {@link dispatchToHandler}); cleared once the task reaches a
+   * terminal state ({@link onStateChange}), so this map only ever holds
+   * entries for currently non-terminal claimed tasks.
+   */
+  private readonly taskActivity = new Map<string, number>();
+  /** The task-lease reaper's own periodic sweep timer — see the constructor and `sweepLeases` below. */
+  private readonly leaseReaperTimer: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly taskStore: TaskStore,
     private readonly devices: DeviceRegistry,
-  ) {}
+    /** See {@link CreateByokServerOptions.taskLeaseMs} — already defaulted by `createByokServer` before reaching here. */
+    private readonly taskLeaseMs: number,
+  ) {
+    // A short (e.g. test-injected) taskLeaseMs sweeps at its own
+    // granularity so a short lease is still caught promptly; a realistic
+    // multi-minute lease sweeps at a fixed, cheap resolution instead of
+    // scaling the interval down with it. Unref'd so this timer never keeps
+    // the process alive on its own (mirrors heartbeat.ts's own timer).
+    const sweepIntervalMs = Math.min(Math.max(taskLeaseMs, 10), MAX_LEASE_REAPER_SWEEP_INTERVAL_MS);
+    this.leaseReaperTimer = setInterval(() => this.sweepLeases(), sweepIntervalMs);
+    this.leaseReaperTimer.unref?.();
+  }
+
+  /**
+   * Stop the task-lease reaper's sweep timer — called by `ByokServer.stop()`
+   * (`index.ts`) on shutdown. Idempotent: clearing an already-cleared
+   * interval is a safe no-op.
+   */
+  stopLeaseReaper(): void {
+    clearInterval(this.leaseReaperTimer);
+  }
 
   /** The top-level `events` feed returned by `createByokServer` — see {@link ByokServerEvent}. */
   subscribeServerEvents(): AsyncIterable<ByokServerEvent> {
@@ -362,7 +416,7 @@ export class ConnectionHub {
       return 'duplicate';
     }
 
-    this.dispatchToHandler(deviceId, envelope);
+    this.dispatchToHandler(deviceId, taskId, envelope);
     return 'accepted';
   }
 
@@ -393,8 +447,15 @@ export class ConnectionHub {
    * time this executes, so the handlers below no longer need their own
    * device-mismatch checks — that authz decision now lives solely in
    * `handleInbound` (N2).
+   *
+   * Also the task-lease reaper's single activity checkpoint
+   * ({@link recordTaskActivity}): every envelope that reaches here counts as
+   * proof of life for `taskId`'s lease, regardless of what its per-type
+   * handler below ends up doing with it (including a no-op/stale drop) —
+   * see the "task-lease reaper" section further down for why.
    */
-  private dispatchToHandler(deviceId: string, envelope: Envelope): void {
+  private dispatchToHandler(deviceId: string, taskId: string, envelope: Envelope): void {
+    this.recordTaskActivity(taskId);
     switch (envelope.type) {
       case 'task.claim':
         this.onClaim(deviceId, envelope.task_id, envelope.payload);
@@ -432,6 +493,11 @@ export class ConnectionHub {
         // exhaustive over the full MessageType union — not a live path.
         return;
     }
+  }
+
+  /** Reset the task-lease reaper's per-task clock (condition (c) in the "task-lease reaper" section below). */
+  private recordTaskActivity(taskId: string): void {
+    this.taskActivity.set(taskId, Date.now());
   }
 
   /** Ownership (record.deviceId matching the connection's authenticated deviceId) is enforced centrally by {@link handleInbound} (N2) before this runs; only the idempotent-claim CAS and the first-claim device patch happen here. */
@@ -603,6 +669,13 @@ export class ConnectionHub {
 
   private onStateChange(record: TaskSnapshot): void {
     this.serverEvents.push({ kind: 'task.state', taskId: record.taskId, state: record.state, at: record.updatedAt });
+    if (isTerminal(record.state)) {
+      // Lease-reaper bookkeeping ends here for every terminal path, not just
+      // the reaper's own reapTask() — see the "task-lease reaper" section
+      // below. Placed ahead of the runtime-lookup early-return so this
+      // always runs regardless of whether a TaskHandle is still around.
+      this.taskActivity.delete(record.taskId);
+    }
     const runtime = this.runtimes.get(record.taskId);
     if (!runtime) return;
     runtime.queue.push({ kind: 'state', state: record.state, at: record.updatedAt });
@@ -610,6 +683,110 @@ export class ConnectionHub {
       runtime.resolveResult(record.result ?? { state: record.state });
       runtime.queue.close();
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // task-lease reaper (Decision: Failed(retryable:true) on dark-device
+  // timeout — no new task state, no new wire message)
+  // ---------------------------------------------------------------------
+
+  /**
+   * Task lease: a backstop for a device that goes dark mid-task and never
+   * comes back — distinct from, and layered on top of, M1's redelivery
+   * (docs/protocol.md §9), which already handles "device reconnects within
+   * the window, nothing lost." Decision (user+design): reuse the existing
+   * `Failed` terminal state and its `retryable` flag —
+   * `Failed(retryable: true, reason: 'lease-expired')` — exactly like any
+   * other `task.fail`. The embedder is expected to treat this exactly like
+   * any other retryable failure: re-dispatch as a brand-new task.
+   *
+   * Implemented as a periodic sweep (see the constructor), not a per-task
+   * timer, so a device that goes dark *after* being idle-but-connected for a
+   * while is still caught on a later tick without needing extra bookkeeping
+   * at disconnect time. `sweepLeases` reaps a task only when ALL three hold,
+   * checked fresh on every tick (never cached):
+   *
+   *   (a) the task is in a non-terminal *claimed* state — `Claimed`,
+   *       `Running`, or `AwaitApproval` ({@link isClaimedState}). `Offered`
+   *       is excluded: it has no owning device yet, so there's nothing to
+   *       be "dark".
+   *   (b) the owning device is dark right now ({@link isDeviceDark}) —
+   *       disconnected outright, or (long-poll only) hasn't been seen since
+   *       before the lease window. A live WS connection is never dark from
+   *       the reaper's point of view: `heartbeat.ts` already independently
+   *       proves liveness at the transport level and flips
+   *       `connected: false` via `handleDisconnect` once it stops getting
+   *       pongs — the reaper just reads that flag rather than re-deriving
+   *       it.
+   *   (c) no inbound `task.*` activity has been recorded for this task
+   *       within the last `taskLeaseMs` ({@link taskActivity}, reset in
+   *       {@link dispatchToHandler} on every accepted envelope — claim,
+   *       started, progress, artifact, await_approval, anything — no matter
+   *       what that envelope's own handler does with it).
+   *
+   * (b) and (c) are deliberately independent clocks, not one merged check.
+   * The property this most exists to protect: a *connected*, momentarily
+   * idle device mid-turn must never be reaped on (c) alone. This is also
+   * what keeps this from reintroducing the M0 bug M1 deliberately removed
+   * (see `handleDisconnect`'s own doc comment above) — M0 force-failed a
+   * task the instant its device disconnected; M1 correctly stopped doing
+   * that so a task could survive a disconnect and resume via redelivery.
+   * This reaper does not revert that: disconnect ALONE still does nothing
+   * here either, because (c) also has to independently hold, and it only
+   * will once the lease window has genuinely elapsed with zero activity. A
+   * task on a connected, actively-progressing device is never touched, no
+   * matter how long `taskLeaseMs` is.
+   *
+   * Interaction with redelivery (§9): redelivery is what handles "the
+   * device came back within the window" — nothing to reap, normal traffic
+   * resumes. This reaper is what handles "it never came back." Idempotent
+   * claim (`onClaim`'s CAS) still protects server-side bookkeeping if a
+   * device wakes up *after* its task was already reaped and retries a stale
+   * claim/progress/etc. for it: every per-type handler's existing
+   * stale/terminal-task guard (§9) drops it as a no-op, same as any other
+   * late message for an already-terminal task — no new guard was needed for
+   * that here.
+   *
+   * Accepted residual (by design, not a bug): idempotent claim protects
+   * *server-side* state, not the device's own local side effects. A dark
+   * device that wakes up after its task has already been reaped may still
+   * be mid-way through running real local work (file writes, shell
+   * commands, whatever the runtime adapter was doing) for a task the server
+   * has since moved on from — and that the embedder may have already
+   * re-dispatched elsewhere. There is no way to remotely guarantee a
+   * truly-dark device stops running; the mitigation is entirely
+   * `taskLeaseMs` being set far larger than any realistic task duration, so
+   * this can only happen to a device that was genuinely gone for a very
+   * long time, not a normal slow turn.
+   */
+  private sweepLeases(): void {
+    const now = Date.now();
+    for (const record of this.taskStore.list()) {
+      if (!isClaimedState(record.state) || !record.deviceId) continue;
+      if (!this.isDeviceDark(record.deviceId, now)) continue;
+      const lastActivity = this.taskActivity.get(record.taskId) ?? Date.parse(record.updatedAt);
+      if (now - lastActivity < this.taskLeaseMs) continue;
+      this.reapTask(record.taskId);
+    }
+  }
+
+  /** Condition (b) above: whether `deviceId`'s connection currently counts as "dark" for lease purposes. */
+  private isDeviceDark(deviceId: string, nowMs: number): boolean {
+    const conn = this.connections.get(deviceId);
+    if (!conn || !conn.connected) return true; // disconnected, or never seen at all
+    if (conn.ws) return false; // live WS — heartbeat.ts is the liveness proof for this transport
+    // Long-poll: dark once its own liveness signal (refreshed on every poll
+    // call, §8) has gone stale for a full lease window.
+    return nowMs - Date.parse(conn.lastSeen) >= this.taskLeaseMs;
+  }
+
+  /** Reap one lease-expired task through the exact same TaskStore/canTransition path — and terminal-event emission — as any other `task.fail` (see {@link applyOrFail}). */
+  private reapTask(taskId: string): void {
+    const record = this.taskStore.get(taskId);
+    if (!record || isTerminal(record.state)) return; // resolved by something else between this tick's scan and now
+    this.applyOrFail(taskId, 'Failed', {
+      result: { state: 'Failed', reason: 'lease-expired', retryable: true },
+    });
   }
 
   // ---------------------------------------------------------------------
