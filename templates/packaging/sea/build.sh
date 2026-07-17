@@ -58,18 +58,25 @@ else
   OUT_BIN="$OUT_DIR/launcher-sea"
 fi
 
-# Default to `pnpm exec esbuild`: esbuild is only a *transitive* dependency
-# here (pulled in by tsup, not listed directly in any package.json), and
-# pnpm's default strict node_modules layout does not reliably hoist a
-# transitive bin's shim to a fixed, predictable node_modules/.bin path --
-# empirically confirmed to vary between a locally-accumulated install and a
-# clean `pnpm install --frozen-lockfile` checkout (e.g. in CI). `pnpm exec`
-# resolves any bin reachable from the workspace's own dependency graph
-# regardless of hoisting, so it's the robust default within this repo. Set
-# ESBUILD_BIN to a concrete path/command if you've copied this recipe into a
-# non-pnpm project (npm/yarn) or have esbuild installed some other way.
+# Resolve esbuild, in order:
+#   1. $ESBUILD_BIN, if the caller set one explicitly.
+#   2. The launcher's own package-local node_modules/.bin/esbuild -- this
+#      recipe's own examples/packaging lists `esbuild` as a direct
+#      devDependency for exactly this reason: pnpm then guarantees a
+#      deterministic .bin shim right next to the entry point, regardless of
+#      hoisting. If you copy this recipe, add `esbuild` as a devDependency of
+#      your own launcher's package.json the same way.
+#   3. `pnpm exec esbuild` as a last resort (works when esbuild is
+#      reachable somewhere in the workspace's dependency graph, but do not
+#      rely on this alone -- empirically inconsistent between a
+#      locally-accumulated install and a clean `pnpm install
+#      --frozen-lockfile` checkout, e.g. in CI, since pnpm's own bin
+#      resolution for `exec` is not guaranteed to see every transitive bin).
+ENTRY_DIR="$(cd "$(dirname "$ENTRY")" && pwd)"
 if [ -n "${ESBUILD_BIN:-}" ]; then
   ESBUILD_CMD=("$ESBUILD_BIN")
+elif [ -x "$ENTRY_DIR/node_modules/.bin/esbuild" ]; then
+  ESBUILD_CMD=("$ENTRY_DIR/node_modules/.bin/esbuild")
 else
   ESBUILD_CMD=(pnpm exec esbuild)
 fi

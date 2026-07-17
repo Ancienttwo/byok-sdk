@@ -16,8 +16,13 @@ repo and adapt it to your own entry point, signing, and release pipeline.
   matured through 21/22).
 - [`esbuild`](https://esbuild.github.io) to flatten the launcher + its
   dependency graph into a single file first (see "Why bundle to CommonJS
-  first" below) — any bundler that can produce a single CJS file works;
-  this repo already depends on esbuild transitively via `tsup`.
+  first" below) — any bundler that can produce a single CJS file works.
+  `examples/packaging` lists `esbuild` as a direct devDependency for exactly
+  this reason: a *transitive* dependency (this repo also pulls esbuild in
+  via `tsup`) is not reliably reachable through a fixed `node_modules/.bin`
+  path once pnpm's hoisting is strict (confirmed empirically — see
+  `build.sh`'s comments) — list it directly in your own launcher's
+  package.json the same way.
 - [`postject`](https://www.npmjs.com/package/postject) to inject the
   generated blob (`npx postject` works with no separate install; pin it as
   a devDependency instead if you want hermetic/offline builds).
