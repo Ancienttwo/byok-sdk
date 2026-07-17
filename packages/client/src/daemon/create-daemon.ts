@@ -1,3 +1,4 @@
+import { createEnvelope } from '@byok/protocol';
 import type { CapabilityFlag, RuntimeCapabilities as ProtocolRuntimeCapabilities, RuntimeId, RuntimeInfo } from '@byok/protocol';
 import type { PermissionPolicy } from '@byok/protocol';
 import type { RuntimeAdapter, RuntimeCapabilities } from '../types';
@@ -9,6 +10,7 @@ import { BlobClient } from './blob-client';
 import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
 import { ConnectionManager } from './connection-manager';
 import { CursorStore } from './cursor-store';
+import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { SessionWorkspaceStore } from './session-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
 import { TaskRunner, type TaskRunnerDeps } from './task-runner';
@@ -75,6 +77,41 @@ export interface Daemon {
   start(): Promise<void>;
   stop(): Promise<void>;
   status(): DaemonStatus;
+  /**
+   * M3-2a: local observability — subscribe to live `DaemonEvent`s (task
+   * feed, connection/pairing state changes, runtime-detection results) as
+   * they happen on THIS daemon, no SaaS-side polling required. Returns an
+   * unsubscribe function; a listener that throws is caught and logged, never
+   * propagated (see `observer.ts`). Purely additive: emitting these never
+   * changes `status()` or any existing wire/task behavior.
+   */
+  subscribe(listener: DaemonEventListener): Unsubscribe;
+  /** M3-2a: current locally-known tasks and their derived state/summary (for a `tasks` CLI subcommand) — reflects only what this daemon has observed since it started; see `observer.ts`'s `DaemonObserver.tasks`. */
+  tasks(): DaemonTaskInfo[];
+  /**
+   * M3-2a: clears this device's persisted identity/credentials and
+   * disconnects — the next `start()` throws until `pair()` is called again.
+   * Safe to call at any point in the daemon's lifecycle (never paired,
+   * paired-but-not-started, or running).
+   */
+  unpair(): Promise<void>;
+  /**
+   * M3-2a: locally resolve a task currently paused on `needs_approval` —
+   * drives the exact same code path a server-sent `task.approve` does
+   * (`TaskRunner.handleApprove`), invoked directly instead of over the wire.
+   * Honest-but-currently-unexercised: none of the three bundled adapters
+   * (pi/claude/codex) ever actually pauses for approval — each one's
+   * `resolveApproval` throws unconditionally (see `toRuntimeInfoCapabilities`'s
+   * doc comment below) — so calling this against a task on this daemon today
+   * always fails that task with a clear reason instead of resuming it,
+   * exactly as an honest, doing-nothing-magic implementation should. Ready
+   * for the day a runtime adapter implements real interactive approval, with
+   * no further changes needed here. A no-op (resolves immediately) for a
+   * `taskId` this daemon doesn't currently have active.
+   */
+  approve(taskId: string): Promise<void>;
+  /** M3-2a: same as {@link approve} but rejects — see that method's doc comment. */
+  reject(taskId: string, reason?: string): Promise<void>;
 }
 
 /** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options or a runtime beyond the three bundled ones. */
@@ -208,19 +245,37 @@ export function createDaemonWithAdapters(
   const store = new DeviceStore(storeDir);
   const cursorStore = new CursorStore(storeDir);
   const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
+  // M3-2a: local observability — constructed once per daemon instance (not
+  // per `start()`) so `subscribe()`/`tasks()` work immediately after
+  // `createDaemonWithAdapters()` returns and keep accumulating across an
+  // internal stop()/start() cycle within the same instance. See `observer.ts`.
+  const observer = new DaemonObserver();
 
   let connection: ConnectionManager | undefined;
   let connectionState: ConnectionState = 'closed';
   let runner: TaskRunner | undefined;
 
-  const auth = new AuthManager({
-    serverUrl: config.serverUrl,
-    store,
-    deviceName: config.deviceName,
-    onRevoked: () => {
-      connectionState = 'revoked';
-    },
-  });
+  // M3-2a: `let`, not `const` — `unpair()` below rebuilds this from scratch
+  // (fresh, no cached in-memory `record`) rather than mutating the existing
+  // instance. `AuthManager` has no reset/forget method of its own (out of
+  // scope: owned by a concurrent worker's untouched file) and caches its
+  // `record` in memory once loaded, so merely clearing `store` on disk isn't
+  // enough on its own — a same-process `loadExisting()` call would keep
+  // returning the cached record. Reconstructing `auth` is the seam this file
+  // already owns end-to-end; `pair`/`start`/`status`/`stop` all read the
+  // CURRENT closure variable at call time, so a fresh instance is picked up
+  // by every one of them with no further wiring.
+  function buildAuthManager(): AuthManager {
+    return new AuthManager({
+      serverUrl: config.serverUrl,
+      store,
+      deviceName: config.deviceName,
+      onRevoked: () => {
+        connectionState = 'revoked';
+      },
+    });
+  }
+  let auth = buildAuthManager();
 
   async function pair(pairingCode: string): Promise<DeviceRecord> {
     // Finding F5: capture whatever device is currently on disk for this
@@ -235,6 +290,7 @@ export function createDaemonWithAdapters(
     if (previous && previous.deviceId !== record.deviceId) {
       await cursorStore.clear(config.serverUrl, previous.deviceId);
     }
+    observer.notePaired(record.deviceId);
     return record;
   }
 
@@ -248,6 +304,10 @@ export function createDaemonWithAdapters(
       detectRuntimes(adapters),
       Promise.resolve(new BlobClient(config.serverUrl, auth)),
     ]);
+    // M3-2a: local runtime-detection result — computed once per `start()`,
+    // same as the `conn.hello.runtimes` it also feeds (see `detectRuntimes`'s
+    // own doc comment on why this isn't re-probed on every reconnect).
+    observer.noteRuntimesDetected(runtimes);
     const capabilities = computeCapabilities(adapters);
 
     const deps: TaskRunnerDeps = {
@@ -256,7 +316,18 @@ export function createDaemonWithAdapters(
       permissionDefaults: config.permissionDefaults,
       workspaceRoot: config.workspaceRoot,
       deviceId: record.deviceId,
-      send: (envelope) => connection?.send(envelope),
+      // M3-2a: `send` is already this file's OWN closure (not something
+      // `TaskRunner` builds) — every `task.claim`/`task.started`/
+      // `task.progress`/`task.artifact`/`task.await_approval`/
+      // `task.complete`/`task.fail`/`task.decline`/`task.cancelled`
+      // `TaskRunner` ever emits passes through here. Feeding the observer
+      // first (never throws — see `observer.ts`) and then sending exactly as
+      // before is the entire integration; `task-runner.ts` itself is
+      // untouched. See `observer.ts`'s module doc comment.
+      send: (envelope) => {
+        observer.handleOutboundEnvelope(envelope);
+        connection?.send(envelope);
+      },
       blobClient,
       batcherOptions: overrides.batch,
       sessionWorkspaces,
@@ -274,9 +345,17 @@ export function createDaemonWithAdapters(
       // Finding F3: return (not void-and-forget) so ConnectionManager can
       // await this handler and only advance/persist its redelivery cursor
       // once it actually resolves — see connection-manager.ts's `process`.
-      onEnvelope: (envelope) => runner?.handleEnvelope(envelope) ?? Promise.resolve(),
+      // M3-2a: also this file's own closure, unrelated to F3's redelivery
+      // semantics above — `handleInboundEnvelope` only ever looks at
+      // `task.offer` (the one event with no corresponding outbound envelope
+      // of its own) and never throws, so it can't affect cursor advancement.
+      onEnvelope: (envelope) => {
+        observer.handleInboundEnvelope(envelope);
+        return runner?.handleEnvelope(envelope) ?? Promise.resolve();
+      },
       onStateChange: (state) => {
         connectionState = state;
+        observer.noteConnectionState(state);
       },
       backoff: overrides.backoff,
       liveness: overrides.liveness,
@@ -295,6 +374,63 @@ export function createDaemonWithAdapters(
     connectionState = 'closed';
   }
 
+  /**
+   * M3-2a: clears this device's persisted identity and disconnects. Safe at
+   * any point in the lifecycle:
+   *  - `stop()` is a no-op beyond clearing state if `start()` was never
+   *    called (`connection` stays `undefined`; `auth.stop()` on a
+   *    never-renewed `AuthManager` just no-ops its unset timer).
+   *  - `store.clear()` (`fs.rm(..., { force: true })`) is a no-op if this
+   *    device was never paired.
+   * Reads the on-disk record BEFORE clearing (mirrors `pair()`'s own F5
+   * pattern above) so the cursor hygiene cleanup below knows which device's
+   * entry to remove; rebuilding `auth` (see `buildAuthManager`) is what
+   * actually makes the NEXT `start()` require a fresh `pair()` — clearing
+   * `store` alone would leave a same-process `AuthManager`'s cached
+   * in-memory record still usable.
+   */
+  async function unpair(): Promise<void> {
+    const current = await store.load();
+    await stop();
+    await store.clear();
+    if (current) {
+      await cursorStore.clear(config.serverUrl, current.deviceId);
+    }
+    auth = buildAuthManager();
+    observer.noteUnpaired();
+  }
+
+  /**
+   * M3-2a: local approve/reject — see the `Daemon` interface's own doc
+   * comments on {@link Daemon.approve}/{@link Daemon.reject} for the full
+   * rationale (honest-but-currently-unexercised; every bundled adapter's
+   * `resolveApproval` throws unconditionally today). Constructs the exact
+   * envelope shape a server-sent `task.approve`/`task.reject` would be and
+   * feeds it straight to `runner.handleEnvelope` — `TaskRunner`'s only public
+   * entry point — rather than reaching into its private `handleApprove`/
+   * `handleReject`. `seq: 0` is an inert local sentinel: this call never
+   * passes through `ConnectionManager`, so nothing ever reads it as a real
+   * redelivery cursor value, and `TaskRunner` itself only ever reads
+   * `task_id`/`payload` off an approve/reject envelope, never `seq`.
+   */
+  async function approve(taskId: string): Promise<void> {
+    if (!runner) throw new Error('daemon is not started; call start() first');
+    await runner.handleEnvelope(createEnvelope('task.approve', {}, { taskId, seq: 0 }));
+  }
+
+  async function reject(taskId: string, reason?: string): Promise<void> {
+    if (!runner) throw new Error('daemon is not started; call start() first');
+    await runner.handleEnvelope(createEnvelope('task.reject', { reason }, { taskId, seq: 0 }));
+  }
+
+  function subscribe(listener: DaemonEventListener): Unsubscribe {
+    return observer.subscribe(listener);
+  }
+
+  function tasks(): DaemonTaskInfo[] {
+    return observer.tasks();
+  }
+
   function status(): DaemonStatus {
     return {
       paired: auth.deviceId !== undefined,
@@ -307,7 +443,7 @@ export function createDaemonWithAdapters(
     };
   }
 
-  return { pair, start, stop, status };
+  return { pair, start, stop, status, subscribe, tasks, unpair, approve, reject };
 }
 
 /**

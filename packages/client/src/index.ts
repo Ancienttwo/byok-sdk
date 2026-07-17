@@ -14,6 +14,11 @@ export { AuthManager, DeviceRevokedError } from './daemon/auth-manager';
 export type { ConnectionState } from './daemon/ws-transport';
 export { BlobClient } from './daemon/blob-client';
 export type { BlobResolver } from './daemon/blob-client';
+// M3-2a: local observability — the seam the CLI (M3-2b) consumes for a live
+// task feed, a task list, and approve/reject/unpair, all local to a running
+// daemon. See `daemon/observer.ts`.
+export { DaemonObserver } from './daemon/observer';
+export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
 
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions } from './adapters/pi/pi-adapter';
