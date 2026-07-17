@@ -16,6 +16,9 @@ import { ClaudeProcessClient, type SpawnFn } from './process-client';
 
 const execFileAsync = promisify(execFile);
 
+/** Applied to both `detect()` probe calls (`--version`, `auth status --json`) — mirrors codex-adapter.ts's identical `DETECT_TIMEOUT_MS`/rationale exactly (cross-model review finding: these two claude probes previously had NO timeout at all, unlike codex's, so a hung claude CLI could block daemon startup and every `detect()` call indefinitely). `detect()` runs on every allowlist-narrowed task offer, so a small ceiling is cheap insurance against either probe ever unexpectedly hanging. */
+const DETECT_TIMEOUT_MS = 5000;
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -104,7 +107,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // Empirically confirmed (unlike pi, which prints to stderr — see
       // ../pi/pi-adapter.ts's own doc comment on that): claude 2.1.212
       // prints `--version` output to STDOUT.
-      const { stdout } = await execFileAsync(bin.command, ['--version']);
+      const { stdout } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
       const version = stdout.trim();
       const authPresent = await this.probeAuthPresent(bin.command);
       return { present: true, version, authPresent };
@@ -184,6 +187,21 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throw err;
     }
 
+    // Cross-model review finding: the doc comment above states this is
+    // "confirmed" to always hold empirically — but nothing actually verified
+    // it in code, so a future/unobserved claude behavior (or a bug) silently
+    // resuming a DIFFERENT session than `task.sessionRef` asked for would
+    // have gone completely unnoticed: this adapter would return a
+    // `ClaudeSession` for whatever `sessionRef` claude happened to report,
+    // running the task against the wrong workspace/history with no signal
+    // to the caller at all. Fail closed instead of trusting the assumption.
+    if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
+      client.kill();
+      throw new Error(
+        `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef}) — refusing to continue in a possibly-wrong session (fail-closed)`,
+      );
+    }
+
     return new ClaudeSession(sessionRef, client, ctx.workspaceDir);
   }
 
@@ -208,7 +226,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
    */
   private async probeAuthPresent(command: string): Promise<boolean> {
     try {
-      const { stdout } = await execFileAsync(command, ['auth', 'status', '--json']);
+      const { stdout } = await execFileAsync(command, ['auth', 'status', '--json'], { timeout: DETECT_TIMEOUT_MS });
       const parsed = JSON.parse(stdout) as { loggedIn?: unknown };
       return parsed.loggedIn === true;
     } catch {

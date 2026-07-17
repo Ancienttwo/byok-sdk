@@ -113,6 +113,17 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     await expect(adapter.start(task, ctx)).rejects.toThrow(/no rollout found/);
   });
 
+  it('cross-model review (Fix 2): fails closed when codex resume echoes a thread id different from the one requested (never silently continues in a possibly-wrong session)', async () => {
+    const adapter = fakeCodexAdapter();
+    const ctx = await makeCtx({
+      ...process.env,
+      FAKE_CODEX_THREAD_ID: 'resume-me-123', // what the resume-target validation checks against (so the resume itself "succeeds")
+      FAKE_CODEX_REPORTED_THREAD_ID: 'some-other-thread', // but thread.started reports a DIFFERENT id
+    });
+    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
+    await expect(adapter.start(task, ctx)).rejects.toThrow(/echoed a different thread id than requested/);
+  });
+
   it('fails closed (never a fabricated sessionRef) when codex does not yield thread.started as its first event', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_NO_THREAD_STARTED: '1' });
@@ -140,6 +151,29 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(events).toContainEqual({ type: 'progress', text: 'attempting...' });
     expect(events).toContainEqual({ type: 'error', message: 'model rejected the request' });
   });
+
+  it('cross-model review (Fix 1): fake-codex exits after a partial turn with NO terminal event at all — the event stream ENDS (not a hang) and surfaces a synthetic error with stderr context', async () => {
+    const adapter = fakeCodexAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_EXIT_NO_TERMINAL: '1' });
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+
+    // A bare, UNBOUNDED for-await here is the whole point: pre-fix, this is
+    // exactly what the reviewer reproduced hanging forever ("process exited,
+    // 250ms later next() still pending"). If this regresses, the test fails
+    // via vitest's own per-test timeout below rather than hanging the suite.
+    const events: AgentEvent[] = [];
+    for await (const event of session.events) {
+      events.push(event);
+    }
+
+    expect(events.some((e) => e.type === 'turn_end')).toBe(false);
+    expect(events).toContainEqual({ type: 'tool_use', tool: 'command_execution', input: { command: '/bin/sh -c "long-running-thing"' } });
+    const lastEvent = events[events.length - 1] as { type: string; message?: string };
+    expect(lastEvent.type).toBe('error');
+    expect(lastEvent.message).toMatch(/exited without completing the turn/);
+    expect(lastEvent.message).toMatch(/worker crashed unexpectedly/); // stderr ring context, per buildExitError
+  }, 5000);
 
   it('FAKE_CODEX_ARTIFACT_NAME drives a real file write + an artifact AgentEvent with a workspace-relative name', async () => {
     const adapter = fakeCodexAdapter();
@@ -173,6 +207,35 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(followUpEvents).toContainEqual({ type: 'turn_end' });
     expect(followUpEvents.filter((e) => e.type === 'turn_end')).toHaveLength(1);
     expect(followUpEvents).toContainEqual({ type: 'usage', inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 });
+  });
+
+  it('cross-model review (Fix 2): followUp() adopts the freshly-returned thread id, so a LATER followUp() resumes the CURRENT id rather than a stale one', async () => {
+    const adapter = fakeCodexAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a' });
+    const session = await adapter.start(baseTask, ctx); // fresh start, no resume requested
+    openSessions.push(session);
+    expect(session.sessionRef).toBe('thread-a');
+    await takeEvents(session, 7);
+
+    // Turn 2: codex resumes 'thread-a' successfully but THIS run reports a
+    // NEW thread id ('thread-b') on its own thread.started — e.g. codex
+    // re-keyed the thread on resume. followUp() must adopt this as the new
+    // sessionRef rather than silently keeping 'thread-a' (the original bug:
+    // the returned id was discarded entirely).
+    ctx.env.FAKE_CODEX_REPORTED_THREAD_ID = 'thread-b';
+    await session.followUp({ instruction: 'turn 2', policy: { mode: 'auto' } });
+    expect(session.sessionRef).toBe('thread-b');
+    await takeEvents(session, 7);
+
+    // Turn 3: must resume 'thread-b' (the CURRENT id) — proven by making the
+    // fixture's own resume-target validation accept ONLY 'thread-b' now: a
+    // stale resume of 'thread-a' (the pre-fix bug) would hit the fixture's
+    // real "no rollout found" rejection and this call would reject instead
+    // of resolving.
+    delete ctx.env.FAKE_CODEX_REPORTED_THREAD_ID;
+    ctx.env.FAKE_CODEX_THREAD_ID = 'thread-b';
+    await expect(session.followUp({ instruction: 'turn 3', policy: { mode: 'auto' } })).resolves.toBeUndefined();
+    expect(session.sessionRef).toBe('thread-b');
   });
 
   it('followUp() fails closed on a policy codex cannot express, without disturbing the already-open session', async () => {

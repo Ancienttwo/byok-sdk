@@ -64,6 +64,33 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
+  it('cross-model review (Fix 4): detect() fails closed (present:false) within the timeout when the fake `--version` hangs', async () => {
+    const adapter = fakeClaudeAdapter();
+    const original = process.env.FAKE_CLAUDE_VERSION_HANG;
+    process.env.FAKE_CLAUDE_VERSION_HANG = '1';
+    try {
+      const result = await adapter.detect();
+      expect(result.present).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env.FAKE_CLAUDE_VERSION_HANG;
+      else process.env.FAKE_CLAUDE_VERSION_HANG = original;
+    }
+  }, 8000);
+
+  it('cross-model review (Fix 4): detect() fails closed (authPresent:false, present still true) within the timeout when the fake `auth status` hangs', async () => {
+    const adapter = fakeClaudeAdapter();
+    const original = process.env.FAKE_CLAUDE_AUTH_HANG;
+    process.env.FAKE_CLAUDE_AUTH_HANG = '1';
+    try {
+      const result = await adapter.detect();
+      expect(result.present).toBe(true);
+      expect(result.authPresent).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env.FAKE_CLAUDE_AUTH_HANG;
+      else process.env.FAKE_CLAUDE_AUTH_HANG = original;
+    }
+  }, 8000);
+
   it('capabilities() advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm mode excluded)', () => {
     const adapter = fakeClaudeAdapter();
     expect(adapter.capabilities()).toEqual({ steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan'] });
@@ -98,6 +125,17 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const session = await adapter.start(task, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('resume-me-123');
+  });
+
+  it('cross-model review (Fix 2): fails closed when claude --resume echoes a session id different from the one requested (never silently continues in a possibly-wrong session)', async () => {
+    const adapter = fakeClaudeAdapter();
+    const ctx = await makeCtx({
+      ...process.env,
+      FAKE_CLAUDE_SESSION_ID: 'resume-me-123', // what the --resume-target validation checks against (so the resume itself "succeeds")
+      FAKE_CLAUDE_REPORTED_SESSION_ID: 'some-other-session', // but system/init reports a DIFFERENT id
+    });
+    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
+    await expect(adapter.start(task, ctx)).rejects.toThrow(/echoed a different session id than requested/);
   });
 
   it('an unresolvable sessionRef surfaces claude\'s real resume rejection as a clean start() failure, not a hang (empirically confirmed against real claude: "No conversation found with session ID: ...", exit 1)', async () => {

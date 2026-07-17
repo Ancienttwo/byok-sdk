@@ -202,6 +202,26 @@ describe('mapClaudeMessageToAgentEvents', () => {
     });
   });
 
+  it('cross-model review (Fix 3): a result with a MISSING is_error is never reported as success — fails closed rather than treating an absent flag as success', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', result: 'done' }; // no is_error at all
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events.some((e) => e.type === 'turn_end')).toBe(false);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'error' });
+    expect((result.events[0] as { message: string }).message).toMatch(/missing\/invalid is_error flag/);
+  });
+
+  it('cross-model review (Fix 3): a result with a NON-BOOLEAN is_error is never reported as success — fails closed rather than coercing truthiness', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', result: 'done', is_error: 'false' };
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events.some((e) => e.type === 'turn_end')).toBe(false);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'error' });
+    expect((result.events[0] as { message: string }).message).toMatch(/missing\/invalid is_error flag/);
+  });
+
   it('treats known-routine system subtypes as no-ops, never unmapped', () => {
     const correlation = createToolUseCorrelation();
     for (const subtype of ROUTINE_CLAUDE_SYSTEM_SUBTYPES) {

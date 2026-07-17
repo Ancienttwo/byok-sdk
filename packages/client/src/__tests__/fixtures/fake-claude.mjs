@@ -27,6 +27,16 @@
 //   FAKE_CLAUDE_VERSION=<text>          -> overrides `--version` output.
 //   FAKE_CLAUDE_AUTH_STATUS=<json>      -> overrides `auth status --json` output.
 //   FAKE_CLAUDE_AUTH_STATUS_FAIL=1      -> `auth status --json` exits 1 with no stdout.
+//   FAKE_CLAUDE_VERSION_HANG=1          -> `claude --version` never responds
+//                                          at all (no stdout, no exit) —
+//                                          cross-model review finding (Fix
+//                                          4): proves claude-adapter.ts's
+//                                          own DETECT_TIMEOUT_MS actually
+//                                          bounds detect() instead of
+//                                          hanging it forever.
+//   FAKE_CLAUDE_AUTH_HANG=1             -> `claude auth status --json` never
+//                                          responds at all — same Fix 4
+//                                          rationale as FAKE_CLAUDE_VERSION_HANG.
 //   FAKE_CLAUDE_SESSION_ID=<id>         -> this run's session id (default
 //                                          'fake-claude-session-1'), reported
 //                                          on every turn's `system/init` frame
@@ -39,6 +49,19 @@
 //                                          exactly like real claude's own
 //                                          unresolvable-resume case (see
 //                                          below).
+//   FAKE_CLAUDE_REPORTED_SESSION_ID=<id> -> overrides ONLY the session_id
+//                                          actually reported in system/init
+//                                          (and every other frame's own
+//                                          session_id field) this run, kept
+//                                          independent of FAKE_CLAUDE_SESSION_ID
+//                                          (which still gates the --resume
+//                                          target validation below).
+//                                          Simulates claude silently
+//                                          resuming/reporting a DIFFERENT
+//                                          session than the one actually
+//                                          requested, for exercising
+//                                          claude-adapter.ts's own resume-
+//                                          identity fail-closed check.
 //   FAKE_CLAUDE_CRASH_WITH_STDERR=<msg> -> write <msg> to stderr and exit 1
 //                                          immediately, before reading any
 //                                          stdin — simulates a bad-flag-class
@@ -98,235 +121,264 @@ import { createInterface } from 'node:readline';
 
 const argv = process.argv.slice(2);
 
-if (argv.length === 2 && argv[0] === 'auth' && argv[1] === 'status') {
-  // real invocation is `auth status --json` (3 args) — guard against a
-  // future accidental argv-shape drift the same way the strict validator
-  // below guards the -p flow. Handled together with the --json variant
-  // just below since both are read-only, no-stdin invocations.
-  process.stderr.write("error: unknown option '--json' is missing\n");
-  process.exit(1);
+// Fix 4 (cross-model review, probe timeout): checked FIRST, before any other
+// argv handling below, and deliberately never calls process.exit() — the
+// whole point is to keep the process running so the CALLER's own timeout
+// (claude-adapter.ts's DETECT_TIMEOUT_MS) is what has to end it, exactly
+// like a real hung CLI would. The rest of this script lives inside
+// runProbeOrTurnFlow() below, invoked only in the `else` branch, since a
+// bare top-level `return` isn't valid outside a function (this is an ES
+// module) — falling through into the flag validation further down would
+// otherwise treat `--version`/`--json` as an unrecognized option and exit
+// immediately, defeating the hang simulation.
+const isVersionInvocation = argv.includes('--version');
+const isAuthStatusInvocation = argv[0] === 'auth' && argv[1] === 'status';
+if (
+  (process.env.FAKE_CLAUDE_VERSION_HANG === '1' && isVersionInvocation) ||
+  (process.env.FAKE_CLAUDE_AUTH_HANG === '1' && isAuthStatusInvocation)
+) {
+  setInterval(() => {}, 60000); // keep the process alive until killed (SIGTERM) — see FAKE_CLAUDE_VERSION_HANG/FAKE_CLAUDE_AUTH_HANG above
+} else {
+  runProbeOrTurnFlow();
 }
 
-if (argv[0] === 'auth' && argv[1] === 'status' && argv[2] === '--json') {
-  if (process.env.FAKE_CLAUDE_AUTH_STATUS_FAIL === '1') {
-    process.stderr.write('error: not logged in\n');
+function runProbeOrTurnFlow() {
+  if (argv.length === 2 && argv[0] === 'auth' && argv[1] === 'status') {
+    // real invocation is `auth status --json` (3 args) — guard against a
+    // future accidental argv-shape drift the same way the strict validator
+    // below guards the -p flow. Handled together with the --json variant
+    // just below since both are read-only, no-stdin invocations.
+    process.stderr.write("error: unknown option '--json' is missing\n");
     process.exit(1);
   }
-  const body =
-    process.env.FAKE_CLAUDE_AUTH_STATUS ??
-    JSON.stringify({
-      loggedIn: true,
-      authMethod: 'claude.ai',
-      apiProvider: 'firstParty',
-      email: 'fake@example.com',
-      orgId: 'org-fake',
-      orgName: "fake's Organization",
-      subscriptionType: 'max',
-    });
-  process.stdout.write(`${body}\n`);
-  process.exit(0);
-}
 
-if (argv.includes('--version')) {
-  process.stdout.write(`${process.env.FAKE_CLAUDE_VERSION ?? '2.0.0-fake'}\n`);
-  process.exit(0);
-}
-
-if (process.env.FAKE_CLAUDE_CRASH_WITH_STDERR) {
-  process.stderr.write(`${process.env.FAKE_CLAUDE_CRASH_WITH_STDERR}\n`);
-  process.exit(1);
-}
-
-// Exactly the flags packages/client/src/adapters/claude/claude-adapter.ts
-// can ever construct today — see the module doc comment above.
-const FLAG_TAKES_VALUE = {
-  '-p': false,
-  '--input-format': true,
-  '--output-format': true,
-  '--verbose': false,
-  '--resume': true,
-  '--permission-mode': true,
-  '--tools': true,
-};
-
-for (let i = 0; i < argv.length; i++) {
-  const arg = argv[i];
-  if (!arg.startsWith('--') && arg !== '-p') continue;
-  if (!(arg in FLAG_TAKES_VALUE)) {
-    process.stderr.write(`error: unknown option '${arg}'\n`);
-    process.exit(1);
-  }
-  if (FLAG_TAKES_VALUE[arg]) i += 1; // skip this flag's value token
-}
-
-const sessionId = process.env.FAKE_CLAUDE_SESSION_ID ?? 'fake-claude-session-1';
-
-const resumeIdx = argv.indexOf('--resume');
-if (resumeIdx !== -1) {
-  const requested = argv[resumeIdx + 1];
-  if (requested !== sessionId) {
-    // Verbatim format+behavior, empirically confirmed against real claude
-    // 2.1.212 given an unresolvable --resume target: a clean, parseable
-    // `result` frame on stdout AND the same message on stderr, exit 1 —
-    // never a hang, never a fabricated fresh session.
-    const errMsg = `No conversation found with session ID: ${requested}`;
-    process.stdout.write(
-      `${JSON.stringify({
-        type: 'result',
-        subtype: 'error_during_execution',
-        duration_ms: 0,
-        duration_api_ms: 0,
-        is_error: true,
-        num_turns: 0,
-        stop_reason: null,
-        session_id: requested,
-        total_cost_usd: 0,
-        usage: {},
-        permission_denials: [],
-        errors: [errMsg],
-      })}\n`,
-    );
-    process.stderr.write(`${errMsg}\n`);
-    process.exit(1);
-  }
-}
-
-function send(obj) {
-  process.stdout.write(`${JSON.stringify(obj)}\n`);
-}
-
-const rl = createInterface({ input: process.stdin, terminal: false });
-let turn = 0;
-
-rl.on('line', (line) => {
-  let msg;
-  try {
-    msg = JSON.parse(line);
-  } catch {
-    return;
-  }
-  if (msg.type !== 'user') return; // only real input shape this fixture accepts, per --input-format stream-json
-  const text = msg.message?.content?.[0]?.text ?? '';
-  runTurn(text);
-});
-
-function runTurn(incomingText) {
-  turn += 1;
-
-  send({
-    type: 'system',
-    subtype: 'init',
-    cwd: process.cwd(),
-    session_id: sessionId,
-    tools: ['Bash', 'Edit', 'Read', 'Write'],
-    permissionMode: 'default',
-  });
-
-  if (process.env.FAKE_CLAUDE_UNKNOWN_TOP_LEVEL === '1' && turn === 1) {
-    send({ type: 'totally_novel_top_level_frame', session_id: sessionId });
-  }
-  if (process.env.FAKE_CLAUDE_UNKNOWN_SYSTEM_SUBTYPE === '1' && turn === 1) {
-    send({ type: 'system', subtype: 'totally_novel_subtype', session_id: sessionId });
-  }
-
-  const toolUseId = `toolu_fake_${turn}`;
-  const artifactPath = process.env.FAKE_CLAUDE_ARTIFACT_PATH;
-
-  if (artifactPath) {
-    const resolved = path.resolve(process.cwd(), artifactPath);
-    send({
-      type: 'assistant',
-      message: { model: 'fake-model', id: `msg_${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Write', input: { file_path: resolved, content: process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body' } }] },
-      session_id: sessionId,
-    });
-
-    if (process.env.FAKE_CLAUDE_DENY === '1') {
-      send({
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: `Claude requested permissions to write to ${resolved}, but you haven't granted it yet.`, is_error: true }] },
-        tool_use_result: `Error: Claude requested permissions to write to ${resolved}, but you haven't granted it yet.`,
-        session_id: sessionId,
-      });
-    } else {
-      mkdirSync(path.dirname(resolved), { recursive: true });
-      writeFileSync(resolved, process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body');
-      send({
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: `File created successfully at: ${resolved}` }] },
-        tool_use_result: { type: 'create', filePath: resolved, content: process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body', structuredPatch: [], originalFile: null, userModified: false },
-        session_id: sessionId,
-      });
+  if (argv[0] === 'auth' && argv[1] === 'status' && argv[2] === '--json') {
+    if (process.env.FAKE_CLAUDE_AUTH_STATUS_FAIL === '1') {
+      process.stderr.write('error: not logged in\n');
+      process.exit(1);
     }
-  } else {
-    send({
-      type: 'assistant',
-      message: { model: 'fake-model', id: `msg_${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Bash', input: { command: 'echo hi' } }] },
-      session_id: sessionId,
-    });
+    const body =
+      process.env.FAKE_CLAUDE_AUTH_STATUS ??
+      JSON.stringify({
+        loggedIn: true,
+        authMethod: 'claude.ai',
+        apiProvider: 'firstParty',
+        email: 'fake@example.com',
+        orgId: 'org-fake',
+        orgName: "fake's Organization",
+        subscriptionType: 'max',
+      });
+    process.stdout.write(`${body}\n`);
+    process.exit(0);
+  }
 
-    if (process.env.FAKE_CLAUDE_DENY === '1') {
-      send({
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'Claude requested permissions to use Bash, but you haven\'t granted it yet.', is_error: true }] },
-        tool_use_result: 'Error: Claude requested permissions to use Bash, but you haven\'t granted it yet.',
-        session_id: sessionId,
-      });
-    } else {
-      send({
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'hi\n' }] },
-        tool_use_result: { stdout: 'hi\n', stderr: '', interrupted: false, isImage: false },
-        session_id: sessionId,
-      });
+  if (argv.includes('--version')) {
+    process.stdout.write(`${process.env.FAKE_CLAUDE_VERSION ?? '2.0.0-fake'}\n`);
+    process.exit(0);
+  }
+
+  if (process.env.FAKE_CLAUDE_CRASH_WITH_STDERR) {
+    process.stderr.write(`${process.env.FAKE_CLAUDE_CRASH_WITH_STDERR}\n`);
+    process.exit(1);
+  }
+
+  // Exactly the flags packages/client/src/adapters/claude/claude-adapter.ts
+  // can ever construct today — see the module doc comment above.
+  const FLAG_TAKES_VALUE = {
+    '-p': false,
+    '--input-format': true,
+    '--output-format': true,
+    '--verbose': false,
+    '--resume': true,
+    '--permission-mode': true,
+    '--tools': true,
+  };
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!arg.startsWith('--') && arg !== '-p') continue;
+    if (!(arg in FLAG_TAKES_VALUE)) {
+      process.stderr.write(`error: unknown option '${arg}'\n`);
+      process.exit(1);
+    }
+    if (FLAG_TAKES_VALUE[arg]) i += 1; // skip this flag's value token
+  }
+
+  const sessionId = process.env.FAKE_CLAUDE_SESSION_ID ?? 'fake-claude-session-1';
+
+  const resumeIdx = argv.indexOf('--resume');
+  if (resumeIdx !== -1) {
+    const requested = argv[resumeIdx + 1];
+    if (requested !== sessionId) {
+      // Verbatim format+behavior, empirically confirmed against real claude
+      // 2.1.212 given an unresolvable --resume target: a clean, parseable
+      // `result` frame on stdout AND the same message on stderr, exit 1 —
+      // never a hang, never a fabricated fresh session.
+      const errMsg = `No conversation found with session ID: ${requested}`;
+      process.stdout.write(
+        `${JSON.stringify({
+          type: 'result',
+          subtype: 'error_during_execution',
+          duration_ms: 0,
+          duration_api_ms: 0,
+          is_error: true,
+          num_turns: 0,
+          stop_reason: null,
+          session_id: requested,
+          total_cost_usd: 0,
+          usage: {},
+          permission_denials: [],
+          errors: [errMsg],
+        })}\n`,
+      );
+      process.stderr.write(`${errMsg}\n`);
+      process.exit(1);
     }
   }
 
-  if (process.env.FAKE_CLAUDE_HANG_AFTER_TOOL === '1') {
-    return; // stay "running" indefinitely — see the toggle's doc comment above
+  // The id actually reported in system/init and every other frame's own
+  // session_id field this run — independent of `sessionId` above (which
+  // only gates the --resume-target validation just above). See
+  // FAKE_CLAUDE_REPORTED_SESSION_ID's own doc comment for why this exists.
+  const reportedSessionId = process.env.FAKE_CLAUDE_REPORTED_SESSION_ID ?? sessionId;
+
+  function send(obj) {
+    process.stdout.write(`${JSON.stringify(obj)}\n`);
   }
 
-  const finalText = `reply-${turn}:${incomingText}`;
-  const content = [
-    { type: 'thinking', thinking: `thinking about turn ${turn}`, signature: 'fake-sig' },
-    { type: 'text', text: finalText },
-  ];
-  if (process.env.FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK === '1' && turn === 1) {
-    content.push({ type: 'totally_novel_block_type', payload: 'x' });
-  }
-  send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content }, session_id: sessionId });
+  const rl = createInterface({ input: process.stdin, terminal: false });
+  let turn = 0;
 
-  send({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' }, session_id: sessionId });
-
-  send({
-    type: 'result',
-    subtype: 'success',
-    is_error: false,
-    duration_ms: 10,
-    duration_api_ms: 8,
-    num_turns: turn,
-    stop_reason: 'end_turn',
-    session_id: sessionId,
-    total_cost_usd: 0.001,
-    // Real shape (field names + nesting) confirmed via a live `claude -p
-    // --output-format stream-json` probe against the installed claude
-    // 2.1.212 binary — see events.ts's `extractClaudeUsageEvent` doc
-    // comment. Values here are fixed/small rather than the live probe's
-    // real (much larger) numbers, matching this fixture's existing
-    // convention of deterministic placeholder data (e.g. total_cost_usd
-    // above is also a fixed placeholder, not a real cost).
-    usage: {
-      input_tokens: 15,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-      output_tokens: 20,
-      server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
-    },
-    result: finalText,
-    permission_denials:
-      process.env.FAKE_CLAUDE_DENY === '1'
-        ? [{ tool_name: artifactPath ? 'Write' : 'Bash', tool_use_id: toolUseId, tool_input: {} }]
-        : [],
+  rl.on('line', (line) => {
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (msg.type !== 'user') return; // only real input shape this fixture accepts, per --input-format stream-json
+    const text = msg.message?.content?.[0]?.text ?? '';
+    runTurn(text);
   });
-}
 
-process.on('SIGTERM', () => process.exit(143));
+  function runTurn(incomingText) {
+    turn += 1;
+
+    send({
+      type: 'system',
+      subtype: 'init',
+      cwd: process.cwd(),
+      session_id: reportedSessionId,
+      tools: ['Bash', 'Edit', 'Read', 'Write'],
+      permissionMode: 'default',
+    });
+
+    if (process.env.FAKE_CLAUDE_UNKNOWN_TOP_LEVEL === '1' && turn === 1) {
+      send({ type: 'totally_novel_top_level_frame', session_id: reportedSessionId });
+    }
+    if (process.env.FAKE_CLAUDE_UNKNOWN_SYSTEM_SUBTYPE === '1' && turn === 1) {
+      send({ type: 'system', subtype: 'totally_novel_subtype', session_id: reportedSessionId });
+    }
+
+    const toolUseId = `toolu_fake_${turn}`;
+    const artifactPath = process.env.FAKE_CLAUDE_ARTIFACT_PATH;
+
+    if (artifactPath) {
+      const resolved = path.resolve(process.cwd(), artifactPath);
+      send({
+        type: 'assistant',
+        message: { model: 'fake-model', id: `msg_${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Write', input: { file_path: resolved, content: process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body' } }] },
+        session_id: reportedSessionId,
+      });
+
+      if (process.env.FAKE_CLAUDE_DENY === '1') {
+        send({
+          type: 'user',
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: `Claude requested permissions to write to ${resolved}, but you haven't granted it yet.`, is_error: true }] },
+          tool_use_result: `Error: Claude requested permissions to write to ${resolved}, but you haven't granted it yet.`,
+          session_id: reportedSessionId,
+        });
+      } else {
+        mkdirSync(path.dirname(resolved), { recursive: true });
+        writeFileSync(resolved, process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body');
+        send({
+          type: 'user',
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: `File created successfully at: ${resolved}` }] },
+          tool_use_result: { type: 'create', filePath: resolved, content: process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body', structuredPatch: [], originalFile: null, userModified: false },
+          session_id: reportedSessionId,
+        });
+      }
+    } else {
+      send({
+        type: 'assistant',
+        message: { model: 'fake-model', id: `msg_${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Bash', input: { command: 'echo hi' } }] },
+        session_id: reportedSessionId,
+      });
+
+      if (process.env.FAKE_CLAUDE_DENY === '1') {
+        send({
+          type: 'user',
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'Claude requested permissions to use Bash, but you haven\'t granted it yet.', is_error: true }] },
+          tool_use_result: 'Error: Claude requested permissions to use Bash, but you haven\'t granted it yet.',
+          session_id: reportedSessionId,
+        });
+      } else {
+        send({
+          type: 'user',
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'hi\n' }] },
+          tool_use_result: { stdout: 'hi\n', stderr: '', interrupted: false, isImage: false },
+          session_id: reportedSessionId,
+        });
+      }
+    }
+
+    if (process.env.FAKE_CLAUDE_HANG_AFTER_TOOL === '1') {
+      return; // stay "running" indefinitely — see the toggle's doc comment above
+    }
+
+    const finalText = `reply-${turn}:${incomingText}`;
+    const content = [
+      { type: 'thinking', thinking: `thinking about turn ${turn}`, signature: 'fake-sig' },
+      { type: 'text', text: finalText },
+    ];
+    if (process.env.FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK === '1' && turn === 1) {
+      content.push({ type: 'totally_novel_block_type', payload: 'x' });
+    }
+    send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content }, session_id: reportedSessionId });
+
+    send({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' }, session_id: reportedSessionId });
+
+    send({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_ms: 10,
+      duration_api_ms: 8,
+      num_turns: turn,
+      stop_reason: 'end_turn',
+      session_id: reportedSessionId,
+      total_cost_usd: 0.001,
+      // Real shape (field names + nesting) confirmed via a live `claude -p
+      // --output-format stream-json` probe against the installed claude
+      // 2.1.212 binary — see events.ts's `extractClaudeUsageEvent` doc
+      // comment. Values here are fixed/small rather than the live probe's
+      // real (much larger) numbers, matching this fixture's existing
+      // convention of deterministic placeholder data (e.g. total_cost_usd
+      // above is also a fixed placeholder, not a real cost).
+      usage: {
+        input_tokens: 15,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        output_tokens: 20,
+        server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+      },
+      result: finalText,
+      permission_denials:
+        process.env.FAKE_CLAUDE_DENY === '1'
+          ? [{ tool_name: artifactPath ? 'Write' : 'Bash', tool_use_id: toolUseId, tool_input: {} }]
+          : [],
+    });
+  }
+
+  process.on('SIGTERM', () => process.exit(143));
+}

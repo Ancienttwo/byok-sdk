@@ -89,6 +89,28 @@
 //                                        listener here) matches the real
 //                                        binary's own empirically-confirmed
 //                                        SIGTERM-terminates-it behavior.
+//   FAKE_CODEX_EXIT_NO_TERMINAL=1      -> cross-model review finding (the
+//                                        "pi-hang class"): emit ONE partial
+//                                        item.started frame, then exit(1)
+//                                        with NO turn.completed, NO
+//                                        turn.failed, and no top-level error
+//                                        at all — nothing on the wire ever
+//                                        says this turn is over. Proves
+//                                        codex-adapter.ts's `runCodexTurn`
+//                                        ends the events stream itself
+//                                        (synthesizing a terminal `error`)
+//                                        instead of hanging `next()` forever.
+//   FAKE_CODEX_REPORTED_THREAD_ID=<id> -> overrides ONLY the thread_id
+//                                        reported in thread.started, kept
+//                                        independent of FAKE_CODEX_THREAD_ID
+//                                        (which still gates the `resume`
+//                                        positional's validation below).
+//                                        Simulates codex resuming/reporting
+//                                        a DIFFERENT thread id than the one
+//                                        actually requested, for exercising
+//                                        codex-adapter.ts's own resume-
+//                                        identity fail-closed check and its
+//                                        followUp()-uses-current-id fix.
 
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -170,7 +192,8 @@ if (process.env.FAKE_CODEX_NO_THREAD_STARTED === '1') {
   process.exit(1);
 }
 
-send({ type: 'thread.started', thread_id: threadId });
+const reportedThreadId = process.env.FAKE_CODEX_REPORTED_THREAD_ID ?? threadId;
+send({ type: 'thread.started', thread_id: reportedThreadId });
 send({ type: 'turn.started' });
 
 // Empirically, this benign informational notice (unrelated to task success)
@@ -195,6 +218,16 @@ if (process.env.FAKE_CODEX_HANG === '1') {
   send({ type: 'item.completed', item: { id: 'item_1', type: 'agent_message', text: 'attempting...' } });
   send({ type: 'error', message });
   send({ type: 'turn.failed', error: { message } });
+  process.exit(1);
+} else if (process.env.FAKE_CODEX_EXIT_NO_TERMINAL === '1') {
+  // See FAKE_CODEX_EXIT_NO_TERMINAL's own doc comment above: a partial turn,
+  // then the process just dies — no turn.completed, no turn.failed, no
+  // top-level error at all.
+  send({
+    type: 'item.started',
+    item: { id: 'item_1', type: 'command_execution', command: '/bin/sh -c "long-running-thing"', aggregated_output: '', exit_code: null, status: 'in_progress' },
+  });
+  process.stderr.write('fake-codex: worker crashed unexpectedly (simulated)\n');
   process.exit(1);
 } else {
   send({ type: 'item.completed', item: { id: 'item_1', type: 'agent_message', text: 'Running the command now.' } });

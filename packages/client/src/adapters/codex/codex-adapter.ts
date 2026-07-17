@@ -280,6 +280,14 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
     rejectFirstLine = reject;
   });
 
+  // Set once THIS turn's own mapped events include an explicit `turn_end` —
+  // see the `waitClosed()` watcher below (cross-model review finding, the
+  // "pi-hang class") for why this matters: `turn_end` already told
+  // task-runner.ts's `pump()` this specific turn is done, so the shared
+  // session-lifetime queue must stay open afterward (a later `followUp()`
+  // reuses this exact same queue — see `CodexSession` below).
+  let turnEnded = false;
+
   const runner = new CodexProcessRunner({
     command: params.command,
     args: argv,
@@ -299,11 +307,44 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
         return;
       }
       const mapped = mapCodexEventToAgentEvents(evt, params.workspaceDir);
-      for (const agentEvent of mapped) params.queue.push(agentEvent);
+      for (const agentEvent of mapped) {
+        if (agentEvent.type === 'turn_end') turnEnded = true;
+        params.queue.push(agentEvent);
+      }
       if (mapped.length === 0 && !isRoutineCodexEvent(evt)) {
         params.recordUnmapped(unmappedFrameKey(evt));
       }
     },
+  });
+
+  /**
+   * Cross-model review finding (the "pi-hang class" — a task that never
+   * completes): `codex exec` is one-shot PER TURN (see this module's own
+   * doc comment) — a failed turn (`turn.failed`, mapped to an `error`
+   * AgentEvent, deliberately NOT a `turn_end`) or any other unexpected exit
+   * (crash, an `interrupt()`-triggered SIGTERM) ends the child process
+   * without ever producing the one signal task-runner.ts's `pump()` treats
+   * as terminal. Nothing else in this file ever called `params.queue.end()`
+   * for that case — confirmed reproducible: the events async-iterable's
+   * `next()` stays pending forever, 250ms+ after the process has already
+   * exited. pi's own `PiRpcClient.onClosed` (`../pi/rpc-client.ts`)
+   * unconditionally ends its eventQueue on process close — correct THERE
+   * because pi is one long-lived process for a WHOLE session (closing means
+   * the whole session is over). Codex is architecturally different: a fresh
+   * process per turn, sharing ONE session-lifetime queue across turns (see
+   * `CodexSession.followUp()`) — unconditionally ending it here would wrongly
+   * terminate a session a later `followUp()` is about to keep using. So:
+   * only when THIS turn never reached `turn_end` do we surface a terminal
+   * `error` AgentEvent (exit code/signal + stderr ring tail via
+   * `buildExitError` — the real reason, never fabricated) and end the queue.
+   * `waitClosed()` never rejects (see process-runner.ts), so no `.catch()`
+   * is needed; pushing/ending an already-ended queue (e.g. `close()` beat
+   * this watcher to it) is a harmless no-op (`AsyncQueue` is idempotent).
+   */
+  void runner.waitClosed().then(() => {
+    if (turnEnded) return;
+    params.queue.push({ type: 'error', message: runner.buildExitError('codex exited without completing the turn').message });
+    params.queue.end();
   });
 
   // Race the first line against the process closing before ever producing
@@ -344,9 +385,20 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
     throw err;
   }
 
+  // Cross-model review finding: this used to only `console.warn` and
+  // continue on a mismatch — "a runtime silently falling back to a
+  // different session runs the task in the WRONG context." `expectedSessionRef`
+  // here is always an EXTERNALLY supplied ask (`CodexAdapter.start()`'s
+  // `task.sessionRef`, from the server/daemon — never `CodexSession
+  // .followUp()`, which intentionally omits it; see that method's own doc
+  // comment for why its own internal resume is handled differently). A
+  // mismatch against an external expectation means this adapter can no
+  // longer trust that codex resumed the workspace/history the caller
+  // actually meant — fail closed rather than quietly proceeding.
   if (params.expectedSessionRef !== undefined && sessionRef !== params.expectedSessionRef) {
-    console.warn(
-      `[byok/codex-adapter] codex exec resume echoed a different thread id than expected (expected ${params.expectedSessionRef}, got ${sessionRef}) — continuing with codex's own id as authoritative`,
+    runner.kill();
+    throw new Error(
+      `codex exec resume echoed a different thread id than requested (requested ${params.expectedSessionRef}, got ${sessionRef}) — refusing to continue in a possibly-wrong session (fail-closed)`,
     );
   }
 
@@ -365,7 +417,16 @@ interface CodexSessionOptions {
 }
 
 class CodexSession implements Session {
-  public readonly sessionRef: string;
+  /**
+   * NOT `readonly` (cross-model review finding): `followUp()` below adopts
+   * whatever thread id codex reports for each new resume — see its own doc
+   * comment for why silently keeping the value captured at construction
+   * time (the original bug: the NEW id `runCodexTurn` returns was discarded,
+   * and every later `followUp()` kept resuming the OLD, potentially stale,
+   * id) is itself a bug independent of the fail-closed check in
+   * `runCodexTurn`.
+   */
+  public sessionRef: string;
   private readonly command: string;
   private readonly workspaceDir: string;
   private readonly env: NodeJS.ProcessEnv;
@@ -411,6 +472,19 @@ class CodexSession implements Session {
    * config default instead of the policy this specific follow-up was
    * offered under, exactly the silent-widen failure mode this adapter exists
    * to prevent.
+   *
+   * Cross-model review finding: deliberately does NOT pass `expectedSessionRef`
+   * to `runCodexTurn` here — unlike `CodexAdapter.start()`, this resume
+   * targets OUR OWN previously-recorded `sessionRef`, not an externally
+   * supplied server expectation crossing a trust boundary (that fail-closed
+   * check belongs solely to `start()`'s `task.sessionRef` comparison; see
+   * `runCodexTurn`'s own doc comment on that check). Whatever id codex
+   * reports back for THIS resume is unambiguously the current, authoritative
+   * id for this session (only one candidate was ever offered) and is
+   * captured below as the new `sessionRef` — the original bug this fixes:
+   * the return value used to be discarded entirely, so every later
+   * `followUp()` kept resuming the OLD id even after codex had moved on to a
+   * new one.
    */
   async followUp(task: TaskOfferPayload): Promise<void> {
     if (typeof task.instruction !== 'string') {
@@ -425,7 +499,7 @@ class CodexSession implements Session {
       throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by codex adapter');
     }
 
-    const { runner } = await runCodexTurn({
+    const { sessionRef, runner } = await runCodexTurn({
       command: this.command,
       resumeRef: this.sessionRef,
       instruction: task.instruction,
@@ -436,8 +510,8 @@ class CodexSession implements Session {
       workspaceDir: this.workspaceDir,
       queue: this.queue,
       recordUnmapped: this.recordUnmapped,
-      expectedSessionRef: this.sessionRef,
     });
+    this.sessionRef = sessionRef;
     this.currentRunner = runner;
     void this.forgetRunnerOnceClosed(runner);
   }

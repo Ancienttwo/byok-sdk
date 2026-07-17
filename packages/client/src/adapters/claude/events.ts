@@ -341,17 +341,25 @@ function tryRealpath(candidate: string): string | undefined {
  */
 function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
   const usageEvent = extractClaudeUsageEvent(msg.usage);
-  if (msg.is_error !== true) {
+  // Cross-model review finding: success must require `is_error === false`
+  // EXPLICITLY — the previous `!== true` check treated a MISSING or
+  // non-boolean `is_error` (a malformed/future `result` frame) as success
+  // too, which would have reported task.complete for a turn that never
+  // actually said it succeeded. `result` is the wire's own terminal signal
+  // (see this function's own doc comment above) — never inferred.
+  if (msg.is_error === false) {
     const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'turn_end' }] : [{ type: 'turn_end' }];
     return { events };
   }
   const errors = Array.isArray(msg.errors) ? msg.errors.filter((e): e is string => typeof e === 'string') : [];
   const message =
-    errors.length > 0
-      ? errors.join('; ')
-      : typeof msg.result === 'string' && msg.result.length > 0
-        ? msg.result
-        : 'claude reported an error result';
+    msg.is_error === true
+      ? errors.length > 0
+        ? errors.join('; ')
+        : typeof msg.result === 'string' && msg.result.length > 0
+          ? msg.result
+          : 'claude reported an error result'
+      : `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed`;
   const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'error', message }] : [{ type: 'error', message }];
   return { events };
 }
