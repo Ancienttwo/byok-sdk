@@ -5,7 +5,7 @@ export default defineConfig({
   format: ['esm'],
   target: 'es2022',
   platform: 'node',
-  dts: true,
+  dts: false,
   sourcemap: true,
   clean: true,
   splitting: false,

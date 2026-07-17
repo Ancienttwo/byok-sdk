@@ -1,31 +1,19 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
-import {
-  CAPABILITY_FLAGS,
-  createEnvelope,
-  decodeEnvelope,
-  encodeEnvelope,
-  PROTOCOL_VERSION,
-  type ConnHelloPayload,
-} from '@byok/protocol';
+import { CAPABILITY_FLAGS, decodeEnvelope, PROTOCOL_VERSION, type ConnHelloPayload } from '@byok/protocol';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
+import { authenticateBearer, type AuthDeps } from './auth';
+import { startHeartbeat, type Heartbeat } from './heartbeat';
 import type { ConnectionHub } from './hub';
-import type { PairingManager } from './pairing';
 
 const WS_PATH = '/byok/ws';
 
 /**
- * Capability flags this M0 server actually implements. `blob-upload` is
- * withheld on purpose — M0 has no blob store (artifacts are inline-only,
- * <=64KB; see the M0 simplifications in the task/plan).
+ * Capability flags this server implements. Unlike the M0 server, `blob-upload`
+ * is no longer withheld — the blob store (§7, `blob-store.ts`) is now
+ * implemented, so both flags are advertised.
  */
-const SUPPORTED_CAPABILITIES: string[] = CAPABILITY_FLAGS.filter((flag) => flag !== 'blob-upload');
-
-function extractBearerToken(header: string | undefined): string | undefined {
-  if (!header) return undefined;
-  const match = /^Bearer\s+(.+)$/i.exec(header);
-  return match?.[1];
-}
+const SUPPORTED_CAPABILITIES: string[] = [...CAPABILITY_FLAGS];
 
 function matchesWsPath(url: string): boolean {
   return url.split('?')[0] === WS_PATH;
@@ -59,18 +47,21 @@ function toDecodable(data: RawData): string | Uint8Array {
   return data; // Buffer, which is a Uint8Array
 }
 
-interface AttachDeps {
-  pairing: PairingManager;
+interface AttachDeps extends AuthDeps {
   hub: ConnectionHub;
   productId: string;
+  /** WS-native ping interval, ms. Defaults inside `heartbeat.ts` (30s) if omitted. */
+  heartbeatIntervalMs?: number;
 }
 
 /**
  * Wire up the `GET /byok/ws` upgrade on a raw Node HTTP server (the one
  * `@hono/node-server`'s `serve()` returns). Auth happens on the upgrade
- * request itself via `Authorization: Bearer <deviceToken>`; unknown/invalid
- * tokens get a 401 and the socket is destroyed. Handshake (`conn.hello` ->
- * `conn.ack`) happens on the first WS message once upgraded.
+ * request itself via `Authorization: Bearer <accessToken>` (a JWT minted by
+ * `/byok/pair` or `/byok/token` — Auth v2, §6); an invalid, expired, or
+ * revoked token gets a 401 and the socket is destroyed. Handshake
+ * (`conn.hello` -> `conn.ack`) happens on the first WS message once
+ * upgraded.
  */
 export function attachWebSocket(server: HttpServer, deps: AttachDeps): void {
   const wss = new WebSocketServer({ noServer: true });
@@ -78,21 +69,22 @@ export function attachWebSocket(server: HttpServer, deps: AttachDeps): void {
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     if (!matchesWsPath(req.url ?? '')) return; // not ours; leave it for any other listener
 
-    const token = extractBearerToken(req.headers.authorization);
-    const deviceId = token ? deps.pairing.deviceIdForToken(token) : undefined;
-    if (!deviceId) {
-      rejectUpgrade(socket, 401, 'Unauthorized');
-      return;
-    }
-
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      handleConnection(ws, deviceId, deps);
-    });
+    void (async () => {
+      const deviceId = await authenticateBearer(req.headers.authorization, deps);
+      if (!deviceId) {
+        rejectUpgrade(socket, 401, 'Unauthorized');
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleConnection(ws, deviceId, deps);
+      });
+    })();
   });
 }
 
 function handleConnection(ws: WebSocket, deviceId: string, deps: AttachDeps): void {
   let helloReceived = false;
+  let heartbeat: Heartbeat | undefined;
 
   ws.once('message', (data: RawData) => {
     let envelope;
@@ -125,14 +117,16 @@ function handleConnection(ws: WebSocket, deviceId: string, deps: AttachDeps): vo
     }
 
     helloReceived = true;
-    deps.hub.registerConnection(deviceId, ws, payload.agents);
+    deps.hub.registerConnection(deviceId, ws, payload.runtimes);
+    deps.hub.sendConnAck(deviceId, SUPPORTED_CAPABILITIES);
+    // Reconnection procedure step 3 (§9): redeliver anything still relevant
+    // sent since the daemon's last-seen `seq`. Omitted on a device's
+    // first-ever connection (no cursor to redeliver from).
+    if (payload.cursor !== undefined) {
+      deps.hub.redeliverAfterReconnect(deviceId, payload.cursor);
+    }
 
-    const ack = createEnvelope('conn.ack', {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: SUPPORTED_CAPABILITIES,
-      serverTime: new Date().toISOString(),
-    });
-    ws.send(encodeEnvelope(ack));
+    heartbeat = startHeartbeat(ws, { intervalMs: deps.heartbeatIntervalMs });
 
     ws.on('message', (msgData: RawData) => {
       let msg;
@@ -142,13 +136,14 @@ function handleConnection(ws: WebSocket, deviceId: string, deps: AttachDeps): vo
         console.warn(`[byok/server] dropping unparsable frame from device ${deviceId}:`, err);
         return;
       }
-      deps.hub.handleEnvelope(deviceId, msg);
+      deps.hub.handleInbound(deviceId, msg);
     });
   });
 
   ws.on('close', () => {
+    heartbeat?.stop();
     if (helloReceived) {
-      deps.hub.handleDisconnect(deviceId);
+      deps.hub.handleDisconnect(deviceId, ws);
     }
   });
 }

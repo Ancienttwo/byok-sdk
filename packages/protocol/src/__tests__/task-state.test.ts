@@ -16,8 +16,8 @@ describe('TASK_TRANSITIONS', () => {
     }
   });
 
-  it('Offered can only move to Claimed or Cancelled', () => {
-    expect([...TASK_TRANSITIONS.Offered].sort()).toEqual(['Cancelled', 'Claimed']);
+  it('Offered can only move to Claimed, Cancelled, or Failed (task.decline maps to Failed — M1 gap #5)', () => {
+    expect([...TASK_TRANSITIONS.Offered].sort()).toEqual(['Cancelled', 'Claimed', 'Failed']);
   });
 
   it('Offered cannot skip straight to Running', () => {

@@ -16,10 +16,6 @@ export function generateDeviceId(): string {
   return `dev_${randomUUID()}`;
 }
 
-export function generateDeviceToken(): string {
-  return `tok_${randomBytes(32).toString('hex')}`;
-}
-
 export function generateTaskId(): string {
   return `task_${randomUUID()}`;
 }

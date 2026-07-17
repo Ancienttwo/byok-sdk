@@ -49,6 +49,20 @@ export interface Session {
   interrupt(): Promise<void>;
   /** Tear down the underlying runtime process/session. Idempotent. */
   close(): Promise<void>;
+  /**
+   * Resolve a session paused on `needs_approval` (protocol §5). The
+   * server's own state has already moved by the time this is called (§4 —
+   * `task.approve`/`task.reject` are best-effort notifications, not
+   * requests awaiting a reply): `approved: true` must make the session
+   * resume producing events (`task.progress` continuing is the proof);
+   * `approved: false` means the caller will immediately follow up with
+   * `interrupt()` + `close()` and report `task.fail` — an adapter that has
+   * no notion of `needs_approval` at all (i.e. never emits one) should
+   * throw a descriptive error here rather than silently no-op, since a
+   * caller receiving `task.approve`/`task.reject` for one of its tasks
+   * implies something upstream expected approval support that isn't there.
+   */
+  resolveApproval(approved: boolean, reason?: string): Promise<void>;
 }
 
 /**

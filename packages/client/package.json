@@ -25,7 +25,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsc -p tsconfig.build.json",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -40,6 +40,8 @@
     "@earendil-works/pi-coding-agent": "^0.74.2"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "@byok/server": "workspace:*",
+    "@hono/node-server": "^2.0.10"
   }
 }

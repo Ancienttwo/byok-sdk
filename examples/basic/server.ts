@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { createByokServer, type DispatchInput, type TaskHandle } from '@byok/server';
+import { createByokServer, LocalDiskBlobStore, type DispatchInput, type TaskHandle } from '@byok/server';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // One product = one daemon process = one server instance (plan: "一产品一
@@ -27,7 +27,15 @@ const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 // rather than pulling in @byok/protocol just for this one array.
 const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
 
-const byok = createByokServer({ productId: PRODUCT_ID });
+// Constructing our own `blobStore` (rather than letting `createByokServer`
+// default one internally) is the M1 `CreateByokServerOptions.blobStore`
+// override in action: it gives this embedder a handle to the exact store
+// instance in use, so `/api/blobs/:blobId/url` below can mint a download URL
+// for the browser directly — the browser has no device bearer token of its
+// own, so it can't call the bearer-authed `GET /byok/blobs/:id/url` route on
+// `byok.hono` itself (see docs/protocol.md §7).
+const blobStore = new LocalDiskBlobStore();
+const byok = createByokServer({ productId: PRODUCT_ID, blobStore });
 
 // `createByokServer`'s public surface only exposes read-only task snapshots
 // (`tasks.get`/`tasks.list`) — the live `TaskHandle` (events/approve/reject/
@@ -51,6 +59,15 @@ app.post('/api/pair', (c) => c.json(byok.pairing.createPairingCode()));
 
 app.get('/api/machines', (c) => c.json(byok.machines.list()));
 
+// M1 §6.3: revocation is server-side only, no wire message — the daemon's
+// next challenge/token/WS attempt gets a 401 and its only recourse is to
+// re-pair. Nothing else to await here; the effect shows up next time the
+// device tries to renew or reconnect (see public/index.html's revoke button).
+app.post('/api/machines/:deviceId/revoke', (c) => {
+  byok.devices.revoke(c.req.param('deviceId'));
+  return c.json({ ok: true });
+});
+
 app.get('/api/tasks', (c) => c.json(byok.tasks.list()));
 
 app.get('/api/tasks/:taskId', (c) => {
@@ -60,7 +77,7 @@ app.get('/api/tasks/:taskId', (c) => {
 });
 
 app.post('/api/tasks', async (c) => {
-  let body: { instruction?: unknown; runtime?: unknown };
+  let body: { instruction?: unknown; runtime?: unknown; sessionRef?: unknown };
   try {
     body = await c.req.json();
   } catch {
@@ -72,6 +89,9 @@ app.post('/api/tasks', async (c) => {
   if (body.runtime !== undefined && !KNOWN_RUNTIMES.has(body.runtime as string)) {
     return c.json({ error: `unknown runtime "${String(body.runtime)}"` }, 400);
   }
+  if (body.sessionRef !== undefined && typeof body.sessionRef !== 'string') {
+    return c.json({ error: 'sessionRef must be a string' }, 400);
+  }
 
   const input: DispatchInput = {
     instruction: body.instruction,
@@ -82,6 +102,13 @@ app.post('/api/tasks', async (c) => {
     // talks to pi, so it opts into `auto` explicitly rather than dispatching
     // a task that would fail-closed on every run.
     policy: { mode: 'auto' },
+    // Optional follow-up-turn pass-through: a caller that already has a
+    // prior task's reported `sessionRef` (see GET /api/tasks/:taskId) can
+    // carry it into a new dispatch so the runtime adapter resumes that same
+    // runtime session (e.g. pi's own `--session`) instead of starting a
+    // fresh one. `DispatchInput.sessionRef` already exists at the SDK level
+    // (packages/server/src/types.ts) — this demo just didn't expose it yet.
+    sessionRef: body.sessionRef as string | undefined,
   };
 
   try {
@@ -91,6 +118,18 @@ app.post('/api/tasks', async (c) => {
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);
   }
+});
+
+// The browser-facing counterpart of the bearer-authed `GET
+// /byok/blobs/:id/url` (protocol §7): this embedder is trusted server-side
+// code, so it mints the presigned download URL directly off its own
+// `blobStore` handle instead of requiring the browser to hold a device
+// token. Used by the UI when an `artifact` event carries a `blobRef` (a
+// >64KB artifact — see task.artifact's inline-vs-blob split).
+app.get('/api/blobs/:blobId/url', async (c) => {
+  const downloadUrl = await blobStore.getDownloadUrl(c.req.param('blobId'));
+  if (!downloadUrl) return c.json({ error: 'blob not found' }, 404);
+  return c.json({ downloadUrl });
 });
 
 app.get('/api/tasks/:taskId/events', (c) => {
