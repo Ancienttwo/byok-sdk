@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { IllegalTaskTransitionError, TaskStore } from '../task-store';
+import { IllegalTaskTransitionError, InMemoryTaskStore } from '../task-store';
 
-function createTask(store: TaskStore, taskId = 'task_1') {
+function createTask(store: InMemoryTaskStore, taskId = 'task_1') {
   return store.create({
     taskId,
     instruction: 'do the thing',
@@ -10,9 +10,9 @@ function createTask(store: TaskStore, taskId = 'task_1') {
   });
 }
 
-describe('TaskStore', () => {
+describe('InMemoryTaskStore', () => {
   it('creates a task in the Offered state', () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     const record = createTask(store);
 
     expect(record.state).toBe('Offered');
@@ -21,12 +21,12 @@ describe('TaskStore', () => {
   });
 
   it('returns undefined for an unknown taskId', () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     expect(store.get('nope')).toBeUndefined();
   });
 
   it('applies a legal transition and updates updatedAt', async () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     createTask(store);
 
     await new Promise((r) => setTimeout(r, 2));
@@ -38,7 +38,7 @@ describe('TaskStore', () => {
   });
 
   it('walks the full happy path Offered -> Claimed -> Running -> Complete', () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     createTask(store);
 
     store.transition('task_1', 'Claimed');
@@ -52,7 +52,7 @@ describe('TaskStore', () => {
   });
 
   it('supports the AwaitApproval <-> Running loop', () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     createTask(store);
     store.transition('task_1', 'Claimed');
     store.transition('task_1', 'Running');
@@ -64,7 +64,7 @@ describe('TaskStore', () => {
   });
 
   it('rejects an illegal transition (Offered -> Running skips Claimed)', () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     createTask(store);
 
     expect(() => store.transition('task_1', 'Running')).toThrow(IllegalTaskTransitionError);
@@ -73,7 +73,7 @@ describe('TaskStore', () => {
   });
 
   it('rejects an illegal transition out of a terminal state', () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     createTask(store);
     store.transition('task_1', 'Cancelled');
 
@@ -81,7 +81,7 @@ describe('TaskStore', () => {
   });
 
   it('rejects AwaitApproval -> Complete (must resume through Running first)', () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     createTask(store);
     store.transition('task_1', 'Claimed');
     store.transition('task_1', 'Running');
@@ -91,7 +91,7 @@ describe('TaskStore', () => {
   });
 
   it('throws transitioning an unknown taskId', () => {
-    const store = new TaskStore();
+    const store = new InMemoryTaskStore();
     expect(() => store.transition('missing', 'Claimed')).toThrow(/unknown taskId/);
   });
 });

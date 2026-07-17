@@ -8,6 +8,7 @@ import type {
   TaskState,
 } from '@byok/protocol';
 import type { BlobStore } from './blob-store';
+import type { TaskStore } from './task-store';
 import type { TokenSigner } from './auth';
 
 /** Options for {@link createByokServer}. */
@@ -25,8 +26,10 @@ export interface CreateByokServerOptions {
   longPollHoldMs?: number;
   /** Per-product blob size ceiling in bytes (§7). Default 100MB. */
   maxBlobSizeBytes?: number;
-  /** Override the reference {@link BlobStore} (e.g. a real object-store-backed implementation). */
+  /** Override the reference {@link BlobStore} (e.g. a real object-store-backed implementation, or `sqlite-blob-store.ts`'s `SqliteBlobStore` for a persistent single-node deployment). */
   blobStore?: BlobStore;
+  /** Override the reference {@link TaskStore} (e.g. `sqlite-task-store.ts`'s `SqliteTaskStore` for a persistent single-node deployment). Defaults to an in-memory store that loses all task state on restart. */
+  taskStore?: TaskStore;
   /** Override the reference {@link TokenSigner} (e.g. an org-wide/KMS-backed signer). */
   tokenSigner?: TokenSigner;
   /**

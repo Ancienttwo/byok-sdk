@@ -5,7 +5,7 @@ import { WebSocket } from 'ws';
 import { DeviceRegistry } from '../auth';
 import { ConnectionHub } from '../hub';
 import { createByokServer } from '../index';
-import { TaskStore } from '../task-store';
+import { InMemoryTaskStore } from '../task-store';
 import type { TaskHandle } from '../types';
 import { connectFakeDaemon, nextEnvelope, send, startServer, stopServer, waitForTaskEvent } from './test-support';
 
@@ -165,7 +165,7 @@ describe('task lease reaper (M2): Claimed/Running/AwaitApproval -> Failed(retrya
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     let hub: ConnectionHub | undefined;
     try {
-      const taskStore = new TaskStore();
+      const taskStore = new InMemoryTaskStore();
       hub = new ConnectionHub(taskStore, new DeviceRegistry(), SHORT_LEASE_MS);
       const deviceId = 'device-idle-then-dark';
       const fakeWs = { send: vi.fn() } as unknown as WebSocket;
@@ -215,7 +215,7 @@ describe('task lease reaper (M2): Claimed/Running/AwaitApproval -> Failed(retrya
     // Drives `ConnectionHub` directly — `taskActivityMap`'s doc comment
     // above explains why (the private map isn't reachable at all through
     // `createByokServer`'s public surface).
-    const taskStore = new TaskStore();
+    const taskStore = new InMemoryTaskStore();
     const hub = new ConnectionHub(taskStore, new DeviceRegistry(), SHORT_LEASE_MS);
     try {
       const deviceId = 'device-activity-bounds';
