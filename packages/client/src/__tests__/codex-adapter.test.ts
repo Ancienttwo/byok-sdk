@@ -209,7 +209,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(followUpEvents).toContainEqual({ type: 'usage', inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 });
   });
 
-  it('cross-model review (Fix 2): followUp() adopts the freshly-returned thread id, so a LATER followUp() resumes the CURRENT id rather than a stale one', async () => {
+  it('cross-model re-review (Fix 2): followUp() fails closed when codex resume echoes a DIFFERENT thread id than the one it asked to resume — never silently migrates this session\'s identity', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a' });
     const session = await adapter.start(baseTask, ctx); // fresh start, no resume requested
@@ -217,25 +217,30 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(session.sessionRef).toBe('thread-a');
     await takeEvents(session, 7);
 
-    // Turn 2: codex resumes 'thread-a' successfully but THIS run reports a
-    // NEW thread id ('thread-b') on its own thread.started — e.g. codex
-    // re-keyed the thread on resume. followUp() must adopt this as the new
-    // sessionRef rather than silently keeping 'thread-a' (the original bug:
-    // the returned id was discarded entirely).
+    // Turn 2: codex resumes 'thread-a' successfully (the fixture's own
+    // resume-target validation still checks against FAKE_CODEX_THREAD_ID, so
+    // the resume itself "succeeds") but THIS run reports a DIFFERENT thread
+    // id ('thread-b') on its own thread.started — e.g. codex silently
+    // re-keyed the thread on resume. A previous wave's followUp() adopted
+    // this as the new sessionRef; this cross-model re-review found that
+    // silently migrates identity instead of failing closed — codex has no
+    // documented contract for re-keying a thread on resume, so a mismatch
+    // must be treated as an error, never silently adopted.
     ctx.env.FAKE_CODEX_REPORTED_THREAD_ID = 'thread-b';
-    await session.followUp({ instruction: 'turn 2', policy: { mode: 'auto' } });
-    expect(session.sessionRef).toBe('thread-b');
-    await takeEvents(session, 7);
+    await expect(session.followUp({ instruction: 'turn 2', policy: { mode: 'auto' } })).rejects.toThrow(
+      /echoed a different thread id than requested/,
+    );
 
-    // Turn 3: must resume 'thread-b' (the CURRENT id) — proven by making the
-    // fixture's own resume-target validation accept ONLY 'thread-b' now: a
-    // stale resume of 'thread-a' (the pre-fix bug) would hit the fixture's
-    // real "no rollout found" rejection and this call would reject instead
-    // of resolving.
+    // The session's own identity is UNCHANGED by the failed attempt — never
+    // migrated to the mismatched id.
+    expect(session.sessionRef).toBe('thread-a');
+
+    // And the session remains otherwise usable afterward: a later followUp()
+    // whose reflected id actually matches what it asked to resume succeeds
+    // normally, proving the failed attempt didn't corrupt the session.
     delete ctx.env.FAKE_CODEX_REPORTED_THREAD_ID;
-    ctx.env.FAKE_CODEX_THREAD_ID = 'thread-b';
     await expect(session.followUp({ instruction: 'turn 3', policy: { mode: 'auto' } })).resolves.toBeUndefined();
-    expect(session.sessionRef).toBe('thread-b');
+    expect(session.sessionRef).toBe('thread-a');
   });
 
   it('followUp() fails closed on a policy codex cannot express, without disturbing the already-open session', async () => {

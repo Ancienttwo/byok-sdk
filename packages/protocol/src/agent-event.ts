@@ -1,35 +1,6 @@
 import { z } from 'zod';
 
 /**
- * Known AgentEvent variant type discriminators, kept as a standalone literal
- * list (not derived from {@link AgentEventSchema}'s internals) so both the
- * discriminated union below and the unknown-variant guard
- * ({@link UnknownAgentEventSchema}) can check against the exact same set
- * without reaching into zod's discriminated-union internals. Keep this in
- * sync with the `type` literals in {@link AgentEventSchema} — adding a new
- * known variant means adding it in both places.
- *
- * Exported (not module-private) so the freeze guard
- * (`__tests__/freeze-guard.test.ts`) can assert this list exactly matches
- * {@link AgentEventSchema}'s own variant `type` literals — a dual-authority
- * drift guard: without it, forgetting to add a new variant here (while still
- * adding it to the schema union) would silently fall through to
- * {@link isKnownAgentEvent}/{@link partitionAgentEvents} misclassifying a
- * well-formed known event as unknown, since those two functions only ever
- * consult this list, never the schema directly.
- */
-export const KNOWN_AGENT_EVENT_TYPES: readonly string[] = [
-  'progress',
-  'tool_use',
-  'tool_result',
-  'artifact',
-  'needs_approval',
-  'turn_end',
-  'error',
-  'usage',
-];
-
-/**
  * Normalized event shape that every runtime adapter (pi / claude / codex)
  * translates its native JSONL output into. This is the interior of a
  * `task.progress` payload's `events` array.
@@ -59,6 +30,34 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
 ]);
 
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
+
+/**
+ * Known AgentEvent variant type discriminators — DERIVED directly from
+ * {@link AgentEventSchema}'s own discriminated-union variants via
+ * `z.toJSONSchema`, rather than hand-maintained as a second literal list.
+ * This used to be a standalone array kept in sync with the schema above by
+ * hand (dual authority); the freeze guard
+ * (`__tests__/freeze-guard.test.ts`'s "dual-authority cross-check") already
+ * asserted the two matched using this EXACT SAME `z.toJSONSchema` extraction
+ * mechanism, which is why deriving it this way is safe: the guard already
+ * proved this extraction produces the identical set the hand-written list
+ * held. With the derivation below, the two can no longer drift apart at
+ * all — there is only one authority now, {@link AgentEventSchema} itself.
+ * The freeze guard test is kept anyway (now definitionally true rather than
+ * a live check) as a regression net in case a future refactor reintroduces a
+ * hand-written list.
+ *
+ * Exported (not module-private) so {@link isKnownAgentEvent} /
+ * {@link partitionAgentEvents} (and the freeze guard) can check against the
+ * exact same set without each reaching into zod's discriminated-union
+ * internals directly. `z.toJSONSchema`'s output shape here (`.oneOf[].
+ * properties.type.const`) is a public, documented zod v4 API — not
+ * reaching into `._def`/internal fields — same as the freeze guard already
+ * relies on.
+ */
+export const KNOWN_AGENT_EVENT_TYPES: readonly string[] = (
+  z.toJSONSchema(AgentEventSchema) as unknown as { oneOf: Array<{ properties: { type: { const: string } } }> }
+).oneOf.map((branch) => branch.properties.type.const);
 
 /**
  * Pre-freeze compatibility widening (the freeze blocker this schema fixes):

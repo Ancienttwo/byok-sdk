@@ -231,7 +231,16 @@ interface RunTurnParams {
   workspaceDir: string;
   queue: AsyncQueue<AgentEvent>;
   recordUnmapped: (key: string) => void;
-  /** When resuming, the sessionRef this call expected codex to echo back in `thread.started`. Used only for a defensive sanity log on mismatch — codex's own id is always treated as authoritative, never overridden. */
+  /**
+   * When resuming, the sessionRef this call expects codex to echo back in
+   * `thread.started` — required for BOTH `start()`'s externally-supplied
+   * `task.sessionRef` and `followUp()`'s own previously-recorded
+   * `sessionRef` (see `CodexSession.followUp`'s doc comment for why the
+   * latter also passes this now). Fail-closed on a mismatch: the
+   * already-spawned runner for this attempt is killed and the call throws
+   * rather than silently adopting whatever id codex actually reported —
+   * this is a real check, not just a diagnostic log.
+   */
   expectedSessionRef?: string | undefined;
 }
 
@@ -418,13 +427,17 @@ interface CodexSessionOptions {
 
 class CodexSession implements Session {
   /**
-   * NOT `readonly` (cross-model review finding): `followUp()` below adopts
-   * whatever thread id codex reports for each new resume — see its own doc
-   * comment for why silently keeping the value captured at construction
-   * time (the original bug: the NEW id `runCodexTurn` returns was discarded,
-   * and every later `followUp()` kept resuming the OLD, potentially stale,
-   * id) is itself a bug independent of the fail-closed check in
-   * `runCodexTurn`.
+   * NOT `readonly` (cross-model review finding): `followUp()` below
+   * re-assigns this from the runtime's own CONFIRMED reflected id on each
+   * resume — see its own doc comment. Silently keeping the value captured at
+   * construction time was the original bug (the NEW id `runCodexTurn`
+   * returns was discarded, so every later `followUp()` kept resuming the
+   * OLD, potentially stale, id); that stays fixed here. A LATER cross-model
+   * re-review found the fix above was itself incomplete: `followUp()` now
+   * also verifies the reflected id matches what it asked to resume BEFORE
+   * this field is touched — a mismatch throws (fail-closed) instead of ever
+   * reaching this assignment, so `sessionRef` only ever advances to an id
+   * codex has proven it actually resumed, never one it silently swapped in.
    */
   public sessionRef: string;
   private readonly command: string;
@@ -473,18 +486,28 @@ class CodexSession implements Session {
    * offered under, exactly the silent-widen failure mode this adapter exists
    * to prevent.
    *
-   * Cross-model review finding: deliberately does NOT pass `expectedSessionRef`
-   * to `runCodexTurn` here — unlike `CodexAdapter.start()`, this resume
-   * targets OUR OWN previously-recorded `sessionRef`, not an externally
-   * supplied server expectation crossing a trust boundary (that fail-closed
-   * check belongs solely to `start()`'s `task.sessionRef` comparison; see
-   * `runCodexTurn`'s own doc comment on that check). Whatever id codex
-   * reports back for THIS resume is unambiguously the current, authoritative
-   * id for this session (only one candidate was ever offered) and is
-   * captured below as the new `sessionRef` — the original bug this fixes:
-   * the return value used to be discarded entirely, so every later
-   * `followUp()` kept resuming the OLD id even after codex had moved on to a
-   * new one.
+   * Cross-model RE-review finding (this corrects the previous wave's own
+   * reasoning, quoted below for context): `expectedSessionRef` IS now passed
+   * to `runCodexTurn`, set to the exact id this call asked to resume
+   * (`resumeRef`, captured up front before the call). The previous version
+   * of this method deliberately omitted it — "this resume targets OUR OWN
+   * previously-recorded `sessionRef`, not an externally supplied server
+   * expectation crossing a trust boundary... whatever id codex reports back
+   * for THIS resume is unambiguously the current, authoritative id for this
+   * session" — but that reasoning let a resume-A/reports-B mismatch silently
+   * MIGRATE this session's identity instead of failing closed: codex has no
+   * documented contract for re-keying a thread on resume, so a mismatch here
+   * must be treated as an error, exactly like `start()`'s own
+   * `task.sessionRef` comparison (see `runCodexTurn`'s doc comment on that
+   * check) — never silently adopted. `runCodexTurn` kills the (failed) new
+   * runner and throws on a mismatch, BEFORE `sessionRef`/`currentRunner`
+   * below are ever touched — so a thrown mismatch leaves this session in its
+   * previous, still-good state rather than partially migrated. The
+   * `sessionRef` return value is still captured and re-assigned below (the
+   * ORIGINAL bug this fixes, one wave further back: the return value used to
+   * be discarded entirely, so every later `followUp()` kept resuming a
+   * stale id even after codex had moved on) — it just can now only ever be
+   * the SAME id this call asked to resume, never a silently-different one.
    */
   async followUp(task: TaskOfferPayload): Promise<void> {
     if (typeof task.instruction !== 'string') {
@@ -499,9 +522,10 @@ class CodexSession implements Session {
       throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by codex adapter');
     }
 
+    const resumeRef = this.sessionRef;
     const { sessionRef, runner } = await runCodexTurn({
       command: this.command,
-      resumeRef: this.sessionRef,
+      resumeRef,
       instruction: task.instruction,
       policyArgs: mapping.args,
       cwd: this.workspaceDir,
@@ -510,6 +534,7 @@ class CodexSession implements Session {
       workspaceDir: this.workspaceDir,
       queue: this.queue,
       recordUnmapped: this.recordUnmapped,
+      expectedSessionRef: resumeRef,
     });
     this.sessionRef = sessionRef;
     this.currentRunner = runner;

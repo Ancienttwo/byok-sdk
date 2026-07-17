@@ -262,14 +262,44 @@ class ClaudeSession implements Session {
         // one `AgentEvent` per `next()` call like every other adapter's
         // `Session.events`.
         let pending: AgentEvent[] = [];
+        // Cross-model re-review finding (P1 regression, the "claude-hang
+        // class"): set once THIS turn's own `result` frame has been read off
+        // `inner` — `result` is claude's real "whole run settled" signal and
+        // is always the LAST frame of a turn, success or failure alike (see
+        // `events.ts`'s `mapResult` doc comment). On the SUCCESS path
+        // (`turn_end`) this is inert: `task-runner.ts`'s `pump()` returns the
+        // instant it sees `turn_end`, so no further `next()` call ever
+        // happens. It matters on the FAILURE/malformed path: `mapResult`
+        // maps a non-success result to a plain `error` AgentEvent with no
+        // `turn_end` — and unlike codex (one process per turn, whose own
+        // process-close watcher ends the queue — see codex-adapter.ts's
+        // `runCodexTurn`), claude's process is PERSISTENT: it stays alive
+        // after `result`, awaiting a possible `followUp()` write on stdin
+        // (see process-client.ts's own doc comment). Nothing would otherwise
+        // ever end this iterator, so `task-runner.ts`'s `pump()` would await
+        // a raw line that never arrives — a real, confirmed hang, not just a
+        // theoretical one. Once `turnSettled` is true and `pending` has been
+        // fully drained (every event from the `result` frame delivered),
+        // this iterator ends itself (`done:true`) WITHOUT pulling `inner`
+        // again — ending only THIS TURN's own exposed event stream, never
+        // the underlying session-lifetime `client.events` queue a future
+        // `followUp()` still needs, and never killing the process itself
+        // (that stays this session's `close()`/`interrupt()`'s job). This is
+        // exactly what lets `pump()`'s existing "iterable ended without
+        // turn_end" branch report the task as Failed instead of hanging.
+        let turnSettled = false;
         return {
           async next(): Promise<IteratorResult<AgentEvent>> {
             for (;;) {
               const buffered = pending.shift();
               if (buffered) return { value: buffered, done: false };
 
+              if (turnSettled) return { value: undefined as never, done: true };
+
               const { value, done } = await inner.next();
               if (done) return { value: undefined as never, done: true };
+
+              if (value.type === 'result') turnSettled = true;
 
               const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
               if (mapped.unmappedLabel) {

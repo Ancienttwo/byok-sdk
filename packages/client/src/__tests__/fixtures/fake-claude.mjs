@@ -114,6 +114,24 @@
 //   FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK=1 -> the assistant's final message
 //                                          includes one extra content block
 //                                          of an unrecognized `type`.
+//   FAKE_CLAUDE_RESULT_MALFORMED=1      -> cross-model re-review (P1
+//                                          regression): the turn's `result`
+//                                          frame is sent with `is_error`
+//                                          OMITTED entirely (a malformed/
+//                                          future wire shape) instead of the
+//                                          normal `is_error:false`/`true` —
+//                                          and, exactly like the real
+//                                          binary's own confirmed persistent-
+//                                          process behavior, this script
+//                                          does NOT exit afterward (no
+//                                          `process.exit()` here, same as
+//                                          the normal success path below).
+//                                          Proves the fix lives in the
+//                                          per-turn event-stream layer
+//                                          (claude-adapter.ts), not in
+//                                          "wait for the process to exit" —
+//                                          the process staying alive is the
+//                                          whole point of this toggle.
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -347,6 +365,27 @@ function runProbeOrTurnFlow() {
     send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content }, session_id: reportedSessionId });
 
     send({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' }, session_id: reportedSessionId });
+
+    if (process.env.FAKE_CLAUDE_RESULT_MALFORMED === '1') {
+      // See FAKE_CLAUDE_RESULT_MALFORMED's own doc comment above: `is_error`
+      // is deliberately omitted (not `false`, not `true`) and this script
+      // does NOT exit — the persistent process stays alive exactly as it
+      // does after a normal turn, since nothing below this branch ever runs.
+      send({
+        type: 'result',
+        subtype: 'error_during_execution',
+        duration_ms: 10,
+        duration_api_ms: 8,
+        num_turns: turn,
+        stop_reason: null,
+        session_id: reportedSessionId,
+        total_cost_usd: 0,
+        usage: {},
+        result: finalText,
+        permission_denials: [],
+      });
+      return;
+    }
 
     send({
       type: 'result',

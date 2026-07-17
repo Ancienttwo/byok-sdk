@@ -202,6 +202,33 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(events[4]).toEqual({ type: 'turn_end' });
   });
 
+  it('cross-model re-review (P1 regression): a malformed claude `result` (missing is_error) ends THIS TURN\'s event stream as a failure — never a hang, even though the persistent claude process itself stays alive awaiting a possible followUp', async () => {
+    const adapter = fakeClaudeAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_RESULT_MALFORMED: '1' });
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+
+    // A bare, UNBOUNDED for-await here is the whole point: pre-fix, claude's
+    // own process never exits after `result` (it waits on stdin for a
+    // possible followUp — see process-client.ts), `mapResult` maps a
+    // malformed result to a plain `error` AgentEvent with no `turn_end`, and
+    // nothing else ever ended `ClaudeSession.events`'s iterator — so this
+    // loop hung forever (confirmed: reverting the claude-adapter.ts fix
+    // reproduces this test timing out at the bound below instead of
+    // resolving). Post-fix, the iterator itself ends once this turn's own
+    // `result` frame has been fully drained, so this loop terminates well
+    // under the timeout without the process ever being killed here.
+    const events: AgentEvent[] = [];
+    for await (const event of session.events) {
+      events.push(event);
+    }
+
+    expect(events.some((e) => e.type === 'turn_end')).toBe(false);
+    const lastEvent = events[events.length - 1] as { type: string; message?: string };
+    expect(lastEvent.type).toBe('error');
+    expect(lastEvent.message).toMatch(/missing\/invalid is_error flag/);
+  }, 5000);
+
   it('followUp() sends a new turn on the SAME persistent process/session, confirmed by an unchanged sessionRef and a second full event cycle', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
