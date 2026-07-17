@@ -83,11 +83,28 @@ fi
 echo "==> bundling $ENTRY to a single CommonJS file (${ESBUILD_CMD[*]})"
 "${ESBUILD_CMD[@]}" "$ENTRY" --bundle --platform=node --format=cjs --outfile="$BUNDLE"
 
+# On Windows, node.exe reads sea-config.json's "main"/"output" values
+# through its own native file APIs, NOT through git-bash's MSYS path
+# emulation -- unlike a path passed as a bare argv token (which git-bash
+# auto-translates for a recognized native exe), a path embedded as JSON
+# *text* is just a string to Node, so a git-bash-style "/tmp/..." path here
+# fails with "Cannot read main script ...: no such file or directory" --
+# empirically confirmed while building this recipe. Convert to a native
+# Windows path (backslashes) via `cygpath -w`, then double the backslashes
+# so the result is valid JSON string content.
+json_path() {
+  local p="$1"
+  if [ "$OS" = "Windows" ] && command -v cygpath >/dev/null 2>&1; then
+    p="$(cygpath -w "$p")"
+  fi
+  printf '%s' "${p//\\/\\\\}"
+}
+
 echo "==> generating SEA blob"
 cat > "$SEA_CONFIG" <<EOF
 {
-  "main": "$BUNDLE",
-  "output": "$BLOB",
+  "main": "$(json_path "$BUNDLE")",
+  "output": "$(json_path "$BLOB")",
   "disableExperimentalSEAWarning": true
 }
 EOF
