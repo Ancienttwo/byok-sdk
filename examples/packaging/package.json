@@ -1,0 +1,23 @@
+{
+  "name": "@byok/example-packaging",
+  "version": "0.0.1",
+  "private": true,
+  "description": "M3-K packageability guarantee smoke: a trivial launcher that forces a single-file bundler (bun build --compile / Node SEA) to pull in @byok/client's daemon + adapter-resolution code paths, then exercises pi's import.meta.resolve degrade path at runtime with zero network I/O. See templates/packaging/{bun,sea} for the recipes that compile launcher.ts into a single executable, and .github/workflows/ci.yml for the automated smoke.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx launcher.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@byok/client": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.19.2",
+    "typescript": "^7.0.2"
+  }
+}
