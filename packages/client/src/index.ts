@@ -21,3 +21,5 @@ export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
+
+export { CodexAdapter, type CodexAdapterOptions } from './adapters/codex/codex-adapter';
