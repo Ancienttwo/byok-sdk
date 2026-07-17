@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ConnHelloPayloadSchema,
   EnvelopeSchema,
+  RuntimeInfoSchema,
   TaskClaimPayloadSchema,
   TaskOfferPayloadSchema,
   createEnvelope,
@@ -71,6 +72,93 @@ describe('conn.hello: runtimes replaces agents (M1 gap #4)', () => {
       deviceId: 'device-1',
       productId: 'acme-agent',
       cursor: 42,
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('runtimes[].capabilities: per-runtime feature flags (pre-freeze addition)', () => {
+  it('accepts a runtime entry with capabilities fully populated', () => {
+    const result = RuntimeInfoSchema.safeParse({
+      id: 'claude',
+      capabilities: {
+        steer: true,
+        resume: true,
+        approvalInteractive: false,
+        permissionModes: ['auto', 'confirm'],
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.capabilities).toEqual({
+        steer: true,
+        resume: true,
+        approvalInteractive: false,
+        permissionModes: ['auto', 'confirm'],
+      });
+    }
+  });
+
+  it('accepts a runtime entry with capabilities only partially populated (partial detection)', () => {
+    const result = RuntimeInfoSchema.safeParse({
+      id: 'codex',
+      capabilities: { approvalInteractive: true },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.capabilities).toEqual({ approvalInteractive: true });
+    }
+  });
+
+  it('accepts a runtime entry with capabilities omitted entirely (older daemon shape)', () => {
+    const result = RuntimeInfoSchema.safeParse({ id: 'pi' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('capabilities' in result.data).toBe(false);
+    }
+  });
+
+  it('permissionModes tolerates a mode string this schema does not enumerate (observability data, not control/security)', () => {
+    const result = RuntimeInfoSchema.safeParse({
+      id: 'claude',
+      capabilities: { permissionModes: ['auto', 'confirm', 'some-future-mode'] },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.capabilities?.permissionModes).toEqual(['auto', 'confirm', 'some-future-mode']);
+    }
+  });
+
+  it('strips unknown keys inside capabilities (documented schema choice: strip, not passthrough)', () => {
+    const result = RuntimeInfoSchema.safeParse({
+      id: 'pi',
+      capabilities: { steer: true, futureFlag: 'from a newer daemon' },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.capabilities).toEqual({ steer: true });
+      expect(result.data.capabilities && 'futureFlag' in result.data.capabilities).toBe(false);
+    }
+  });
+
+  it('conn.hello validates with a runtimes[].capabilities present', () => {
+    const result = ConnHelloPayloadSchema.safeParse({
+      protocolVersions: [1],
+      capabilities: [],
+      deviceId: 'device-1',
+      productId: 'acme-agent',
+      runtimes: [{ id: 'claude', capabilities: { steer: true } }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('conn.hello validates with runtimes[].capabilities absent', () => {
+    const result = ConnHelloPayloadSchema.safeParse({
+      protocolVersions: [1],
+      capabilities: [],
+      deviceId: 'device-1',
+      productId: 'acme-agent',
+      runtimes: [{ id: 'claude' }],
     });
     expect(result.success).toBe(true);
   });

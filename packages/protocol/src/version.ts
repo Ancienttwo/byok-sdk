@@ -16,7 +16,13 @@ export const PROTOCOL_VERSION = 1;
  * Capability flags exchanged during the connection handshake (`conn.hello` /
  * `conn.ack`). Additional flags may be introduced without a protocol version
  * bump; unrecognized flags must be ignored by both sides.
+ *
+ * `interactive-approval` is RESERVED as of this addition: it gates the
+ * (currently unexercised) approval seam — a server must not route an
+ * approval-requiring policy to a daemon that hasn't advertised this flag. No
+ * bundled runtime adapter emits it yet; that's expected until interactive
+ * approval is actually wired up in a later wave.
  */
-export const CAPABILITY_FLAGS = ['steer', 'blob-upload'] as const;
+export const CAPABILITY_FLAGS = ['steer', 'blob-upload', 'interactive-approval'] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
