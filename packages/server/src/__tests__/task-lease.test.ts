@@ -2,9 +2,23 @@ import type { Server as HttpServer } from 'node:http';
 import { createEnvelope } from '@byok/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
+import { DeviceRegistry } from '../auth';
+import { ConnectionHub } from '../hub';
 import { createByokServer } from '../index';
+import { TaskStore } from '../task-store';
 import type { TaskHandle } from '../types';
 import { connectFakeDaemon, nextEnvelope, send, startServer, stopServer, waitForTaskEvent } from './test-support';
+
+/**
+ * A `ConnectionHub`'s `taskActivity` map is a private implementation detail
+ * (TS `private` is compile-time-only) — reaching into it directly is the
+ * only way to observe {@link ConnectionHub}'s per-task activity bookkeeping
+ * from outside, since `createByokServer`'s public `ByokServer` surface
+ * doesn't expose the hub. Used only by the "activity map" tests below.
+ */
+function taskActivityMap(hub: ConnectionHub): Map<string, number> {
+  return (hub as unknown as { taskActivity: Map<string, number> }).taskActivity;
+}
 
 const PRODUCT_ID = 'acme';
 /**
@@ -137,6 +151,112 @@ describe('task lease reaper (M2): Claimed/Running/AwaitApproval -> Failed(retrya
     await sleep(SHORT_LEASE_MS * 5);
 
     expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
+  });
+
+  it('does not reap immediately on disconnect merely because task activity was already stale while connected — the dark clock restarts from disconnect, not from stale pre-disconnect activity (regression: this would reintroduce the M0 disconnect-alone-fails-the-task bug)', async () => {
+    // Drives `ConnectionHub` directly instead of the real WS/HTTP harness
+    // the other tests in this file use — mirrors `heartbeat.test.ts`'s own
+    // fake-socket approach — so `vi.useFakeTimers()` can precisely position
+    // the disconnect relative to the reaper's sweep tick. The real-WS
+    // harness can't give that precision (see this file's header comment on
+    // why fake timers don't mix with real sockets); a real-timer version of
+    // this test would be unavoidably racy against the sweep's own tick
+    // phase.
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    let hub: ConnectionHub | undefined;
+    try {
+      const taskStore = new TaskStore();
+      hub = new ConnectionHub(taskStore, new DeviceRegistry(), SHORT_LEASE_MS);
+      const deviceId = 'device-idle-then-dark';
+      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
+
+      hub.registerConnection(deviceId, fakeWs, undefined);
+      const handle = await hub.dispatch({ instruction: 'idle then disconnect', deviceId });
+      const { taskId } = handle;
+      hub.handleInbound(deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
+      hub.handleInbound(deviceId, createEnvelope('task.started', {}, { taskId }));
+      expect(taskStore.get(taskId)?.state).toBe('Running');
+
+      // The device stays CONNECTED but goes idle well past taskLeaseMs —
+      // the "long idle" half of the bug report. Condition (b) (dark) is
+      // false the whole time (live WS), so this alone must never reap, no
+      // matter how stale the task's own activity timestamp gets.
+      await vi.advanceTimersByTimeAsync(SHORT_LEASE_MS * 2.9);
+      expect(taskStore.get(taskId)?.state).toBe('Running');
+
+      // NOW the device goes dark, shortly before the reaper's next
+      // scheduled sweep tick — the "then disconnect" half. The task's own
+      // last-activity timestamp is already ~2.9x taskLeaseMs stale at this
+      // exact instant: precisely the precondition the bug describes.
+      hub.handleDisconnect(deviceId, fakeWs);
+
+      // Advance just past that next tick. The buggy implementation reaps
+      // right here: `isDeviceDark` flips true the instant `connected` does,
+      // with no elapsed-time floor of its own, and the already-stale
+      // activity timestamp alone satisfies the old (c)-only check. The
+      // fix must NOT have reaped yet — under 1x taskLeaseMs has elapsed
+      // since the device actually went dark.
+      await vi.advanceTimersByTimeAsync(SHORT_LEASE_MS);
+      expect(taskStore.get(taskId)?.state).toBe('Running');
+
+      // Once a full taskLeaseMs has genuinely elapsed since disconnect, the
+      // reaper must still fire — this is a correctly-delayed reap, not a
+      // permanently blocked one.
+      await vi.advanceTimersByTimeAsync(SHORT_LEASE_MS);
+      expect(taskStore.get(taskId)?.state).toBe('Failed');
+      expect(taskStore.get(taskId)?.result).toEqual({ state: 'Failed', reason: 'lease-expired', retryable: true });
+    } finally {
+      hub?.stopLeaseReaper();
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds the lease activity map: an unknown taskId is never recorded, and a stale message for an already-terminal task does not recreate its (already-deleted) entry', async () => {
+    // Drives `ConnectionHub` directly — `taskActivityMap`'s doc comment
+    // above explains why (the private map isn't reachable at all through
+    // `createByokServer`'s public surface).
+    const taskStore = new TaskStore();
+    const hub = new ConnectionHub(taskStore, new DeviceRegistry(), SHORT_LEASE_MS);
+    try {
+      const deviceId = 'device-activity-bounds';
+      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
+      hub.registerConnection(deviceId, fakeWs, undefined);
+
+      const handle = await hub.dispatch({ instruction: 'bounds check', deviceId });
+      const { taskId } = handle;
+      hub.handleInbound(deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
+      // Sanity baseline: a real, non-terminal, currently-claimed task IS
+      // tracked — the fix must not break the normal case.
+      expect(taskActivityMap(hub).has(taskId)).toBe(true);
+
+      // (1) A taskId that never existed at all must never gain an entry —
+      // otherwise an authenticated-but-malicious daemon could grow this map
+      // without bound, since taskIds (unlike envelope ids) are never
+      // deduped.
+      const unknownTaskId = 'task_never-existed';
+      hub.handleInbound(deviceId, createEnvelope('task.progress', { seq: 1, events: [] }, { taskId: unknownTaskId }));
+      expect(taskActivityMap(hub).has(unknownTaskId)).toBe(false);
+
+      // (2) Drive the real task to a terminal state — its entry must be
+      // gone (already true pre-fix, via onStateChange's own cleanup).
+      hub.handleInbound(deviceId, createEnvelope('task.started', {}, { taskId }));
+      hub.handleInbound(deviceId, createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_bounds' }, { taskId }));
+      expect(taskStore.get(taskId)?.state).toBe('Complete');
+      expect(taskActivityMap(hub).has(taskId)).toBe(false);
+
+      // (3) A stale message arriving *after* the task is terminal (a fresh
+      // envelope id, so it isn't just a dedup no-op) must not recreate the
+      // entry `onStateChange` already deleted — this is what fails pre-fix,
+      // since `dispatchToHandler` used to record activity unconditionally,
+      // before the per-type handler's own terminal-state check ever runs.
+      hub.handleInbound(
+        deviceId,
+        createEnvelope('task.complete', { summary: 'done (stale retry)', sessionRef: 'sess_bounds' }, { taskId }),
+      );
+      expect(taskActivityMap(hub).has(taskId)).toBe(false);
+    } finally {
+      hub.stopLeaseReaper();
+    }
   });
 
   it('the reaper sweep timer is cleaned up on server stop (no lingering handle)', () => {
