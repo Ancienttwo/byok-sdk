@@ -67,16 +67,20 @@ cp "$BIN" "$RUN_BIN"
 chmod +x "$RUN_BIN" 2>/dev/null || true
 
 if [ "$OS" = "Windows" ]; then
-  STUB="$WORK_DIR/stub-pi.cmd"
-  cat > "$STUB" <<'EOF'
-@echo off
-if "%~1"=="--version" (
-  echo stub-pi 0.0.0-test 1>&2
-  exit /b 0
-)
-echo stub-pi: unsupported args 1>&2
-exit /b 1
-EOF
+  # NOT a .cmd/.bat here on purpose: pi-adapter.ts's detect() calls Node's
+  # `child_process.execFile(bin.command, ['--version'])` with no
+  # `shell: true` -- Windows can't CreateProcess a .cmd/.bat directly
+  # without a shell, so execFile fails for one (silently degrading to
+  # `present: false`, same symptom as "truly absent" -- empirically
+  # confirmed while building this recipe: a .cmd stub here read as
+  # indistinguishable from no stub at all). This is a real, pre-existing
+  # execFile-without-shell limitation of pi-adapter.ts's own resolveBin
+  # usage on Windows, orthogonal to bundling -- it would affect an
+  # unbundled Windows run identically. A copy of `node.exe` is a genuine
+  # .exe that responds to `--version` on stdout with exit 0, so it is a
+  # fair stand-in for "a real pi binary" for this smoke's purposes.
+  STUB="$WORK_DIR/stub-pi.exe"
+  node -e "require('fs').copyFileSync(process.execPath, process.argv[1])" "$STUB"
 else
   STUB="$WORK_DIR/stub-pi"
   cat > "$STUB" <<'EOF'
@@ -89,6 +93,16 @@ echo "stub-pi: unsupported args: $*" >&2
 exit 1
 EOF
   chmod +x "$STUB"
+fi
+
+# BYOK_PI_BIN's value is read by the compiled binary's own native
+# execFile() -- like sea-config.json's "main"/"output" (see build.sh), a
+# git-bash-style "/tmp/..." path in an env var's *value* is not guaranteed
+# to be translated the way a bare argv token passed to a recognized native
+# exe is, so convert to a native Windows path defensively.
+STUB_ENV_VALUE="$STUB"
+if [ "$OS" = "Windows" ] && command -v cygpath >/dev/null 2>&1; then
+  STUB_ENV_VALUE="$(cygpath -w "$STUB")"
 fi
 
 # $1=label $2=expected piDetect.present ("true"/"false") $3=output file $4=exit code
@@ -122,7 +136,7 @@ assert_probe "pi-absent-degrades" "false" "$OUT1" "$EXIT1"
 echo "==> scenario 2: BYOK_PI_BIN stub (pi picked up)"
 OUT2="$WORK_DIR/out2.log"
 EXIT2=0
-( cd "$ISOLATED_DIR" && BYOK_PI_BIN="$STUB" "./$(basename "$RUN_BIN")" ) >"$OUT2" 2>&1 || EXIT2=$?
+( cd "$ISOLATED_DIR" && BYOK_PI_BIN="$STUB_ENV_VALUE" "./$(basename "$RUN_BIN")" ) >"$OUT2" 2>&1 || EXIT2=$?
 assert_probe "pi-stub-picked-up" "true" "$OUT2" "$EXIT2"
 
 echo "==> Node SEA packageability smoke: PASS"

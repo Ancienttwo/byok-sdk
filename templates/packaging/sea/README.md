@@ -89,6 +89,21 @@ because it actually works on the Node versions this SDK targets
 (`engines.node >= 20`); revisit `mainFormat: "module"` once it's reliably
 supported on your floor.
 
+### A Windows note: `BYOK_PI_BIN` and `.cmd`/`.bat` don't mix with `execFile`
+
+Unrelated to bundling, but worth knowing if you test this on Windows: pi
+adapter's `detect()` (`packages/client/src/adapters/pi/pi-adapter.ts`) calls
+Node's `child_process.execFile(bin.command, ['--version'])` with no
+`shell: true`. Windows can't `CreateProcess` a `.cmd`/`.bat` file directly
+without a shell, so pointing `BYOK_PI_BIN` at one silently degrades to
+`present: false` — indistinguishable from pi being genuinely absent.
+This recipe's `smoke-test.sh` stub is a copy of `node.exe` (a genuine
+`.exe`) for exactly this reason, not a `.cmd` script. This is a real,
+pre-existing characteristic of `execFile`-without-`shell` on Windows that
+would affect an unbundled Windows run identically — it is not a
+packaging/bundling defect, just easy to trip over if your own real pi
+binary (or a wrapper around it) happens to be a `.cmd`/`.bat` on Windows.
+
 ## What this actually guarantees (and what it doesn't)
 
 Bundling a Node.js daemon into one file is not automatically safe. This
