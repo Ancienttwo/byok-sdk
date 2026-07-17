@@ -2,6 +2,8 @@ import type { CapabilityFlag, RuntimeCapabilities as ProtocolRuntimeCapabilities
 import type { PermissionPolicy } from '@byok/protocol';
 import type { RuntimeAdapter, RuntimeCapabilities } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
 import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
@@ -12,15 +14,47 @@ import { DeviceStore, type DeviceRecord } from './store';
 import { TaskRunner, type TaskRunnerDeps } from './task-runner';
 import type { ProgressBatcherOptions } from './progress-batcher';
 
+/**
+ * Optional white-label product display info — purely opaque passthrough
+ * (never interpreted, validated, or rendered by the daemon itself). Carried
+ * through to `DaemonStatus.branding` (see `status()` below) so a downstream
+ * CLI or audit log can render/stamp product identity without the daemon
+ * needing to know anything about presentation. Deliberately a small,
+ * open-ish shape rather than an exhaustive theming schema — add fields here
+ * only as concrete consumers (CLI UX, audit log) need them.
+ */
+export interface DaemonBranding {
+  /** Product/company name for banners, prompts, audit log entries, etc. */
+  displayName?: string;
+  /** Support/help URL surfaced alongside branding. */
+  supportUrl?: string;
+  /** Brand accent color (any CSS-color-like string — hex, name, etc.); not parsed or validated here. */
+  accent?: string;
+}
+
 export interface DaemonConfig {
   productName: string;
   productId: string;
   serverUrl: string;
   deviceName?: string;
   workspaceRoot: string;
+  /**
+   * Restricts which runtimes this daemon will ever use — enforced in two
+   * places that must stay consistent: `createDaemon` (this file) builds its
+   * bundled adapter set FROM this list (unset = all three bundled adapters
+   * — pi, claude, codex; set = exactly the listed runtime ids, unknown ids
+   * ignored — see `buildDefaultAdapters`), and `TaskRunner.pickAdapter`
+   * (`task-runner.ts`) separately fail-closed-rejects any `task.offer`
+   * naming a runtime outside this list regardless of which adapters were
+   * constructed. `createDaemonWithAdapters` callers supply their own
+   * `adapters` array directly, so for them this field is enforcement-only,
+   * unchanged from M1/M2.
+   */
   runtimeAllowlist?: string[];
   permissionDefaults?: PermissionPolicy;
   storeDir?: string;
+  /** Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`. */
+  branding?: DaemonBranding;
 }
 
 export interface DaemonStatus {
@@ -32,6 +66,8 @@ export interface DaemonStatus {
   revoked: boolean;
   deviceId?: string;
   activeTaskCount: number;
+  /** Passthrough of `DaemonConfig.branding` — `undefined` when the product configured none. See `DaemonBranding`. */
+  branding?: DaemonBranding;
 }
 
 export interface Daemon {
@@ -41,7 +77,7 @@ export interface Daemon {
   status(): DaemonStatus;
 }
 
-/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. Also the real entry point for products wiring up more than the pi default (e.g. M2's claude/codex adapters). */
+/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options or a runtime beyond the three bundled ones. */
 export interface DaemonOverrides {
   backoff?: BackoffOptions;
   batch?: ProgressBatcherOptions;
@@ -124,6 +160,43 @@ function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
   if (adapters.some((adapter) => adapter.capabilities().steer)) flags.push('steer');
   flags.push('blob-upload');
   return flags;
+}
+
+/**
+ * Canonical construction order for `createDaemon`'s bundled adapter set —
+ * also the priority order `TaskRunner.pickAdapter` falls back to when a
+ * `task.offer` names no explicit runtime (`task-runner.ts`: first adapter
+ * whose `detect()` finds it present on the device wins). Pi first preserves
+ * the exact M0/M1 default behavior (pi was the only adapter that ever
+ * existed then).
+ */
+const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
+
+function buildAdapter(id: RuntimeId): RuntimeAdapter {
+  switch (id) {
+    case 'pi':
+      return new PiAdapter();
+    case 'claude':
+      return new ClaudeAdapter();
+    case 'codex':
+      return new CodexAdapter();
+  }
+}
+
+/**
+ * Builds `createDaemon`'s bundled adapter set from `DaemonConfig.runtimeAllowlist`
+ * — see that field's own doc comment for the unset-vs-set contract. Filters
+ * `ALL_RUNTIME_IDS` (rather than mapping the allowlist directly) so an
+ * allowlist entry that isn't a real runtime id is silently ignored — the same
+ * "unknown id never gets an adapter" fail-closed shape `TaskRunner.pickAdapter`
+ * already applies to an unknown *requested* runtime — and it de-duplicates
+ * repeated entries for free.
+ */
+function buildDefaultAdapters(runtimeAllowlist: string[] | undefined): RuntimeAdapter[] {
+  const ids = runtimeAllowlist
+    ? ALL_RUNTIME_IDS.filter((id) => runtimeAllowlist.includes(id))
+    : ALL_RUNTIME_IDS;
+  return ids.map(buildAdapter);
 }
 
 export function createDaemonWithAdapters(
@@ -230,6 +303,7 @@ export function createDaemonWithAdapters(
       revoked: connection?.isRevoked() ?? auth.isRevoked(),
       deviceId: auth.deviceId,
       activeTaskCount: runner?.activeTaskCount ?? 0,
+      branding: config.branding,
     };
   }
 
@@ -237,10 +311,25 @@ export function createDaemonWithAdapters(
 }
 
 /**
- * Public M0/M1 entry point: pi-only daemon, matching the documented config
- * shape exactly. Products needing more than the built-in pi adapter (e.g.
- * M2's claude/codex adapters) use `createDaemonWithAdapters` directly.
+ * Public white-label entry point (M0-M3): the "5-line launcher" — a product
+ * only needs a `DaemonConfig`, no hand-built adapter list. The bundled
+ * adapter set is built from `config.runtimeAllowlist` (see
+ * `buildDefaultAdapters` and that field's own doc comment for the exact
+ * unset-vs-set contract); with no `runtimeAllowlist` configured, the default
+ * is ALL THREE bundled adapters (pi, claude, codex), not pi alone: M0/M1
+ * hard-wired pi-only unconditionally, which meant any product wanting
+ * claude/codex had to drop to `createDaemonWithAdapters` and hand-build
+ * adapters just to get a runtime that was already built into this SDK.
+ * `detectRuntimes` only ever advertises what's actually present on the
+ * device (protocol §10 gap #4), so constructing an adapter for a runtime the
+ * device doesn't have costs one quick failed `--version` probe at `start()`
+ * and is otherwise invisible — there's no reason to withhold it by default.
+ * Products that DO want to restrict to a subset set `runtimeAllowlist`
+ * (also independently enforced at task-pick time — see
+ * `TaskRunnerDeps.runtimeAllowlist` / `TaskRunner.pickAdapter`); products
+ * needing something this can't build (custom adapter options, a fourth
+ * in-house runtime, test stubs) use `createDaemonWithAdapters` directly.
  */
 export function createDaemon(config: DaemonConfig): Daemon {
-  return createDaemonWithAdapters(config, [new PiAdapter()]);
+  return createDaemonWithAdapters(config, buildDefaultAdapters(config.runtimeAllowlist));
 }

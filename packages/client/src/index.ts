@@ -8,7 +8,7 @@ export type {
 export { PolicyUnsupportedError } from './types';
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides } from './daemon/create-daemon';
+export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding } from './daemon/create-daemon';
 export type { DeviceRecord } from './daemon/store';
 export { AuthManager, DeviceRevokedError } from './daemon/auth-manager';
 export type { ConnectionState } from './daemon/ws-transport';
