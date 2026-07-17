@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { atomicWriteFile } from '../util/atomic-write';
 
 export interface DeviceRecord {
   deviceId: string;
@@ -62,11 +63,13 @@ export class DeviceStore {
 
   async save(record: DeviceRecord): Promise<void> {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-    await fs.writeFile(this.filePath, JSON.stringify(record, null, 2), { mode: 0o600 });
-    // `mode` on writeFile only applies when the file is created; force it in
-    // case a previous, differently-permissioned file already existed. This
-    // file holds the device private key, so 0600 is load-bearing, not cosmetic.
-    await fs.chmod(this.filePath, 0o600);
+    // Atomic (temp file + rename) so a concurrent reader never observes a
+    // torn/partial file and a crash mid-write never corrupts the existing
+    // one — see `util/atomic-write.ts`. This file holds the device private
+    // key, so both the atomicity and the 0600 mode are load-bearing, not
+    // cosmetic; `{ mode: 0o600 }` is re-asserted on every save (not just the
+    // one that first creates the file).
+    await atomicWriteFile(this.filePath, JSON.stringify(record, null, 2), { mode: 0o600 });
   }
 
   async clear(): Promise<void> {

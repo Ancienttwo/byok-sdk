@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { atomicWriteFile } from '../util/atomic-write';
 
 /**
  * Persists the highest processed server->daemon envelope `seq` per
@@ -62,7 +63,12 @@ export class CursorStore {
   async save(serverUrl: string, deviceId: string, cursor: number): Promise<void> {
     const file = this.fileFor(serverUrl, deviceId);
     await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-    await fs.writeFile(file, JSON.stringify({ cursor }), 'utf8');
+    // Atomic (temp file + rename) so a `load()` racing an in-flight `save()`
+    // (e.g. redelivery bookkeeping alongside a concurrent reconnect) never
+    // observes a torn/partial file and falls back to `undefined` for a
+    // cursor that was, in fact, already durably persisted — see
+    // `util/atomic-write.ts`.
+    await atomicWriteFile(file, JSON.stringify({ cursor }));
   }
 
   /** Remove any persisted cursor for (serverUrl, deviceId) — a no-op if none exists. Called from `pair()` (finding F5) so a device that's about to be replaced never leaves a cursor a future, unrelated device could somehow inherit. */
