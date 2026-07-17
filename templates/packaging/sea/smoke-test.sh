@@ -32,12 +32,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ENTRY="${LAUNCHER_ENTRY:-$REPO_ROOT/examples/packaging/launcher.ts}"
 
-# Prefer this repo's own esbuild (a transitive devDependency via tsup) over
-# assuming a bare `esbuild` is on PATH -- a product copying this recipe
-# elsewhere should either have esbuild on PATH or set ESBUILD_BIN itself.
-if [ -z "${ESBUILD_BIN:-}" ] && [ -x "$REPO_ROOT/node_modules/.bin/esbuild" ]; then
-  export ESBUILD_BIN="$REPO_ROOT/node_modules/.bin/esbuild"
-fi
+# esbuild resolution (pnpm exec by default, or $ESBUILD_BIN override) is
+# handled inside build.sh -- see its comments for why a plain `esbuild` on
+# PATH can't be assumed here.
 
 OS="${RUNNER_OS:-}"
 if [ -z "$OS" ]; then

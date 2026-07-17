@@ -58,9 +58,23 @@ else
   OUT_BIN="$OUT_DIR/launcher-sea"
 fi
 
-ESBUILD="${ESBUILD_BIN:-esbuild}"
-echo "==> bundling $ENTRY to a single CommonJS file ($ESBUILD)"
-"$ESBUILD" "$ENTRY" --bundle --platform=node --format=cjs --outfile="$BUNDLE"
+# Default to `pnpm exec esbuild`: esbuild is only a *transitive* dependency
+# here (pulled in by tsup, not listed directly in any package.json), and
+# pnpm's default strict node_modules layout does not reliably hoist a
+# transitive bin's shim to a fixed, predictable node_modules/.bin path --
+# empirically confirmed to vary between a locally-accumulated install and a
+# clean `pnpm install --frozen-lockfile` checkout (e.g. in CI). `pnpm exec`
+# resolves any bin reachable from the workspace's own dependency graph
+# regardless of hoisting, so it's the robust default within this repo. Set
+# ESBUILD_BIN to a concrete path/command if you've copied this recipe into a
+# non-pnpm project (npm/yarn) or have esbuild installed some other way.
+if [ -n "${ESBUILD_BIN:-}" ]; then
+  ESBUILD_CMD=("$ESBUILD_BIN")
+else
+  ESBUILD_CMD=(pnpm exec esbuild)
+fi
+echo "==> bundling $ENTRY to a single CommonJS file (${ESBUILD_CMD[*]})"
+"${ESBUILD_CMD[@]}" "$ENTRY" --bundle --platform=node --format=cjs --outfile="$BUNDLE"
 
 echo "==> generating SEA blob"
 cat > "$SEA_CONFIG" <<EOF
