@@ -523,19 +523,53 @@ class CodexSession implements Session {
     }
 
     const resumeRef = this.sessionRef;
-    const { sessionRef, runner } = await runCodexTurn({
-      command: this.command,
-      resumeRef,
-      instruction: task.instruction,
-      policyArgs: mapping.args,
-      cwd: this.workspaceDir,
-      env: this.env,
-      spawnFn: this.spawnFn,
-      workspaceDir: this.workspaceDir,
-      queue: this.queue,
-      recordUnmapped: this.recordUnmapped,
-      expectedSessionRef: resumeRef,
-    });
+    let sessionRef: string;
+    let runner: CodexProcessRunner;
+    try {
+      ({ sessionRef, runner } = await runCodexTurn({
+        command: this.command,
+        resumeRef,
+        instruction: task.instruction,
+        policyArgs: mapping.args,
+        cwd: this.workspaceDir,
+        env: this.env,
+        spawnFn: this.spawnFn,
+        workspaceDir: this.workspaceDir,
+        queue: this.queue,
+        recordUnmapped: this.recordUnmapped,
+        expectedSessionRef: resumeRef,
+      }));
+    } catch (err) {
+      // Fix (queue-leak-on-failure): confirmed empirically with a diagnostic
+      // unbounded `for await` over `session.events` — the SAME shared queue
+      // this method's own `runCodexTurn` call already writes into is exposed
+      // to the caller from before this call even started (`this.queue` ===
+      // `session.events`, session-lifetime). `runCodexTurn` already kills the
+      // FAILED attempt's own runner before throwing in both its failure
+      // branches (a bad/missing first frame, and this exact session-identity
+      // mismatch — see its own doc comment), but never touches `this.queue`.
+      // The identity-mismatch case in particular routinely reaches
+      // `turn.completed` (mapped to `turn_end`) on the wire BEFORE the
+      // mismatch is even detected — this turn's own `onEvent` callback keeps
+      // draining the child's stdout independently of when `runCodexTurn`'s
+      // own promise settles, and a synchronous fixture's whole output can
+      // arrive in one 'data' chunk, processed before the "await sessionRef"
+      // continuation ever runs. That means `runCodexTurn`'s own "this turn
+      // never reached turn_end" background watcher sees `turnEnded === true`
+      // and correctly declines to end the queue itself (see that watcher's
+      // doc comment: a later `followUp()` reusing this same queue is the
+      // normal case it's protecting) — leaving NOTHING that will ever end
+      // it, so a consumer that reads past everything already buffered gets a
+      // `next()` that never resolves. Ending it here closes that gap,
+      // mirroring `close()`'s own `this.queue.end()` — deliberately NOT
+      // setting `this.closed`, since a failed followUp() must not corrode
+      // the SESSION itself (a later `followUp()` with a matching id still
+      // succeeds — see the cross-model re-review test above); only this
+      // queue's usefulness ends, since nothing can safely keep sharing it
+      // once a turn's own result has been this explicitly distrusted.
+      this.queue.end();
+      throw err;
+    }
     this.sessionRef = sessionRef;
     this.currentRunner = runner;
     void this.forgetRunnerOnceClosed(runner);

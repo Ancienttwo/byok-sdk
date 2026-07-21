@@ -222,6 +222,62 @@ describe('mapClaudeMessageToAgentEvents', () => {
     expect((result.events[0] as { message: string }).message).toMatch(/missing\/invalid is_error flag/);
   });
 
+  it('M4 Fix 1: a MISSING is_error with a usable errors array still fails closed, but no longer silently drops that diagnostic content', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = {
+      type: 'result',
+      subtype: 'error_during_execution',
+      errors: ['No conversation found with session ID: bogus'], // no is_error at all
+    };
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events.some((e) => e.type === 'turn_end')).toBe(false); // still fail-closed
+    expect(result.events).toHaveLength(1);
+    const event = result.events[0] as { type: string; message: string };
+    expect(event.type).toBe('error');
+    expect(event.message).toMatch(/missing\/invalid is_error flag/); // fail-closed verdict preserved
+    expect(event.message).toContain('No conversation found with session ID: bogus');
+  });
+
+  it('M4 Fix 1: a non-boolean is_error with a usable result string still fails closed, but no longer silently drops that diagnostic content', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = {
+      type: 'result',
+      subtype: 'success',
+      is_error: 1, // malformed: neither `true` nor `false`
+      result: 'partial output before the flag went missing',
+    };
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events.some((e) => e.type === 'turn_end')).toBe(false);
+    expect(result.events).toHaveLength(1);
+    const event = result.events[0] as { type: string; message: string };
+    expect(event.type).toBe('error');
+    expect(event.message).toMatch(/missing\/invalid is_error flag/);
+    expect(event.message).toContain('partial output before the flag went missing');
+  });
+
+  it('M4 Fix 1: a MISSING is_error with NEITHER errors nor result leaves the generic fail-closed message exactly as before (nothing to append)', () => {
+    const correlation = createToolUseCorrelation();
+    const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success' }; // no is_error, no errors, no result
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events).toEqual([
+      {
+        type: 'error',
+        message: 'claude result frame had a missing/invalid is_error flag (got undefined) — treating as failure, fail-closed',
+      },
+    ]);
+  });
+
+  it('M4 Fix 1: an oversized diagnostic payload on a malformed result frame is truncated to a sane bound rather than appended verbatim', () => {
+    const correlation = createToolUseCorrelation();
+    const hugeResult = 'x'.repeat(5000);
+    const msg: ClaudeStreamMessage = { type: 'result', subtype: 'success', result: hugeResult }; // is_error missing
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    const event = result.events[0] as { type: string; message: string };
+    expect(event.message.length).toBeLessThan(hugeResult.length);
+    expect(event.message).toContain('[truncated]');
+    expect(event.message).not.toContain(hugeResult); // the full untruncated string never appears
+  });
+
   it('treats known-routine system subtypes as no-ops, never unmapped', () => {
     const correlation = createToolUseCorrelation();
     for (const subtype of ROUTINE_CLAUDE_SYSTEM_SUBTYPES) {

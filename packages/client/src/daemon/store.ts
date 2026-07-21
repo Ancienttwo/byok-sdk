@@ -62,7 +62,16 @@ export class DeviceStore {
   }
 
   async save(record: DeviceRecord): Promise<void> {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
+    const storeDir = path.dirname(this.filePath);
+    await fs.mkdir(storeDir, { recursive: true, mode: 0o700 });
+    // `mkdir`'s own `mode` only applies at CREATION time — a pre-existing
+    // storeDir (predating this fix, or created by something else with a
+    // more permissive mode) keeps whatever it already had until explicitly
+    // chmod'd. Re-asserted on every save, best-effort — mirrors
+    // `bin/audit-log.ts`'s `appendAuditEvent`, which has the identical gap
+    // (and the identical fix) for the same reason: a failure here (e.g. a
+    // storeDir owned by a different user) must never block the save itself.
+    await fs.chmod(storeDir, 0o700).catch(() => {});
     // Atomic (temp file + rename) so a concurrent reader never observes a
     // torn/partial file and a crash mid-write never corrupts the existing
     // one — see `util/atomic-write.ts`. This file holds the device private

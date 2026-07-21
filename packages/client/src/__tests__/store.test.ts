@@ -60,6 +60,29 @@ describe('DeviceStore (atomic write path)', () => {
     expect(await store.load()).toEqual(record);
   });
 
+  it('M4 Fix 3: a pre-existing storeDir with a permissive mode gets tightened to 0700 on save() (mirrors bin/audit-log.ts\'s identical fix for its own storeDir)', async () => {
+    const parent = await tmpDir('byok-device-store-mode-parent-');
+    storeDir = path.join(parent, 'permissive-store');
+    // Simulate a pre-existing, permissively-moded storeDir (predates this
+    // fix, or created by something else under a looser umask). `mkdir`'s own
+    // `mode` argument only governs permissions at CREATION time, so the
+    // pre-fix `fs.mkdir(dir, { recursive: true, mode: 0o700 })` alone never
+    // retroactively tightened an already-existing, looser-moded directory —
+    // only `audit-log.ts`'s own defensive `fs.chmod` (per-append) did, for
+    // device.json's storeDir as a side effect. This is that same fix,
+    // applied directly in `DeviceStore.save()` itself.
+    await fs.mkdir(storeDir, { mode: 0o755 });
+    const before = await fs.stat(storeDir);
+    expect(before.mode & 0o777).toBe(0o755);
+
+    const store = new DeviceStore(storeDir);
+    await store.save(record);
+
+    const after = await fs.stat(storeDir);
+    expect(after.mode & 0o777).toBe(0o700);
+    expect(await store.load()).toEqual(record);
+  });
+
   it('leaves no leftover atomic-write temp file behind after save()', async () => {
     storeDir = await tmpDir('byok-device-store-');
     const store = new DeviceStore(storeDir);

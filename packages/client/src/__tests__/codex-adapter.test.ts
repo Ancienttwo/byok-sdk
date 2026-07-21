@@ -243,6 +243,89 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(session.sessionRef).toBe('thread-a');
   });
 
+  it('M4 Fix 2: followUp() failing on a session-identity mismatch ends the shared queue so an in-flight/subsequent consumer terminates instead of hanging forever', async () => {
+    const adapter = fakeCodexAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a' });
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+    await takeEvents(session, 7); // drain turn 1
+
+    // Pre-fix, confirmed empirically with a diagnostic unbounded for-await
+    // here: it never returned on its own (only vitest's own afterEach —
+    // which calls session.close() on every pushed session regardless of
+    // pass/fail — eventually unblocked it, well after this test had already
+    // failed on its OWN timeout). Whether the mismatched turn's own onEvent
+    // processing happens to reach turn.completed before runCodexTurn's
+    // mismatch check runs (racing the child's stdout delivery against the
+    // "await sessionRef" continuation) decides whether 0 or 7 of ITS events
+    // are already buffered by the time this runs — not something this test
+    // pins down either way. A bounded (test-timeout-only) unbounded
+    // for-await, exactly like the "cross-model review (Fix 1)" test above,
+    // so a regression here fails loudly instead of hanging the whole suite.
+    ctx.env.FAKE_CODEX_REPORTED_THREAD_ID = 'thread-b';
+    await expect(session.followUp({ instruction: 'turn 2', policy: { mode: 'auto' } })).rejects.toThrow(
+      /echoed a different thread id than requested/,
+    );
+
+    // Drain whatever this (possibly-mismatched) turn's own onEvent
+    // processing already pushed before the identity check ran — race-
+    // dependent (0 or more items), and not what this test asserts on.
+    for await (const _drained of session.events) {
+      void _drained;
+    }
+
+    // The property this fix actually guarantees: the queue is DURABLY ended,
+    // not just lucky once — a second, entirely fresh for-await over the same
+    // session.events (a new iterator, same underlying queue) also completes
+    // immediately with nothing further, rather than hanging on its own first
+    // next() call.
+    const secondPass: AgentEvent[] = [];
+    for await (const event of session.events) {
+      secondPass.push(event);
+    }
+    expect(secondPass).toEqual([]);
+  }, 5000);
+
+  it('M4 Fix 2: followUp() failing on a session-identity mismatch terminates the events stream promptly even when the underlying process would otherwise hang, and close() afterward still resolves cleanly', async () => {
+    const adapter = fakeCodexAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a', FAKE_CODEX_HANG: '1' });
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+    await takeEvents(session, 1); // only the skills-budget notice arrives before the fixture hangs
+
+    // Here the mismatched turn's own process never reaches turn.completed on
+    // its own (FAKE_CODEX_HANG keeps it alive via setInterval) —
+    // runCodexTurn's mismatch branch SIGTERMs it, but the process actually
+    // exiting (`waitClosed()` resolving) is a real async round-trip through
+    // the OS. This fix's `this.queue.end()` runs synchronously in
+    // followUp()'s own catch, the instant the mismatch is detected — it does
+    // not wait for that round-trip, so the stream terminates immediately
+    // rather than only once the killed process eventually exits. If the kill
+    // itself silently failed to land, `close()` below (via a fresh SIGTERM)
+    // would be this test's last chance to end it before the bound below.
+    ctx.env.FAKE_CODEX_REPORTED_THREAD_ID = 'thread-b';
+    await expect(session.followUp({ instruction: 'turn 2', policy: { mode: 'auto' } })).rejects.toThrow(
+      /echoed a different thread id than requested/,
+    );
+
+    for await (const _drained of session.events) {
+      void _drained;
+    }
+
+    const secondPass: AgentEvent[] = [];
+    for await (const event of session.events) {
+      secondPass.push(event);
+    }
+    expect(secondPass).toEqual([]);
+
+    // The other half of "child/runner is cleaned up": close() (which
+    // SIGTERMs whatever `currentRunner` still refers to — here, turn 1's own
+    // still-hanging runner, since the failed turn 2 never got a chance to
+    // replace it) resolves cleanly rather than hanging waiting on anything
+    // this fix left dangling.
+    await expect(session.close()).resolves.toBeUndefined();
+  }, 5000);
+
   it('followUp() fails closed on a policy codex cannot express, without disturbing the already-open session', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
