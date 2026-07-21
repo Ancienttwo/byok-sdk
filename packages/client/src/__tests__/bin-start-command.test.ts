@@ -146,6 +146,54 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     await startPromise;
   });
 
+  it('finding F8: an awaiting-approval event\'s stdout line is redacted (no raw tool-input text) even though the SAME event is otherwise rendered in full', async () => {
+    const listeners = new Set<DaemonEventListener>();
+    const rawSummary = 'Bash: rm -rf /etc/passwd && cat /home/user/.ssh/id_rsa';
+    const fakeDaemon: Daemon = {
+      pair: vi.fn(),
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      status: vi.fn().mockReturnValue({ paired: true, connected: true, degraded: false, revoked: false, activeTaskCount: 1 }),
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      tasks: () => [],
+      unpair: vi.fn(),
+      approve: vi.fn(),
+      reject: vi.fn(),
+    };
+    const storeDir = await tmpDir('byok-start-store-redact-');
+
+    const lines: string[] = [];
+    const controller = new AbortController();
+    const startPromise = runStartCommand(
+      { productName: 'Acme', productId: 'acme-start-redact', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+      { daemon: fakeDaemon, log: (l) => lines.push(l), signal: controller.signal },
+    );
+
+    await vi.waitFor(() => expect(listeners.size).toBe(1));
+    for (const listener of listeners) {
+      listener({ kind: 'awaiting-approval', ts: '2026-01-01T00:00:00.000Z', taskId: 'task-1', summary: rawSummary, approvalId: 'appr-1' });
+    }
+
+    await vi.waitFor(() => expect(lines.some((l) => l.includes('awaiting-approval'))).toBe(true));
+    const approvalLine = lines.find((l) => l.includes('awaiting-approval'))!;
+
+    // The raw tool-input text must never reach stdout ...
+    expect(approvalLine).not.toContain(rawSummary);
+    expect(approvalLine).not.toContain('id_rsa');
+    expect(approvalLine).not.toContain('/etc/passwd');
+    // ... but the line is still otherwise fully rendered (taskId, approvalId,
+    // a byte-count placeholder in place of the summary — not just dropped).
+    expect(approvalLine).toContain('taskId=task-1');
+    expect(approvalLine).toContain('approvalId=appr-1');
+    expect(approvalLine).toContain(`[redacted: ${Buffer.byteLength(rawSummary, 'utf8')} bytes]`);
+
+    controller.abort();
+    await startPromise;
+  });
+
   it('propagates an error from daemon.start() after unsubscribing and best-effort stopping', async () => {
     const listeners = new Set<DaemonEventListener>();
     const stop = vi.fn().mockResolvedValue(undefined);

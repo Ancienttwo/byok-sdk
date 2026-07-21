@@ -46,8 +46,18 @@ export interface WsTransportOptions {
   getCursor?: () => number | undefined;
   onEnvelope: (envelope: Envelope) => void;
   onStateChange?: (state: ConnectionState) => void;
-  /** Fired the moment `conn.ack` is processed and the connection becomes usable — independent of `onConnectOutcome`, which only fires on close (a healthy, still-open connection never reaches it). */
-  onAcked?: () => void;
+  /**
+   * Fired the moment `conn.ack` is processed and the connection becomes
+   * usable — independent of `onConnectOutcome`, which only fires on close (a
+   * healthy, still-open connection never reaches it). Carries the ack's own
+   * `capabilities` (untyped `string[]` on the wire, forward-compat — a
+   * server may advertise a flag this build doesn't recognize yet), so a
+   * caller can learn what the CURRENTLY connected server understands (e.g.
+   * the `approval_resolved` capability flag — see
+   * `ConnectionManager.getServerCapabilities`) instead of it being silently
+   * discarded after the handshake completes.
+   */
+  onAcked?: (capabilities: string[]) => void;
   /**
    * Fired once per connection attempt when the socket closes, reporting
    * whether that attempt ever reached `conn.ack` (`acked`) before closing,
@@ -208,7 +218,7 @@ export class WsTransport {
         this.everAckedThisAttempt = true;
         this.opts.onStateChange?.('open');
         for (const waiter of this.ackWaiters.splice(0)) waiter.resolve();
-        this.opts.onAcked?.();
+        this.opts.onAcked?.(envelope.payload.capabilities);
       }
       this.opts.onEnvelope(envelope);
     });

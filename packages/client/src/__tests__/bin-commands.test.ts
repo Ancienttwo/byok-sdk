@@ -6,12 +6,19 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Daemon, DaemonConfig, DeviceRecord, ServiceLifecycle } from '../index';
 import { ControlError } from '../daemon/control-protocol';
 import type { ConnectControlResult, ControlClient } from '../bin/control-client';
+import { runApprovalsCommand } from '../bin/commands/approvals';
 import { runApproveCommand, runRejectCommand } from '../bin/commands/approve-reject';
 import { runPairCommand } from '../bin/commands/pair';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runTasksFollowCommand, runTasksListCommand } from '../bin/commands/tasks';
-import { runUnpairCommand, UnpairBlockedByRunningServiceError, UnpairNotConfirmedError, UnpairUnknownDaemonStateError } from '../bin/commands/unpair';
+import {
+  runUnpairCommand,
+  UnpairBlockedByRunningServiceError,
+  UnpairExitUnconfirmedError,
+  UnpairNotConfirmedError,
+  UnpairUnknownDaemonStateError,
+} from '../bin/commands/unpair';
 import { appendAuditEvent, auditLogPath } from '../bin/audit-log';
 import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -254,6 +261,65 @@ describe('bin/commands/approve-reject (M4 Phase 2: control socket, not a live in
 
     expect(handleRequest).toHaveBeenCalledWith('approvals.resolve', { approvalId: 'approval-3', decision: 'reject', reason: undefined });
     expect(lines).toEqual(['rejected: approvalId=approval-3']);
+  });
+});
+
+describe('bin/commands/approvals: runApprovalsCommand (finding F4)', () => {
+  it('renders registry entries end-to-end via the control socket — approvalId, taskId, age, and a quoted summary excerpt per line', async () => {
+    const handleRequest = vi.fn().mockResolvedValue({
+      approvals: [
+        { approvalId: 'appr-1', taskId: 't1', summary: 'Bash: rm -rf /tmp/x', createdAt: '2026-01-01T00:00:00.000Z' },
+        { approvalId: 'appr-2', taskId: 't2', createdAt: '2026-01-01T00:00:30.000Z' },
+      ],
+    });
+    const { connectControl, close } = fakeConnected(handleRequest);
+    const { log, lines } = collectLog();
+
+    await runApprovalsCommand('/store', 'acme-product', {
+      log,
+      connectControl,
+      now: () => Date.parse('2026-01-01T00:01:00.000Z'),
+    });
+
+    expect(handleRequest).toHaveBeenCalledWith('approvals.list', undefined);
+    expect(lines).toEqual([
+      'appr-1 taskId=t1 age=1m summary="Bash: rm -rf /tmp/x"',
+      'appr-2 taskId=t2 age=30s summary="(no summary)"',
+    ]);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a placeholder line when there are no pending approvals', async () => {
+    const handleRequest = vi.fn().mockResolvedValue({ approvals: [] });
+    const { connectControl } = fakeConnected(handleRequest);
+    const { log, lines } = collectLog();
+
+    await runApprovalsCommand('/store', 'acme-product', { log, connectControl });
+
+    expect(lines).toEqual(['(no pending approvals)']);
+  });
+
+  it('reports a clear, specific error (not an exception dump) when the daemon is unreachable', async () => {
+    const errors: string[] = [];
+    await expect(
+      runApprovalsCommand('/store', 'acme-product', {
+        error: (l) => errors.push(l),
+        connectControl: fakeUnreachable(),
+      }),
+    ).rejects.toThrow(/not reachable/);
+    expect(errors.some((l) => l.includes('not reachable') && l.includes('approvals'))).toBe(true);
+  });
+
+  it('surfaces a control error and rethrows, closing the connection either way', async () => {
+    const handleRequest = vi.fn().mockRejectedValue(new ControlError('internal_error', 'boom'));
+    const { connectControl, close } = fakeConnected(handleRequest);
+    const errors: string[] = [];
+
+    await expect(
+      runApprovalsCommand('/store', 'acme-product', { error: (l) => errors.push(l), connectControl }),
+    ).rejects.toThrow(/boom/);
+    expect(errors.some((l) => l.includes('boom'))).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -526,6 +592,108 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
       expect(close).toHaveBeenCalledTimes(1);
       expect(unpair).toHaveBeenCalledTimes(1);
       expect(lines.some((l) => l.includes('confirmed exited'))).toBe(true);
+    });
+
+    describe('finding F6: fail-closed when the daemon\'s exit is not confirmed', () => {
+      it('refuses (never calling daemon.unpair(), leaving device.json intact) when isControlDaemonGone never confirms exit', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const requestSpy = vi.fn().mockResolvedValue({ acknowledged: true });
+        const { connectControl, close } = fakeConnected(requestSpy);
+        const isControlDaemonGone = vi.fn().mockResolvedValue(false); // never confirms exit
+
+        await expect(
+          runUnpairCommand(
+            { unpair },
+            {
+              storeDir: '/store',
+              productId: 'acme-product',
+              confirmed: true,
+              connectControl,
+              isControlDaemonGone,
+              controlExitTimeoutMs: 30,
+              controlExitPollIntervalMs: 10,
+            },
+          ),
+        ).rejects.toThrow(UnpairExitUnconfirmedError);
+
+        expect(unpair).not.toHaveBeenCalled(); // device.json left intact — the whole point of this fix
+        expect(close).toHaveBeenCalledTimes(1); // the control-socket connection is still closed despite the later refusal
+      });
+
+      it('the refusal error message is actionable: mentions --force and that the daemon may still be running', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const requestSpy = vi.fn().mockResolvedValue({ acknowledged: true });
+        const { connectControl } = fakeConnected(requestSpy);
+        const isControlDaemonGone = vi.fn().mockResolvedValue(false);
+
+        let caught: unknown;
+        try {
+          await runUnpairCommand(
+            { unpair },
+            {
+              storeDir: '/store',
+              productId: 'acme-product',
+              confirmed: true,
+              connectControl,
+              isControlDaemonGone,
+              controlExitTimeoutMs: 30,
+              controlExitPollIntervalMs: 10,
+            },
+          );
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(UnpairExitUnconfirmedError);
+        const message = (caught as Error).message;
+        expect(message).toContain('--force');
+        expect(message).toMatch(/still be running/);
+      });
+
+      it('--force overrides an unconfirmed exit, clears device.json anyway, and logs an explicit WARNING', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const requestSpy = vi.fn().mockResolvedValue({ acknowledged: true });
+        const { connectControl } = fakeConnected(requestSpy);
+        const isControlDaemonGone = vi.fn().mockResolvedValue(false);
+        const { log, lines } = collectLog();
+
+        await runUnpairCommand(
+          { unpair },
+          {
+            storeDir: '/store',
+            productId: 'acme-product',
+            confirmed: true,
+            force: true,
+            connectControl,
+            isControlDaemonGone,
+            controlExitTimeoutMs: 30,
+            controlExitPollIntervalMs: 10,
+            log,
+          },
+        );
+
+        expect(unpair).toHaveBeenCalledTimes(1);
+        expect(lines.some((l) => l.includes('WARNING') && l.includes('did NOT confirm exit'))).toBe(true);
+      });
+
+      it('a CONFIRMED exit still proceeds without --force — this fix does not require --force universally', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const requestSpy = vi.fn().mockResolvedValue({ acknowledged: true });
+        const { connectControl } = fakeConnected(requestSpy);
+        const isControlDaemonGone = vi.fn().mockResolvedValue(true);
+
+        await runUnpairCommand(
+          { unpair },
+          {
+            storeDir: '/store',
+            productId: 'acme-product',
+            confirmed: true,
+            connectControl,
+            isControlDaemonGone,
+          },
+        );
+
+        expect(unpair).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });

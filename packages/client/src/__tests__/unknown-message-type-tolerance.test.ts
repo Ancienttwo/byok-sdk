@@ -204,17 +204,35 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(received).toHaveLength(2);
   });
 
-  it('long-poll (b): a genuinely malformed KNOWN-type entry (recognized type, invalid/missing payload fields) is skipped exactly like WS treats the identical malformation — silently, batch and connection unaffected', async () => {
-    // WS behavior this mirrors (confirmed by reading ws-transport.ts's
-    // message handler): `decodeEnvelope` throws `EnvelopeValidationError`
-    // for a recognized type with an invalid payload, and the SAME blanket
-    // `catch { return; }` that skips an unrecognized-type frame ALSO
-    // catches this — WS does not distinguish the two failure reasons at
-    // all; both are silently dropped, one frame, no error surfaced, no
-    // log line. Long-poll now does the identical thing per-entry.
+  it('long-poll (b, finding F1 fix): a genuinely malformed KNOWN-type entry (recognized type, invalid/missing payload fields) is skipped for its batch but must NOT advance the cursor — unlike an unrecognized type, this is not forward-compat tolerance, so the server must keep redelivering it until a corrected version is processed', async () => {
+    // F1: the ORIGINAL bug forwarded EVERY parseMessage failure (regardless
+    // of class) to `onSkippedSeq`, which permanently advanced the cursor
+    // past a malformed KNOWN-type entry too — e.g. a real `task.offer`
+    // whose `PermissionPolicy` rejected an unknown constraint. That
+    // silently, permanently acked a control message the daemon never
+    // actually understood: the server would stop redelivering it and
+    // whatever it was offering got stuck forever. WS never had this
+    // hazard — an unparseable WS frame has no skip-side cursor bookkeeping
+    // at all, so it simply gets redelivered later (see ws-transport.ts) —
+    // this test proves long-poll now matches that same "no silent
+    // permanent ack" property for a malformed (not just unrecognized)
+    // entry.
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-malformed-store-');
 
     const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'known-before-2', seq: 1 });
+    server.pushLongPollEvent(before);
+
+    await vi.waitFor(() => {
+      expect(received.some((e) => e.type === 'task.offer' && e.task_id === 'known-before-2')).toBe(true);
+    });
+    await vi.waitFor(async () => {
+      expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
+    });
+
+    // Pushed ALONE (nothing higher-seq queued right after it in this
+    // phase) so its effect on the cursor can be observed in isolation,
+    // unmasked by some later, unrelated envelope's own independent
+    // success advancing the cursor past it anyway.
     const malformed = {
       v: 1,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff03',
@@ -224,22 +242,37 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       seq: 2,
       payload: {}, // ... but missing task.offer's required `instruction`/`policy` fields
     };
-    const after = createEnvelope('task.offer', { instruction: 'after', policy: { mode: 'auto' } }, { taskId: 'known-after-2', seq: 3 });
-
-    server.pushLongPollEvent(before);
     server.pushRawLongPollEvent(malformed);
-    server.pushLongPollEvent(after);
+
+    // Generous real-time window (several retry cycles) — prove the cursor
+    // NEVER reaches 2, not just "hasn't yet". `EnvelopeValidationError` is
+    // not `UnknownMessageTypeError`, so `onSkippedSeq` must not be called
+    // for it at all.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
+    expect(received).toHaveLength(1); // still just `before` — the malformed entry never became a second onEnvelope call
+
+    // Redelivery of a CORRECTED version at the same seq (mirrors a real
+    // server whose outbox still considers this seq owed to the device,
+    // since the cursor never advanced past it, and which redelivers a
+    // fixed-up payload) — well-formed this time, so it's processed
+    // normally and the cursor finally advances past it.
+    const corrected = createEnvelope(
+      'task.offer',
+      { instruction: 'corrected', policy: { mode: 'auto' } },
+      { taskId: 'malformed-task', seq: 2 },
+    );
+    server.pushLongPollEvent(corrected);
 
     await vi.waitFor(() => {
-      expect(received.filter((e) => e.type === 'task.offer').map((e) => e.task_id)).toEqual(['known-before-2', 'known-after-2']);
+      expect(received.some((e) => e.type === 'task.offer' && e.task_id === 'malformed-task')).toBe(true);
     });
-    expect(received).toHaveLength(2); // the malformed entry never became a third onEnvelope call
-
     await vi.waitFor(async () => {
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(3);
+      expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
     });
+    expect(received).toHaveLength(2); // before + corrected — the malformed attempt itself never counted as delivered
 
-    expect(connection?.isTransportDegraded()).toBe(true); // connection itself entirely unaffected
+    expect(connection?.isTransportDegraded()).toBe(true); // connection itself entirely unaffected throughout
   });
 
   it('long-poll (c, was: documents the stall — now: asserts the fix): a persistently-redelivered unrecognized-type envelope never blocks forward progress — the cursor keeps advancing through it, and a concurrent known envelope is delivered immediately, no grace period needed', async () => {

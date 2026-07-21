@@ -353,6 +353,16 @@ export interface ControlStatusResult {
   runtimeIds: string[];
   /** M4 Phase 4 (part B.3): per-active-task queue watermarks — see {@link TaskQueueWatermark}. */
   queueWatermarks: TaskQueueWatermark[];
+  /**
+   * Finding F4 (cross-model adversarial review): the actual pending
+   * approvals currently dispatched — the SAME entries `approvals.list`
+   * returns (`ApprovalRegistry.list()`), surfaced here too so a single
+   * `status` call can show an operator every `approvalId` they'd need to
+   * `approve`/`reject`, without a second control-socket round trip. This is
+   * `approvalsPending`'s own source list (`approvalsPending ===
+   * approvals.length`, always).
+   */
+  approvals: PendingApproval[];
   /** M4 Phase 4 (part B.3): total approvals currently DISPATCHED (registered) across the whole daemon — the same count `approvals.list` returns, surfaced here too for a one-call status view. */
   approvalsPending: number;
 }

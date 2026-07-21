@@ -123,6 +123,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.complete': { taskId: 'required', seq: 'optional' },
     'task.fail': { taskId: 'required', seq: 'optional' },
     'task.cancelled': { taskId: 'required', seq: 'optional' },
+    'task.approval_resolved': { taskId: 'required', seq: 'optional' },
   };
 }
 
@@ -169,6 +170,10 @@ type CodecRequirednessMatrix = {
   'task.complete': { taskId: FieldRequiredness<'task.complete', 'taskId'>; seq: FieldRequiredness<'task.complete', 'seq'> };
   'task.fail': { taskId: FieldRequiredness<'task.fail', 'taskId'>; seq: FieldRequiredness<'task.fail', 'seq'> };
   'task.cancelled': { taskId: FieldRequiredness<'task.cancelled', 'taskId'>; seq: FieldRequiredness<'task.cancelled', 'seq'> };
+  'task.approval_resolved': {
+    taskId: FieldRequiredness<'task.approval_resolved', 'taskId'>;
+    seq: FieldRequiredness<'task.approval_resolved', 'seq'>;
+  };
 };
 
 /** Builds the current schema fingerprint fresh from the live schemas — compared against the committed `golden/v1.frozen.json`. */
@@ -446,6 +451,8 @@ function minimalPayloadForProbe(type: MessageType): unknown {
       return { reason: 'boom' };
     case 'task.cancelled':
       return {};
+    case 'task.approval_resolved':
+      return { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: '2026-01-01T00:00:00.000Z' };
     default: {
       const exhaustive: never = type;
       throw new Error(`no minimal payload fixture for message type: ${String(exhaustive)}`);

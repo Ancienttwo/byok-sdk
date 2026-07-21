@@ -1,4 +1,4 @@
-import { MessagesSendResponseSchema, parseMessage, type Envelope } from '@byok/protocol';
+import { MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
@@ -11,20 +11,35 @@ export interface LongPollClientOptions {
   /** Called once the device is found to be revoked (401 surfaced through {@link AuthManager}) — the loop stops itself rather than retrying. */
   onRevoked?: () => void;
   /**
-   * M4 Phase 4 (version-negotiation drill fix): called for a batch entry
-   * that could not be parsed into a known `Envelope` at all (an
-   * unrecognized message type — mirrors `ws-transport.ts`'s identical
-   * per-frame tolerance) but still carries a numeric envelope-level `seq`
-   * AND a recognizably task-class `type` (a `task.` prefix — see
-   * `extractSkippableSeq`'s own doc comment for why a `conn.*`-shaped or
-   * type-less entry is deliberately excluded, mirroring F2's "conn.* is
-   * never cursor-tracked" rule), so the caller can advance its
-   * cursor/watermark past it even though there is no real `Envelope` to
+   * M4 Phase 4 (version-negotiation drill fix), scope narrowed by finding F1:
+   * called ONLY for a batch entry that failed to parse because its `type`
+   * is entirely unrecognized (`parseMessage` throwing
+   * {@link UnknownMessageTypeError} — mirrors `ws-transport.ts`'s identical
+   * per-frame tolerance for that SPECIFIC failure) and which still carries a
+   * numeric envelope-level `seq` AND a recognizably task-class `type` (a
+   * `task.` prefix — see `extractSkippableSeq`'s own doc comment for why a
+   * `conn.*`-shaped or type-less entry is deliberately excluded, mirroring
+   * F2's "conn.* is never cursor-tracked" rule), so the caller can advance
+   * its cursor/watermark past it even though there is no real `Envelope` to
    * hand to `onEnvelope`. Without this, a persistently-redelivered
    * unrecognized-type entry (the real server retains and redelivers an
    * un-acked envelope, protocol §9) would keep reappearing at the same
-   * cursor position forever. Optional only for constructor/test
-   * convenience — `ConnectionManager` always supplies it.
+   * cursor position forever.
+   *
+   * Finding F1: a RECOGNIZED type that fails schema validation
+   * ({@link EnvelopeValidationError} — e.g. a `task.offer` whose
+   * `PermissionPolicy` rejects an unknown constraint) is deliberately NOT
+   * reported here. That failure is a genuinely malformed control message,
+   * not forward-compat tolerance — forwarding its `seq` here would
+   * permanently ack a message the daemon never actually understood (the
+   * server would stop redelivering it, silently stranding whatever it was
+   * offering). The WS path never had this hazard (an unparseable WS frame
+   * has no skip-side cursor bookkeeping at all — see
+   * `ws-transport.ts` — so it simply gets redelivered later); this callback
+   * being scoped to `UnknownMessageTypeError` only is what makes long-poll
+   * match that same "no silent permanent ack" property for real. Optional
+   * only for constructor/test convenience — `ConnectionManager` always
+   * supplies it.
    */
   onSkippedSeq?: (seq: number) => void;
   /**
@@ -202,25 +217,41 @@ export class LongPollClient {
         // then validated INDIVIDUALLY via `parseMessage` — mirrors
         // `ws-transport.ts`'s identical per-frame tolerance (see
         // `parseLooseEventsPollResponse`'s own doc comment for the full
-        // rationale). An entry that fails for ANY reason — an unrecognized
-        // message type (`UnknownMessageTypeError`) or a recognized type
-        // with a malformed/invalid payload (`EnvelopeValidationError`) — is
-        // silently skipped, exactly as `ws-transport.ts`'s own blanket
-        // `catch {}` treats both identically; it never fails the rest of
-        // the batch. A skipped entry that's recognizably task-class (see
-        // `extractSkippableSeq`'s own doc comment for why `conn.*`-shaped
-        // or type-less entries are excluded) and still carries a numeric
-        // `seq` still advances the cursor/watermark past it
-        // (`onSkippedSeq`), so a persistently-redelivered unparseable entry
-        // can never stall this device's progress.
+        // rationale). An entry that fails for ANY reason is silently
+        // skipped for THIS batch — it never fails the rest of the batch —
+        // but (finding F1) the two failure classes are NOT treated
+        // identically for cursor purposes, unlike `ws-transport.ts`'s own
+        // blanket `catch {}`:
+        //   - `UnknownMessageTypeError` (an entirely unrecognized `type` —
+        //     genuine forward-compat tolerance, e.g. a future minor
+        //     server's new message type): recognizably task-class entries
+        //     (see `extractSkippableSeq`'s own doc comment for why
+        //     `conn.*`-shaped or type-less entries are excluded) still
+        //     advance the cursor/watermark past it (`onSkippedSeq`), so a
+        //     persistently-redelivered unparseable entry can never stall
+        //     this device's progress.
+        //   - Any OTHER failure (in practice `EnvelopeValidationError`: a
+        //     RECOGNIZED type whose payload fails schema validation) does
+        //     NOT forward its `seq` — the cursor is left exactly where it
+        //     was. This is a genuinely malformed control message, not a
+        //     forward-compat case; advancing the cursor for it would
+        //     permanently ack something the daemon never understood (the
+        //     server would stop redelivering it — see `onSkippedSeq`'s own
+        //     doc comment). Not calling `advanceCursor` for it is what
+        //     lets the server's ordinary retain-and-redeliver semantics
+        //     (protocol §9) keep it alive until a corrected version shows
+        //     up, mirroring the WS path's lack of skip-side cursor
+        //     bookkeeping for real.
         const parsed = parseLooseEventsPollResponse(await res.json());
         for (const raw of parsed.events) {
           let envelope: Envelope;
           try {
             envelope = parseMessage(raw);
-          } catch {
-            const skippableSeq = extractSkippableSeq(raw);
-            if (skippableSeq !== undefined) this.opts.onSkippedSeq?.(skippableSeq);
+          } catch (err) {
+            if (err instanceof UnknownMessageTypeError) {
+              const skippableSeq = extractSkippableSeq(raw);
+              if (skippableSeq !== undefined) this.opts.onSkippedSeq?.(skippableSeq);
+            }
             continue;
           }
           this.opts.onEnvelope(envelope);

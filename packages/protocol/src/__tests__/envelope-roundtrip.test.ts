@@ -294,6 +294,19 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     roundTrip(type, createEnvelope(type, { reason: 'user cancelled' }, { taskId: 'task-1' }));
   });
 
+  it('task.approval_resolved', () => {
+    const type = 'task.approval_resolved' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: '2026-01-01T00:00:00.000Z' },
+        { taskId: 'task-1' },
+      ),
+    );
+  });
+
   it('covers every declared message type', () => {
     expect([...new Set(testedTypes)].sort()).toEqual([...MESSAGE_TYPES].sort());
   });

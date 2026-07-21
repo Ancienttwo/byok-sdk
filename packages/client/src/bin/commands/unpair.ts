@@ -63,6 +63,34 @@ export class UnpairUnknownDaemonStateError extends Error {
   }
 }
 
+/**
+ * Finding F6 (cross-model adversarial review): thrown instead of clearing
+ * the store on the LIVE (control-socket) unpair path when the daemon's
+ * actual exit could NOT be confirmed — the shutdown RPC request itself
+ * failed/never got through, teardown hung past `waitForControlExit`'s
+ * deadline, or the exit-poll otherwise never observed `isControlDaemonGone`
+ * before timing out. All three collapse to the same observable signal
+ * (`exited === false`): a daemon that never actually received/finished the
+ * shutdown is presumably STILL RUNNING, with its `AuthManager`'s proactive
+ * renewal timer ready to write a fresh `device.json` right back over
+ * whatever `unpair()` is about to clear — clearing anyway (the pre-fix
+ * behavior) meant the log line had to openly admit "did not confirm exit...
+ * local device identity has still been cleared" as if that were routine,
+ * when it is exactly the silently-self-reverting hazard finding P1 #2
+ * originally set out to close. Bypassable via `--force`, same shape as
+ * {@link UnpairUnknownDaemonStateError} — this means "can't confirm it
+ * actually stopped", an explicit, logged-as-unsafe override, never a
+ * silent default.
+ */
+export class UnpairExitUnconfirmedError extends Error {
+  constructor() {
+    super(
+      'unpair refused: the daemon was told to shut down over the control socket but did not confirm exit before the timeout — it may still be running, and its next proactive token renewal could silently re-write device.json, undoing this unpair. Verify no `byok-agent` process is still running against this store and retry, or pass --force to clear the local credential anyway (unsafe — see UnpairExitUnconfirmedError\'s own doc comment).',
+    );
+    this.name = 'UnpairExitUnconfirmedError';
+  }
+}
+
 export interface UnpairDeps {
   log?: (line: string) => void;
   /** `--yes`: skip the confirmation prompt entirely. */
@@ -91,6 +119,12 @@ export interface UnpairDeps {
    * actively confirmed the service IS running
    * ({@link UnpairBlockedByRunningServiceError} is unconditional either
    * way) — `--force` overrides uncertainty, never a known-unsafe result.
+   *
+   * Finding F6: this SAME flag also overrides the LIVE (control-socket)
+   * path's own exit-confirmation gate — see
+   * {@link UnpairExitUnconfirmedError}. One flag, two independent unsafe
+   * overrides (whichever path this invocation actually took), each logged
+   * as an explicit WARNING rather than silently accepted.
    */
   force?: boolean;
   /**
@@ -182,13 +216,26 @@ async function checkServiceState(lifecycle: Pick<ServiceLifecycle, 'status'> | u
  * reachable right now, that's a definitively confirmed "yes, something is
  * running against this store", strictly better than the OS-service-state
  * GUESS the rest of this doc comment describes: after confirming, this
- * sends `shutdown {reason:'unpair'}`, waits for the daemon to actually exit
- * (polling `isControlDaemonGone` — both the control token file gone AND a
- * fresh connect refused), then clears the store exactly as below. Only when
- * the control socket is NOT reachable (daemon not running at all, or an
- * older daemon build predating this feature) does this fall through to the
- * heuristic, OS-service-state-based flow this whole doc comment otherwise
- * describes — untouched, including every refusal below.
+ * sends `shutdown {reason:'unpair'}`, then waits for the daemon to actually
+ * exit (polling `isControlDaemonGone` — both the control token file gone AND
+ * a fresh connect refused).
+ *
+ * Finding F6 (cross-model adversarial review, fixed same session): that
+ * exit confirmation is now load-bearing, not advisory — clearing the store
+ * only proceeds when `exited` is true, OR the caller passed `--force`
+ * (logged as an explicit WARNING either way). Before this fix, `daemon
+ * .unpair()` ran UNCONDITIONALLY regardless of whether the daemon ever
+ * actually confirmed exit — a shutdown RPC that failed outright, teardown
+ * that hung, or an exit-poll that simply timed out all still cleared
+ * `device.json` as if the daemon were confirmed gone, when it might still be
+ * fully running with its `AuthManager`'s proactive renewal timer poised to
+ * write a fresh credential right back — the exact silently-self-reverting
+ * hazard finding P1 #2 (below) was originally about, reopened on this one
+ * path. See {@link UnpairExitUnconfirmedError}. Only when the control socket
+ * is NOT reachable AT ALL (daemon not running at all, or an older daemon
+ * build predating this feature) does this fall through to the heuristic,
+ * OS-service-state-based flow this whole doc comment otherwise describes —
+ * untouched, including every refusal below.
  *
  * ## Finding P1 #2: unpair used to silently fail (and self-revert) against a running daemon
  *
@@ -329,12 +376,25 @@ export async function runUnpairCommand(daemon: Pick<Daemon, 'unpair'>, deps: Unp
         deps.controlExitPollIntervalMs ?? 300,
       );
 
+      // Finding F6: fail closed on an unconfirmed exit — see
+      // UnpairExitUnconfirmedError's own doc comment. Covers all three named
+      // failure shapes (the shutdown RPC itself failing, teardown hanging,
+      // or the exit-poll simply timing out): every one of them means
+      // `exited` is false here, so this one gate gets all three.
+      if (!exited && !deps.force) {
+        throw new UnpairExitUnconfirmedError();
+      }
+
       await daemon.unpair();
-      log(
-        exited
-          ? 'unpaired: the running daemon was told to shut down over the control socket, confirmed exited, and the local device identity has been cleared.'
-          : 'unpaired: the running daemon was told to shut down over the control socket but did not confirm exit within the timeout; local device identity has still been cleared — verify no byok-agent process is still running against this store.',
-      );
+      if (exited) {
+        log(
+          'unpaired: the running daemon was told to shut down over the control socket, confirmed exited, and the local device identity has been cleared.',
+        );
+      } else {
+        log(
+          'unpaired: local device identity cleared. WARNING: --force was used to proceed even though the daemon did NOT confirm exit within the timeout after being told to shut down over the control socket — if it is still running, its next proactive token renewal will re-write device.json and silently undo this unpair. Verify no byok-agent process is still running against this store.',
+        );
+      }
       return;
     }
   }

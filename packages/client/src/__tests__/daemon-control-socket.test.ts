@@ -3,9 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok/protocol';
-import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
+import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
 import { controlSocketPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { connectControlClient } from '../bin/control-client';
+import { LongPollClient } from '../daemon/long-poll-transport';
+import type { DaemonEvent } from '../daemon/observer';
 import { runStartCommand } from '../bin/commands/start';
 import { runStatusCommand } from '../bin/commands/status';
 import { runTasksFollowCommand } from '../bin/commands/tasks';
@@ -44,6 +46,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks(); // finding F5(b) test mocks LongPollClient.prototype.postBatch — never leak a stalled implementation into later tests
     await daemon?.stop();
     daemon = undefined;
     await server.close();
@@ -52,11 +55,12 @@ describe('M4 Phase 2: control socket end-to-end', () => {
   async function pairedAndStarted(
     productId: string,
     adapter: StubRuntimeAdapter,
+    overrides: DaemonOverrides = {},
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
     const workspaceRoot = await tmpDir(`byok-ctl-e2e-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-ctl-e2e-${productId}-store-`);
     const config: DaemonConfig = { productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
-    const built = createDaemonWithAdapters(config, [adapter]);
+    const built = createDaemonWithAdapters(config, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
     return { daemon: built, config, storeDir };
@@ -220,6 +224,56 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     // A NEW offer arriving after shutdown was requested (but possibly before
     // the connection fully tears down) must never be claimed.
     expect(adapter.sessions).toHaveLength(1);
+  }, 10000);
+
+  it('finding F5(b) end-to-end: a stalled long-poll POST during a REAL control-socket shutdown bounds the wait and the shutdown-complete audit event honestly records the undelivered task.fail — it never claims delivery that did not happen', async () => {
+    server.setRejectWs(true); // force long-poll from the very first attempt
+    const adapter = new StubRuntimeAdapter('pi');
+    const built = await pairedAndStarted('acme-ctl-shutdown-stalled-drain', adapter, {
+      longPoll: { wsFailureThreshold: 1, retryDelayMs: 20, idleDelayMs: 20 },
+      shutdown: { outboxDrainTimeoutMs: 150 },
+    });
+    daemon = built.daemon;
+    expect(daemon.status().degraded).toBe(true);
+
+    // `server.send` only ever writes to a LIVE WS socket (none exists here —
+    // `setRejectWs(true)` above forces this daemon onto long-poll from the
+    // start) — `pushLongPollEvent` is the long-poll-mode equivalent (mirrors
+    // `unknown-message-type-tolerance.test.ts`'s own `startLongPollOnly` convention).
+    server.pushLongPollEvent(
+      createEnvelope('task.offer', { instruction: 'long task', policy: { mode: 'auto' } }, { taskId: 't-stalled', seq: server.nextSeq() }),
+    );
+    await server.waitFor((e) => e.type === 'task.started');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+
+    const observed: DaemonEvent[] = [];
+    daemon.subscribe((event) => observed.push(event));
+
+    // Genuinely stalled — never settles — the exact scenario this finding
+    // names, not merely a slow-but-eventually-ok POST.
+    vi.spyOn(LongPollClient.prototype, 'postBatch').mockImplementation(() => new Promise(() => {}));
+
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+    const startedAt = Date.now();
+    await expect(conn.client.request('shutdown', { reason: 'operator' })).resolves.toEqual({ acknowledged: true });
+    conn.client.close();
+
+    await vi.waitFor(() => expect(observed.some((e) => e.kind === 'shutdown-complete')).toBe(true), { timeout: 3000 });
+    const elapsedMs = Date.now() - startedAt;
+
+    // Bounded — proves this test's own stalled mock actually matters (the
+    // shutdown genuinely completed instead of hanging on the stalled POST),
+    // and stays comfortably under the outer SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS.
+    expect(elapsedMs).toBeLessThan(5000);
+
+    const shutdownComplete = observed.find((e) => e.kind === 'shutdown-complete');
+    if (shutdownComplete?.kind !== 'shutdown-complete') throw new Error('unreachable');
+    // Honest audit note: the task.fail shutdownActiveTasks sent for
+    // 't-stalled' never actually left the outbox (the mocked POST never
+    // resolves) — this must be a POSITIVE count, never 0/undefined
+    // silently implying full delivery.
+    expect(shutdownComplete.undeliveredOutboxCount).toBeGreaterThanOrEqual(1);
   }, 10000);
 
   it('runStartCommand exits cleanly when the control socket shutdown RPC fires, with no external abort signal ever sent', async () => {

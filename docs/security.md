@@ -100,6 +100,26 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 - **Permissions**: `storeDir` and the socket's own parent directory are
   0700; the socket file and `control.token` are 0600 (`control-server.ts`'s
   `startControlServer`/`bindControlEndpoint`).
+- **Windows (finding F7)**: POSIX modes restrict nothing on win32 — Node's
+  `fs.chmod` there only toggles the read-only attribute, never the
+  ACL/DACL. `storeDir`'s actual Windows-side secrecy (for both
+  `device.json`'s device keypair/access token and `control.token`) depends
+  on a restrictive DACL applied via `icacls` at the one chokepoint both
+  `DeviceStore.save()` and `startControlServer` funnel `storeDir` creation
+  through (`util/secure-dir.ts`'s `ensureSecureDir`): inherited ACEs are
+  stripped (`/inheritance:r`) and full control is granted, recursively, to
+  exactly three principals — the current user (via `os.userInfo()`,
+  queried fresh rather than trusting a possibly-stale `%USERNAME%`),
+  `SYSTEM`, and `Administrators` (both needed for a Windows-service
+  topology, where the daemon runs as `SYSTEM` while an operator's
+  interactive CLI runs as a normal user against the same `storeDir`).
+  Best-effort: an `icacls` failure (missing binary, insufficient
+  permission to run it) is logged loudly (`console.warn`) rather than
+  silently swallowed, but does not block daemon startup — an operator
+  seeing that warning on Windows should treat `storeDir` as NOT
+  ACL-protected until it's resolved. Verified end-to-end only on a real
+  Windows CI runner (`templates/service/winsw/smoke-test.mjs`), since this
+  SDK is developed on darwin/linux.
 - **Framing bounds**: a 64KiB unterminated-line cap (`MAX_LINE_BYTES`) —
   exceeding it destroys the connection rather than growing an unbounded
   buffer (`control-protocol.ts`'s `NdjsonLineReader`).
@@ -158,7 +178,7 @@ device's daemon over the control socket (`approvals.request`) and answers
 | Attacker position | Can | Cannot |
 |---|---|---|
 | Remote network | — | Reach the stdio MCP transport between claude and its own child, or the control socket |
-| Malicious/compromised SaaS | Send `task.approve`/`task.reject` for a task it offered — a legitimate use of the wire's own approve channel, racing (not overriding) any local decision | Bypass the fail-closed timeout; force an approval to resolve any faster than a real decision arriving; read or resolve an approval for a task it didn't offer |
+| Malicious/compromised SaaS | Send `task.approve`/`task.reject` for a task it offered — a legitimate use of the wire's own approve channel, racing any local decision, in a window now narrowed to network latency (see below) | Bypass the fail-closed timeout; force an approval to resolve any faster than a real decision arriving; read or resolve an approval for a task it didn't offer |
 | Same-user local process | Call `approvals.resolve` directly over the control socket, independent of claude/MCP entirely — the device owner's own override path, by design | — |
 | Other local user | — | Reach either the MCP stdio (parented by a specific claude child process) or the control socket (blocked by perms) |
 
@@ -168,6 +188,27 @@ safety property `confirm` mode adds is that the device owner's own local
 `approve`/`reject` can independently race and win, and that an unreachable
 or silent SaaS denies by default (via the timeout) instead of hanging a
 task forever.
+
+**Narrowed race, honestly stated (additive-minor, `task.approval_resolved` —
+docs/protocol.md §5.2):** the row above used to read "racing (not
+overriding)" without qualification — that was optimistic. Before this
+addition, the server had no way to learn about a LOCAL resolution until the
+daemon's next `task.progress`/`task.artifact`/`task.complete` proved it,
+after the fact (`ConnectionHub.resumeIfImplicitlyApproved`, `hub.ts`) — in
+that window, a SaaS `task.approve`/`task.reject` genuinely could override the
+server's own authoritative record out from under a local decision the daemon
+had already acted on. The daemon now reports a local resolution explicitly
+and immediately (`task.approval_resolved`, gated on both sides supporting
+it), narrowing that window from "however long until the next progress
+message" down to ordinary network latency. It is a narrowing, not an
+elimination: a SaaS decision already in flight when the local resolution
+happens can still land first and win — both sides (`hub.ts`'s
+`onApprovalResolved`, `task-runner.ts`'s `handleApprove`/`handleReject`)
+treat the loser as a clean, audited stale no-op either way, never a crash or
+a double-apply, and the only residual divergence is the server's terminal
+record disagreeing with a daemon that already stopped or continued its own
+local session — the same class of residual §4/redelivery already accepts
+elsewhere in this system, not a new one.
 
 ### 4. Service lifecycle (launchd / systemd / WinSW)
 
@@ -208,6 +249,14 @@ makes at install time, not something this SDK can constrain from inside.
   at-most-once exposure of ANY abrupt WS disconnect." At-least-once
   delivery is a reconnect-and-redeliver guarantee, not an
   every-byte-before-a-hard-close guarantee.
+- **A SaaS decision can still race a local approval resolution and win, in a
+  narrowed (network-latency-sized) window.** Stated in full above (§3,
+  "Narrowed race, honestly stated") — `task.approval_resolved` closes the
+  arbitrarily-wide pre-existing window (open until the daemon's next
+  progress message) down to ordinary network latency, not to zero; the
+  residual is bounded to the same class of divergence §4/redelivery already
+  accepts elsewhere (a terminal server record vs. a daemon that already
+  acted locally), never a crash or a double-apply on either side.
 - **SIGTERM/SIGINT does not `task.fail` an active task before exiting —
   pre-existing M3 behavior, unchanged in M4.** `bin/commands/start.ts`
   wires an OS-signal abort straight to `daemon.stop()`

@@ -15,6 +15,24 @@
 
 export type ApprovalDecision = 'approve' | 'reject';
 
+/**
+ * M4 (additive-minor, `task.approval_resolved`): distinguishes a resolution
+ * that arrived over the wire (a server-sent `task.approve`/`task.reject`,
+ * relayed here via `TaskContext.approvalChannel.resolve` — `task-runner.ts`'s
+ * `handleOffer`) from one this device decided on its own (the local
+ * `approvals.resolve` control-socket RPC, a fail-closed `requestApproval`
+ * timeout, or a fail-closed finish/eviction rejection). `TaskRunner` uses
+ * this to decide whether to report `task.approval_resolved` back to the
+ * server: a wire-triggered resolution is something the server already knows
+ * about (it sent the decision itself) and must never be echoed back;
+ * everything else is new information only the device has, and — capability
+ * permitting — gets reported. `'local'` is the default (see `resolve()`
+ * below) precisely because it's the common case: every call site in this
+ * module and `task-runner.ts` except the one wire-relay closure is local by
+ * construction.
+ */
+export type ApprovalOrigin = 'wire' | 'local';
+
 /** What `approvals.list` returns per pending approval — deliberately small; a runtime-specific payload (e.g. the exact tool call awaiting approval) is Phase 3's concern, not this registry's. */
 export interface PendingApproval {
   approvalId: string;
@@ -33,7 +51,7 @@ export class ApprovalNotFoundError extends Error {
 /** Cap on simultaneously pending approvals — generous for any plausible concurrent-approval workload, and existing purely as a defensive bound (mirrors `task-runner.ts`'s `MAX_TRACKED_TASK_IDS`/`observer.ts`'s `MAX_TRACKED_TASKS`), not a real-world limit this is expected to ever approach. */
 export const MAX_PENDING_APPROVALS = 200;
 
-type ResolveCallback = (decision: ApprovalDecision, reason: string | undefined) => void;
+type ResolveCallback = (decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin) => void;
 
 interface RegisteredApproval {
   approval: PendingApproval;
@@ -71,7 +89,13 @@ export class ApprovalRegistry {
         console.warn(
           `[byok/client] approval registry exceeded ${MAX_PENDING_APPROVALS} pending entries — evicted the oldest (${oldestId})`,
         );
-        evicted?.onResolve('reject', `evicted: approval registry exceeded ${MAX_PENDING_APPROVALS} pending entries`);
+        // 'local': an eviction is this registry's own bookkeeping, never a
+        // relayed server decision — see `ApprovalOrigin`'s own doc comment.
+        evicted?.onResolve(
+          'reject',
+          `evicted: approval registry exceeded ${MAX_PENDING_APPROVALS} pending entries`,
+          'local',
+        );
       }
     }
     this.pending.set(approval.approvalId, { approval, onResolve });
@@ -81,11 +105,26 @@ export class ApprovalRegistry {
     return [...this.pending.values()].map((entry) => entry.approval);
   }
 
-  /** Throws {@link ApprovalNotFoundError} for an unknown/already-resolved id — never silently no-ops, since a caller (the control socket's `approvals.resolve`) needs to distinguish "resolved" from "nothing to resolve". */
-  resolve(approvalId: string, decision: ApprovalDecision, reason?: string): void {
+  /**
+   * Throws {@link ApprovalNotFoundError} for an unknown/already-resolved id —
+   * never silently no-ops, since a caller (the control socket's
+   * `approvals.resolve`) needs to distinguish "resolved" from "nothing to
+   * resolve".
+   *
+   * `origin` defaults to `'local'` (see {@link ApprovalOrigin}'s own doc
+   * comment for why that's the correct default, not just a convenient one):
+   * every existing caller of this method — the control socket's
+   * `approvals.resolve` RPC (`create-daemon.ts`), `TaskRunner`'s
+   * `requestApproval` timeout and `finish()` fail-closed cleanup
+   * (`task-runner.ts`) — resolves a decision this device made on its own.
+   * The one exception, a server-sent wire `task.approve`/`task.reject`
+   * relayed through `TaskContext.approvalChannel.resolve`
+   * (`task-runner.ts`'s `handleOffer`), passes `'wire'` explicitly.
+   */
+  resolve(approvalId: string, decision: ApprovalDecision, reason?: string, origin: ApprovalOrigin = 'local'): void {
     const entry = this.pending.get(approvalId);
     if (!entry) throw new ApprovalNotFoundError(approvalId);
     this.pending.delete(approvalId);
-    entry.onResolve(decision, reason);
+    entry.onResolve(decision, reason, origin);
   }
 }

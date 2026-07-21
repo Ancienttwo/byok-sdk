@@ -386,6 +386,59 @@ describe('control-server: stale socket cleanup + "another daemon running"', () =
   });
 });
 
+describe('control-server: finding F9 — a post-bind token-write failure must not orphan the listener', () => {
+  let handle: ControlServerHandle | undefined;
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  it('startControlServer rejects AND the endpoint is closed — a subsequent bind at the SAME storeDir/productId succeeds', async () => {
+    if (process.platform === 'win32') return; // the failure below is injected via a POSIX rename-onto-a-directory error
+    const storeDir = await tmpDir('byok-ctl-token-write-fail-');
+    await fs.mkdir(storeDir, { recursive: true });
+
+    // Real, deterministic failure injection (mirrors
+    // bin-start-command.test.ts's own "storeDir itself is a FILE" trick):
+    // pre-create `control.token` AS A DIRECTORY. `atomicWriteFile`'s temp
+    // file write succeeds (it's an unrelated, freshly-named path), but the
+    // final `fs.rename(tmpPath, tokenPath)` onto an existing DIRECTORY
+    // fails (EISDIR/ENOTDIR/EPERM depending on platform) — a real
+    // post-bind token-write failure, not a mocked one.
+    await fs.mkdir(controlTokenPath(storeDir), { recursive: true });
+
+    await expect(startControlServer({ storeDir, productId: 'acme-f9', methods: noopMethods() })).rejects.toThrow();
+
+    // The listener from the failed attempt must be gone — not orphaned,
+    // unreachable, and blocking every future bind at this exact endpoint.
+    // Prove it by actually reaching the endpoint: a fresh connect attempt
+    // must be REFUSED (nothing listening), not accepted by a leftover
+    // half-initialized server. (Already known non-win32 here — see the
+    // early return at the top of this test.)
+    const socketPath = controlSocketPath(storeDir);
+    // The socket FILE was actually removed (not merely left dangling) — a
+    // fresh connect attempt fails with ENOENT (no such file), not
+    // ECONNREFUSED (which would mean the file still exists but nothing is
+    // listening) and CERTAINLY not a successful connect (which would mean
+    // the old, half-initialized listener is still alive).
+    await expect(fs.stat(socketPath)).rejects.toThrow();
+    await expect(connectRaw(socketPath)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    // Clear the way for a real retry (remove the directory blocking the
+    // token path — a real operator/redeploy would fix the underlying
+    // condition the same way) and confirm the endpoint is genuinely free:
+    // a subsequent bind at the identical storeDir/productId must succeed,
+    // not fail with AnotherControlServerRunningError/EADDRINUSE against a
+    // ghost listener from the first, failed attempt.
+    await fs.rm(controlTokenPath(storeDir), { recursive: true, force: true });
+    handle = await startControlServer({ storeDir, productId: 'acme-f9', methods: noopMethods() });
+
+    const conn = await connectControlClient({ storeDir, productId: 'acme-f9' });
+    expect(conn.ok).toBe(true);
+    if (conn.ok) conn.client.close();
+  });
+});
+
 describe('control-server: defensive hardening (gatekeeper advisories)', () => {
   let handle: ControlServerHandle | undefined;
   afterEach(async () => {

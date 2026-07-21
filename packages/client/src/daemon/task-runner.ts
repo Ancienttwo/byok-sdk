@@ -10,7 +10,7 @@ import {
   type TaskOfferPayload,
 } from '@byok/protocol';
 import { PolicyUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
-import type { ApprovalDecision, ApprovalRegistry } from './approvals';
+import type { ApprovalDecision, ApprovalOrigin, ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
 import { computeEffectivePolicy } from './policy';
@@ -27,6 +27,29 @@ import type { SessionWorkspaceStore } from './session-workspace-store';
  * see `create-daemon.ts`).
  */
 export const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Finding F5(a) (cross-model adversarial review): bound on how long
+ * `shutdownTask` waits for a single task's OWN `session.interrupt()` before
+ * giving up on it specifically and reporting `task.fail` anyway. Without an
+ * INNER bound here, a hung `interrupt()` (a misbehaving runtime adapter
+ * whose promise never settles) meant `task.fail` for THAT task was never
+ * sent at all — not eventually, not ever — because the send was sequenced
+ * strictly AFTER the `await`. The OUTER deadline
+ * `create-daemon.ts`'s `performControlShutdown` races `shutdownActiveTasks`
+ * against (`SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS`) does not help: racing at
+ * that layer only unblocks the CALLER to proceed to `stop()`/closing the
+ * connection — it does nothing to unstick THIS function's own
+ * still-suspended `await`, which just keeps running (harmlessly, since
+ * nothing awaits it anymore) in the background forever after, its
+ * `deps.send` line never reached. Deliberately shorter than the outer
+ * 10s deadline so one hung task's own interrupt can't itself consume the
+ * whole outer budget and starve however many OTHER tasks
+ * `shutdownActiveTasks` awaits concurrently via `Promise.all`. Overridable
+ * via `TaskRunnerDeps.shutdownInterruptTimeoutMs` (ultimately
+ * `DaemonOverrides.shutdown.taskInterruptTimeoutMs` — see `create-daemon.ts`).
+ */
+export const DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS = 5_000;
 
 /**
  * M4 Phase 4 (fold-in from the P3 gate): bound on how many `requestApproval`
@@ -128,6 +151,36 @@ export interface TaskRunnerDeps {
    * minimal test harness) isn't forced to supply one.
    */
   onStaleApprovalDecision?: (taskId: string, decision: ApprovalDecision, reason?: string) => void;
+  /**
+   * Finding F4 (cross-model adversarial review): operators had no way to
+   * ever learn a pending approval's `approvalId` short of reading raw
+   * audit-log JSON — `approve`/`reject` require one, but nothing surfaced
+   * it. Called synchronously from `dispatchApproval`, BEFORE `deps.send`'s
+   * own `task.await_approval` — `create-daemon.ts` wires this to
+   * `DaemonObserver.noteApprovalDispatched`, which stashes `approvalId`
+   * keyed by `taskId` so the observer's `task.await_approval` handling
+   * (triggered by that very `deps.send` call, synchronously, right after
+   * this) can attach it to the `awaiting-approval` `DaemonEvent` it emits
+   * (see `observer.ts`'s own doc comment). Optional so a minimal test
+   * harness that doesn't care about this audit-trail detail isn't forced
+   * to supply one — mirrors `onStaleApprovalDecision`'s own contract.
+   */
+  onApprovalDispatched?: (taskId: string, approvalId: string) => void;
+  /** Finding F5(a): overrides {@link DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS} — see `shutdownTask`'s own doc comment. */
+  shutdownInterruptTimeoutMs?: number;
+  /**
+   * M4 (additive-minor, `task.approval_resolved`): the negotiated
+   * `conn.ack.capabilities` of the CURRENTLY (or most recently) connected
+   * server — read fresh at call time (mirrors `getCursor`/`getToken`'s own
+   * "read fresh, not captured once" convention elsewhere in this codebase),
+   * since the capability is learned asynchronously, after this `TaskRunner`
+   * is already constructed (`create-daemon.ts`'s `start()` builds `deps`
+   * before `connection` exists). `create-daemon.ts` wires this to
+   * `ConnectionManager.getServerCapabilities`. Optional, and treated as "no
+   * capabilities" when absent, so a minimal test harness that doesn't care
+   * about this gate isn't forced to supply one — see `sendApprovalResolved`.
+   */
+  getServerCapabilities?: () => readonly string[];
 }
 
 interface ActiveTask {
@@ -482,12 +535,34 @@ export class TaskRunner {
     await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
   }
 
+  /**
+   * Finding F5(a): `session.interrupt()` is now raced against its own
+   * bounded deadline ({@link DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS}) rather
+   * than awaited unconditionally — see that constant's own doc comment for
+   * why an unbounded `await` here meant `task.fail` was silently never
+   * sent at all for a task whose adapter's `interrupt()` hangs. The
+   * interrupt attempt itself is wrapped so it can never reject/throw past
+   * the race (synchronously OR via a rejected promise) — only ever
+   * best-effort, exactly as before; `task.fail` is now sent and `finish()`
+   * called UNCONDITIONALLY once EITHER settles, not only on the (hopefully
+   * common) path where interrupt itself resolved first.
+   */
   private async shutdownTask(active: ActiveTask, reason: string): Promise<void> {
-    try {
-      await active.session.interrupt();
-    } catch {
-      // best-effort — still report the failure below
-    }
+    const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
+    const interruptSettled = (async (): Promise<void> => {
+      try {
+        await active.session.interrupt();
+      } catch {
+        // best-effort — still report the failure below regardless
+      }
+    })();
+    await Promise.race([
+      interruptSettled,
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
     this.deps.send(
       createEnvelope('task.fail', { reason: `daemon shutting down: ${reason}`, retryable: true }, { taskId: active.taskId }),
     );
@@ -628,7 +703,15 @@ export class TaskRunner {
             if (!pendingId) {
               throw new NoPendingApprovalError(taskId);
             }
-            this.deps.approvalRegistry.resolve(pendingId, approved ? 'approve' : 'reject', reason);
+            // 'wire': this closure is invoked ONLY by an adapter's own
+            // `session.resolveApproval()` (e.g. `ClaudeSession.resolveApproval`
+            // under `confirm` mode), which in turn is called ONLY from
+            // `handleApprove`/`handleReject` below — i.e. a server-sent wire
+            // `task.approve`/`task.reject`. The server already knows this
+            // decision (it sent it); `task.approval_resolved` must never be
+            // sent back for it — see `ApprovalOrigin`'s own doc comment
+            // (`approvals.ts`) and `sendApprovalResolved`'s gate below.
+            this.deps.approvalRegistry.resolve(pendingId, approved ? 'approve' : 'reject', reason, 'wire');
           },
         },
       };
@@ -1051,6 +1134,11 @@ export class TaskRunner {
     const { taskId } = active;
     const approvalId = randomUUID();
     active.pendingApprovalId = approvalId;
+    // Finding F4: see `onApprovalDispatched`'s own doc comment — must fire
+    // BEFORE `deps.send` below so the observer has already stashed this
+    // approvalId by the time that same synchronous call triggers
+    // `DaemonObserver.handleOutboundEnvelope`'s `task.await_approval` case.
+    this.deps.onApprovalDispatched?.(taskId, approvalId);
     // Mirrors the dormant needs_approval branch's own flush-before-pausing
     // discipline (~line 611 below): whatever progress already accumulated
     // this turn should reach the server before the task's state moves to
@@ -1073,14 +1161,56 @@ export class TaskRunner {
 
       this.deps.approvalRegistry.register(
         { approvalId, taskId, summary, createdAt: new Date().toISOString() },
-        (decision: ApprovalDecision, reason: string | undefined) => {
+        (decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin) => {
           clearTimeout(timer);
           if (active.pendingApprovalId === approvalId) active.pendingApprovalId = undefined;
+          // M4 (additive-minor): report a LOCAL resolution to the server
+          // immediately — but never a 'wire' one (the server already knows;
+          // see `ApprovalOrigin`'s own doc comment, `approvals.ts`). This is
+          // the single convergence point for every local path: the CLI's
+          // `approvals.resolve`, this same method's own timeout branch above,
+          // `finish()`'s fail-closed cleanup, and the registry's own
+          // bounded-eviction fallback all funnel through `onResolve` here.
+          if (origin === 'local') {
+            this.sendApprovalResolved(taskId, approvalId, decision);
+          }
           resolve({ approved: decision === 'approve', reason });
           this.dispatchNextQueuedApproval(active);
         },
       );
     });
+  }
+
+  /**
+   * M4 (additive-minor, `task.approval_resolved` — see `messages.ts`'s own
+   * doc comment on `TaskApprovalResolvedPayloadSchema` for the full wire
+   * rationale): report a LOCALLY-resolved approval to the server
+   * immediately, gated on the negotiated `approval_resolved` capability
+   * (`deps.getServerCapabilities` — an old server that never advertises it
+   * never receives this message; the daemon then falls back to the
+   * pre-existing implicit-resume inference, unconditionally, exactly as
+   * before this message existed — the N/N-1 compatibility path).
+   *
+   * Ordering (verified by `task-runner-approval-resolved.test.ts`): this is
+   * called, and therefore `deps.send` pushes this envelope onto the outbox,
+   * SYNCHRONOUSLY from the `onResolve` callback above — strictly BEFORE the
+   * `resolve(...)` call on the very next line that unblocks whatever was
+   * awaiting `requestApproval()`'s promise (`byok-approval-mcp`, ultimately
+   * the paused runtime turn). Any further progress from the resumed session
+   * can only be produced AFTER that unblock, which needs at least one more
+   * microtask/event-loop turn — so `task.approval_resolved` is always queued
+   * ahead of it with no extra bookkeeping needed here.
+   */
+  private sendApprovalResolved(taskId: string, approvalId: string, decision: ApprovalDecision): void {
+    const capabilities = this.deps.getServerCapabilities?.() ?? [];
+    if (!capabilities.includes('approval_resolved')) return;
+    this.deps.send(
+      createEnvelope(
+        'task.approval_resolved',
+        { approvalId, decision, resolvedBy: 'local', at: new Date().toISOString() },
+        { taskId },
+      ),
+    );
   }
 
   /**

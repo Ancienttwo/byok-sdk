@@ -49,7 +49,19 @@ export type DaemonEvent =
   /** One per normalized `AgentEvent` (not one per `task.progress` batch) — matches "a live task feed" better than re-exposing the wire's own batching. */
   | { kind: 'progress'; ts: string; taskId: string; event: AgentEvent }
   | { kind: 'artifact'; ts: string; taskId: string; name: string; contentType: string; inline?: string; blobRef?: BlobRef }
-  | { kind: 'awaiting-approval'; ts: string; taskId: string; summary: string }
+  /**
+   * Finding F4: `approvalId` is populated whenever `TaskRunner` dispatched
+   * this approval THROUGH the normal `requestApproval`/`onApprovalDispatched`
+   * path (see `noteApprovalDispatched`) — `undefined` only for a
+   * hypothetical caller of `handleOutboundEnvelope` that never went through
+   * that hook (there is no other producer of `task.await_approval` today).
+   * This is the one piece of information an operator needs to actually
+   * call `approve`/`reject` (or the `approvals` CLI command) against this
+   * specific pending decision — before this fix, nothing surfaced it
+   * outside the control socket's `approvals.list`/`approvals.request`
+   * internals.
+   */
+  | { kind: 'awaiting-approval'; ts: string; taskId: string; summary: string; approvalId?: string }
   | { kind: 'completed'; ts: string; taskId: string; summary: string; sessionRef: string }
   /**
    * Covers BOTH a post-claim `task.fail` and a pre-claim `task.decline` —
@@ -77,8 +89,18 @@ export type DaemonEvent =
    * `shutdown-requested` instead would race `daemon.stop()` against the
    * still-in-flight `task.fail` send and silently drop it (confirmed via a
    * real regression — see `daemon-control-socket.test.ts`).
+   *
+   * Finding F5(b): `undeliveredOutboxCount`, when defined, is the honest
+   * post-drain read of `ConnectionManager.outboxLength()` — 0 means the
+   * bounded outbox drain (see `ConnectionManager.stop`) genuinely finished
+   * before the connection closed; a positive number means that many
+   * envelopes (almost certainly including a `task.fail`
+   * `shutdownActiveTasks` just enqueued) never actually left the outbox.
+   * `undefined` only for a hypothetical caller of `noteShutdownComplete`
+   * that didn't pass one — `create-daemon.ts`'s own `performControlShutdown`
+   * (the only real producer of this event) always does.
    */
-  | { kind: 'shutdown-complete'; ts: string; reason: string }
+  | { kind: 'shutdown-complete'; ts: string; reason: string; undeliveredOutboxCount?: number }
   /**
    * M4 Phase 3 hardening: a wire `task.approve`/`task.reject` (or this
    * device's own redelivered copy of one) arrived for an out-of-band
@@ -145,6 +167,19 @@ function nowIso(): string {
 export class DaemonObserver {
   private readonly listeners = new Set<DaemonEventListener>();
   private readonly taskInfo = new Map<string, DaemonTaskInfo>();
+  /**
+   * Finding F4: `approvalId` for a taskId's NEXT `task.await_approval`,
+   * stashed by `noteApprovalDispatched` and consumed (read + deleted) the
+   * moment `handleOutboundEnvelope`'s `task.await_approval` case actually
+   * emits the corresponding `awaiting-approval` event — see that hook's own
+   * doc comment for why this is always populated first (both calls happen
+   * synchronously, in that order, from `TaskRunner.dispatchApproval`).
+   * Read-and-delete keeps this self-bounding: an entry never outlives the
+   * one event it was stashed for, so this can never leak across a
+   * long-lived daemon's lifetime the way an evict-on-schedule cache would
+   * need explicit bookkeeping to avoid.
+   */
+  private readonly pendingApprovalIdByTask = new Map<string, string>();
 
   subscribe(listener: DaemonEventListener): Unsubscribe {
     this.listeners.add(listener);
@@ -239,8 +274,12 @@ export class DaemonObserver {
       }
       case 'task.await_approval': {
         const taskId = envelope.task_id;
+        // Finding F4: read-and-delete — see `pendingApprovalIdByTask`'s own
+        // doc comment for why this never needs a separate eviction policy.
+        const approvalId = this.pendingApprovalIdByTask.get(taskId);
+        this.pendingApprovalIdByTask.delete(taskId);
         this.upsertTask(taskId, { state: 'AwaitApproval', summary: envelope.payload.summary });
-        this.emit({ kind: 'awaiting-approval', ts, taskId, summary: envelope.payload.summary });
+        this.emit({ kind: 'awaiting-approval', ts, taskId, summary: envelope.payload.summary, approvalId });
         return;
       }
       case 'task.complete': {
@@ -305,14 +344,28 @@ export class DaemonObserver {
     this.emit({ kind: 'shutdown-requested', ts: nowIso(), reason });
   }
 
-  /** M4 Phase 2: see the `shutdown-complete` `DaemonEvent` variant's own doc comment. */
-  noteShutdownComplete(reason: string): void {
-    this.emit({ kind: 'shutdown-complete', ts: nowIso(), reason });
+  /** M4 Phase 2: see the `shutdown-complete` `DaemonEvent` variant's own doc comment (finding F5(b): `undeliveredOutboxCount`). */
+  noteShutdownComplete(reason: string, undeliveredOutboxCount?: number): void {
+    this.emit({ kind: 'shutdown-complete', ts: nowIso(), reason, undeliveredOutboxCount });
   }
 
   /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */
   noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void {
     this.emit({ kind: 'stale-approval-decision', ts: nowIso(), taskId, decision, reason });
+  }
+
+  /**
+   * Finding F4: wired from `TaskRunnerDeps.onApprovalDispatched`, called
+   * synchronously by `TaskRunner.dispatchApproval` BEFORE its own
+   * `deps.send(createEnvelope('task.await_approval', ...))` — stashes
+   * `approvalId` so `handleOutboundEnvelope`'s `task.await_approval` case
+   * (triggered by that very `send` call) can attach it to the
+   * `awaiting-approval` `DaemonEvent` it emits. Never emits anything
+   * itself — purely a handoff, same as `upsertTask`'s bookkeeping role for
+   * other events.
+   */
+  noteApprovalDispatched(taskId: string, approvalId: string): void {
+    this.pendingApprovalIdByTask.set(taskId, approvalId);
   }
 
   private upsertTask(

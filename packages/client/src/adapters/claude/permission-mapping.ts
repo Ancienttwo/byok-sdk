@@ -118,6 +118,14 @@ const READONLY_TOOLS: readonly string[] = ['Read', 'Glob', 'Grep'];
  *   but this is a judgment call for a human to weigh in on, not a fact.
  * - `confirm`: SUPPORTED as of M4 Phase 3 — `--permission-mode default`
  *   (deny-by-default baseline, same as `readonly`'s own choice above) plus
+ *   `allowTools`/`denyTools` mapped exactly like `auto` does (finding F2,
+ *   fixed same session as the confirm-mode support itself first shipped —
+ *   see the function body below): an explicit `--tools <allowTools>` when
+ *   only `allowTools` is set, and a fail-closed refusal whenever `denyTools`
+ *   is non-empty, since confirm — like `auto`/`plan` and unlike
+ *   `readonly` — has no bounded, known-safe base tool list to subtract
+ *   from; the only trustworthy restriction mechanism (`--tools`) is
+ *   replacive, not subtractive. This composes with, rather than replaces,
  *   `--permission-prompt-tool` pointed at a small bundled MCP server
  *   (`bin/byok-approval-mcp.ts`) that forwards the pending permission
  *   decision to this device's own daemon over its control socket and blocks
@@ -167,6 +175,8 @@ export function mapPermissionPolicyToClaudeArgs(policy: PermissionPolicy): Claud
     };
   }
 
+  const denyTools = policy.denyTools ?? [];
+
   if (policy.mode === 'confirm') {
     // Deny-by-default baseline (never a permissive mode — see readonly's own
     // reasoning above): `--permission-prompt-tool` only intercepts a
@@ -175,10 +185,38 @@ export function mapPermissionPolicyToClaudeArgs(policy: PermissionPolicy): Claud
     // `--permission-prompt-tool`/`--mcp-config` flags are appended by
     // `claude-adapter.ts`'s `start()` (see `needsApprovalMcp` above), not
     // here, since generating the mcp-config file is a real I/O side effect.
-    return { ok: true, args: ['--permission-mode', 'default'], needsApprovalMcp: true };
+    //
+    // Finding F2 (cross-model adversarial review): this branch used to
+    // return unconditionally right here, silently discarding
+    // `allowTools`/`denyTools` entirely — a `{mode:'confirm',
+    // denyTools:['Bash']}` policy would still let Bash through (subject
+    // only to a per-call human prompt), never actually enforcing the
+    // caller's denial; that's a silent widening of the requested policy,
+    // exactly what this mapper fails closed for everywhere else. Confirm
+    // has no bounded, known-safe base tool list the way `readonly` does
+    // (`READONLY_TOOLS`) — its whole point is to allow the FULL active
+    // tool surface, gated by a human decision per call, not a fixed small
+    // set — so its `denyTools` problem is the SAME shape as `auto`/`plan`'s
+    // below: the only mechanism this mapper trusts (`--tools`) is
+    // REPLACIVE, not subtractive, and there is no reliable "full active set
+    // minus denied" to compute. Mirrors `auto`'s handling exactly: fail
+    // closed whenever `denyTools` is non-empty (composed with `allowTools`
+    // or not — an inexpressible constraint is inexpressible either way),
+    // otherwise an explicit `--tools <allowTools>` when `allowTools` alone
+    // is set.
+    if (denyTools.length > 0) {
+      return {
+        ok: false,
+        args: [],
+        reason: `claude adapter cannot reliably enforce denyTools ([${denyTools.join(', ')}]) under confirm mode: its only trustworthy tool-restriction mechanism (--tools) replaces the whole active set rather than subtracting from it, and this adapter has no reliable way to learn a target installation's full default tool set to compute "default minus denied" (this dev machine's own installed build exposes a non-vanilla, bespoke tool list) — refusing rather than risking a denial that silently doesn't hold`,
+      };
+    }
+    const confirmArgs = ['--permission-mode', 'default'];
+    if (policy.allowTools && policy.allowTools.length > 0) {
+      confirmArgs.push('--tools', policy.allowTools.join(','));
+    }
+    return { ok: true, args: confirmArgs, needsApprovalMcp: true };
   }
-
-  const denyTools = policy.denyTools ?? [];
 
   if (policy.mode === 'readonly') {
     const base = policy.allowTools ? policy.allowTools.filter((tool) => READONLY_TOOLS.includes(tool)) : [...READONLY_TOOLS];

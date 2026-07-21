@@ -6,7 +6,7 @@ import { createEnvelope } from '@byok/protocol';
 import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
 import { connectControlClient } from '../bin/control-client';
-import type { ApprovalsRequestResult } from '../daemon/control-protocol';
+import type { ApprovalsListResult, ApprovalsRequestResult, ControlStatusResult } from '../daemon/control-protocol';
 import type { DaemonEvent } from '../daemon/observer';
 import type { ApprovalChannel, RuntimeAdapter, RuntimeCapabilities, RuntimeDetectResult, Session, TaskContext } from '../types';
 import { AsyncQueue } from '../util/async-queue';
@@ -152,6 +152,59 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     const outcome = await requestPromise;
     expect(outcome).toEqual({ approved: true, reason: undefined });
     expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([{ approved: true }]);
+
+    conn.client.close();
+  });
+
+  it('finding F4: the awaiting-approval DaemonEvent, approvals.list, and status.approvals all agree on the SAME real approvalId — an operator can learn it from any of the three surfaces', async () => {
+    const adapter = new ApprovalAwareAdapter();
+    const built = await pairedAndStarted('acme-confirm-approvalid-surfaces', adapter);
+    daemon = built.daemon;
+
+    const events: DaemonEvent[] = [];
+    built.daemon.subscribe((e) => events.push(e));
+
+    const taskId = 't-approvalid-surfaces-1';
+    server.send(
+      createEnvelope('task.offer', { instruction: 'do gated work', policy: { mode: 'confirm' } }, { taskId, seq: server.nextSeq() }),
+    );
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+
+    const requestPromise = conn.client.request<ApprovalsRequestResult>('approvals.request', {
+      taskId,
+      summary: 'Bash: rm -rf /tmp/surfaces',
+    });
+    await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
+
+    // Surface 1: the awaiting-approval DaemonEvent (what `tasks --follow`
+    // renders) — must have a defined approvalId now (finding F4), not the
+    // pre-fix `undefined` that left operators with no way to learn one.
+    const awaiting = await vi.waitFor(() => {
+      const e = events.find((e) => e.kind === 'awaiting-approval' && e.taskId === taskId);
+      if (e?.kind !== 'awaiting-approval') throw new Error('not yet emitted');
+      return e;
+    });
+    expect(awaiting.approvalId).toEqual(expect.any(String));
+
+    // Surface 2: approvals.list (backing the new `byok-agent approvals` command).
+    const list = await conn.client.request<ApprovalsListResult>('approvals.list');
+    expect(list.approvals).toHaveLength(1);
+    expect(list.approvals[0]?.approvalId).toBe(awaiting.approvalId);
+    expect(list.approvals[0]?.taskId).toBe(taskId);
+
+    // Surface 3: status's live section (`formatLiveStatusLines`'s `live-approval` line).
+    const status = await conn.client.request<ControlStatusResult>('status');
+    expect(status.approvalsPending).toBe(1);
+    expect(status.approvals).toHaveLength(1);
+    expect(status.approvals[0]?.approvalId).toBe(awaiting.approvalId);
+    expect(status.approvals[0]?.taskId).toBe(taskId);
+
+    // Clean up: resolve so the pending `approvals.request` call doesn't hang past this test.
+    await conn.client.request('approvals.resolve', { approvalId: awaiting.approvalId, decision: 'approve' });
+    await requestPromise;
 
     conn.client.close();
   });

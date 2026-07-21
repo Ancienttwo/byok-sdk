@@ -112,6 +112,14 @@ export class ConnectionManager {
    * transport was active is ever stranded when the other takes over.
    */
   private readonly outbox: Envelope[] = [];
+  /**
+   * Finding F5(b): how many envelopes `drainOutbox`'s long-poll branch has
+   * currently spliced OUT of `this.outbox` for an in-flight (not yet
+   * confirmed delivered) `postBatch` call — 0 the rest of the time. See
+   * `outboxLength`'s own doc comment for why this needs to be tracked
+   * separately from `this.outbox.length` at all.
+   */
+  private inFlightBatchSize = 0;
   private draining = false;
   private stopped = false;
   private revoked = false;
@@ -156,6 +164,17 @@ export class ConnectionManager {
    * exits. See `drainRetryDelay`.
    */
   private cancelPendingDrainRetry: (() => void) | undefined;
+  /**
+   * The capabilities the CURRENTLY (or most recently) connected server
+   * advertised in its `conn.ack` — untyped `string[]` (forward-compat: a
+   * server may advertise a flag this build doesn't recognize yet), populated
+   * by {@link onAcked} and read by {@link getServerCapabilities}. Empty until
+   * the very first successful handshake; long-poll never repeats a
+   * handshake (docs/protocol.md §8.1: "still sends conn.hello semantics
+   * implicitly"), so this stays at whatever the last real WS `conn.ack` said
+   * even while degraded.
+   */
+  private serverCapabilities: string[] = [];
 
   constructor(private readonly opts: ConnectionManagerOptions) {
     this.ws = new WsTransport({
@@ -170,7 +189,7 @@ export class ConnectionManager {
       onStateChange: (state) => {
         if (!this.stopped && !this.revoked) this.opts.onStateChange?.(state);
       },
-      onAcked: () => this.onAcked(),
+      onAcked: (capabilities) => this.onAcked(capabilities),
       onConnectOutcome: (acked, err) => this.onWsOutcome(acked, err),
       backoff: opts.backoff,
       liveness: opts.liveness,
@@ -267,7 +286,19 @@ export class ConnectionManager {
         }
 
         const batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
-        const ok = await this.longPoll.postBatch(batch);
+        // Finding F5(b): tracked for the DURATION of the `postBatch` await —
+        // `batch` has already left `this.outbox` (spliced out above) but
+        // isn't confirmed delivered yet, so a plain `this.outbox.length`
+        // read right now would UNDERCOUNT it entirely (this is exactly what
+        // a stalled/hung `postBatch` call means: neither queued nor
+        // delivered, just stuck). See `outboxLength`'s own doc comment.
+        this.inFlightBatchSize = batch.length;
+        let ok: boolean;
+        try {
+          ok = await this.longPoll.postBatch(batch);
+        } finally {
+          this.inFlightBatchSize = 0;
+        }
         if (ok) continue; // loop back around — more may be queued, or the next chunk still needs sending
 
         this.outbox.unshift(...batch); // retry, preserving order — same objects, same ids (finding F1)
@@ -315,6 +346,17 @@ export class ConnectionManager {
     return this.mode === 'long-poll';
   }
 
+  /**
+   * The capabilities the currently (or most recently) connected server
+   * advertised in its `conn.ack` — e.g. lets a caller gate a daemon->server
+   * message on whether THIS server understands it before sending (see
+   * `task-runner.ts`'s `sendApprovalResolved`, gated on `approval_resolved`).
+   * Empty before the first handshake completes.
+   */
+  getServerCapabilities(): readonly string[] {
+    return this.serverCapabilities;
+  }
+
   isConnected(): boolean {
     return this.mode === 'ws' && this.ws.isOpen;
   }
@@ -359,14 +401,95 @@ export class ConnectionManager {
    * disk — otherwise a `stop()` racing a just-processed envelope's
    * persistence could lose that cursor advance, or leave a handler running
    * unobserved after the daemon reports itself stopped.
+   *
+   * Finding F5(b) (cross-model adversarial review): `drainTimeoutMs`, when
+   * passed, bounds how long this waits for the shared outbox (`this.outbox`
+   * — Design B) to actually finish draining BEFORE flipping `this.stopped`
+   * and closing the transports. Before this fix, `stop()` set `stopped`
+   * synchronously and never waited for `drainOutbox` at all: an envelope
+   * `send()` had just pushed moments earlier (e.g. `TaskRunner.shutdownTask`'s
+   * own `task.fail`, sent right before `create-daemon.ts`'s
+   * `performControlShutdown` calls this) could still be sitting UNSENT in
+   * `this.outbox` — mid long-poll retry backoff, or simply not yet picked up
+   * by the fire-and-forget `drainOutbox()` `send()` kicked off — and this
+   * method would happily proceed to `stopped = true` / `ws.close()` regardless,
+   * after which NOTHING ever drains it again: silently lost, even though
+   * `TaskRunner` believed it had been sent. `drainTimeoutMs` omitted (the
+   * default) preserves the EXACT prior behavior for every other existing
+   * caller (an ordinary `daemon.stop()`/`unpair()`) — only the control-socket
+   * shutdown path opts into the bounded wait (see `create-daemon.ts`'s
+   * `performControlShutdown`). This can never claim delivery that didn't
+   * happen: on a timeout, whatever's still queued stays exactly where it is
+   * (readable via {@link outboxLength} immediately after this resolves) —
+   * it does NOT force-flush or pretend success.
    */
-  async stop(): Promise<void> {
+  async stop(drainTimeoutMs?: number): Promise<void> {
+    if (drainTimeoutMs !== undefined) {
+      await this.waitForOutboxDrained(drainTimeoutMs);
+    }
     this.stopped = true;
     if (this.wsRetryTimer) clearInterval(this.wsRetryTimer);
     this.longPoll.stop();
     this.ws.close();
     await this.processingChain;
     await this.pendingCursorSave;
+  }
+
+  /**
+   * Finding F5(b): how many envelopes are neither confirmed delivered NOR
+   * safely re-queued — meant to be read right after a bounded {@link stop}
+   * call returns, to know honestly whether the drain actually finished (0)
+   * or timed out with something still stuck (>0). See `create-daemon.ts`'s
+   * `performControlShutdown`, which surfaces this on the `shutdown-complete`
+   * audit event rather than silently claiming everything was delivered.
+   *
+   * Deliberately `this.outbox.length + this.inFlightBatchSize`, NOT just
+   * `this.outbox.length` alone: `drainOutbox`'s long-poll branch SPLICES a
+   * batch out of `this.outbox` before awaiting `postBatch` (so a concurrent
+   * `send()` sees an accurate, non-double-counted queue) — while that POST
+   * is in flight (or, this finding's whole point, genuinely STALLED and
+   * never resolving), those envelopes have already left `this.outbox` but
+   * are not delivered either. Reading `this.outbox.length` alone at exactly
+   * that moment would undercount to 0 — silently implying full delivery
+   * for the one case (a hung POST) this finding exists to catch honestly.
+   */
+  outboxLength(): number {
+    return this.outbox.length + this.inFlightBatchSize;
+  }
+
+  /**
+   * Finding F5(b): polls {@link outboxLength} (not `this.outbox.length`
+   * alone — see that method's own doc comment for why a spliced-out,
+   * in-flight batch would otherwise be invisible here) rather than hooking
+   * a single `drainOutbox()` promise directly — a drain in progress can
+   * itself loop through multiple retry/backoff cycles (`drainRetryDelay`)
+   * while the server is unreachable, and a fresh, INDEPENDENT
+   * `drainOutbox()` call can also be triggered concurrently (`send()`, a
+   * mode switch's own `void this.drainOutbox()`) — polling the one thing
+   * that actually matters (is anything still undelivered) can never go
+   * stale the way capturing one specific in-flight promise reference
+   * could. Kicks off one more `drainOutbox()` attempt itself first
+   * (harmless no-op if one is already running — see its own re-entrancy
+   * guard) in case nothing is currently actively retrying (e.g. WS just
+   * dropped and long-poll hasn't taken over yet), so this bounded wait
+   * isn't just passively hoping something else happens to be making
+   * progress.
+   */
+  private waitForOutboxDrained(timeoutMs: number): Promise<void> {
+    if (this.outboxLength() === 0) return Promise.resolve();
+    void this.drainOutbox();
+    return new Promise((resolve) => {
+      const deadline = Date.now() + timeoutMs;
+      const poll = (): void => {
+        if (this.outboxLength() === 0 || this.stopped || this.revoked || Date.now() >= deadline) {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(poll, 20);
+        timer.unref?.();
+      };
+      poll();
+    });
   }
 
   /**
@@ -575,7 +698,8 @@ export class ConnectionManager {
    * connection stays open indefinitely, so it never reaches `onWsOutcome`
    * (which is close-only) at all.
    */
-  private onAcked(): void {
+  private onAcked(capabilities: string[]): void {
+    this.serverCapabilities = capabilities;
     this.consecutiveFailures = 0;
     this.notifySettled();
     if (this.mode === 'long-poll') this.exitLongPoll();

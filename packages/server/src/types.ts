@@ -4,6 +4,7 @@ import type {
   PermissionPolicy,
   RuntimeId,
   RuntimeInfo,
+  TaskApprovalResolvedPayload,
   TaskArtifactPayload,
   TaskState,
 } from '@byok/protocol';
@@ -194,6 +195,28 @@ export type ByokServerEvent =
    * says it was approved locally" if it cares to.
    */
   | { kind: 'task.approval_resolved_implicit'; taskId: string; at: string }
+  /**
+   * M4 (additive-minor): the EXPLICIT counterpart to
+   * `task.approval_resolved_implicit` above — fires when the daemon reports
+   * a locally-resolved approval via the wire `task.approval_resolved`
+   * message (`ConnectionHub.onApprovalResolved`, `hub.ts`) rather than the
+   * server having to infer it from later task traffic. Carries the same
+   * `approvalId`/`decision`/`resolvedBy` the daemon reported, so an embedder
+   * can render/audit exactly what was resolved and by which path, not just
+   * that a resolution happened. `resolvedBy` is currently always `'local'`
+   * (`@byok/protocol`'s `TaskApprovalResolvedPayloadSchema` — a single-value
+   * enum today, future-proofed for an additional value later without a
+   * version bump). Mutually exclusive with `task.approval_resolved_implicit`
+   * for the same resolution: whichever mechanism the server processes first
+   * performs the actual `AwaitApproval -> Running` transition, and the other
+   * is already a no-op by the time it would otherwise run — see
+   * `onApprovalResolved`'s own doc comment (`hub.ts`) for the full
+   * relationship.
+   */
+  | ({ kind: 'task.approval_resolved'; taskId: string; at: string } & Pick<
+      TaskApprovalResolvedPayload,
+      'approvalId' | 'decision' | 'resolvedBy'
+    >)
   /**
    * M4 Phase 4 (part A): `deviceId` exceeded its inbound-envelope rate limit
    * (`CreateByokServerOptions.rateLimit`, enforced in

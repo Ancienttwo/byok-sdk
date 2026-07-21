@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
+import { ensureSecureDir } from '../util/secure-dir';
 import {
   computeClientAuth,
   computeServerProof,
@@ -369,8 +370,11 @@ function handleConnection(
  * must never be allowed to brick the rest of the daemon).
  */
 export async function startControlServer(opts: ControlServerOptions): Promise<ControlServerHandle> {
-  await fs.mkdir(opts.storeDir, { recursive: true, mode: 0o700 });
-  await fs.chmod(opts.storeDir, 0o700).catch(() => {});
+  // Finding F7: on win32, ALSO applies a restrictive DACL via `icacls` —
+  // POSIX modes (the `{mode: 0o700}` this replaces) restrict nothing there.
+  // See `util/secure-dir.ts`'s own doc comment; `control.token` (written
+  // below, once the bind succeeds) inherits this directory's ACL.
+  await ensureSecureDir(opts.storeDir);
 
   const token = randomBytes(32).toString('hex'); // in-memory only until the bind below actually succeeds
   const tokenPath = controlTokenPath(opts.storeDir);
@@ -400,7 +404,39 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
 
   await bindControlEndpoint(server, endpoint); // throws without ever touching the token file — see doc comment above
 
-  await atomicWriteFile(tokenPath, token, { mode: 0o600 });
+  try {
+    await atomicWriteFile(tokenPath, token, { mode: 0o600 });
+  } catch (err) {
+    // Finding F9 (cross-model adversarial review): the bind just above
+    // already succeeded — `server` is actively listening on `endpoint`. A
+    // token-write failure (disk full, storeDir removed out from under this
+    // call, a permission change mid-flight) used to propagate straight out
+    // of this function without ever tearing that listener down: the caller
+    // never gets a `ControlServerHandle` to `close()` (the throw happens
+    // before this function ever returns one — see `create-daemon.ts`'s own
+    // "continuing without it" degrade path, which only ever sees the
+    // exception, never the live socket underneath it), so the listener was
+    // silently ORPHANED — unreachable for the rest of the process's
+    // lifetime, and blocking every future bind attempt at this exact
+    // `endpoint` with `EADDRINUSE`/{@link AnotherControlServerRunningError}
+    // (e.g. a later retry, or this same daemon's next `start()`) even
+    // though nothing valid is actually listening behind it anymore in any
+    // useful sense (its token was never written, so no client could ever
+    // complete a handshake against it either). `atomicWriteFile` itself
+    // already guarantees `tokenPath` was never created/left partial on
+    // failure (its own temp-file-only cleanup — see `util/atomic-write.ts`),
+    // so there is nothing to unwind on that side; only the listener this
+    // function itself just stood up needs tearing down before rethrowing.
+    // Mirrors `close()`'s own teardown shape below (destroy any sockets
+    // that connected in this narrow window, close the server, remove the
+    // socket file — never a pipe, which has no file to remove).
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (process.platform !== 'win32') {
+      await fs.rm(endpoint, { force: true }).catch(() => {});
+    }
+    throw err;
+  }
 
   let closed = false;
   async function close(): Promise<void> {

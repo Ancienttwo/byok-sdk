@@ -30,7 +30,11 @@ const unusedBlobClient: BlobResolver = {
   },
 };
 
-async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promise<TaskRunner> {
+async function makeRunner(
+  adapter: StubRuntimeAdapter,
+  sent: Envelope[],
+  overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs'>> = {},
+): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = {
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-shutdown-workspace-'),
@@ -43,6 +47,7 @@ async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promis
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
+    shutdownInterruptTimeoutMs: overrides.shutdownInterruptTimeoutMs,
   };
   return new TaskRunner(deps);
 }
@@ -133,6 +138,34 @@ describe('TaskRunner.shutdownActiveTasks', () => {
 
     await expect(runner.shutdownActiveTasks('operator')).resolves.toBeUndefined();
     expect(sent.some((e) => e.type === 'task.fail' && e.task_id === 'task-1')).toBe(true);
+  });
+
+  it('finding F5(a): still reports task.fail even when session.interrupt() hangs forever — bounded by shutdownInterruptTimeoutMs rather than blocking the send indefinitely', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    // Short override so this test doesn't wait out the real 5s default —
+    // proves the BOUND applies, not any particular duration.
+    const runner = await makeRunner(adapter, sent, { shutdownInterruptTimeoutMs: 20 });
+
+    await runner.handleEnvelope(
+      createEnvelope('task.offer', { instruction: 'do work', policy: { mode: 'auto' } }, { taskId: 'task-hang', seq: 1 }),
+    );
+    const session = adapter.sessions[0];
+    expect(session).toBeDefined();
+    // Never resolves, never rejects — the exact "misbehaving adapter" shape
+    // this finding is about (distinct from the sibling test above, which
+    // throws SYNCHRONOUSLY-from-the-caller's-perspective via a rejection).
+    session!.interrupt = () => new Promise<void>(() => {});
+
+    const startedAt = Date.now();
+    await runner.shutdownActiveTasks('operator');
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(2000); // bounded by the 20ms override, nowhere near "hung forever"
+    expect(runner.activeTaskCount).toBe(0);
+    const fail = sent.find((e) => e.type === 'task.fail' && e.task_id === 'task-hang');
+    expect(fail).toBeDefined();
+    expect(fail?.payload).toMatchObject({ retryable: true });
   });
 
   it('handles multiple concurrently-active tasks', async () => {

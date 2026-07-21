@@ -60,7 +60,18 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
   // "subscribe before pair()/start()" convention.
   const unsubscribe = daemon.subscribe((event) => {
     appendToAudit(event);
-    log(formatDaemonEventLine(event));
+    // Finding F8 (cross-model adversarial review): this stdout stream is
+    // captured verbatim by whatever's running `start` — a human's terminal,
+    // but ALSO launchd/systemd/WinSW service logs when installed as a
+    // background service. An `awaiting-approval` summary can carry the
+    // exact tool-call text (a shell command, a file's contents) a
+    // `confirm`-mode policy is gating; redact it here the same way
+    // `appendToAudit` above already redacts it on disk. The full summary
+    // stays available via the AUTHENTICATED control socket — the new
+    // `approvals` CLI command, `approvals.list`, or `tasks --follow`'s own
+    // `tasks.subscribe` path (`bin/commands/tasks.ts`, which does NOT set
+    // this flag).
+    log(formatDaemonEventLine(event, { redactApprovalSummary: true }));
     if (event.kind === 'shutdown-complete') {
       controlShutdownComplete = true;
       notifyControlShutdown?.();

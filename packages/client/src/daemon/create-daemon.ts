@@ -31,6 +31,9 @@ import type { ProgressBatcherOptions } from './progress-batcher';
 /** M4 Phase 2: bound on how long the control socket's `shutdown` RPC waits for `TaskRunner.shutdownActiveTasks` before proceeding to the rest of teardown regardless — an active task's `session.interrupt()` hanging (a misbehaving runtime adapter) must never block the daemon from actually stopping. */
 const SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS = 10_000;
 
+/** Finding F5(b): default bound on how long `performControlShutdown` waits for the outbox to actually drain before closing the connection — see `ConnectionManager.stop`'s own doc comment. Overridable via `DaemonOverrides.shutdown.outboxDrainTimeoutMs`. */
+const DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS = 5_000;
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -143,6 +146,13 @@ export interface DaemonOverrides {
   liveness?: LivenessOptions;
   /** M4 Phase 3: overrides `TaskRunner`'s default out-of-band approval wait (`DEFAULT_APPROVAL_TIMEOUT_MS`, 10 minutes) before an unanswered `requestApproval` force-resolves as a fail-closed rejection. */
   approvalTimeoutMs?: number;
+  /** Finding F5: overrides for the control-socket shutdown path's own bounded waits — see `TaskRunner.shutdownTask`'s and `ConnectionManager.stop`'s own doc comments. Both default to 5s; neither affects an ordinary (non-shutdown-RPC) `daemon.stop()` call. */
+  shutdown?: {
+    /** Bound on how long `shutdownTask` waits for a single task's own `session.interrupt()` before giving up on it specifically and reporting `task.fail` anyway. Default `DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS`. */
+    taskInterruptTimeoutMs?: number;
+    /** Bound on how long the control-socket shutdown path waits for the outbox to actually drain before closing the connection. Default `DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS`. */
+    outboxDrainTimeoutMs?: number;
+  };
   longPoll?: {
     /** Consecutive never-acked WS connect failures before falling back to long-poll. Default 3. */
     wsFailureThreshold?: number;
@@ -407,6 +417,8 @@ export function createDaemonWithAdapters(
       storeDir,
       productId: config.productId,
       approvalTimeoutMs: overrides.approvalTimeoutMs,
+      // Finding F5(a): see TaskRunnerDeps.shutdownInterruptTimeoutMs's own doc comment.
+      shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,
       // M4 Phase 3 hardening: bridges TaskRunner's stale-approval-race
       // finding out to the SAME local observability seam every other
       // daemon-local event already uses (see observer.ts's own module doc
@@ -415,6 +427,20 @@ export function createDaemonWithAdapters(
       onStaleApprovalDecision: (taskId, decision, reason) => {
         observer.noteStaleApprovalDecision(taskId, decision, reason);
       },
+      // Finding F4: see `TaskRunnerDeps.onApprovalDispatched`'s own doc
+      // comment — lets `observer`'s `awaiting-approval` DaemonEvent (and
+      // thus `tasks --follow`) surface the approvalId an operator actually
+      // needs to call `approve`/`reject`/`approvals` against.
+      onApprovalDispatched: (taskId, approvalId) => {
+        observer.noteApprovalDispatched(taskId, approvalId);
+      },
+      // M4 (additive-minor, `task.approval_resolved`): read fresh at call
+      // time via `connection` (assigned just below — safe by the time this
+      // is actually invoked, same closure pattern `send` above already
+      // relies on) rather than captured once here, since the negotiated
+      // capability is only known once the handshake completes, strictly
+      // after this `deps` object is constructed.
+      getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
     };
     runner = new TaskRunner(deps);
 
@@ -452,8 +478,17 @@ export function createDaemonWithAdapters(
     await connection.waitForAck();
   }
 
-  async function stop(): Promise<void> {
-    await connection?.stop();
+  /**
+   * `opts.drainTimeoutMs` (finding F5(b)): threaded through to
+   * `ConnectionManager.stop` — omitted here (the default, e.g. from the
+   * public `Daemon.stop()`/`unpair()` paths) preserves the exact prior
+   * behavior (no bounded wait); only `performControlShutdown` below passes
+   * one, since that's the path a just-sent `task.fail` (from
+   * `TaskRunner.shutdownTask`) actually needs a chance to drain before the
+   * connection closes out from under it.
+   */
+  async function stop(opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+    await connection?.stop(opts.drainTimeoutMs);
     auth.stop();
     connectionState = 'closed';
     // M4 Phase 2: stop the control socket in every shutdown path — this is
@@ -528,6 +563,11 @@ export function createDaemonWithAdapters(
       .tasks()
       .filter((task) => TASK_TRANSITIONS[task.state].length > 0) // non-terminal only — see the `status` method's own doc comment (control-protocol.ts)
       .map((task) => ({ taskId: task.taskId, state: task.state }));
+    // Finding F4: computed once and reused for both `approvals` (the actual
+    // entries, so `status`'s live section can render approvalIds without a
+    // second control-socket round trip) and `approvalsPending` (the same
+    // list's count) — same source `approvals.list` itself calls.
+    const pendingApprovals = approvalRegistry.list();
     return {
       pid: process.pid,
       uptimeMs: startedAt !== undefined ? Date.now() - startedAt : 0,
@@ -541,10 +581,10 @@ export function createDaemonWithAdapters(
       // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s
       // own doc comment for why this is a progress-batcher-backlog +
       // in-flight-approval-count proxy rather than the adapter's own event
-      // queue depth. `approvalsPending` is the same whole-daemon count
-      // `approvals.list` already returns, surfaced here too.
+      // queue depth.
       queueWatermarks: runner?.getQueueWatermarks() ?? [],
-      approvalsPending: approvalRegistry.list().length,
+      approvals: pendingApprovals,
+      approvalsPending: pendingApprovals.length,
     };
   }
 
@@ -595,9 +635,19 @@ export function createDaemonWithAdapters(
       runner?.stopAcceptingOffers();
       const activeTeardown = runner?.shutdownActiveTasks(`control socket shutdown (${effectiveReason})`) ?? Promise.resolve();
       await Promise.race([activeTeardown, delay(SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS)]);
-      await stop();
+      // Finding F5(b): bounded wait for the outbox (e.g. the task.fail(s)
+      // shutdownActiveTasks just enqueued) to actually drain — see
+      // ConnectionManager.stop's own doc comment for why an unbounded wait
+      // wasn't safe to make the universal default, and ConnectionManager
+      // .outboxLength's doc comment for the honest-audit read right below.
+      await stop({ drainTimeoutMs: overrides.shutdown?.outboxDrainTimeoutMs ?? DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS });
     } finally {
-      observer.noteShutdownComplete(effectiveReason);
+      // Finding F5(b): read AFTER stop() returns — 0 means the drain
+      // genuinely finished in time; a positive count is an honest record
+      // that this many envelopes (almost certainly including a task.fail
+      // shutdownActiveTasks just sent) never actually left the outbox,
+      // rather than the audit log silently implying full delivery.
+      observer.noteShutdownComplete(effectiveReason, connection?.outboxLength() ?? 0);
     }
   }
 

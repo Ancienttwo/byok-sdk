@@ -34,7 +34,19 @@ export const PROTOCOL_VERSION = 1;
  * approval-requiring policy to a daemon that hasn't advertised this flag. No
  * bundled runtime adapter emits it yet; that's expected until interactive
  * approval is actually wired up in a later wave.
+ *
+ * `approval_resolved` (additive-minor): a SERVER-advertised flag meaning
+ * "I understand the `task.approval_resolved` message" (`messages.ts`). This
+ * is the N/N-1 answer for that new daemon -> server message: an old server's
+ * `CAPABILITY_FLAGS`/`conn.ack.capabilities` never includes it, so a new
+ * daemon talking to an old server never sends `task.approval_resolved` at
+ * all (see `packages/client`'s `task-runner.ts`) and falls back to the
+ * pre-existing implicit-resume inference
+ * (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`)
+ * unconditionally, exactly as before this flag existed. Unlike
+ * `interactive-approval`, this one IS exercised the moment both sides
+ * support it — there is no reserved/dormant period for it.
  */
-export const CAPABILITY_FLAGS = ['steer', 'blob-upload', 'interactive-approval'] as const;
+export const CAPABILITY_FLAGS = ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved'] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

@@ -44,6 +44,7 @@ export {
   TaskCompletePayloadSchema,
   TaskFailPayloadSchema,
   TaskCancelledPayloadSchema,
+  TaskApprovalResolvedPayloadSchema,
 } from './messages';
 export type {
   MessageType,
@@ -66,6 +67,7 @@ export type {
   TaskCompletePayload,
   TaskFailPayload,
   TaskCancelledPayload,
+  TaskApprovalResolvedPayload,
 } from './messages';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';

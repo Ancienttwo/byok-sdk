@@ -93,18 +93,29 @@ This asymmetry is enforced by the freeze-guard regression test
 (`packages/protocol/src/__tests__/freeze-guard.test.ts`), not just documented
 here — see that file for the executable version of every bullet above.
 
-**Deferred additive candidate (not yet added — no wire/schema change today):**
-a first-class `task.approval_resolved` message — an explicit daemon → server
+**Landed additive minor: `task.approval_resolved` (was tracked here as a
+deferred candidate; now shipped).** A daemon → server message — an explicit
 notification for the case where a pending approval was resolved entirely
-locally (the daemon's own control-socket `approvals.resolve`, M4 Phase 3),
-with no wire `task.approve`/`task.reject` ever exchanged. Today the server
-only infers this after the fact (`ConnectionHub.resumeIfImplicitlyApproved`,
-`packages/server/src/hub.ts`) and surfaces it purely as an embedder-facing
-`task.approval_resolved_implicit` `ByokServerEvent`
-(`packages/server/src/types.ts`) — never a protocol change. Noted here as a
-candidate for a future additive minor (it would land as "a new message
-type," the first bullet at the top of this section — no `PROTOCOL_VERSION`
-bump needed when it does), not committed to any wire shape yet.
+locally (the daemon's own control-socket `approvals.resolve`, a fail-closed
+`requestApproval` timeout, or a fail-closed finish/eviction rejection — see
+`packages/client/src/daemon/task-runner.ts`'s `sendApprovalResolved`), with
+no wire `task.approve`/`task.reject` ever exchanged for it. Exactly what the
+first bullet at the top of this section already allows — "a new message
+type" — so it landed with no `PROTOCOL_VERSION` bump, alongside a new
+handshake capability flag, `approval_resolved` (`CAPABILITY_FLAGS`,
+`version.ts`), that a server advertises when it understands the message; see
+§2's catalog entry and §5.2 below for the full flow and the wire shape.
+
+Before this landed, the server could only infer a local resolution after the
+fact (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`)
+once the daemon's next `task.progress`/`task.artifact`/`task.complete`
+proved it had already moved on — surfaced purely as an embedder-facing
+`task.approval_resolved_implicit` `ByokServerEvent` (`packages/server/src/
+types.ts`), never a protocol change. That inference path is untouched and
+remains the permanent N/N-1 fallback: an old daemon that predates this
+message, or a daemon talking to an old server that never advertises
+`approval_resolved`, never sends the new message at all, and the server
+keeps inferring exactly as it did before this section's previous wording.
 
 ## 1. Envelope
 
@@ -208,6 +219,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?` | Runtime reached `turn_end` |
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?` | Task ends `Cancelled` (server- or daemon-initiated) |
+| `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
@@ -410,6 +422,72 @@ capability signals that should eventually converge (a future wave giving
 an oversight; until then, `permissionModes` is authoritative and
 `interactive-approval` remains exactly as unreliable a signal as it always
 was.
+
+### 5.2 `task.approval_resolved` — explicit local-resolution report (additive minor)
+
+The approval flow above (§5) has always had two resolution paths: the wire
+`task.approve`/`task.reject` (server-authoritative, §4) and the daemon's own
+local control-socket `approvals.resolve` (device-owner-authoritative). Before
+this addition, the SERVER only ever learned about a *local* resolution
+implicitly — the next `task.progress`/`task.artifact`/`task.complete` for
+that task proved, after the fact, that the daemon had already moved past
+`AwaitApproval` (`ConnectionHub.resumeIfImplicitlyApproved`,
+`packages/server/src/hub.ts`). In the window between the local resolution and
+that next message, the server's own record still said `AwaitApproval` — long
+enough for a SaaS-side `TaskHandle.approve()`/`.reject()` to independently
+decide (and win) the server's authoritative record while the daemon had
+already moved on locally.
+
+**`task.approval_resolved` (D→S) closes that window.** The daemon sends it
+immediately whenever an approval resolves through any LOCAL path — the
+control socket's `approvals.resolve` RPC, a fail-closed `requestApproval`
+timeout, or a fail-closed finish/registry-eviction rejection
+(`packages/client/src/daemon/task-runner.ts`'s `sendApprovalResolved`) —
+*never* for a resolution that arrived over the wire (`task.approve`/
+`task.reject`): the server already knows its own decision, so it must never
+be echoed back. Payload: `approvalId` (the resolved `ApprovalRegistry` entry
+id), `decision` (`'approve'` or `'reject'`), `resolvedBy` (currently always
+`'local'` — a single-value enum, deliberately future-proofed for an
+additional value later without a version bump), and `at` (ISO-8601 datetime).
+Envelope `task_id` is required (routes by task, like every other `task.*`
+type); `seq` stays optional (daemon → server).
+
+**Gated on a new handshake capability flag, `approval_resolved`**
+(`CAPABILITY_FLAGS`, `version.ts`) — the N/N-1 answer for this message: an
+old server never advertises the flag in its `conn.ack`, so a new daemon
+talking to it never sends `task.approval_resolved` at all and silently falls
+back to the pre-existing implicit-inference path, unconditionally, exactly
+as before this message existed. Server-side handling
+(`ConnectionHub.onApprovalResolved`, `hub.ts`): `AwaitApproval` legally
+transitions to `Running` (the same edge `approveTask` itself uses) and emits
+a `task.approval_resolved` `ByokServerEvent` carrying
+`approvalId`/`decision`/`resolvedBy`; already-`Running` (evidence, or the
+implicit path, already got there first) is a silent idempotent no-op; any
+other state (terminal, or a state that never reached `AwaitApproval` at all)
+is a stale no-op with a logged warning, never force-failed. The pre-existing
+`resumeIfImplicitlyApproved`/`task.approval_resolved_implicit` machinery is
+completely untouched and remains the permanent fallback for the N/N-1 cases
+above; the two mechanisms can never both fire for the same resolution —
+whichever the server processes first performs the actual transition, and the
+other's own guard is already true by the time it would otherwise run.
+
+**Residual race (honest, by design — narrowed, not eliminated):** a SaaS
+decision (`TaskHandle.approve()`/`.reject()`) already in flight on the wire
+when the local resolution happens can still land on the server FIRST and
+move the record to a terminal state before `task.approval_resolved` arrives.
+When that happens, the message hits the stale-no-op branch above — exactly
+like any other late message for an already-terminal task — and the daemon
+independently treats a crossing `task.approve`/`task.reject` the same way
+(`NoPendingApprovalError`, an audit-only no-op — §5, `task-runner.ts`'s
+`handleApprove`/`handleReject`). Both sides treat the loser as a stale no-op;
+neither crashes or double-applies anything. What changed is the SIZE of the
+window this can happen in: before this addition it was open until the
+daemon's next progress message (arbitrarily long); now it is
+network-latency-sized (however long `task.approval_resolved` takes to
+reach the server) — and the only possible divergence is exactly the same
+kind §4 already accepts elsewhere: the server's terminal record disagreeing
+with a daemon that (in the reject case) already stopped, or (in the approve
+case) already continued, its own local session.
 
 ## 6. Auth flows
 
@@ -1157,27 +1235,48 @@ real evidence:
      per-message validator `decodeEnvelope` (WS's own per-frame decode)
      calls internally, so the two transports share one notion of "valid"
      and cannot drift apart on it again. An entry that fails for ANY reason
-     (unrecognized type, or a recognized type with an invalid payload — see
-     the malformed-entry case below) is skipped exactly as WS treats the
-     same failure: silently, no log line, batch and connection otherwise
-     unaffected. A skipped entry that still carries a numeric `seq` still
-     advances the cursor/watermark past it
+     is skipped for THIS batch — silently, no log line, batch and
+     connection otherwise unaffected — but (finding F1, below) NOT every
+     failure class gets the same cursor treatment.
+     
+     A skipped entry that fails with `UnknownMessageTypeError` (an entirely
+     unrecognized `type` — genuine forward-compat tolerance) and still
+     carries a numeric `seq` advances the cursor/watermark past it
      (`ConnectionManager.noteSkippedSeq`), so a persistently-redelivered
      unparseable entry can never stall progress again — verified directly:
      the cursor keeps advancing through repeated redelivery of the same
      poison payload, and a concurrent legitimate envelope is delivered with
-     no grace period needed. Malformed-known-type entries (a recognized
-     `type` with an invalid/missing payload) get the IDENTICAL treatment,
-     mirroring WS exactly — WS's own blanket `catch {}` never distinguished
-     "unrecognized type" from "recognized type, invalid payload" either; both
-     already fell through the same silent skip. See
+     no grace period needed.
+     
+     **Finding F1 (cross-model adversarial review, fixed the same session):
+     a malformed-known-type entry (a recognized `type` whose payload fails
+     schema validation — `EnvelopeValidationError`, e.g. a real `task.offer`
+     whose `PermissionPolicy` rejects an unknown constraint) must NOT get
+     that same cursor advance.** The original fix above forwarded EVERY
+     `parseMessage` failure to `onSkippedSeq` regardless of class, reasoning
+     (wrongly) that this "mirrored WS exactly". It does not: WS's blanket
+     `catch {}` drops the frame with no skip-side cursor bookkeeping AT ALL
+     (an unparseable WS frame never advances anything, so the server's
+     retain-and-redeliver semantics keep it alive on their own); long-poll's
+     `onSkippedSeq` call is an ACTIVE cursor advance with no WS equivalent.
+     Applied uniformly, it meant a genuinely malformed control message the
+     daemon never understood got silently, permanently acked — the server
+     would stop redelivering it and whatever it was offering was stuck for
+     good. The fix narrows `onSkippedSeq` to `UnknownMessageTypeError` only;
+     any other parse/validation failure of a recognized type is skipped for
+     THIS batch same as before, but its `seq` is never forwarded, so the
+     cursor is left exactly where it was and the server's ordinary
+     retain-and-redeliver semantics (protocol §9) keep the entry alive until
+     a corrected version is actually processed — genuinely matching WS's
+     "no silent permanent ack" property this time. See
      `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`
      for the full regression suite (against the real `ConnectionManager`/
      `WsTransport`/`LongPollClient`): interleaved known/unknown/known
      batches processed in order with the cursor advanced past all three
      (including a trailing skip with nothing known after it, tested in
-     isolation), the malformed-known-type case, and the persistent-
-     redelivery/recovery case.
+     isolation), the persistent-redelivery/recovery case, and (F1) the
+     malformed-known-type case proving the cursor stays frozen until a
+     corrected redelivery at the same seq is processed.
 3. **Unknown fields on control/security-class schemas
    (`PermissionPolicySchema`, the `instruction` blob-ref variant) are
    REJECTED, fail-closed** — already established by `freeze-guard.test.ts`;

@@ -41,7 +41,7 @@ const unusedBlobClient: BlobResolver = {
 async function makeRunner(
   adapter: StubRuntimeAdapter,
   sent: Envelope[],
-  overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry'>> = {},
+  overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry' | 'onApprovalDispatched'>> = {},
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
   const deps: TaskRunnerDeps = {
@@ -57,6 +57,7 @@ async function makeRunner(
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
     approvalTimeoutMs: overrides.approvalTimeoutMs,
+    onApprovalDispatched: overrides.onApprovalDispatched,
   };
   return { runner: new TaskRunner(deps), approvalRegistry };
 }
@@ -103,6 +104,38 @@ describe('TaskRunner.requestApproval', () => {
     await expect(outcomePromise).resolves.toEqual({ approved: true, reason: undefined });
     // Resolved entry is consumed — nothing left pending.
     expect(approvalRegistry.list()).toEqual([]);
+  });
+
+  it('finding F4: calls onApprovalDispatched with {taskId, approvalId} BEFORE sending task.await_approval, with the exact approvalId the registry ends up holding', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const dispatched: Array<{ taskId: string; approvalId: string }> = [];
+    // Asserted from INSIDE the hook (not just after `requestApproval`
+    // returns): proves ordering, not just eventual presence — the hook must
+    // fire before `task.await_approval` is pushed onto `sent`, since
+    // `DaemonObserver.noteApprovalDispatched` (create-daemon.ts's wiring)
+    // must have already stashed the id by the time the observer's own
+    // `task.await_approval` handling (triggered by that same synchronous
+    // `deps.send`) runs.
+    let sentCountAtDispatchTime = -1;
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent, {
+      onApprovalDispatched: (taskId, approvalId) => {
+        dispatched.push({ taskId, approvalId });
+        sentCountAtDispatchTime = sent.filter((e) => e.type === 'task.await_approval').length;
+      },
+    });
+    const taskId = 'task-approval-dispatched-1';
+    await offerAndActivate(runner, taskId);
+
+    void runner.requestApproval(taskId, 'Bash: echo hi');
+
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.taskId).toBe(taskId);
+    expect(sentCountAtDispatchTime).toBe(0); // fired BEFORE task.await_approval was sent
+
+    const pending = approvalRegistry.list();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.approvalId).toBe(dispatched[0]?.approvalId); // exact same id the registry actually holds
   });
 
   it('resolves approved:false with the reason once the registry entry is rejected', async () => {

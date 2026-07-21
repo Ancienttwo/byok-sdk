@@ -25,6 +25,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * `RateLimiter.buckets` is a private implementation detail (TS `private` is
+ * compile-time-only) — reaching into it directly is the only way to observe
+ * idle-eviction sweeps from outside, mirroring `task-lease.test.ts`'s own
+ * `taskActivityMap` helper for the same reason. Used only by the
+ * constructor-validation and idle-eviction tests below.
+ */
+function bucketsMap(limiter: RateLimiter): Map<string, { tokens: number; lastRefillMs: number }> {
+  return (limiter as unknown as { buckets: Map<string, { tokens: number; lastRefillMs: number }> }).buckets;
+}
+
 /** Mirrors `integration.test.ts`'s identical helper — resolves once `socket` actually closes, with its close code/reason. */
 function waitForClose(socket: WebSocket): Promise<{ code: number; reason: string }> {
   return new Promise((resolve) => {
@@ -290,5 +301,123 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     } finally {
       hub.stopLeaseReaper();
     }
+  });
+});
+
+/**
+ * Cross-model review fix (P2, rate-limiter.ts:40): construction previously
+ * accepted any `messagesPerSecond`/`burst` value unchecked — `NaN` poisons
+ * every subsequent token computation, `0`/negative values either divide by
+ * zero or make the bucket permanently empty, and `Infinity` makes the limit
+ * never actually engage. All of these are a silently broken/disabled
+ * limiter rather than a loud failure, so construction now validates
+ * fail-fast instead.
+ */
+describe('RateLimiter: constructor option validation (fail-fast)', () => {
+  it.each([
+    ['messagesPerSecond', 'NaN', { messagesPerSecond: NaN }],
+    ['messagesPerSecond', 'zero', { messagesPerSecond: 0 }],
+    ['messagesPerSecond', 'negative', { messagesPerSecond: -5 }],
+    ['messagesPerSecond', 'Infinity', { messagesPerSecond: Infinity }],
+    ['burst', 'NaN', { burst: NaN }],
+    ['burst', 'zero', { burst: 0 }],
+    ['burst', 'negative', { burst: -5 }],
+    ['burst', 'Infinity', { burst: Infinity }],
+  ] as const)('throws a TypeError at construction when %s is %s', (_field, _label, opts) => {
+    expect(() => new RateLimiter(opts)).toThrow(TypeError);
+  });
+
+  it('accepts valid finite positive options — including the all-defaults case — without throwing', () => {
+    expect(() => new RateLimiter()).not.toThrow();
+    expect(() => new RateLimiter({ messagesPerSecond: 50, burst: 100 })).not.toThrow();
+    expect(() => new RateLimiter({ messagesPerSecond: 0.5, burst: 1 })).not.toThrow();
+  });
+});
+
+/**
+ * Cross-model review fix (P2, rate-limiter.ts:40): `buckets` previously held
+ * one permanent entry per historical device key for the life of the
+ * process — a device that connected once and never again was never cleaned
+ * up. These tests drive `RateLimiter` directly (bypassing `ConnectionHub`/
+ * the server) with fake timers for full determinism over the internal sweep
+ * cadence (`EVICTION_SWEEP_EVERY_N_CALLS` = 1000 calls to `consume()`,
+ * across all keys), mirroring the "coalesces" tests above's own "drive it
+ * directly" style.
+ */
+describe('RateLimiter: idle bucket eviction bounds memory', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('evicts idle buckets during a periodic sweep, keeping the map bounded instead of accumulating every historical key forever', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = new Date('2026-01-01T00:00:00.000Z').getTime();
+    vi.setSystemTime(t0);
+
+    // messagesPerSecond=100, burst=10 => idle-to-full threshold = 100ms: any
+    // bucket untouched for >=100ms is guaranteed already refilled to burst
+    // (even from 0 tokens), so evicting it is behaviorally invisible — see
+    // rate-limiter.ts's own doc comment on `idleEvictionThresholdMs`.
+    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 10 });
+
+    // Wave 1: exactly one sweep cycle's worth (1000) of distinct keys, all
+    // created at the same instant t0 -> nothing is idle yet, so the sweep
+    // that fires on the wave's last call finds nothing to evict.
+    for (let i = 0; i < 1000; i++) {
+      limiter.consume(`device-wave1-${i}`);
+    }
+    expect(bucketsMap(limiter).size).toBe(1000);
+
+    // Move well past the idle threshold, then add a second full wave of
+    // 1000 distinct keys. The sweep firing on THIS wave's last call now
+    // finds every wave-1 entry idle (1000ms elapsed >> 100ms threshold) and
+    // drops them, while wave-2's own entries (just created at t1) survive.
+    const t1 = t0 + 1000;
+    vi.setSystemTime(t1);
+    for (let i = 0; i < 1000; i++) {
+      limiter.consume(`device-wave2-${i}`);
+    }
+
+    // Bounded to wave 2 alone (1000 entries), not the full historical 2000
+    // — wave 1's stale entries were swept away, proving this doesn't just
+    // grow forever as distinct keys accumulate over the process lifetime.
+    const remaining = bucketsMap(limiter);
+    expect(remaining.size).toBe(1000);
+    for (let i = 0; i < 1000; i++) {
+      expect(remaining.has(`device-wave1-${i}`)).toBe(false);
+      expect(remaining.has(`device-wave2-${i}`)).toBe(true);
+    }
+  });
+
+  it("an evicted key's next consume() succeeds with a full fresh burst, exactly as if it were a never-before-seen key", () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = new Date('2026-01-01T00:00:00.000Z').getTime();
+    vi.setSystemTime(t0);
+
+    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 3 }); // idle-to-full threshold = 30ms
+    const key = 'device-evicted';
+
+    // Exhaust this key's burst completely (calls #1-4 of this instance).
+    expect(limiter.consume(key)).toBe(true);
+    expect(limiter.consume(key)).toBe(true);
+    expect(limiter.consume(key)).toBe(true);
+    expect(limiter.consume(key)).toBe(false); // over budget — 0 tokens left
+
+    // Go idle long enough to be trivially full again, then drive the call
+    // count the rest of the way to the next sweep boundary (1000 total)
+    // with other keys so the periodic sweep actually runs and evicts `key`.
+    vi.setSystemTime(t0 + 1000);
+    for (let i = 0; i < 999; i++) {
+      limiter.consume(`device-filler-${i}`);
+    }
+    expect(bucketsMap(limiter).has(key)).toBe(false); // confirms the sweep evicted it
+
+    // The next consume() for the evicted key must behave EXACTLY like a
+    // fresh full bucket (burst=3) — not remember it was just exhausted, and
+    // not come back only partially refilled either.
+    expect(limiter.consume(key)).toBe(true);
+    expect(limiter.consume(key)).toBe(true);
+    expect(limiter.consume(key)).toBe(true);
+    expect(limiter.consume(key)).toBe(false); // exactly burst=3 tokens, no more
   });
 });

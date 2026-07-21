@@ -57,6 +57,45 @@ describe('mapPermissionPolicyToClaudeArgs', () => {
     expect(result.reason).toMatch(/network/i);
   });
 
+  // Finding F2 (cross-model adversarial review): the confirm branch used to
+  // return unconditionally before ever looking at allowTools/denyTools,
+  // silently discarding both. The four tests below pin the fixed behavior:
+  // allowTools alone is honored (mirrors auto), denyTools alone fails
+  // closed (mirrors auto's identical reasoning — confirm has no bounded
+  // base tool list to subtract from), the combination still fails closed
+  // (denyTools is inexpressible regardless of an accompanying allowTools),
+  // and an inexpressible constraint (network:false) fails closed even
+  // alongside an otherwise-expressible allowTools.
+  it('confirm+allowTools: maps to an explicit --tools restriction, mirroring auto (finding F2 fix)', () => {
+    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', allowTools: ['Bash', 'Read'] });
+    expect(result).toEqual({
+      ok: true,
+      args: ['--permission-mode', 'default', '--tools', 'Bash,Read'],
+      needsApprovalMcp: true,
+    });
+  });
+
+  it('confirm+denyTools: fails closed (finding F2 fix — no bounded base tool list to subtract from, same as auto)', () => {
+    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', denyTools: ['Bash'] });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/denyTools/);
+    expect(result.reason).toMatch(/confirm/i);
+    expect(result.args).toEqual([]);
+    expect(result.needsApprovalMcp).toBeUndefined();
+  });
+
+  it('confirm+both (allowTools and denyTools together): still fails closed — denyTools is inexpressible regardless of an accompanying allowTools', () => {
+    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', allowTools: ['Read'], denyTools: ['Bash'] });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/denyTools/);
+  });
+
+  it('confirm+inexpressible: an inexpressible constraint (network:false) fails closed even alongside an otherwise-expressible allowTools', () => {
+    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', allowTools: ['Read'], network: false });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/network/i);
+  });
+
   it('fails closed on network:false (claude has no network sandbox for its Bash tool either)', () => {
     const result = mapPermissionPolicyToClaudeArgs({ mode: 'auto', network: false });
     expect(result.ok).toBe(false);

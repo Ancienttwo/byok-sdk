@@ -23,23 +23,36 @@ describe('ApprovalRegistry', () => {
     expect(registry.list()).toEqual([approval('a1'), approval('a2', { summary: 'run rm -rf /tmp/x' })]);
   });
 
-  it('resolve() invokes the onResolve callback with the decision and reason, and removes the entry', () => {
+  it('resolve() invokes the onResolve callback with the decision, reason, and origin, and removes the entry', () => {
     const registry = new ApprovalRegistry();
     const onResolve = vi.fn();
     registry.register(approval('a1'), onResolve);
 
     registry.resolve('a1', 'approve');
-    expect(onResolve).toHaveBeenCalledWith('approve', undefined);
+    // M4 (additive-minor, task.approval_resolved): `origin` defaults to
+    // 'local' when the caller doesn't pass one — see `resolve()`'s own doc
+    // comment (`approvals.ts`) for why that's the correct default, not just
+    // a convenient one.
+    expect(onResolve).toHaveBeenCalledWith('approve', undefined, 'local');
     expect(registry.list()).toEqual([]);
   });
 
-  it('resolve() passes a reject reason through to the callback', () => {
+  it('resolve() passes a reject reason through to the callback, with the default local origin', () => {
     const registry = new ApprovalRegistry();
     const onResolve = vi.fn();
     registry.register(approval('a1'), onResolve);
 
     registry.resolve('a1', 'reject', 'not allowed');
-    expect(onResolve).toHaveBeenCalledWith('reject', 'not allowed');
+    expect(onResolve).toHaveBeenCalledWith('reject', 'not allowed', 'local');
+  });
+
+  it('resolve() forwards an explicit origin (the wire-relay closure in task-runner.ts passes "wire")', () => {
+    const registry = new ApprovalRegistry();
+    const onResolve = vi.fn();
+    registry.register(approval('a1'), onResolve);
+
+    registry.resolve('a1', 'approve', undefined, 'wire');
+    expect(onResolve).toHaveBeenCalledWith('approve', undefined, 'wire');
   });
 
   it('resolve() of an unknown id throws ApprovalNotFoundError and does not call anything', () => {
@@ -100,9 +113,13 @@ describe('ApprovalRegistry', () => {
     registry.register(approval('overflow'), () => {});
 
     expect(evictedOnResolve).toHaveBeenCalledTimes(1);
-    const [decision, reason] = evictedOnResolve.mock.calls[0] as [string, string | undefined];
+    const [decision, reason, origin] = evictedOnResolve.mock.calls[0] as [string, string | undefined, string];
     expect(decision).toBe('reject');
     expect(reason).toMatch(/evicted/i);
+    // M4 (additive-minor, task.approval_resolved): an eviction is this
+    // registry's own bookkeeping, never a relayed server decision — always
+    // 'local', same as every other call site in this module.
+    expect(origin).toBe('local');
     // Resolved, not just notified — a future resolve('a0', ...) call must
     // fail not_found, same as any other already-resolved id.
     expect(() => registry.resolve('a0', 'approve')).toThrow(ApprovalNotFoundError);

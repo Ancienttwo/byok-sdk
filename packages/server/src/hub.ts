@@ -11,6 +11,7 @@ import {
   type MessageType,
   type PermissionPolicy,
   type RuntimeInfo,
+  type TaskApprovalResolvedPayload,
   type TaskArtifactPayload,
   type TaskAwaitApprovalPayload,
   type TaskCancelledPayload,
@@ -659,6 +660,9 @@ export class ConnectionHub {
       case 'task.cancelled':
         this.onCancelled(envelope.task_id, envelope.payload);
         return;
+      case 'task.approval_resolved':
+        this.onApprovalResolved(envelope.task_id, envelope.payload);
+        return;
       default:
         // conn.hello is handled during the handshake (ws-server.ts); the
         // remaining types (conn.ack/task.offer/approve/reject/cancel/steer)
@@ -810,6 +814,89 @@ export class ConnectionHub {
     this.applyOrFail(taskId, 'Cancelled', { result: { state: 'Cancelled', reason: payload.reason } });
   }
 
+  /**
+   * M4 (additive-minor, `task.approval_resolved`): the EXPLICIT counterpart
+   * to {@link resumeIfImplicitlyApproved} — a daemon that resolved a pending
+   * approval entirely LOCALLY now reports it immediately, instead of the
+   * server only finding out after the fact once evidence (a later
+   * `task.progress`/`task.artifact`/`task.complete`) proves it.
+   *
+   * Relationship to the implicit path (both stay, permanently — this is not
+   * a replacement): {@link resumeIfImplicitlyApproved} remains completely
+   * untouched as the fallback for (a) an old daemon that predates this
+   * message, and (b) a daemon connected to an old server that never
+   * advertised the `approval_resolved` capability flag (`version.ts`) at
+   * handshake time — in either case the daemon never sends this message at
+   * all (see `packages/client`'s `task-runner.ts`), and the server keeps
+   * inferring the resolution from evidence exactly as it did before this
+   * message existed. When THIS message does arrive first, it already moves
+   * the record out of `AwaitApproval` (see below) — so by the time any
+   * following `task.progress`/etc. reaches `onProgress`/`onArtifact`/
+   * `onComplete`, `resumeIfImplicitlyApproved`'s own `record.state !==
+   * 'AwaitApproval'` guard is already true and it no-ops, never firing its
+   * own `task.approval_resolved_implicit` event a second time for the same
+   * resolution. The two mechanisms race harmlessly: whichever one the
+   * server processes first is the one that actually performs the
+   * transition; the other is naturally inert once it runs.
+   *
+   * Three outcomes, mirroring this file's existing per-type idempotency
+   * conventions:
+   *   - `AwaitApproval` (the expected case): legal transition to `Running`
+   *     (an existing `TASK_TRANSITIONS` edge, the same one `approveTask`
+   *     itself uses) plus a `task.approval_resolved` {@link ByokServerEvent}
+   *     carrying `approvalId`/`decision`/`resolvedBy` for an embedder to
+   *     observe.
+   *   - Already `Running` (evidence — or the implicit path — already beat
+   *     this message to it): idempotent no-op, silent, mirroring
+   *     `onStarted`'s own already-running guard.
+   *   - Terminal, or a state that was never `AwaitApproval` in the first
+   *     place (`Offered`/`Claimed` — a genuinely out-of-sequence report):
+   *     stale no-op with a `console.warn`, matching this file's existing
+   *     stale-message convention (`forceFailOrDrop`, `handleInbound`'s
+   *     ownership-mismatch drop) — never force-failed, since a late/
+   *     redelivered report about a task that has already moved on is not
+   *     evidence of anything currently wrong with it.
+   *
+   * This is also the residual-race resolution the accompanying protocol/docs
+   * update documents: a SaaS decision (`approveTask`/`rejectTask`) already in
+   * flight when the local resolution happens can still land on the server
+   * FIRST and move the record to a terminal state before this message
+   * arrives — in that case this message hits the terminal branch above and
+   * is a stale no-op, exactly like any other late message for an
+   * already-terminal task. The window for that crossing is now
+   * network-latency-sized (how long this message takes to arrive), not
+   * "until the next progress message" the way the pre-existing implicit-only
+   * inference left it.
+   */
+  private onApprovalResolved(taskId: string, payload: TaskApprovalResolvedPayload): void {
+    const record = this.taskStore.get(taskId);
+    if (!record) return;
+    if (record.state === 'Running') return; // evidence (or the implicit path) already beat this message to it — idempotent no-op, mirrors onStarted's own guard.
+    if (record.state !== 'AwaitApproval') {
+      // Terminal (a SaaS decision — or a redelivered terminal message —
+      // already crossed this one and won), or a state that never reached
+      // AwaitApproval at all (Offered/Claimed) — genuinely stale/
+      // out-of-sequence either way. Never force-failed: a late report about
+      // a task that has already moved on is not itself evidence of anything
+      // wrong with that task.
+      console.warn(
+        `[byok/server] dropping task.approval_resolved for ${taskId}: not awaiting approval (state ${record.state})`,
+      );
+      return;
+    }
+    this.applyOrFail(taskId, 'Running', {});
+    const after = this.taskStore.get(taskId);
+    if (after?.state !== 'Running') return; // defensive: AwaitApproval -> Running is always a legal TASK_TRANSITIONS edge, so applyOrFail should never actually fall back to Failed here.
+    this.serverEvents.push({
+      kind: 'task.approval_resolved',
+      taskId,
+      approvalId: payload.approvalId,
+      decision: payload.decision,
+      resolvedBy: payload.resolvedBy,
+      at: after.updatedAt,
+    });
+  }
+
   // ---------------------------------------------------------------------
   // transition helpers — the single place "illegal transition" is handled
   // ---------------------------------------------------------------------
@@ -853,10 +940,19 @@ export class ConnectionHub {
    * `taskActivity`) observes it exactly as it would a real wire
    * `task.approve`. Then emits `task.approval_resolved_implicit` (a
    * `ByokServerEvent`, NOT a wire message — see that type's own doc comment)
-   * so an embedder can distinguish this from an operator-driven approval. A
-   * first-class `task.approval_resolved` WIRE notification is a deliberately
-   * deferred v1.1 candidate (tracked in the project ledger, not here) — this
-   * fix is zero wire/protocol change, entirely server-side inference.
+   * so an embedder can distinguish this from an operator-driven approval.
+   *
+   * M4 (additive-minor, superseding this method's own former "deferred"
+   * framing): a first-class `task.approval_resolved` WIRE notification now
+   * exists (`onApprovalResolved`, below) — a daemon that supports it, talking
+   * to a server that advertised the `approval_resolved` capability flag
+   * (`version.ts`), reports a local resolution explicitly and immediately
+   * instead of leaving the server to infer it here. This method is
+   * UNTOUCHED and remains the permanent fallback for the N/N-1 cases where
+   * that explicit report never arrives (an old daemon, or an old server this
+   * daemon is talking to) — see `onApprovalResolved`'s own doc comment for
+   * the full relationship between the two paths, including why they can
+   * never both fire for the same resolution.
    *
    * No-op (returns `record` unchanged) for any state other than
    * `AwaitApproval` — every other guard (terminal, pre-claim, already-

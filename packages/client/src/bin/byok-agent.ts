@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createDaemon, createServiceLifecycle, DeviceRevokedError, type ServiceLifecycle } from '../index';
 import { argValue, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
+import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
 import { runPairCommand } from './commands/pair';
 import { runRuntimesCommand } from './commands/runtimes';
@@ -68,8 +69,13 @@ import { runUnpairCommand } from './commands/unpair';
  * - `unpair` tries the control socket first: if reachable, that's a
  *   DEFINITIVE "yes, a daemon is running against this store" (foreground or
  *   service, no distinction needed anymore) — it sends `shutdown
- *   {reason:'unpair'}`, waits for the daemon to actually exit, then clears
- *   `device.json`. Only when the socket isn't reachable does it fall back to
+ *   {reason:'unpair'}` and waits for the daemon to actually exit. Finding F6:
+ *   `device.json` is only cleared once that exit is CONFIRMED (or `--force`
+ *   is passed, logged as an explicit WARNING) — an unconfirmed exit (the RPC
+ *   failing, teardown hanging, or the exit-poll timing out) refuses instead,
+ *   since the daemon may still be running and could silently re-write the
+ *   credential (see `commands/unpair.ts`'s `UnpairExitUnconfirmedError`).
+ *   Only when the socket isn't reachable does it fall back to
  *   the heuristic, OS-service-state-based flow this command has had since
  *   finding P1 #2: refusing outright when an installed background service
  *   is confirmed running, or when it cannot even confirm one ISN'T running
@@ -84,6 +90,12 @@ import { runUnpairCommand } from './commands/unpair';
  *   what these can resolve today: no bundled runtime adapter raises an
  *   approval yet, so a real daemon always answers `not_found` — see
  *   `commands/approve-reject.ts`'s own doc comment.
+ * - `approvals` (finding F4: operators otherwise had no way to ever learn
+ *   an `approvalId` to pass to `approve`/`reject`) calls the control
+ *   socket's `approvals.list` and renders one line per pending approval
+ *   (approvalId/taskId/age/summary excerpt) — same no-fallback rule as
+ *   `approve`/`reject` above. See `commands/approvals.ts`'s own doc
+ *   comment.
  *
  * `pair`/`start` are the only two commands that mutate/run a live daemon in
  * THIS process, unchanged in spirit from the pre-M3-2b bin.
@@ -99,6 +111,7 @@ function usage(): never {
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
+      '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
       '  byok-agent approve <approvalId> [--config <path>]',
       '  byok-agent reject <approvalId> [--reason <text>] [--config <path>]',
       '',
@@ -196,6 +209,12 @@ async function main(): Promise<void> {
       storeDir: resolveStoreDir(config),
       productId: config.productId,
     });
+  }
+
+  if (command === 'approvals') {
+    const config = loadConfig(configPathFrom(rest));
+    const storeDir = resolveStoreDir(config);
+    return runApprovalsCommand(storeDir, config.productId);
   }
 
   if (command === 'approve' || command === 'reject') {

@@ -72,7 +72,13 @@ async function resolveApproval(
     log(`${verb}: approvalId=${approvalId}${reason ? ` reason=${JSON.stringify(reason)}` : ''}`);
   } catch (err) {
     if (err instanceof ControlError && err.code === 'not_found') {
-      error(err.message);
+      // Finding F4: an unknown/already-resolved approvalId is exactly the
+      // moment an operator needs pointing at the ONE command that lists
+      // valid ones (`byok-agent approvals`) — before that command existed,
+      // there was no way to learn a correct id short of raw audit-log JSON.
+      // `err` itself (re-thrown below, unchanged) still carries the
+      // original message alone; this hint is rendered-output-only.
+      error(`${err.message} — run \`byok-agent approvals\` to see pending approvalIds`);
     } else {
       error(`${decision} failed: ${err instanceof Error ? err.message : String(err)}`);
     }

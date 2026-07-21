@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DaemonEvent, DaemonTaskInfo } from '../index';
 import {
   formatAgentEvent,
+  formatApprovalsListLines,
   formatDaemonEventLine,
   formatLiveStatusLines,
   formatRuntimeLines,
@@ -10,7 +11,7 @@ import {
   formatTaskListLines,
   type StatusView,
 } from '../bin/format';
-import type { ControlStatusResult } from '../daemon/control-protocol';
+import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ProbedRuntime } from '../bin/runtime-probe';
 
 // eslint-disable-next-line no-control-regex
@@ -49,6 +50,7 @@ describe('bin/format: formatDaemonEventLine', () => {
       { kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'turn_end' } },
       { kind: 'artifact', ts: 'T', taskId: 't1', name: 'out.txt', contentType: 'text/plain' },
       { kind: 'awaiting-approval', ts: 'T', taskId: 't1', summary: 'needs a human' },
+      { kind: 'awaiting-approval', ts: 'T', taskId: 't1', summary: 'needs a human', approvalId: 'appr-1' },
       { kind: 'completed', ts: 'T', taskId: 't1', summary: 'done', sessionRef: 'sess-1' },
       { kind: 'failed', ts: 'T', taskId: 't1', reason: 'boom', retryable: false },
       { kind: 'failed', ts: 'T', taskId: 't1', reason: 'declined', retryable: false, preClaim: true },
@@ -58,15 +60,19 @@ describe('bin/format: formatDaemonEventLine', () => {
       { kind: 'paired', ts: 'T', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: 'T' },
       { kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi' }, { id: 'claude' }] },
+      { kind: 'shutdown-complete', ts: 'T', reason: 'operator' },
+      { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 0 },
+      { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 2 },
     ];
 
-    expect(cases.map(formatDaemonEventLine)).toEqual([
+    expect(cases.map((event) => formatDaemonEventLine(event))).toEqual([
       '[T] offered taskId=t1 runtime=pi',
       '[T] claimed taskId=t1',
       '[T] started taskId=t1',
       '[T] progress taskId=t1 turn_end',
       '[T] artifact taskId=t1 name=out.txt contentType=text/plain',
       '[T] awaiting-approval taskId=t1 summary="needs a human"',
+      '[T] awaiting-approval taskId=t1 approvalId=appr-1 summary="needs a human"',
       '[T] completed taskId=t1 sessionRef=sess-1 summary="done"',
       '[T] failed taskId=t1 retryable=false reason="boom"',
       '[T] failed taskId=t1 retryable=false preClaim=true reason="declined"',
@@ -76,7 +82,40 @@ describe('bin/format: formatDaemonEventLine', () => {
       '[T] paired deviceId=dev-1',
       '[T] unpaired',
       '[T] runtimes-detected ids=pi,claude',
+      '[T] shutdown-complete reason="operator"',
+      '[T] shutdown-complete reason="operator" undeliveredOutboxCount=0',
+      '[T] shutdown-complete reason="operator" undeliveredOutboxCount=2',
     ]);
+  });
+
+  describe('finding F8: redactApprovalSummary option', () => {
+    it('redacts an awaiting-approval summary to a byte-count placeholder when set, leaving taskId/approvalId intact', () => {
+      const event: DaemonEvent = { kind: 'awaiting-approval', ts: 'T', taskId: 't1', approvalId: 'appr-1', summary: 'Bash: rm -rf /tmp/secret' };
+      const line = formatDaemonEventLine(event, { redactApprovalSummary: true });
+      expect(line).toBe(`[T] awaiting-approval taskId=t1 approvalId=appr-1 summary="[redacted: ${Buffer.byteLength('Bash: rm -rf /tmp/secret', 'utf8')} bytes]"`);
+      expect(line).not.toContain('rm -rf');
+    });
+
+    it('defaults to full fidelity (option omitted) — unchanged from before this finding', () => {
+      const event: DaemonEvent = { kind: 'awaiting-approval', ts: 'T', taskId: 't1', summary: 'needs a human' };
+      expect(formatDaemonEventLine(event)).toBe('[T] awaiting-approval taskId=t1 summary="needs a human"');
+    });
+
+    it('explicit redactApprovalSummary:false also keeps full fidelity', () => {
+      const event: DaemonEvent = { kind: 'awaiting-approval', ts: 'T', taskId: 't1', summary: 'needs a human' };
+      expect(formatDaemonEventLine(event, { redactApprovalSummary: false })).toBe('[T] awaiting-approval taskId=t1 summary="needs a human"');
+    });
+
+    it('the option only ever affects awaiting-approval — every other kind renders identically with or without it', () => {
+      const events: DaemonEvent[] = [
+        { kind: 'completed', ts: 'T', taskId: 't1', summary: 'done', sessionRef: 'sess-1' },
+        { kind: 'failed', ts: 'T', taskId: 't1', reason: 'boom', retryable: false },
+        { kind: 'cancelled', ts: 'T', taskId: 't1', reason: 'user cancelled' },
+      ];
+      for (const event of events) {
+        expect(formatDaemonEventLine(event, { redactApprovalSummary: true })).toBe(formatDaemonEventLine(event));
+      }
+    });
   });
 
   it('never emits ANSI escape sequences (plain/headless-safe by construction)', () => {
@@ -85,7 +124,7 @@ describe('bin/format: formatDaemonEventLine', () => {
       { kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'progress', text: 'hi' } },
       { kind: 'connection', ts: 'T', state: 'degraded' },
     ];
-    for (const line of events.map(formatDaemonEventLine)) {
+    for (const line of events.map((event) => formatDaemonEventLine(event))) {
       expect(line).not.toMatch(ANSI_ESCAPE_RE);
     }
   });
@@ -243,6 +282,7 @@ describe('bin/format: formatLiveStatusLines', () => {
       activeTasks: [],
       runtimeIds: ['pi'],
       queueWatermarks: [],
+      approvals: [],
       approvalsPending: 0,
       ...overrides,
     };
@@ -267,6 +307,39 @@ describe('bin/format: formatLiveStatusLines', () => {
     expect(formatLiveStatusLines(baseLive({ approvalsPending: 3 }))).toContain('live-approvals-pending: 3');
   });
 
+  // Finding F4: `status`'s live section must surface actual approvalIds,
+  // not just a count — otherwise an operator still has no way to learn one
+  // short of the dedicated `approvals` command.
+  it('shows a placeholder for no pending approvals, and one line per approval (with its approvalId) otherwise', () => {
+    expect(formatLiveStatusLines(baseLive())).toContain('live-approvals: (none)');
+
+    const lines = formatLiveStatusLines(
+      baseLive({
+        approvals: [{ approvalId: 'appr-1', taskId: 't1', summary: 'Bash: rm -rf /tmp/x', createdAt: '2026-01-01T00:00:00.000Z' }],
+        approvalsPending: 1,
+      }),
+    );
+    expect(lines).toContain('live-approval: appr-1 taskId=t1 summary="Bash: rm -rf /tmp/x"');
+    expect(lines).not.toContain('live-approvals: (none)');
+  });
+
+  it('truncates a long approval summary in the live section (display-width concern, not redaction — F8 keeps stdout redaction separate)', () => {
+    const longSummary = 'x'.repeat(100);
+    const lines = formatLiveStatusLines(
+      baseLive({
+        approvals: [{ approvalId: 'appr-2', taskId: 't2', summary: longSummary, createdAt: '2026-01-01T00:00:00.000Z' }],
+      }),
+    );
+    expect(lines.some((l) => l.startsWith('live-approval: appr-2') && l.includes('…') && !l.includes(longSummary))).toBe(true);
+  });
+
+  it('renders "(no summary)" for a pending approval with no summary at all', () => {
+    const lines = formatLiveStatusLines(
+      baseLive({ approvals: [{ approvalId: 'appr-3', taskId: 't3', createdAt: '2026-01-01T00:00:00.000Z' }] }),
+    );
+    expect(lines).toContain('live-approval: appr-3 taskId=t3 summary="(no summary)"');
+  });
+
   it('shows a placeholder for no queue watermarks, and one line per task otherwise (M4 Phase 4, part B.3)', () => {
     expect(formatLiveStatusLines(baseLive())).toContain('live-queue-watermarks: (none)');
 
@@ -289,9 +362,63 @@ describe('bin/format: formatLiveStatusLines', () => {
         deviceId: 'dev-1',
         activeTasks: [{ taskId: 't1', state: 'Running' }],
         queueWatermarks: [{ taskId: 't1', progressBatcherPending: 1, pendingApprovals: 1 }],
+        approvals: [{ approvalId: 'appr-1', taskId: 't1', summary: 'Bash: echo hi', createdAt: '2026-01-01T00:00:00.000Z' }],
         approvalsPending: 1,
       }),
     );
+    for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);
+  });
+});
+
+describe('bin/format: formatApprovalsListLines (finding F4)', () => {
+  function approval(overrides: Partial<PendingApproval> = {}): PendingApproval {
+    return { approvalId: 'appr-1', taskId: 't1', summary: 'Bash: rm -rf /tmp/x', createdAt: '2026-01-01T00:00:00.000Z', ...overrides };
+  }
+
+  it('shows a placeholder for an empty list', () => {
+    expect(formatApprovalsListLines([], Date.now())).toEqual(['(no pending approvals)']);
+  });
+
+  it('renders approvalId, taskId, age, and a quoted summary excerpt — one line per pending approval', () => {
+    const nowMs = Date.parse('2026-01-01T00:01:30.000Z'); // 90s after createdAt
+    const lines = formatApprovalsListLines([approval()], nowMs);
+    expect(lines).toEqual(['appr-1 taskId=t1 age=1m summary="Bash: rm -rf /tmp/x"']);
+  });
+
+  it('renders one line per entry, preserving order', () => {
+    const nowMs = Date.parse('2026-01-01T00:00:10.000Z');
+    const lines = formatApprovalsListLines(
+      [approval({ approvalId: 'appr-1', taskId: 't1' }), approval({ approvalId: 'appr-2', taskId: 't2' })],
+      nowMs,
+    );
+    expect(lines).toEqual([
+      'appr-1 taskId=t1 age=10s summary="Bash: rm -rf /tmp/x"',
+      'appr-2 taskId=t2 age=10s summary="Bash: rm -rf /tmp/x"',
+    ]);
+  });
+
+  it('renders ages in seconds/minutes/hours/days at their natural thresholds', () => {
+    const created = '2026-01-01T00:00:00.000Z';
+    expect(formatApprovalsListLines([approval({ createdAt: created })], Date.parse(created) + 45_000)[0]).toContain('age=45s');
+    expect(formatApprovalsListLines([approval({ createdAt: created })], Date.parse(created) + 5 * 60_000)[0]).toContain('age=5m');
+    expect(formatApprovalsListLines([approval({ createdAt: created })], Date.parse(created) + 3 * 3_600_000)[0]).toContain('age=3h');
+    expect(formatApprovalsListLines([approval({ createdAt: created })], Date.parse(created) + 2 * 86_400_000)[0]).toContain('age=2d');
+  });
+
+  it('renders "(no summary)" when summary is absent', () => {
+    const lines = formatApprovalsListLines([approval({ summary: undefined })], Date.now());
+    expect(lines[0]).toContain('summary="(no summary)"');
+  });
+
+  it('truncates a long summary with an ellipsis rather than wrapping the table', () => {
+    const longSummary = 'y'.repeat(200);
+    const lines = formatApprovalsListLines([approval({ summary: longSummary })], Date.now());
+    expect(lines[0]).toContain('…');
+    expect(lines[0]).not.toContain(longSummary);
+  });
+
+  it('never emits ANSI escape sequences', () => {
+    const lines = formatApprovalsListLines([approval()], Date.now());
     for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);
   });
 });

@@ -60,6 +60,8 @@ function minimalPayload(type: MessageType): unknown {
       return { reason: 'boom' };
     case 'task.cancelled':
       return {};
+    case 'task.approval_resolved':
+      return { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() };
     default: {
       const exhaustive: never = type;
       throw new Error(`no minimal payload fixture for message type: ${exhaustive}`);
