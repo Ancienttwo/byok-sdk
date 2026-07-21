@@ -4,7 +4,13 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createByokServer } from '../index';
 import { SqliteTaskStore } from '../sqlite-task-store';
+import { isSqliteCapableNodeVersion } from '../sqlite-support';
 import { IllegalTaskTransitionError } from '../task-store';
+
+// node:sqlite requires Node 22.5+. The core SDK works on the declared Node 20
+// floor with the default InMemoryTaskStore; these SQLite reference-store tests
+// skip on older runtimes (the CI Node 20 leg) rather than fail the whole leg.
+const sqliteReady = isSqliteCapableNodeVersion(process.versions.node);
 
 function tempDbPath(prefix: string): string {
   const dir = mkdtempSync(path.join(tmpdir(), prefix));
@@ -21,7 +27,7 @@ function createTask(store: SqliteTaskStore, taskId = 'task_1') {
   });
 }
 
-describe('SqliteTaskStore', () => {
+describe.skipIf(!sqliteReady)('SqliteTaskStore', () => {
   it('creates a task in the Offered state (same contract as InMemoryTaskStore)', () => {
     const store = new SqliteTaskStore({ path: ':memory:' });
     const record = createTask(store);
@@ -121,7 +127,7 @@ describe('SqliteTaskStore', () => {
   });
 });
 
-describe('createByokServer({ taskStore: new SqliteTaskStore(...) }) restart-safety', () => {
+describe.skipIf(!sqliteReady)('createByokServer({ taskStore: new SqliteTaskStore(...) }) restart-safety', () => {
   it('a second createByokServer instance on the same db file recovers a task created by the first', () => {
     const dbPath = tempDbPath('byok-sqlite-task-server-');
 

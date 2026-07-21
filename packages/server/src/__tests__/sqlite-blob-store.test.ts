@@ -5,7 +5,13 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createByokServer } from '../index';
 import { SqliteBlobStore } from '../sqlite-blob-store';
+import { isSqliteCapableNodeVersion } from '../sqlite-support';
 import { pairFakeDaemon, startServer, stopServer } from './test-support';
+
+// node:sqlite requires Node 22.5+. The core SDK works on the declared Node 20
+// floor with the default LocalDiskBlobStore; these SQLite reference-store tests
+// skip on older runtimes (the CI Node 20 leg) rather than fail the whole leg.
+const sqliteReady = isSqliteCapableNodeVersion(process.versions.node);
 
 /** Canonical `contentHash` form (docs/protocol.md §7, finding F9): `sha256:<64 lowercase hex>` — same helper `blob.test.ts` uses. */
 function sha256Hex(data: Buffer): string {
@@ -26,7 +32,7 @@ function parseSignedUrl(url: string): { sig: string; exp: number } {
   return { sig, exp: Number(exp) };
 }
 
-describe('SqliteBlobStore', () => {
+describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
   it('round-trips content through createUpload -> writeContent -> readContent (same contract as LocalDiskBlobStore)', async () => {
     const store = new SqliteBlobStore({ path: ':memory:' });
     const content = Buffer.from('hello sqlite blob world');
@@ -130,7 +136,7 @@ describe('SqliteBlobStore', () => {
   });
 });
 
-describe('createByokServer({ blobStore: new SqliteBlobStore(...) }) restart-safety', () => {
+describe.skipIf(!sqliteReady)('createByokServer({ blobStore: new SqliteBlobStore(...) }) restart-safety', () => {
   it('a blob uploaded through one live server is downloadable through a second server instance on the same db file, via the exact same presigned URL', async () => {
     const dbPath = tempDbPath('byok-sqlite-blob-server-');
     const content = Buffer.from('end-to-end sqlite blob restart-safety');
