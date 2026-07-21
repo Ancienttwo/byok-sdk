@@ -100,26 +100,63 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 - **Permissions**: `storeDir` and the socket's own parent directory are
   0700; the socket file and `control.token` are 0600 (`control-server.ts`'s
   `startControlServer`/`bindControlEndpoint`).
-- **Windows (finding F7)**: POSIX modes restrict nothing on win32 — Node's
-  `fs.chmod` there only toggles the read-only attribute, never the
-  ACL/DACL. `storeDir`'s actual Windows-side secrecy (for both
-  `device.json`'s device keypair/access token and `control.token`) depends
-  on a restrictive DACL applied via `icacls` at the one chokepoint both
-  `DeviceStore.save()` and `startControlServer` funnel `storeDir` creation
-  through (`util/secure-dir.ts`'s `ensureSecureDir`): inherited ACEs are
-  stripped (`/inheritance:r`) and full control is granted, recursively, to
-  exactly three principals — the current user (via `os.userInfo()`,
-  queried fresh rather than trusting a possibly-stale `%USERNAME%`),
-  `SYSTEM`, and `Administrators` (both needed for a Windows-service
-  topology, where the daemon runs as `SYSTEM` while an operator's
-  interactive CLI runs as a normal user against the same `storeDir`).
-  Best-effort: an `icacls` failure (missing binary, insufficient
-  permission to run it) is logged loudly (`console.warn`) rather than
-  silently swallowed, but does not block daemon startup — an operator
-  seeing that warning on Windows should treat `storeDir` as NOT
-  ACL-protected until it's resolved. Verified end-to-end only on a real
-  Windows CI runner (`templates/service/winsw/smoke-test.mjs`), since this
-  SDK is developed on darwin/linux.
+- **Windows (finding F7, hardened further by finding R4)**: POSIX modes
+  restrict nothing on win32 — Node's `fs.chmod` there only toggles the
+  read-only attribute, never the ACL/DACL. `storeDir`'s actual
+  Windows-side secrecy (for both `device.json`'s device keypair/access
+  token and `control.token`) depends on a restrictive DACL applied via
+  `icacls` at the one chokepoint both `DeviceStore.save()` and
+  `startControlServer` funnel `storeDir` creation through
+  (`util/secure-dir.ts`'s `ensureSecureDir`): inherited ACEs are stripped
+  (`/inheritance:r`) and full control is granted, recursively, to exactly
+  three principals — the current user (via `os.userInfo()`, queried fresh
+  rather than trusting a possibly-stale `%USERNAME%`), and `SYSTEM`/
+  `Administrators` (both needed for a Windows-service topology, where the
+  daemon runs as `SYSTEM` while an operator's interactive CLI runs as a
+  normal user against the same `storeDir`) — the latter two referenced by
+  their WELL-KNOWN SIDs (`*S-1-5-18`, `*S-1-5-32-544`), not their display
+  names: `SYSTEM`/`Administrators` are LOCALIZED strings (a
+  French-language Windows shows the Administrators group as
+  "Administrateurs"), so granting by name would silently fail to resolve
+  — and thus fail the whole hardening step — on any non-English install;
+  the SIDs are invariant everywhere.
+  **Fail-closed (finding R4):** an `icacls` failure (missing binary,
+  insufficient permission to run it, or it running and exiting non-zero)
+  now THROWS `SecureDirHardeningError` — it is no longer logged and
+  silently continued past. `DeviceStore.save()` calls this before ever
+  writing `device.json`, so a win32 host where `icacls` genuinely cannot
+  succeed fails `pair()` itself with that clear, typed error rather than
+  persisting an ACL-unprotected credential. `control-server.ts`'s
+  `startControlServer` calls this before any socket/pipe exists, so a
+  failure there propagates into the daemon's own pre-existing
+  non-fatal-bind-failure path: logged loudly (`console.warn`, naming the
+  reason) and the daemon continues running WITHOUT a control socket
+  rather than refusing to start entirely — a control-IPC-layer failure
+  degrades the same way any other control-socket bind failure already
+  did, it does not block the wire connection to the SaaS server. Non-win32
+  (darwin/linux) behavior is entirely unchanged by this finding. Verified
+  end-to-end only on a real Windows CI runner
+  (`templates/service/winsw/smoke-test.mjs`), since this SDK is developed
+  on darwin/linux.
+  **Accepted residual (finding R4, explicitly recorded rather than left
+  implicit):** this DACL protects the `storeDir` FILES
+  (`device.json`/`control.token`) — it does not, and cannot, protect the
+  named PIPE itself. Windows named pipes live in a global, machine-wide
+  namespace with their own separate security descriptor, set at
+  `CreateNamedPipe` time; Node's `net.createServer().listen(pipeName)`
+  exposes no way to customize it, so the pipe's default ACL (typically
+  permissive to other local users) applies regardless of how tightly
+  `storeDir` itself is locked down. A malicious LOCAL user can therefore
+  still open (and hold open) connections against the pipe, up to
+  `MAX_HALF_OPEN_CONNECTIONS` (8) — denying the legitimate operator CLI a
+  slot, an availability/DoS concern — but the mutual HMAC handshake still
+  fully blocks AUTHENTICATION: without `control.token` (which the DACL
+  above genuinely does protect), that same attacker can never complete
+  the handshake or issue a single method call. Closing the DoS residual
+  itself would require a native addon (or a different IPC primitive
+  entirely) to set a custom pipe security descriptor — out of scope here;
+  recorded as a known, bounded (availability-only, never confidentiality
+  or authentication) limitation.
 - **Framing bounds**: a 64KiB unterminated-line cap (`MAX_LINE_BYTES`) —
   exceeding it destroys the connection rather than growing an unbounded
   buffer (`control-protocol.ts`'s `NdjsonLineReader`).

@@ -275,6 +275,179 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(connection?.isTransportDegraded()).toBe(true); // connection itself entirely unaffected throughout
   });
 
+  it('long-poll (d, finding R1 — the F1 fix alone was NOT-CLOSED): [bad known-type seq2, valid seq3] in ONE batch engages the SAME stall a real handler failure would — the cursor freezes BEFORE 2 even though seq3 is fully processed, i.e. no INDIRECT permanent ack via a later envelope\'s own success', async () => {
+    // R1: the F1 fix alone (not forwarding a validation-failed seq to
+    // onSkippedSeq) was insufficient — a batch [bad seq2, valid seq3] still
+    // let seq3's own independent success silently drag the cursor to 3,
+    // permanently acking seq2 one hop removed from the original bug. Fixed
+    // by engaging `stalledAtSeq` (`ConnectionManager.noteValidationFailure`)
+    // for the validation failure exactly like a thrown handler failure
+    // would — this test proves the cursor freeze holds even with a
+    // successfully-processed LATER envelope in the very same batch.
+    const { record, cursorStore, received } = await startLongPollOnly('byok-r1-stall-store-');
+
+    const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'r1-before', seq: 1 });
+    server.pushLongPollEvent(before);
+    await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(1));
+
+    const bad = {
+      v: 1,
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffff50',
+      ts: new Date().toISOString(),
+      type: 'task.offer', // recognized type ...
+      task_id: 'r1-bad',
+      seq: 2,
+      payload: {}, // ... missing required fields -> EnvelopeValidationError
+    };
+    const validAfter = createEnvelope(
+      'task.offer',
+      { instruction: 'after', policy: { mode: 'auto' } },
+      { taskId: 'r1-valid-3', seq: 3 },
+    );
+    // Pushed together, synchronously, so both land in the SAME poll
+    // response batch — the exact shape this finding is about.
+    server.pushRawLongPollEvent(bad);
+    server.pushLongPollEvent(validAfter);
+
+    // seq3 DOES get processed — its handler runs, side effects happen
+    // (this daemon claims/starts that task) — the stall does not prevent
+    // that. What it prevents is the CURSOR treating that success as
+    // "safe to ack past seq2".
+    await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1-valid-3')).toBe(true));
+
+    // Generous real-time window across several retry cycles — proves the
+    // cursor NEVER reaches 2 OR 3, not just "hasn't yet". This is the
+    // direct regression check for the bug R1 fixes: before this fix, the
+    // cursor would have advanced to 3 here because seq3's own handler
+    // succeeded, even though seq2 (a KNOWN type) was never actually
+    // understood.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
+    expect(received).toHaveLength(2); // before + the valid seq3 — the malformed entry never became a THIRD onEnvelope call
+
+    expect(connection?.isTransportDegraded()).toBe(true); // connection itself entirely unaffected
+  });
+
+  it('long-poll (e, finding R1): once a corrected redelivery of seq2 succeeds, the stall clears and the cursor advances to exactly 2 — reaching any HIGHER already-processed seq (here, 3) requires a later, genuinely-new envelope, mirroring the pre-existing stalledAtSeq/deliveredSeq contract for a real thrown-handler stall', async () => {
+    // IMPORTANT SEMANTIC, stated explicitly rather than left implied (per
+    // this finding's own review note): entries AFTER the bad seq in the
+    // same (or a later) batch ARE delivered to onEnvelope and their
+    // handler DOES run — proven by the previous test (`r1-valid-3` reaches
+    // `received`). What does NOT happen automatically is the durable
+    // cursor jumping all the way to that later seq once the stall clears.
+    // `process()`'s existing (pre-R1, unchanged) success path only ever
+    // advances the cursor to the CURRENTLY-resolving envelope's own seq —
+    // this is the exact same behavior a real thrown-handler stall already
+    // had (see this file's own "CRITICAL fix" test, which needed an
+    // EXPLICIT extra redelivery of its skip entry to reach the cursor's
+    // final value). For a REAL envelope specifically (unlike an
+    // unknown-type SKIP, whose `onSkippedSeq` callback has no redelivery
+    // dedup at all), a further redelivery of that already-processed higher
+    // seq does not help either: `deliveredSeq` already covers it, so
+    // `deliver()`'s own idempotent-redelivery dedup check discards it
+    // before `process()` ever runs again. The gap is closed the NORMAL
+    // way any live connection naturally closes it: a later, genuinely-new
+    // envelope succeeds and its own `advanceCursor` call covers everything
+    // up to that point (`advanceCursor`'s only guard is `seq <= cursor`).
+    // This is not a new limitation R1 introduces — it is the pre-existing
+    // stalledAtSeq/deliveredSeq contract, and R1 deliberately reuses it
+    // as-is rather than inventing a second, divergent recovery path.
+    const { record, cursorStore, received } = await startLongPollOnly('byok-r1-unstall-store-');
+
+    const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'r1b-before', seq: 1 });
+    server.pushLongPollEvent(before);
+    await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(1));
+
+    const bad = {
+      v: 1,
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffff51',
+      ts: new Date().toISOString(),
+      type: 'task.offer',
+      task_id: 'r1b-bad',
+      seq: 2,
+      payload: {},
+    };
+    const validAfter = createEnvelope(
+      'task.offer',
+      { instruction: 'after', policy: { mode: 'auto' } },
+      { taskId: 'r1b-valid-3', seq: 3 },
+    );
+    server.pushRawLongPollEvent(bad);
+    server.pushLongPollEvent(validAfter);
+    await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-valid-3')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(1); // still frozen, as the previous test also proves
+
+    // Corrected redelivery of seq2 ALONE — the stall clears, the cursor
+    // advances to exactly 2 (not automatically to 3).
+    const corrected = createEnvelope(
+      'task.offer',
+      { instruction: 'corrected', policy: { mode: 'auto' } },
+      { taskId: 'r1b-bad', seq: 2 },
+    );
+    server.pushLongPollEvent(corrected);
+    await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-bad')).toBe(true));
+    await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(2));
+
+    // Re-delivering the already-processed seq3 again does NOT move the
+    // cursor further, and does NOT reprocess it (the redelivery dedup —
+    // deliveredSeq already covers seq3 — discards it before onEnvelope is
+    // ever called a second time): stays exactly 2, received count unchanged.
+    server.pushLongPollEvent(validAfter);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
+    expect(received).toHaveLength(3); // before, valid-3 (first delivery), corrected — the redelivery of valid-3 never landed a 4th time
+
+    // A genuinely NEW, later envelope succeeding normally is what actually
+    // flushes the cursor past the gap — ordinary continued operation, not
+    // a special recovery step.
+    const fresh = createEnvelope('task.offer', { instruction: 'fresh', policy: { mode: 'auto' } }, { taskId: 'r1b-fresh-4', seq: 4 });
+    server.pushLongPollEvent(fresh);
+    await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-fresh-4')).toBe(true));
+    await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(4));
+
+    expect(connection?.isTransportDegraded()).toBe(true);
+  });
+
+  it('long-poll (f, finding R1): a persistently-redelivered validation-failed entry is only console.warn\'d ONCE per seq, never once per poll', async () => {
+    const { received } = await startLongPollOnly('byok-r1-warn-once-store-');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const poison = {
+      v: 1,
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffff52',
+      ts: new Date().toISOString(),
+      type: 'task.offer',
+      task_id: 'r1-poison',
+      seq: 1,
+      payload: {}, // never becomes valid in this test — stays stalled the whole time
+    };
+
+    // TestServer's own long-poll queue is a plain drain-once, not a real
+    // retain-and-redeliver outbox (see the "CRITICAL fix" test's own doc
+    // comment above) — re-push the SAME poison payload on every cycle to
+    // reproduce the real server's persistent-redelivery shape for as long
+    // as the cursor stays frozen.
+    let keepPoisoning = true;
+    const poisonTimer = setInterval(() => {
+      if (keepPoisoning) server.pushRawLongPollEvent(poison);
+    }, 10);
+
+    try {
+      // Many retry cycles' worth of real time — the SAME seq=1 failure is
+      // rediscovered on every single one of them.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(received).toEqual([]); // never becomes a real envelope
+
+      const warnCallsForThisSeq = warnSpy.mock.calls.filter((args) => String(args[0]).includes('seq=1'));
+      expect(warnCallsForThisSeq).toHaveLength(1); // exactly once despite many redeliveries across ~15 cycles
+    } finally {
+      keepPoisoning = false;
+      clearInterval(poisonTimer);
+      warnSpy.mockRestore();
+    }
+  });
+
   it('long-poll (c, was: documents the stall — now: asserts the fix): a persistently-redelivered unrecognized-type envelope never blocks forward progress — the cursor keeps advancing through it, and a concurrent known envelope is delivered immediately, no grace period needed', async () => {
     // Mirrors the REAL @byok/server's outbox semantics (hub.ts's
     // collectRelevant): an un-ack'd envelope is RETAINED and redelivered on

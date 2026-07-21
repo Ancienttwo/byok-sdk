@@ -255,12 +255,23 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
     case 'runtimes-detected':
       return { ...base, runtimes: event.runtimes };
     case 'shutdown-requested':
-    case 'shutdown-complete':
       // Not sensitive/free-form the way task instruction/output text is —
       // this is an internally-constructed operational message (see
       // `create-daemon.ts`'s control-socket shutdown wiring), so it's kept
       // verbatim rather than redacted to a size.
       return { ...base, reason: event.reason };
+    case 'shutdown-complete':
+      // Finding R3 (cross-model re-review): `undeliveredOutboxCount`
+      // (finding F5(b)) is a plain NUMBER, not free-form text — no
+      // redaction concern at all — but this branch used to share the
+      // `shutdown-requested` case above verbatim, which only ever copied
+      // `reason` across, silently dropping this field on every persisted
+      // write. A replayed `tasks --follow`/audit read therefore always saw
+      // `undeliveredOutboxCount: undefined`, indistinguishable from "0
+      // undelivered" — exactly the false "everything was delivered"
+      // impression F5(b) exists to prevent. See `reconstructDaemonEvent`'s
+      // own `shutdown-complete` case for the read-side symmetry this needs.
+      return { ...base, reason: event.reason, undeliveredOutboxCount: event.undeliveredOutboxCount };
     case 'stale-approval-decision':
       // `reason` here is an operator-supplied free-text reject reason (same
       // redaction rule as `failed`/`cancelled` above) — `decision` is just
@@ -389,7 +400,13 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
     case 'shutdown-requested':
       return { kind: 'shutdown-requested', ts, reason: str(raw.reason) };
     case 'shutdown-complete':
-      return { kind: 'shutdown-complete', ts, reason: str(raw.reason) };
+      // Finding R3: read-side symmetry with `redactForAudit`'s own
+      // `shutdown-complete` case — `undeliveredOutboxCount` is a plain
+      // number, reconstructed verbatim (never a placeholder — there was
+      // never anything to redact here), `undefined` only for an
+      // audit-log line written before this fix existed (or a
+      // corrupt/non-numeric value).
+      return { kind: 'shutdown-complete', ts, reason: str(raw.reason), undeliveredOutboxCount: num(raw.undeliveredOutboxCount) };
     case 'stale-approval-decision': {
       const reasonSize = num(raw.reasonSize);
       return {

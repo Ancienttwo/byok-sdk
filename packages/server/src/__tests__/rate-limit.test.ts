@@ -323,14 +323,32 @@ describe('RateLimiter: constructor option validation (fail-fast)', () => {
     ['burst', 'zero', { burst: 0 }],
     ['burst', 'negative', { burst: -5 }],
     ['burst', 'Infinity', { burst: Infinity }],
+    // Finding R5 (cross-model re-review — F10 residual): 0 < burst < 1 used
+    // to pass this validation cleanly, then silently construct a limiter
+    // that rejects EVERY message forever for every key (see
+    // rate-limiter.ts's own module doc comment: consume()'s debit check
+    // can never succeed once the bucket's own ceiling is below 1 token).
+    ['burst', '0.5 (between 0 and 1 — silently rejects everything forever, not just "too strict")', { burst: 0.5 }],
+    ['burst', 'just under 1 (0.999...)', { burst: 0.999 }],
+    ['maxTrackedDevices', 'NaN', { maxTrackedDevices: NaN }],
+    ['maxTrackedDevices', 'zero', { maxTrackedDevices: 0 }],
+    ['maxTrackedDevices', 'negative', { maxTrackedDevices: -5 }],
+    ['maxTrackedDevices', 'Infinity', { maxTrackedDevices: Infinity }],
   ] as const)('throws a TypeError at construction when %s is %s', (_field, _label, opts) => {
     expect(() => new RateLimiter(opts)).toThrow(TypeError);
   });
 
-  it('accepts valid finite positive options — including the all-defaults case — without throwing', () => {
+  it('accepts valid finite positive options — including the all-defaults case and burst exactly at its new minimum (1) — without throwing', () => {
     expect(() => new RateLimiter()).not.toThrow();
     expect(() => new RateLimiter({ messagesPerSecond: 50, burst: 100 })).not.toThrow();
     expect(() => new RateLimiter({ messagesPerSecond: 0.5, burst: 1 })).not.toThrow();
+    expect(() => new RateLimiter({ messagesPerSecond: 50, burst: 100, maxTrackedDevices: 5 })).not.toThrow();
+  });
+
+  it('finding R5: a burst of exactly 1 actually lets messages through (proving >= 1 is the correct boundary, not merely "no longer throws")', () => {
+    const limiter = new RateLimiter({ messagesPerSecond: 1, burst: 1 });
+    expect(limiter.consume('device-burst-one')).toBe(true);
+    expect(limiter.consume('device-burst-one')).toBe(false); // exactly 1 token, no more until refill
   });
 });
 
@@ -419,5 +437,109 @@ describe('RateLimiter: idle bucket eviction bounds memory', () => {
     expect(limiter.consume(key)).toBe(true);
     expect(limiter.consume(key)).toBe(true);
     expect(limiter.consume(key)).toBe(false); // exactly burst=3 tokens, no more
+  });
+});
+
+/**
+ * Finding R5 (cross-model re-review — F10 residual): the idle sweep above
+ * only ever reclaims a bucket once it's gone quiet for
+ * `idleEvictionThresholdMs` — a flood of many thousands of genuinely
+ * DISTINCT, ACTIVELY-touched keys (arriving faster than any of them ever
+ * goes idle) would defeat it and grow `buckets` without bound. A small
+ * `maxTrackedDevices` (mirroring the idle-eviction tests' own convention of
+ * driving `RateLimiter` directly, bypassing `ConnectionHub`/the server) is
+ * used throughout so these tests don't need to actually insert real-world
+ * (10,000-default) volumes of keys to exercise the cap.
+ */
+describe('RateLimiter: hard cap on tracked devices (finding R5)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('never lets buckets.size exceed maxTrackedDevices, even under a flood of distinct keys that never go idle', () => {
+    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 10, maxTrackedDevices: 50 });
+
+    for (let i = 0; i < 500; i++) {
+      limiter.consume(`device-${i}`);
+      expect(bucketsMap(limiter).size).toBeLessThanOrEqual(50); // true after EVERY single insert, not just at the end
+    }
+    expect(bucketsMap(limiter).size).toBe(50);
+  });
+
+  it('evicts the LEAST-RECENTLY-refilled key first once at capacity', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = new Date('2026-01-01T00:00:00.000Z').getTime();
+    vi.setSystemTime(t0);
+
+    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 10, maxTrackedDevices: 3 });
+    limiter.consume('oldest'); // touched at t0
+    vi.setSystemTime(t0 + 10);
+    limiter.consume('middle'); // touched at t0+10
+    vi.setSystemTime(t0 + 20);
+    limiter.consume('newest'); // touched at t0+20
+    expect(bucketsMap(limiter).size).toBe(3);
+
+    // A 4th distinct key forces an eviction — must drop "oldest" specifically.
+    vi.setSystemTime(t0 + 30);
+    limiter.consume('fourth');
+
+    const remaining = bucketsMap(limiter);
+    expect(remaining.size).toBe(3);
+    expect(remaining.has('oldest')).toBe(false);
+    expect(remaining.has('middle')).toBe(true);
+    expect(remaining.has('newest')).toBe(true);
+    expect(remaining.has('fourth')).toBe(true);
+  });
+
+  it("an evicted-at-capacity key's next consume() behaves as fresh — exactly like a never-before-seen key, same as the idle-eviction case above", () => {
+    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 3, maxTrackedDevices: 2 });
+
+    // Exhaust "victim"'s entire burst before it gets evicted.
+    expect(limiter.consume('victim')).toBe(true);
+    expect(limiter.consume('victim')).toBe(true);
+    expect(limiter.consume('victim')).toBe(true);
+    expect(limiter.consume('victim')).toBe(false); // 0 tokens left
+
+    limiter.consume('other'); // fills the cap (maxTrackedDevices=2: victim + other)
+    limiter.consume('forces-eviction'); // 3rd distinct key -> evicts the least-recently-refilled entry (victim, untouched since its own exhausting calls)
+    expect(bucketsMap(limiter).has('victim')).toBe(false);
+
+    // "victim" reappearing must get a FULL fresh burst — not remember it
+    // was just exhausted moments ago.
+    expect(limiter.consume('victim')).toBe(true);
+    expect(limiter.consume('victim')).toBe(true);
+    expect(limiter.consume('victim')).toBe(true);
+    expect(limiter.consume('victim')).toBe(false); // exactly burst=3 tokens again, no more
+  });
+
+  it('the idle sweep and the hard cap compose correctly: idle keys are swept first, so a slow-but-steady stream of distinct keys never needlessly hits the cap-eviction path', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = new Date('2026-01-01T00:00:00.000Z').getTime();
+    vi.setSystemTime(t0);
+
+    // idle-to-full threshold = (10/100)*1000 = 100ms.
+    const limiter = new RateLimiter({ messagesPerSecond: 100, burst: 10, maxTrackedDevices: 1000 });
+
+    for (let i = 0; i < 1000; i++) {
+      limiter.consume(`wave1-${i}`);
+    }
+    expect(bucketsMap(limiter).size).toBe(1000); // at the cap, but via genuinely distinct active keys, not eviction yet
+
+    // Move well past the idle threshold so wave 1 is now stale, then send a
+    // second wave — the periodic idle sweep (not the hard-cap eviction)
+    // should reclaim wave 1's entries, leaving room for wave 2 without ever
+    // exceeding the cap.
+    vi.setSystemTime(t0 + 1000);
+    for (let i = 0; i < 1000; i++) {
+      limiter.consume(`wave2-${i}`);
+      expect(bucketsMap(limiter).size).toBeLessThanOrEqual(1000);
+    }
+
+    const remaining = bucketsMap(limiter);
+    expect(remaining.size).toBe(1000);
+    for (let i = 0; i < 1000; i++) {
+      expect(remaining.has(`wave1-${i}`)).toBe(false);
+      expect(remaining.has(`wave2-${i}`)).toBe(true);
+    }
   });
 });

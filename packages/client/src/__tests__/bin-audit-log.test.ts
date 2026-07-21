@@ -64,6 +64,56 @@ describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
     const events = await readAuditEvents(storeDir);
     expect(events).toEqual([good]);
   });
+
+  // Finding R3 (cross-model re-review): `shutdown-complete`'s
+  // `undeliveredOutboxCount` (finding F5(b)) is a plain NUMBER — no
+  // redaction concern — but the redaction/reconstruction branch used to
+  // share `shutdown-requested`'s case verbatim, which only ever copied
+  // `reason` across; the field was silently dropped on every persisted
+  // write, so a replayed view always saw `undefined`, indistinguishable
+  // from "0 undelivered" (the exact false "everything delivered"
+  // impression F5(b) exists to prevent).
+  it('finding R3: shutdown-complete.undeliveredOutboxCount survives a real append + read round trip', async () => {
+    const storeDir = await tmpDir('byok-audit-shutdown-complete-');
+    const withCount: DaemonEvent = {
+      kind: 'shutdown-complete',
+      ts: '2026-01-01T00:00:00.000Z',
+      reason: 'operator',
+      undeliveredOutboxCount: 3,
+    };
+    const zeroCount: DaemonEvent = {
+      kind: 'shutdown-complete',
+      ts: '2026-01-01T00:00:01.000Z',
+      reason: 'unpair',
+      undeliveredOutboxCount: 0,
+    };
+
+    await appendAuditEvent(storeDir, withCount);
+    await appendAuditEvent(storeDir, zeroCount);
+
+    const events = await readAuditEvents(storeDir);
+    expect(events).toEqual([withCount, zeroCount]);
+
+    // Explicit, not incidental: the persisted line itself actually carries
+    // the field (proves it survived redaction on the WRITE side, not just
+    // that reconstruction happens to default it back to the right number).
+    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
+    const lines = raw.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines[0]?.undeliveredOutboxCount).toBe(3);
+    expect(lines[1]?.undeliveredOutboxCount).toBe(0);
+  });
+
+  it('finding R3: an older audit line predating this fix (no undeliveredOutboxCount key at all) reconstructs as undefined, never a false 0', async () => {
+    const storeDir = await tmpDir('byok-audit-shutdown-complete-legacy-');
+    await fs.mkdir(storeDir, { recursive: true });
+    await fs.writeFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'shutdown-complete', ts: '2026-01-01T00:00:00.000Z', reason: 'operator' })}\n`);
+
+    const events = await readAuditEvents(storeDir);
+    expect(events).toHaveLength(1);
+    const [event] = events;
+    if (event?.kind !== 'shutdown-complete') throw new Error('unreachable');
+    expect(event.undeliveredOutboxCount).toBeUndefined();
+  });
 });
 
 describe('bin/audit-log: finding P1 #3 (SECURITY) — redaction, 0600 file, 0700 storeDir', () => {

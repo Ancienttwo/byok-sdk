@@ -21,17 +21,48 @@
  * `TypeError` on anything non-finite or <= 0) rather than silently building
  * a limiter that either divides into `NaN` token math or (an `Infinity`
  * burst/rate) never actually limits anything.
+ *
+ * Finding R5 (cross-model re-review — F10 residual): `burst` specifically
+ * must be `>= 1`, not merely `> 0`. A `0 < burst < 1` value used to pass
+ * the old `<= 0` check cleanly, but `consume()`'s own debit logic
+ * (`if (bucket.tokens < 1) return false;`) can NEVER succeed once the
+ * bucket's own CEILING (`burst`) is itself below 1 — `Math.min(this.burst,
+ * ...)` caps refill there, so `tokens` can never reach 1 no matter how
+ * long the bucket sits idle. The old validation let this construct
+ * silently — a limiter that rejects every single message, forever, for
+ * every key, is not a rate LIMIT, it's a permanent, total block; that
+ * should be a construction-time error, not a runtime surprise discovered
+ * once real traffic starts getting rejected.
  */
 
 export interface RateLimiterOptions {
   /** Sustained refill rate, tokens (i.e. messages) per second. Must be a finite number > 0. Default 50. */
   messagesPerSecond?: number;
-  /** Bucket capacity — how many messages may arrive back-to-back before the limit engages. Must be a finite number > 0. Default 100. */
+  /** Bucket capacity — how many messages may arrive back-to-back before the limit engages. Must be a finite number >= 1 (finding R5 — see the module doc comment for why `< 1` can never let a single message through, ever). Default 100. */
   burst?: number;
+  /** Hard cap on how many distinct keys (finding R5) this limiter tracks at once — see {@link DEFAULT_MAX_TRACKED_DEVICES}'s own doc comment. Must be a finite number >= 1. Default 10,000. */
+  maxTrackedDevices?: number;
 }
 
 const DEFAULT_MESSAGES_PER_SECOND = 50;
 const DEFAULT_BURST = 100;
+/**
+ * Finding R5 (cross-model re-review — F10 residual): hard cap on
+ * `RateLimiter.buckets`' size — see {@link RateLimiter.evictOldestIfAtCapacity}
+ * for the eviction policy this backs. Without a HARD cap, the existing idle
+ * sweep (`evictIdleBucketsIfDue`) only ever reclaims a bucket once it's
+ * been quiet for `idleEvictionThresholdMs` — a flood of many THOUSANDS of
+ * genuinely-distinct, ACTIVELY-used keys arriving faster than they ever go
+ * idle (a legitimately huge fleet, or a same-shape Sybil-style attack
+ * registering many fake device ids) would otherwise grow `buckets` without
+ * bound regardless of the idle sweep, exactly the unbounded-growth shape
+ * this codebase caps everywhere else (`MAX_PENDING_APPROVALS`,
+ * `MAX_TRACKED_TASKS`, `MAX_LIVE_TASK_ANCHORS`, ...). 10,000 is generously
+ * sized for any plausible real deployment while still being a genuine,
+ * enforced ceiling — not a real-world limit this is expected to ever
+ * approach in ordinary operation.
+ */
+const DEFAULT_MAX_TRACKED_DEVICES = 10_000;
 
 /**
  * Sweep cadence for idle-bucket eviction (`evictIdleBucketsIfDue`), in
@@ -63,20 +94,30 @@ export class RateLimiter {
    * the caller.
    */
   private readonly idleEvictionThresholdMs: number;
+  /** Finding R5: hard cap on `buckets.size` — see {@link DEFAULT_MAX_TRACKED_DEVICES}'s own doc comment. */
+  private readonly maxTrackedDevices: number;
   /** Calls to `consume()` since the last sweep — see `EVICTION_SWEEP_EVERY_N_CALLS`. */
   private callsSinceSweep = 0;
 
   constructor(opts: RateLimiterOptions = {}) {
     const messagesPerSecond = opts.messagesPerSecond ?? DEFAULT_MESSAGES_PER_SECOND;
     const burst = opts.burst ?? DEFAULT_BURST;
+    const maxTrackedDevices = opts.maxTrackedDevices ?? DEFAULT_MAX_TRACKED_DEVICES;
     if (!Number.isFinite(messagesPerSecond) || messagesPerSecond <= 0) {
       throw new TypeError(`RateLimiter: messagesPerSecond must be a finite number > 0, got ${messagesPerSecond}`);
     }
-    if (!Number.isFinite(burst) || burst <= 0) {
-      throw new TypeError(`RateLimiter: burst must be a finite number > 0, got ${burst}`);
+    // Finding R5: `< 1`, not `<= 0` — see the module doc comment for why a
+    // burst between 0 and 1 (exclusive) constructs a limiter that can never
+    // let a single message through, ever, for any key.
+    if (!Number.isFinite(burst) || burst < 1) {
+      throw new TypeError(`RateLimiter: burst must be a finite number >= 1, got ${burst}`);
+    }
+    if (!Number.isFinite(maxTrackedDevices) || maxTrackedDevices < 1) {
+      throw new TypeError(`RateLimiter: maxTrackedDevices must be a finite number >= 1, got ${maxTrackedDevices}`);
     }
     this.messagesPerSecond = messagesPerSecond;
     this.burst = burst;
+    this.maxTrackedDevices = maxTrackedDevices;
     this.idleEvictionThresholdMs = (burst / messagesPerSecond) * 1000;
   }
 
@@ -92,6 +133,11 @@ export class RateLimiter {
 
     let bucket = this.buckets.get(key);
     if (!bucket) {
+      // Finding R5: enforce the hard cap right before growing the map with
+      // a genuinely NEW key — see `evictOldestIfAtCapacity`'s own doc
+      // comment for the eviction policy and its equivalence/best-effort
+      // split.
+      this.evictOldestIfAtCapacity();
       bucket = { tokens: this.burst, lastRefillMs: now };
       this.buckets.set(key, bucket);
     } else {
@@ -124,5 +170,49 @@ export class RateLimiter {
         this.buckets.delete(key);
       }
     }
+  }
+
+  /**
+   * Finding R5 (cross-model re-review — F10 residual): called right before
+   * inserting a bucket for a genuinely NEW key, evicting the single
+   * LEAST-RECENTLY-refilled entry if `buckets` is already at
+   * `maxTrackedDevices` — an O(n) scan, but one that only ever runs once
+   * the map is already at its hard ceiling (a rare/bounded event under
+   * ordinary operation, not a per-call cost), mirroring this codebase's own
+   * established "acceptable O(n) for a rare/bounded case" precedent (e.g.
+   * `audit-log.ts`'s `compactPreservingLiveTasks` during rotation).
+   *
+   * Equivalence split (stated explicitly, not left implied):
+   * - For any evicted bucket that was ALREADY idle for at least
+   *   `idleEvictionThresholdMs` (i.e. `evictIdleBucketsIfDue` would have
+   *   reclaimed it anyway, just not yet — sweeps only run every
+   *   `EVICTION_SWEEP_EVERY_N_CALLS` calls, not continuously), eviction is
+   *   PROVABLY equivalent to an in-place refill: both cap at `burst`, so a
+   *   caller can never observe the difference (see `idleEvictionThresholdMs`'s
+   *   own doc comment for the identical reasoning `evictIdleBucketsIfDue`
+   *   already relies on).
+   * - For a bucket evicted EARLY — still within its idle threshold, forced
+   *   out only because `buckets` is at capacity (many thousands of
+   *   genuinely-distinct, actively-used keys, not a quiet one) — this is
+   *   BEST-EFFORT, not equivalence-preserving: whatever partial token debt
+   *   that key had is discarded, and its very next `consume()` call starts
+   *   completely fresh (`tokens: this.burst`), a strictly MORE permissive
+   *   outcome than if it had kept its place. This is an accepted,
+   *   deliberately bounded trade-off — it only ever engages under
+   *   cardinality far beyond any plausible real deployment — favoring
+   *   bounded memory over perfect per-key continuity in that one extreme
+   *   case.
+   */
+  private evictOldestIfAtCapacity(): void {
+    if (this.buckets.size < this.maxTrackedDevices) return;
+    let oldestKey: string | undefined;
+    let oldestLastRefillMs = Infinity;
+    for (const [key, bucket] of this.buckets) {
+      if (bucket.lastRefillMs < oldestLastRefillMs) {
+        oldestLastRefillMs = bucket.lastRefillMs;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey !== undefined) this.buckets.delete(oldestKey);
   }
 }

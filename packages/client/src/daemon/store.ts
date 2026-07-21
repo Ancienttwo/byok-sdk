@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureDir } from '../util/secure-dir';
+import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
 
 export interface DeviceRecord {
   deviceId: string;
@@ -27,7 +27,20 @@ export interface DeviceRecord {
 export class DeviceStore {
   private readonly filePath: string;
 
-  constructor(storeDir: string) {
+  /**
+   * `secureDirOptions` is a test-only DI seam (mirrors `EnsureSecureDirOptions`'s
+   * own `run`/`platform` overrides) — every real caller omits it, getting
+   * real `ensureSecureDir(storeDir)` behavior unchanged. It exists so
+   * finding R4's fail-closed contract ("on win32, an `icacls` failure makes
+   * `save()` — and thus `AuthManager.pair()` — reject with a clear typed
+   * `SecureDirHardeningError` instead of silently persisting an
+   * ACL-unprotected credential") is verifiable from a real `darwin`/`linux`
+   * CI/dev machine, not just asserted.
+   */
+  constructor(
+    storeDir: string,
+    private readonly secureDirOptions?: EnsureSecureDirOptions,
+  ) {
     this.filePath = path.join(storeDir, 'device.json');
   }
 
@@ -73,8 +86,12 @@ export class DeviceStore {
     // storeDir owned by a different user) must never block the save itself.
     // Finding F7: on win32, `ensureSecureDir` ALSO applies a restrictive
     // DACL via `icacls` — POSIX modes alone restrict nothing there. See
-    // `util/secure-dir.ts`'s own doc comment.
-    await ensureSecureDir(storeDir);
+    // `util/secure-dir.ts`'s own doc comment. Finding R4: this now THROWS
+    // (`SecureDirHardeningError`) on a win32 `icacls` failure instead of
+    // warning and continuing — propagates straight out of `save()` (and so
+    // out of `AuthManager.pair()`, since nothing here catches it), before
+    // `device.json` is ever written.
+    await ensureSecureDir(storeDir, this.secureDirOptions);
     // Atomic (temp file + rename) so a concurrent reader never observes a
     // torn/partial file and a crash mid-write never corrupts the existing
     // one — see `util/atomic-write.ts`. This file holds the device private

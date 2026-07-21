@@ -22,6 +22,17 @@ import { defaultRunner, type Runner } from '../lifecycle/exec-runner';
  */
 
 /**
+ * Finding R4 (cross-model re-review — F7 residual): the well-known SID for
+ * the local `SYSTEM` account (`NT AUTHORITY\SYSTEM`) — invariant across
+ * every Windows locale/edition. See `buildIcaclsArgs`'s own doc comment for
+ * why SID form (`*S-...`, icacls's own documented "prefix with `*`" syntax)
+ * is used here instead of the display name `SYSTEM`.
+ */
+const SYSTEM_SID = '*S-1-5-18';
+/** Finding R4: the well-known SID for the built-in `Administrators` group (`BUILTIN\Administrators`) — same locale-independence rationale as {@link SYSTEM_SID}. */
+const ADMINISTRATORS_SID = '*S-1-5-32-544';
+
+/**
  * Pure command-construction seam (finding F7) — kept separate from the
  * actual `icacls` invocation below so it's unit-testable on ANY host OS,
  * not just win32 (this whole SDK is developed on darwin/linux — see
@@ -38,13 +49,24 @@ import { defaultRunner, type Runner } from '../lifecycle/exec-runner';
  *   `%USERNAME%` environment variable a hand-typed reference command might
  *   use: an env var can be stale, unset, or (in an unusual but real
  *   embedding) spoofed by whatever set up this process's environment;
- *   querying the OS directly cannot be.
+ *   querying the OS directly cannot be. This one genuinely has to be a
+ *   NAME (icacls has no "current user" SID shorthand), but it's the
+ *   account's real name, not a translated built-in label.
  * - `SYSTEM` and `Administrators` — both needed for a Windows-SERVICE
  *   topology, where the daemon runs as `SYSTEM` (a WinSW-installed
  *   service's default account) while an operator's interactive CLI
  *   invocation runs as a normal user against the SAME `storeDir` — see
  *   `control-protocol.ts`'s `controlPipeName` doc comment for the
- *   identical service-account rationale on the pipe-naming side.
+ *   identical service-account rationale on the pipe-naming side. Finding
+ *   R4: referenced by their WELL-KNOWN SIDs ({@link SYSTEM_SID} /
+ *   {@link ADMINISTRATORS_SID}), not the display names `SYSTEM`/
+ *   `Administrators` — those two names are LOCALIZED (e.g. a
+ *   French-language Windows renders the Administrators group as
+ *   "Administrateurs"), so `icacls ... /grant Administrators:...` would
+ *   silently fail to resolve (and thus fail the whole hardening step) on
+ *   any non-English install. The SIDs themselves are invariant across
+ *   every locale/edition; `icacls` accepts SID form directly when prefixed
+ *   with `*` (its own documented syntax).
  *
  * Returns a plain ARGV array with NO manually-embedded quote characters —
  * this is meant for `child_process.execFile`'s array form (this codebase's
@@ -61,7 +83,7 @@ import { defaultRunner, type Runner } from '../lifecycle/exec-runner';
  * involved.
  */
 export function buildIcaclsArgs(dir: string, username: string): string[] {
-  return [dir, '/inheritance:r', '/grant:r', `${username}:(OI)(CI)F`, '/grant', 'SYSTEM:(OI)(CI)F', '/grant', 'Administrators:(OI)(CI)F'];
+  return [dir, '/inheritance:r', '/grant:r', `${username}:(OI)(CI)F`, '/grant', `${SYSTEM_SID}:(OI)(CI)F`, '/grant', `${ADMINISTRATORS_SID}:(OI)(CI)F`];
 }
 
 export interface EnsureSecureDirOptions {
@@ -72,23 +94,69 @@ export interface EnsureSecureDirOptions {
 }
 
 /**
+ * Finding R4 (cross-model re-review — F7 residual): thrown by
+ * {@link ensureSecureDir} on win32 when `icacls` either could not be run at
+ * all (e.g. missing binary, or a restricted service account lacking
+ * permission to spawn it) or ran and exited non-zero (e.g. it couldn't
+ * resolve a principal, or was itself denied). This directory's contents —
+ * `device.json` (an Ed25519 private key + access token) or `control.token`
+ * (the control socket's HMAC secret) — would otherwise be protected by
+ * nothing but the OS's own default ACL, typically readable by any local
+ * user; see `docs/security.md`'s own note on why this is now fail-closed
+ * rather than a logged-and-ignored warning. See {@link ensureSecureDir}'s
+ * own doc comment for how each caller (`DeviceStore.save`,
+ * `control-server.ts`'s `startControlServer`) reacts to this.
+ */
+export class SecureDirHardeningError extends Error {
+  constructor(
+    public readonly dir: string,
+    reason: string,
+  ) {
+    super(
+      `failed to apply a restrictive Windows ACL to "${dir}": ${reason} — refusing to leave this directory unprotected (it holds device credentials and/or the control-socket token, otherwise readable by any other local user); see docs/security.md`,
+    );
+    this.name = 'SecureDirHardeningError';
+  }
+}
+
+/**
  * Creates (if needed) and secures `dir`: POSIX `{mode: 0o700}` plus a
  * best-effort `chmod` re-assertion on every platform (unchanged from
  * before this fix — this is what actually restricts access on
  * darwin/linux), PLUS — win32 only — a restrictive DACL via `icacls` (see
  * `buildIcaclsArgs`'s own doc comment for exactly what it grants/removes).
  *
- * The `icacls` step is deliberately best-effort but LOUDLY so: a failure is
- * logged via `console.warn` (never silently swallowed the way the POSIX
- * `chmod` fallback right above it is — that one is genuinely benign in the
- * common case, an `EPERM` against a directory this process doesn't own;
- * an `icacls` failure means this directory's Windows-side secrecy is NOT
- * enforced by an ACL at all, which is a real, actionable gap an operator
- * should know about — see `docs/security.md`). Never throws on the icacls
- * step's own failure — the caller (`DeviceStore.save()`/
- * `startControlServer`) must still be able to create/use the directory
- * even on a locked-down host where spawning `icacls` itself fails (e.g. a
- * restricted service account with no permission to run it).
+ * Finding R4 (cross-model re-review): the win32 `icacls` step is now
+ * FAIL-CLOSED — it used to be best-effort (logged via `console.warn`,
+ * never thrown), which meant a host where `icacls` genuinely can't run
+ * (missing binary, a locked-down service account) would silently create
+ * `storeDir` with NO Windows-side ACL protection at all and carry on as if
+ * nothing were wrong. Now it THROWS {@link SecureDirHardeningError}
+ * instead, on both failure shapes (the spawn itself failing, or `icacls`
+ * running and exiting non-zero). Each real caller already has (or gets,
+ * via this fix) an appropriate reaction:
+ *
+ * - `control-server.ts`'s `startControlServer` calls this as the very
+ *   FIRST thing, before any socket/pipe exists — a thrown error here
+ *   propagates out of `startControlServer` with nothing to clean up (no
+ *   F9-style orphan-listener risk), straight into `create-daemon.ts`'s
+ *   `start()`'s EXISTING "any non-`AnotherControlServerRunningError` bind
+ *   failure degrades non-fatally" catch block: logs a loud
+ *   `console.warn` naming the reason (this error's own message) and
+ *   continues the rest of the daemon WITHOUT a control socket — the
+ *   correct "graceful path" for a control-IPC-layer failure, unchanged
+ *   code, already exactly right once this function starts throwing.
+ * - `DeviceStore.save()` calls this before ever writing `device.json` —
+ *   a thrown error here propagates directly out of `AuthManager.pair()`
+ *   (called during `pair()`, before any credential is persisted) as a
+ *   clear, typed, actionable rejection — pairing simply fails rather than
+ *   silently leaving an unprotected device keypair/access token on disk.
+ *
+ * Non-win32 (darwin/linux) behavior is completely unchanged — the POSIX
+ * `mkdir`/`chmod` calls above are the only enforcement there, and never
+ * throw on their own best-effort `chmod` failure (that one stays
+ * genuinely benign — an `EPERM` against a directory this process doesn't
+ * own — see the inline comment on it).
  */
 export async function ensureSecureDir(dir: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
   const platform = opts.platform ?? process.platform;
@@ -99,17 +167,14 @@ export async function ensureSecureDir(dir: string, opts: EnsureSecureDirOptions 
 
   if (platform !== 'win32') return;
 
+  const { username } = os.userInfo();
+  let result: Awaited<ReturnType<Runner>>;
   try {
-    const { username } = os.userInfo();
-    const result = await run('icacls', buildIcaclsArgs(dir, username));
-    if (result.code !== 0) {
-      console.warn(
-        `[byok/client] icacls failed to restrict "${dir}" (exit ${result.code}): ${(result.stderr || result.stdout).trim()} — this directory's contents (device credentials / the control-socket token) are NOT protected by a Windows ACL; see docs/security.md`,
-      );
-    }
+    result = await run('icacls', buildIcaclsArgs(dir, username));
   } catch (err) {
-    console.warn(
-      `[byok/client] could not run icacls to restrict "${dir}": ${err instanceof Error ? err.message : String(err)} — this directory's contents (device credentials / the control-socket token) are NOT protected by a Windows ACL; see docs/security.md`,
-    );
+    throw new SecureDirHardeningError(dir, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (result.code !== 0) {
+    throw new SecureDirHardeningError(dir, `icacls exited ${result.code}: ${(result.stderr || result.stdout).trim()}`);
   }
 }

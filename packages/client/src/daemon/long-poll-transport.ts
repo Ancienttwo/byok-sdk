@@ -43,6 +43,30 @@ export interface LongPollClientOptions {
    */
   onSkippedSeq?: (seq: number) => void;
   /**
+   * Finding R1 (cross-model re-review — the F1 fix alone was NOT-CLOSED):
+   * called for a batch entry whose `type` WAS recognized but whose payload
+   * failed schema validation ({@link EnvelopeValidationError}) — a genuine
+   * delivery failure at that specific seq, not forward-compat tolerance
+   * (contrast {@link onSkippedSeq}, which is scoped to the opposite case,
+   * an entirely unrecognized type). F1's own fix — simply not forwarding
+   * this seq to `onSkippedSeq` — turned out to be insufficient on its own:
+   * a LATER valid envelope in the same or a later batch would still
+   * silently advance the durable cursor PAST this seq once its own handler
+   * succeeded, since nothing had told `ConnectionManager` this seq needed
+   * the same stall treatment a thrown handler failure already gets — an
+   * INDIRECT permanent ack, one hop removed from the exact bug F1 set out
+   * to fix. `ConnectionManager` (`noteValidationFailure`) engages
+   * `stalledAtSeq` for this seq the same way `process()`'s own catch block
+   * does for a real thrown handler — freezing `dedupWatermark()` at the
+   * durable cursor (so the server's retain-and-redeliver semantics,
+   * protocol §9, keep this seq alive) and, via that SAME existing
+   * machinery, holding back the cursor for anything else delivered after it
+   * in the same batch too, exactly as a real handler failure already would.
+   * Optional only for constructor/test convenience — `ConnectionManager`
+   * always supplies it.
+   */
+  onValidationFailedSeq?: (seq: number) => void;
+  /**
    * Finding P2 (Fix 2a): true while a `task.*` envelope's handler has failed
    * and hasn't yet been successfully reprocessed
    * (`ConnectionManager.stalledAtSeq`). While true, `getCursor()` stays
@@ -73,6 +97,9 @@ interface LooseEventsPollResponse {
   events: unknown[];
   cursor: number;
 }
+
+/** Finding R1: soft cap on `LongPollClient`'s own `warnedValidationFailureSeqs` bookkeeping — see that field's own doc comment for why this is a simple "clear outright" reset rather than an eviction policy: a rare/pathological path, not a hot one. */
+const MAX_TRACKED_VALIDATION_FAILURE_WARNINGS = 1000;
 
 /**
  * M4 Phase 4 (version-negotiation drill fix): validates ONLY the OUTER shape
@@ -143,6 +170,22 @@ function extractSkippableSeq(raw: unknown): number | undefined {
  */
 export class LongPollClient {
   private running = false;
+  /**
+   * Finding R1: seqs this loop has already `console.warn`'d about for a
+   * validation-failed (recognized-type, invalid-payload) entry — a poison
+   * entry is redelivered on every poll cycle for as long as it stalls the
+   * cursor (protocol §9), so without this the SAME warning would repeat
+   * every ~poll-interval, forever, for one persistently-malformed message.
+   * Never cleared: once a seq is fixed (a corrected redelivery is
+   * processed), the server never redelivers that seq again, so there is
+   * nothing left to re-warn about for it either. Soft-capped — this is a
+   * pathological/rare path (unlike a per-task hot structure), so on the
+   * rare chance a connection somehow accumulates an unreasonable number of
+   * distinct poisoned seqs, this is simply cleared outright (accepting a
+   * handful of possible re-warnings) rather than carrying any per-entry
+   * eviction bookkeeping for a case this unlikely.
+   */
+  private readonly warnedValidationFailureSeqs = new Set<number>();
 
   constructor(private readonly opts: LongPollClientOptions) {}
 
@@ -219,8 +262,8 @@ export class LongPollClient {
         // `parseLooseEventsPollResponse`'s own doc comment for the full
         // rationale). An entry that fails for ANY reason is silently
         // skipped for THIS batch — it never fails the rest of the batch —
-        // but (finding F1) the two failure classes are NOT treated
-        // identically for cursor purposes, unlike `ws-transport.ts`'s own
+        // but (finding F1, revised by finding R1) the two failure classes
+        // are NOT treated identically, unlike `ws-transport.ts`'s own
         // blanket `catch {}`:
         //   - `UnknownMessageTypeError` (an entirely unrecognized `type` —
         //     genuine forward-compat tolerance, e.g. a future minor
@@ -231,18 +274,35 @@ export class LongPollClient {
         //     persistently-redelivered unparseable entry can never stall
         //     this device's progress.
         //   - Any OTHER failure (in practice `EnvelopeValidationError`: a
-        //     RECOGNIZED type whose payload fails schema validation) does
-        //     NOT forward its `seq` — the cursor is left exactly where it
-        //     was. This is a genuinely malformed control message, not a
-        //     forward-compat case; advancing the cursor for it would
-        //     permanently ack something the daemon never understood (the
-        //     server would stop redelivering it — see `onSkippedSeq`'s own
-        //     doc comment). Not calling `advanceCursor` for it is what
-        //     lets the server's ordinary retain-and-redeliver semantics
-        //     (protocol §9) keep it alive until a corrected version shows
-        //     up, mirroring the WS path's lack of skip-side cursor
-        //     bookkeeping for real.
+        //     RECOGNIZED type whose payload fails schema validation) is a
+        //     genuine delivery failure at that seq, not a forward-compat
+        //     case. Finding R1: this now engages the SAME stall machinery a
+        //     thrown handler failure does (`onValidationFailedSeq` ->
+        //     `ConnectionManager.noteValidationFailure`) rather than merely
+        //     withholding the skip-forward — the F1 fix alone still let a
+        //     LATER valid envelope in the same/a later batch silently drag
+        //     the cursor past this seq once ITS OWN handler succeeded (see
+        //     `onValidationFailedSeq`'s own doc comment for the full
+        //     before/after). Freezing the cursor via the stall (rather than
+        //     just not advancing it here) is what lets the server's
+        //     ordinary retain-and-redeliver semantics (protocol §9) keep
+        //     this seq alive, and holds back anything delivered after it
+        //     too, until a corrected version is actually processed.
         const parsed = parseLooseEventsPollResponse(await res.json());
+        // Finding R1 (Codex's new P2): true the moment THIS batch contains
+        // at least one validation-failed entry — used below to apply the
+        // stalled backoff on the VERY SAME cycle the failure is first
+        // discovered. `onValidationFailedSeq` chains its own `stalledAtSeq`
+        // mutation onto `ConnectionManager`'s FIFO `processingChain` (it
+        // must — see that method's own doc comment for why a synchronous
+        // mutation here would race an earlier still-in-flight envelope in
+        // the same batch), so `this.opts.isStalled?.()` read synchronously,
+        // right here, would NOT yet reflect a failure `onValidationFailedSeq`
+        // was JUST called for a moment earlier in this same for-loop — a
+        // real hot-loop risk (this cycle's own failure would only show up
+        // in `isStalled()` starting from the NEXT cycle) without this local
+        // flag closing that one-cycle gap.
+        let hadValidationFailureThisBatch = false;
         for (const raw of parsed.events) {
           let envelope: Envelope;
           try {
@@ -251,6 +311,27 @@ export class LongPollClient {
             if (err instanceof UnknownMessageTypeError) {
               const skippableSeq = extractSkippableSeq(raw);
               if (skippableSeq !== undefined) this.opts.onSkippedSeq?.(skippableSeq);
+            } else {
+              const failedSeq = extractSkippableSeq(raw);
+              if (failedSeq !== undefined) {
+                hadValidationFailureThisBatch = true;
+                this.opts.onValidationFailedSeq?.(failedSeq);
+                // Finding R1: once per seq, not once per poll — this exact
+                // entry gets redelivered on every cycle for as long as it
+                // stalls the cursor (protocol §9's retain-and-redeliver),
+                // so without the `warnedValidationFailureSeqs` guard this
+                // would spam identically forever.
+                if (!this.warnedValidationFailureSeqs.has(failedSeq)) {
+                  if (this.warnedValidationFailureSeqs.size > MAX_TRACKED_VALIDATION_FAILURE_WARNINGS) {
+                    this.warnedValidationFailureSeqs.clear(); // see this Set's own doc comment — a rare-path reset, not a hot one
+                  }
+                  this.warnedValidationFailureSeqs.add(failedSeq);
+                  console.warn(
+                    `[byok/client] long-poll: a recognized message type at seq=${failedSeq} failed payload validation — skipped for this batch, cursor frozen so the server keeps redelivering it until a corrected version arrives:`,
+                    err,
+                  );
+                }
+              }
             }
             continue;
           }
@@ -259,12 +340,13 @@ export class LongPollClient {
 
         if (parsed.events.length === 0) {
           await sleep(this.opts.idleDelayMs ?? 250);
-        } else if (this.opts.isStalled?.()) {
-          // Finding P2 (Fix 2a): a non-empty batch while stalled means this
-          // cycle just re-pulled the whole post-cursor backlog again
-          // without making any cursor progress — apply the same backoff a
-          // failed HTTP attempt gets, instead of looping back immediately
-          // at RTT (see `isStalled`'s own doc comment).
+        } else if (this.opts.isStalled?.() || hadValidationFailureThisBatch) {
+          // Finding P2 (Fix 2a) / R1: a non-empty batch while stalled (or
+          // one that just NOW triggered the stall — see
+          // `hadValidationFailureThisBatch`'s own doc comment for why that
+          // local flag is needed on top of `isStalled()`) means this cycle
+          // made no real cursor progress — apply the same backoff a failed
+          // HTTP attempt gets, instead of looping back immediately at RTT.
           await sleep(this.opts.retryDelayMs ?? 2000);
         }
       } catch (err) {

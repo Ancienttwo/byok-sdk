@@ -75,6 +75,8 @@ export class TestServer {
   private tokenTtlMs = 60 * 60 * 1000;
   private rejectWs = false;
   private failBlobUploads = false;
+  /** Finding R2: capabilities advertised in every subsequent `conn.ack` — see `setAckCapabilities`. */
+  private ackCapabilities: string[] = [];
 
   private constructor(
     private readonly httpServer: http.Server,
@@ -117,6 +119,11 @@ export class TestServer {
   /** Reject every WS upgrade attempt (503) while `true` — used to force the client into its long-poll fallback (protocol §8). */
   setRejectWs(reject: boolean): void {
     this.rejectWs = reject;
+  }
+
+  /** Finding R2: capabilities to advertise in every SUBSEQUENT `conn.ack` (default `[]`, matching the wire's real "additive-minor, absent means not understood" convention) — used to test capability-gated client behavior (e.g. `approval_resolved`) without needing the real `@byok/server`. */
+  setAckCapabilities(capabilities: string[]): void {
+    this.ackCapabilities = capabilities;
   }
 
   /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
@@ -267,7 +274,7 @@ export class TestServer {
           encodeEnvelope(
             createEnvelope(
               'conn.ack',
-              { protocolVersion: PROTOCOL_VERSION, capabilities: [], serverTime: new Date().toISOString() },
+              { protocolVersion: PROTOCOL_VERSION, capabilities: this.ackCapabilities, serverTime: new Date().toISOString() },
               { seq: this.nextSeq() },
             ),
           ),

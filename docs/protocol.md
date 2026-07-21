@@ -1236,9 +1236,9 @@ real evidence:
      calls internally, so the two transports share one notion of "valid"
      and cannot drift apart on it again. An entry that fails for ANY reason
      is skipped for THIS batch — silently, no log line, batch and
-     connection otherwise unaffected — but (finding F1, below) NOT every
+     connection otherwise unaffected — but (finding F1/R1, below) NOT every
      failure class gets the same cursor treatment.
-     
+
      A skipped entry that fails with `UnknownMessageTypeError` (an entirely
      unrecognized `type` — genuine forward-compat tolerance) and still
      carries a numeric `seq` advances the cursor/watermark past it
@@ -1247,12 +1247,12 @@ real evidence:
      the cursor keeps advancing through repeated redelivery of the same
      poison payload, and a concurrent legitimate envelope is delivered with
      no grace period needed.
-     
-     **Finding F1 (cross-model adversarial review, fixed the same session):
-     a malformed-known-type entry (a recognized `type` whose payload fails
-     schema validation — `EnvelopeValidationError`, e.g. a real `task.offer`
-     whose `PermissionPolicy` rejects an unknown constraint) must NOT get
-     that same cursor advance.** The original fix above forwarded EVERY
+
+     **Finding F1 (cross-model adversarial review): a malformed-known-type
+     entry (a recognized `type` whose payload fails schema validation —
+     `EnvelopeValidationError`, e.g. a real `task.offer` whose
+     `PermissionPolicy` rejects an unknown constraint) must NOT get that
+     same cursor advance.** The original fix above forwarded EVERY
      `parseMessage` failure to `onSkippedSeq` regardless of class, reasoning
      (wrongly) that this "mirrored WS exactly". It does not: WS's blanket
      `catch {}` drops the frame with no skip-side cursor bookkeeping AT ALL
@@ -1262,21 +1262,68 @@ real evidence:
      Applied uniformly, it meant a genuinely malformed control message the
      daemon never understood got silently, permanently acked — the server
      would stop redelivering it and whatever it was offering was stuck for
-     good. The fix narrows `onSkippedSeq` to `UnknownMessageTypeError` only;
-     any other parse/validation failure of a recognized type is skipped for
-     THIS batch same as before, but its `seq` is never forwarded, so the
-     cursor is left exactly where it was and the server's ordinary
-     retain-and-redeliver semantics (protocol §9) keep the entry alive until
-     a corrected version is actually processed — genuinely matching WS's
-     "no silent permanent ack" property this time. See
-     `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`
+     good. F1's own fix narrowed `onSkippedSeq` to `UnknownMessageTypeError`
+     only, forwarding no `seq` at all for any other failure.
+
+     **Finding R1 (cross-model RE-review — F1's fix alone was NOT-CLOSED):
+     simply not forwarding the seq was insufficient.** A batch
+     `[bad seq2, valid seq3]` still let seq3's own INDEPENDENT success
+     silently drag the durable cursor to 3 once its handler resolved —
+     permanently acking seq2 one hop removed from the exact bug F1 set out
+     to fix, since the server would still conclude the daemon has
+     everything through 3 and stop redelivering seq2. Fix
+     (`ConnectionManager.noteValidationFailure`): a validation-failed
+     KNOWN-type entry now engages `stalledAtSeq` — the SAME machinery a
+     thrown handler failure already uses — freezing `dedupWatermark()` at
+     the durable cursor. Because `process()`'s own existing post-success
+     guard already refuses to advance the cursor past a still-unresolved
+     `stalledAtSeq` for ANY other envelope, this required zero changes to
+     `process()` itself: a later envelope in the same or a later batch
+     (seq3 above) is still delivered to its handler and its side effects
+     still run normally, but the cursor stays frozen until the stall
+     clears. `LongPollClient` additionally applies its `retryDelayMs`
+     backoff on the VERY SAME poll cycle the failure is first discovered
+     (not just from the next cycle onward — a local
+     `hadValidationFailureThisBatch` flag closes a one-cycle race a
+     synchronous read of `isStalled()` alone would miss, since the stall
+     mutation is itself deferred via `ConnectionManager`'s FIFO
+     `processingChain`), and `console.warn`s once per distinct poisoned
+     seq, never once per poll.
+
+     Explicit semantic (stated, not left implied): once the stall clears
+     (a corrected redelivery of the bad seq succeeds), the cursor advances
+     to EXACTLY that seq — it does NOT automatically jump forward to cover
+     a higher seq that already succeeded while stalled. That higher seq's
+     own `deliveredSeq` watermark already marks it "seen", so a further
+     redelivery of it is idempotently discarded before ever reaching
+     `process()` again (unlike an unknown-type SKIP, whose `onSkippedSeq`
+     callback has no redelivery dedup at all and so DOES get another
+     chance to nudge the cursor forward on a redelivery). The gap closes
+     the ordinary way any live connection closes it: a later, genuinely-new
+     envelope succeeds and its own `advanceCursor` call covers everything
+     up to that point. This is not a new limitation R1 introduces — it is
+     the pre-existing `stalledAtSeq`/`deliveredSeq` contract a real
+     thrown-handler stall already had (see this section's own "CRITICAL
+     fix" test below, which needed an explicit extra redelivery of ITS
+     skip entry to reach its own final cursor value) — R1 deliberately
+     reuses it as-is.
+
+     See `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`
      for the full regression suite (against the real `ConnectionManager`/
      `WsTransport`/`LongPollClient`): interleaved known/unknown/known
      batches processed in order with the cursor advanced past all three
      (including a trailing skip with nothing known after it, tested in
-     isolation), the persistent-redelivery/recovery case, and (F1) the
+     isolation), the persistent-redelivery/recovery case, the
      malformed-known-type case proving the cursor stays frozen until a
-     corrected redelivery at the same seq is processed.
+     corrected redelivery at the same seq is processed, and (R1) the
+     same-batch stall-engagement case plus the "reaching a higher seq
+     needs a later genuinely-new envelope" case above. The dedicated
+     `console.warn`-cadence and poll-backoff-timing assertions live in
+     `packages/client/src/__tests__/long-poll-validation-stall.test.ts`
+     (isolated from a real `TestServer` — see that file's own doc comment
+     for why, including a documented deviation from an original
+     fake-timer-based test plan that reproducibly hung this vitest/Node
+     combination).
 3. **Unknown fields on control/security-class schemas
    (`PermissionPolicySchema`, the `instruction` blob-ref variant) are
    REJECTED, fail-closed** — already established by `freeze-guard.test.ts`;
