@@ -301,11 +301,81 @@ export class TaskRunner {
    * cancellation intent.
    */
   private readonly finishedTaskIds = new Set<string>();
+  /**
+   * M4 Phase 2 (daemon control socket `shutdown` RPC): set once by
+   * {@link stopAcceptingOffers}, checked at the very top of `handleOffer` —
+   * see that method's own doc comment for why offers must stop being
+   * claimed BEFORE currently-active tasks are reported failed in
+   * {@link shutdownActiveTasks}, not after. Irreversible for this
+   * `TaskRunner` instance; a fresh one is constructed on the daemon's next
+   * `start()`.
+   */
+  private stoppingOffers = false;
 
   constructor(private readonly deps: TaskRunnerDeps) {}
 
   get activeTaskCount(): number {
     return this.tasks.size;
+  }
+
+  /** M4 Phase 2: stop claiming any FUTURE `task.offer` — see `stoppingOffers`'s own doc comment. Idempotent. */
+  stopAcceptingOffers(): void {
+    this.stoppingOffers = true;
+  }
+
+  /**
+   * M4 Phase 2: best-effort shutdown of every currently ACTIVE task, for the
+   * control socket's `shutdown` RPC. Mirrors `handleCancel`'s best-effort
+   * `session.interrupt()` style (an interrupt failure is swallowed; the
+   * terminal message is sent either way) but reports `task.fail` rather than
+   * `task.cancelled` — these tasks aren't ending because the SERVER
+   * cancelled them, they're ending because this device is shutting down.
+   * `retryable: true` throughout: nothing about the task/policy itself was
+   * ever at fault, only this device's own availability right now.
+   *
+   * Snapshots `this.tasks` into a plain array up front rather than iterating
+   * the live `Map` — `finish()` (called per task below) deletes from that
+   * same map as each shutdown settles, and a snapshot avoids relying on
+   * "mutate while iterating" semantics being followed correctly here.
+   *
+   * Must be called AFTER {@link stopAcceptingOffers} and BEFORE the
+   * connection is closed: the caller (`create-daemon.ts`'s
+   * `performControlShutdown`) awaits this method to fully settle — every
+   * `task.fail` actually enqueued via `deps.send` — before it ever calls
+   * `stop()` (which closes the connection). Stopping offers first (rather
+   * than closing the connection first) is what prevents a new
+   * `task.offer` from being claimed in the window while these are being
+   * torn down.
+   *
+   * This ordering invariant is NOT just about `performControlShutdown`'s
+   * own internal statement order — it also depends on nothing ELSE
+   * closing the connection first. A real regression (gatekeeper-caught,
+   * fixed in `create-daemon.ts`/`bin/commands/start.ts`) had exactly that
+   * happen: `start.ts` used to wake up on the EARLIER `shutdown-requested`
+   * event (fired synchronously, before this method even calls
+   * `session.interrupt()`) and call `daemon.stop()` itself, racing ahead
+   * and closing the connection before this method's `task.fail` send ever
+   * reached the outbox drain. `start.ts` now waits for the LATER
+   * `shutdown-complete` event (emitted only after `performControlShutdown`'s
+   * own `stop()` call has already resolved), so it can no longer race
+   * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
+   * regression test for the exact scenario.
+   */
+  async shutdownActiveTasks(reason: string): Promise<void> {
+    const active = [...this.tasks.values()];
+    await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
+  }
+
+  private async shutdownTask(active: ActiveTask, reason: string): Promise<void> {
+    try {
+      await active.session.interrupt();
+    } catch {
+      // best-effort — still report the failure below
+    }
+    this.deps.send(
+      createEnvelope('task.fail', { reason: `daemon shutting down: ${reason}`, retryable: true }, { taskId: active.taskId }),
+    );
+    await this.finish(active.taskId);
   }
 
   async handleEnvelope(envelope: Envelope): Promise<void> {
@@ -341,6 +411,15 @@ export class TaskRunner {
     // well after it already succeeded) would start a SECOND adapter session
     // for the same task, orphaning the first.
     if (this.tasks.has(taskId) || this.finishedTaskIds.has(taskId)) {
+      return;
+    }
+
+    // M4 Phase 2: the control socket's `shutdown` RPC flips this before
+    // tearing down active tasks (see `stopAcceptingOffers`'s own doc
+    // comment) — any offer arriving after that point is declined outright,
+    // never claimed.
+    if (this.stoppingOffers) {
+      this.decline(taskId, 'daemon is shutting down', true);
       return;
     }
 

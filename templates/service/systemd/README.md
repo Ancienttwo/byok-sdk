@@ -90,6 +90,20 @@ WantedBy=default.target
 | `service-stop` | `stop` (best-effort) |
 | `service-status` | `is-active` (exit code + stdout drive `running`); the unit file's presence on disk drives `installed` |
 
+## Talking to the running service (M4 Phase 2: the control socket)
+
+Once installed, the service is reachable through a local control socket at
+`~/.byok/<productId>/control.sock` (a Unix domain socket; falls back to a
+short, deterministic path under `$TMPDIR` if the natural one would be too
+long), authenticated by a per-run token at `~/.byok/<productId>/control.token`
+(mode 0600 — never transmitted over the socket itself, only used to compute
+an HMAC proof each side shows the other). `byok-agent status`, `tasks
+--follow`, `unpair`, `approve`, and `reject` all talk to the running service
+through this socket automatically — no separate flag needed — falling back
+to a persisted-state view (or, for `unpair`, the OS-service-state check
+described above) whenever the socket isn't reachable (the service isn't
+running, or predates this feature).
+
 ## Verifying it yourself
 
 Unit-test the exact generated content

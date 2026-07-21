@@ -4,6 +4,8 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { Daemon, DaemonConfig, DeviceRecord, ServiceLifecycle } from '../index';
+import { ControlError } from '../daemon/control-protocol';
+import type { ConnectControlResult, ControlClient } from '../bin/control-client';
 import { runApproveCommand, runRejectCommand } from '../bin/commands/approve-reject';
 import { runPairCommand } from '../bin/commands/pair';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
@@ -13,6 +15,25 @@ import { runUnpairCommand, UnpairBlockedByRunningServiceError, UnpairNotConfirme
 import { appendAuditEvent, auditLogPath } from '../bin/audit-log';
 import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+
+/** Fake `connectControlClient` returning an unreachable result — the default for tests below that don't care about the live control socket. */
+function fakeUnreachable(reason = 'daemon is not running (no control.token found)'): () => Promise<ConnectControlResult> {
+  return async () => ({ ok: false, reason });
+}
+
+/** Fake `connectControlClient` returning a reachable client whose `request()` is driven by `handleRequest`. */
+function fakeConnected(handleRequest: (method: string, params?: unknown) => Promise<unknown>): {
+  connectControl: () => Promise<ConnectControlResult>;
+  close: ReturnType<typeof vi.fn>;
+} {
+  const close = vi.fn();
+  const client: ControlClient = {
+    request: (method, params) => handleRequest(method, params) as never,
+    subscribe: () => ({ close: vi.fn() }),
+    close,
+  };
+  return { connectControl: async () => ({ ok: true, client }), close };
+}
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -177,36 +198,62 @@ describe('bin/commands/pair: runPairCommand', () => {
   });
 });
 
-describe('bin/commands/approve-reject', () => {
-  it('runApproveCommand calls daemon.approve(taskId) and logs success', async () => {
-    const approve = vi.fn().mockResolvedValue(undefined);
+describe('bin/commands/approve-reject (M4 Phase 2: control socket, not a live in-process Daemon)', () => {
+  it('runApproveCommand calls approvals.resolve over the control socket and logs success', async () => {
+    const handleRequest = vi.fn().mockResolvedValue({ resolved: true });
+    const { connectControl, close } = fakeConnected(handleRequest);
     const { log, lines } = collectLog();
-    await runApproveCommand({ approve }, 'task-1', { log });
-    expect(approve).toHaveBeenCalledWith('task-1');
-    expect(lines).toEqual(['approved: taskId=task-1']);
+
+    await runApproveCommand('/store', 'acme-product', 'approval-1', { log, connectControl });
+
+    expect(handleRequest).toHaveBeenCalledWith('approvals.resolve', { approvalId: 'approval-1', decision: 'approve', reason: undefined });
+    expect(lines).toEqual(['approved: approvalId=approval-1']);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it('runApproveCommand prints the honest unexercised note and rethrows on failure', async () => {
-    const approve = vi.fn().mockRejectedValue(new Error('daemon is not started; call start() first'));
+  it('runApproveCommand reports a clear, specific error (not an exception dump) when the daemon is unreachable', async () => {
     const errors: string[] = [];
-    await expect(runApproveCommand({ approve }, 'task-1', { error: (l) => errors.push(l) })).rejects.toThrow(/not started/);
-    expect(errors.some((l) => l.includes('ready-but-unexercised'))).toBe(true);
+    await expect(
+      runApproveCommand('/store', 'acme-product', 'approval-1', {
+        error: (l) => errors.push(l),
+        connectControl: fakeUnreachable(),
+      }),
+    ).rejects.toThrow(/not reachable/);
+    expect(errors.some((l) => l.includes('not reachable') && l.includes('approval-1'))).toBe(true);
   });
 
-  it('runRejectCommand calls daemon.reject(taskId, reason) and logs success', async () => {
-    const reject = vi.fn().mockResolvedValue(undefined);
+  it('runApproveCommand surfaces the registry not_found error message and rethrows, closing the connection either way', async () => {
+    const handleRequest = vi.fn().mockRejectedValue(new ControlError('not_found', 'no pending approval with id "approval-x"'));
+    const { connectControl, close } = fakeConnected(handleRequest);
+    const errors: string[] = [];
+
+    await expect(
+      runApproveCommand('/store', 'acme-product', 'approval-x', { error: (l) => errors.push(l), connectControl }),
+    ).rejects.toThrow(/no pending approval/);
+    expect(errors.some((l) => l.includes('no pending approval'))).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('runRejectCommand calls approvals.resolve with the reason and logs success', async () => {
+    const handleRequest = vi.fn().mockResolvedValue({ resolved: true });
+    const { connectControl } = fakeConnected(handleRequest);
     const { log, lines } = collectLog();
-    await runRejectCommand({ reject }, 'task-2', 'not allowed', { log });
-    expect(reject).toHaveBeenCalledWith('task-2', 'not allowed');
-    expect(lines).toEqual(['rejected: taskId=task-2 reason="not allowed"']);
+
+    await runRejectCommand('/store', 'acme-product', 'approval-2', 'not allowed', { log, connectControl });
+
+    expect(handleRequest).toHaveBeenCalledWith('approvals.resolve', { approvalId: 'approval-2', decision: 'reject', reason: 'not allowed' });
+    expect(lines).toEqual(['rejected: approvalId=approval-2 reason="not allowed"']);
   });
 
   it('runRejectCommand works with no reason given', async () => {
-    const reject = vi.fn().mockResolvedValue(undefined);
+    const handleRequest = vi.fn().mockResolvedValue({ resolved: true });
+    const { connectControl } = fakeConnected(handleRequest);
     const { log, lines } = collectLog();
-    await runRejectCommand({ reject }, 'task-3', undefined, { log });
-    expect(reject).toHaveBeenCalledWith('task-3', undefined);
-    expect(lines).toEqual(['rejected: taskId=task-3']);
+
+    await runRejectCommand('/store', 'acme-product', 'approval-3', undefined, { log, connectControl });
+
+    expect(handleRequest).toHaveBeenCalledWith('approvals.resolve', { approvalId: 'approval-3', decision: 'reject', reason: undefined });
+    expect(lines).toEqual(['rejected: approvalId=approval-3']);
   });
 });
 
@@ -435,6 +482,50 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
       // this would hang waiting on `input`. It must throw first.
       await expect(runUnpairCommand({ unpair }, { isTTY: true, input, output })).rejects.toThrow(UnpairUnknownDaemonStateError);
       expect(unpair).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('M4 Phase 2: live (control-socket) unpair path', () => {
+    it('REGRESSION (gatekeeper-caught): closes the control-socket connection even when confirmation is declined, before rethrowing', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const requestSpy = vi.fn();
+      const { connectControl, close } = fakeConnected(requestSpy);
+
+      await expect(
+        runUnpairCommand(
+          { unpair },
+          { storeDir: '/store', productId: 'acme-product', isTTY: false, connectControl },
+        ),
+      ).rejects.toThrow(UnpairNotConfirmedError);
+
+      expect(close).toHaveBeenCalledTimes(1); // used to leak: confirmUnpair() throwing skipped straight past conn.client.close()
+      expect(requestSpy).not.toHaveBeenCalled(); // never got as far as sending shutdown
+      expect(unpair).not.toHaveBeenCalled();
+    });
+
+    it('with confirmed:true, sends shutdown over the control socket and closes the connection', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const requestSpy = vi.fn().mockResolvedValue({ acknowledged: true });
+      const { connectControl, close } = fakeConnected(requestSpy);
+      const isControlDaemonGone = vi.fn().mockResolvedValue(true);
+      const { log, lines } = collectLog();
+
+      await runUnpairCommand(
+        { unpair },
+        {
+          storeDir: '/store',
+          productId: 'acme-product',
+          confirmed: true,
+          connectControl,
+          isControlDaemonGone,
+          log,
+        },
+      );
+
+      expect(requestSpy).toHaveBeenCalledWith('shutdown', { reason: 'unpair' });
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(unpair).toHaveBeenCalledTimes(1);
+      expect(lines.some((l) => l.includes('confirmed exited'))).toBe(true);
     });
   });
 });

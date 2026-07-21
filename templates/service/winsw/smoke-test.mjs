@@ -27,7 +27,7 @@
 //
 // Requires @byok/client already built (`pnpm --filter @byok/client build`).
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -153,6 +153,27 @@ try {
   console.log('PASS: service removed from the SCM after uninstall');
 
   console.log('==> WinSW service lifecycle smoke: PASS');
+
+  // M4 Phase 2 addendum: the checks above deliberately run a harmless
+  // placeholder command (see the header comment) to isolate service
+  // lifecycle MECHANICS from the daemon/control-socket concern -- this
+  // separate, throwaway service instance runs the REAL `byok-agent start`
+  // (paired against a real, ephemeral @byok/server this helper also boots)
+  // and proves `byok-agent status` reaches its control socket live over a
+  // Windows named pipe. See
+  // packages/client/scripts/control-socket-check.mjs's own header comment.
+  console.log('==> M4 Phase 2: control socket check (separate scratch service running the real byok-agent)');
+  const controlSocketCheck = path.join(repoRoot, 'packages', 'client', 'scripts', 'control-socket-check.mjs');
+  const checkExitCode = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [controlSocketCheck, `${name}-ctlsocket`, '--winsw-bin', winswBin], {
+      stdio: 'inherit',
+    });
+    child.once('error', reject);
+    child.once('exit', (code) => resolve(code));
+  });
+  if (checkExitCode !== 0) {
+    throw new Error(`control-socket-check.mjs exited with code ${checkExitCode}`);
+  }
 } catch (err) {
   failed = true;
   console.error('FAIL:', err instanceof Error ? err.stack : err);

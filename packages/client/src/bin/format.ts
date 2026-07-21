@@ -1,5 +1,6 @@
 import type { AgentEvent } from '@byok/protocol';
 import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo } from '../index';
+import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { ProbedRuntime } from './runtime-probe';
 import type { TaskCounts } from './tasks-view';
 
@@ -80,6 +81,10 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
       return `${prefix} unpaired`;
     case 'runtimes-detected':
       return `${prefix} runtimes-detected ids=${event.runtimes.map((r) => r.id).join(',') || '(none)'}`;
+    case 'shutdown-requested':
+      return `${prefix} shutdown-requested reason=${quote(event.reason)}`;
+    case 'shutdown-complete':
+      return `${prefix} shutdown-complete reason=${quote(event.reason)}`;
   }
 }
 
@@ -150,5 +155,29 @@ export function formatStatusLines(view: StatusView): string[] {
     `tasks: total=${c.total} offered=${c.Offered} claimed=${c.Claimed} running=${c.Running} awaitApproval=${c.AwaitApproval} complete=${c.Complete} failed=${c.Failed} cancelled=${c.Cancelled}`,
   );
   lines.push(`audit-log: ${view.auditLogPath} (${view.auditLogLineCount} event${view.auditLogLineCount === 1 ? '' : 's'})`);
+  return lines;
+}
+
+/**
+ * M4 Phase 2: renders the control socket's live `status` result — appended
+ * after {@link formatStatusLines}' persisted-state view when a running
+ * daemon is actually reachable (see `bin/commands/status.ts`). Every line
+ * is prefixed `live-` (or is the single `live:` summary line) so it's
+ * unambiguous which lines are a live snapshot of a running process versus
+ * the historical/persisted view above them.
+ */
+export function formatLiveStatusLines(live: ControlStatusResult): string[] {
+  const lines: string[] = [
+    `live: pid=${live.pid} uptimeMs=${live.uptimeMs} transport=${live.transport}`,
+    `live-paired: ${live.paired ? 'yes' : 'no'}${live.deviceId ? ` deviceId=${live.deviceId}` : ''}`,
+    `live-runtimes: ${live.runtimeIds.length ? live.runtimeIds.join(',') : '(none)'}`,
+  ];
+  if (live.activeTasks.length === 0) {
+    lines.push('live-active-tasks: (none)');
+  } else {
+    for (const task of live.activeTasks) {
+      lines.push(`live-active-task: ${task.taskId} ${task.state}`);
+    }
+  }
   return lines;
 }

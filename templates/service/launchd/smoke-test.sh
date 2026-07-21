@@ -141,3 +141,14 @@ if launchctl print "gui/$UID_NUM/$LABEL" 2>&1; then
 fi
 
 echo "==> launchd service lifecycle smoke: PASS"
+
+# M4 Phase 2 addendum: the checks above deliberately run a harmless
+# placeholder command (see the header comment) to isolate service lifecycle
+# MECHANICS from the daemon/control-socket concern -- this separate,
+# throwaway service instance runs the REAL `byok-agent start` (paired
+# against a real, ephemeral @byok/server this helper also boots) and proves
+# `byok-agent status` reaches its control socket live. See
+# packages/client/scripts/control-socket-check.mjs's own header comment.
+CLIENT_SCRIPTS_DIR="$REPO_ROOT/packages/client/scripts"
+echo "==> M4 Phase 2: control socket check (separate scratch service running the real byok-agent)"
+node "$CLIENT_SCRIPTS_DIR/control-socket-check.mjs" "$LABEL.ctlsocket"

@@ -64,7 +64,21 @@ export type DaemonEvent =
   | { kind: 'connection'; ts: string; state: ConnectionState }
   | { kind: 'paired'; ts: string; deviceId: string }
   | { kind: 'unpaired'; ts: string }
-  | { kind: 'runtimes-detected'; ts: string; runtimes: RuntimeInfo[] };
+  | { kind: 'runtimes-detected'; ts: string; runtimes: RuntimeInfo[] }
+  /** M4 Phase 2: the control socket's `shutdown` RPC was invoked — emitted once, before this daemon starts tearing itself down, so it lands in the audit log via the exact same subscribe->append plumbing every other event already uses (see `bin/commands/start.ts`). Informational only — do NOT gate any teardown decision on this event; see `shutdown-complete`. */
+  | { kind: 'shutdown-requested'; ts: string; reason: string }
+  /**
+   * M4 Phase 2: emitted once, AFTER the control-socket-driven shutdown
+   * sequence has fully finished — active tasks reported failed over the
+   * (at that point still-open) connection, then the connection/control
+   * socket actually closed (see `create-daemon.ts`'s `performControlShutdown`,
+   * which calls this last). This is the event `bin/commands/start.ts` must
+   * wait for before treating the daemon as done: reacting to
+   * `shutdown-requested` instead would race `daemon.stop()` against the
+   * still-in-flight `task.fail` send and silently drop it (confirmed via a
+   * real regression — see `daemon-control-socket.test.ts`).
+   */
+  | { kind: 'shutdown-complete'; ts: string; reason: string };
 
 export type DaemonEventListener = (event: DaemonEvent) => void;
 export type Unsubscribe = () => void;
@@ -271,6 +285,16 @@ export class DaemonObserver {
 
   noteRuntimesDetected(runtimes: RuntimeInfo[]): void {
     this.emit({ kind: 'runtimes-detected', ts: nowIso(), runtimes });
+  }
+
+  /** M4 Phase 2: see the `shutdown-requested` `DaemonEvent` variant's own doc comment. */
+  noteShutdownRequested(reason: string): void {
+    this.emit({ kind: 'shutdown-requested', ts: nowIso(), reason });
+  }
+
+  /** M4 Phase 2: see the `shutdown-complete` `DaemonEvent` variant's own doc comment. */
+  noteShutdownComplete(reason: string): void {
+    this.emit({ kind: 'shutdown-complete', ts: nowIso(), reason });
   }
 
   private upsertTask(

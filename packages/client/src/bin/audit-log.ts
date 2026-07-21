@@ -254,6 +254,13 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       return { ...base };
     case 'runtimes-detected':
       return { ...base, runtimes: event.runtimes };
+    case 'shutdown-requested':
+    case 'shutdown-complete':
+      // Not sensitive/free-form the way task instruction/output text is —
+      // this is an internally-constructed operational message (see
+      // `create-daemon.ts`'s control-socket shutdown wiring), so it's kept
+      // verbatim rather than redacted to a size.
+      return { ...base, reason: event.reason };
   }
 }
 
@@ -374,6 +381,10 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
       return { kind: 'unpaired', ts };
     case 'runtimes-detected':
       return { kind: 'runtimes-detected', ts, runtimes: Array.isArray(raw.runtimes) ? (raw.runtimes as RuntimeInfo[]) : [] };
+    case 'shutdown-requested':
+      return { kind: 'shutdown-requested', ts, reason: str(raw.reason) };
+    case 'shutdown-complete':
+      return { kind: 'shutdown-complete', ts, reason: str(raw.reason) };
     default:
       return undefined;
   }

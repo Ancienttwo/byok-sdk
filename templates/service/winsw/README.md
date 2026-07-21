@@ -118,6 +118,21 @@ same characteristic (it launches `<executable>` directly, no shell), which
 is part of why this recipe emits one `<argument>` element per token instead
 of a single shell-quoted string — see above.
 
+## Talking to the running service (M4 Phase 2: the control socket)
+
+Once installed, the service is reachable through a local control socket — on
+Windows this is a named pipe (`\\.\pipe\byok-<hash of productId+storeDir+
+user>`, deterministically derived so the CLI computes the identical name
+independently, no path/file involved the way a Unix socket has), authenticated
+by a per-run token still written to a real file at
+`<storeDir>\control.token` (mode 0600 — never transmitted over the pipe
+itself, only used to compute an HMAC proof each side shows the other).
+`byok-agent status`, `tasks --follow`, `unpair`, `approve`, and `reject` all
+talk to the running service through this pipe automatically — no separate
+flag needed — falling back to a persisted-state view (or, for `unpair`, the
+`sc.exe`-based service-state check described above) whenever it isn't
+reachable (the service isn't running, or predates this feature).
+
 ## Verifying it yourself
 
 ```powershell
@@ -133,7 +148,12 @@ gone — cleaning up unconditionally even on failure. This is exactly what CI
 runs on every push (`.github/workflows/ci.yml`'s `windows-service-smoke`
 job) on a real `windows-latest` runner — this SDK's own macOS/Linux
 development machines cannot execute WinSW at all, so that CI job (not a
-local run) is the real proof this recipe works.
+local run) is the real proof this recipe works. It then additionally
+installs a SECOND scratch service running the real `byok-agent start`
+(paired against a real, ephemeral `@byok/server`) and confirms `byok-agent
+status` reaches its control socket live over a Windows named pipe (M4
+Phase 2 — see `packages/client/scripts/control-socket-check.mjs`), before
+uninstalling that one too.
 
 ## What's explicitly out of scope
 

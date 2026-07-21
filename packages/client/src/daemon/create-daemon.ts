@@ -1,13 +1,24 @@
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope, TASK_TRANSITIONS } from '@byok/protocol';
 import type { CapabilityFlag, RuntimeCapabilities as ProtocolRuntimeCapabilities, RuntimeId, RuntimeInfo } from '@byok/protocol';
 import type { PermissionPolicy } from '@byok/protocol';
 import type { RuntimeAdapter, RuntimeCapabilities } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
 import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
+import { AnotherControlServerRunningError, startControlServer } from './control-server';
+import type { ControlMethods, ControlServerHandle } from './control-server';
+import {
+  ControlError,
+  parseApprovalsResolveParams,
+  parseShutdownParams,
+  type ControlActiveTask,
+  type ControlStatusResult,
+  type ShutdownReason,
+} from './control-protocol';
 import { ConnectionManager } from './connection-manager';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
@@ -15,6 +26,16 @@ import { SessionWorkspaceStore } from './session-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
 import { TaskRunner, type TaskRunnerDeps } from './task-runner';
 import type { ProgressBatcherOptions } from './progress-batcher';
+
+/** M4 Phase 2: bound on how long the control socket's `shutdown` RPC waits for `TaskRunner.shutdownActiveTasks` before proceeding to the rest of teardown regardless — an active task's `session.interrupt()` hanging (a misbehaving runtime adapter) must never block the daemon from actually stopping. */
+const SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS = 10_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
 
 /**
  * Optional white-label product display info — purely opaque passthrough
@@ -250,10 +271,22 @@ export function createDaemonWithAdapters(
   // `createDaemonWithAdapters()` returns and keep accumulating across an
   // internal stop()/start() cycle within the same instance. See `observer.ts`.
   const observer = new DaemonObserver();
+  // M4 Phase 2: registry backing the control socket's `approvals.list`/
+  // `approvals.resolve` methods — see `approvals.ts`'s module doc comment.
+  // Nothing populates it yet in Phase 2; it's constructed now so Phase 3
+  // only needs to add producers.
+  const approvalRegistry = new ApprovalRegistry();
 
   let connection: ConnectionManager | undefined;
   let connectionState: ConnectionState = 'closed';
   let runner: TaskRunner | undefined;
+  // M4 Phase 2: local control socket (see `control-server.ts`) — started in
+  // `start()`, closed in `stop()`. `undefined` whenever the daemon isn't
+  // running, or when binding it failed non-fatally (see `start()`'s own
+  // try/catch below).
+  let controlServerHandle: ControlServerHandle | undefined;
+  /** M4 Phase 2: when this `start()` began — backs the control socket's `status.uptimeMs`. */
+  let startedAt: number | undefined;
 
   // M3-2a: `let`, not `const` — `unpair()` below rebuilds this from scratch
   // (fresh, no cached in-memory `record`) rather than mutating the existing
@@ -298,6 +331,34 @@ export function createDaemonWithAdapters(
     const record = await auth.loadExisting();
     if (!record) {
       throw new Error('device is not paired yet; call pair(pairingCode) first');
+    }
+
+    startedAt = Date.now();
+    // M4 Phase 2: a second start() on THIS SAME Daemon instance (e.g. the
+    // revoke -> re-pair -> start() again recovery flow) restarts its own
+    // control socket rather than colliding with itself — `stop()` was not
+    // necessarily called in between (mirrors `connection`/`runner` above,
+    // which are also silently replaced on a second start()). Only a
+    // DIFFERENT process/instance still holding this storeDir's control
+    // socket open is the "another daemon is running" fatal case below.
+    if (controlServerHandle) {
+      await controlServerHandle.close();
+      controlServerHandle = undefined;
+    }
+    // The control socket must never brick the rest of the daemon: "another
+    // daemon's control server is already running against this exact
+    // storeDir" is the one bind failure that stays fatal (a second daemon
+    // writing to the same store concurrently is a real hazard); any other
+    // bind failure (e.g. an unsupported filesystem) is logged and the
+    // daemon proceeds without a control socket at all.
+    try {
+      controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods: controlMethods });
+    } catch (err) {
+      if (err instanceof AnotherControlServerRunningError) throw err;
+      console.warn(
+        `[byok/client] control socket failed to start (continuing without it): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      controlServerHandle = undefined;
     }
 
     const [runtimes, blobClient] = await Promise.all([
@@ -372,6 +433,13 @@ export function createDaemonWithAdapters(
     await connection?.stop();
     auth.stop();
     connectionState = 'closed';
+    // M4 Phase 2: stop the control socket in every shutdown path — this is
+    // the single lifecycle choke point every caller (a foreground abort via
+    // `bin/commands/start.ts`, `unpair()` below, and the control socket's
+    // OWN `shutdown` RPC — see `performControlShutdown`) already funnels
+    // through, so nothing else needs its own control-socket teardown logic.
+    await controlServerHandle?.close();
+    controlServerHandle = undefined;
   }
 
   /**
@@ -422,6 +490,114 @@ export function createDaemonWithAdapters(
     if (!runner) throw new Error('daemon is not started; call start() first');
     await runner.handleEnvelope(createEnvelope('task.reject', { reason }, { taskId, seq: 0 }));
   }
+
+  // -------------------------------------------------------------------------
+  // M4 Phase 2: control socket method registry (`control-server.ts` is
+  // daemon-agnostic; this is the glue that closes over THIS daemon
+  // instance's own state). Built once; every handler below reads `runner`/
+  // `connection`/`connectionState`/`auth` fresh at CALL time via normal JS
+  // closure semantics, so it stays correct across this daemon's own
+  // start()/stop() cycles.
+  // -------------------------------------------------------------------------
+
+  function buildControlStatus(): ControlStatusResult {
+    const activeTasks: ControlActiveTask[] = observer
+      .tasks()
+      .filter((task) => TASK_TRANSITIONS[task.state].length > 0) // non-terminal only — see the `status` method's own doc comment (control-protocol.ts)
+      .map((task) => ({ taskId: task.taskId, state: task.state }));
+    return {
+      pid: process.pid,
+      uptimeMs: startedAt !== undefined ? Date.now() - startedAt : 0,
+      paired: auth.deviceId !== undefined,
+      deviceId: auth.deviceId,
+      transport: connectionState,
+      activeTasks,
+      runtimeIds: adapters.map((adapter) => adapter.id),
+    };
+  }
+
+  /**
+   * The control socket's `shutdown` RPC — see this method's own protocol
+   * doc comment (`control-protocol.ts`'s `ShutdownParams`) for the wire
+   * contract. Order matters: offers must stop being claimed BEFORE active
+   * tasks are torn down (so nothing new sneaks in claimed while that
+   * happens), and active tasks must be reported failed BEFORE the
+   * connection itself is closed (so that `task.fail` actually reaches the
+   * server) — see `TaskRunner.shutdownActiveTasks`'s own doc comment.
+   * Invoked from the RPC handler via `setImmediate` (see `controlMethods`
+   * below) so the `{acknowledged:true}` response has already been written
+   * to the wire before any of this runs.
+   *
+   * Gatekeeper-confirmed regression (fixed here): `noteShutdownRequested`
+   * fires SYNCHRONOUSLY, before `shutdownActiveTasks` even calls
+   * `session.interrupt()` — `observer.emit()` calls its listeners
+   * synchronously, so `bin/commands/start.ts`'s subscriber used to be woken
+   * IMMEDIATELY, race ahead, and call `daemon.stop()` (which sets
+   * `ConnectionManager.stopped = true` synchronously) before the active
+   * task's `task.fail` was ever sent — silently stranding it in a
+   * post-`stopped` outbox that `drainOutbox` refuses to flush. Fixed by
+   * emitting a SEPARATE, later `shutdown-complete` event only once THIS
+   * function's own `stop()` call below has fully resolved — `start.ts` now
+   * waits for that one instead, so it can never race ahead of this
+   * function's own internal ordering. `shutdown-requested` is kept as an
+   * earlier, informational-only audit marker; nothing may gate teardown
+   * decisions on it.
+   */
+  async function performControlShutdown(reason: ShutdownReason | undefined): Promise<void> {
+    const effectiveReason = reason ?? 'operator';
+    observer.noteShutdownRequested(effectiveReason);
+    runner?.stopAcceptingOffers();
+    const activeTeardown = runner?.shutdownActiveTasks(`control socket shutdown (${effectiveReason})`) ?? Promise.resolve();
+    await Promise.race([activeTeardown, delay(SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS)]);
+    await stop();
+    observer.noteShutdownComplete(effectiveReason);
+  }
+
+  const controlMethods: ControlMethods = {
+    unary: {
+      status: () => buildControlStatus(),
+      'approvals.list': () => ({ approvals: approvalRegistry.list() }),
+      'approvals.resolve': (params) => {
+        const parsed = parseApprovalsResolveParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'approvals.resolve requires {approvalId, decision}');
+        try {
+          approvalRegistry.resolve(parsed.approvalId, parsed.decision, parsed.reason);
+        } catch (err) {
+          if (err instanceof ApprovalNotFoundError) throw new ControlError('not_found', err.message);
+          throw err;
+        }
+        return { resolved: true };
+      },
+      shutdown: (params) => {
+        const { reason } = parseShutdownParams(params);
+        // Fire-and-forget, deliberately AFTER this handler's own return
+        // value has been serialized and written to the socket (see
+        // `control-server.ts`'s dispatch: it awaits this handler, THEN
+        // writes the response) — `setImmediate` schedules the teardown for
+        // the next macrotask tick, strictly after that write.
+        setImmediate(() => {
+          void performControlShutdown(reason).catch((err: unknown) => {
+            console.error('[byok/client] error during control-socket shutdown teardown:', err);
+          });
+        });
+        return { acknowledged: true };
+      },
+    },
+    stream: {
+      'tasks.subscribe': (_params, ctx) =>
+        new Promise<void>((resolve) => {
+          const unsubscribeObserver = observer.subscribe((event) => ctx.emit(event));
+          ctx.signal.addEventListener(
+            'abort',
+            () => {
+              unsubscribeObserver();
+              resolve();
+            },
+            { once: true },
+          );
+        }),
+    },
+  };
 
   function subscribe(listener: DaemonEventListener): Unsubscribe {
     return observer.subscribe(listener);

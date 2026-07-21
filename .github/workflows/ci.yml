@@ -199,3 +199,53 @@ jobs:
         env:
           WINSW_BIN: ${{ runner.temp }}\WinSW.exe
         run: node templates/service/winsw/smoke-test.mjs
+
+  # M4 Phase 2 daemon control socket guarantee: proves the local IPC control
+  # socket (Unix domain socket on macOS/Linux, a named pipe on Windows --
+  # packages/client/src/daemon/control-server.ts,
+  # packages/client/src/daemon/control-protocol.ts) actually works
+  # end-to-end through the REAL packaged `byok-agent` CLI, on all three
+  # OSes -- not just the in-process unit/integration tests already covered
+  # by `pnpm -r test` above (packages/client/src/__tests__/control-*.test.ts,
+  # daemon-control-socket.test.ts). Starts a real `byok-agent start` child
+  # process (paired against a real, ephemeral `@byok/server` this script
+  # also boots), reaches it live via a SEPARATE `byok-agent status`
+  # invocation, then performs a real live `byok-agent unpair --yes` and
+  # confirms the daemon process actually exits on its own -- the exact
+  # "must not leave the process hanging" guarantee this feature exists to
+  # provide. See packages/client/scripts/ipc-smoke.mjs for the full script.
+  #
+  # Deliberately independent of build-test/packageability-smoke/
+  # windows-service-smoke above (no `needs:`): its own install + build, so
+  # it can be extended/reordered later without perturbing any of those.
+  ipc-smoke:
+    name: IPC control socket smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (needed for @byok/client + @byok/server dist/ this script drives)
+        run: pnpm -r build
+
+      - name: Run the IPC control socket smoke
+        run: node packages/client/scripts/ipc-smoke.mjs
