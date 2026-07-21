@@ -71,13 +71,24 @@ import { atomicWriteFile } from '../util/atomic-write';
  * forever. `followAuditLog` no longer re-reads the entire file every poll
  * either; see its own doc comment.
  *
- * Finding P2 (new, STILL-OPEN, now fixed): that trim used to be purely
+ * Finding P2 (new, round 1, now fixed): that trim used to be purely
  * positional (the most recent N lines, full stop) — which could evict
  * EVERY event a still-running task ever had if it went quiet for long
  * enough, permanently erasing it from `tasks`/`status` even though it was
  * never actually done. `compactPreservingLiveTasks` now preserves one
  * lifecycle-anchor line for any still-open (non-terminal) task that would
  * otherwise be fully evicted — see its own doc comment.
+ *
+ * Finding P2 (new, round 2, now fixed): round 1's anchor preservation had no
+ * cap of its own — a daemon that crashes leaving many non-terminal tasks
+ * behind (or one that keeps creating non-terminal tasks that never reach a
+ * terminal kind) accumulates one anchor per distinct non-terminal taskId
+ * FOREVER, defeating `MAX_AUDIT_LOG_BYTES`'s own size cap (the whole point
+ * of rotation) and making every append past the cap an ever-larger O(n)
+ * read + atomic-rewrite. `compactPreservingLiveTasks` now also bounds the
+ * anchors themselves to `MAX_LIVE_TASK_ANCHORS`, keeping the most
+ * recently-touched ones and dropping the oldest overflow with a single
+ * logged warning — see that constant's own doc comment.
  */
 
 export function auditLogPath(storeDir: string): string {
@@ -101,6 +112,26 @@ const AUDIT_STORE_DIR_MODE = 0o700;
  */
 export const MAX_AUDIT_LOG_BYTES = 10 * 1024 * 1024;
 export const AUDIT_LOG_TRIM_TARGET_LINES = 5000;
+
+/**
+ * Finding P2 (new, round 2): the hard cap on how many non-terminal-task
+ * lifecycle anchors {@link compactPreservingLiveTasks} will ever preserve in
+ * a single rotation — without this, a daemon that crashes leaving many
+ * non-terminal tasks behind (or a bug that keeps creating tasks that never
+ * reach a terminal kind) accumulates one anchor per distinct taskId with no
+ * upper bound, defeating `MAX_AUDIT_LOG_BYTES`'s own size cap and turning
+ * every subsequent append into an ever-larger O(n) read + atomic-rewrite.
+ * Mirrors `daemon/observer.ts`'s `MAX_TRACKED_TASKS`/`task-runner.ts`'s
+ * `MAX_TRACKED_TASK_IDS` registries: bounded to a generously-sized "a
+ * handful of genuinely concurrent tasks never gets close to this" cap, kept
+ * the most RECENTLY-touched (by last-seen line index) and dropping the
+ * oldest overflow with a single `console.warn` per rotation (not one per
+ * dropped anchor — a runaway leak should be visible without spamming the
+ * log). A dropped task simply reverts to the pre-round-1 behavior (falls
+ * out of `tasks`/`status` once its own events age out of the retained
+ * tail) rather than the file growing without bound.
+ */
+export const MAX_LIVE_TASK_ANCHORS = 500;
 
 function byteSize(text: string | undefined): number | undefined {
   return text === undefined ? undefined : Buffer.byteLength(text, 'utf8');
@@ -411,8 +442,8 @@ function eventTaskId(event: DaemonEvent): string | undefined {
 }
 
 /**
- * Finding P2 (new): a pure positional "keep the last N lines" trim can
- * evict EVERY event a still-running (non-terminal) task ever had — if a
+ * Finding P2 (new, round 1): a pure positional "keep the last N lines" trim
+ * can evict EVERY event a still-running (non-terminal) task ever had — if a
  * task's `offered`/`started`/`progress` events are all old enough to fall
  * in the dropped prefix, and it hasn't reached a terminal kind
  * (`completed`/`failed`/`cancelled`) anywhere in the file, there is
@@ -434,13 +465,20 @@ function eventTaskId(event: DaemonEvent): string | undefined {
  * terminal kind needs no anchor at all: it's fully reconstructable from
  * that one terminal event, wherever it happens to fall.
  *
- * Trade-off worth calling out: the number of anchors is bounded by the
- * number of DISTINCT non-terminal tasks old enough to be affected, which in
- * realistic operation is small (a handful of genuinely concurrent
- * in-flight tasks, not thousands) — so `kept.length` can exceed
- * `targetLines` by that small amount. It's still self-correcting: once an
- * anchored task reaches a terminal kind, a later rotation stops preserving
- * it.
+ * Finding P2 (new, round 2): round 1's anchor count had no cap of its own —
+ * bounded by "the number of DISTINCT non-terminal tasks old enough to be
+ * affected", which in realistic operation is small, but is NOT actually
+ * bounded when a daemon crashes leaving many non-terminal tasks behind, or
+ * a bug keeps creating tasks that never reach a terminal kind. Anchors are
+ * now additionally capped at {@link MAX_LIVE_TASK_ANCHORS}: once the number
+ * of candidate anchors exceeds it, only the most RECENTLY-touched ones (by
+ * last-seen line index) are kept, the oldest overflow is dropped, and a
+ * single warning is logged for the whole rotation (not once per dropped
+ * anchor). This keeps `kept.length` bounded by `targetLines +
+ * MAX_LIVE_TASK_ANCHORS` in the worst case — still slightly over
+ * `targetLines`, by design (see round 1's own trade-off), but no longer
+ * unboundedly so. Self-correcting either way: once an anchored task reaches
+ * a terminal kind, a later rotation stops preserving it at all.
  */
 function compactPreservingLiveTasks(lines: readonly string[], targetLines: number): string[] {
   if (lines.length <= targetLines) return [...lines];
@@ -460,12 +498,21 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
     if (TERMINAL_EVENT_KINDS.has(event.kind)) hasTerminalEvent.add(taskId);
   }
 
-  const anchorIndices: number[] = [];
+  let anchorIndices: number[] = [];
   for (const [taskId, lastIndex] of lastIndexForTask) {
     if (hasTerminalEvent.has(taskId)) continue; // reconstructable from its own terminal event, wherever that falls
     if (lastIndex < cutIndex) anchorIndices.push(lastIndex); // otherwise about to be fully evicted
   }
-  anchorIndices.sort((a, b) => a - b);
+  anchorIndices.sort((a, b) => a - b); // ascending: oldest-touched first, most-recently-touched last
+
+  if (anchorIndices.length > MAX_LIVE_TASK_ANCHORS) {
+    const totalCandidates = anchorIndices.length;
+    const droppedCount = totalCandidates - MAX_LIVE_TASK_ANCHORS;
+    anchorIndices = anchorIndices.slice(-MAX_LIVE_TASK_ANCHORS); // keep the most RECENTLY-touched, drop the oldest overflow
+    console.warn(
+      `[byok/client] audit log rotation: ${totalCandidates} non-terminal task lifecycle anchors exceeded MAX_LIVE_TASK_ANCHORS (${MAX_LIVE_TASK_ANCHORS}) — dropped the oldest ${droppedCount}, kept the most recently-touched ${MAX_LIVE_TASK_ANCHORS}; dropped tasks will stop appearing in tasks/status once their own events age out of the retained tail`,
+    );
+  }
 
   return [...anchorIndices.map((i) => lines[i]), ...lines.slice(cutIndex)].filter((l): l is string => l !== undefined);
 }

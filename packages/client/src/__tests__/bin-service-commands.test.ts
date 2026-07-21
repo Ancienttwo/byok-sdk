@@ -84,7 +84,7 @@ function fakeLifecycle(overrides: Partial<ServiceLifecycle> = {}): ServiceLifecy
     uninstall: vi.fn().mockResolvedValue(undefined),
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
-    status: vi.fn().mockResolvedValue({ installed: true, running: true, detail: 'ok' }),
+    status: vi.fn().mockResolvedValue({ installed: true, running: true, determinate: true, detail: 'ok' }),
     ...overrides,
   };
 }
@@ -127,17 +127,39 @@ describe('bin/commands/service: run*Command (DI lifecycle)', () => {
     expect(lines).toEqual(['service stopped: acme-product']);
   });
 
-  it('runServiceStatusCommand logs installed:no/running:no/detail:(none) for an empty status', async () => {
-    const lifecycle = fakeLifecycle({ status: vi.fn().mockResolvedValue({ installed: false, running: false, detail: '' }) });
+  it('runServiceStatusCommand logs installed:no/running:no/detail:(none) for an empty, cleanly-confirmed status', async () => {
+    const lifecycle = fakeLifecycle({
+      status: vi.fn().mockResolvedValue({ installed: false, running: false, determinate: true, detail: '' }),
+    });
     const { log, lines } = collectLog();
     await runServiceStatusCommand(baseConfig(), '/c.json', [], { lifecycle, log });
     expect(lines).toEqual(['installed: no', 'running: no', 'detail: (none)']);
   });
 
   it('runServiceStatusCommand logs installed:yes/running:yes with real detail text', async () => {
-    const lifecycle = fakeLifecycle({ status: vi.fn().mockResolvedValue({ installed: true, running: true, detail: 'state = running' }) });
+    const lifecycle = fakeLifecycle({
+      status: vi.fn().mockResolvedValue({ installed: true, running: true, determinate: true, detail: 'state = running' }),
+    });
     const { log, lines } = collectLog();
     await runServiceStatusCommand(baseConfig(), '/c.json', [], { lifecycle, log });
     expect(lines).toEqual(['installed: yes', 'running: yes', 'detail: state = running']);
+  });
+
+  it('finding P1 #2 (residual, round 3): runServiceStatusCommand logs "running: unknown (...)" rather than a confirmed "no" when the manager query was indeterminate', async () => {
+    const lifecycle = fakeLifecycle({
+      status: vi.fn().mockResolvedValue({
+        installed: true,
+        running: false,
+        determinate: false,
+        detail: 'Failed to connect to bus: No such file or directory',
+      }),
+    });
+    const { log, lines } = collectLog();
+    await runServiceStatusCommand(baseConfig(), '/c.json', [], { lifecycle, log });
+    expect(lines).toEqual([
+      'installed: yes',
+      'running: unknown (could not query the service manager)',
+      'detail: Failed to connect to bus: No such file or directory',
+    ]);
   });
 });

@@ -87,9 +87,37 @@ export interface ServiceInstallOptions {
 export interface ServiceStatusResult {
   /** Whether the platform's own service manager has this service registered at all (a plist/unit/WinSW-config file present — checked directly, not inferred from `running`). */
   installed: boolean;
-  /** Whether it's currently running, per the platform's own authoritative query (`launchctl print`, `systemctl --user is-active`, `sc.exe query`) — never a locally-cached guess. */
+  /** Whether it's currently running, per the platform's own authoritative query (`launchctl print`, `systemctl --user is-active`, `sc.exe query`) — never a locally-cached guess. `false` here means "confirmed not running" ONLY when `determinate` is also `true` — see that field's own doc comment. */
   running: boolean;
-  /** Raw human-readable output from the underlying platform tool, for the `service-status` CLI subcommand and debugging. Never parsed further than the two booleans above. */
+  /**
+   * Finding P1 #2 (residual, round 3): whether `running`/`installed` above
+   * were actually CONFIRMED by a clean query, as opposed to a fallback
+   * because the platform's own service-manager tool could not be asked at
+   * all. `run()` (`exec-runner.ts`'s `Runner`) resolves an ordinary
+   * non-throwing `RunResult` for a bus-connect failure, an unreachable
+   * launchd GUI domain, or a permission-denied query — the SAME shape a
+   * genuine "not running" query returns — so without this field, a caller
+   * receiving `running: false` could not tell "the manager confirms it's
+   * not running" apart from "the manager could not even be asked" (both
+   * silently collapsed into the same boolean). Concretely:
+   *
+   * - `true`: either an authoritative "running"/"active" match, or a query
+   *   that resolved with a KNOWN clean "not running"/"not loaded"/"not
+   *   found" result.
+   * - `false`: the query itself could not be answered — a
+   *   connectivity/permission/manager-unreachable failure (each platform
+   *   classifies this with the SAME `neverAbsence`-style pattern list its
+   *   `uninstall()`/`stop()` already use for the identical reason — see
+   *   `systemd.ts`/`launchd.ts`/`winsw.ts`'s own
+   *   `*_CONNECTIVITY_OR_PERMISSION_FAILURE` constants). `running: false`
+   *   in this case is a FALLBACK, not a confirmed fact.
+   *
+   * Callers that must not fail open on an unreachable manager (see
+   * `bin/commands/unpair.ts`'s `checkServiceState`) must treat
+   * `determinate: false` exactly the same as a thrown `status()` call.
+   */
+  determinate: boolean;
+  /** Raw human-readable output from the underlying platform tool, for the `service-status` CLI subcommand and debugging. Never parsed further than the booleans above. */
   detail: string;
 }
 

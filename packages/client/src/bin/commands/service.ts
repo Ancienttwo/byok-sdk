@@ -113,6 +113,12 @@ export async function runServiceStatusCommand(config: DaemonConfig, configPath: 
   const lifecycle = buildLifecycle(config, configPath, rest, deps);
   const status = await lifecycle.status();
   log(`installed: ${status.installed ? 'yes' : 'no'}`);
-  log(`running: ${status.running ? 'yes' : 'no'}`);
+  // Finding P1 #2 (residual, round 3): a plain `running: no` would misreport
+  // an INDETERMINATE query (manager unreachable/permission denied — see
+  // `ServiceStatusResult.determinate`) as a confirmed "not running" result.
+  // Said so explicitly instead; the raw `detail` line right after still
+  // carries the underlying tool output for diagnosis.
+  const runningLabel = status.running ? 'yes' : status.determinate ? 'no' : 'unknown (could not query the service manager)';
+  log(`running: ${runningLabel}`);
   log(`detail: ${status.detail.trim() || '(none)'}`);
 }

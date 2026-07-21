@@ -10,6 +10,7 @@ import {
   createAuditAppender,
   followAuditLog,
   MAX_AUDIT_LOG_BYTES,
+  MAX_LIVE_TASK_ANCHORS,
   readAuditEvents,
 } from '../bin/audit-log';
 import { atomicWriteFile } from '../util/atomic-write';
@@ -344,6 +345,70 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
     // its OWN terminal event and needs no anchor.
     expect(events.some((e) => 'taskId' in e && e.taskId === 'filler-0')).toBe(false);
     expect(events.length).toBeLessThan(AUDIT_LOG_TRIM_TARGET_LINES + 10);
+  });
+
+  it('finding P2 (new, round 2): many (>> cap) never-terminal tasks do not defeat the rotation cap — anchors are themselves bounded, dropping the oldest, and a recently-touched running task still survives', async () => {
+    const storeDir = await tmpDir('byok-audit-rotate-anchor-cap-');
+    await fs.mkdir(storeDir, { recursive: true });
+    const filePath = auditLogPath(storeDir);
+
+    const lines: string[] = [];
+    // Far more distinct non-terminal (never-completed) taskIds than
+    // MAX_LIVE_TASK_ANCHORS — every one of these would have gotten its own
+    // anchor under the un-capped round-1-only logic, defeating the size cap
+    // this test exercises.
+    const leakedCount = MAX_LIVE_TASK_ANCHORS * 3;
+    for (let i = 0; i < leakedCount; i++) {
+      lines.push(JSON.stringify({ kind: 'claimed', ts: '2026-01-01T00:00:00.000Z', taskId: `leaked-${i}` }));
+    }
+    // The most RECENTLY-touched non-terminal task (last of the candidates,
+    // by line index) — must survive the cap, which keeps the most recent
+    // and drops the oldest.
+    lines.push(JSON.stringify({ kind: 'started', ts: '2026-01-01T00:00:01.000Z', taskId: 'recent-running' }));
+
+    // Bulk TERMINAL filler (none of it needs its own anchor) — enough to
+    // push the file over the size cap and well past the trim target.
+    const fillerCount = AUDIT_LOG_TRIM_TARGET_LINES * 5;
+    for (let i = 0; i < fillerCount; i++) {
+      lines.push(
+        JSON.stringify({
+          kind: 'completed',
+          ts: '2026-01-01T00:00:02.000Z',
+          taskId: `filler-${i}`,
+          summarySize: 4,
+          sessionRef: 'sess',
+          padding: 'x'.repeat(500),
+        }),
+      );
+    }
+    await fs.writeFile(filePath, `${lines.join('\n')}\n`, { mode: 0o600 });
+    expect((await fs.stat(filePath)).size).toBeGreaterThan(MAX_AUDIT_LOG_BYTES);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // One more real append triggers the rotation check.
+    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:03.000Z' });
+
+    const events = await readAuditEvents(storeDir);
+
+    // The file stays BOUNDED: at most the trim target plus the anchor cap —
+    // never one anchor per leaked task (which would be ~leakedCount lines,
+    // far larger than this bound).
+    expect(events.length).toBeLessThanOrEqual(AUDIT_LOG_TRIM_TARGET_LINES + MAX_LIVE_TASK_ANCHORS + 10);
+
+    // The most recently-touched non-terminal task is still preserved...
+    expect(events.some((e) => 'taskId' in e && e.taskId === 'recent-running')).toBe(true);
+
+    // ...but the OLDEST leaked non-terminal tasks were dropped once the cap
+    // was exceeded (only the most recent MAX_LIVE_TASK_ANCHORS survive).
+    expect(events.some((e) => 'taskId' in e && e.taskId === 'leaked-0')).toBe(false);
+
+    // Exactly one warning was logged for the whole rotation — not one per
+    // dropped anchor. Asserted BEFORE mockRestore(), which clears call history.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('MAX_LIVE_TASK_ANCHORS');
+
+    warnSpy.mockRestore();
   });
 });
 

@@ -218,9 +218,10 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(run).toHaveBeenCalledWith('sc.exe', ['query', 'Acme-Agent-']);
     expect(status.installed).toBe(true);
     expect(status.running).toBe(true);
+    expect(status.determinate).toBe(true);
   });
 
-  it('status() reports running=false on a STOPPED state line', async () => {
+  it('status() reports running=false, determinate=true on a STOPPED state line', async () => {
     const fs = fakeFs();
     fs.stat.mockResolvedValue({} as never);
     const scOutput = ['SERVICE_NAME: Acme-Agent-', '        STATE              : 1  STOPPED'].join('\r\n');
@@ -229,13 +230,26 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
 
     const status = await lifecycle.status();
     expect(status.running).toBe(false);
+    expect(status.determinate).toBe(true);
   });
 
-  it('status() reports installed=false when sc query fails (service does not exist) and no xml file exists locally', async () => {
+  it('status() reports installed=false, determinate=true when sc query fails (service does not exist) and no xml file exists locally', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
     const lifecycle = createWinswLifecycle(def(), { run, fs: fakeFs() });
     const status = await lifecycle.status();
     expect(status.installed).toBe(false);
     expect(status.running).toBe(false);
+    expect(status.determinate).toBe(true);
+  });
+
+  it('finding P1 #2 (residual, round 3): status() reports determinate=false (never a confirmed "not running") when sc.exe reports access denied', async () => {
+    const fs = fakeFs();
+    fs.stat.mockResolvedValue({} as never);
+    const run = vi.fn<Runner>().mockResolvedValue(fail(5, '', 'Access is denied.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    const status = await lifecycle.status();
+    expect(status.running).toBe(false);
+    expect(status.determinate).toBe(false);
   });
 });

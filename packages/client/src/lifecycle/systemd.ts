@@ -262,7 +262,17 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
     const installed = await fileExists(unitPath());
     const result = await run('systemctl', ['--user', 'is-active', unitName]);
     const detail = (result.stdout || result.stderr).trim();
-    return { installed, running: result.code === 0 && detail === 'active', detail };
+    const running = result.code === 0 && detail === 'active';
+    // Finding P1 #2 (residual, round 3): a bus-connect/permission failure on
+    // THIS query is not evidence of "inactive" — it means `systemctl`
+    // couldn't even be asked. Reuses the same `neverAbsence`-style pattern
+    // this file already applies to `uninstall()`/`stop()` (see
+    // `SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE`'s own doc comment) so a
+    // caller like `bin/commands/unpair.ts`'s `checkServiceState` can tell
+    // "confirmed not running" apart from "couldn't tell" — see
+    // `service-types.ts`'s `ServiceStatusResult.determinate`.
+    const determinate = running || !SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
+    return { installed, running, determinate, detail };
   }
 
   return { install, uninstall, start, stop, status };

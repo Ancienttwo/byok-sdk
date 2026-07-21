@@ -206,7 +206,15 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
     const result = await run('sc.exe', ['query', id]);
     const detail = (result.stdout || result.stderr).trim();
     const running = result.code === 0 && /\bSTATE\b.*\bRUNNING\b/i.test(detail);
-    return { installed, running, detail };
+    // Finding P1 #2 (residual, round 3): see `systemd.ts`'s `status()` for
+    // the full rationale — reuses this file's own
+    // `WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE` so callers can tell a
+    // confirmed result (including a clean "does not exist", code 1060 —
+    // unaffected, since that text never matches this pattern list) apart
+    // from a query the SCM/WinSW could not even answer — see
+    // `service-types.ts`'s `ServiceStatusResult.determinate`.
+    const determinate = running || !WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
+    return { installed, running, determinate, detail };
   }
 
   return { install, uninstall, start, stop, status };

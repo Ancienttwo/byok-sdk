@@ -324,10 +324,10 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
 
     const status = await lifecycle.status();
-    expect(status).toEqual({ installed: true, running: true, detail: 'active' });
+    expect(status).toEqual({ installed: true, running: true, determinate: true, detail: 'active' });
   });
 
-  it('status() reports running=false when is-active exits non-zero (inactive/failed), even though installed', async () => {
+  it('status() reports running=false, determinate=true when is-active exits non-zero (inactive/failed), even though installed', async () => {
     const fs = fakeFs();
     fs.stat.mockResolvedValue({} as never);
     const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'inactive\n'));
@@ -336,6 +336,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     const status = await lifecycle.status();
     expect(status.installed).toBe(true);
     expect(status.running).toBe(false);
+    expect(status.determinate).toBe(true);
     expect(status.detail).toBe('inactive');
   });
 
@@ -344,5 +345,27 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     const lifecycle = createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' });
     const status = await lifecycle.status();
     expect(status.installed).toBe(false);
+  });
+
+  it('finding P1 #2 (residual, round 3): status() reports determinate=false (never a confirmed "not running") on a bus-connect failure (no --user D-Bus session)', async () => {
+    const fs = fakeFs();
+    fs.stat.mockResolvedValue({} as never);
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'Failed to connect to bus: No such file or directory'));
+    const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
+
+    const status = await lifecycle.status();
+    expect(status.running).toBe(false);
+    expect(status.determinate).toBe(false);
+  });
+
+  it('finding P1 #2 (residual, round 3): status() reports determinate=false on a permission-denied query', async () => {
+    const fs = fakeFs();
+    fs.stat.mockResolvedValue({} as never);
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'Access denied'));
+    const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
+
+    const status = await lifecycle.status();
+    expect(status.running).toBe(false);
+    expect(status.determinate).toBe(false);
   });
 });

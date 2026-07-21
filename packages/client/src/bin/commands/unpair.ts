@@ -27,14 +27,28 @@ export class UnpairBlockedByRunningServiceError extends Error {
 }
 
 /**
- * Finding P1 #2 (residual, STILL-OPEN, now fixed): thrown instead of
+ * Finding P1 #2 (residual, now fixed across two rounds): thrown instead of
  * clearing the store when unpair could NOT positively confirm that no
- * background service/daemon is running — a `deps.lifecycle` that could not
- * even be constructed (unsupported platform, win32 without `--winsw-bin`,
- * or no config to build one from at all) or whose `status()` call itself
- * rejected (the query to the platform's service manager failed) are both
- * "unknown", and unknown is treated as unsafe BY DEFAULT — exactly like a
- * confirmed-running service — unless the caller opts in via `--force`.
+ * background service/daemon is running. Three shapes all collapse to
+ * "unknown", unsafe BY DEFAULT — exactly like a confirmed-running service —
+ * unless the caller opts in via `--force`:
+ *
+ * - Round 1: a `deps.lifecycle` that could not even be constructed
+ *   (unsupported platform, win32 without `--winsw-bin`, or no config to
+ *   build one from at all).
+ * - Round 1: a `status()` call that itself rejected (the query to the
+ *   platform's service manager failed outright).
+ * - Round 3: a `status()` call that RESOLVED but reported
+ *   `determinate: false` — the manager query itself could not be answered
+ *   (no reachable systemd `--user` D-Bus session, no launchd GUI domain for
+ *   this uid, permission denied), so `running: false` in that response is a
+ *   fallback, not a confirmed fact; see `lifecycle/service-types.ts`'s
+ *   `ServiceStatusResult.determinate`. Every one of `systemd.ts`/
+ *   `launchd.ts`/`winsw.ts` used to collapse exactly this case into a plain
+ *   `running: false`, which this file's `checkServiceState` then trusted at
+ *   face value — reopening the identical fail-open gap round 1 fixed for
+ *   the other two shapes.
+ *
  * Bypassable by `--force`, deliberately unlike
  * {@link UnpairBlockedByRunningServiceError}: this error means "can't
  * tell", not "confirmed unsafe".
@@ -81,17 +95,19 @@ export interface UnpairDeps {
 }
 
 /**
- * Finding P1 #2 (residual): the three outcomes {@link runUnpairCommand}
- * acts on. A `lifecycle` that's `undefined`, or whose `status()` call
- * rejects, both collapse to `'unknown'` — deliberately NOT reinterpreted as
- * "confirmed not running" (that was the fail-open bug). A `status()` call
- * that RESOLVES is trusted at face value per `ServiceStatusResult`'s own
- * contract ("queried fresh from the platform's own service manager... never
- * a locally-cached guess" — see `lifecycle/service-types.ts`); if a
- * specific platform's `status()` implementation itself silently folds an
- * internal query failure into `running: false` rather than rejecting,
- * that's a gap in that implementation, not something this caller can
- * detect from the result shape alone.
+ * Finding P1 #2 (residual, now fixed across two rounds): the three outcomes
+ * {@link runUnpairCommand} acts on. A `lifecycle` that's `undefined`, whose
+ * `status()` call rejects, OR whose `status()` call resolves with
+ * `determinate: false` (round 3 — see `lifecycle/service-types.ts`'s
+ * `ServiceStatusResult.determinate`: the platform's own manager query
+ * itself could not be answered) all collapse to `'unknown'` — deliberately
+ * NOT reinterpreted as "confirmed not running" (that was the original
+ * fail-open bug, and round 3's residual reopening of it via a `status()`
+ * that resolves cleanly instead of rejecting). Only a `status()` call that
+ * resolves with `determinate: true` is trusted at face value per
+ * `ServiceStatusResult`'s own contract ("queried fresh from the platform's
+ * own service manager... never a locally-cached guess" — see
+ * `lifecycle/service-types.ts`).
  */
 type ServiceCheckResult =
   | { outcome: 'confirmed-not-running' }
@@ -104,7 +120,21 @@ async function checkServiceState(lifecycle: Pick<ServiceLifecycle, 'status'> | u
   }
   try {
     const status = await lifecycle.status();
-    return status.running ? { outcome: 'confirmed-running', detail: status.detail } : { outcome: 'confirmed-not-running' };
+    if (status.running) {
+      return { outcome: 'confirmed-running', detail: status.detail };
+    }
+    if (!status.determinate) {
+      // Finding P1 #2 (residual, round 3): `status()` RESOLVED (didn't
+      // throw) with `running: false`, but it was NOT a clean confirmation —
+      // the manager query itself failed (unreachable/permission-denied).
+      // Treat exactly like a thrown `status()` call: cannot confirm no
+      // daemon is running.
+      return {
+        outcome: 'unknown',
+        reason: `service status could not be confirmed — the service manager query was indeterminate rather than a clean "not running" result${status.detail ? `: ${status.detail}` : ''}`,
+      };
+    }
+    return { outcome: 'confirmed-not-running' };
   } catch (err) {
     return { outcome: 'unknown', reason: `checking service status failed: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -147,7 +177,7 @@ async function checkServiceState(lifecycle: Pick<ServiceLifecycle, 'status'> | u
  *   {@link UnpairBlockedByRunningServiceError} BEFORE even prompting for
  *   confirmation, rather than proceeding and quietly losing the race.
  *   Unconditional — `--force` does not bypass this; see below.
- * - Finding P1 #2 residual (STILL-OPEN, now fixed): every OTHER path used
+ * - Finding P1 #2 residual, round 1 (now fixed): every OTHER path used
  *   to FAIL OPEN — no `deps.lifecycle` at all (unsupported platform, win32
  *   without `--winsw-bin`, or no config to build one from), or a
  *   `status()` call that itself errored, both silently fell through to
@@ -156,11 +186,23 @@ async function checkServiceState(lifecycle: Pick<ServiceLifecycle, 'status'> | u
  *   {@link UnpairUnknownDaemonStateError} (before prompting, same position
  *   as the confirmed-running case above) unless the caller passes
  *   `--force`, which proceeds anyway and logs an explicit warning
- *   alongside the usual success message instead of the usual NOTE. A
- *   `status()` call that RESOLVES cleanly with `running: false` is still
- *   trusted at face value and proceeds without needing `--force` — this
- *   fix does not make every unpair require `--force`, only the
- *   genuinely-unconfirmable ones.
+ *   alongside the usual success message instead of the usual NOTE.
+ * - Finding P1 #2 residual, round 3 (now fixed): a `status()` call that
+ *   RESOLVED (didn't throw) with `running: false` was ALSO being trusted
+ *   at face value even when the platform's own query had actually failed
+ *   to reach the service manager at all — `systemd.ts`/`launchd.ts`/
+ *   `winsw.ts` used to collapse a bus-connect/permission-denied/
+ *   manager-unreachable query failure into a plain `running: false`,
+ *   textually and structurally indistinguishable from a clean "confirmed
+ *   not running" (the exact same re-open shape round 1 fixed for the
+ *   other two paths). `ServiceStatusResult` is now tri-state
+ *   (`determinate: boolean` — see `lifecycle/service-types.ts`), every
+ *   platform's `status()` sets it accurately, and `checkServiceState`
+ *   treats `determinate: false` exactly like a thrown `status()` call.
+ *   Only a `status()` call that resolves `running: false` AND
+ *   `determinate: true` is trusted at face value and proceeds without
+ *   needing `--force` — this fix does not make every unpair require
+ *   `--force`, only the genuinely-unconfirmable ones.
  * - A `start` running directly in the foreground (no OS service involved)
  *   cannot be detected at all from a separate short-lived CLI invocation,
  *   even when the OS-service check above comes back clean — this residual

@@ -216,7 +216,15 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
     const result = await run('launchctl', ['print', serviceTarget()]);
     const detail = result.stdout || result.stderr;
     const running = result.code === 0 && /\bstate\s*=\s*running\b/i.test(detail);
-    return { installed, running, detail };
+    // Finding P1 #2 (residual, round 3): see `systemd.ts`'s `status()` for
+    // the full rationale — reuses this file's own
+    // `LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE` (an unreachable GUI
+    // domain or a permission failure on THIS query is not evidence of "not
+    // running") so callers can tell a confirmed result apart from one the
+    // manager could not even answer — see `service-types.ts`'s
+    // `ServiceStatusResult.determinate`.
+    const determinate = running || !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
+    return { installed, running, determinate, detail };
   }
 
   return { install, uninstall, start, stop, status };

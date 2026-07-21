@@ -34,6 +34,22 @@ function collectLog(): { log: (line: string) => void; lines: string[] } {
   return { log: (line) => lines.push(line), lines };
 }
 
+/**
+ * Shared by both the "confirmed running/not-running" tests and the
+ * "residual" (round 3) indeterminate-query tests below — `determinate`
+ * defaults to `true` (a clean, confirmed query) so every existing fixture
+ * stays a "confirmed" result unchanged; the round-3 tests override it
+ * explicitly to `false` (see `ServiceStatusResult.determinate`).
+ */
+function fakeLifecycle(status: {
+  installed: boolean;
+  running: boolean;
+  detail: string;
+  determinate?: boolean;
+}): Pick<ServiceLifecycle, 'status'> {
+  return { status: vi.fn().mockResolvedValue({ determinate: true, ...status }) };
+}
+
 describe('bin/commands/status: runStatusCommand', () => {
   it('reports unpaired, no connection, zero tasks, and branding when no state exists yet', async () => {
     const storeDir = await tmpDir('byok-cmd-status-empty-');
@@ -237,9 +253,6 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
   });
 
   describe('finding P1 #2: lifecycle-aware refusal against a running background service', () => {
-    function fakeLifecycle(status: { installed: boolean; running: boolean; detail: string }): Pick<ServiceLifecycle, 'status'> {
-      return { status: vi.fn().mockResolvedValue(status) };
-    }
 
     it('refuses (never calling daemon.unpair(), never even prompting) when the lifecycle reports the service running', async () => {
       const unpair = vi.fn().mockResolvedValue(undefined);
@@ -305,7 +318,7 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
     });
   });
 
-  describe('finding P1 #2 residual (STILL-OPEN, now fixed): fail-CLOSED, not open, when the daemon state cannot be confirmed', () => {
+  describe('finding P1 #2 residual (now fixed across rounds 1 and 3): fail-CLOSED, not open, when the daemon state cannot be confirmed', () => {
     it('refuses (never calling daemon.unpair()) when no lifecycle was supplied at all — this used to fail OPEN', async () => {
       const unpair = vi.fn().mockResolvedValue(undefined);
 
@@ -353,6 +366,62 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
       await runUnpairCommand({ unpair }, { confirmed: true, force: true, lifecycle, log });
       expect(unpair).toHaveBeenCalledTimes(1);
       expect(lines.some((l) => l.includes('WARNING') && l.includes('sc.exe not found'))).toBe(true);
+    });
+
+    describe('round 3: status() RESOLVES (does not throw) but the manager query itself was indeterminate', () => {
+      it('refuses (never calling daemon.unpair(), never clearing the store) when status() resolves determinate=false on a bus-connect failure — this used to fail OPEN', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const lifecycle = fakeLifecycle({
+          installed: true,
+          running: false,
+          detail: 'Failed to connect to bus: No such file or directory',
+          determinate: false,
+        });
+
+        await expect(runUnpairCommand({ unpair }, { confirmed: true, lifecycle })).rejects.toThrow(UnpairUnknownDaemonStateError);
+        expect(unpair).not.toHaveBeenCalled();
+      });
+
+      it('refuses when status() resolves determinate=false on a permission-denied query', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const lifecycle = fakeLifecycle({ installed: true, running: false, detail: 'Access denied', determinate: false });
+
+        await expect(runUnpairCommand({ unpair }, { confirmed: true, lifecycle })).rejects.toThrow(UnpairUnknownDaemonStateError);
+        expect(unpair).not.toHaveBeenCalled();
+      });
+
+      it('--force proceeds anyway when status() resolves indeterminate, and still logs the warning with the manager detail', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const lifecycle = fakeLifecycle({
+          installed: true,
+          running: false,
+          detail: 'Failed to connect to bus: No such file or directory',
+          determinate: false,
+        });
+        const { log, lines } = collectLog();
+
+        await runUnpairCommand({ unpair }, { confirmed: true, force: true, lifecycle, log });
+        expect(unpair).toHaveBeenCalledTimes(1);
+        expect(lines.some((l) => l.includes('WARNING') && l.includes('Failed to connect to bus'))).toBe(true);
+      });
+
+      it('a clean (determinate=true) not-installed/not-running result still proceeds without --force — this fix does not require --force universally', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const lifecycle = fakeLifecycle({ installed: false, running: false, detail: '', determinate: true });
+
+        await runUnpairCommand({ unpair }, { confirmed: true, lifecycle });
+        expect(unpair).toHaveBeenCalledTimes(1);
+      });
+
+      it('a CONFIRMED running result still hard-blocks even when determinate=true is explicit — unconditional, same as the round-1 check', async () => {
+        const unpair = vi.fn().mockResolvedValue(undefined);
+        const lifecycle = fakeLifecycle({ installed: true, running: true, detail: 'state = running', determinate: true });
+
+        await expect(runUnpairCommand({ unpair }, { confirmed: true, force: true, lifecycle })).rejects.toThrow(
+          UnpairBlockedByRunningServiceError,
+        );
+        expect(unpair).not.toHaveBeenCalled();
+      });
     });
 
     it('never even prompts for confirmation before refusing on an unknown state — same as the confirmed-running check', async () => {

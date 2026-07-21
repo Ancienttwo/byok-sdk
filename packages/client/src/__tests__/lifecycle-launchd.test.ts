@@ -203,10 +203,15 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
 
     const status = await lifecycle.status();
-    expect(status).toEqual({ installed: true, running: true, detail: expect.stringContaining('state = running') });
+    expect(status).toEqual({
+      installed: true,
+      running: true,
+      determinate: true,
+      detail: expect.stringContaining('state = running'),
+    });
   });
 
-  it('status() reports running=false when launchctl print fails (not loaded), even though the plist file exists', async () => {
+  it('status() reports running=false, determinate=true when launchctl print fails (not loaded), even though the plist file exists', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'Could not find service'));
     const fs = fakeFs();
     fs.stat.mockResolvedValue({} as never);
@@ -215,6 +220,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     const status = await lifecycle.status();
     expect(status.installed).toBe(true);
     expect(status.running).toBe(false);
+    expect(status.determinate).toBe(true);
   });
 
   it('status() reports installed=false when no plist file exists on disk', async () => {
@@ -222,6 +228,28 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     const lifecycle = createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 });
     const status = await lifecycle.status();
     expect(status.installed).toBe(false);
+  });
+
+  it('finding P1 #2 (residual, round 3): status() reports determinate=false (never a confirmed "not running") when launchctl cannot find the GUI domain for this uid', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(112, 'Could not find domain for user gui: 1'));
+    const fs = fakeFs();
+    fs.stat.mockResolvedValue({} as never);
+    const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 1 });
+
+    const status = await lifecycle.status();
+    expect(status.running).toBe(false);
+    expect(status.determinate).toBe(false);
+  });
+
+  it('finding P1 #2 (residual, round 3): status() reports determinate=false on "Operation not permitted"', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, 'Operation not permitted'));
+    const fs = fakeFs();
+    fs.stat.mockResolvedValue({} as never);
+    const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
+
+    const status = await lifecycle.status();
+    expect(status.running).toBe(false);
+    expect(status.determinate).toBe(false);
   });
 
   it('throws a clear error if getuid is unavailable (non-POSIX) and no override was given', async () => {
