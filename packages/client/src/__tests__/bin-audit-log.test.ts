@@ -12,6 +12,8 @@ import {
   MAX_AUDIT_LOG_BYTES,
   readAuditEvents,
 } from '../bin/audit-log';
+import { atomicWriteFile } from '../util/atomic-write';
+import { deriveTasksFromEvents } from '../bin/tasks-view';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -143,6 +145,84 @@ describe('bin/audit-log: finding P1 #3 (SECURITY) — redaction, 0600 file, 0700
   });
 });
 
+describe('bin/audit-log: finding P1 #3b (STILL-OPEN, now fixed) — chmod happens BEFORE the write, not after', () => {
+  it('reasserts 0600 before appendFile is called — no window where the appended line lands in a still-permissive file', async () => {
+    const storeDir = await tmpDir('byok-audit-chmod-order-');
+    await fs.mkdir(storeDir, { recursive: true });
+    const filePath = auditLogPath(storeDir);
+    // Pre-existing file, world-readable — simulates one predating this fix
+    // (or loosened by something else in between appends).
+    await fs.writeFile(filePath, `${JSON.stringify({ kind: 'unpaired', ts: '2025-01-01T00:00:00.000Z' })}\n`, { mode: 0o644 });
+    expect((await fs.stat(filePath)).mode & 0o777).toBe(0o644);
+
+    const callOrder: string[] = [];
+    let modeObservedBeforeAppend: number | undefined;
+    const realOpen = fs.open.bind(fs);
+    const openSpy = vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await realOpen(...args);
+      const originalChmod = handle.chmod.bind(handle);
+      const originalAppendFile = handle.appendFile.bind(handle);
+      handle.chmod = (async (mode: Parameters<typeof handle.chmod>[0]) => {
+        callOrder.push('chmod');
+        return originalChmod(mode);
+      }) as typeof handle.chmod;
+      handle.appendFile = (async (...appendArgs: Parameters<typeof handle.appendFile>) => {
+        callOrder.push('appendFile');
+        // The critical assertion: by the time the WRITE actually happens,
+        // has the tightening already landed on disk? A separate, real
+        // `fs.stat` call (not going through the mocked handle) proves it —
+        // this is what "no window" means, not just "eventually 0600".
+        modeObservedBeforeAppend = (await fs.stat(filePath)).mode & 0o777;
+        return originalAppendFile(...appendArgs);
+      }) as typeof handle.appendFile;
+      return handle;
+    });
+
+    try {
+      await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
+    } finally {
+      openSpy.mockRestore();
+    }
+
+    expect(callOrder).toEqual(['chmod', 'appendFile']);
+    expect(modeObservedBeforeAppend).toBe(0o600);
+
+    const stat = await fs.stat(filePath);
+    expect(stat.mode & 0o777).toBe(0o600);
+  });
+
+  it('tightens the file to 0600 even when appendFile itself fails — the tightening is not gated behind a successful write', async () => {
+    const storeDir = await tmpDir('byok-audit-chmod-order-failure-');
+    await fs.mkdir(storeDir, { recursive: true });
+    const filePath = auditLogPath(storeDir);
+    await fs.writeFile(filePath, `${JSON.stringify({ kind: 'unpaired', ts: '2025-01-01T00:00:00.000Z' })}\n`, { mode: 0o644 });
+
+    const realOpen = fs.open.bind(fs);
+    const openSpy = vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await realOpen(...args);
+      handle.appendFile = (async () => {
+        throw new Error('simulated disk-full failure');
+      }) as typeof handle.appendFile;
+      return handle;
+    });
+
+    try {
+      await expect(appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' })).rejects.toThrow(
+        'simulated disk-full failure',
+      );
+    } finally {
+      openSpy.mockRestore();
+    }
+
+    // The append itself failed, but the file must still have been
+    // tightened to 0600 — the OLD (buggy) code gated the chmod behind a
+    // successful appendFile, so a failing write left a pre-existing
+    // permissive file exactly as permissive as it started.
+    const stat = await fs.stat(filePath);
+    expect(stat.mode & 0o777).toBe(0o600);
+  });
+});
+
 describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () => {
   it('rotates (atomically trims to the most recent lines) once the file exceeds the size cap', async () => {
     const storeDir = await tmpDir('byok-audit-rotate-');
@@ -151,16 +231,32 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
 
     // Pre-seed a file already OVER the cap directly (bypassing individual
     // appendAuditEvent calls, which would be slow/wasteful at this scale).
-    // Each line is a valid (already-redacted-shaped) 'claimed' record with a
+    // Each line is a valid (already-redacted-shaped) 'completed' (TERMINAL —
+    // see finding P2 (new)'s `compactPreservingLiveTasks`) record with a
     // distinguishable taskId so the trim boundary is directly observable.
-    // Line count and per-line padding are both deliberately chosen so that
-    // this many lines exceeds MAX_AUDIT_LOG_BYTES, but AUDIT_LOG_TRIM_TARGET_LINES
-    // of them (what a rotation keeps) does NOT — i.e. proportioned like real
-    // (small) redacted lines, not a pathological single-huge-line case.
+    // Deliberately terminal, not e.g. 'claimed': a non-terminal kind would
+    // make every one of these thousands of distinct never-completed taskIds
+    // its own live-task anchor under the new rotation logic, defeating the
+    // very cap this test exercises — a dedicated test below
+    // ('rotation preserves a still-running task's lifecycle anchor')
+    // exercises that behavior directly instead. Line count and per-line
+    // padding are both deliberately chosen so that this many lines exceeds
+    // MAX_AUDIT_LOG_BYTES, but AUDIT_LOG_TRIM_TARGET_LINES of them (what a
+    // rotation keeps) does NOT — i.e. proportioned like real (small)
+    // redacted lines, not a pathological single-huge-line case.
     const lineCount = AUDIT_LOG_TRIM_TARGET_LINES * 5;
     const bigLines: string[] = [];
     for (let i = 0; i < lineCount; i++) {
-      bigLines.push(JSON.stringify({ kind: 'claimed', ts: '2026-01-01T00:00:00.000Z', taskId: `pre-seed-${i}`, padding: 'x'.repeat(500) }));
+      bigLines.push(
+        JSON.stringify({
+          kind: 'completed',
+          ts: '2026-01-01T00:00:00.000Z',
+          taskId: `pre-seed-${i}`,
+          summarySize: 4,
+          sessionRef: 'sess',
+          padding: 'x'.repeat(500),
+        }),
+      );
     }
     await fs.writeFile(filePath, `${bigLines.join('\n')}\n`, { mode: 0o600 });
     const beforeSize = (await fs.stat(filePath)).size;
@@ -192,6 +288,62 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
     }
     const events = await readAuditEvents(storeDir);
     expect(events).toHaveLength(20); // nothing trimmed
+  });
+
+  it('finding P2 (new): rotation preserves a still-running (non-terminal) task\'s lifecycle anchor, even though its own events fall entirely in the dropped range — deriveTasksFromEvents still lists it', async () => {
+    const storeDir = await tmpDir('byok-audit-rotate-live-task-');
+    await fs.mkdir(storeDir, { recursive: true });
+    const filePath = auditLogPath(storeDir);
+
+    const lines: string[] = [];
+    // The still-running task's ONLY events — old enough that a pure
+    // positional trim would evict both, and it never reaches a terminal
+    // kind anywhere in the file.
+    lines.push(JSON.stringify({ kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 'still-running', runtime: 'pi' }));
+    lines.push(JSON.stringify({ kind: 'started', ts: '2026-01-01T00:00:01.000Z', taskId: 'still-running' }));
+
+    // Bulk TERMINAL filler (none of it needs its own anchor) — enough to
+    // push the file over the size cap and well past the trim target, so
+    // the two lines above fall in the dropped prefix under a naive
+    // positional trim.
+    const fillerCount = AUDIT_LOG_TRIM_TARGET_LINES * 5;
+    for (let i = 0; i < fillerCount; i++) {
+      lines.push(
+        JSON.stringify({
+          kind: 'completed',
+          ts: '2026-01-01T00:00:02.000Z',
+          taskId: `filler-${i}`,
+          summarySize: 4,
+          sessionRef: 'sess',
+          padding: 'x'.repeat(500),
+        }),
+      );
+    }
+    await fs.writeFile(filePath, `${lines.join('\n')}\n`, { mode: 0o600 });
+    expect((await fs.stat(filePath)).size).toBeGreaterThan(MAX_AUDIT_LOG_BYTES);
+
+    // One more real append triggers the rotation check (same trigger as
+    // the test above).
+    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:03.000Z' });
+
+    const events = await readAuditEvents(storeDir);
+
+    // The still-running task's anchor survived rotation even though it's
+    // far older than the trim target...
+    expect(events.some((e) => 'taskId' in e && e.taskId === 'still-running')).toBe(true);
+
+    // ...and `deriveTasksFromEvents` — the actual `tasks`/`status` reducer
+    // — still lists it as Running, rather than forgetting it entirely.
+    const tasks = deriveTasksFromEvents(events);
+    const stillRunning = tasks.find((t) => t.taskId === 'still-running');
+    expect(stillRunning).toBeDefined();
+    expect(stillRunning?.state).toBe('Running');
+
+    // The bulk terminal filler did NOT all get individually anchored —
+    // rotation still actually bounds the file, since each filler task has
+    // its OWN terminal event and needs no anchor.
+    expect(events.some((e) => 'taskId' in e && e.taskId === 'filler-0')).toBe(false);
+    expect(events.length).toBeLessThan(AUDIT_LOG_TRIM_TARGET_LINES + 10);
   });
 });
 
@@ -278,6 +430,51 @@ describe('bin/audit-log: finding P2/#11 (audit half) — followAuditLog byte-off
     });
 
     await vi.waitFor(() => expect(seen.some((e) => e.kind === 'paired')).toBe(true));
+
+    controller.abort();
+    await followPromise;
+  });
+
+  it('finding P2 (new): re-syncs from the start of a REPLACED (renamed) file even when the replacement is LARGER than the old offset, rather than skipping its prefix / garbling mid-line', async () => {
+    const storeDir = await tmpDir('byok-audit-follow-rotate-larger-');
+    await fs.mkdir(storeDir, { recursive: true });
+    const filePath = auditLogPath(storeDir);
+
+    // Start the file out TINY (one event) so the follow's initial
+    // `fromEnd` offset is tiny too.
+    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
+
+    const seen: DaemonEvent[] = [];
+    const controller = new AbortController();
+    const followPromise = followAuditLog(filePath, (e) => seen.push(e), {
+      signal: controller.signal,
+      pollIntervalMs: 10,
+      fromEnd: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30)); // let it settle at the tiny offset
+
+    // Replace the file via the SAME atomic (temp-file + fs.rename)
+    // mechanism `rotateIfNeeded` actually uses, with content much LARGER
+    // (in bytes) than the tiny pre-replace offset — the old size-only
+    // check (`st.size < offset`) only reset on a SMALLER replacement, so it
+    // would have kept reading from the stale tiny offset straight into the
+    // middle of this new file's bytes instead of re-syncing from its start.
+    const replacementEvents: DaemonEvent[] = Array.from({ length: 30 }, (_, i) => ({
+      kind: 'claimed',
+      ts: `2026-01-01T00:01:${String(i).padStart(2, '0')}.000Z`,
+      taskId: `post-rotation-${i}`,
+    }));
+    const content = `${replacementEvents.map((e) => JSON.stringify(e)).join('\n')}\n`;
+    await atomicWriteFile(filePath, content, { mode: 0o600 });
+
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(replacementEvents.length));
+
+    // Every replacement event survived, in full and in order — a stale
+    // byte offset carried into the new (larger) file would instead have
+    // skipped its own prefix and likely garbled/dropped its first line(s).
+    expect(seen.map((e) => ('taskId' in e ? e.taskId : undefined))).toEqual(
+      replacementEvents.map((e) => ('taskId' in e ? e.taskId : undefined)),
+    );
 
     controller.abort();
     await followPromise;

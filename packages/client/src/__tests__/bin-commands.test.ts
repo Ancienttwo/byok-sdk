@@ -9,7 +9,7 @@ import { runPairCommand } from '../bin/commands/pair';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runTasksFollowCommand, runTasksListCommand } from '../bin/commands/tasks';
-import { runUnpairCommand, UnpairBlockedByRunningServiceError, UnpairNotConfirmedError } from '../bin/commands/unpair';
+import { runUnpairCommand, UnpairBlockedByRunningServiceError, UnpairNotConfirmedError, UnpairUnknownDaemonStateError } from '../bin/commands/unpair';
 import { appendAuditEvent, auditLogPath } from '../bin/audit-log';
 import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -195,17 +195,22 @@ describe('bin/commands/approve-reject', () => {
 });
 
 describe('bin/commands/unpair: runUnpairCommand', () => {
+  // These first four tests exercise the CONFIRMATION flow in isolation —
+  // `force: true` keeps them decoupled from the lifecycle/service-state
+  // gate (finding P1 #2 residual, its own describe block below), which
+  // would otherwise refuse before ever reaching the confirmation check
+  // since no `lifecycle` is supplied here.
   it('with confirmed:true (i.e. --yes), calls daemon.unpair() without prompting', async () => {
     const unpair = vi.fn().mockResolvedValue(undefined);
     const { log, lines } = collectLog();
-    await runUnpairCommand({ unpair }, { confirmed: true, log });
+    await runUnpairCommand({ unpair }, { confirmed: true, force: true, log });
     expect(unpair).toHaveBeenCalledTimes(1);
     expect(lines.some((l) => l.startsWith('unpaired:'))).toBe(true);
   });
 
   it('without confirmation and no TTY, throws UnpairNotConfirmedError WITHOUT calling daemon.unpair() (never hangs headless)', async () => {
     const unpair = vi.fn().mockResolvedValue(undefined);
-    await expect(runUnpairCommand({ unpair }, { isTTY: false })).rejects.toThrow(UnpairNotConfirmedError);
+    await expect(runUnpairCommand({ unpair }, { isTTY: false, force: true })).rejects.toThrow(UnpairNotConfirmedError);
     expect(unpair).not.toHaveBeenCalled();
   });
 
@@ -214,7 +219,7 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
     const input = new PassThrough();
     const output = new PassThrough();
     output.on('data', () => {}); // drain the prompt text
-    const runPromise = runUnpairCommand({ unpair }, { isTTY: true, input, output });
+    const runPromise = runUnpairCommand({ unpair }, { isTTY: true, force: true, input, output });
     input.write('y\n');
     await runPromise;
     expect(unpair).toHaveBeenCalledTimes(1);
@@ -225,7 +230,7 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
     const input = new PassThrough();
     const output = new PassThrough();
     output.on('data', () => {});
-    const runPromise = runUnpairCommand({ unpair }, { isTTY: true, input, output });
+    const runPromise = runUnpairCommand({ unpair }, { isTTY: true, force: true, input, output });
     input.write('n\n');
     await expect(runPromise).rejects.toThrow(UnpairNotConfirmedError);
     expect(unpair).not.toHaveBeenCalled();
@@ -264,7 +269,17 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
       expect(message).toContain('state = running');
     });
 
-    it('proceeds normally when the lifecycle reports installed but NOT running', async () => {
+    it('--force does NOT bypass a CONFIRMED running service — that block is unconditional', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const lifecycle = fakeLifecycle({ installed: true, running: true, detail: 'state = running' });
+
+      await expect(runUnpairCommand({ unpair }, { confirmed: true, force: true, lifecycle })).rejects.toThrow(
+        UnpairBlockedByRunningServiceError,
+      );
+      expect(unpair).not.toHaveBeenCalled();
+    });
+
+    it('proceeds normally (no --force needed) when the lifecycle reports installed but NOT running', async () => {
       const unpair = vi.fn().mockResolvedValue(undefined);
       const lifecycle = fakeLifecycle({ installed: true, running: false, detail: 'state = stopped' });
 
@@ -272,7 +287,7 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
       expect(unpair).toHaveBeenCalledTimes(1);
     });
 
-    it('proceeds normally when the lifecycle reports no service installed at all', async () => {
+    it('proceeds normally (no --force needed) when the lifecycle reports no service installed at all', async () => {
       const unpair = vi.fn().mockResolvedValue(undefined);
       const lifecycle = fakeLifecycle({ installed: false, running: false, detail: '' });
 
@@ -280,20 +295,77 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
       expect(unpair).toHaveBeenCalledTimes(1);
     });
 
-    it('proceeds normally when no lifecycle was supplied at all (could not even check — e.g. unsupported platform, or win32 without --winsw-bin)', async () => {
-      const unpair = vi.fn().mockResolvedValue(undefined);
-
-      await runUnpairCommand({ unpair }, { confirmed: true });
-      expect(unpair).toHaveBeenCalledTimes(1);
-    });
-
-    it('the success message always calls out the foreground-process residual gap, regardless of the service check result', async () => {
+    it('the success message always calls out the foreground-process residual gap, when the service state was confirmed not-running', async () => {
       const unpair = vi.fn().mockResolvedValue(undefined);
       const { log, lines } = collectLog();
       const lifecycle = fakeLifecycle({ installed: false, running: false, detail: '' });
 
       await runUnpairCommand({ unpair }, { confirmed: true, lifecycle, log });
       expect(lines.some((l) => l.includes('foreground') && l.includes('re-write device.json'))).toBe(true);
+    });
+  });
+
+  describe('finding P1 #2 residual (STILL-OPEN, now fixed): fail-CLOSED, not open, when the daemon state cannot be confirmed', () => {
+    it('refuses (never calling daemon.unpair()) when no lifecycle was supplied at all — this used to fail OPEN', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+
+      await expect(runUnpairCommand({ unpair }, { confirmed: true })).rejects.toThrow(UnpairUnknownDaemonStateError);
+      expect(unpair).not.toHaveBeenCalled();
+    });
+
+    it('the refusal message is actionable: mentions --force and that a running daemon could re-write the credential', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+
+      let caught: unknown;
+      try {
+        await runUnpairCommand({ unpair }, { confirmed: true });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UnpairUnknownDaemonStateError);
+      const message = (caught as Error).message;
+      expect(message).toContain('--force');
+      expect(message).toContain('re-writing');
+    });
+
+    it('--force proceeds anyway when no lifecycle was supplied, and logs an explicit warning instead of the usual NOTE', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const { log, lines } = collectLog();
+
+      await runUnpairCommand({ unpair }, { confirmed: true, force: true, log });
+      expect(unpair).toHaveBeenCalledTimes(1);
+      expect(lines.some((l) => l.startsWith('unpaired:') && l.includes('WARNING') && l.includes('--force'))).toBe(true);
+    });
+
+    it('refuses (never calling daemon.unpair()) when the lifecycle\'s status() call itself rejects', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const lifecycle: Pick<ServiceLifecycle, 'status'> = { status: vi.fn().mockRejectedValue(new Error('sc.exe not found')) };
+
+      await expect(runUnpairCommand({ unpair }, { confirmed: true, lifecycle })).rejects.toThrow(UnpairUnknownDaemonStateError);
+      expect(unpair).not.toHaveBeenCalled();
+    });
+
+    it('--force proceeds anyway when status() rejects, and still logs the warning', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const lifecycle: Pick<ServiceLifecycle, 'status'> = { status: vi.fn().mockRejectedValue(new Error('sc.exe not found')) };
+      const { log, lines } = collectLog();
+
+      await runUnpairCommand({ unpair }, { confirmed: true, force: true, lifecycle, log });
+      expect(unpair).toHaveBeenCalledTimes(1);
+      expect(lines.some((l) => l.includes('WARNING') && l.includes('sc.exe not found'))).toBe(true);
+    });
+
+    it('never even prompts for confirmation before refusing on an unknown state — same as the confirmed-running check', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const input = new PassThrough();
+      const output = new PassThrough();
+      output.on('data', () => {});
+
+      // No `confirmed`/`force` at all, plus an (unused) interactive TTY —
+      // if the unknown-state refusal ran AFTER the confirmation prompt,
+      // this would hang waiting on `input`. It must throw first.
+      await expect(runUnpairCommand({ unpair }, { isTTY: true, input, output })).rejects.toThrow(UnpairUnknownDaemonStateError);
+      expect(unpair).not.toHaveBeenCalled();
     });
   });
 });

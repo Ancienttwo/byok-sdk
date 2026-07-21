@@ -40,12 +40,27 @@ import { atomicWriteFile } from '../util/atomic-write';
  *    `DaemonEvent` before it ever reaches this module) is unaffected and
  *    keeps full fidelity — this redaction applies ONLY to what's written to
  *    disk.
- * 2. **Permissions**: the file is opened/created at 0600 and that mode is
- *    re-asserted via an explicit `chmod` on every append (mirrors
- *    `util/atomic-write.ts`'s own defensive re-chmod, for the identical
- *    reason: `open()`'s own `mode` argument only governs permissions at
- *    creation time). `storeDir` gets the same defensive re-`chmod` to 0700 on
- *    every append.
+ * 2. **Permissions**: the file is tightened to 0600 BEFORE any new content
+ *    is written, on every single append (mirrors `util/atomic-write.ts`'s
+ *    own defensive re-chmod, for the identical reason: `open()`'s own
+ *    `mode` argument only governs permissions at CREATION time, so a
+ *    pre-existing file — predating this fix, or loosened by something else
+ *    — keeps whatever mode it already had until explicitly chmod'd).
+ *    `storeDir` gets the same defensive re-`chmod` to 0700 on every append.
+ *
+ *    Finding P1 #3b (STILL-OPEN, now fixed): the chmod used to run AFTER
+ *    `appendFile` rather than before — for a pre-existing permissive file
+ *    that meant the newly-appended line briefly landed in a file that was
+ *    still world-readable, and if `appendFile` itself failed, the chmod
+ *    (being sequenced after it) never ran at all, leaving the file exactly
+ *    as permissive as it started. Fixed by reordering so the chmod always
+ *    happens FIRST: there is no window where a new append lands in a
+ *    still-permissive file, and the tightening takes effect even when the
+ *    append that follows it fails. This closes the gap going forward; it
+ *    does NOT retroactively scrub plaintext a pre-fix build of this code
+ *    may have already written into an inherited permissive file — only
+ *    that the file stops being world-readable from the first append
+ *    onward.
  *
  * Finding P2/#11 (audit half): also bounded/rotated now — `appendAuditEvent`
  * checks the file's size (cheap `fs.stat`) on every append and, once it
@@ -55,6 +70,14 @@ import { atomicWriteFile } from '../util/atomic-write';
  * mid-rotation) — so a long-lived daemon's audit.jsonl no longer grows
  * forever. `followAuditLog` no longer re-reads the entire file every poll
  * either; see its own doc comment.
+ *
+ * Finding P2 (new, STILL-OPEN, now fixed): that trim used to be purely
+ * positional (the most recent N lines, full stop) — which could evict
+ * EVERY event a still-running task ever had if it went quiet for long
+ * enough, permanently erasing it from `tasks`/`status` even though it was
+ * never actually done. `compactPreservingLiveTasks` now preserves one
+ * lifecycle-anchor line for any still-open (non-terminal) task that would
+ * otherwise be fully evicted — see its own doc comment.
  */
 
 export function auditLogPath(storeDir: string): string {
@@ -350,13 +373,19 @@ export async function appendAuditEvent(storeDir: string, event: DaemonEvent): Pr
   const line = `${JSON.stringify(redactForAudit(event))}\n`;
   const handle = await fs.open(filePath, 'a', AUDIT_LOG_MODE);
   try {
-    await handle.appendFile(line, 'utf8');
-    // Same reasoning as `mkdir`'s mode above: `open()`'s own `mode` argument
-    // only governs permissions at file-CREATION time. Re-assert 0600 on
-    // every single append — mirrors `util/atomic-write.ts`'s own defensive
-    // re-chmod, for the identical reason (don't trust "governed at creation
-    // only" for a file that can carry sensitive metadata).
+    // Finding P1 #3b: chmod BEFORE appending, not after. `open()`'s own
+    // `mode` argument only governs permissions at file-CREATION time, so a
+    // PRE-EXISTING file (predating this fix, or loosened by something else)
+    // keeps whatever mode it already had until explicitly chmod'd here —
+    // doing that FIRST means there is never a window where the line we're
+    // about to write lands in a still-permissive file, and the tightening
+    // still takes effect even if the `appendFile` below then fails (it's no
+    // longer gated behind a write that might throw before ever reaching
+    // it). Mirrors `util/atomic-write.ts`'s own defensive re-chmod, for the
+    // identical reason (don't trust "governed at creation only" for a file
+    // that can carry sensitive metadata).
     await handle.chmod(AUDIT_LOG_MODE);
+    await handle.appendFile(line, 'utf8');
   } finally {
     await handle.close();
   }
@@ -364,7 +393,84 @@ export async function appendAuditEvent(storeDir: string, event: DaemonEvent): Pr
   await rotateIfNeeded(filePath);
 }
 
-/** Finding P2/#11 (audit half): see `MAX_AUDIT_LOG_BYTES`'s own doc comment. */
+/**
+ * `DaemonEvent.kind`s that end a task's lifecycle — once one of these
+ * appears anywhere for a taskId, `deriveTasksFromEvents` (`tasks-view.ts`)
+ * can reconstruct that task's final state from that ONE event alone
+ * (`upsert` seeds a fresh record from whatever patch a terminal event
+ * carries), so no earlier event of its needs to survive a rotation. A small
+ * local set rather than importing from `@byok/protocol`/`tasks-view.ts`:
+ * those describe reducer OUTPUT states, not `DaemonEvent.kind`s, and only
+ * these three kinds ever end a task (mirrors `tasks-view.ts`'s own
+ * `deriveTasksFromEvents` switch).
+ */
+const TERMINAL_EVENT_KINDS = new Set(['completed', 'failed', 'cancelled']);
+
+function eventTaskId(event: DaemonEvent): string | undefined {
+  return 'taskId' in event ? event.taskId : undefined;
+}
+
+/**
+ * Finding P2 (new): a pure positional "keep the last N lines" trim can
+ * evict EVERY event a still-running (non-terminal) task ever had — if a
+ * task's `offered`/`started`/`progress` events are all old enough to fall
+ * in the dropped prefix, and it hasn't reached a terminal kind
+ * (`completed`/`failed`/`cancelled`) anywhere in the file, there is
+ * nothing left for `deriveTasksFromEvents` to reconstruct it from —
+ * `tasks`/`status` silently forget a task that is still actually running.
+ *
+ * Deliberately simple (a full retention policy is more than this finding's
+ * own scope calls for): scan every line once, tracking per taskId whether
+ * a terminal kind occurs anywhere in the file and the index of its LAST
+ * occurrence. Any taskId with no terminal kind whose last occurrence falls
+ * in the portion about to be dropped gets exactly that one line preserved
+ * — spliced in immediately before the kept tail (so the file stays
+ * oldest-first overall, matching every other invariant this module
+ * documents) as a lifecycle anchor. That's just enough for the reducer to
+ * know the task exists and its last-known state; it does NOT preserve that
+ * task's entire historical event stream (which could itself be unbounded
+ * for a long-running task with many `progress` events — preserving all of
+ * it would defeat the point of rotation). A task that already reached a
+ * terminal kind needs no anchor at all: it's fully reconstructable from
+ * that one terminal event, wherever it happens to fall.
+ *
+ * Trade-off worth calling out: the number of anchors is bounded by the
+ * number of DISTINCT non-terminal tasks old enough to be affected, which in
+ * realistic operation is small (a handful of genuinely concurrent
+ * in-flight tasks, not thousands) — so `kept.length` can exceed
+ * `targetLines` by that small amount. It's still self-correcting: once an
+ * anchored task reaches a terminal kind, a later rotation stops preserving
+ * it.
+ */
+function compactPreservingLiveTasks(lines: readonly string[], targetLines: number): string[] {
+  if (lines.length <= targetLines) return [...lines];
+
+  const cutIndex = lines.length - targetLines; // lines[0, cutIndex) would normally be dropped entirely
+  const hasTerminalEvent = new Set<string>();
+  const lastIndexForTask = new Map<string, number>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    const event = parseAuditLine(line);
+    if (!event) continue;
+    const taskId = eventTaskId(event);
+    if (taskId === undefined) continue;
+    lastIndexForTask.set(taskId, i);
+    if (TERMINAL_EVENT_KINDS.has(event.kind)) hasTerminalEvent.add(taskId);
+  }
+
+  const anchorIndices: number[] = [];
+  for (const [taskId, lastIndex] of lastIndexForTask) {
+    if (hasTerminalEvent.has(taskId)) continue; // reconstructable from its own terminal event, wherever that falls
+    if (lastIndex < cutIndex) anchorIndices.push(lastIndex); // otherwise about to be fully evicted
+  }
+  anchorIndices.sort((a, b) => a - b);
+
+  return [...anchorIndices.map((i) => lines[i]), ...lines.slice(cutIndex)].filter((l): l is string => l !== undefined);
+}
+
+/** Finding P2/#11 (audit half): see `MAX_AUDIT_LOG_BYTES`'s own doc comment. Finding P2 (new): see {@link compactPreservingLiveTasks}. */
 async function rotateIfNeeded(filePath: string): Promise<void> {
   let size: number;
   try {
@@ -375,7 +481,7 @@ async function rotateIfNeeded(filePath: string): Promise<void> {
   if (size <= MAX_AUDIT_LOG_BYTES) return;
 
   const lines = await readCompleteLines(filePath);
-  const kept = lines.slice(-AUDIT_LOG_TRIM_TARGET_LINES);
+  const kept = compactPreservingLiveTasks(lines, AUDIT_LOG_TRIM_TARGET_LINES);
   const content = kept.length > 0 ? `${kept.join('\n')}\n` : '';
   // Atomic (temp file + rename) so a concurrent `readAuditEvents`/
   // `followAuditLog` reader never observes a torn/partial file mid-rotation
@@ -519,12 +625,30 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
  * trailing line" contract for `readAuditEvents`, just incremental.
  *
  * Rotation tolerance: if `appendAuditEvent`'s own size-cap rotation (or
- * anything else) replaces the file with a SMALLER one out from under an
- * in-progress follow, `offset` resets to 0 and `pending` is cleared — the
- * follow session survives (rather than throwing) at the cost of re-emitting
- * the post-rotation file's retained lines as if they were new, identical in
- * spirit to the previous implementation's own tolerance for this exact
- * "log replaced/truncated out from under us" case.
+ * anything else) replaces the file out from under an in-progress follow,
+ * `offset` resets to 0 and `pending` is cleared — the follow session
+ * survives (rather than throwing or garbling) at the cost of re-emitting
+ * the post-rotation file's retained lines as if they were new.
+ *
+ * Finding P2 (new): that replacement is detected by file IDENTITY
+ * (`dev:ino`), not by comparing sizes. The previous implementation only
+ * reset `offset` when the new file was SMALLER than it (`st.size <
+ * offset`) — sufficient for the common case (a big pre-rotation file
+ * trimmed down to a small one), but `rotateIfNeeded`'s replace is an atomic
+ * temp-file + `fs.rename` (see `atomicWriteFile`), which swaps the
+ * underlying INODE regardless of whether the new file happens to be
+ * smaller OR LARGER than the reader's current offset. A `--follow` session
+ * that attached while the log was still tiny (a small `offset`) can have a
+ * rotation land a compacted-but-still-much-bigger-than-that-tiny-offset
+ * file in its place — the old size-only check missed exactly that case
+ * (`st.size < offset` was false), so it kept reading from the stale
+ * `offset` INTO THE NEW FILE's bytes: skipping that file's own prefix
+ * entirely and very likely starting mid-JSON-line. Tracking `dev:ino`
+ * across polls catches ANY replacement — smaller, larger, anything — and
+ * resets `offset` to 0 so the new file is always re-read from its own
+ * start. The size-based check is kept as a secondary fallback (a
+ * same-identity in-place truncate, or a platform where `ino` isn't a
+ * reliable identity signal).
  */
 export async function followAuditLog(
   filePath: string,
@@ -539,10 +663,16 @@ export async function followAuditLog(
   // return types don't always narrow identically across @types/node
   // versions — the plain `Buffer` alias covers all of them.
   let pending: Buffer = Buffer.alloc(0);
+  // Finding P2 (new): `dev:ino` of the file `offset` was last measured
+  // against — `undefined` until the first successful stat of an existing
+  // file. See this function's own doc comment ("Rotation tolerance").
+  let lastFileIdentity: string | undefined;
 
   if (fromEnd) {
     try {
-      offset = (await fs.stat(filePath)).size;
+      const st = await fs.stat(filePath);
+      offset = st.size;
+      lastFileIdentity = `${st.dev}:${st.ino}`;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       offset = 0;
@@ -559,12 +689,23 @@ export async function followAuditLog(
     }
     try {
       const st = await handle.stat();
-      if (st.size < offset) {
-        // Truncated/replaced (e.g. a rotation) out from under us — reset
-        // rather than throw; see this function's own doc comment.
+      const identity = `${st.dev}:${st.ino}`;
+      if (lastFileIdentity !== undefined && identity !== lastFileIdentity) {
+        // The file at this path was replaced (e.g. an atomic rotation)
+        // since our last read — a different inode means our byte offset no
+        // longer means anything for THIS file's bytes, regardless of
+        // whether the new file is smaller OR LARGER than the old offset
+        // (a purely size-based check misses the latter — finding P2 (new)).
+        offset = 0;
+        pending = Buffer.alloc(0);
+      } else if (st.size < offset) {
+        // Same identity but shrunk (e.g. truncated in place rather than
+        // replaced) — keep the original size-based fallback for that case,
+        // and as a safety net on a platform where `ino` isn't reliable.
         offset = 0;
         pending = Buffer.alloc(0);
       }
+      lastFileIdentity = identity;
       if (st.size <= offset) return Buffer.alloc(0);
       const length = st.size - offset;
       const buffer = Buffer.alloc(length);

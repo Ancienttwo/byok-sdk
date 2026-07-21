@@ -15,13 +15,20 @@ export interface ApproveRejectDeps {
  * wired end-to-end and ready for both prerequisites, but effectively
  * unexercised until they exist.
  *
- * Finding P1 #1: because of the above, `byok-agent approve`/`reject` fail
- * with "daemon is not started" on EVERY invocation today, no exceptions —
- * `byok-agent.ts`'s dispatch still routes to these two functions (so this
- * stays ready-wired for the day cross-process IPC exists) but deliberately
- * leaves both out of `usage()`'s advertised command list, so the CLI's own
- * `--help`-equivalent output never tells an operator to run a command that
- * cannot succeed.
+ * Finding P1 #1 (residual, STILL-OPEN, now fixed): a `Daemon` constructed by
+ * a separate, short-lived CLI invocation (never `start()`ed) fails
+ * `approve`/`reject` with "daemon is not started" on EVERY call — a
+ * confusing, sounds-like-a-bug message for something that was never wired
+ * to succeed in the first place. `byok-agent.ts` used to still DISPATCH
+ * `approve`/`reject` to this module (just hidden from `usage()`'s advertised
+ * list) — that dispatch has been removed entirely, so `byok-agent approve
+ * <id>` now falls through to the ordinary unknown-command path, like any
+ * typo, instead of running and failing with that message. This module's two
+ * functions are unaffected and still directly tested (they behave exactly
+ * as documented against whatever `Daemon`-shaped object they're given) —
+ * they remain a ready-to-wire building block for the day cross-process IPC
+ * (M4) makes calling them from this CLI meaningful; `byok-agent.ts` just no
+ * longer routes to them.
  */
 const UNEXERCISED_NOTE =
   'note: approve/reject are ready-but-unexercised — no bundled runtime adapter raises an approval yet, and byok-agent has no IPC link to an already-running `start` process (that is likely M4).';

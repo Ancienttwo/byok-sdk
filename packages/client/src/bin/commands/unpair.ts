@@ -13,6 +13,9 @@ export class UnpairNotConfirmedError extends Error {
  * Finding P1 #2: thrown instead of clearing the store when the OS
  * background service (`byok-agent install`) is currently installed AND
  * running — see this file's own module doc comment for the full "why".
+ * Unconditional: unlike {@link UnpairUnknownDaemonStateError}, `--force`
+ * never bypasses this one — it exists for a KNOWN-unsafe state, not an
+ * uncertain one.
  */
 export class UnpairBlockedByRunningServiceError extends Error {
   constructor(detail: string) {
@@ -20,6 +23,28 @@ export class UnpairBlockedByRunningServiceError extends Error {
       `unpair refused: the background service is currently running (${detail || 'installed and running'}) — stop it first (byok-agent service-stop), then retry unpair`,
     );
     this.name = 'UnpairBlockedByRunningServiceError';
+  }
+}
+
+/**
+ * Finding P1 #2 (residual, STILL-OPEN, now fixed): thrown instead of
+ * clearing the store when unpair could NOT positively confirm that no
+ * background service/daemon is running — a `deps.lifecycle` that could not
+ * even be constructed (unsupported platform, win32 without `--winsw-bin`,
+ * or no config to build one from at all) or whose `status()` call itself
+ * rejected (the query to the platform's service manager failed) are both
+ * "unknown", and unknown is treated as unsafe BY DEFAULT — exactly like a
+ * confirmed-running service — unless the caller opts in via `--force`.
+ * Bypassable by `--force`, deliberately unlike
+ * {@link UnpairBlockedByRunningServiceError}: this error means "can't
+ * tell", not "confirmed unsafe".
+ */
+export class UnpairUnknownDaemonStateError extends Error {
+  constructor(reason: string) {
+    super(
+      `unpair refused: could not confirm whether a background service is running (${reason}) — proceeding blind risks a running daemon silently re-writing the credential. Stop any \`byok-agent\` process/service yourself and retry, or pass --force to proceed anyway once you are sure none is running.`,
+    );
+    this.name = 'UnpairUnknownDaemonStateError';
   }
 }
 
@@ -38,10 +63,51 @@ export interface UnpairDeps {
    * (`buildServiceDefinition` + `createServiceLifecycle`) and passes it
    * through. `undefined` means "could not even check" (unsupported
    * platform, or Windows without `--winsw-bin`) — this is NOT the same as
-   * "confirmed not running"; see the module doc comment for what that
-   * residual gap means and why it's still honestly reported regardless.
+   * "confirmed not running": see {@link UnpairUnknownDaemonStateError} and
+   * the module doc comment for what that residual gap means and why it's
+   * refused by default (bypassable only via `--force`).
    */
   lifecycle?: Pick<ServiceLifecycle, 'status'>;
+  /**
+   * Finding P1 #2 (residual): explicit opt-in to proceed when the service
+   * check could NOT positively confirm "not running" (lifecycle
+   * unavailable, or its `status()` call itself failed) — see
+   * {@link UnpairUnknownDaemonStateError}. Does NOT bypass a lifecycle that
+   * actively confirmed the service IS running
+   * ({@link UnpairBlockedByRunningServiceError} is unconditional either
+   * way) — `--force` overrides uncertainty, never a known-unsafe result.
+   */
+  force?: boolean;
+}
+
+/**
+ * Finding P1 #2 (residual): the three outcomes {@link runUnpairCommand}
+ * acts on. A `lifecycle` that's `undefined`, or whose `status()` call
+ * rejects, both collapse to `'unknown'` — deliberately NOT reinterpreted as
+ * "confirmed not running" (that was the fail-open bug). A `status()` call
+ * that RESOLVES is trusted at face value per `ServiceStatusResult`'s own
+ * contract ("queried fresh from the platform's own service manager... never
+ * a locally-cached guess" — see `lifecycle/service-types.ts`); if a
+ * specific platform's `status()` implementation itself silently folds an
+ * internal query failure into `running: false` rather than rejecting,
+ * that's a gap in that implementation, not something this caller can
+ * detect from the result shape alone.
+ */
+type ServiceCheckResult =
+  | { outcome: 'confirmed-not-running' }
+  | { outcome: 'confirmed-running'; detail: string }
+  | { outcome: 'unknown'; reason: string };
+
+async function checkServiceState(lifecycle: Pick<ServiceLifecycle, 'status'> | undefined): Promise<ServiceCheckResult> {
+  if (!lifecycle) {
+    return { outcome: 'unknown', reason: 'no background-service lifecycle could be constructed for this platform/config' };
+  }
+  try {
+    const status = await lifecycle.status();
+    return status.running ? { outcome: 'confirmed-running', detail: status.detail } : { outcome: 'confirmed-not-running' };
+  } catch (err) {
+    return { outcome: 'unknown', reason: `checking service status failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 /**
@@ -76,23 +142,43 @@ export interface UnpairDeps {
  * only honest:
  *
  * - If an installed OS service can be QUERIED (`deps.lifecycle` was
- *   successfully constructed) and it reports `running: true`, this throws
+ *   successfully constructed AND its `status()` call resolves) and it
+ *   reports `running: true`, this throws
  *   {@link UnpairBlockedByRunningServiceError} BEFORE even prompting for
  *   confirmation, rather than proceeding and quietly losing the race.
+ *   Unconditional — `--force` does not bypass this; see below.
+ * - Finding P1 #2 residual (STILL-OPEN, now fixed): every OTHER path used
+ *   to FAIL OPEN — no `deps.lifecycle` at all (unsupported platform, win32
+ *   without `--winsw-bin`, or no config to build one from), or a
+ *   `status()` call that itself errored, both silently fell through to
+ *   "proceed as if safe". That is now treated as "cannot confirm no daemon
+ *   is running", which is unsafe BY DEFAULT: it throws
+ *   {@link UnpairUnknownDaemonStateError} (before prompting, same position
+ *   as the confirmed-running case above) unless the caller passes
+ *   `--force`, which proceeds anyway and logs an explicit warning
+ *   alongside the usual success message instead of the usual NOTE. A
+ *   `status()` call that RESOLVES cleanly with `running: false` is still
+ *   trusted at face value and proceeds without needing `--force` — this
+ *   fix does not make every unpair require `--force`, only the
+ *   genuinely-unconfirmable ones.
  * - A `start` running directly in the foreground (no OS service involved)
- *   cannot be detected at all from a separate short-lived CLI invocation —
- *   this residual gap is called out explicitly in the success message below
- *   every time, not just in a doc comment nobody reads at the terminal.
+ *   cannot be detected at all from a separate short-lived CLI invocation,
+ *   even when the OS-service check above comes back clean — this residual
+ *   gap is called out explicitly in the success message below every time,
+ *   not just in a doc comment nobody reads at the terminal. Fully-safe live
+ *   unpair (able to confirm/stop ANY running daemon, foreground included)
+ *   needs the M4 control socket.
  */
 export async function runUnpairCommand(daemon: Pick<Daemon, 'unpair'>, deps: UnpairDeps = {}): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const isTTY = deps.isTTY ?? Boolean(process.stdin.isTTY);
 
-  if (deps.lifecycle) {
-    const status = await deps.lifecycle.status();
-    if (status.running) {
-      throw new UnpairBlockedByRunningServiceError(status.detail);
-    }
+  const serviceState = await checkServiceState(deps.lifecycle);
+  if (serviceState.outcome === 'confirmed-running') {
+    throw new UnpairBlockedByRunningServiceError(serviceState.detail);
+  }
+  if (serviceState.outcome === 'unknown' && !deps.force) {
+    throw new UnpairUnknownDaemonStateError(serviceState.reason);
   }
 
   if (!deps.confirmed) {
@@ -114,7 +200,13 @@ export async function runUnpairCommand(daemon: Pick<Daemon, 'unpair'>, deps: Unp
   }
 
   await daemon.unpair();
-  log(
-    'unpaired: local device identity cleared. NOTE: this cannot detect or stop a `byok-agent start` running directly in the foreground (no OS service involved) — if one is running against this same store, its next proactive token renewal will re-write device.json and silently undo this unpair; stop that process yourself first. (An installed background SERVICE is checked automatically; true cross-process live unpair needs the M4 control socket.)',
-  );
+  if (serviceState.outcome === 'unknown') {
+    log(
+      `unpaired: local device identity cleared. WARNING: --force was used to proceed WITHOUT confirming no background service/daemon is running (${serviceState.reason}) — if one IS running against this same store, its next proactive token renewal will re-write device.json and silently undo this unpair. Stop it yourself, then re-run unpair to verify. (True cross-process live unpair needs the M4 control socket.)`,
+    );
+  } else {
+    log(
+      'unpaired: local device identity cleared. NOTE: this cannot detect or stop a `byok-agent start` running directly in the foreground (no OS service involved) — if one is running against this same store, its next proactive token renewal will re-write device.json and silently undo this unpair; stop that process yourself first. (An installed background SERVICE is checked automatically; true cross-process live unpair needs the M4 control socket.)',
+    );
+  }
 }
