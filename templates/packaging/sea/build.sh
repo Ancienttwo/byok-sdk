@@ -135,7 +135,10 @@ if [ "$OS" = "macOS" ]; then
   # platform's command omits it).
   POSTJECT_ARGS+=(--macho-segment-name NODE_SEA)
 fi
-npx --yes postject "$OUT_BIN" NODE_SEA_BLOB "$BLOB" "${POSTJECT_ARGS[@]}"
+# Pin postject to an exact version rather than resolving a mutable latest,
+# so CI/build can't silently execute a changed upstream release. Bump
+# deliberately; this is the version the Node.js SEA docs pair with this flow.
+npx --yes postject@1.0.0-alpha.6 "$OUT_BIN" NODE_SEA_BLOB "$BLOB" "${POSTJECT_ARGS[@]}"
 
 if [ "$OS" = "macOS" ]; then
   echo "==> re-signing (ad-hoc, macOS)"
