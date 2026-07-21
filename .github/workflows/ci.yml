@@ -137,3 +137,57 @@ jobs:
 
       - name: Run packaging smoke
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
+
+  # M3-4 Windows Service guarantee: proves the generated WinSW service
+  # descriptor (packages/client/src/lifecycle/winsw.ts) actually installs,
+  # runs, stops, restarts, and uninstalls as a REAL Windows Service via the
+  # real Windows SCM -- this is the one platform in M3-4's lifecycle API
+  # (launchd/systemd/WinSW) that cannot be verified on this repo's own
+  # macOS/Linux dev machines, so this job (not a local run) is the actual
+  # proof. See templates/service/winsw/{README.md,smoke-test.mjs} for the
+  # full recipe + rationale -- this job just runs that same script, the
+  # same way `packageability-smoke` above runs templates/packaging's own
+  # smoke-test.sh.
+  #
+  # Deliberately independent of build-test/packageability-smoke above (no
+  # `needs:`): its own install + build, so it can be extended/reordered
+  # later without perturbing either of those.
+  #
+  # WinSW-x64.exe is a self-contained .NET single-file executable (no
+  # separate .NET runtime install needed on the runner) -- fetched from
+  # WinSW's own GitHub "latest release" asset URL rather than pinned to a
+  # specific version, matching the download line WinSW's own README
+  # recommends for tooling/CI use.
+  windows-service-smoke:
+    name: Windows service install smoke (WinSW)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (needed for @byok/client's dist/index.js the smoke script imports)
+        run: pnpm -r build
+
+      - name: Download WinSW
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/winsw/winsw/releases/latest/download/WinSW-x64.exe" -OutFile "$env:RUNNER_TEMP\WinSW.exe"
+
+      - name: Run the WinSW service lifecycle smoke (install -> assert RUNNING -> stop -> start -> uninstall)
+        env:
+          WINSW_BIN: ${{ runner.temp }}\WinSW.exe
+        run: node templates/service/winsw/smoke-test.mjs

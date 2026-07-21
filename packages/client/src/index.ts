@@ -20,6 +20,22 @@ export type { BlobResolver } from './daemon/blob-client';
 export { DaemonObserver } from './daemon/observer';
 export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
 
+// M3-4: OS service lifecycle (launchd/systemd/WinSW) — see `lifecycle/create-service-lifecycle.ts`.
+export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
+export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle';
+export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types';
+export type {
+  NodeAgentProgramOptions,
+  ServiceDefinition,
+  ServiceInstallOptions,
+  ServiceLifecycle,
+  ServiceProgram,
+  ServiceStatusResult,
+} from './lifecycle/service-types';
+export { generateLaunchdPlist } from './lifecycle/launchd';
+export { generateSystemdUnit } from './lifecycle/systemd';
+export { generateWinswXml } from './lifecycle/winsw';
+
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';

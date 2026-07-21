@@ -4,6 +4,13 @@ import { argValue, hasFlag, loadConfig, positionalArgs } from './config';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
 import { runPairCommand } from './commands/pair';
 import { runRuntimesCommand } from './commands/runtimes';
+import {
+  runInstallCommand,
+  runServiceStartCommand,
+  runServiceStatusCommand,
+  runServiceStopCommand,
+  runUninstallCommand,
+} from './commands/service';
 import { runStartCommand } from './commands/start';
 import { runStatusCommand } from './commands/status';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
@@ -79,6 +86,13 @@ function usage(): never {
       '  byok-agent approve <taskId> [--config <path>]',
       '  byok-agent reject <taskId> [reason...] [--config <path>]',
       '  byok-agent unpair [--yes] [--config <path>]',
+      '',
+      '  Background OS service (launchd/systemd/WinSW) — see templates/service/**:',
+      '  byok-agent install [--config <path>] [--name <svc>] [--agent-bin <path>] [--node-bin <path>] [--winsw-bin <path>] [--winsw-install-dir <path>]',
+      '  byok-agent uninstall [--config <path>] [--name <svc>]',
+      '  byok-agent service-start [--config <path>] [--name <svc>]',
+      '  byok-agent service-stop [--config <path>] [--name <svc>]',
+      '  byok-agent service-status [--config <path>] [--name <svc>]',
     ].join('\n'),
   );
   process.exit(1);
@@ -153,6 +167,26 @@ async function main(): Promise<void> {
     const config = loadConfig(configPathFrom(rest));
     const daemon = createDaemon(config);
     return runUnpairCommand(daemon, { confirmed: hasFlag(rest, '--yes') });
+  }
+
+  if (
+    command === 'install' ||
+    command === 'uninstall' ||
+    command === 'service-start' ||
+    command === 'service-stop' ||
+    command === 'service-status'
+  ) {
+    const configPath = configPathFrom(rest);
+    if (!configPath) {
+      console.error(`${command} requires --config <path> or a BYOK_CONFIG env var`);
+      process.exit(1);
+    }
+    const config = loadConfig(configPath);
+    if (command === 'install') return runInstallCommand(config, configPath, rest);
+    if (command === 'uninstall') return runUninstallCommand(config, configPath, rest);
+    if (command === 'service-start') return runServiceStartCommand(config, configPath, rest);
+    if (command === 'service-stop') return runServiceStopCommand(config, configPath, rest);
+    return runServiceStatusCommand(config, configPath, rest);
   }
 
   usage();
