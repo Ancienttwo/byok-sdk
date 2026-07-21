@@ -5,12 +5,14 @@ import { LocalDiskBlobStore } from './blob-store';
 import { buildHonoApp } from './http';
 import { ConnectionHub } from './hub';
 import { PairingManager, type PairingCodeInfo } from './pairing';
+import { RateLimiter } from './rate-limiter';
 import { InMemoryTaskStore } from './task-store';
 import { attachWebSocket as attachWsUpgrade } from './ws-server';
 import type {
   ByokServerEvent,
   CreateByokServerOptions,
   DispatchInput,
+  HubStats,
   MachineInfo,
   TaskHandle,
   TaskSnapshot,
@@ -20,6 +22,7 @@ export type {
   ByokServerEvent,
   CreateByokServerOptions,
   DispatchInput,
+  HubStats,
   MachineInfo,
   ServerTaskEvent,
   TaskHandle,
@@ -47,6 +50,7 @@ export { SqliteTaskStore } from './sqlite-task-store';
 export type { SqliteBlobStoreOptions } from './sqlite-blob-store';
 export { SqliteBlobStore } from './sqlite-blob-store';
 export { SqliteUnavailableError } from './sqlite-support';
+export type { RateLimiterOptions } from './rate-limiter';
 
 /** Per-product blob size ceiling (§7): 100MB unless overridden. */
 const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
@@ -97,6 +101,17 @@ export interface ByokServer {
    * tests; safe to call more than once.
    */
   stop(): void;
+  /**
+   * M4 Phase 4 (part B.1): a plain, serializable in-process snapshot of this
+   * hub's current state — connected device count, task counts by state,
+   * envelope in/out totals, dedup drops, rate-limit events, and uptime. See
+   * {@link HubStats} for the full contract. Deliberately in-process only —
+   * never exposed over HTTP by this SDK itself (see
+   * `CreateByokServerOptions.healthzRoute`'s doc comment); an embedder that
+   * wants any of this surfaced remotely builds its own authenticated route
+   * around this method.
+   */
+  stats(): HubStats;
 }
 
 /**
@@ -121,9 +136,21 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const longPollHoldMs = opts.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS;
   const taskLeaseMs = opts.taskLeaseMs ?? DEFAULT_TASK_LEASE_MS;
 
+  const rateLimiter = new RateLimiter(opts.rateLimit);
+
   const taskStore = opts.taskStore ?? new InMemoryTaskStore();
-  const hub = new ConnectionHub(taskStore, devices, taskLeaseMs);
-  const hono = buildHonoApp({ pairing, devices, nonces, tokenSigner, blobStore, maxBlobSizeBytes, longPollHoldMs, hub });
+  const hub = new ConnectionHub(taskStore, devices, taskLeaseMs, rateLimiter);
+  const hono = buildHonoApp({
+    pairing,
+    devices,
+    nonces,
+    tokenSigner,
+    blobStore,
+    maxBlobSizeBytes,
+    longPollHoldMs,
+    hub,
+    healthzRoute: opts.healthzRoute ?? false,
+  });
 
   return {
     hono,
@@ -156,5 +183,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     stop(): void {
       hub.stopLeaseReaper();
     },
+    stats: () => hub.stats(),
   };
 }

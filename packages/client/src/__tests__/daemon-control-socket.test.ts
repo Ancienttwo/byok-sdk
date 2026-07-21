@@ -78,6 +78,9 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(status.transport).toBe('open');
     expect(status.activeTasks).toEqual([]);
     expect(status.runtimeIds).toEqual(['pi']);
+    // M4 Phase 4 (part B.3): queue watermarks, empty with no active tasks.
+    expect(status.queueWatermarks).toEqual([]);
+    expect(status.approvalsPending).toBe(0);
     conn.client.close();
   });
 
@@ -95,6 +98,9 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     if (!conn.ok) throw new Error('expected reachable');
     const status = await conn.client.request<ControlStatusResult>('status');
     expect(status.activeTasks).toEqual([{ taskId: 't1', state: 'Running' }]);
+    // M4 Phase 4 (part B.3): a freshly-started task has no progress backlog
+    // and no pending approvals yet.
+    expect(status.queueWatermarks).toEqual([{ taskId: 't1', progressBatcherPending: 0, pendingApprovals: 0 }]);
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     adapter.sessions[0]?.emit({ type: 'turn_end' });
@@ -102,6 +108,33 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
     const statusAfter = await conn.client.request<ControlStatusResult>('status');
     expect(statusAfter.activeTasks).toEqual([]);
+    expect(statusAfter.queueWatermarks).toEqual([]);
+    expect(statusAfter.approvalsPending).toBe(0);
+    conn.client.close();
+  });
+
+  it('status.queueWatermarks reflects a real progress backlog for a running task, over the actual control socket', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const built = await pairedAndStarted('acme-ctl-status-watermarks', adapter);
+    daemon = built.daemon;
+
+    server.send(
+      createEnvelope('task.offer', { instruction: 'do work', policy: { mode: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
+    );
+    await server.waitFor((e) => e.type === 'task.started');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+
+    // Default batcher config (maxBatchSize 10) — one progress event stays
+    // buffered rather than flushing immediately.
+    adapter.sessions[0]?.emit({ type: 'progress', text: 'working' });
+    await vi.waitFor(async () => {
+      const status = await conn.client.request<ControlStatusResult>('status');
+      expect(status.queueWatermarks).toEqual([{ taskId: 't1', progressBatcherPending: 1, pendingApprovals: 0 }]);
+    });
+
     conn.client.close();
   });
 

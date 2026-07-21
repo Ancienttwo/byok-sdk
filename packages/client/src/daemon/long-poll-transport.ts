@@ -1,4 +1,4 @@
-import { EventsPollResponseSchema, MessagesSendResponseSchema, type Envelope } from '@byok/protocol';
+import { MessagesSendResponseSchema, parseMessage, type Envelope } from '@byok/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
@@ -10,6 +10,23 @@ export interface LongPollClientOptions {
   onEnvelope: (envelope: Envelope) => void;
   /** Called once the device is found to be revoked (401 surfaced through {@link AuthManager}) — the loop stops itself rather than retrying. */
   onRevoked?: () => void;
+  /**
+   * M4 Phase 4 (version-negotiation drill fix): called for a batch entry
+   * that could not be parsed into a known `Envelope` at all (an
+   * unrecognized message type — mirrors `ws-transport.ts`'s identical
+   * per-frame tolerance) but still carries a numeric envelope-level `seq`
+   * AND a recognizably task-class `type` (a `task.` prefix — see
+   * `extractSkippableSeq`'s own doc comment for why a `conn.*`-shaped or
+   * type-less entry is deliberately excluded, mirroring F2's "conn.* is
+   * never cursor-tracked" rule), so the caller can advance its
+   * cursor/watermark past it even though there is no real `Envelope` to
+   * hand to `onEnvelope`. Without this, a persistently-redelivered
+   * unrecognized-type entry (the real server retains and redelivers an
+   * un-acked envelope, protocol §9) would keep reappearing at the same
+   * cursor position forever. Optional only for constructor/test
+   * convenience — `ConnectionManager` always supplies it.
+   */
+  onSkippedSeq?: (seq: number) => void;
   /**
    * Finding P2 (Fix 2a): true while a `task.*` envelope's handler has failed
    * and hasn't yet been successfully reprocessed
@@ -34,6 +51,64 @@ export interface LongPollClientOptions {
    * otherwise make this a tight busy-loop. Default 250ms.
    */
   idleDelayMs?: number;
+}
+
+interface LooseEventsPollResponse {
+  /** Raw, not-yet-validated entries — see `parseLooseEventsPollResponse`'s own doc comment for why each is validated individually, not as one array. */
+  events: unknown[];
+  cursor: number;
+}
+
+/**
+ * M4 Phase 4 (version-negotiation drill fix): validates ONLY the OUTER shape
+ * of a `/byok/events` response — `events` is an array of not-yet-validated
+ * entries, `cursor` is an integer. Deliberately does NOT validate each
+ * entry against the frozen `EnvelopeSchema` here the way the protocol
+ * package's own `EventsPollResponseSchema` (`z.array(EnvelopeSchema)`)
+ * used to be applied in one shot: that meant a SINGLE unrecognized-type
+ * entry anywhere in the batch failed the ENTIRE `.parse()` call, silently
+ * discarding every other, otherwise-valid entry right alongside it — a real
+ * forward-compat gap the WS transport never had (`ws-transport.ts` decodes
+ * and dispatches one frame at a time). Each entry is now validated
+ * individually, right where it's consumed (`LongPollClient.loop`, below),
+ * via `parseMessage` — the SAME per-message validator `decodeEnvelope`
+ * (ws-transport.ts's own per-frame decode) calls internally — so the two
+ * transports draw from one shared notion of "valid" and cannot drift apart
+ * on it again.
+ */
+function parseLooseEventsPollResponse(raw: unknown): LooseEventsPollResponse {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('events poll response is not an object');
+  }
+  const { events, cursor } = raw as { events?: unknown; cursor?: unknown };
+  if (!Array.isArray(events)) {
+    throw new Error('events poll response.events is not an array');
+  }
+  if (typeof cursor !== 'number' || !Number.isInteger(cursor)) {
+    throw new Error('events poll response.cursor is not an integer');
+  }
+  return { events, cursor };
+}
+
+/**
+ * M4 Phase 4 (gatekeeper MEDIUM advisory): a numeric envelope-level `seq`
+ * opportunistically read off a batch entry that failed `parseMessage` — but
+ * ONLY when the entry's own `type` string also looks task-shaped (a
+ * `task.` prefix), mirroring `ConnectionManager`'s own (unexported)
+ * `isTaskEnvelopeType` distinction. Finding F2 documents that `conn.*` types
+ * are NEVER cursor-tracked, even when perfectly well-formed — there is no
+ * way to tell a hypothetical future `conn.something` type apart from that
+ * rule from raw shape alone, so a skipped entry that isn't recognizably
+ * task-class (wrong prefix, or no `type`/`seq` at all) must not be allowed
+ * to touch the cursor either. `undefined` whenever the entry doesn't
+ * qualify — used only to feed `onSkippedSeq`, never to treat the entry as
+ * processable.
+ */
+function extractSkippableSeq(raw: unknown): number | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const { type, seq } = raw as { type?: unknown; seq?: unknown };
+  if (typeof type !== 'string' || !type.startsWith('task.')) return undefined;
+  return typeof seq === 'number' && Number.isInteger(seq) ? seq : undefined;
 }
 
 /**
@@ -121,9 +196,34 @@ export class LongPollClient {
         // identically on both transports; `parsed.cursor` (the server's own
         // batch high-water) is intentionally not consulted for that — the
         // client tracks its own delivery/dedup watermark instead (Design A).
-        const parsed = EventsPollResponseSchema.parse(await res.json());
-        for (const envelope of parsed.events) {
-          this.opts.onEnvelope(envelope as Envelope);
+        //
+        // M4 Phase 4 (version-negotiation drill fix): the outer shape
+        // (`events` array + `cursor`) is validated loosely; each entry is
+        // then validated INDIVIDUALLY via `parseMessage` — mirrors
+        // `ws-transport.ts`'s identical per-frame tolerance (see
+        // `parseLooseEventsPollResponse`'s own doc comment for the full
+        // rationale). An entry that fails for ANY reason — an unrecognized
+        // message type (`UnknownMessageTypeError`) or a recognized type
+        // with a malformed/invalid payload (`EnvelopeValidationError`) — is
+        // silently skipped, exactly as `ws-transport.ts`'s own blanket
+        // `catch {}` treats both identically; it never fails the rest of
+        // the batch. A skipped entry that's recognizably task-class (see
+        // `extractSkippableSeq`'s own doc comment for why `conn.*`-shaped
+        // or type-less entries are excluded) and still carries a numeric
+        // `seq` still advances the cursor/watermark past it
+        // (`onSkippedSeq`), so a persistently-redelivered unparseable entry
+        // can never stall this device's progress.
+        const parsed = parseLooseEventsPollResponse(await res.json());
+        for (const raw of parsed.events) {
+          let envelope: Envelope;
+          try {
+            envelope = parseMessage(raw);
+          } catch {
+            const skippableSeq = extractSkippableSeq(raw);
+            if (skippableSeq !== undefined) this.opts.onSkippedSeq?.(skippableSeq);
+            continue;
+          }
+          this.opts.onEnvelope(envelope);
         }
 
         if (parsed.events.length === 0) {

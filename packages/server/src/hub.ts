@@ -5,6 +5,7 @@ import {
   DAEMON_TO_SERVER_TYPES,
   encodeEnvelope,
   PROTOCOL_VERSION,
+  TASK_STATES,
   type CreateEnvelopeOptions,
   type Envelope,
   type MessageType,
@@ -24,10 +25,12 @@ import {
 import type { DeviceRegistry } from './auth';
 import { AsyncEventQueue } from './event-queue';
 import { generateTaskId } from './ids';
+import { RateLimiter } from './rate-limiter';
 import type { TaskStore } from './task-store';
 import type {
   ByokServerEvent,
   DispatchInput,
+  HubStats,
   MachineInfo,
   ServerTaskEvent,
   TaskHandle,
@@ -191,13 +194,17 @@ type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'
  * M4 Phase 3: thrown by {@link ConnectionHub.approveTask}/{@link
  * ConnectionHub.rejectTask} for a `taskId` this hub has no record of at all
  * — mirrors `task-store.ts`'s `IllegalTaskTransitionError` (typed error
- * class + `instanceof` dispatch at the HTTP layer is this codebase's own
- * established idiom for mapping a domain error to the right status code;
- * see `http.ts`'s existing `PairingCodeInvalidError`/`ApprovalNotFoundError`
- * handling for the same pattern). Distinguished from {@link
- * TaskNotAwaitingApprovalError} so `http.ts`'s new `/tasks/:id/approve`
- * `/tasks/:id/reject` routes can return 404 vs. 409 correctly instead of a
- * single generic error status for both.
+ * class + `instanceof` dispatch is this codebase's own established idiom for
+ * mapping a domain error to the right status code). Distinguished from
+ * {@link TaskNotAwaitingApprovalError} so a caller CAN tell the two failure
+ * modes apart (e.g. 404 vs. 409) instead of only ever seeing a single
+ * generic `Error`. There is no bearer-authed HTTP route for this on
+ * `http.ts`'s own app (see that file's own closing comment for why) — the
+ * supported entry point is calling `approveTask`/`rejectTask` directly, or
+ * via `TaskHandle.approve()`/`reject()` (thin wrappers over the same two
+ * methods); an embedder builds its own operator-facing surface on top of
+ * that, exactly like `examples/basic/server.ts`'s own
+ * `/api/tasks/:taskId/approve`/`reject` routes do.
  */
 export class UnknownTaskError extends Error {
   constructor(public readonly taskId: string) {
@@ -246,12 +253,40 @@ export class ConnectionHub {
   private readonly taskActivity = new Map<string, number>();
   /** The task-lease reaper's own periodic sweep timer — see the constructor and `sweepLeases` below. */
   private readonly leaseReaperTimer: ReturnType<typeof setInterval>;
+  /** {@link ConnectionHub.stats}'s `uptimeMs` origin — this hub's own construction instant. */
+  private readonly startedAtMs = Date.now();
+  /** {@link ConnectionHub.stats}'s `envelopesIn` — every {@link handleInbound} call, every outcome. */
+  private envelopesInCount = 0;
+  /** {@link ConnectionHub.stats}'s `envelopesOut` — every envelope built via the single outbound choke point, {@link sendToDevice}. */
+  private envelopesOutCount = 0;
+  /** {@link ConnectionHub.stats}'s `dedupDrops` (N3). */
+  private dedupDropCount = 0;
+  /** {@link ConnectionHub.stats}'s `rateLimitEvents` — see {@link handleRateLimited}. */
+  private rateLimitEventCount = 0;
+  /**
+   * M4 Phase 4 (gatekeeper LOW advisory): devices that have already had a
+   * `device.rate_limited` embedder event emitted for their CURRENT
+   * over-budget episode — see {@link handleRateLimited}'s own doc comment.
+   * Coalescing state only; {@link rateLimitEventCount} still counts every
+   * single hit regardless of what this suppresses.
+   */
+  private readonly rateLimitEventEmittedFor = new Set<string>();
 
   constructor(
     private readonly taskStore: TaskStore,
     private readonly devices: DeviceRegistry,
     /** See {@link CreateByokServerOptions.taskLeaseMs} — already defaulted by `createByokServer` before reaching here. */
     private readonly taskLeaseMs: number,
+    /**
+     * M4 Phase 4 (part A): per-device inbound-envelope token bucket — see
+     * {@link CreateByokServerOptions.rateLimit} (already defaulted by
+     * `createByokServer` before reaching here) and {@link handleInbound}'s
+     * own doc comment for where it's enforced. Defaults to a fresh
+     * default-configured `RateLimiter` so every existing direct-construction
+     * call site (this hub is constructed directly by several tests) keeps
+     * working unchanged.
+     */
+    private readonly rateLimiter: RateLimiter = new RateLimiter(),
   ) {
     // A short (e.g. test-injected) taskLeaseMs sweeps at its own
     // granularity so a short lease is still caught promptly; a realistic
@@ -431,6 +466,14 @@ export class ConnectionHub {
    * path (`POST /byok/messages`, `http.ts`) in place of reaching into
    * per-type handlers directly. Runs a fixed gate, in order:
    *
+   * 0. **rate limit (M4 Phase 4, part A)** — one token debited from this
+   *    device's bucket ({@link rateLimiter}) for EVERY inbound envelope,
+   *    before anything else runs (including the type-allow check below) —
+   *    a flood of garbage-typed envelopes must cost the same budget as a
+   *    flood of well-formed ones. Checked first specifically so an
+   *    over-budget device is turned away as cheaply as possible, before any
+   *    taskStore lookup or dedup bookkeeping. See {@link handleRateLimited}
+   *    for what happens on exceed (never a silent drop).
    * 1. **type-allow (P2)** — only {@link DAEMON_TO_SERVER_TYPES} may pass; a
    *    server -> daemon type (or anything unrecognized, e.g. a stale/future
    *    `conn.hello` outside the handshake) arriving inbound is rejected
@@ -452,9 +495,22 @@ export class ConnectionHub {
    * Returns which outcome applied. A duplicate still counts as `accepted` on
    * the `POST /byok/messages` wire (§8.2) — an idempotent replay is a
    * wire-level success even though no handler ran a second time; only
-   * `rejected` (gate steps 1-2) is excluded from that count.
+   * `rejected`/`rate_limited` (gate steps 0-2) are excluded from that count.
    */
-  handleInbound(deviceId: string, envelope: Envelope): 'accepted' | 'duplicate' | 'rejected' {
+  handleInbound(deviceId: string, envelope: Envelope): 'accepted' | 'duplicate' | 'rejected' | 'rate_limited' {
+    this.envelopesInCount++;
+
+    if (!this.rateLimiter.consume(deviceId)) {
+      this.handleRateLimited(deviceId);
+      return 'rate_limited';
+    }
+    // Back under budget — clear any earlier suppression (see
+    // `rateLimitEventEmittedFor`'s own doc comment) so the NEXT time this
+    // device floods, it's treated as a fresh episode and gets its own
+    // embedder event rather than being silently coalesced into a flood it
+    // already recovered from.
+    this.rateLimitEventEmittedFor.delete(deviceId);
+
     if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) {
       return 'rejected';
     }
@@ -469,11 +525,60 @@ export class ConnectionHub {
     }
 
     if (this.checkAndRecordDuplicate(deviceId, envelope.id)) {
+      this.dedupDropCount++;
       return 'duplicate';
     }
 
     this.dispatchToHandler(deviceId, taskId, envelope);
     return 'accepted';
+  }
+
+  /**
+   * M4 Phase 4 (part A): `deviceId` just exceeded its inbound-envelope rate
+   * limit. Never a silent drop: counts the occurrence
+   * ({@link rateLimitEventCount}, surfaced via {@link stats} — every single
+   * hit, unconditionally) and, the FIRST time in this over-budget episode
+   * only, emits an embedder-facing `device.rate_limited`
+   * {@link ByokServerEvent} — see that variant's own doc comment (`types.ts`)
+   * for the full per-transport enforcement shape.
+   *
+   * Gatekeeper LOW advisory (event amplification): a single flood can make
+   * `handleInbound` call this many times in a row — e.g. several WS frames
+   * already in flight before the close below actually lands, or a
+   * long-poll device retrying its `POST /byok/messages` before its bucket
+   * has refilled. Without coalescing, an embedder subscribed to
+   * `events.subscribe()` would see one `device.rate_limited` per hit, which
+   * is noisy for what is really ONE ongoing episode of one device
+   * flooding. `rateLimitEventEmittedFor` suppresses the repeats: this
+   * method only pushes the event the first time it sees a given `deviceId`
+   * since `handleInbound`'s own success path last cleared it (i.e. since
+   * this device was last confirmed back under budget) — the COUNTER above
+   * is entirely unaffected by this and still increments on every call,
+   * unconditionally.
+   *
+   * This method only handles the WS half of the enforcement shape (closing
+   * the live connection, if any, so the client's existing backoff+reconnect
+   * takes over — mirrors `takeOverAsLongPoll`'s own `ws.close`, the only
+   * other place this hub closes a device's socket directly); a long-poll
+   * device has no live `ws` to close here at all (`conn.ws` is `undefined`
+   * while long-polling — see {@link ConnectionState}), so `http.ts`'s
+   * `/byok/messages` handler maps this same `'rate_limited'` `handleInbound`
+   * outcome to an HTTP 429 for that transport instead.
+   */
+  private handleRateLimited(deviceId: string): void {
+    this.rateLimitEventCount++;
+    if (!this.rateLimitEventEmittedFor.has(deviceId)) {
+      this.rateLimitEventEmittedFor.add(deviceId);
+      const at = new Date().toISOString();
+      this.serverEvents.push({ kind: 'device.rate_limited', deviceId, at });
+    }
+    const conn = this.connections.get(deviceId);
+    if (conn?.ws) {
+      // 1008 = Policy Violation (RFC 6455) — distinct from the 1002
+      // protocol-error closes ws-server.ts uses for a malformed handshake;
+      // this connection was well-formed, it just sent too much of it.
+      conn.ws.close(1008, 'rate limit exceeded');
+    }
   }
 
   /**
@@ -1048,10 +1153,14 @@ export class ConnectionHub {
   }
 
   /**
-   * M4 Phase 3: made public (was private through M3) so `http.ts`'s new
-   * `POST /tasks/:id/approve` route can call it directly — see this file's
-   * own `UnknownTaskError`/`TaskNotAwaitingApprovalError` doc comments for
-   * why the two failure modes are now distinct typed errors rather than a
+   * M4 Phase 3: made public (was private through M3) so an embedder can call
+   * it directly from its own operator-facing surface — there is no
+   * bearer-authed HTTP route for this on `http.ts`'s own app (see
+   * `UnknownTaskError`'s own doc comment for why, and
+   * `examples/basic/server.ts`'s `/api/tasks/:taskId/approve` for the
+   * intended shape of that embedder-built surface). See this file's own
+   * `UnknownTaskError`/`TaskNotAwaitingApprovalError` doc comments for why
+   * the two failure modes are now distinct typed errors rather than a
    * single generic `Error`. Every thrown message's TEXT is byte-for-byte
    * unchanged from M2/M3 — only the error's type changed (this is still also
    * reachable via `TaskHandle.approve()`, unaffected).
@@ -1124,6 +1233,7 @@ export class ConnectionHub {
     payload: Parameters<typeof createEnvelope<T>>[1],
     opts: Omit<CreateEnvelopeOptions<T>, 'seq' | 'v' | 'id' | 'ts'>,
   ): Extract<Envelope, { type: T }> {
+    this.envelopesOutCount++;
     const outbox = this.getOrCreateOutbox(deviceId);
     const seq = outbox.nextSeq++;
     // `createEnvelope`'s own public signature conditionally requires `opts`
@@ -1225,5 +1335,40 @@ export class ConnectionHub {
 
   listTasks(): TaskSnapshot[] {
     return this.taskStore.list();
+  }
+
+  // ---------------------------------------------------------------------
+  // observability (M4 Phase 4, part B.1) — in-process only; see
+  // `types.ts`'s `HubStats`/`CreateByokServerOptions.healthzRoute` doc
+  // comments for why this is never exposed over HTTP by this SDK itself.
+  // ---------------------------------------------------------------------
+
+  /**
+   * A plain, serializable snapshot of this hub's current state, derived from
+   * existing structures (`connections`, `taskStore`) plus the small counters
+   * this file already maintains for exactly this purpose — no new
+   * bookkeeping structures beyond those counters. See {@link HubStats}
+   * (`types.ts`) for the full field-by-field contract.
+   */
+  stats(): HubStats {
+    const taskCountsByState = Object.fromEntries(TASK_STATES.map((state) => [state, 0])) as Record<TaskState, number>;
+    for (const record of this.taskStore.list()) {
+      taskCountsByState[record.state]++;
+    }
+
+    let connectedDeviceCount = 0;
+    for (const conn of this.connections.values()) {
+      if (conn.connected) connectedDeviceCount++;
+    }
+
+    return {
+      connectedDeviceCount,
+      taskCountsByState,
+      envelopesIn: this.envelopesInCount,
+      envelopesOut: this.envelopesOutCount,
+      dedupDrops: this.dedupDropCount,
+      rateLimitEvents: this.rateLimitEventCount,
+      uptimeMs: Date.now() - this.startedAtMs,
+    };
   }
 }

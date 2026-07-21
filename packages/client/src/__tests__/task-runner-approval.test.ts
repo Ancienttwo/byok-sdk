@@ -6,7 +6,12 @@ import { createEnvelope, type Envelope } from '@byok/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
-import { DEFAULT_APPROVAL_TIMEOUT_MS, TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import {
+  DEFAULT_APPROVAL_TIMEOUT_MS,
+  MAX_PENDING_APPROVALS_PER_TASK,
+  TaskRunner,
+  type TaskRunnerDeps,
+} from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 /**
@@ -169,5 +174,134 @@ describe('TaskRunner.requestApproval', () => {
 
     await expect(outcomeA).resolves.toEqual({ approved: true, reason: undefined });
     await expect(outcomeB).resolves.toEqual({ approved: false, reason: 'no B' });
+  });
+
+  /**
+   * M4 Phase 4 (fold-in from the P3 gate): claude's parallel tool use can
+   * call `requestApproval` more than once for the SAME task before the
+   * first call resolves. Pre-fix, the second call's `pendingApprovalId`
+   * silently overwrote the first's, so only the latest was ever
+   * wire-resolvable and the first died by timeout. These two tests exercise
+   * the serialized-queue fix directly against `TaskRunner`, mirroring every
+   * other test in this file's convention of driving `requestApproval` and
+   * inspecting `approvalRegistry`/`sent` rather than going through a real
+   * control socket.
+   */
+  describe('concurrent requestApproval calls for the SAME task (M4 Phase 4 fold-in)', () => {
+    it('serializes: only the first is dispatched immediately; the second queues with its own approvalId and its own task.await_approval, dispatched once the first resolves', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const sent: Envelope[] = [];
+      const { runner, approvalRegistry } = await makeRunner(adapter, sent);
+      const taskId = 'task-parallel-1';
+      await offerAndActivate(runner, taskId);
+
+      const outcome1 = runner.requestApproval(taskId, 'Bash: first');
+      const outcome2 = runner.requestApproval(taskId, 'Bash: second');
+
+      // Only the first is actually dispatched right now — registered, and
+      // its own task.await_approval sent. The second is queued: no second
+      // registry entry, no second frame, yet.
+      let pending = approvalRegistry.list();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.summary).toBe('Bash: first');
+      expect(sent.filter((e) => e.type === 'task.await_approval')).toHaveLength(1);
+
+      const firstApprovalId = pending[0]!.approvalId;
+      approvalRegistry.resolve(firstApprovalId, 'approve');
+      await expect(outcome1).resolves.toEqual({ approved: true, reason: undefined });
+
+      // The second is now dispatched: its own registry entry (distinct
+      // approvalId) and its own task.await_approval frame — the embedder
+      // sees both frames across the two dispatches, one at a time.
+      pending = approvalRegistry.list();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.summary).toBe('Bash: second');
+      const secondApprovalId = pending[0]!.approvalId;
+      expect(secondApprovalId).not.toBe(firstApprovalId);
+      expect(sent.filter((e) => e.type === 'task.await_approval')).toHaveLength(2);
+
+      approvalRegistry.resolve(secondApprovalId, 'reject', 'no second');
+      await expect(outcome2).resolves.toEqual({ approved: false, reason: 'no second' });
+    });
+
+    it('bounds the per-task queue: overflow beyond MAX_PENDING_APPROVALS_PER_TASK is rejected fail-closed immediately, without registering or sending anything', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const sent: Envelope[] = [];
+      const { runner, approvalRegistry } = await makeRunner(adapter, sent);
+      const taskId = 'task-overflow-1';
+      await offerAndActivate(runner, taskId);
+
+      // First dispatches immediately; the next MAX_PENDING_APPROVALS_PER_TASK
+      // all queue, filling the queue exactly to its cap.
+      const first = runner.requestApproval(taskId, 'first');
+      const queued = Array.from({ length: MAX_PENDING_APPROVALS_PER_TASK }, (_, i) =>
+        runner.requestApproval(taskId, `queued-${i}`),
+      );
+
+      // One more must be rejected fail-closed immediately — not queued.
+      const overflow = await runner.requestApproval(taskId, 'overflow');
+      expect(overflow.approved).toBe(false);
+      expect(overflow.reason).toMatch(/too many approval requests already queued/);
+
+      // Only the first was ever actually registered/sent at this point.
+      expect(approvalRegistry.list()).toHaveLength(1);
+      expect(sent.filter((e) => e.type === 'task.await_approval')).toHaveLength(1);
+
+      // Drain the first + every queued request so nothing is left dangling —
+      // one dispatched at a time, so this is `first` PLUS all
+      // MAX_PENDING_APPROVALS_PER_TASK queued ones (17 total resolutions).
+      for (let i = 0; i < MAX_PENDING_APPROVALS_PER_TASK + 1; i++) {
+        const pending = approvalRegistry.list();
+        expect(pending).toHaveLength(1);
+        approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
+      }
+      await first;
+      await Promise.all(queued);
+    });
+
+    /**
+     * Gatekeeper LOW advisory: a task can finish (complete/fail/cancel)
+     * while one approval is DISPATCHED and more are QUEUED behind it.
+     * `TaskRunner.finish` must reject every queued one immediately,
+     * fail-closed — never dispatch them (no `task.await_approval`, no
+     * fresh timeout window for a task that no longer exists) — and must
+     * also resolve the DISPATCHED one so no registry entry or timer
+     * lingers for a finished task.
+     */
+    it("finish() (gatekeeper LOW advisory): a task finishing with a dispatched approval AND queued ones behind it rejects everything immediately — no await_approval for the queued ones, registry ends up empty", async () => {
+      const adapter = new StubRuntimeAdapter();
+      const sent: Envelope[] = [];
+      const { runner, approvalRegistry } = await makeRunner(adapter, sent);
+      const taskId = 'task-finish-queue-1';
+      await offerAndActivate(runner, taskId);
+
+      const dispatched = runner.requestApproval(taskId, 'dispatched');
+      const queued1 = runner.requestApproval(taskId, 'queued-1');
+      const queued2 = runner.requestApproval(taskId, 'queued-2');
+
+      // Sanity: only the first is actually dispatched right now.
+      expect(approvalRegistry.list()).toHaveLength(1);
+      expect(sent.filter((e) => e.type === 'task.await_approval')).toHaveLength(1);
+
+      // Finish the task via a normal turn_end (session emits it, pump()
+      // sends task.complete and calls finish()).
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+      const [dispatchedOutcome, queued1Outcome, queued2Outcome] = await Promise.all([dispatched, queued1, queued2]);
+
+      expect(dispatchedOutcome.approved).toBe(false);
+      expect(queued1Outcome.approved).toBe(false);
+      expect(queued2Outcome.approved).toBe(false);
+      expect(queued1Outcome.reason).toMatch(/finished before this queued approval request could be dispatched/);
+      expect(queued2Outcome.reason).toMatch(/finished before this queued approval request could be dispatched/);
+
+      // No NEW task.await_approval frames were ever sent for the queued
+      // ones (still exactly the one from the original dispatch).
+      expect(sent.filter((e) => e.type === 'task.await_approval')).toHaveLength(1);
+
+      // The registry itself is left empty — the dispatched one was
+      // resolved too, not just the queue.
+      expect(approvalRegistry.list()).toEqual([]);
+    });
   });
 });

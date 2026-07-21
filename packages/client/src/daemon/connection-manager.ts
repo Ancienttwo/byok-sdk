@@ -188,6 +188,12 @@ export class ConnectionManager {
       getCursor: () => this.dedupWatermark(),
       onEnvelope: (envelope) => this.deliver(envelope),
       onRevoked: () => this.enterRevoked(),
+      // M4 Phase 4 (version-negotiation drill fix): a batch entry
+      // LongPollClient couldn't parse into a known Envelope at all (an
+      // unrecognized message type) still needs its cursor/watermark
+      // advanced past it, exactly like a successfully-processed envelope
+      // would — see `noteSkippedSeq`'s own doc comment.
+      onSkippedSeq: (seq) => this.noteSkippedSeq(seq),
       // Finding P2 (Fix 2a): lets the long-poll loop distinguish "this
       // non-empty batch was a stalled backlog re-pull, no cursor progress
       // was made" from ordinary forward progress, so it can back off
@@ -467,6 +473,78 @@ export class ConnectionManager {
     } finally {
       if (tracked) this.inFlightSeqs.delete(seq!);
     }
+  }
+
+  /**
+   * M4 Phase 4 (version-negotiation drill fix): `LongPollClient` calls this
+   * for a batch entry it could not parse into a known `Envelope` at all (an
+   * unrecognized message type — mirrors `ws-transport.ts`'s identical
+   * per-frame tolerance, see `long-poll-transport.ts`'s own doc comment on
+   * `parseLooseEventsPollResponse`) but which still carried a numeric,
+   * task-class envelope-level `seq` (the caller only invokes this for a
+   * `task.`-prefixed type — see `long-poll-transport.ts`'s own
+   * `extractSkippableSeq`; `conn.*`-shaped or type-less entries never reach
+   * here at all, mirroring F2's "conn.* is never cursor-tracked" rule).
+   * There is no real `Envelope` to hand to a handler — a genuinely
+   * unrecognized type has nothing this build could ever act on.
+   *
+   * GATEKEEPER-CAUGHT REGRESSION (fixed here): this used to call
+   * `advanceCursor(seq)` DIRECTLY, synchronously, the instant a skip was
+   * detected in `LongPollClient.loop()`'s per-entry for-loop. That is NOT
+   * "instantaneous and race-free" the way the previous version of this
+   * comment claimed — the hazard was never the skip racing against itself,
+   * it was the skip racing AHEAD of an EARLIER real envelope in the SAME
+   * batch that is still in flight on `processingChain` (`deliver()`, above,
+   * only ever CHAINS `process()` onto that promise chain — it never awaits
+   * it before returning). Concretely, batch `[real seq1, unknown seq2]`:
+   * `deliver(seq1)` chains `process(seq1)` but returns immediately without
+   * running it; the for-loop then reaches `seq2` and (pre-fix) called
+   * `advanceCursor(2)` synchronously, BEFORE `process(seq1)` had even
+   * started, let alone failed. If `seq1`'s handler then failed,
+   * `stalledAtSeq` became 1 — but the durable cursor was already 2, so
+   * `dedupWatermark()` returned 2, and every future redelivery of seq1 was
+   * dedup-dropped as "already past the cursor" forever: permanent envelope
+   * loss, exactly the F3 bug class the whole `stalledAtSeq`/frozen-watermark
+   * mechanism exists to prevent.
+   *
+   * Fix: the cursor-advancing half is now CHAINED onto `processingChain`
+   * too, exactly like `process()`'s own post-handler bookkeeping — so it
+   * only ever runs once every earlier envelope already queued ahead of it
+   * has fully settled (success or failure), and can observe `stalledAtSeq`'s
+   * REAL, up-to-date value rather than whatever it happened to be at the
+   * instant the skip was first noticed. The guard mirrors `process()`'s own
+   * success-path guard exactly: never advance past a still-unresolved
+   * earlier failure, unless (degenerate, cannot really happen for a skip)
+   * this exact seq IS the stalled one.
+   *
+   * `noteDelivered` (the eager, in-memory watermark) stays UNCHAINED —
+   * called immediately, unconditionally, regardless of `stalledAtSeq` —
+   * matching `deliver()`'s own eager, unconditional call for a real
+   * envelope: its only job is "don't re-pull something already handed off,"
+   * independent of outcome, and that property does not depend on FIFO
+   * ordering the way the DURABLE cursor does.
+   *
+   * Deliberately NO top-level `dedupWatermark() <= seq` early-return before
+   * queuing the chained callback (an earlier draft of this fix had one, and
+   * it was itself subtly wrong): `deliveredSeq` can already reflect a seq
+   * from the FIRST time it was ever seen, while the DURABLE cursor is still
+   * behind it because a stall intervened before that seq's chained
+   * advancement ran — a pre-check keyed on `deliveredSeq` would then
+   * wrongly treat a LATER redelivery of the same seq (arriving once the
+   * stall has since cleared) as "already accounted for" and never queue
+   * another attempt, permanently stranding the cursor one seq short. Always
+   * queuing is safe and cheap: `advanceCursor`'s own `seq <= this.cursor`
+   * guard already makes a genuinely-redundant call a no-op, so there is no
+   * correctness reason to short-circuit earlier, only a (here, unnecessary)
+   * micro-optimization one.
+   */
+  private noteSkippedSeq(seq: number): void {
+    this.noteDelivered(seq);
+    this.processingChain = this.processingChain.then(() => {
+      if (this.stalledAtSeq === undefined || seq === this.stalledAtSeq) {
+        this.advanceCursor(seq);
+      }
+    });
   }
 
   private advanceCursor(seq: number): void {

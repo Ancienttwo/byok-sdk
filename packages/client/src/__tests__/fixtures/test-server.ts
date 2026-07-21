@@ -55,7 +55,17 @@ export class TestServer {
   private readonly devicesById = new Map<string, DeviceAuthState>();
   private readonly pendingNonces = new Map<string, string>(); // nonce -> deviceId
   private readonly blobs = new Map<string, StoredBlob>();
-  private pendingLongPollEvents: Envelope[] = [];
+  /**
+   * M4 Phase 4 (version-negotiation drill): ONE ordered queue for the next
+   * long-poll response's `events` array — typed pushes (`pushLongPollEvent`)
+   * and raw/untyped pushes (`pushRawLongPollEvent`) both append here, in
+   * call order, so a test can interleave known and unrecognized-shape
+   * entries and have the response preserve that exact order (two separate
+   * queues merged at response time could not do this: everything from one
+   * queue would always precede everything from the other, regardless of
+   * push order).
+   */
+  private pendingLongPollEntries: unknown[] = [];
   private longPollCursor = 0;
 
   private deviceSeq = 0;
@@ -136,12 +146,38 @@ export class TestServer {
     return this.devicesById.get(deviceId)?.accessToken;
   }
 
-  /** Queue an envelope for the next long-poll `GET /byok/events` response (protocol §8). */
+  /** Queue an envelope for the next long-poll `GET /byok/events` response (protocol §8) — appended to the single ordered `pendingLongPollEntries` queue (see its own doc comment for why order matters). */
   pushLongPollEvent(envelope: Envelope): void {
-    this.pendingLongPollEvents.push(envelope);
+    this.pendingLongPollEntries.push(envelope);
     if (typeof envelope.seq === 'number' && envelope.seq > this.longPollCursor) {
       this.longPollCursor = envelope.seq;
     }
+  }
+
+  /**
+   * M4 Phase 4 (version-negotiation drill): queue a RAW, untyped value into
+   * the next long-poll response's `events` array — bypassing `Envelope`'s
+   * type checking entirely. `pushLongPollEvent` above can't express a wire
+   * payload the current `@byok/protocol` package doesn't recognize at all
+   * (e.g. a hypothetical future minor server's new message type) since its
+   * parameter is typed as the real, frozen `Envelope` union; this is the
+   * escape hatch for simulating exactly that scenario against the client's
+   * real long-poll transport. Appended to the SAME ordered queue
+   * `pushLongPollEvent` uses, so a test can freely interleave typed and raw
+   * pushes and have the response preserve that exact call order.
+   */
+  pushRawLongPollEvent(raw: unknown): void {
+    this.pendingLongPollEntries.push(raw);
+  }
+
+  /**
+   * M4 Phase 4 (version-negotiation drill): send a RAW, untyped value over
+   * the live WS connection — bypassing `createEnvelope`'s validation (which
+   * would reject a `type` this package doesn't recognize). Mirrors
+   * `pushRawLongPollEvent`'s rationale for the WS transport.
+   */
+  sendRaw(raw: unknown): void {
+    this.socket?.send(`${JSON.stringify(raw)}\n`);
   }
 
   /** The content currently stored for a blob (undefined until the presigned PUT lands). */
@@ -399,11 +435,15 @@ export class TestServer {
     res.writeHead(200, { 'content-type': blob.contentType }).end(blob.bytes);
   }
 
-  /** `cursor` is accepted per the schema but not used to filter — this stub always drains its whole queue rather than tracking per-request replay. */
+  /** `cursor` is accepted per the schema but not used to filter — this stub always drains its whole queue (in push order — see `pendingLongPollEntries`'s own doc comment) rather than tracking per-request replay. */
   private async handleEventsPoll(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.requireBearer(req, res)) return;
-    const events = this.pendingLongPollEvents.splice(0);
-    respondJson(res, 200, { events, cursor: this.longPollCursor });
+    const entries = this.pendingLongPollEntries.splice(0);
+    // Not re-validated here — this response is hand-serialized exactly like
+    // the real server's `EventsPollResponse`, so a raw entry queued via
+    // `pushRawLongPollEvent` rides along unchanged, the same way a genuinely
+    // future message type would arrive from a real future server.
+    respondJson(res, 200, { events: entries, cursor: this.longPollCursor });
   }
 
   /** `POST /byok/messages` (finding F6): the daemon's outbound send path while long-polling — same recording/waiter-resolution as a live WS message. */

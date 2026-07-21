@@ -12,6 +12,7 @@ import {
 import { PolicyUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
 import type { ApprovalDecision, ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
+import type { TaskQueueWatermark } from './control-protocol';
 import { computeEffectivePolicy } from './policy';
 import { ProgressBatcher, type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
@@ -26,6 +27,19 @@ import type { SessionWorkspaceStore } from './session-workspace-store';
  * see `create-daemon.ts`).
  */
 export const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * M4 Phase 4 (fold-in from the P3 gate): bound on how many `requestApproval`
+ * calls may sit QUEUED (not yet dispatched — see that method's own doc
+ * comment) for the same task at once. Claude's parallel tool use can fire
+ * more than one concurrent approval request for the same taskId; this is a
+ * defensive ceiling on that fan-out, mirroring `approvals.ts`'s own
+ * `MAX_PENDING_APPROVALS` (a whole-daemon cap) one level down (a per-task
+ * cap) — not a realistic workload limit. A request arriving once a task's
+ * queue is already at this size is rejected fail-closed immediately, the
+ * same shape `requestApproval` already uses for an unknown/inactive taskId.
+ */
+export const MAX_PENDING_APPROVALS_PER_TASK = 16;
 
 /**
  * M4 Phase 3 hardening (orchestrator-directed fix): thrown by the
@@ -125,12 +139,29 @@ interface ActiveTask {
   summaryParts: string[];
   /**
    * M4 Phase 3: the `ApprovalRegistry` id of the single out-of-band approval
-   * currently pending for this task, if any — set by `requestApproval`,
-   * cleared once resolved (by a real decision or by the timeout). `undefined`
-   * whenever nothing is pending. See `requestApproval` and
+   * currently DISPATCHED (registered + `task.await_approval` sent) for this
+   * task, if any — set by `requestApproval`/`dispatchApproval`, cleared once
+   * resolved (by a real decision or by the timeout). `undefined` whenever
+   * nothing is dispatched right now — including while `approvalQueue` below
+   * is non-empty but hasn't been dispatched yet. See `requestApproval` and
    * `TaskContext.approvalChannel.resolve`'s doc comments.
    */
   pendingApprovalId?: string;
+  /**
+   * M4 Phase 4 (fold-in from the P3 gate): FIFO queue of `requestApproval`
+   * calls for this SAME task that arrived while another one was already
+   * dispatched (`pendingApprovalId` set) — see `requestApproval`'s own doc
+   * comment for the full concurrency bug this fixes (claude's parallel tool
+   * use can call it more than once for one task before the first resolves).
+   * Bounded by {@link MAX_PENDING_APPROVALS_PER_TASK}.
+   */
+  approvalQueue: QueuedApprovalRequest[];
+}
+
+/** One not-yet-dispatched `requestApproval` call waiting its turn — see `ActiveTask.approvalQueue`. */
+interface QueuedApprovalRequest {
+  summary: string;
+  resolve: (result: { approved: boolean; reason?: string }) => void;
 }
 
 type PickResult =
@@ -386,6 +417,21 @@ export class TaskRunner {
 
   get activeTaskCount(): number {
     return this.tasks.size;
+  }
+
+  /**
+   * M4 Phase 4 (part B.3, observability): per-active-task queue watermarks
+   * for the control socket's `status` result — see
+   * `control-protocol.ts`'s `TaskQueueWatermark` doc comment for why this
+   * reflects the daemon's own progress-batcher backlog and in-flight
+   * approval count, not the adapter's own event-queue depth.
+   */
+  getQueueWatermarks(): TaskQueueWatermark[] {
+    return [...this.tasks.values()].map((active) => ({
+      taskId: active.taskId,
+      progressBatcherPending: active.batcher.pendingCount,
+      pendingApprovals: (active.pendingApprovalId !== undefined ? 1 : 0) + active.approvalQueue.length,
+    }));
   }
 
   /** M4 Phase 2: stop claiming any FUTURE `task.offer` — see `stoppingOffers`'s own doc comment. Idempotent. */
@@ -661,6 +707,7 @@ export class TaskRunner {
           (seq, events) => this.deps.send(createEnvelope('task.progress', { seq, events }, { taskId, seq })),
           this.deps.batcherOptions,
         ),
+        approvalQueue: [],
       };
       this.tasks.set(taskId, active);
       void this.pump(active);
@@ -937,6 +984,37 @@ export class TaskRunner {
    * Fails closed immediately (no registry entry ever created) for a `taskId`
    * that isn't currently active on this device — a stale/unknown/
    * already-finished task has nothing to pause.
+   *
+   * M4 Phase 4 (fold-in from the P3 gate — concurrent-approval-overwrite
+   * fix): claude's parallel tool use can call this MORE THAN ONCE for the
+   * SAME task before the first call's approval is resolved — each parallel
+   * tool call is its own independent `byok-approval-mcp` `tools/call`
+   * request, and the MCP protocol lets several be in flight on one
+   * connection at once (see `byok-approval-mcp.ts`'s own doc comment on
+   * sharing one control-socket connection across them). Before this fix,
+   * `active.pendingApprovalId = approvalId` above was unconditional — a
+   * second concurrent call for the same task silently overwrote the first
+   * call's id, so only the LATEST request was ever wire-resolvable
+   * (`ctx.approvalChannel.resolve`, below, and any server `task.approve`/
+   * `task.reject`, both resolve by looking up `active.pendingApprovalId`);
+   * every earlier one could only ever time out.
+   *
+   * Fix: only ONE approval per task is ever actually DISPATCHED (registered
+   * in `approvalRegistry` + `task.await_approval` sent + its own timeout
+   * window running) at a time — see `dispatchApproval` below. A second
+   * (third, ...) concurrent call for a task that already has one dispatched
+   * queues (FIFO, `active.approvalQueue`) instead of overwriting anything,
+   * and is only dispatched — with its OWN fresh approvalId and its OWN
+   * timeout window starting at THAT dispatch, not at this call's arrival —
+   * once the currently-dispatched one resolves (see
+   * `dispatchNextQueuedApproval`). The MCP callers on the other end are
+   * already independently blocked, each awaiting its own `requestApproval`
+   * promise, so this added latency for a queued request is transparent to
+   * them: nothing here changes what claude itself observes beyond "the
+   * answer took a bit longer." Bounded by
+   * {@link MAX_PENDING_APPROVALS_PER_TASK}: a request arriving once this
+   * task's queue is already full is rejected fail-closed immediately,
+   * mirroring the unknown/inactive-taskId case above.
    */
   async requestApproval(taskId: string, summary: string): Promise<{ approved: boolean; reason?: string }> {
     const active = this.tasks.get(taskId);
@@ -944,6 +1022,33 @@ export class TaskRunner {
       return { approved: false, reason: 'task is not currently active on this device' };
     }
 
+    if (active.pendingApprovalId !== undefined) {
+      if (active.approvalQueue.length >= MAX_PENDING_APPROVALS_PER_TASK) {
+        return {
+          approved: false,
+          reason: `too many approval requests already queued for task ${taskId} (max ${MAX_PENDING_APPROVALS_PER_TASK}) — rejected fail-closed`,
+        };
+      }
+      return new Promise((resolve) => {
+        active.approvalQueue.push({ summary, resolve });
+      });
+    }
+
+    return this.dispatchApproval(active, summary);
+  }
+
+  /**
+   * Actually dispatch one approval request for `active`'s task: register it
+   * in `deps.approvalRegistry`, send its `task.await_approval`, and start its
+   * own `deps.approvalTimeoutMs` window — see `requestApproval`'s own doc
+   * comment for why this is split out (only ever ONE dispatched per task at
+   * a time; everything else queues). Called either immediately
+   * (`requestApproval`, nothing else pending for this task) or from
+   * `dispatchNextQueuedApproval` once the previously-dispatched request for
+   * this same task resolves.
+   */
+  private dispatchApproval(active: ActiveTask, summary: string): Promise<{ approved: boolean; reason?: string }> {
+    const { taskId } = active;
     const approvalId = randomUUID();
     active.pendingApprovalId = approvalId;
     // Mirrors the dormant needs_approval branch's own flush-before-pausing
@@ -972,9 +1077,22 @@ export class TaskRunner {
           clearTimeout(timer);
           if (active.pendingApprovalId === approvalId) active.pendingApprovalId = undefined;
           resolve({ approved: decision === 'approve', reason });
+          this.dispatchNextQueuedApproval(active);
         },
       );
     });
+  }
+
+  /**
+   * FIFO: once a task's currently-dispatched approval resolves (real
+   * decision or timeout), dispatch the next queued request for that SAME
+   * task, if any — see `requestApproval`'s own doc comment. A no-op when
+   * nothing is queued.
+   */
+  private dispatchNextQueuedApproval(active: ActiveTask): void {
+    const next = active.approvalQueue.shift();
+    if (!next) return;
+    void this.dispatchApproval(active, next.summary).then(next.resolve);
   }
 
   /**
@@ -1075,6 +1193,40 @@ export class TaskRunner {
     active.batcher.stop();
     this.tasks.delete(taskId);
     this.addFinishedTaskId(taskId); // finding P2 (Fix 2c) — see its own doc comment
+
+    // M4 Phase 4 (gatekeeper LOW advisory): a task can finish (complete,
+    // fail, or cancel) while ONE approval is still DISPATCHED
+    // (`active.pendingApprovalId`) and/or MORE are QUEUED behind it
+    // (`active.approvalQueue` — see `requestApproval`'s own doc comment for
+    // the full concurrent-approval design). Left alone, a queued request
+    // would eventually get dispatched (a fresh, pointless `task.await_approval`
+    // + timeout window for a task that no longer exists) once whatever it
+    // was queued behind finally resolves; the dispatched one's own timer
+    // would keep running for up to `approvalTimeoutMs` regardless. Both are
+    // resolved fail-closed HERE instead: the queue is drained and rejected
+    // FIRST (each queued promise settles immediately, never dispatched at
+    // all), so that resolving the dispatched one next — which triggers
+    // `dispatchNextQueuedApproval` via its own `onResolve` callback — finds
+    // an already-empty queue and dispatches nothing. Order matters: doing
+    // it the other way around would let that callback pull the first
+    // queued entry and dispatch it for real.
+    const queued = active.approvalQueue.splice(0);
+    for (const request of queued) {
+      request.resolve({
+        approved: false,
+        reason: `task ${taskId} finished before this queued approval request could be dispatched`,
+      });
+    }
+    if (active.pendingApprovalId !== undefined) {
+      try {
+        this.deps.approvalRegistry.resolve(active.pendingApprovalId, 'reject', `task ${taskId} finished`);
+      } catch {
+        // Already resolved by a real decision/timeout that raced this —
+        // benign, same "first resolution wins" guarantee ApprovalRegistry
+        // already documents; nothing left to do.
+      }
+    }
+
     try {
       await active.session.close();
     } catch {

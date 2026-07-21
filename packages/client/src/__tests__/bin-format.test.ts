@@ -3,12 +3,14 @@ import type { DaemonEvent, DaemonTaskInfo } from '../index';
 import {
   formatAgentEvent,
   formatDaemonEventLine,
+  formatLiveStatusLines,
   formatRuntimeLines,
   formatStatusLines,
   formatTaskLine,
   formatTaskListLines,
   type StatusView,
 } from '../bin/format';
+import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { ProbedRuntime } from '../bin/runtime-probe';
 
 // eslint-disable-next-line no-control-regex
@@ -225,6 +227,69 @@ describe('bin/format: formatStatusLines', () => {
         deviceId: 'dev-1',
         connection: { state: 'open', ts: 'T' },
         runtimes: [{ id: 'pi', present: true, version: '1.0', authPresent: true, steer: true, resume: true, permissionModes: ['auto'] }],
+      }),
+    );
+    for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);
+  });
+});
+
+describe('bin/format: formatLiveStatusLines', () => {
+  function baseLive(overrides: Partial<ControlStatusResult> = {}): ControlStatusResult {
+    return {
+      pid: 123,
+      uptimeMs: 4567,
+      paired: true,
+      transport: 'open',
+      activeTasks: [],
+      runtimeIds: ['pi'],
+      queueWatermarks: [],
+      approvalsPending: 0,
+      ...overrides,
+    };
+  }
+
+  it('renders pid/uptime/transport, paired+deviceId, and runtimes on their own lines', () => {
+    const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimeIds: ['pi', 'claude'] }));
+    expect(lines).toContain('live: pid=123 uptimeMs=4567 transport=open');
+    expect(lines).toContain('live-paired: yes deviceId=dev-1');
+    expect(lines).toContain('live-runtimes: pi,claude');
+  });
+
+  it('shows a placeholder for no active tasks, and one line per active task otherwise', () => {
+    expect(formatLiveStatusLines(baseLive())).toContain('live-active-tasks: (none)');
+    const lines = formatLiveStatusLines(baseLive({ activeTasks: [{ taskId: 't1', state: 'Running' }] }));
+    expect(lines).toContain('live-active-task: t1 Running');
+    expect(lines).not.toContain('live-active-tasks: (none)');
+  });
+
+  it('renders approvalsPending as its own line', () => {
+    expect(formatLiveStatusLines(baseLive({ approvalsPending: 0 }))).toContain('live-approvals-pending: 0');
+    expect(formatLiveStatusLines(baseLive({ approvalsPending: 3 }))).toContain('live-approvals-pending: 3');
+  });
+
+  it('shows a placeholder for no queue watermarks, and one line per task otherwise (M4 Phase 4, part B.3)', () => {
+    expect(formatLiveStatusLines(baseLive())).toContain('live-queue-watermarks: (none)');
+
+    const lines = formatLiveStatusLines(
+      baseLive({
+        queueWatermarks: [
+          { taskId: 't1', progressBatcherPending: 4, pendingApprovals: 2 },
+          { taskId: 't2', progressBatcherPending: 0, pendingApprovals: 0 },
+        ],
+      }),
+    );
+    expect(lines).toContain('live-queue-watermark: t1 progressBatcherPending=4 pendingApprovals=2');
+    expect(lines).toContain('live-queue-watermark: t2 progressBatcherPending=0 pendingApprovals=0');
+    expect(lines).not.toContain('live-queue-watermarks: (none)');
+  });
+
+  it('never emits ANSI escape sequences', () => {
+    const lines = formatLiveStatusLines(
+      baseLive({
+        deviceId: 'dev-1',
+        activeTasks: [{ taskId: 't1', state: 'Running' }],
+        queueWatermarks: [{ taskId: 't1', progressBatcherPending: 1, pendingApprovals: 1 }],
+        approvalsPending: 1,
       }),
     );
     for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);

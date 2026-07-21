@@ -8,6 +8,7 @@ import type {
   TaskState,
 } from '@byok/protocol';
 import type { BlobStore } from './blob-store';
+import type { RateLimiterOptions } from './rate-limiter';
 import type { TaskStore } from './task-store';
 import type { TokenSigner } from './auth';
 
@@ -49,6 +50,45 @@ export interface CreateByokServerOptions {
    * design and its accepted residual risk. Default 30 minutes.
    */
   taskLeaseMs?: number;
+  /**
+   * M4 Phase 4 (part A): per-device inbound-envelope token bucket, enforced
+   * by `ConnectionHub.handleInbound` (`hub.ts`) — the single choke point
+   * both WS (`ws-server.ts`) and long-poll (`POST /byok/messages`, `http.ts`)
+   * inbound traffic passes through. Defaults: 50 msg/s sustained, burst 100
+   * (see `rate-limiter.ts`'s own defaults). Exceeding it never drops
+   * silently: it counts in `ConnectionHub.stats()`'s `rateLimitEvents`, and
+   * emits a `device.rate_limited` {@link ByokServerEvent} — see that
+   * variant's own doc comment for the per-transport enforcement shape (WS
+   * close vs. long-poll 429). Blob upload/download routes (`http.ts`) are
+   * deliberately NOT covered by this same bucket — see that file's own
+   * comment on why a shared limiter didn't drop in cleanly there.
+   *
+   * Honest caveat (no code change changes this — it's an inherent property
+   * of an abrupt WS close, not something rate limiting adds): a
+   * flood-triggered 1008 close is not special. Envelopes the daemon's own
+   * WS transport already handed off to its socket write between the moment
+   * the device exceeded budget and the close actually landing share the
+   * ordinary at-most-once exposure of ANY abrupt WS disconnect (network
+   * blip, server restart, etc.) — the wire's at-least-once guarantee
+   * (docs/protocol.md §9) is specified for the server->daemon direction
+   * only; daemon->server has no redelivery cursor to begin with, so this
+   * was already true before rate limiting existed. A flood just makes that
+   * pre-existing window more likely to have something in flight at the
+   * exact moment of a close.
+   */
+  rateLimit?: RateLimiterOptions;
+  /**
+   * M4 Phase 4 (part B.2): opt-in `GET /healthz` liveness route on the Hono
+   * app (`http.ts`) — deliberately unauthenticated (no bearer check) and
+   * carrying no sensitive data (no device ids, no counts), just
+   * `{ok:true, uptimeMs}`; see `http.ts`'s own comment on that route for the
+   * full auth-posture rationale. Default `false` (no route mounted at all).
+   * `ConnectionHub.stats()` (richer, in-process-only detail) is never
+   * exposed over HTTP by this SDK regardless of this flag — an embedder that
+   * wants that surfaced remotely builds its own authenticated route around
+   * `stats()`.
+   */
+  healthzRoute?: boolean;
 }
 
 /** Input to {@link ByokServer.dispatch}. */
@@ -153,4 +193,42 @@ export type ByokServerEvent =
    * so a SaaS UI can distinguish "approved server-side" from "the device
    * says it was approved locally" if it cares to.
    */
-  | { kind: 'task.approval_resolved_implicit'; taskId: string; at: string };
+  | { kind: 'task.approval_resolved_implicit'; taskId: string; at: string }
+  /**
+   * M4 Phase 4 (part A): `deviceId` exceeded its inbound-envelope rate limit
+   * (`CreateByokServerOptions.rateLimit`, enforced in
+   * `ConnectionHub.handleInbound`, `hub.ts`) — fired for every envelope that
+   * arrives once the bucket is empty, not just the first. Never a silent
+   * drop: this event fires AND the occurrence is counted in
+   * `ConnectionHub.stats()`'s `rateLimitEvents`. Per-transport enforcement
+   * differs (both still emit this same event): a WS connection is closed
+   * (policy-violation close code) right after, so the client's existing
+   * backoff+reconnect (protocol §9's redelivery covers the rest); a
+   * long-poll device has no live connection to close, so `POST
+   * /byok/messages` (`http.ts`) instead answers that request with HTTP 429.
+   */
+  | { kind: 'device.rate_limited'; deviceId: string; at: string };
+
+/**
+ * Plain, serializable in-process snapshot returned by
+ * `ConnectionHub.stats()` (`hub.ts`) — M4 Phase 4 (part B.1). Deliberately
+ * NOT exposed over HTTP by this SDK (see `CreateByokServerOptions.healthzRoute`'s
+ * doc comment): an embedder that wants any of this surfaced remotely builds
+ * its own authenticated route around `ByokServer.stats()`.
+ */
+export interface HubStats {
+  /** Devices with a currently-live WS or long-poll connection. */
+  connectedDeviceCount: number;
+  /** Every {@link TaskState} mapped to how many known tasks currently sit in it. */
+  taskCountsByState: Record<TaskState, number>;
+  /** Total inbound daemon->server envelopes {@link ConnectionHub.handleInbound} has ever been called with (every outcome, including rejected/rate-limited). */
+  envelopesIn: number;
+  /** Total server->daemon envelopes ever constructed via {@link ConnectionHub}'s single outbound choke point (`sendToDevice`), regardless of whether a live transport was available to flush them immediately. */
+  envelopesOut: number;
+  /** Inbound envelopes recognized as an already-seen `(deviceId, id)` pair (N3) — a no-op wire-level success, counted here for observability. */
+  dedupDrops: number;
+  /** Inbound envelopes rejected for exceeding a device's rate limit — see `device.rate_limited` on {@link ByokServerEvent}. */
+  rateLimitEvents: number;
+  /** Milliseconds since this `ConnectionHub` was constructed. */
+  uptimeMs: number;
+}

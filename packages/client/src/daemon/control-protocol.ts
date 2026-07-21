@@ -317,6 +317,30 @@ export interface ControlActiveTask {
   state: TaskState;
 }
 
+/**
+ * M4 Phase 4 (part B.3, observability): a cheap per-active-task queue-depth
+ * watermark for the `status` result. The IDEAL metric here would be each
+ * runtime adapter's own event-queue depth (`util/async-queue.ts`'s
+ * `AsyncQueue`) — but that queue lives inside each adapter's concrete
+ * `Session` implementation, and `Session.events` (`types.ts`) is typed only
+ * as a plain `AsyncIterable<AgentEvent>`, which has no queryable backlog
+ * size; reaching it would mean adding a new method to the `Session`
+ * interface AND implementing it in all three bundled adapters
+ * (pi/claude/codex), which is out of scope for this pass. This instead
+ * reflects two things `TaskRunner` already cheaply knows about the SAME
+ * task without any new plumbing: how much progress is buffered locally
+ * (not yet flushed as a `task.progress` batch), and how many out-of-band
+ * approval requests are currently in flight for it. See
+ * `task-runner.ts`'s `getQueueWatermarks` for how each field is computed.
+ */
+export interface TaskQueueWatermark {
+  taskId: string;
+  /** Events buffered in this task's `ProgressBatcher`, not yet flushed as a `task.progress` batch. */
+  progressBatcherPending: number;
+  /** Approval requests currently in flight for this task: 1 if one is actively dispatched (registered + `task.await_approval` sent) plus however many more are queued behind it (M4 Phase 4 fold-in — see `TaskRunner.requestApproval`). */
+  pendingApprovals: number;
+}
+
 /** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
 export interface ControlStatusResult {
   pid: number;
@@ -327,6 +351,10 @@ export interface ControlStatusResult {
   transport: string;
   activeTasks: ControlActiveTask[];
   runtimeIds: string[];
+  /** M4 Phase 4 (part B.3): per-active-task queue watermarks — see {@link TaskQueueWatermark}. */
+  queueWatermarks: TaskQueueWatermark[];
+  /** M4 Phase 4 (part B.3): total approvals currently DISPATCHED (registered) across the whole daemon — the same count `approvals.list` returns, surfaced here too for a one-call status view. */
+  approvalsPending: number;
 }
 
 export interface ApprovalsListResult {

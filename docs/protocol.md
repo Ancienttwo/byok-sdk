@@ -93,6 +93,19 @@ This asymmetry is enforced by the freeze-guard regression test
 (`packages/protocol/src/__tests__/freeze-guard.test.ts`), not just documented
 here — see that file for the executable version of every bullet above.
 
+**Deferred additive candidate (not yet added — no wire/schema change today):**
+a first-class `task.approval_resolved` message — an explicit daemon → server
+notification for the case where a pending approval was resolved entirely
+locally (the daemon's own control-socket `approvals.resolve`, M4 Phase 3),
+with no wire `task.approve`/`task.reject` ever exchanged. Today the server
+only infers this after the fact (`ConnectionHub.resumeIfImplicitlyApproved`,
+`packages/server/src/hub.ts`) and surfaces it purely as an embedder-facing
+`task.approval_resolved_implicit` `ByokServerEvent`
+(`packages/server/src/types.ts`) — never a protocol change. Noted here as a
+candidate for a future additive minor (it would land as "a new message
+type," the first bullet at the top of this section — no `PROTOCOL_VERSION`
+bump needed when it does), not committed to any wire shape yet.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -1101,3 +1114,103 @@ truly-dark device stops running. The mitigation is entirely `taskLeaseMs`
 being set far larger than any realistic task duration, so this residual can
 only manifest for a device genuinely unreachable for an extended period, not
 a normal slow turn.
+
+## 13. Version-negotiation drill (M4 Phase 4)
+
+A compat-matrix exercise simulating a future minor server against today's
+daemon, and vice versa — proving the Freeze rule's stated additive-compat
+promise actually holds in real code, not just in this document, and pinning
+down exactly where it doesn't (by design). Four scenarios, each with its
+real evidence:
+
+1. **Unknown additive fields on observability-class messages are tolerated**
+   (parsed, field stripped, no throw) —
+   `packages/protocol/src/__tests__/version-negotiation-drill.test.ts` and
+   the adjacent AgentEvent-variant case already in `freeze-guard.test.ts`.
+2. **Unknown NEW message type — the ignore/skip behavior differed by
+   transport; a genuine asymmetry the drill FOUND AND FIXED:**
+   - WS (`ws-transport.ts`): tolerant per-frame — an unrecognized `type`
+     fails `decodeEnvelope` with a distinctly-catchable
+     `UnknownMessageTypeError`, the WS message handler's `catch` block
+     silently skips just that one frame, and the connection (and every
+     later, well-formed frame) is unaffected. Unchanged by this fix — it
+     was already correct.
+   - Long-poll (`long-poll-transport.ts`): **was NOT tolerant at the batch
+     level.** `EventsPollResponseSchema` used to validate the WHOLE polled
+     batch as one `z.array(EnvelopeSchema)`; a single unrecognized-type
+     entry anywhere in it failed the entire `.parse()` call, discarding
+     every other (otherwise-valid) envelope in that same batch. Because the
+     client's redelivery cursor only ever advances after a successful
+     parse, and the real server's outbox *retains and redelivers* an
+     un-acked envelope (§9) rather than dropping it after one attempt, a
+     real future-typed envelope stuck at the head of a device's backlog
+     would make that device's long-poll cursor stall on every retry — not a
+     crash, not an unbounded hang (the retry loop kept backing off exactly
+     as it does for any other failure), but a genuine, indefinite lack of
+     forward progress on that transport specifically. This is exactly the
+     failure class this drill exists to catch — a `v1.1` server adding one
+     new additive message type would have stranded every `v1.0` long-poll
+     device — so it was fixed rather than shipped as a documented gap.
+     **Fix (`long-poll-transport.ts`, `connection-manager.ts`):** the outer
+     batch shape (`events` array + `cursor`) is now validated loosely; each
+     entry is validated INDIVIDUALLY via `parseMessage` — the same
+     per-message validator `decodeEnvelope` (WS's own per-frame decode)
+     calls internally, so the two transports share one notion of "valid"
+     and cannot drift apart on it again. An entry that fails for ANY reason
+     (unrecognized type, or a recognized type with an invalid payload — see
+     the malformed-entry case below) is skipped exactly as WS treats the
+     same failure: silently, no log line, batch and connection otherwise
+     unaffected. A skipped entry that still carries a numeric `seq` still
+     advances the cursor/watermark past it
+     (`ConnectionManager.noteSkippedSeq`), so a persistently-redelivered
+     unparseable entry can never stall progress again — verified directly:
+     the cursor keeps advancing through repeated redelivery of the same
+     poison payload, and a concurrent legitimate envelope is delivered with
+     no grace period needed. Malformed-known-type entries (a recognized
+     `type` with an invalid/missing payload) get the IDENTICAL treatment,
+     mirroring WS exactly — WS's own blanket `catch {}` never distinguished
+     "unrecognized type" from "recognized type, invalid payload" either; both
+     already fell through the same silent skip. See
+     `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`
+     for the full regression suite (against the real `ConnectionManager`/
+     `WsTransport`/`LongPollClient`): interleaved known/unknown/known
+     batches processed in order with the cursor advanced past all three
+     (including a trailing skip with nothing known after it, tested in
+     isolation), the malformed-known-type case, and the persistent-
+     redelivery/recovery case.
+3. **Unknown fields on control/security-class schemas
+   (`PermissionPolicySchema`, the `instruction` blob-ref variant) are
+   REJECTED, fail-closed** — already established by `freeze-guard.test.ts`;
+   `version-negotiation-drill.test.ts` additionally routes both cases
+   through the real end-to-end `decodeEnvelope` entrypoint (not just the
+   isolated payload schema) to close the loop.
+4. **Handshake version negotiation: a daemon advertising an overlapping set
+   (e.g. `[1, 2]`) agrees on `1`; a disjoint set (e.g. `[2, 3]`) gets a
+   clean, typed failure, not a hang.** The schema half (`conn.hello` accepts
+   either shape; `conn.ack` can only ever express one resolved version) is
+   in `version-negotiation-drill.test.ts`. The actual negotiation DECISION —
+   `ws-server.ts`'s handshake check,
+   `payload.protocolVersions.includes(PROTOCOL_VERSION)` — is exercised for
+   real (not reimplemented) in
+   `packages/server/src/__tests__/version-negotiation.test.ts`, including a
+   race against a timeout as direct "not a hang" evidence rather than
+   relying on the test runner's own global timeout to catch a hang
+   implicitly. Confirms today's actual negotiation rule is a simple
+   membership check against the server's single `PROTOCOL_VERSION`, not yet
+   the "highest common version across an N/N-1 range" policy the "Freeze
+   rule" section above already flags as "currently a no-op in practice"
+   until a real `v:2` exists.
+
+**Adjacent honest note (gatekeeper advisory, docs-only, no code change): rate
+limiting's abrupt WS close is not a new at-most-once risk.** M4 Phase 4's
+per-device rate limiter (`CreateByokServerOptions.rateLimit`) closes a
+flooding device's WS connection (1008). Any envelope the daemon's own WS
+transport already handed to its socket write between budget exhaustion and
+that close actually landing shares the ordinary at-most-once exposure of ANY
+abrupt WS disconnect — this section's own opening line scopes the
+at-least-once guarantee to the server→daemon direction; daemon→server has no
+redelivery cursor at all (`messages.ts`: "M1 only specifies at-least-once
+server->daemon redelivery, not a daemon->server one"), so this was already
+true before rate limiting existed. A flood just makes the pre-existing
+window more likely to have something in flight at the exact moment of a
+close — it introduces no new loss mode of its own.

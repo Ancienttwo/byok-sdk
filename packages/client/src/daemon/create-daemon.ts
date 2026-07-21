@@ -536,6 +536,15 @@ export function createDaemonWithAdapters(
       transport: connectionState,
       activeTasks,
       runtimeIds: adapters.map((adapter) => adapter.id),
+      // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
+      // active-task map (distinct from `observer.tasks()` above, which is
+      // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s
+      // own doc comment for why this is a progress-batcher-backlog +
+      // in-flight-approval-count proxy rather than the adapter's own event
+      // queue depth. `approvalsPending` is the same whole-daemon count
+      // `approvals.list` already returns, surfaced here too.
+      queueWatermarks: runner?.getQueueWatermarks() ?? [],
+      approvalsPending: approvalRegistry.list().length,
     };
   }
 

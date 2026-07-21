@@ -181,5 +181,19 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
       lines.push(`live-active-task: ${task.taskId} ${task.state}`);
     }
   }
+  // M4 Phase 4 (part B.3): queue watermarks — see ControlStatusResult's own
+  // doc comment (control-protocol.ts) for why this is a progress-batcher
+  // backlog + in-flight-approval-count proxy, not the adapter's own event
+  // queue depth.
+  lines.push(`live-approvals-pending: ${live.approvalsPending}`);
+  if (live.queueWatermarks.length === 0) {
+    lines.push('live-queue-watermarks: (none)');
+  } else {
+    for (const watermark of live.queueWatermarks) {
+      lines.push(
+        `live-queue-watermark: ${watermark.taskId} progressBatcherPending=${watermark.progressBatcherPending} pendingApprovals=${watermark.pendingApprovals}`,
+      );
+    }
+  }
   return lines;
 }
