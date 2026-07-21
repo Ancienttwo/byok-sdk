@@ -31,7 +31,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -58,7 +58,15 @@ try {
   process.exit(1);
 }
 
-const { createServiceLifecycle } = await import(clientDistIndex);
+// Node's dynamic `import()` requires a proper URL, not a bare filesystem
+// path — on POSIX an absolute path happens to also parse as a (relative)
+// specifier and mostly works, but on Windows an absolute path like
+// `D:\a\...\index.js` is misread as a URL with scheme "d:", which throws
+// `ERR_UNSUPPORTED_ESM_URL_SCHEME` (empirically confirmed: this is exactly
+// what failed the first version of this script in CI on windows-latest).
+// `pathToFileURL` converts a native absolute path to a correct `file://`
+// URL on every platform, which `import()` always accepts.
+const { createServiceLifecycle } = await import(pathToFileURL(clientDistIndex).href);
 
 const name = `byok-winsw-smoke-${process.pid}`;
 const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-winsw-smoke-'));
