@@ -4,13 +4,17 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createByokServer } from '../index';
 import { SqliteTaskStore } from '../sqlite-task-store';
-import { isSqliteCapableNodeVersion } from '../sqlite-support';
+import { isSqliteAvailable } from '../sqlite-support';
 import { IllegalTaskTransitionError } from '../task-store';
 
-// node:sqlite requires Node 22.5+. The core SDK works on the declared Node 20
-// floor with the default InMemoryTaskStore; these SQLite reference-store tests
-// skip on older runtimes (the CI Node 20 leg) rather than fail the whole leg.
-const sqliteReady = isSqliteCapableNodeVersion(process.versions.node);
+// node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
+// until later in the 22.x line — so "Node >= 22.5" alone doesn't mean the
+// module actually loads. Gate on ACTUAL availability (attempts the real
+// require — see sqlite-support.ts's isSqliteAvailable), not a version-number
+// heuristic, so this correctly skips on any runtime where node:sqlite isn't
+// really usable (the CI Node 20 leg, or an intermediate flagged 22.x) and
+// still runs on one where it is.
+const sqliteReady = isSqliteAvailable();
 
 function tempDbPath(prefix: string): string {
   const dir = mkdtempSync(path.join(tmpdir(), prefix));
@@ -74,7 +78,51 @@ describe.skipIf(!sqliteReady)('SqliteTaskStore', () => {
     store.close();
   });
 
-  it('recovers a task’s full state after being reopened on the same database file (restart-safety)', () => {
+  it('compare-and-set prevents a lost update: two stores racing on the same Running task — exactly one transition wins, the other is rejected against the state that actually won (no terminal -> terminal)', () => {
+    const dbPath = tempDbPath('byok-sqlite-task-cas-race-');
+
+    const storeA = new SqliteTaskStore({ path: dbPath });
+    const storeB = new SqliteTaskStore({ path: dbPath });
+    createTask(storeA);
+    storeA.transition('task_1', 'Claimed');
+    storeA.transition('task_1', 'Running');
+
+    // Force the exact race a pre-CAS unconditional UPDATE was vulnerable to,
+    // deterministically. `transition()` starts with `this.get(taskId)`; a
+    // real race is "two connections both read Running, both validate a
+    // different target, both write" — reproduced here by splicing storeB's
+    // FULL, independent `Running -> Failed` transition in between storeA's
+    // read and storeA's write: storeA's `get` is called first (capturing a
+    // `Running` snapshot), then storeB commits `Failed` on the real
+    // database, then the stale `Running` snapshot is handed back to
+    // storeA's `transition`, exactly as if a second process had committed
+    // between storeA's read and its write.
+    const originalGet = storeA.get.bind(storeA);
+    let intercepted = false;
+    (storeA as unknown as { get: SqliteTaskStore['get'] }).get = (taskId: string) => {
+      const record = originalGet(taskId);
+      if (!intercepted) {
+        intercepted = true;
+        storeB.transition(taskId, 'Failed'); // the "concurrent" writer commits first
+      }
+      return record; // stale snapshot captured before storeB's write
+    };
+
+    // Pre-fix, this would have silently succeeded (unconditional UPDATE),
+    // performing an illegal Failed -> Complete transition under the hood.
+    // Post-fix, the CAS write affects 0 rows (the real state is now
+    // Failed), so transition() re-reads, sees Failed, and rejects Complete.
+    expect(() => storeA.transition('task_1', 'Complete')).toThrow(IllegalTaskTransitionError);
+
+    // No lost update: the row reflects storeB's committed write, not
+    // silently clobbered by storeA's stale Complete attempt.
+    expect(storeA.get('task_1')?.state).toBe('Failed');
+
+    storeA.close();
+    storeB.close();
+  });
+
+  it('recovers a task’s full record after being reopened on the same database file (record persistence — not live task reconnection; see SqliteTaskStore doc comment)', () => {
     const dbPath = tempDbPath('byok-sqlite-task-restart-');
 
     const storeA = new SqliteTaskStore({ path: dbPath });
@@ -127,8 +175,8 @@ describe.skipIf(!sqliteReady)('SqliteTaskStore', () => {
   });
 });
 
-describe.skipIf(!sqliteReady)('createByokServer({ taskStore: new SqliteTaskStore(...) }) restart-safety', () => {
-  it('a second createByokServer instance on the same db file recovers a task created by the first', () => {
+describe.skipIf(!sqliteReady)('createByokServer({ taskStore: new SqliteTaskStore(...) }) task-record persistence across restart', () => {
+  it('a second createByokServer instance on the same db file can read the task RECORD created by the first (record persistence only — no live device/runtime reconnection)', () => {
     const dbPath = tempDbPath('byok-sqlite-task-server-');
 
     const storeA = new SqliteTaskStore({ path: dbPath });
@@ -148,7 +196,13 @@ describe.skipIf(!sqliteReady)('createByokServer({ taskStore: new SqliteTaskStore
     storeA.close();
 
     // "Restart": a brand-new createByokServer backed by a brand-new
-    // SqliteTaskStore instance, pointed at the exact same file.
+    // SqliteTaskStore instance, pointed at the exact same file. `byokB` has
+    // no connected device and no live runtime for this task — it never had
+    // one — so this proves the RECORD survived and is readable through a
+    // fresh server, not that the task's in-flight connection came back.
+    // There's nothing here to actually push a new event to this task or
+    // resume its runtime; see `SqliteTaskStore`'s doc comment for why that's
+    // explicitly out of scope for this reference store.
     const storeB = new SqliteTaskStore({ path: dbPath });
     const byokB = createByokServer({ productId: 'acme', taskStore: storeB });
 

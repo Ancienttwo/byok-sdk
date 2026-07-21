@@ -1,17 +1,21 @@
-import { createHash } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createByokServer } from '../index';
-import { SqliteBlobStore } from '../sqlite-blob-store';
-import { isSqliteCapableNodeVersion } from '../sqlite-support';
+import { loadOrCreateSigningSecret, SCHEMA, SqliteBlobStore } from '../sqlite-blob-store';
+import { isSqliteAvailable, openSqliteDatabase } from '../sqlite-support';
 import { pairFakeDaemon, startServer, stopServer } from './test-support';
 
-// node:sqlite requires Node 22.5+. The core SDK works on the declared Node 20
-// floor with the default LocalDiskBlobStore; these SQLite reference-store tests
-// skip on older runtimes (the CI Node 20 leg) rather than fail the whole leg.
-const sqliteReady = isSqliteCapableNodeVersion(process.versions.node);
+// node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
+// until later in the 22.x line — so "Node >= 22.5" alone doesn't mean the
+// module actually loads. Gate on ACTUAL availability (attempts the real
+// require — see sqlite-support.ts's isSqliteAvailable), not a version-number
+// heuristic, so this correctly skips on any runtime where node:sqlite isn't
+// really usable (the CI Node 20 leg, or an intermediate flagged 22.x) and
+// still runs on one where it is.
+const sqliteReady = isSqliteAvailable();
 
 /** Canonical `contentHash` form (docs/protocol.md §7, finding F9): `sha256:<64 lowercase hex>` — same helper `blob.test.ts` uses. */
 function sha256Hex(data: Buffer): string {
@@ -133,6 +137,63 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     // A signature for the wrong action must still fail.
     expect(storeB.verifySignedUrl(blobId, 'get', put.sig, put.exp)).toBe(false);
     storeB.close();
+  });
+
+  it('two connections racing to initialize the signing secret converge on the SAME value, not two different ones', () => {
+    const dbPath = tempDbPath('byok-sqlite-blob-secret-race-');
+
+    // Two raw connections to the same brand-new file, as if two
+    // `SqliteBlobStore` instances were being constructed at nearly the same
+    // moment — dbA applies the schema (idempotent CREATE TABLE IF NOT
+    // EXISTS), so dbB sees the same `meta` table already there.
+    const dbA = openSqliteDatabase(dbPath);
+    dbA.exec(SCHEMA);
+    const dbB = openSqliteDatabase(dbPath);
+
+    let secretB: Buffer | undefined;
+    // Force the exact race: dbA's SELECT finds no existing secret, and
+    // right at the point dbA would generate ITS candidate, dbB races ahead
+    // and fully completes its own load-or-create first (also finding
+    // nothing yet, generating and persisting its own candidate). Control
+    // then returns to dbA, which still generates a (necessarily different)
+    // candidate of its own — one that must lose the race, since dbB's is
+    // already persisted.
+    const secretA = loadOrCreateSigningSecret(dbA, () => {
+      secretB = loadOrCreateSigningSecret(dbB, () => randomBytes(32));
+      return randomBytes(32); // dbA's own candidate — must lose the race
+    });
+
+    expect(secretB).toBeDefined();
+    // Pre-fix (INSERT OR REPLACE, returning the local candidate
+    // unconditionally), this would fail: dbA would keep its own discarded
+    // candidate instead of adopting dbB's persisted, winning value.
+    expect(secretA.equals(secretB!)).toBe(true);
+
+    dbA.close();
+    dbB.close();
+  });
+
+  it('the database file, and its WAL/SHM siblings, are created with owner-only 0600 permissions (0700 for a freshly-created containing directory)', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'byok-sqlite-blob-perms-'));
+    const dbPath = path.join(dir, 'nested', 'blobs.db');
+    const store = new SqliteBlobStore({ path: dbPath });
+
+    // Force a write so the WAL/SHM siblings are guaranteed to exist.
+    const content = Buffer.from('secure me');
+    const contentHash = sha256Hex(content);
+    const { blobId } = await store.createUpload({ size: content.length, contentType: 'text/plain', contentHash });
+    await store.writeContent(blobId, content);
+
+    expect(statSync(path.dirname(dbPath)).mode & 0o777).toBe(0o700);
+    expect(statSync(dbPath).mode & 0o777).toBe(0o600);
+    for (const suffix of ['-wal', '-shm']) {
+      const siblingPath = `${dbPath}${suffix}`;
+      if (existsSync(siblingPath)) {
+        expect(statSync(siblingPath).mode & 0o777).toBe(0o600);
+      }
+    }
+
+    store.close();
   });
 });
 

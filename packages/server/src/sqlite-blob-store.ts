@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import type { BlobStore, CreateUploadInput, ReadContentResult, WriteContentResult } from './blob-store';
-import { openSqliteDatabase } from './sqlite-support';
+import { openSqliteDatabase, secureSqliteFilePermissions } from './sqlite-support';
 
 export interface SqliteBlobStoreOptions {
   /**
@@ -27,7 +27,8 @@ export interface SqliteBlobStoreOptions {
   signingKey?: Buffer;
 }
 
-const SCHEMA = `
+/** Exported (only) so `sqlite-blob-store.test.ts` can apply the same schema to a raw `DatabaseSync` connection when testing {@link loadOrCreateSigningSecret}'s concurrency behavior directly. */
+export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -65,6 +66,54 @@ interface BlobRow {
 }
 
 /**
+ * Atomically load the persisted HMAC signing secret from `db`'s `meta`
+ * table, generating and persisting one if none exists yet.
+ *
+ * Safe under two `DatabaseSync` connections racing on the same file — e.g.
+ * two fresh `SqliteBlobStore` instances constructed against a brand-new
+ * database at nearly the same moment. Both may see no existing row (via the
+ * initial `SELECT`) and both generate a candidate secret, but `INSERT OR
+ * IGNORE` guarantees at most one candidate is ever persisted, and —
+ * critically — EVERY caller unconditionally re-reads the row afterward and
+ * returns THAT value, never its own locally-generated candidate. Without
+ * that re-read (the bug this fixes: the previous implementation used
+ * `INSERT OR REPLACE` and returned its own candidate unconditionally), a
+ * caller whose candidate lost the race would keep using its own discarded
+ * value in memory — so a presigned URL it signs would fail to verify
+ * against any other instance, which persisted (and uses) the winning value.
+ *
+ * `generateCandidate` defaults to `randomBytes(32)`; overridable so
+ * `sqlite-blob-store.test.ts` can deterministically force the race window —
+ * real callers never need to pass it.
+ */
+export function loadOrCreateSigningSecret(
+  db: DatabaseSync,
+  generateCandidate: () => Buffer = () => randomBytes(32),
+): Buffer {
+  const selectStmt = db.prepare('SELECT value FROM meta WHERE key = ?');
+  const existing = selectStmt.get(SIGNING_SECRET_META_KEY) as { value: string } | undefined;
+  if (existing) return Buffer.from(existing.value, 'hex');
+
+  const candidate = generateCandidate();
+  db.prepare('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)').run(
+    SIGNING_SECRET_META_KEY,
+    candidate.toString('hex'),
+  );
+
+  // Re-read regardless of whether OUR insert is what actually landed: if a
+  // concurrent connection's INSERT committed first, this returns ITS value.
+  const persisted = selectStmt.get(SIGNING_SECRET_META_KEY) as { value: string } | undefined;
+  if (!persisted) {
+    // Unreachable in practice — INSERT OR IGNORE guarantees a row exists by
+    // now (ours or a racing connection's). A loud failure here rather than
+    // silently generating yet another candidate keeps this from masking a
+    // genuinely broken database.
+    throw new Error('failed to initialize SQLite blob store signing secret');
+  }
+  return Buffer.from(persisted.value, 'hex');
+}
+
+/**
  * Persistent {@link BlobStore} backed by `node:sqlite` — no native
  * dependency, same rationale as `SqliteTaskStore` (`sqlite-support.ts`).
  * Metadata AND content bytes both live in the same database file (a `data
@@ -93,8 +142,9 @@ export class SqliteBlobStore implements BlobStore {
   constructor(opts: SqliteBlobStoreOptions) {
     this.db = openSqliteDatabase(opts.path);
     this.db.exec(SCHEMA);
+    secureSqliteFilePermissions(opts.path);
     this.urlTtlMs = opts.urlTtlMs ?? DEFAULT_URL_TTL_MS;
-    this.secret = opts.signingKey ?? this.loadOrCreateSecret();
+    this.secret = opts.signingKey ?? loadOrCreateSigningSecret(this.db);
 
     this.insertBlobStmt = this.db.prepare(
       `INSERT INTO blobs (blob_id, size, content_type, content_hash, uploaded, data)
@@ -156,18 +206,6 @@ export class SqliteBlobStore implements BlobStore {
   /** Close the underlying database connection — see `SqliteTaskStore.close`'s doc comment; same rationale. */
   close(): void {
     this.db.close();
-  }
-
-  private loadOrCreateSecret(): Buffer {
-    const existing = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(SIGNING_SECRET_META_KEY) as
-      | { value: string }
-      | undefined;
-    if (existing) return Buffer.from(existing.value, 'hex');
-    const secret = randomBytes(32);
-    this.db
-      .prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)')
-      .run(SIGNING_SECRET_META_KEY, secret.toString('hex'));
-    return secret;
   }
 
   private computeSig(blobId: string, action: 'put' | 'get', exp: number): string {

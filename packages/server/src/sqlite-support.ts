@@ -1,4 +1,6 @@
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
 /**
@@ -42,6 +44,14 @@ const MIN_NODE_MINOR = 5;
  * shape this hasn't seen before): `loadSqliteModule`'s own `require` call is
  * the real, authoritative gate; this check only exists to turn the common
  * case (a too-old Node) into a clear message instead of a cryptic one.
+ *
+ * Not a sufficient capability check on its own: `node:sqlite` shipped in
+ * Node 22.5.0 behind the `--experimental-sqlite` flag and only became usable
+ * unflagged in a later 22.x release (https://nodejs.org/api/sqlite.html), so
+ * a runtime that satisfies this version check can still fail to actually
+ * load the module. Use {@link isSqliteAvailable} when the question is "can I
+ * use `node:sqlite` right now", not "is the Node version new enough for it
+ * to exist at all".
  */
 export function isSqliteCapableNodeVersion(nodeVersion: string): boolean {
   const [majorStr, minorStr] = nodeVersion.split('.');
@@ -85,8 +95,33 @@ function loadSqliteModule(): typeof import('node:sqlite') {
   }
 }
 
+/**
+ * Whether `node:sqlite` can ACTUALLY be loaded right now — the authoritative
+ * capability check, in contrast to {@link isSqliteCapableNodeVersion}'s
+ * version-string heuristic. This is what this package's own test suite uses
+ * to decide whether to skip the SQLite-backed reference-store tests (rather
+ * than fail them), and what anything else should call before assuming a
+ * `SqliteTaskStore`/`SqliteBlobStore` can be constructed: it attempts the
+ * real `require('node:sqlite')` (via {@link loadSqliteModule}, memoized) and
+ * reports whether that succeeded, so it agrees with reality regardless of
+ * whether the current runtime is old, too-new-but-flagged, or fully capable.
+ */
+export function isSqliteAvailable(): boolean {
+  try {
+    loadSqliteModule();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Busy-timeout (ms) shared by both SQLite stores: long enough that two same-process `DatabaseSync` connections opened against the same file back-to-back (e.g. a test proving restart-safety by opening a "second instance" against the same path) don't spuriously throw `SQLITE_BUSY` under momentary write-lock contention. */
 const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
+
+/** POSIX mode both SQLite reference-store db files (and their WAL/SHM siblings) are secured to — owner read/write only, no group/other access. Matches the convention the client-side device credential store already uses (`packages/client/src/daemon/store.ts`). */
+const SECURE_FILE_MODE = 0o600;
+/** POSIX mode applied to a freshly-created directory holding a SQLite reference-store db file — owner read/write/execute only. Same rationale as {@link SECURE_FILE_MODE}. */
+const SECURE_DIR_MODE = 0o700;
 
 /**
  * Open (or create) a `node:sqlite` `DatabaseSync` at `path`, applying the
@@ -95,15 +130,48 @@ const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
  * blocking each other, and is what makes "close instance A, open instance B
  * on the same file" — the restart-safety story — reliable) and a busy
  * timeout (see {@link DEFAULT_BUSY_TIMEOUT_MS}). WAL is skipped for
- * `:memory:`, where it's meaningless. Throws {@link SqliteUnavailableError}
- * if `node:sqlite` itself can't be loaded (Node <22.5) — callers don't need
- * their own guard for that; this is the single choke point.
+ * `:memory:`, where it's meaningless. For a file-backed path whose parent
+ * directory doesn't exist yet, creates it (recursively) at
+ * {@link SECURE_DIR_MODE} — mirroring the client-side device store's
+ * convention of never leaving a credential directory at a permissive
+ * default mode. Throws {@link SqliteUnavailableError} if `node:sqlite`
+ * itself can't be loaded (Node <22.5, or a flagged intermediate 22.x — see
+ * {@link isSqliteAvailable}) — callers don't need their own guard for that;
+ * this is the single choke point.
  */
 export function openSqliteDatabase(path: string, options?: DatabaseSyncOptions): DatabaseSync {
   const { DatabaseSync } = loadSqliteModule();
+  if (path !== ':memory:') {
+    mkdirSync(dirname(path), { recursive: true, mode: SECURE_DIR_MODE });
+  }
   const db = new DatabaseSync(path, { timeout: DEFAULT_BUSY_TIMEOUT_MS, ...options });
   if (path !== ':memory:') {
     db.exec('PRAGMA journal_mode = WAL;');
   }
   return db;
+}
+
+/**
+ * Restrict `dbPath` and its WAL/SHM sibling files (`<path>-wal`,
+ * `<path>-shm` — created by SQLite itself once WAL mode is active and a
+ * write has happened) to owner-only read/write ({@link SECURE_FILE_MODE}).
+ * Both SQLite reference stores hold sensitive bytes on disk with no other
+ * access-control layer of their own — `SqliteBlobStore` an HMAC signing
+ * secret plus arbitrary uploaded blob content, `SqliteTaskStore` task
+ * instructions and device/session refs — so a real (non-`:memory:`)
+ * database file must not be left at whatever permissive mode the process'
+ * umask would otherwise give it.
+ *
+ * Call this AFTER the schema has been created against `dbPath` (so the
+ * WAL/SHM files, which SQLite creates lazily on first write, already exist)
+ * — a sibling file that doesn't exist yet is silently skipped rather than
+ * treated as an error. No-op for `:memory:`.
+ */
+export function secureSqliteFilePermissions(dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (existsSync(candidate)) {
+      chmodSync(candidate, SECURE_FILE_MODE);
+    }
+  }
 }

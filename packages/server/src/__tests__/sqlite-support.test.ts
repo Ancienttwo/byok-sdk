@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSqliteCapableNodeVersion, SqliteUnavailableError } from '../sqlite-support';
+import { isSqliteAvailable, isSqliteCapableNodeVersion, openSqliteDatabase, SqliteUnavailableError } from '../sqlite-support';
 
 /**
  * `SqliteTaskStore`/`SqliteBlobStore` require Node.js 22.5+ (`node:sqlite`'s
@@ -40,5 +40,32 @@ describe('SQLite availability guard', () => {
     expect(err.message).toMatch(/InMemoryTaskStore/);
     expect(err.message).toMatch(/LocalDiskBlobStore/);
     expect(err.cause).toBe(cause);
+  });
+
+  /**
+   * `isSqliteCapableNodeVersion` is a version-string heuristic only: Node
+   * 22.5–~22.12 satisfies it yet still required `--experimental-sqlite` to
+   * actually load the module, so a test suite gating its `skipIf` on THAT
+   * function alone would wrongly attempt (and fail, not skip) SQLite tests
+   * on such a runtime. `isSqliteAvailable` is the fix — it attempts the real
+   * module load and reports whether that actually succeeded, so it agrees
+   * with reality regardless of flag state. This is what
+   * `sqlite-task-store.test.ts`/`sqlite-blob-store.test.ts` gate on.
+   */
+  it('isSqliteAvailable agrees with reality: whenever it reports true, openSqliteDatabase actually works, and whenever it reports false, openSqliteDatabase throws SqliteUnavailableError', () => {
+    // Deliberately branches on the live result rather than hardcoding one
+    // outcome: this asserts the two independent code paths
+    // (isSqliteAvailable's try/catch around loadSqliteModule, and
+    // openSqliteDatabase's own call into the same loader) stay consistent
+    // with each other on whatever runtime this actually executes on —
+    // including the in-between Node 22.x range where node:sqlite exists but
+    // needs `--experimental-sqlite`, which this same assertion covers by
+    // exercising the `false` branch there instead of skipping.
+    if (isSqliteAvailable()) {
+      const db = openSqliteDatabase(':memory:');
+      db.close();
+    } else {
+      expect(() => openSqliteDatabase(':memory:')).toThrow(SqliteUnavailableError);
+    }
   });
 });
