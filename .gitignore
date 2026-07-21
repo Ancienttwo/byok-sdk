@@ -11,3 +11,6 @@ coverage/
 _ref/
 _ops/
 .gstack/
+
+# examples/basic BYOK_STORE=sqlite persisted data (M3)
+examples/basic/data/

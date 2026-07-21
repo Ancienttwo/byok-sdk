@@ -8,12 +8,33 @@ export type {
 export { PolicyUnsupportedError } from './types';
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides } from './daemon/create-daemon';
+export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding } from './daemon/create-daemon';
 export type { DeviceRecord } from './daemon/store';
 export { AuthManager, DeviceRevokedError } from './daemon/auth-manager';
 export type { ConnectionState } from './daemon/ws-transport';
 export { BlobClient } from './daemon/blob-client';
 export type { BlobResolver } from './daemon/blob-client';
+// M3-2a: local observability — the seam the CLI (M3-2b) consumes for a live
+// task feed, a task list, and approve/reject/unpair, all local to a running
+// daemon. See `daemon/observer.ts`.
+export { DaemonObserver } from './daemon/observer';
+export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
+
+// M3-4: OS service lifecycle (launchd/systemd/WinSW) — see `lifecycle/create-service-lifecycle.ts`.
+export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
+export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle';
+export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types';
+export type {
+  NodeAgentProgramOptions,
+  ServiceDefinition,
+  ServiceInstallOptions,
+  ServiceLifecycle,
+  ServiceProgram,
+  ServiceStatusResult,
+} from './lifecycle/service-types';
+export { generateLaunchdPlist } from './lifecycle/launchd';
+export { generateSystemdUnit } from './lifecycle/systemd';
+export { generateWinswXml } from './lifecycle/winsw';
 
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions } from './adapters/pi/pi-adapter';

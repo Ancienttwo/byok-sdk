@@ -70,6 +70,29 @@ see `server.ts`); a mismatch is rejected at the WS handshake.
    implements) and click **Dispatch**. The progress feed streams live via
    SSE; approve/cancel buttons call the task's `TaskHandle` directly.
 
+## Persistent storage (M3)
+
+By default this demo's task/blob state is in-memory + local-disk and is lost
+whenever the server process restarts. Set `BYOK_STORE=sqlite` to swap in
+`@byok/server`'s `node:sqlite`-backed reference stores (`SqliteTaskStore`/
+`SqliteBlobStore`) instead — task **records** and blob bytes then survive a
+restart, persisted under `examples/basic/data/` (gitignored):
+
+> Note: this is **record persistence**, not live-task recovery. A restarted
+> server recovers the stored task/blob rows, but an *in-flight* task is not
+> resumed — the fresh process has no live runtime connection, event queue,
+> result promise, or device session for it, and previously paired devices
+> reconnect as new sessions. Reconnection/resume of active work is out of
+> scope for the M3 reference stores.
+
+```sh
+BYOK_STORE=sqlite pnpm --filter @byok/example-basic dev
+```
+
+Requires Node.js 22.5+ (`node:sqlite`'s minimum); on an older Node this fails
+fast with a clear error rather than a cryptic one (see
+`packages/server/src/sqlite-support.ts`).
+
 ## Provider API key (for a *real* pi run)
 
 `pi` needs a model provider credential to actually call an LLM. Set one of

@@ -69,3 +69,133 @@ jobs:
 
       - name: Test
         run: pnpm -r test
+
+  # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
+  # into a single-file executable (bun build --compile / Node SEA) without
+  # pi's optionalDependency resolution (packages/client/src/adapters/pi/
+  # resolve-bin.ts's `import.meta.resolve`) crashing the process when pi
+  # isn't reachable from inside the bundle -- it must degrade to
+  # `present: false`, same as it already does for a plain `node` run with
+  # the optionalDependency missing. See templates/packaging/{bun,sea} for
+  # the full recipes + empirically-confirmed rationale (including a macOS
+  # postject gotcha that silently segfaults without one extra flag), and
+  # examples/packaging/launcher.ts for the entry point both recipes compile.
+  #
+  # Decision-6 boundary: this is a packageability GUARANTEE (a smoke proving
+  # the daemon can be single-file-bundled) plus reference recipes a product
+  # copies -- not the SDK producing, signing, or distributing a binary
+  # itself. Nothing in this job signs, notarizes, or distributes anything.
+  #
+  # Deliberately independent of build-test above (no `needs:`): each leg
+  # does its own install + build, so this job can be extended or reordered
+  # later (e.g. a Windows-Service CI job) without perturbing build-test's
+  # own matrix or steps.
+  #
+  # windows-latest is included for both recipes -- bun natively
+  # cross-platform compiles, and Node SEA on Windows needs no macOS-style
+  # codesign dance (see templates/packaging/sea/build.sh) -- both were wired
+  # up per Node's own documented per-OS steps, but only macOS + Linux were
+  # actually run on the machine these recipes were authored on (no local
+  # Windows box available). If a windows-latest leg goes red, that is
+  # exactly this job's purpose: catch it here, not in a product downstream.
+  packageability-smoke:
+    name: packageability smoke (${{ matrix.recipe }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        recipe: [bun, sea]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (needed so @byok/client has a dist/ to bundle)
+        run: pnpm -r build
+
+      # Only the bun recipe's legs need this -- GitHub-hosted runners don't
+      # ship bun by default. The sea recipe only needs node/esbuild/postject,
+      # already covered by the steps above and templates/packaging/sea/build.sh.
+      - name: Setup bun
+        if: matrix.recipe == 'bun'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Run packaging smoke
+        run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
+
+  # M3-4 Windows Service guarantee: proves the generated WinSW service
+  # descriptor (packages/client/src/lifecycle/winsw.ts) actually installs,
+  # runs, stops, restarts, and uninstalls as a REAL Windows Service via the
+  # real Windows SCM -- this is the one platform in M3-4's lifecycle API
+  # (launchd/systemd/WinSW) that cannot be verified on this repo's own
+  # macOS/Linux dev machines, so this job (not a local run) is the actual
+  # proof. See templates/service/winsw/{README.md,smoke-test.mjs} for the
+  # full recipe + rationale -- this job just runs that same script, the
+  # same way `packageability-smoke` above runs templates/packaging's own
+  # smoke-test.sh.
+  #
+  # Deliberately independent of build-test/packageability-smoke above (no
+  # `needs:`): its own install + build, so it can be extended/reordered
+  # later without perturbing either of those.
+  #
+  # WinSW-x64.exe is a self-contained .NET single-file executable (no
+  # separate .NET runtime install needed on the runner) -- pinned to an
+  # immutable release version and SHA256-verified before it is executed, so
+  # an upstream release cannot silently change what CI installs and runs.
+  windows-service-smoke:
+    name: Windows service install smoke (WinSW)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (needed for @byok/client's dist/index.js the smoke script imports)
+        run: pnpm -r build
+
+      - name: Download WinSW (pinned version + checksum-verified)
+        shell: pwsh
+        run: |
+          # Pinned to an immutable release asset (not `latest`) and integrity-checked,
+          # so an upstream release can never silently change what CI installs+runs.
+          $ver = "v2.12.0"
+          $sha = "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
+          $out = "$env:RUNNER_TEMP\WinSW.exe"
+          Invoke-WebRequest -Uri "https://github.com/winsw/winsw/releases/download/$ver/WinSW-x64.exe" -OutFile $out
+          $actual = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLower()
+          if ($actual -ne $sha) { Write-Error "WinSW checksum mismatch: expected $sha, got $actual"; exit 1 }
+          Write-Host "WinSW $ver checksum OK"
+
+      - name: Run the WinSW service lifecycle smoke (install -> assert RUNNING -> stop -> start -> uninstall)
+        env:
+          WINSW_BIN: ${{ runner.temp }}\WinSW.exe
+        run: node templates/service/winsw/smoke-test.mjs

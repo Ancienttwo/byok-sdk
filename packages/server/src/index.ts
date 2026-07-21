@@ -5,7 +5,7 @@ import { LocalDiskBlobStore } from './blob-store';
 import { buildHonoApp } from './http';
 import { ConnectionHub } from './hub';
 import { PairingManager, type PairingCodeInfo } from './pairing';
-import { TaskStore } from './task-store';
+import { InMemoryTaskStore } from './task-store';
 import { attachWebSocket as attachWsUpgrade } from './ws-server';
 import type {
   ByokServerEvent,
@@ -26,7 +26,8 @@ export type {
   TaskResult,
   TaskSnapshot,
 } from './types';
-export { IllegalTaskTransitionError } from './task-store';
+export type { CreateTaskInput, TaskRecord, TaskStore } from './task-store';
+export { IllegalTaskTransitionError, InMemoryTaskStore } from './task-store';
 export { PairingCodeInvalidError } from './pairing';
 export type {
   AccessTokenClaims,
@@ -41,6 +42,11 @@ export type {
   WriteContentResult,
 } from './blob-store';
 export { LocalDiskBlobStore } from './blob-store';
+export type { SqliteTaskStoreOptions } from './sqlite-task-store';
+export { SqliteTaskStore } from './sqlite-task-store';
+export type { SqliteBlobStoreOptions } from './sqlite-blob-store';
+export { SqliteBlobStore } from './sqlite-blob-store';
+export { SqliteUnavailableError } from './sqlite-support';
 
 /** Per-product blob size ceiling (§7): 100MB unless overridden. */
 const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
@@ -100,7 +106,10 @@ export interface ByokServer {
  * lifecycle tracking. See the per-module doc comments (`auth.ts`,
  * `blob-store.ts`, `hub.ts`, `pairing.ts`, `ws-server.ts`) for what's a
  * pinned wire/HTTP contract (docs/protocol.md) versus a reference-impl
- * choice a SaaS embedder might swap out (`tokenSigner`, `blobStore`).
+ * choice a SaaS embedder might swap out (`tokenSigner`, `blobStore`,
+ * `taskStore` — the latter two default to in-memory/local-disk and lose all
+ * state on restart; see `sqlite-task-store.ts`/`sqlite-blob-store.ts` for
+ * persistent M3 alternatives implementing the same interfaces).
  */
 export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const pairing = new PairingManager();
@@ -112,7 +121,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const longPollHoldMs = opts.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS;
   const taskLeaseMs = opts.taskLeaseMs ?? DEFAULT_TASK_LEASE_MS;
 
-  const taskStore = new TaskStore();
+  const taskStore = opts.taskStore ?? new InMemoryTaskStore();
   const hub = new ConnectionHub(taskStore, devices, taskLeaseMs);
   const hono = buildHonoApp({ pairing, devices, nonces, tokenSigner, blobStore, maxBlobSizeBytes, longPollHoldMs, hub });
 

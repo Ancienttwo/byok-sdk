@@ -24,7 +24,7 @@ import {
 import type { DeviceRegistry } from './auth';
 import { AsyncEventQueue } from './event-queue';
 import { generateTaskId } from './ids';
-import { TaskStore } from './task-store';
+import type { TaskStore } from './task-store';
 import type {
   ByokServerEvent,
   DispatchInput,

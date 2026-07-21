@@ -5,6 +5,7 @@
 // This is the "examples/ (不发布)" app from the plan's 服务端参考实现 section:
 // pair -> list machines -> dispatch a task -> stream progress -> show the
 // result -> approve/cancel. See README.md for how to run the whole loop.
+import { mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { Server as HttpServer } from 'node:http';
 import path from 'node:path';
@@ -12,7 +13,18 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { createByokServer, LocalDiskBlobStore, type DispatchInput, type TaskHandle } from '@byok/server';
+import {
+  createByokServer,
+  LocalDiskBlobStore,
+  SqliteBlobStore,
+  SqliteTaskStore,
+  type BlobStore,
+  type DispatchInput,
+  type TaskHandle,
+  type TaskStore,
+} from '@byok/server';
+
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number(process.env.PORT ?? 8787);
 // One product = one daemon process = one server instance (plan: "一产品一
@@ -34,8 +46,33 @@ const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
 // for the browser directly — the browser has no device bearer token of its
 // own, so it can't call the bearer-authed `GET /byok/blobs/:id/url` route on
 // `byok.hono` itself (see docs/protocol.md §7).
-const blobStore = new LocalDiskBlobStore();
-const byok = createByokServer({ productId: PRODUCT_ID, blobStore });
+//
+// Storage mode (M3): `BYOK_STORE=sqlite` swaps both reference stores for
+// their `node:sqlite`-backed persistent counterparts (`SqliteTaskStore`/
+// `SqliteBlobStore`, from `@byok/server`) so task RECORDS and blob bytes
+// survive a restart of this demo process (record persistence only — an
+// in-flight task is not resumed/reconnected; see the README) — data lands
+// under `examples/basic/data/`
+// (gitignored). Requires Node.js 22.5+ (`node:sqlite`'s minimum — see
+// `packages/server/src/sqlite-support.ts`). Anything else, including unset,
+// keeps the zero-setup default: in-memory tasks + local-disk blobs, both
+// lost on restart.
+const STORE_MODE = process.env.BYOK_STORE === 'sqlite' ? 'sqlite' : 'memory';
+
+let blobStore: BlobStore;
+let taskStore: TaskStore | undefined; // undefined -> createByokServer's own in-memory default
+
+if (STORE_MODE === 'sqlite') {
+  const dataDir = path.join(exampleDir, 'data');
+  mkdirSync(dataDir, { recursive: true });
+  blobStore = new SqliteBlobStore({ path: path.join(dataDir, 'blobs.db') });
+  taskStore = new SqliteTaskStore({ path: path.join(dataDir, 'tasks.db') });
+  console.log(`byok example: BYOK_STORE=sqlite — persisting to ${dataDir}`);
+} else {
+  blobStore = new LocalDiskBlobStore();
+}
+
+const byok = createByokServer({ productId: PRODUCT_ID, blobStore, taskStore });
 
 // `createByokServer`'s public surface only exposes read-only task snapshots
 // (`tasks.get`/`tasks.list`) — the live `TaskHandle` (events/approve/reject/
@@ -44,7 +81,7 @@ const byok = createByokServer({ productId: PRODUCT_ID, blobStore });
 // keep its own map from taskId -> handle; this is that map.
 const handles = new Map<string, TaskHandle>();
 
-const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
+const publicDir = path.join(exampleDir, 'public');
 const indexHtml = await readFile(path.join(publicDir, 'index.html'), 'utf8');
 
 // Compose our own app and mount byok's routes into it (`POST /byok/pair`),
