@@ -183,6 +183,24 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(run).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.exe', ['stop']);
   });
 
+  it('stop() tolerates ERROR_SERVICE_NOT_ACTIVE (1062, "has not been started")', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1062, '', 'The service has not been started.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs: fakeFs() });
+    await expect(lifecycle.stop()).resolves.toBeUndefined();
+  });
+
+  it('stop() tolerates "not installed" (1060) too — nothing to stop', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1060, '', 'The specified service does not exist as an installed service.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs: fakeFs() });
+    await expect(lifecycle.stop()).resolves.toBeUndefined();
+  });
+
+  it('stop() surfaces a REAL failure instead of reporting success (P1 #7 round 2)', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'Access is denied.'));
+    const lifecycle = createWinswLifecycle(def(), { run, fs: fakeFs() });
+    await expect(lifecycle.stop()).rejects.toThrow(/winsw stop failed \(exit 1\): Access is denied\./);
+  });
+
   it('status() queries sc.exe (not WinSW\'s own status) and reports running=true on a RUNNING state line', async () => {
     const fs = fakeFs();
     fs.stat.mockResolvedValue({} as never);

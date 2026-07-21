@@ -5,14 +5,44 @@ import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type 
 import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
 
 /**
- * What `launchctl bootout` prints/exits with when there was nothing loaded
- * to boot out — as opposed to a genuine failure (permission denied, a
- * malformed domain target, launchd itself misbehaving), which must be
- * surfaced rather than treated the same way (see `uninstall()` below and
- * cross-model-review P1 #7).
+ * Genuine-failure text that must NEVER be reclassified as "job already
+ * absent", checked before `LAUNCHD_NOT_LOADED`'s own `patterns` (see
+ * `exec-runner.ts`'s `IdempotentAbsence.neverAbsence`). Both verified
+ * directly against real `launchctl` output on macOS (Darwin 25.5.0):
+ * `launchctl bootout system/<id>` as a non-root user → `Boot-out failed: 1:
+ * Operation not permitted` (a real permission failure); `launchctl bootout
+ * gui/1/<id>` (uid 1 has no active GUI session — the same "headless box"
+ * shape as systemd's missing `--user` D-Bus session) → `Could not find
+ * domain for user gui: 1`, exit 112 — launchd cannot even ask whether the
+ * job is loaded, which is a REAL failure to surface, not evidence it's
+ * absent (cross-model-review P1 #7, round 2 — the same re-orphan shape as
+ * the systemd bus failure, for launchd).
+ */
+const LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE: readonly RegExp[] = [
+  /operation not permitted/i,
+  /could not find domain/i,
+  /permission denied/i,
+  /access denied/i,
+];
+
+/**
+ * What `launchctl bootout`/`launchctl stop` prints/exits with when there was
+ * nothing loaded to boot out — as opposed to a genuine failure (permission
+ * denied, an unreachable GUI domain, launchd itself misbehaving), which must
+ * be surfaced rather than treated the same way (see `uninstall()`/`stop()`
+ * below and cross-model-review P1 #7). `/no such process/i` is verified
+ * directly against real `launchctl bootout` output for a job that was never
+ * loaded (`Boot-out failed: 3: No such process`, exit 3).
+ *
+ * Deliberately does NOT include a bare "domain...not found/does not exist"
+ * pattern (present in an earlier version of this fix): it never matched any
+ * verified real "not loaded" output, and an unreachable/nonexistent GUI
+ * domain is exactly the genuine-failure shape `LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE`
+ * above exists to catch, not evidence of absence.
  */
 const LAUNCHD_NOT_LOADED: IdempotentAbsence = {
-  patterns: [/no such process/i, /could not find (specified )?service/i, /domain.*(not found|does not exist)/i, /not loaded/i],
+  patterns: [/no such process/i, /could not find (specified )?service/i, /not loaded/i],
+  neverAbsence: LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE,
 };
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment for why a mocked `run` is enough to unit-test all of this file's install/uninstall/start/stop/status logic on any host OS. */
@@ -174,7 +204,11 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   }
 
   async function stop(): Promise<void> {
-    await run('launchctl', ['bootout', serviceTarget()]); // best-effort — tolerant of "already stopped"
+    // Tolerant of "already stopped/not loaded" (fine — nothing to stop),
+    // but a REAL failure (permission denied, an unreachable GUI domain)
+    // must be surfaced rather than silently reported as "stopped"
+    // (cross-model-review P1 #7, round 2, second half).
+    await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
   }
 
   async function status(): Promise<ServiceStatusResult> {

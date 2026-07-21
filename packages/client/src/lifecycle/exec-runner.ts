@@ -88,14 +88,38 @@ export async function runOrThrow(run: Runner, command: string, args: string[], l
  * Describes what a "genuinely nothing to do" outcome looks like for a
  * best-effort stop/uninstall step whose target may legitimately already be
  * absent (not currently loaded/enabled/installed) — as opposed to a genuine
- * failure (permission denied, service busy, a manager fault) that must NOT
- * be treated the same way. See {@link isIdempotentAbsence}.
+ * failure (permission denied, service busy, a manager fault, the manager
+ * itself unreachable) that must NOT be treated the same way. See
+ * {@link isIdempotentAbsence}.
  */
 export interface IdempotentAbsence {
   /** Exit codes that ALONE mean "already absent", independent of any stdout/stderr text (e.g. Windows's `ERROR_SERVICE_DOES_NOT_EXIST`, 1060). */
   codes?: readonly number[];
   /** Case-insensitive patterns checked against `stdout + "\n" + stderr`; a match means "already absent/not loaded/does not exist" for this platform's tool. */
   patterns: readonly RegExp[];
+  /**
+   * Case-insensitive patterns checked against the SAME `stdout + "\n" +
+   * stderr` text, and consulted BEFORE `codes`/`patterns`: a match here
+   * means "this is a genuine failure", full stop, even if `codes`/`patterns`
+   * would otherwise call the result idempotent absence. Exists because a
+   * connectivity/permission/manager-unreachable error can be textually
+   * indistinguishable from — or reuse the very same generic OS errno string
+   * as — a genuine "not loaded"/"does not exist" message. Concretely: on a
+   * headless host with no reachable `systemd --user` D-Bus session (common
+   * for exactly the SSH/no-lingering boxes this daemon runs on),
+   * `systemctl --user disable --now` fails with `Failed to connect to bus:
+   * No such file or directory` — the SAME "No such file or directory" text
+   * a genuinely-absent unit can also produce, but here it means "we could
+   * not even ask the manager", not "the manager confirms it's gone".
+   * Conflating the two previously let this REAL failure look identical to
+   * idempotent absence and then delete the still-relevant plist/unit/exe
+   * (cross-model-review P1 #7, round 2 — the same re-orphan shape the
+   * original `codes`/`patterns` split was meant to fix in round 1). Each
+   * platform module supplies its own `neverAbsence` for the same reason it
+   * supplies its own `patterns`/`codes`: the actual wording is tool-specific
+   * — see `launchd.ts`/`systemd.ts`/`winsw.ts`'s own constants.
+   */
+  neverAbsence?: readonly RegExp[];
 }
 
 /**
@@ -112,11 +136,19 @@ export interface IdempotentAbsence {
  * platform module supplies its own `patterns`/`codes` because the actual
  * wording/codes are tool-specific — see `launchd.ts`/`systemd.ts`/
  * `winsw.ts`'s own constants.
+ *
+ * `absence.neverAbsence` is checked FIRST (right after the unambiguous
+ * `code === 0` success case) and, on a match, wins outright over any
+ * `codes`/`patterns` match — see {@link IdempotentAbsence.neverAbsence}'s
+ * own doc comment for why a connectivity/permission/manager-unreachable
+ * signal must never be reclassified as absence no matter what else matches
+ * (cross-model-review P1 #7, round 2).
  */
 export function isIdempotentAbsence(result: RunResult, absence: IdempotentAbsence): boolean {
   if (result.code === 0) return true;
-  if (absence.codes?.includes(result.code)) return true;
   const detail = `${result.stdout}\n${result.stderr}`;
+  if (absence.neverAbsence?.some((pattern) => pattern.test(detail))) return false;
+  if (absence.codes?.includes(result.code)) return true;
   return absence.patterns.some((pattern) => pattern.test(detail));
 }
 
@@ -130,7 +162,11 @@ export function isIdempotentAbsence(result: RunResult, absence: IdempotentAbsenc
  * to delete the plist/unit/exe+xml ONLY when this resolves without
  * throwing; a thrown error here means "do NOT delete the control files —
  * surface this to the caller so they can retry" (see each platform's own
- * `uninstall()`).
+ * `uninstall()`). Each platform's standalone `stop()` uses the same
+ * function for the same reason: tolerate "already stopped/not loaded", but
+ * surface — rather than silently swallow — a genuine failure (permission
+ * denied, manager unreachable) instead of misreporting it as "stopped"
+ * (cross-model-review P1 #7, round 2, second half).
  */
 export async function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult> {
   const result = await run(command, args);

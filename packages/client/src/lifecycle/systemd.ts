@@ -12,14 +12,50 @@ export interface SystemdDeps {
 }
 
 /**
- * What `systemctl --user disable --now` prints/exits with when the unit
- * isn't installed/loaded at all — as opposed to a genuine failure
- * (permission denied, no running `--user` instance, a manager fault), which
- * must be surfaced rather than treated the same way (see `uninstall()`
- * below and cross-model-review P1 #7).
+ * Genuine-failure text that must NEVER be reclassified as "unit already
+ * absent", checked before `SYSTEMD_NOT_LOADED`'s own `patterns` (see
+ * `exec-runner.ts`'s `IdempotentAbsence.neverAbsence`). The load-bearing one
+ * is `Failed to connect to bus: No such file or directory` — the standard,
+ * very common systemd message when there is no reachable `systemd --user`
+ * D-Bus session for this uid (headless/SSH without `loginctl
+ * enable-linger` — exactly where this daemon commonly runs). Its own
+ * "No such file or directory" wording is textually indistinguishable from a
+ * genuinely-absent unit's ENOENT unless the "connect to ... bus" prefix is
+ * checked for and excluded first: without this, that bus-connect failure
+ * was previously misread as "already absent", deleting the still-relevant
+ * unit file out from under a service that may still be installed/running —
+ * the exact orphan bug #7 was supposed to fix, reintroduced by this one
+ * over-broad pattern (cross-model-review P1 #7, round 2).
+ */
+const SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE: readonly RegExp[] = [
+  /failed to connect to.*bus/i,
+  /connection refused/i,
+  /access denied/i,
+  /permission denied/i,
+  /interactive authentication required/i,
+];
+
+/**
+ * What `systemctl --user disable --now`/`systemctl --user stop` prints/exits
+ * with when the unit isn't installed/loaded at all — as opposed to a
+ * genuine failure (permission denied, no running `--user` instance, a
+ * manager fault), which must be surfaced rather than treated the same way
+ * (see `uninstall()`/`stop()` below and cross-model-review P1 #7).
+ *
+ * Deliberately does NOT include a bare "no such file or directory" pattern
+ * (present in an earlier version of this fix): both genuine absence shapes
+ * this module actually needs to tolerate — `stop` on an unloaded unit
+ * ("Unit foo.service not loaded.") and `disable`/other unit-file lookups on
+ * one that was never written ("Unit file foo.service does not exist.") —
+ * are already covered by the two patterns below without it, while the bare
+ * ENOENT string is ALSO exactly what a bus-connect failure produces (see
+ * `SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE` above) — there is no
+ * genuine-absence case this module relies on that only the bare pattern
+ * would have caught.
  */
 const SYSTEMD_NOT_LOADED: IdempotentAbsence = {
-  patterns: [/not loaded/i, /does not exist/i, /no such file or directory/i],
+  patterns: [/not loaded/i, /does not exist/i],
+  neverAbsence: SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE,
 };
 
 /**
@@ -215,7 +251,11 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
   }
 
   async function stop(): Promise<void> {
-    await run('systemctl', ['--user', 'stop', unitName]); // best-effort — tolerant of "already stopped"
+    // Tolerant of "already stopped/not loaded" (fine — nothing to stop),
+    // but a REAL failure (permission denied, no running `--user` instance,
+    // a manager fault) must be surfaced rather than silently reported as
+    // "stopped" (cross-model-review P1 #7, round 2, second half).
+    await runIdempotent(run, 'systemctl', ['--user', 'stop', unitName], 'systemctl stop', SYSTEMD_NOT_LOADED);
   }
 
   async function status(): Promise<ServiceStatusResult> {

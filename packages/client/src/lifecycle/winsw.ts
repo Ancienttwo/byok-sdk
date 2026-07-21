@@ -4,6 +4,26 @@ import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type 
 import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
 
 /**
+ * Genuine-failure text that must NEVER be reclassified as "service already
+ * absent/stopped", checked before `WINSW_NOT_INSTALLED`'s/
+ * `WINSW_ALREADY_STOPPED`'s own `patterns` (see `exec-runner.ts`'s
+ * `IdempotentAbsence.neverAbsence`) — the same defense-in-depth applied to
+ * the systemd bus-connect false-positive and launchd's unreachable-domain
+ * false-positive (cross-model-review P1 #7, round 2), audited here for
+ * parity even though no live Windows host was available to reproduce a
+ * false match directly (see `generateWinswXml`'s own doc comment on why
+ * this macOS dev box cannot execute WinSW/`sc.exe` at all — the
+ * `windows-service-smoke` CI job is the real verification for this
+ * platform).
+ */
+const WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE: readonly RegExp[] = [
+  /access is denied/i,
+  /access denied/i,
+  /permission denied/i,
+  /being used by another process/i,
+];
+
+/**
  * What WinSW/`sc.exe` prints or exits with when the service isn't installed
  * at all — as opposed to a genuine failure (access denied, the exe
  * locked/busy, a WinSW/SCM fault), which must be surfaced rather than
@@ -14,6 +34,23 @@ import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions
 const WINSW_NOT_INSTALLED: IdempotentAbsence = {
   codes: [1060],
   patterns: [/does not exist/i, /non-existent service/i],
+  neverAbsence: WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE,
+};
+
+/**
+ * Superset of `WINSW_NOT_INSTALLED` used by the standalone `stop()` (see
+ * below): tolerates EITHER "not installed at all" OR "installed but already
+ * stopped" — Windows's own `ERROR_SERVICE_NOT_ACTIVE` is exit code 1062,
+ * FormatMessage text "The service has not been started." (a long-stable,
+ * well-documented Win32 SCM error code, distinct from and adjacent to
+ * `ERROR_SERVICE_DOES_NOT_EXIST`'s 1060) — as opposed to a genuine failure
+ * (access denied, the exe locked/busy), which must still be surfaced
+ * (cross-model-review P1 #7, round 2, second half).
+ */
+const WINSW_ALREADY_STOPPED: IdempotentAbsence = {
+  codes: [1062, ...(WINSW_NOT_INSTALLED.codes ?? [])],
+  patterns: [/not running/i, /has not been started/i, ...WINSW_NOT_INSTALLED.patterns],
+  neverAbsence: WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE,
 };
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
@@ -157,7 +194,11 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
   }
 
   async function stop(): Promise<void> {
-    await run(exePath, ['stop']); // best-effort — tolerant of "already stopped"
+    // Tolerant of "already stopped/not installed" (fine — nothing to
+    // stop), but a REAL failure (access denied, the exe locked/busy, an SCM
+    // fault) must be surfaced rather than silently reported as "stopped"
+    // (cross-model-review P1 #7, round 2, second half).
+    await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
   }
 
   async function status(): Promise<ServiceStatusResult> {

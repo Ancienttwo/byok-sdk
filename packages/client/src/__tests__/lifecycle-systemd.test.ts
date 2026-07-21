@@ -229,6 +229,45 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     expect(calls).toEqual(['systemctl --user disable --now Acme-Agent-.service']);
   });
 
+  it('uninstall() throws and does NOT delete the unit file when there is no reachable --user D-Bus session (P1 #7 round 2: was mis-classified as idempotent absence pre-fix)', async () => {
+    // Real, extremely common systemd message on a headless/SSH host with no
+    // active --user D-Bus session (no `loginctl enable-linger`) — exactly
+    // where this daemon commonly runs. Its "No such file or directory" text
+    // is textually indistinguishable from a genuinely-absent unit's ENOENT,
+    // which is exactly why an earlier version of this fix's bare
+    // `/no such file or directory/i` pattern wrongly classified THIS as
+    // "already absent" and proceeded to delete the still-relevant unit file
+    // — re-orphaning the service the original P1 #7 fix was meant to
+    // prevent. Asserting the unit file survives is the regression guard.
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      return fail(1, '', 'Failed to connect to bus: No such file or directory');
+    });
+    const fs = fakeFs();
+    const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
+
+    await expect(lifecycle.uninstall()).rejects.toThrow(/systemctl disable --now failed \(exit 1\): Failed to connect to bus: No such file or directory/);
+
+    expect(fs.rm).not.toHaveBeenCalled();
+    expect(calls).toEqual(['systemctl --user disable --now Acme-Agent-.service']);
+  });
+
+  it('uninstall() still cleans up on a genuine "unit file does not exist" result (real absence, not a bus failure)', async () => {
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      return fail(1, '', 'Failed to disable unit: Unit file Acme-Agent-.service does not exist.');
+    });
+    const fs = fakeFs();
+    const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
+
+    await lifecycle.uninstall();
+
+    expect(calls).toEqual(['systemctl --user disable --now Acme-Agent-.service', 'systemctl --user daemon-reload']);
+    expect(fs.rm).toHaveBeenCalledWith('/h/.config/systemd/user/Acme-Agent-.service', { force: true });
+  });
+
   it('a service name starting with "-" is sanitized before reaching systemctl, never mistaken for a CLI option (P1 #8)', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(ok());
     const fs = fakeFs();
@@ -259,11 +298,23 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     await expect(lifecycleFail.start()).rejects.toThrow(/systemctl start failed/);
   });
 
-  it('stop() stops and tolerates a nonzero exit (already stopped)', async () => {
-    const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'not active'));
+  it('stop() stops and tolerates a nonzero exit (already stopped/not loaded)', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'Unit Acme-Agent-.service not loaded.'));
     const lifecycle = createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' });
     await expect(lifecycle.stop()).resolves.toBeUndefined();
     expect(run).toHaveBeenCalledWith('systemctl', ['--user', 'stop', 'Acme-Agent-.service']);
+  });
+
+  it('stop() surfaces a REAL failure instead of reporting success (P1 #7 round 2)', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'Access denied'));
+    const lifecycle = createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' });
+    await expect(lifecycle.stop()).rejects.toThrow(/systemctl stop failed \(exit 1\): Access denied/);
+  });
+
+  it('stop() surfaces a bus-connect failure (no --user D-Bus session) rather than reporting "stopped" (P1 #7 round 2)', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, '', 'Failed to connect to bus: No such file or directory'));
+    const lifecycle = createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' });
+    await expect(lifecycle.stop()).rejects.toThrow(/systemctl stop failed \(exit 1\): Failed to connect to bus/);
   });
 
   it('status() reports installed=true/running=true when the unit file exists and is-active reports "active" with exit 0', async () => {

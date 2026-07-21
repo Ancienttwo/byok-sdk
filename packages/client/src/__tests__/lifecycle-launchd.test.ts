@@ -142,6 +142,21 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(fs.rm).not.toHaveBeenCalled();
   });
 
+  it('uninstall() throws and does NOT delete the plist when the GUI domain is unreachable for this uid (P1 #7 round 2)', async () => {
+    // Verified real `launchctl` output (Darwin 25.5.0): `launchctl bootout
+    // gui/1/<id>` when uid 1 has no active GUI session at all →
+    // "Could not find domain for user gui: 1", exit 112. This is a genuine
+    // "can't even ask" failure, not evidence the job was never loaded — the
+    // same re-orphan shape as systemd's bus-connect false-positive.
+    const run = vi.fn<Runner>().mockResolvedValue(fail(112, 'Could not find domain for user gui: 501'));
+    const fs = fakeFs();
+    const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
+
+    await expect(lifecycle.uninstall()).rejects.toThrow(/launchctl bootout failed \(exit 112\): Could not find domain for user gui: 501/);
+
+    expect(fs.rm).not.toHaveBeenCalled();
+  });
+
   it('start() throws "not installed" when the plist does not exist on disk', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(ok());
     const lifecycle = createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 });
@@ -173,6 +188,12 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     const lifecycle = createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 });
     await expect(lifecycle.stop()).resolves.toBeUndefined();
     expect(run).toHaveBeenCalledWith('launchctl', ['bootout', 'gui/501/Acme-Agent-']);
+  });
+
+  it('stop() surfaces a REAL failure instead of reporting success (P1 #7 round 2)', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, 'Operation not permitted'));
+    const lifecycle = createLaunchdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h', getuid: () => 501 });
+    await expect(lifecycle.stop()).rejects.toThrow(/launchctl bootout failed \(exit 1\): Operation not permitted/);
   });
 
   it('status() reports installed=true/running=true when the plist exists and launchctl print reports "state = running"', async () => {

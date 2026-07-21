@@ -109,16 +109,25 @@ export interface ServiceStatusResult {
  * Idempotency convention shared by every platform implementation: `install`
  * and `start` hard-fail (throw) if the final "make it actually running"
  * step fails, since silently doing nothing there would misreport success.
- * `stop` is always best-effort/tolerant of "already stopped" (mirrors
- * `Daemon.unpair()`'s own "safe to call at any point in the lifecycle"
- * convention in `daemon/create-daemon.ts`). `uninstall` is tolerant ONLY of
- * a KNOWN idempotent "not loaded"/"does not exist"/"already absent" result
+ * `stop` is best-effort/tolerant ONLY of a KNOWN idempotent "already
+ * stopped"/"not loaded"/"not installed" result (mirrors `Daemon.unpair()`'s
+ * own "safe to call at any point in the lifecycle" convention in
+ * `daemon/create-daemon.ts` for that idempotent case) — a genuine failure
+ * (permission denied, manager unreachable, the exe locked/busy) is thrown
+ * instead of being misreported as "stopped", using the same precise
+ * classifier `uninstall` uses (cross-model-review P1 #7, round 2, second
+ * half: silently swallowing a real `stop()` failure undermines the operator's
+ * ability to trust "stopped" at all). `uninstall` is tolerant ONLY of a
+ * KNOWN idempotent "not loaded"/"does not exist"/"already absent" result
  * from its stop+unregister step (see `exec-runner.ts`'s
  * `isIdempotentAbsence`) — a genuine failure (permission denied, service
- * busy, manager error) is thrown instead, and the plist/unit/winsw exe+xml
- * are deliberately left in place, so a still-running service never loses
- * its control files and becomes an orphan nobody can stop/uninstall
- * (cross-model-review P1 #7).
+ * busy, manager error, manager UNREACHABLE — e.g. no reachable systemd
+ * `--user` D-Bus session or launchd GUI domain for this uid, textually
+ * indistinguishable from "already absent" unless explicitly excluded, see
+ * `exec-runner.ts`'s `IdempotentAbsence.neverAbsence`) is thrown instead,
+ * and the plist/unit/winsw exe+xml are deliberately left in place, so a
+ * still-running service never loses its control files and becomes an
+ * orphan nobody can stop/uninstall (cross-model-review P1 #7).
  */
 export interface ServiceLifecycle {
   /** Writes the platform service definition and registers + starts it with the OS service manager. Safe to call again later (e.g. after an upgrade): overwrites the definition and reloads it. */
@@ -127,7 +136,7 @@ export interface ServiceLifecycle {
   uninstall(): Promise<void>;
   /** Starts an already-installed service. Throws a clear error if it isn't installed. */
   start(): Promise<void>;
-  /** Stops a running service without uninstalling it. Safe to call when already stopped. */
+  /** Stops a running service without uninstalling it. Safe to call when already stopped (or not installed/not loaded). Throws if the underlying service manager reports a genuine failure instead (e.g. permission denied, manager unreachable) rather than silently reporting success; see this interface's own doc comment. */
   stop(): Promise<void>;
   /** Current installed/running state, queried fresh from the platform's own service manager. */
   status(): Promise<ServiceStatusResult>;
