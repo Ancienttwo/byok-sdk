@@ -85,7 +85,7 @@ WantedBy=default.target
 | CLI command | systemctl calls |
 |---|---|
 | `install` | write unit file -> `daemon-reload` -> `enable --now` |
-| `uninstall` | `disable --now` (best-effort) -> remove unit file -> `daemon-reload` (best-effort) |
+| `uninstall` | `disable --now` (tolerates already-absent; a **real** failure aborts and leaves the unit file intact so the service is never orphaned) -> remove unit file -> `daemon-reload` (best-effort) |
 | `service-start` | `start` |
 | `service-stop` | `stop` (best-effort) |
 | `service-status` | `is-active` (exit code + stdout drive `running`); the unit file's presence on disk drives `installed` |
