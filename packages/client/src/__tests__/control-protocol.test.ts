@@ -1,5 +1,6 @@
+import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   computeClientAuth,
   computeServerProof,
@@ -42,7 +43,7 @@ describe('control-protocol: endpoint path derivation', () => {
     expect(a).not.toBe(b);
   });
 
-  it('controlPipeName is deterministic for the same productId+storeDir (+ current user) and looks like a Windows pipe', () => {
+  it('controlPipeName is deterministic for the same productId+storeDir and looks like a Windows pipe', () => {
     const name1 = controlPipeName('acme', '/Users/me/.byok/acme');
     const name2 = controlPipeName('acme', '/Users/me/.byok/acme');
     expect(name1).toBe(name2);
@@ -55,6 +56,22 @@ describe('control-protocol: endpoint path derivation', () => {
     const differentStore = controlPipeName('acme', '/Users/me/.byok/other');
     expect(differentProduct).not.toBe(base);
     expect(differentStore).not.toBe(base);
+  });
+
+  it('controlPipeName does not depend on the OS user — a WinSW service account and the interactive operator CLI must derive the same name for the same productId+storeDir', () => {
+    const userInfoSpy = vi.spyOn(os, 'userInfo');
+    userInfoSpy.mockReturnValue({ username: 'SYSTEM', uid: 0, gid: 0, shell: null, homedir: '/root' });
+    const asServiceAccount = controlPipeName('acme', '/Users/me/.byok/acme');
+    userInfoSpy.mockReturnValue({ username: 'alice', uid: 501, gid: 20, shell: '/bin/zsh', homedir: '/Users/alice' });
+    const asInteractiveUser = controlPipeName('acme', '/Users/me/.byok/acme');
+    userInfoSpy.mockRestore();
+    expect(asServiceAccount).toBe(asInteractiveUser);
+  });
+
+  it('controlPipeName normalizes storeDir with path.resolve so a trivial path-form difference (e.g. a trailing slash) cannot split the name', () => {
+    const withTrailingSlash = controlPipeName('acme', '/Users/me/.byok/acme/');
+    const canonical = controlPipeName('acme', '/Users/me/.byok/acme');
+    expect(withTrailingSlash).toBe(canonical);
   });
 
   it('controlEndpointPath dispatches to the pipe name on win32 and the socket path everywhere else', () => {

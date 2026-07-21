@@ -69,16 +69,25 @@ export function controlSocketPath(storeDir: string): string {
 
 /**
  * The Windows named pipe name for a daemon identified by `productId` +
- * `storeDir` + the current OS user. Named pipes have no filesystem path (no
- * stale-file cleanup concern the way Unix sockets have — see
+ * (`path.resolve`-normalized) `storeDir`. Named pipes have no filesystem
+ * path (no stale-file cleanup concern the way Unix sockets have — see
  * `control-server.ts`), but DO share one flat namespace across the whole
  * machine, so the name must be scoped to this exact daemon instance: two
- * different products, two different store directories (e.g. two agents of
- * the same product — see `templates/service/README.md`'s "running multiple
- * agents" section), or two different Windows users must never collide.
+ * different products, or two different store directories (e.g. two agents
+ * of the same product — see `templates/service/README.md`'s "running
+ * multiple agents" section), must never collide. `storeDir` is resolved
+ * before hashing so a trivial path-form difference (trailing slash, etc.)
+ * between the two sides can't split the name.
+ *
+ * NOT keyed by the OS user: a WinSW-installed service runs the daemon under
+ * the Windows service account (e.g. `SYSTEM`) while the operator CLI runs
+ * as the interactive user, so both sides must derive the identical name
+ * from the same `storeDir` alone. Impostor servers are defeated by the
+ * mutual HMAC handshake below, not by pipe-name secrecy — keying by user
+ * was security theater that broke the service-account topology.
  */
 export function controlPipeName(productId: string, storeDir: string): string {
-  const id = shortHash(`${productId}|${storeDir}|${os.userInfo().username}`);
+  const id = shortHash(`${productId}|${path.resolve(storeDir)}`);
   return `\\\\.\\pipe\\byok-${id}`;
 }
 
