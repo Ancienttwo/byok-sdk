@@ -85,6 +85,8 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
       return `${prefix} shutdown-requested reason=${quote(event.reason)}`;
     case 'shutdown-complete':
       return `${prefix} shutdown-complete reason=${quote(event.reason)}`;
+    case 'stale-approval-decision':
+      return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
   }
 }
 

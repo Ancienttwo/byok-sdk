@@ -113,7 +113,23 @@ function connectAndHandshake(endpoint: string, token: string, opts: ControlClien
     }
 
     function onData(chunk: Buffer): void {
-      for (const line of reader.push(chunk)) {
+      // Hardening finding (P2 re-gate): `reader.push` throws once the
+      // still-unterminated remainder exceeds MAX_LINE_BYTES
+      // (control-protocol.ts) — a hostile/broken peer sending a >64KiB line
+      // with no newline. Uncaught, this would propagate out of the 'data'
+      // listener and crash the whole CLI process (Node has no default
+      // recovery for an exception thrown inside an EventEmitter callback).
+      // Mirrors control-server.ts's own identical guard around its matching
+      // `reader.push` call — route into this same handshake's `fail()` path
+      // instead, exactly like every other handshake failure here.
+      let lines: string[];
+      try {
+        lines = reader.push(chunk);
+      } catch (err) {
+        fail(err);
+        return;
+      }
+      for (const line of lines) {
         let parsed: unknown;
         try {
           parsed = JSON.parse(line);
@@ -208,7 +224,24 @@ function createControlClient(socket: net.Socket, reader: NdjsonLineReader, opts:
   }
 
   socket.on('data', (chunk: Buffer) => {
-    for (const line of reader.push(chunk)) {
+    // Same hardening as connectAndHandshake's own onData above: `reader.push`
+    // throws on a >64KiB unterminated line (MAX_LINE_BYTES,
+    // control-protocol.ts) — uncaught, that would crash this CLI process
+    // from inside an EventEmitter 'data' callback. This connection is
+    // already past the handshake (there is no `fail()` closure here), so
+    // fail closed the same way a malformed/unexpected frame elsewhere in
+    // this function already does: destroy the connection (which rejects
+    // every pending call via the 'close' handler below) rather than risk
+    // continuing to read from a peer that just proved it doesn't speak this
+    // protocol.
+    let lines: string[];
+    try {
+      lines = reader.push(chunk);
+    } catch {
+      socket.destroy();
+      return;
+    }
+    for (const line of lines) {
       let parsed: unknown;
       try {
         parsed = JSON.parse(line);

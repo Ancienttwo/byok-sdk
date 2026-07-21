@@ -9,6 +9,7 @@ import {
   controlSocketPath,
   controlTokenPath,
   NdjsonLineReader,
+  parseApprovalsRequestParams,
   parseApprovalsResolveParams,
   parseClientAuth,
   parseClientHello,
@@ -175,6 +176,20 @@ describe('control-protocol: frame parsers (used by both control-server.ts and co
     expect(parseApprovalsResolveParams({ approvalId: 'a1', decision: 'maybe' })).toBeUndefined();
     expect(parseApprovalsResolveParams({ decision: 'approve' })).toBeUndefined();
     expect(parseApprovalsResolveParams(undefined)).toBeUndefined();
+  });
+
+  it('M4 Phase 3: parseApprovalsRequestParams requires a non-empty taskId and a string summary', () => {
+    expect(parseApprovalsRequestParams({ taskId: 't1', summary: 'Bash: echo hi' })).toEqual({
+      taskId: 't1',
+      summary: 'Bash: echo hi',
+    });
+    expect(parseApprovalsRequestParams({ taskId: 't1', summary: '' })).toEqual({ taskId: 't1', summary: '' });
+    expect(parseApprovalsRequestParams({ taskId: '', summary: 'x' })).toBeUndefined(); // empty taskId rejected
+    expect(parseApprovalsRequestParams({ summary: 'x' })).toBeUndefined(); // missing taskId
+    expect(parseApprovalsRequestParams({ taskId: 't1' })).toBeUndefined(); // missing summary
+    expect(parseApprovalsRequestParams({ taskId: 5, summary: 'x' })).toBeUndefined();
+    expect(parseApprovalsRequestParams(undefined)).toBeUndefined();
+    expect(parseApprovalsRequestParams('garbage')).toBeUndefined();
   });
 
   it('parseShutdownParams accepts a known reason and defaults everything else to {} rather than throwing', () => {

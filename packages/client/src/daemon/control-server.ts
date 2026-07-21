@@ -124,6 +124,58 @@ async function handleStaleUnixSocket(socketPath: string): Promise<void> {
   await fs.rm(socketPath, { force: true });
 }
 
+/**
+ * Hardening finding (P2 re-gate): `fs.chmod` just above/below this call is
+ * fire-and-forget (`.catch(() => {})`) because tightening the mode on a
+ * directory this process doesn't OWN fails with `EPERM` — not because that
+ * failure is safe to ignore. On a shared, world-writable `os.tmpdir()` (the
+ * long-storeDir-path fallback branch of `controlSocketPath`), an attacker on
+ * the same machine can pre-create the exact deterministic `byok-<hash>`
+ * directory name (derived from a hash of `storeDir` alone, so it's fully
+ * predictable ahead of time) — e.g. as a symlink to somewhere else, or
+ * simply owned by a different uid with a permissive mode. `fs.mkdir` above
+ * is a silent no-op against an already-existing directory (never throws,
+ * never fixes ownership), so without this check the swallowed `chmod`
+ * failure would fall straight through to `handleStaleUnixSocket` and this
+ * daemon would bind its control socket's Unix domain socket file INSIDE
+ * that attacker-owned/aliased directory — handing a same-machine attacker a
+ * way to plant their own listener at the exact path this daemon is about to
+ * bind, or delete/replace the legitimate socket file later (the directory's
+ * own owner controls what's inside it, regardless of the socket file's own
+ * mode).
+ *
+ * `lstat` (never `stat`, which follows a symlink) closes this: fail CLOSED
+ * (throw) rather than silently proceeding whenever the path that's actually
+ * there is either a symlink or not owned by this exact process's own uid —
+ * the two properties a same-machine attacker could control that "the
+ * directory exists" alone can't rule out once `chmod` has already failed
+ * silently. Applied unconditionally (not just in the tmpdir-fallback
+ * branch): a no-op in the common `storeDir` case (already owned + 0700 by
+ * this same process — see `startControlServer`), genuine defense-in-depth
+ * where it actually matters.
+ *
+ * Throws a plain `Error` — like any other non-`AnotherControlServerRunningError`
+ * bind failure this module raises (see `startControlServer`'s own doc
+ * comment) — so the caller (`create-daemon.ts`'s `start()`) degrades
+ * non-fatally: it logs a clear warning and continues without a control
+ * socket, rather than bricking the rest of the daemon over it.
+ */
+async function assertOwnedPrivateDir(dir: string): Promise<void> {
+  const uid = process.getuid?.();
+  if (uid === undefined) return; // non-POSIX — this is only ever called from the non-win32 branch below, but stay defensive
+  const st = await fs.lstat(dir);
+  if (st.isSymbolicLink()) {
+    throw new Error(
+      `refusing to bind control socket under "${dir}": path is a symlink, not a real directory (possible attacker-controlled path in a shared temp directory)`,
+    );
+  }
+  if (st.uid !== uid) {
+    throw new Error(
+      `refusing to bind control socket under "${dir}": directory is owned by uid ${st.uid}, not this process's own uid ${uid} (possible attacker-controlled path in a shared temp directory)`,
+    );
+  }
+}
+
 async function bindControlEndpoint(server: net.Server, endpoint: string): Promise<void> {
   if (process.platform !== 'win32') {
     // Ensure the socket's own parent directory is private BEFORE the
@@ -139,6 +191,7 @@ async function bindControlEndpoint(server: net.Server, endpoint: string): Promis
     const endpointDir = path.dirname(endpoint);
     await fs.mkdir(endpointDir, { recursive: true, mode: 0o700 });
     await fs.chmod(endpointDir, 0o700).catch(() => {});
+    await assertOwnedPrivateDir(endpointDir);
     await handleStaleUnixSocket(endpoint);
   }
   await new Promise<void>((resolve, reject) => {

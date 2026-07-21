@@ -45,12 +45,16 @@ describe('mapPermissionPolicyToClaudeArgs', () => {
     });
   });
 
-  it('fails closed on mode "confirm": claude\'s headless approval model resolves synchronously, with nothing to pause on', () => {
+  it('M4 Phase 3: mode "confirm" is supported — deny-by-default --permission-mode default, plus a flag telling start() to wire the approval-mcp channel (the actual --permission-prompt-tool/--mcp-config flags are appended by start() itself, not here — see needsApprovalMcp\'s own doc comment)', () => {
     const policy: PermissionPolicy = { mode: 'confirm' };
     const result = mapPermissionPolicyToClaudeArgs(policy);
+    expect(result).toEqual({ ok: true, args: ['--permission-mode', 'default'], needsApprovalMcp: true });
+  });
+
+  it('confirm mode still fails closed on network:false, same as every other mode', () => {
+    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', network: false });
     expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/confirm/);
-    expect(result.reason).toMatch(/synchronously/);
+    expect(result.reason).toMatch(/network/i);
   });
 
   it('fails closed on network:false (claude has no network sandbox for its Bash tool either)', () => {

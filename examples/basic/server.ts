@@ -192,6 +192,34 @@ app.post('/api/tasks/:taskId/approve', async (c) => {
   }
 });
 
+// M4 Phase 3: the approvals-panel counterpart to /approve above — mirrors it
+// exactly (same handle lookup, same optional-reason-body parsing /cancel
+// already uses, same 404/409 error shape). Calls TaskHandle.reject()
+// in-process, the SAME way /approve calls TaskHandle.approve(). Approval is
+// deliberately NOT an SDK-level HTTP route at all (see http.ts's own M4
+// Phase 3 note): the SDK's wire-facing routes are bearer-authed with a
+// DEVICE's access token, and any validly-paired device approving/rejecting
+// ANY task is a footgun, not a feature. `ConnectionHub.approveTask`/
+// `rejectTask` (called here via `TaskHandle`) is the supported entry point —
+// an embedder builds its own operator-facing surface (own auth, own routes)
+// on top of it, exactly like this file does.
+app.post('/api/tasks/:taskId/reject', async (c) => {
+  const handle = handles.get(c.req.param('taskId'));
+  if (!handle) return c.json({ error: 'unknown taskId' }, 404);
+  let reason: string | undefined;
+  try {
+    reason = (await c.req.json())?.reason;
+  } catch {
+    // no body / not JSON — reject with no reason
+  }
+  try {
+    await handle.reject(reason);
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);
+  }
+});
+
 app.post('/api/tasks/:taskId/cancel', async (c) => {
   const handle = handles.get(c.req.param('taskId'));
   if (!handle) return c.json({ error: 'unknown taskId' }, 404);

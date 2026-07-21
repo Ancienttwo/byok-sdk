@@ -187,6 +187,46 @@ type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'
  * section further down for the full design, including why this does not
  * reintroduce the disconnect-alone-fails-the-task bug M1 removed above.
  */
+/**
+ * M4 Phase 3: thrown by {@link ConnectionHub.approveTask}/{@link
+ * ConnectionHub.rejectTask} for a `taskId` this hub has no record of at all
+ * — mirrors `task-store.ts`'s `IllegalTaskTransitionError` (typed error
+ * class + `instanceof` dispatch at the HTTP layer is this codebase's own
+ * established idiom for mapping a domain error to the right status code;
+ * see `http.ts`'s existing `PairingCodeInvalidError`/`ApprovalNotFoundError`
+ * handling for the same pattern). Distinguished from {@link
+ * TaskNotAwaitingApprovalError} so `http.ts`'s new `/tasks/:id/approve`
+ * `/tasks/:id/reject` routes can return 404 vs. 409 correctly instead of a
+ * single generic error status for both.
+ */
+export class UnknownTaskError extends Error {
+  constructor(public readonly taskId: string) {
+    super(`unknown taskId: ${taskId}`);
+    this.name = 'UnknownTaskError';
+  }
+}
+
+/**
+ * Thrown by {@link ConnectionHub.approveTask}/{@link ConnectionHub.rejectTask}
+ * when the task exists but isn't currently `AwaitApproval` — see {@link
+ * UnknownTaskError}'s own doc comment for why this is a distinct class.
+ * `verb` keeps the exact pre-existing message wording per call site
+ * ("cannot approve ..." vs. "cannot reject ...") byte-for-byte unchanged —
+ * this message is user-visible today (e.g. `examples/basic`'s own
+ * `/api/tasks/:taskId/approve` surfaces `err.message` straight to the
+ * caller), so only the error's TYPE changes here, not its text.
+ */
+export class TaskNotAwaitingApprovalError extends Error {
+  constructor(
+    public readonly taskId: string,
+    public readonly state: TaskState,
+    verb: 'approve' | 'reject',
+  ) {
+    super(`cannot ${verb} task ${taskId}: not awaiting approval (state ${state})`);
+    this.name = 'TaskNotAwaitingApprovalError';
+  }
+}
+
 export class ConnectionHub {
   private readonly connections = new Map<string, ConnectionState>();
   private readonly outboxes = new Map<string, DeviceOutbox>();
@@ -575,7 +615,8 @@ export class ConnectionHub {
   private onProgress(taskId: string, payload: TaskProgressPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
-    if (record.state !== 'Running') {
+    const resumed = this.resumeIfImplicitlyApproved(record);
+    if (resumed.state !== 'Running') {
       this.forceFailOrDrop(taskId, 'task.progress received while not Running');
       return;
     }
@@ -589,7 +630,8 @@ export class ConnectionHub {
   private onArtifact(taskId: string, payload: TaskArtifactPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
-    if (record.state !== 'Running') {
+    const resumed = this.resumeIfImplicitlyApproved(record);
+    if (resumed.state !== 'Running') {
       this.forceFailOrDrop(taskId, 'task.artifact received while not Running');
       return;
     }
@@ -620,6 +662,11 @@ export class ConnectionHub {
     // Terminal messages arriving for an already-terminal task are stale/
     // duplicate (§9) — drop silently, not a warning.
     if (isTerminal(record.state)) return;
+    // Implicit-resume first (no-op unless still AwaitApproval) so a task
+    // completing right after a LOCAL-only approval lands on the normal
+    // Running -> Complete edge below, not the illegal AwaitApproval ->
+    // Complete edge — see resumeIfImplicitlyApproved's own doc comment.
+    this.resumeIfImplicitlyApproved(record);
     const result: TaskResult = {
       state: 'Complete',
       summary: payload.summary,
@@ -676,6 +723,49 @@ export class ConnectionHub {
       return;
     }
     this.forceFailOrDrop(taskId, `illegal transition ${record.state} -> ${target}`);
+  }
+
+  /**
+   * M4 Phase 3 hardening (orchestrator-directed fix for the server-state-
+   * machine trace finding): a task can be resolved entirely OUT-OF-BAND, on
+   * the daemon side only (M4 Phase 3's local `approvals.resolve`
+   * control-socket path, `packages/client`) — the server never sees a wire
+   * `task.approve`/`task.reject` for it, so its own record sits in
+   * `AwaitApproval` even though the daemon already resumed and moved on.
+   *
+   * The daemon is the execution authority in this security model (the SaaS
+   * only ever *proposes* — see docs/spec.md); the daemon sending ANY further
+   * task.* traffic for a task the server still thinks is `AwaitApproval` is
+   * itself sufficient proof the approval was resolved locally, one way or
+   * another. Rather than force-failing/dropping that traffic (the pre-fix
+   * behavior — `onProgress`/`onArtifact`'s own `!== 'Running'` guard,
+   * `onComplete`'s illegal-transition fallback), this applies the exact same
+   * `AwaitApproval -> Running` edge `approveTask` already uses (a
+   * pre-existing legal `TASK_TRANSITIONS` edge, not a new one) through the
+   * normal transition path — `taskStore.transition` + `onStateChange`, same
+   * as `applyOrFail`'s own legal-transition branch — so every existing
+   * consumer of task state (§, `TaskHandle.events()`, the lease reaper's
+   * `taskActivity`) observes it exactly as it would a real wire
+   * `task.approve`. Then emits `task.approval_resolved_implicit` (a
+   * `ByokServerEvent`, NOT a wire message — see that type's own doc comment)
+   * so an embedder can distinguish this from an operator-driven approval. A
+   * first-class `task.approval_resolved` WIRE notification is a deliberately
+   * deferred v1.1 candidate (tracked in the project ledger, not here) — this
+   * fix is zero wire/protocol change, entirely server-side inference.
+   *
+   * No-op (returns `record` unchanged) for any state other than
+   * `AwaitApproval` — every other guard (terminal, pre-claim, already-
+   * Running) keeps exactly its current behavior. `onFail`/`onCancelled`
+   * never call this: `Failed`/`Cancelled` are already direct, legal edges
+   * from `AwaitApproval`, so they never hit the illegal-transition path this
+   * exists to avoid in the first place.
+   */
+  private resumeIfImplicitlyApproved(record: TaskSnapshot): TaskSnapshot {
+    if (record.state !== 'AwaitApproval') return record;
+    const updated = this.taskStore.transition(record.taskId, 'Running', {});
+    this.onStateChange(updated);
+    this.serverEvents.push({ kind: 'task.approval_resolved_implicit', taskId: record.taskId, at: updated.updatedAt });
+    return updated;
   }
 
   /**
@@ -957,11 +1047,20 @@ export class ConnectionHub {
     }
   }
 
-  private async approveTask(taskId: string): Promise<void> {
+  /**
+   * M4 Phase 3: made public (was private through M3) so `http.ts`'s new
+   * `POST /tasks/:id/approve` route can call it directly — see this file's
+   * own `UnknownTaskError`/`TaskNotAwaitingApprovalError` doc comments for
+   * why the two failure modes are now distinct typed errors rather than a
+   * single generic `Error`. Every thrown message's TEXT is byte-for-byte
+   * unchanged from M2/M3 — only the error's type changed (this is still also
+   * reachable via `TaskHandle.approve()`, unaffected).
+   */
+  async approveTask(taskId: string): Promise<void> {
     const record = this.taskStore.get(taskId);
-    if (!record) throw new Error(`unknown taskId: ${taskId}`);
+    if (!record) throw new UnknownTaskError(taskId);
     if (record.state !== 'AwaitApproval') {
-      throw new Error(`cannot approve task ${taskId}: not awaiting approval (state ${record.state})`);
+      throw new TaskNotAwaitingApprovalError(taskId, record.state, 'approve');
     }
     this.applyOrFail(taskId, 'Running', {});
     if (record.deviceId) {
@@ -969,11 +1068,12 @@ export class ConnectionHub {
     }
   }
 
-  private async rejectTask(taskId: string, reason?: string): Promise<void> {
+  /** M4 Phase 3: made public — see {@link ConnectionHub.approveTask}'s own doc comment for the full rationale (identical reasoning applies here). */
+  async rejectTask(taskId: string, reason?: string): Promise<void> {
     const record = this.taskStore.get(taskId);
-    if (!record) throw new Error(`unknown taskId: ${taskId}`);
+    if (!record) throw new UnknownTaskError(taskId);
     if (record.state !== 'AwaitApproval') {
-      throw new Error(`cannot reject task ${taskId}: not awaiting approval (state ${record.state})`);
+      throw new TaskNotAwaitingApprovalError(taskId, record.state, 'reject');
     }
     this.applyOrFail(taskId, 'Failed', {
       result: { state: 'Failed', reason: reason ?? 'approval rejected', retryable: false },

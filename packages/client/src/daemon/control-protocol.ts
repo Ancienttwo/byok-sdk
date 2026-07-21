@@ -349,6 +349,33 @@ export function parseApprovalsResolveParams(value: unknown): ApprovalsResolvePar
   return { approvalId: value.approvalId, decision: value.decision, reason: value.reason };
 }
 
+/**
+ * M4 Phase 3: the control method `byok-approval-mcp` (`bin/byok-approval-mcp.ts`)
+ * calls FROM a claude-spawned MCP-server child process — a genuinely
+ * different OS process from the daemon, reachable only over this same
+ * control socket (see `../types.ts`'s `ApprovalChannel` doc comment for the
+ * full why). `taskId` correlates the request to an active task;
+ * `summary` is a short, human-readable description of the gated action
+ * (carried verbatim into the wire `task.await_approval.summary`).
+ */
+export interface ApprovalsRequestParams {
+  taskId: string;
+  summary: string;
+}
+
+export function parseApprovalsRequestParams(value: unknown): ApprovalsRequestParams | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.taskId !== 'string' || value.taskId.length === 0) return undefined;
+  if (typeof value.summary !== 'string') return undefined;
+  return { taskId: value.taskId, summary: value.summary };
+}
+
+/** Result of `approvals.request` — the outcome `byok-approval-mcp` translates into its own MCP `allow`/`deny` answer. */
+export interface ApprovalsRequestResult {
+  approved: boolean;
+  reason?: string;
+}
+
 export type ShutdownReason = 'unpair' | 'operator';
 
 export interface ShutdownParams {

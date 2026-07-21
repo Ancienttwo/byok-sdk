@@ -261,6 +261,11 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       // `create-daemon.ts`'s control-socket shutdown wiring), so it's kept
       // verbatim rather than redacted to a size.
       return { ...base, reason: event.reason };
+    case 'stale-approval-decision':
+      // `reason` here is an operator-supplied free-text reject reason (same
+      // redaction rule as `failed`/`cancelled` above) — `decision` is just
+      // the fixed 'approve'|'reject' identifier, kept verbatim.
+      return { ...base, taskId: event.taskId, decision: event.decision, reasonSize: byteSize(event.reason) };
   }
 }
 
@@ -385,6 +390,16 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
       return { kind: 'shutdown-requested', ts, reason: str(raw.reason) };
     case 'shutdown-complete':
       return { kind: 'shutdown-complete', ts, reason: str(raw.reason) };
+    case 'stale-approval-decision': {
+      const reasonSize = num(raw.reasonSize);
+      return {
+        kind: 'stale-approval-decision',
+        ts,
+        taskId: str(raw.taskId),
+        decision: str(raw.decision) as 'approve' | 'reject',
+        reason: reasonSize === undefined ? undefined : placeholderFor(reasonSize),
+      };
+    }
     default:
       return undefined;
   }

@@ -410,6 +410,55 @@ describe('control-server: defensive hardening (gatekeeper advisories)', () => {
     if (conn.ok) conn.client.close();
   });
 
+  it('P2 re-gate hardening: refuses to bind when the tmpdir fallback directory is a SYMLINK rather than a real directory (possible attacker-controlled path in a shared temp dir)', async () => {
+    if (process.platform === 'win32') return; // Unix symlink/uid concept only
+    const longStoreDir = path.join(await tmpDir('byok-ctl-symlink-'), 'x'.repeat(200));
+    const socketPath = controlSocketPath(longStoreDir);
+    const endpointDir = path.dirname(socketPath);
+
+    // Simulate an attacker pre-creating the exact deterministic byok-<hash>
+    // directory name as a symlink to somewhere else, BEFORE this daemon ever
+    // starts — mkdir(recursive) never throws on an existing path and never
+    // fixes an existing symlink's target, so nothing upstream of the new
+    // check would have caught this.
+    const attackerTarget = await tmpDir('byok-ctl-symlink-target-');
+    await fs.mkdir(path.dirname(endpointDir), { recursive: true });
+    await fs.symlink(attackerTarget, endpointDir);
+
+    await expect(startControlServer({ storeDir: longStoreDir, productId: 'acme', methods: noopMethods() })).rejects.toThrow(
+      /is a symlink/,
+    );
+
+    // Confirms this genuinely never bound inside the attacker's directory.
+    expect(await fs.readdir(attackerTarget)).toEqual([]);
+  });
+
+  it('P2 re-gate hardening: refuses to bind when the tmpdir fallback directory is owned by a DIFFERENT uid (possible attacker-controlled path in a shared temp dir)', async () => {
+    if (process.platform === 'win32') return; // Unix uid concept only
+    const longStoreDir = path.join(await tmpDir('byok-ctl-uidmismatch-'), 'x'.repeat(200));
+    const socketPath = controlSocketPath(longStoreDir);
+    const endpointDir = path.dirname(socketPath);
+    const realLstat = fs.lstat;
+    const lstatSpy = vi.spyOn(fs, 'lstat').mockImplementation(async (target, ...rest) => {
+      const real = await realLstat(target, ...(rest as []));
+      if (target === endpointDir) {
+        // A directory genuinely owned by someone else — same shape lstat
+        // would report, only the uid differs (chmod having already failed
+        // silently against it is exactly the pre-fix swallowed case).
+        return Object.assign(Object.create(Object.getPrototypeOf(real)), real, { uid: real.uid + 1 });
+      }
+      return real;
+    });
+
+    try {
+      await expect(startControlServer({ storeDir: longStoreDir, productId: 'acme', methods: noopMethods() })).rejects.toThrow(
+        /owned by uid/,
+      );
+    } finally {
+      lstatSpy.mockRestore();
+    }
+  });
+
   it('an NDJSON line exceeding MAX_LINE_BYTES closes the connection (fail-closed), never grows the buffer unbounded', async () => {
     const storeDir = await tmpDir('byok-ctl-maxline-');
     handle = await startControlServer({ storeDir, productId: 'acme', methods: noopMethods() });

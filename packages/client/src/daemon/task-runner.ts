@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,10 +10,47 @@ import {
   type TaskOfferPayload,
 } from '@byok/protocol';
 import { PolicyUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
+import type { ApprovalDecision, ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import { computeEffectivePolicy } from './policy';
 import { ProgressBatcher, type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
+
+/**
+ * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
+ * before force-resolving an unanswered out-of-band approval as a fail-closed
+ * rejection — generous enough for a real human to actually notice and act on
+ * an approval prompt, short enough that a genuinely abandoned task doesn't
+ * tie up daemon/task bookkeeping forever. Overridable via
+ * `TaskRunnerDeps.approvalTimeoutMs` (ultimately `DaemonConfig`-configurable —
+ * see `create-daemon.ts`).
+ */
+export const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * M4 Phase 3 hardening (orchestrator-directed fix): thrown by the
+ * `ctx.approvalChannel.resolve` closure built in `handleOffer` below when
+ * this task has no CURRENTLY pending out-of-band approval to resolve.
+ * Distinguished from a plain `Error` specifically so `handleApprove`/
+ * `handleReject` can tell "a wire task.approve/task.reject arrived for an
+ * approval a DIFFERENT, faster path (a racing local `approvals.resolve`, or
+ * this exact decision arriving twice) already resolved" — a benign,
+ * expected race, audit-worthy but never task-state-affecting — apart from
+ * "the session's own resolveApproval() failed for some other, genuine
+ * reason" (an adapter-level problem, which still fails the task exactly as
+ * before). Only ever thrown for an adapter that actually wires up a real
+ * approval channel (claude, under `confirm` mode) — pi/codex's own
+ * `resolveApproval()` still throw their own unrelated, adapter-specific
+ * "not supported at all" errors, which are NOT instances of this class and
+ * therefore still fall through to the pre-existing fail-the-task behavior,
+ * unchanged.
+ */
+export class NoPendingApprovalError extends Error {
+  constructor(public readonly taskId: string) {
+    super(`no pending out-of-band approval to resolve for task ${taskId}`);
+    this.name = 'NoPendingApprovalError';
+  }
+}
 
 /** Inline artifact payloads must stay under this many UTF-8 bytes — mirrors the frozen `TaskArtifactPayloadSchema.inline` limit in `packages/protocol` (see docs/protocol.md §7). Anything bigger goes through the blob client. */
 const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
@@ -52,6 +90,30 @@ export interface TaskRunnerDeps {
    * `SessionWorkspaceStore`'s own doc comment.
    */
   sessionWorkspaces: SessionWorkspaceStore;
+  /**
+   * M4 Phase 3: this daemon's control-socket identity + the shared registry
+   * backing the control socket's own `approvals.list`/`approvals.resolve`
+   * methods (`create-daemon.ts` constructs ONE `ApprovalRegistry` and passes
+   * the SAME instance here) — see `requestApproval`'s own doc comment for
+   * why `TaskRunner` needs a handle on all three. `storeDir`/`productId` are
+   * copied verbatim into every task's `TaskContext.approvalChannel`.
+   */
+  approvalRegistry: ApprovalRegistry;
+  storeDir: string;
+  productId: string;
+  /** Default `requestApproval` timeout — see {@link DEFAULT_APPROVAL_TIMEOUT_MS}. */
+  approvalTimeoutMs?: number;
+  /**
+   * M4 Phase 3 hardening: called by `handleApprove`/`handleReject` instead of
+   * failing the task when the referenced approval turns out to be stale
+   * (see {@link NoPendingApprovalError}) — an audit-only signal, never
+   * gating any task-state decision. `create-daemon.ts` wires this to
+   * `DaemonObserver.noteStaleApprovalDecision`, the same way every other
+   * locally-observable daemon event reaches the audit log/`tasks --follow`.
+   * Optional so a caller that doesn't care about this audit trail (e.g. a
+   * minimal test harness) isn't forced to supply one.
+   */
+  onStaleApprovalDecision?: (taskId: string, decision: ApprovalDecision, reason?: string) => void;
 }
 
 interface ActiveTask {
@@ -61,6 +123,14 @@ interface ActiveTask {
   workspaceDir: string;
   batcher: ProgressBatcher;
   summaryParts: string[];
+  /**
+   * M4 Phase 3: the `ApprovalRegistry` id of the single out-of-band approval
+   * currently pending for this task, if any — set by `requestApproval`,
+   * cleared once resolved (by a real decision or by the timeout). `undefined`
+   * whenever nothing is pending. See `requestApproval` and
+   * `TaskContext.approvalChannel.resolve`'s doc comments.
+   */
+  pendingApprovalId?: string;
 }
 
 type PickResult =
@@ -490,7 +560,32 @@ export class TaskRunner {
         return;
       }
 
-      const ctx: TaskContext = { workspaceDir, policy: decision.policy, env: process.env };
+      const ctx: TaskContext = {
+        workspaceDir,
+        policy: decision.policy,
+        env: process.env,
+        // M4 Phase 3: adapter-agnostic and cheap to always populate — only an
+        // adapter whose runtime genuinely supports an out-of-band approval
+        // pause (claude, today) ever reads this. `resolve` is a closure over
+        // `taskId` (not a pre-bound approvalId): it looks up whichever
+        // approval is CURRENTLY pending for this task at call time, since one
+        // task/session can face several approval requests, one at a time,
+        // over its life. See `types.ts`'s `ApprovalChannel` doc comment.
+        approvalChannel: {
+          taskId,
+          storeDir: this.deps.storeDir,
+          productId: this.deps.productId,
+          timeoutMs: this.deps.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS,
+          resolve: async (approved, reason) => {
+            const currentActive = this.tasks.get(taskId);
+            const pendingId = currentActive?.pendingApprovalId;
+            if (!pendingId) {
+              throw new NoPendingApprovalError(taskId);
+            }
+            this.deps.approvalRegistry.resolve(pendingId, approved ? 'approve' : 'reject', reason);
+          },
+        },
+      };
       const effectiveOffer: TaskOfferPayload = {
         ...payload,
         instruction: resolvedInstruction,
@@ -808,9 +903,99 @@ export class TaskRunner {
   }
 
   /**
+   * M4 Phase 3: the daemon-side half of the out-of-band approval channel
+   * (`types.ts`'s `ApprovalChannel`) — called from `create-daemon.ts`'s
+   * `approvals.request` control method, itself called by `byok-approval-mcp`
+   * (a claude-spawned MCP-server child process, NOT the adapter/session
+   * in-process — see `ApprovalChannel`'s own doc comment for the full why
+   * this seam exists at all rather than an `AgentEvent`).
+   *
+   * Deliberately independent of the dormant `needs_approval` `AgentEvent`
+   * path in `pump()` below (~line 611): empirically confirmed (M4 Phase 3
+   * STEP 0), claude's own stream-json output emits NOTHING while a
+   * permission-prompt-tool call is outstanding — the gap between a `tool_use`
+   * frame and its `tool_result` is invisible on the wire, indistinguishable
+   * from ordinary model "thinking" latency. `pump()`'s for-await loop over
+   * `active.session.events` therefore has no event to ever branch on for
+   * this case; the ONLY signal that a task is paused arrives out-of-band,
+   * over the control socket, which is exactly what this method is for. The
+   * `needs_approval` path stays dormant, untouched, for a hypothetical
+   * future adapter whose runtime DOES expose the pause on its own event
+   * stream.
+   *
+   * Sends `task.await_approval` (protocol §5), registers a fresh entry in
+   * `deps.approvalRegistry`, and races it against `deps.approvalTimeoutMs`
+   * (default {@link DEFAULT_APPROVAL_TIMEOUT_MS}) — an unanswered request
+   * force-resolves as a fail-closed rejection once the deadline passes. Both
+   * that timeout AND a real decision (server wire `task.approve`/
+   * `task.reject` via `handleApprove`/`handleReject` below, OR the local
+   * CLI's `approvals.resolve` in `control-server.ts`) converge on the exact
+   * same `ApprovalRegistry.resolve()` call — "first resolution wins, the
+   * loser is a clean already-resolved no-op" is `ApprovalRegistry`'s own
+   * existing guarantee, reused here rather than reimplemented.
+   *
+   * Fails closed immediately (no registry entry ever created) for a `taskId`
+   * that isn't currently active on this device — a stale/unknown/
+   * already-finished task has nothing to pause.
+   */
+  async requestApproval(taskId: string, summary: string): Promise<{ approved: boolean; reason?: string }> {
+    const active = this.tasks.get(taskId);
+    if (!active) {
+      return { approved: false, reason: 'task is not currently active on this device' };
+    }
+
+    const approvalId = randomUUID();
+    active.pendingApprovalId = approvalId;
+    // Mirrors the dormant needs_approval branch's own flush-before-pausing
+    // discipline (~line 611 below): whatever progress already accumulated
+    // this turn should reach the server before the task's state moves to
+    // AwaitApproval, not sit buffered behind an indefinite pause.
+    active.batcher.flush();
+    this.deps.send(createEnvelope('task.await_approval', { summary }, { taskId }));
+
+    const timeoutMs = this.deps.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        try {
+          this.deps.approvalRegistry.resolve(approvalId, 'reject', `approval timed out after ${timeoutMs}ms with no decision`);
+        } catch {
+          // Already resolved by a real decision that raced the timer — the
+          // registered onResolve callback below already fired; nothing left
+          // to do here.
+        }
+      }, timeoutMs);
+      timer.unref?.();
+
+      this.deps.approvalRegistry.register(
+        { approvalId, taskId, summary, createdAt: new Date().toISOString() },
+        (decision: ApprovalDecision, reason: string | undefined) => {
+          clearTimeout(timer);
+          if (active.pendingApprovalId === approvalId) active.pendingApprovalId = undefined;
+          resolve({ approved: decision === 'approve', reason });
+        },
+      );
+    });
+  }
+
+  /**
    * Protocol §5 approval flow: the server's own state already moved
    * `AwaitApproval -> Running` before this best-effort notification arrives
    * (§4) — resuming the session is what makes `task.progress` continue.
+   *
+   * M4 Phase 3 hardening (orchestrator-directed fix): a wire `task.approve`
+   * can legitimately arrive AFTER a different, faster path (a racing local
+   * `approvals.resolve` over the control socket, or this exact message
+   * redelivered) already resolved the SAME approval — `ApprovalRegistry`'s
+   * own "first resolution wins" guarantee means `session.resolveApproval()`
+   * throws {@link NoPendingApprovalError} for that loser, not because
+   * anything is actually wrong. Before this fix, ANY thrown error here
+   * (stale or genuine) failed the whole task — for the stale case that
+   * meant a task the winning path had ALREADY correctly resumed (and which
+   * may go on to complete normally) got marked `Failed` anyway, purely
+   * because a second, now-meaningless notification arrived late. Stale is
+   * now an audit-only no-op; a genuine failure (the session itself
+   * couldn't resume for some real reason) still fails the task exactly as
+   * before.
    */
   private async handleApprove(taskId: string): Promise<void> {
     const active = this.tasks.get(taskId);
@@ -818,6 +1003,10 @@ export class TaskRunner {
     try {
       await active.session.resolveApproval(true);
     } catch (err) {
+      if (err instanceof NoPendingApprovalError) {
+        this.deps.onStaleApprovalDecision?.(taskId, 'approve');
+        return;
+      }
       await this.fail(taskId, `failed to resume session after approval: ${errorMessage(err)}`, false);
     }
   }
@@ -827,13 +1016,34 @@ export class TaskRunner {
    * `AwaitApproval -> Failed` before this best-effort notification arrives
    * (§4) — the daemon's job is just to stop the session and prove it via
    * `task.fail`.
+   *
+   * M4 Phase 3 hardening (orchestrator-directed fix): same race as
+   * `handleApprove` above, but the pre-fix bug here was worse — this method
+   * unconditionally interrupted the session and sent `task.fail` regardless
+   * of whether `resolveApproval` even threw, so a stale/late wire
+   * `task.reject` (the local CLI, or a racing wire approve, already
+   * resolved this exact approval a different way) would tear down and fail
+   * a task that was already correctly approved and possibly still running
+   * fine. Now: a {@link NoPendingApprovalError} short-circuits to an
+   * audit-only no-op BEFORE the interrupt/fail/finish sequence — nothing
+   * about this task's state is touched. Any OTHER outcome (success, or a
+   * genuine non-staleness error) falls through to the existing
+   * interrupt+`task.fail`+finish sequence unchanged: the server's own
+   * record already moved `AwaitApproval -> Failed` for a REAL reject
+   * (§4's "server state is authoritative on its own action" rule), so the
+   * daemon must still conform to that regardless of whether telling the
+   * session about it succeeded.
    */
   private async handleReject(taskId: string, reason: string | undefined): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
     try {
       await active.session.resolveApproval(false, reason);
-    } catch {
+    } catch (err) {
+      if (err instanceof NoPendingApprovalError) {
+        this.deps.onStaleApprovalDecision?.(taskId, 'reject', reason);
+        return;
+      }
       // best-effort — still report the rejection outcome below
     }
     try {

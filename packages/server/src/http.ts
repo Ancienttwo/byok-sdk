@@ -229,6 +229,20 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     return c.json(response, 200);
   });
 
+  // M4 Phase 3 note: task approval (resolving a task currently
+  // `AwaitApproval`) is deliberately NOT exposed as an HTTP route on this
+  // app. Every route above is the pinned device<->server wire contract
+  // (docs/protocol.md), bearer-authed with a DEVICE's own access token —
+  // approval is an operator/embedder-side action, and a device-bearer-authed
+  // route would let any validly-paired device approve/reject ANY task, not
+  // just its own. The supported entry point is `ConnectionHub.approveTask`/
+  // `rejectTask` (hub.ts) called in-process — an embedder builds its own
+  // operator-facing surface (its own auth, its own routes) on top of that,
+  // exactly like `examples/basic/server.ts`'s own `/api/tasks/:taskId/approve`
+  // and `/api/tasks/:taskId/reject`, which call `TaskHandle.approve()`/
+  // `reject()` (themselves thin wrappers over `approveTask`/`rejectTask`)
+  // directly rather than proxying through any bearer-authed SDK route.
+
   return app;
 }
 

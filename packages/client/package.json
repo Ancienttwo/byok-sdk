@@ -12,7 +12,8 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "byok-agent": "./dist/bin/byok-agent.js"
+    "byok-agent": "./dist/bin/byok-agent.js",
+    "byok-approval-mcp": "./dist/bin/byok-approval-mcp.js"
   },
   "exports": {
     ".": {

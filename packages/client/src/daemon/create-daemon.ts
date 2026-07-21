@@ -13,6 +13,7 @@ import { AnotherControlServerRunningError, startControlServer } from './control-
 import type { ControlMethods, ControlServerHandle } from './control-server';
 import {
   ControlError,
+  parseApprovalsRequestParams,
   parseApprovalsResolveParams,
   parseShutdownParams,
   type ControlActiveTask,
@@ -140,6 +141,8 @@ export interface DaemonOverrides {
   backoff?: BackoffOptions;
   batch?: ProgressBatcherOptions;
   liveness?: LivenessOptions;
+  /** M4 Phase 3: overrides `TaskRunner`'s default out-of-band approval wait (`DEFAULT_APPROVAL_TIMEOUT_MS`, 10 minutes) before an unanswered `requestApproval` force-resolves as a fail-closed rejection. */
+  approvalTimeoutMs?: number;
   longPoll?: {
     /** Consecutive never-acked WS connect failures before falling back to long-poll. Default 3. */
     wsFailureThreshold?: number;
@@ -392,6 +395,26 @@ export function createDaemonWithAdapters(
       blobClient,
       batcherOptions: overrides.batch,
       sessionWorkspaces,
+      // M4 Phase 3: the SAME `ApprovalRegistry` instance the control
+      // socket's own `approvals.list`/`approvals.resolve` methods already
+      // share (see that field's own construction above) — `TaskRunner
+      // .requestApproval` registers into it directly, so a decision arriving
+      // via either the server wire or the local CLI resolves the identical
+      // entry. `storeDir`/`productId` let `TaskContext.approvalChannel`
+      // (populated per-task by `TaskRunner`) tell an out-of-process helper
+      // (`bin/byok-approval-mcp.ts`) exactly which control socket to dial.
+      approvalRegistry,
+      storeDir,
+      productId: config.productId,
+      approvalTimeoutMs: overrides.approvalTimeoutMs,
+      // M4 Phase 3 hardening: bridges TaskRunner's stale-approval-race
+      // finding out to the SAME local observability seam every other
+      // daemon-local event already uses (see observer.ts's own module doc
+      // comment) — TaskRunner itself still has no notion `DaemonObserver`
+      // exists, exactly like every other `deps.send`-shaped seam here.
+      onStaleApprovalDecision: (taskId, decision, reason) => {
+        observer.noteStaleApprovalDecision(taskId, decision, reason);
+      },
     };
     runner = new TaskRunner(deps);
 
@@ -546,11 +569,27 @@ export function createDaemonWithAdapters(
   async function performControlShutdown(reason: ShutdownReason | undefined): Promise<void> {
     const effectiveReason = reason ?? 'operator';
     observer.noteShutdownRequested(effectiveReason);
-    runner?.stopAcceptingOffers();
-    const activeTeardown = runner?.shutdownActiveTasks(`control socket shutdown (${effectiveReason})`) ?? Promise.resolve();
-    await Promise.race([activeTeardown, delay(SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS)]);
-    await stop();
-    observer.noteShutdownComplete(effectiveReason);
+    // Hardening finding (P2 re-gate): `noteShutdownComplete` now fires in a
+    // `finally` — `start.ts`'s own wait for THIS event (see the doc comment
+    // above) is what makes `runStartCommand` return at all. Before this fix,
+    // a throw anywhere in the body below (stopAcceptingOffers/
+    // shutdownActiveTasks/stop() are all best-effort in their OWN
+    // implementations today, but nothing here guaranteed one of them could
+    // never throw in the future) would propagate out of this function
+    // without ever emitting `shutdown-complete`, leaving `start.ts` waiting
+    // forever — exactly the class of hang this event was introduced to
+    // prevent in the first place. `finally` runs on both the success path
+    // and any throw, and does not swallow the throw itself (it still
+    // propagates to this function's own caller — the `shutdown` control
+    // method's `.catch()` in `controlMethods` below — afterward).
+    try {
+      runner?.stopAcceptingOffers();
+      const activeTeardown = runner?.shutdownActiveTasks(`control socket shutdown (${effectiveReason})`) ?? Promise.resolve();
+      await Promise.race([activeTeardown, delay(SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS)]);
+      await stop();
+    } finally {
+      observer.noteShutdownComplete(effectiveReason);
+    }
   }
 
   const controlMethods: ControlMethods = {
@@ -567,6 +606,21 @@ export function createDaemonWithAdapters(
           throw err;
         }
         return { resolved: true };
+      },
+      // M4 Phase 3: called by `bin/byok-approval-mcp.ts` — a claude-spawned
+      // MCP-server child process, not this daemon's own adapter/session
+      // in-process (see `types.ts`'s `ApprovalChannel` doc comment). Awaits
+      // `TaskRunner.requestApproval`'s own returned promise directly, which
+      // is exactly what lets this control call stay pending for as long as
+      // `approvalTimeoutMs` allows (`control-server.ts`'s unary dispatch has
+      // no timeout of its own — see its `dispatch()`) — the caller's own
+      // `requestTimeoutMs` (`bin/control-client.ts`) must be configured
+      // longer than that for the same reason.
+      'approvals.request': (params) => {
+        const parsed = parseApprovalsRequestParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'approvals.request requires {taskId, summary}');
+        if (!runner) throw new ControlError('not_found', 'daemon is not started');
+        return runner.requestApproval(parsed.taskId, parsed.summary);
       },
       shutdown: (params) => {
         const { reason } = parseShutdownParams(params);

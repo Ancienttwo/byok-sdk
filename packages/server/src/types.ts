@@ -137,4 +137,20 @@ export type ByokServerEvent =
   | { kind: 'device.connected'; deviceId: string; at: string }
   | { kind: 'device.disconnected'; deviceId: string; at: string }
   | { kind: 'task.created'; taskId: string; at: string }
-  | { kind: 'task.state'; taskId: string; state: TaskState; at: string };
+  | { kind: 'task.state'; taskId: string; state: TaskState; at: string }
+  /**
+   * M4 Phase 3 hardening (orchestrator-directed): the daemon resolved a
+   * pending approval entirely locally (M4 Phase 3's local `approvals.resolve`
+   * control-socket path) — no wire `task.approve`/`task.reject` ever reached
+   * the server for it. This fires when daemon-originated task traffic
+   * (`task.progress`/`task.artifact`/`task.complete`) for a task the server's
+   * own record still has as `AwaitApproval` proves, after the fact, that the
+   * approval was resolved on the device — see `ConnectionHub`'s
+   * `resumeIfImplicitlyApproved` (hub.ts) for the state-machine side of this.
+   * Deliberately NOT a wire message (no `packages/protocol` change) — a
+   * first-class `task.approval_resolved` wire notification is a deferred
+   * v1.1 candidate; this is purely an embedder-facing observability signal
+   * so a SaaS UI can distinguish "approved server-side" from "the device
+   * says it was approved locally" if it cares to.
+   */
+  | { kind: 'task.approval_resolved_implicit'; taskId: string; at: string };

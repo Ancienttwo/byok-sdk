@@ -78,7 +78,20 @@ export type DaemonEvent =
    * still-in-flight `task.fail` send and silently drop it (confirmed via a
    * real regression — see `daemon-control-socket.test.ts`).
    */
-  | { kind: 'shutdown-complete'; ts: string; reason: string };
+  | { kind: 'shutdown-complete'; ts: string; reason: string }
+  /**
+   * M4 Phase 3 hardening: a wire `task.approve`/`task.reject` (or this
+   * device's own redelivered copy of one) arrived for an out-of-band
+   * approval a DIFFERENT, faster path (a racing local `approvals.resolve`
+   * over the control socket, or this exact decision arriving twice) had
+   * already resolved — `TaskRunner.handleApprove`/`handleReject`
+   * (`task-runner.ts`) emit this instead of failing the task a second time.
+   * Audit-only: never gates any teardown/task-state decision, purely a
+   * record that a stale message was seen and correctly ignored — see
+   * `NoPendingApprovalError`'s own doc comment (`task-runner.ts`) for the
+   * full race this closes.
+   */
+  | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reason?: string };
 
 export type DaemonEventListener = (event: DaemonEvent) => void;
 export type Unsubscribe = () => void;
@@ -295,6 +308,11 @@ export class DaemonObserver {
   /** M4 Phase 2: see the `shutdown-complete` `DaemonEvent` variant's own doc comment. */
   noteShutdownComplete(reason: string): void {
     this.emit({ kind: 'shutdown-complete', ts: nowIso(), reason });
+  }
+
+  /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */
+  noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void {
+    this.emit({ kind: 'stale-approval-decision', ts: nowIso(), taskId, decision, reason });
   }
 
   private upsertTask(
