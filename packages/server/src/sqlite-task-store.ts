@@ -179,7 +179,13 @@ export class SqliteTaskStore implements TaskStore {
    * caller would get if it happened to run a moment later.
    */
   transition(taskId: string, to: TaskState, patch: Partial<Omit<TaskRecord, 'taskId' | 'state'>> = {}): TaskRecord {
-    for (;;) {
+    // Bounded CAS retry: each miss means another writer committed between our
+    // read and write. A legal state cycle (e.g. Running <-> AwaitApproval)
+    // driven continuously by another process could otherwise starve this call
+    // forever, so cap the attempts and surface a contention error rather than
+    // spin unbounded. The cap is far above any real contention depth.
+    const MAX_CAS_ATTEMPTS = 100;
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
       const record = this.get(taskId);
       if (!record) {
         throw new Error(`unknown taskId: ${taskId}`);
@@ -213,6 +219,9 @@ export class SqliteTaskStore implements TaskStore {
       // the read and the write above. Loop back and re-validate against
       // the (now current) real state instead of returning stale success.
     }
+    throw new Error(
+      `transition contention: taskId ${taskId} kept changing state under concurrent writers after ${MAX_CAS_ATTEMPTS} attempts`,
+    );
   }
 
   /**

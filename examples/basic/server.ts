@@ -49,8 +49,10 @@ const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
 //
 // Storage mode (M3): `BYOK_STORE=sqlite` swaps both reference stores for
 // their `node:sqlite`-backed persistent counterparts (`SqliteTaskStore`/
-// `SqliteBlobStore`, from `@byok/server`) so tasks and blobs survive a
-// restart of this demo process — data lands under `examples/basic/data/`
+// `SqliteBlobStore`, from `@byok/server`) so task RECORDS and blob bytes
+// survive a restart of this demo process (record persistence only — an
+// in-flight task is not resumed/reconnected; see the README) — data lands
+// under `examples/basic/data/`
 // (gitignored). Requires Node.js 22.5+ (`node:sqlite`'s minimum — see
 // `packages/server/src/sqlite-support.ts`). Anything else, including unset,
 // keeps the zero-setup default: in-memory tasks + local-disk blobs, both
