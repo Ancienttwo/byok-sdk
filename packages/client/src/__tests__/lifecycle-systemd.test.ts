@@ -2,7 +2,7 @@ import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { createSystemdLifecycle, generateSystemdUnit } from '../lifecycle/systemd';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
-import type { ServiceDefinition } from '../lifecycle/service-types';
+import { sanitizeServiceName, type ServiceDefinition } from '../lifecycle/service-types';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -45,6 +45,84 @@ describe('lifecycle/systemd: generateSystemdUnit', () => {
       logDir: '/tmp/logs',
     });
     expect(unit).toContain('ExecStart="node" "--path" "C:\\\\some \\"quoted\\" path"');
+  });
+
+  it('escapes "$" and "%" in ExecStart tokens so systemd never expands them as a variable/specifier (P1 #8)', () => {
+    const unit = generateSystemdUnit({
+      name: 'x',
+      displayName: 'X',
+      program: { command: 'node', args: ['--config', '/etc/$HOME/100%done.json'] },
+      logDir: '/tmp/logs',
+    });
+    expect(unit).toContain('ExecStart="node" "--config" "/etc/$$HOME/100%%done.json"');
+  });
+
+  it('escapes a literal "%" in Description/WorkingDirectory/StandardOutput/StandardError so systemd specifiers are never expanded (P1 #8)', () => {
+    const unit = generateSystemdUnit({
+      name: 'x',
+      displayName: '100% Agent',
+      program: { command: 'node', args: [], cwd: '/opt/50%agent' },
+      logDir: '/var/log/50%dir',
+    });
+    expect(unit).toContain('Description=100%% Agent');
+    expect(unit).toContain('WorkingDirectory=/opt/50%%agent');
+    expect(unit).toContain('StandardOutput=append:/var/log/50%%dir/x.out.log');
+    expect(unit).toContain('StandardError=append:/var/log/50%%dir/x.err.log');
+  });
+
+  it('rejects a newline embedded in displayName instead of letting it inject an extra unit directive (P1 #8)', () => {
+    expect(() =>
+      generateSystemdUnit({
+        name: 'x',
+        displayName: 'Evil\n[Service]\nExecStartPost=/bin/rm -rf /',
+        program: { command: 'node', args: [] },
+        logDir: '/tmp/logs',
+      }),
+    ).toThrow(/control characters/);
+  });
+
+  it('rejects a newline embedded in program.cwd (P1 #8)', () => {
+    expect(() =>
+      generateSystemdUnit({
+        name: 'x',
+        displayName: 'X',
+        program: { command: 'node', args: [], cwd: '/tmp\nExecStartPost=evil' },
+        logDir: '/tmp/logs',
+      }),
+    ).toThrow(/control characters/);
+  });
+
+  it('rejects a newline embedded in an ExecStart arg (P1 #8)', () => {
+    expect(() =>
+      generateSystemdUnit({
+        name: 'x',
+        displayName: 'X',
+        program: { command: 'node', args: ['--config', 'safe\nExecStartPost=evil'] },
+        logDir: '/tmp/logs',
+      }),
+    ).toThrow(/control characters/);
+  });
+
+  it('rejects a newline reaching the logDir-derived log paths via `name` (P1 #8)', () => {
+    expect(() =>
+      generateSystemdUnit({
+        name: 'x\nExecStartPost=evil',
+        displayName: 'X',
+        program: { command: 'node', args: [] },
+        logDir: '/tmp/logs',
+      }),
+    ).toThrow(/control characters/);
+  });
+});
+
+describe('lifecycle/systemd: sanitizeServiceName leading "-" hardening (P1 #8)', () => {
+  it('strips a leading "-" so systemctl never mistakes the unit name for an option', () => {
+    expect(sanitizeServiceName('-dangerous-name')).toBe('dangerous-name');
+    expect(sanitizeServiceName('--rm-rf')).toBe('rm-rf');
+  });
+
+  it('throws if nothing valid remains after stripping leading dashes', () => {
+    expect(() => sanitizeServiceName('---')).toThrow(/no valid characters/);
   });
 });
 
@@ -120,11 +198,11 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     expect(written).toContain('ExecStart="/other/node" "x"');
   });
 
-  it('uninstall() disables (best-effort) and removes the unit file, then reloads', async () => {
+  it('uninstall() disables (idempotent "not loaded") and removes the unit file, then reloads', async () => {
     const calls: string[] = [];
     const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
       calls.push(`${cmd} ${args.join(' ')}`);
-      return fail(1, '', 'not found');
+      return fail(1, '', 'Unit Acme-Agent-.service not loaded.');
     });
     const fs = fakeFs();
     const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
@@ -133,6 +211,32 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
 
     expect(calls).toEqual(['systemctl --user disable --now Acme-Agent-.service', 'systemctl --user daemon-reload']);
     expect(fs.rm).toHaveBeenCalledWith('/h/.config/systemd/user/Acme-Agent-.service', { force: true });
+  });
+
+  it('uninstall() throws and does NOT delete the unit file when disable --now fails for a real reason (P1 #7)', async () => {
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      return fail(1, '', 'Access denied');
+    });
+    const fs = fakeFs();
+    const lifecycle = createSystemdLifecycle(def(), { run, fs, homedir: () => '/h' });
+
+    await expect(lifecycle.uninstall()).rejects.toThrow(/systemctl disable --now failed \(exit 1\): Access denied/);
+
+    expect(fs.rm).not.toHaveBeenCalled();
+    // Never reaches daemon-reload — the function throws before that point.
+    expect(calls).toEqual(['systemctl --user disable --now Acme-Agent-.service']);
+  });
+
+  it('a service name starting with "-" is sanitized before reaching systemctl, never mistaken for a CLI option (P1 #8)', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(ok());
+    const fs = fakeFs();
+    const lifecycle = createSystemdLifecycle(def({ name: '-rm-rf-everything' }), { run, fs, homedir: () => '/h' });
+
+    await lifecycle.install();
+
+    expect(run).toHaveBeenCalledWith('systemctl', ['--user', 'enable', '--now', 'rm-rf-everything.service']);
   });
 
   it('start() throws "not installed" when the unit file does not exist on disk', async () => {

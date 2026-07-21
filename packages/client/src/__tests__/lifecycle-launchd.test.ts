@@ -121,7 +121,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(written).toContain('<string>/other/node</string>');
   });
 
-  it('uninstall() bootouts (best-effort) and removes the plist file', async () => {
+  it('uninstall() bootouts (idempotent "not loaded") and removes the plist file', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'not loaded'));
     const fs = fakeFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
@@ -130,6 +130,16 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
     expect(run).toHaveBeenCalledWith('launchctl', ['bootout', 'gui/501/Acme-Agent-']);
     expect(fs.rm).toHaveBeenCalledWith('/h/Library/LaunchAgents/Acme-Agent-.plist', { force: true });
+  });
+
+  it('uninstall() throws and does NOT delete the plist when bootout fails for a real reason (P1 #7)', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(1, 'Operation not permitted'));
+    const fs = fakeFs();
+    const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
+
+    await expect(lifecycle.uninstall()).rejects.toThrow(/launchctl bootout failed \(exit 1\): Operation not permitted/);
+
+    expect(fs.rm).not.toHaveBeenCalled();
   });
 
   it('start() throws "not installed" when the plist does not exist on disk', async () => {

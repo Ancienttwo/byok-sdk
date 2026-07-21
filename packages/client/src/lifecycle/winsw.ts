@@ -1,7 +1,20 @@
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { defaultRunner, runOrThrow, type Runner } from './exec-runner';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
+
+/**
+ * What WinSW/`sc.exe` prints or exits with when the service isn't installed
+ * at all — as opposed to a genuine failure (access denied, the exe
+ * locked/busy, a WinSW/SCM fault), which must be surfaced rather than
+ * treated the same way (see `uninstall()` below and cross-model-review P1
+ * #7). Windows's own `ERROR_SERVICE_DOES_NOT_EXIST` is exit code 1060 (see
+ * this same phrase/code already asserted in `status()`'s own test).
+ */
+const WINSW_NOT_INSTALLED: IdempotentAbsence = {
+  codes: [1060],
+  patterns: [/does not exist/i, /non-existent service/i],
+};
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface WinswDeps {
@@ -123,8 +136,15 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
   }
 
   async function uninstall(): Promise<void> {
-    await run(exePath, ['stop']); // best-effort — fine if not running
-    await run(exePath, ['uninstall']); // best-effort — fine if not installed
+    // Tolerant of "wasn't running/installed" (fine), but a REAL failure
+    // (access denied, the exe locked/busy, a WinSW/SCM fault) at EITHER
+    // step must NOT be masked: only delete the exe+xml once we know the
+    // service is actually stopped and unregistered (or was never there),
+    // so a still-running service never loses its control files and
+    // becomes an orphan nobody can stop/uninstall (cross-model-review P1
+    // #7).
+    await runIdempotent(run, exePath, ['stop'], 'winsw stop', WINSW_NOT_INSTALLED);
+    await runIdempotent(run, exePath, ['uninstall'], 'winsw uninstall', WINSW_NOT_INSTALLED);
     await fs.rm(exePath, { force: true });
     await fs.rm(xmlPath, { force: true });
   }

@@ -120,11 +120,11 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     await expect(lifecycle.install()).rejects.toThrow(/winsw start failed/);
   });
 
-  it('uninstall() stops + uninstalls (both best-effort) and removes the copied exe + xml', async () => {
+  it('uninstall() stops + uninstalls (both idempotent "does not exist") and removes the copied exe + xml', async () => {
     const calls: string[] = [];
     const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
       calls.push(`${cmd} ${args.join(' ')}`);
-      return fail(1, '', 'not installed');
+      return fail(1060, '', 'The specified service does not exist as an installed service.');
     });
     const fs = fakeFs();
     const lifecycle = createWinswLifecycle(def(), { run, fs });
@@ -134,6 +134,31 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe stop', 'C:\\acme\\logs/Acme-Agent-.exe uninstall']);
     expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.exe', { force: true });
     expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.xml', { force: true });
+  });
+
+  it('uninstall() throws and does NOT delete exe/xml when "stop" fails for a real reason, and never calls "uninstall" (P1 #7)', async () => {
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      return fail(1, '', 'Access is denied.');
+    });
+    const fs = fakeFs();
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    await expect(lifecycle.uninstall()).rejects.toThrow(/winsw stop failed \(exit 1\): Access is denied\./);
+
+    expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe stop']);
+    expect(fs.rm).not.toHaveBeenCalled();
+  });
+
+  it('uninstall() throws and does NOT delete exe/xml when "stop" succeeds but "uninstall" fails for a real reason (P1 #7)', async () => {
+    const run = vi.fn<Runner>().mockImplementation(async (_cmd, args) => (args[0] === 'uninstall' ? fail(1, '', 'Access is denied.') : ok()));
+    const fs = fakeFs();
+    const lifecycle = createWinswLifecycle(def(), { run, fs });
+
+    await expect(lifecycle.uninstall()).rejects.toThrow(/winsw uninstall failed \(exit 1\): Access is denied\./);
+
+    expect(fs.rm).not.toHaveBeenCalled();
   });
 
   it('start() throws "not installed" when the xml config does not exist on disk', async () => {

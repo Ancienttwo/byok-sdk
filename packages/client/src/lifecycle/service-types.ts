@@ -108,15 +108,22 @@ export interface ServiceStatusResult {
  *
  * Idempotency convention shared by every platform implementation: `install`
  * and `start` hard-fail (throw) if the final "make it actually running"
- * step fails, since silently doing nothing there would misreport success;
- * `stop` and `uninstall` are always best-effort/tolerant of "already
- * stopped"/"never installed" (mirrors `Daemon.unpair()`'s own "safe to call
- * at any point in the lifecycle" convention in `daemon/create-daemon.ts`).
+ * step fails, since silently doing nothing there would misreport success.
+ * `stop` is always best-effort/tolerant of "already stopped" (mirrors
+ * `Daemon.unpair()`'s own "safe to call at any point in the lifecycle"
+ * convention in `daemon/create-daemon.ts`). `uninstall` is tolerant ONLY of
+ * a KNOWN idempotent "not loaded"/"does not exist"/"already absent" result
+ * from its stop+unregister step (see `exec-runner.ts`'s
+ * `isIdempotentAbsence`) — a genuine failure (permission denied, service
+ * busy, manager error) is thrown instead, and the plist/unit/winsw exe+xml
+ * are deliberately left in place, so a still-running service never loses
+ * its control files and becomes an orphan nobody can stop/uninstall
+ * (cross-model-review P1 #7).
  */
 export interface ServiceLifecycle {
   /** Writes the platform service definition and registers + starts it with the OS service manager. Safe to call again later (e.g. after an upgrade): overwrites the definition and reloads it. */
   install(opts?: ServiceInstallOptions): Promise<void>;
-  /** Stops (if running) and fully removes the service registration + generated definition file. Safe to call when not installed. */
+  /** Stops (if running) and fully removes the service registration + generated definition file. Safe to call when not installed. Throws — and leaves the control file in place — if the underlying service manager reports a genuine failure rather than success/"not installed"; see this interface's own doc comment. */
   uninstall(): Promise<void>;
   /** Starts an already-installed service. Throws a clear error if it isn't installed. */
   start(): Promise<void>;
@@ -132,15 +139,23 @@ export interface ServiceLifecycle {
  * (which doubles as a Windows service name AND a generated filename) — the
  * intersection of all three platforms' safe-identifier rules is
  * "letters, digits, `.`, `-`, `_`". Anything outside that set collapses to
- * `-`. Called independently by each platform module (not once centrally) so
+ * `-`. A LEADING `-` is then stripped even though `-` is itself an allowed
+ * character: `systemctl`'s argument parser (and, generally, any
+ * getopt-style CLI) mistakes a bare positional argument starting with `-`
+ * for an option rather than the service/unit name — e.g. `systemctl --user
+ * enable --now -foo.service` — which would otherwise misparse every one of
+ * `launchd.ts`/`systemd.ts`/`winsw.ts`'s own `run()` calls that pass this
+ * sanitized name straight through as a CLI argument (cross-model-review P1
+ * #8). Called independently by each platform module (not once centrally) so
  * every one of `launchd.ts`/`systemd.ts`/`winsw.ts` stays correct even when
  * used directly, without going through `createServiceLifecycle`'s
  * dispatcher.
  */
 export function sanitizeServiceName(name: string): string {
   const cleaned = name.trim().replace(/[^A-Za-z0-9._-]+/g, '-');
-  if (!cleaned) {
-    throw new Error(`service name "${name}" has no valid characters left after sanitizing (allowed: letters, digits, ".", "-", "_")`);
+  const safe = cleaned.replace(/^-+/, '');
+  if (!safe) {
+    throw new Error(`service name "${name}" has no valid characters left after sanitizing (allowed: letters, digits, ".", "-", "_"; cannot consist only of leading "-")`);
   }
-  return cleaned;
+  return safe;
 }

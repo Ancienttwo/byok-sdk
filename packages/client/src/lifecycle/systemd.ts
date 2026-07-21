@@ -1,7 +1,7 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, runOrThrow, type Runner } from './exec-runner';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
@@ -12,15 +12,87 @@ export interface SystemdDeps {
 }
 
 /**
+ * What `systemctl --user disable --now` prints/exits with when the unit
+ * isn't installed/loaded at all — as opposed to a genuine failure
+ * (permission denied, no running `--user` instance, a manager fault), which
+ * must be surfaced rather than treated the same way (see `uninstall()`
+ * below and cross-model-review P1 #7).
+ */
+const SYSTEMD_NOT_LOADED: IdempotentAbsence = {
+  patterns: [/not loaded/i, /does not exist/i, /no such file or directory/i],
+};
+
+/**
+ * True if `value` contains any C0 control character (newline, CR, NUL,
+ * etc., code points below 32) or DEL (code point 127) - checked by
+ * character code rather than a regex escape sequence for that range, so
+ * there is no ambiguity about which literal bytes are being matched.
+ */
+function hasControlChar(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
+}
+
+/**
+ * Rejects (rather than silently mangling or truncating) a value about to be
+ * embedded in a generated systemd unit file if it contains any control
+ * character. Unit files are line-oriented `Key=value` text: a raw newline
+ * in `displayName`/`cwd`/a log path/an arg would split one logical
+ * directive into two, letting an attacker- or mistake-controlled value
+ * inject an ENTIRE ADDITIONAL, attacker-chosen unit directive
+ * (cross-model-review P1 #8) — there is no escape sequence that makes an
+ * embedded raw newline safe here, so this rejects outright rather than
+ * attempting to neutralize it in place.
+ */
+function assertNoControlChars(value: string, field: string): void {
+  if (hasControlChar(value)) {
+    throw new Error(
+      `systemd unit ${field} must not contain control characters (newline/CR/etc.) — refusing to generate a unit file that could inject an unintended directive (got ${JSON.stringify(value)})`,
+    );
+  }
+}
+
+/**
+ * Escapes a literal `%` as systemd's own documented `%%` — systemd expands
+ * `%`-prefixed specifiers (`%h`, `%n`, `%i`, ...) in unit file directive
+ * values (`systemd.unit(5)`'s "Specifiers" section), so a raw `%` in a
+ * supposedly-verbatim path/name would otherwise risk being silently
+ * reinterpreted rather than passed through as written
+ * (cross-model-review P1 #8).
+ */
+function escapeSystemdPercent(value: string): string {
+  return value.replace(/%/g, '%%');
+}
+
+/**
  * systemd unit-file quoting (`systemd.syntax(7)`): `ExecStart=` is
  * whitespace-tokenized like a shell command line unless quoted. Every
  * token is wrapped in double quotes and has embedded backslashes/quotes
  * escaped — unconditionally, not just when a token happens to contain
  * whitespace — so there is no "does this need quoting" judgment call that
- * could get a space-containing config path wrong.
+ * could get a space-containing config path wrong. Per
+ * `systemd.service(5)`'s "Command Lines" section, `ExecStart=` ALSO expands
+ * `%`-specifiers and `$FOO`/`${FOO}` environment variables in the raw
+ * command line before tokenizing — both neutralized here too (`$` doubled
+ * to `$$`, systemd's own documented escape for a literal dollar sign; `%`
+ * doubled to `%%`) so `program.command`/`program.args` reach the process
+ * exactly as given (see `service-types.ts`'s `ServiceProgram.args` doc
+ * comment: "passed verbatim"), never silently rewritten by systemd
+ * (cross-model-review P1 #8). A control character (e.g. an embedded
+ * newline) is rejected outright — see `assertNoControlChars`; a quoted
+ * string still can't survive an embedded newline in a line-oriented unit
+ * file.
  */
 function quoteSystemdArg(value: string): string {
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  assertNoControlChars(value, 'program.command/program.args entry');
+  const escaped = escapeSystemdPercent(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, () => '$$');
+  return `"${escaped}"`;
 }
 
 /**
@@ -41,21 +113,34 @@ function quoteSystemdArg(value: string): string {
  */
 export function generateSystemdUnit(def: { name: string; displayName: string; program: ServiceProgram; logDir: string }): string {
   const { name, displayName, program, logDir } = def;
-  const execStart = [program.command, ...program.args].map(quoteSystemdArg).join(' ');
+  // Every interpolated value is validated/escaped BEFORE being written into
+  // the template below — never after — so there is no path that emits an
+  // unchecked value into the generated unit file (cross-model-review P1
+  // #8). `name` is checked here too even though every real caller already
+  // ran it through `sanitizeServiceName` (see `service-types.ts`), since
+  // this is a directly exported, directly unit-tested pure function that
+  // must be safe on its own, not just when called via
+  // `createSystemdLifecycle`.
+  assertNoControlChars(name, 'name');
+  assertNoControlChars(displayName, 'displayName');
   const cwd = program.cwd ?? os.homedir();
+  assertNoControlChars(cwd, 'program.cwd');
   const outLog = path.join(logDir, `${name}.out.log`);
   const errLog = path.join(logDir, `${name}.err.log`);
+  assertNoControlChars(outLog, 'logDir');
+  assertNoControlChars(errLog, 'logDir');
+  const execStart = [program.command, ...program.args].map(quoteSystemdArg).join(' ');
   return `[Unit]
-Description=${displayName}
+Description=${escapeSystemdPercent(displayName)}
 
 [Service]
 Type=simple
 ExecStart=${execStart}
-WorkingDirectory=${cwd}
+WorkingDirectory=${escapeSystemdPercent(cwd)}
 Restart=on-failure
 RestartSec=10
-StandardOutput=append:${outLog}
-StandardError=append:${errLog}
+StandardOutput=append:${escapeSystemdPercent(outLog)}
+StandardError=append:${escapeSystemdPercent(errLog)}
 
 [Install]
 WantedBy=default.target
@@ -110,9 +195,16 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
   }
 
   async function uninstall(): Promise<void> {
-    await run('systemctl', ['--user', 'disable', '--now', unitName]); // best-effort — fine if not installed/running
+    // Tolerant of "wasn't installed/running" (fine — nothing to
+    // stop/unregister), but a REAL failure (permission denied, no running
+    // `--user` instance, a manager fault) must NOT be masked: only delete
+    // the unit file once we know it's actually disabled/stopped or was
+    // never there, so a still-running unit never loses its control file
+    // and becomes an orphan nobody can stop/uninstall (cross-model-review
+    // P1 #7).
+    await runIdempotent(run, 'systemctl', ['--user', 'disable', '--now', unitName], 'systemctl disable --now', SYSTEMD_NOT_LOADED);
     await fs.rm(unitPath(), { force: true });
-    await run('systemctl', ['--user', 'daemon-reload']); // best-effort
+    await run('systemctl', ['--user', 'daemon-reload']); // best-effort — no control file left to protect at this point
   }
 
   async function start(): Promise<void> {

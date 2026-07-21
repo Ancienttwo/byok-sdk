@@ -83,3 +83,60 @@ export async function runOrThrow(run: Runner, command: string, args: string[], l
   }
   return result;
 }
+
+/**
+ * Describes what a "genuinely nothing to do" outcome looks like for a
+ * best-effort stop/uninstall step whose target may legitimately already be
+ * absent (not currently loaded/enabled/installed) — as opposed to a genuine
+ * failure (permission denied, service busy, a manager fault) that must NOT
+ * be treated the same way. See {@link isIdempotentAbsence}.
+ */
+export interface IdempotentAbsence {
+  /** Exit codes that ALONE mean "already absent", independent of any stdout/stderr text (e.g. Windows's `ERROR_SERVICE_DOES_NOT_EXIST`, 1060). */
+  codes?: readonly number[];
+  /** Case-insensitive patterns checked against `stdout + "\n" + stderr`; a match means "already absent/not loaded/does not exist" for this platform's tool. */
+  patterns: readonly RegExp[];
+}
+
+/**
+ * Distinguishes a KNOWN idempotent "already absent / not loaded / does not
+ * exist" outcome (safe to still proceed with cleanup) from a genuine
+ * failure. A non-zero exit is ambiguous on its own: `launchctl bootout`,
+ * `systemctl disable --now`, and a WinSW `stop`+`uninstall` all use the SAME
+ * non-zero exit for both "there was nothing to stop/unregister" (fine, an
+ * everyday outcome — see this module's own {@link RunResult} doc comment)
+ * and "I refused/failed to do it" (not fine) — conflating the two
+ * previously let a real failure look identical to success and then delete
+ * the plist/unit/exe out from under a still-running service
+ * (cross-model-review P1 #7: an orphaned, uncontrollable process). Each
+ * platform module supplies its own `patterns`/`codes` because the actual
+ * wording/codes are tool-specific — see `launchd.ts`/`systemd.ts`/
+ * `winsw.ts`'s own constants.
+ */
+export function isIdempotentAbsence(result: RunResult, absence: IdempotentAbsence): boolean {
+  if (result.code === 0) return true;
+  if (absence.codes?.includes(result.code)) return true;
+  const detail = `${result.stdout}\n${result.stderr}`;
+  return absence.patterns.some((pattern) => pattern.test(detail));
+}
+
+/**
+ * Runs `command`/`args` via `run` for a best-effort stop/uninstall step and
+ * throws a clear, labeled error UNLESS the result is either a genuine
+ * success or a known idempotent "already absent" outcome (see
+ * {@link isIdempotentAbsence}). Unlike {@link runOrThrow} (which throws on
+ * ANY non-zero exit, for calls that must actually succeed), this is the
+ * tolerant-but-not-blind form each platform's `uninstall()` needs: proceed
+ * to delete the plist/unit/exe+xml ONLY when this resolves without
+ * throwing; a thrown error here means "do NOT delete the control files —
+ * surface this to the caller so they can retry" (see each platform's own
+ * `uninstall()`).
+ */
+export async function runIdempotent(run: Runner, command: string, args: string[], label: string, absence: IdempotentAbsence): Promise<RunResult> {
+  const result = await run(command, args);
+  if (!isIdempotentAbsence(result, absence)) {
+    const detail = (result.stderr || result.stdout).trim();
+    throw new Error(`${label} failed (exit ${result.code})${detail ? `: ${detail}` : ''}`);
+  }
+  return result;
+}

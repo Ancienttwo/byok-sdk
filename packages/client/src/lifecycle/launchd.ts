@@ -1,8 +1,19 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { defaultRunner, runOrThrow, type Runner } from './exec-runner';
+import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
 import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
+
+/**
+ * What `launchctl bootout` prints/exits with when there was nothing loaded
+ * to boot out — as opposed to a genuine failure (permission denied, a
+ * malformed domain target, launchd itself misbehaving), which must be
+ * surfaced rather than treated the same way (see `uninstall()` below and
+ * cross-model-review P1 #7).
+ */
+const LAUNCHD_NOT_LOADED: IdempotentAbsence = {
+  patterns: [/no such process/i, /could not find (specified )?service/i, /domain.*(not found|does not exist)/i, /not loaded/i],
+};
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment for why a mocked `run` is enough to unit-test all of this file's install/uninstall/start/stop/status logic on any host OS. */
 export interface LaunchdDeps {
@@ -144,7 +155,13 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   }
 
   async function uninstall(): Promise<void> {
-    await run('launchctl', ['bootout', serviceTarget()]); // best-effort — fine if not loaded
+    // Tolerant of "wasn't loaded" (fine — nothing to stop/unregister), but a
+    // REAL failure (permission denied, launchd itself misbehaving) must NOT
+    // be masked: only delete the plist once we know the job is actually
+    // gone from the domain, so a still-running job never loses its control
+    // file and becomes an orphan nobody can stop/uninstall
+    // (cross-model-review P1 #7).
+    await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
     await fs.rm(plistPath(), { force: true });
   }
 
