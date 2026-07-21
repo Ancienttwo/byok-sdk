@@ -92,7 +92,7 @@ export interface DaemonTaskInfo {
  * way `TaskRunner.tasks` itself is bounded by real concurrency rather than
  * an explicit cap.
  */
-const MAX_TRACKED_TASKS = 2000;
+export const MAX_TRACKED_TASKS = 2000;
 
 function isTerminalState(state: TaskState): boolean {
   // Derived from TASK_TRANSITIONS (single authority — docs/protocol.md,
@@ -288,6 +288,23 @@ export class DaemonObserver {
     this.evictIfNeeded();
   }
 
+  /**
+   * Finding P2/#11 (observer half): the "no terminal entry to evict" branch
+   * used to just give up and leave the registry unbounded for as long as
+   * every tracked task stayed nonterminal (many concurrent/stuck offers that
+   * never reach Complete/Failed/Cancelled — the exact case this cap exists
+   * for, since a normal quickly-resolving workload always has terminal
+   * entries to evict well before this). Falling back to "never evict" here
+   * defeats the whole point of `MAX_TRACKED_TASKS`. Fix: fall back to
+   * evicting the OLDEST entry regardless of state (same insertion-order
+   * idiom as everywhere else this file/`task-runner.ts` bound a collection),
+   * logged since it's a real, if rare, observability loss — this registry is
+   * a local READ-MODEL only (see the module doc comment), never consulted by
+   * `TaskRunner`'s own state machine, so evicting a still-active task's
+   * entry here can't affect that task's actual execution — it only means
+   * `tasks()`/a CLI's task list can no longer show it until it reports
+   * another transition (which re-inserts it via `upsertTask`).
+   */
   private evictIfNeeded(): void {
     if (this.taskInfo.size <= MAX_TRACKED_TASKS) return;
     for (const [taskId, info] of this.taskInfo) {
@@ -296,16 +313,50 @@ export class DaemonObserver {
         return;
       }
     }
-    // No terminal entry available to evict (would require implausibly many
-    // concurrent active tasks) — best-effort bound, not a hard cap, same
-    // caveat `task-runner.ts`'s own bounded maps document about themselves.
+    const oldest = this.taskInfo.keys().next().value;
+    if (oldest !== undefined) {
+      console.warn(
+        `[byok/client] daemon task registry exceeded ${MAX_TRACKED_TASKS} entries with none terminal — evicting the oldest nonterminal task (${oldest}) from local observability only (its actual execution is unaffected)`,
+      );
+      this.taskInfo.delete(oldest);
+    }
   }
 
-  /** Listener errors are caught here so a broken subscriber (e.g. a CLI's rendering bug) can never propagate back into the real send/onEnvelope path this module wraps — see this file's own module doc comment. */
+  /**
+   * Listener errors are caught here so a broken subscriber (e.g. a CLI's
+   * rendering bug) can never propagate back into the real send/onEnvelope
+   * path this module wraps — see this file's own module doc comment.
+   *
+   * Finding #6: `DaemonEventListener` is typed `(event: DaemonEvent) =>
+   * void`, but TypeScript's structural typing does not stop a caller from
+   * subscribing an `async` function (or anything else returning a promise)
+   * where a void-returning callback is expected — nothing here ever
+   * validates that at runtime. The `try`/`catch` below only ever catches a
+   * SYNCHRONOUS throw; an async listener doesn't throw synchronously, it
+   * RETURNS an already-rejected (or later-rejecting) promise, which sails
+   * straight past that catch. Left unhandled, that promise's rejection
+   * becomes an `unhandledRejection` on the process — which, depending on
+   * the host's Node version/flags, can crash the entire daemon over one
+   * subscriber's bug (e.g. a CLI's own progress renderer awaiting something
+   * that throws). Fix: treat the listener's return value as "possibly a
+   * promise" regardless of its declared type, and attach a `.catch` so a
+   * later rejection is caught and logged exactly like a synchronous throw,
+   * never left to become unhandled. This call stays synchronous itself
+   * (never `await`s a listener) — `emit` is invoked from the send/cursor
+   * path (`handleOutboundEnvelope`/`handleInboundEnvelope`, wired in
+   * directly from `create-daemon.ts`'s `send`/`onEnvelope` closures) and
+   * must never make a subscriber's own async work a precondition for
+   * cursor advancement or the next envelope being processed.
+   */
   private emit(event: DaemonEvent): void {
     for (const listener of this.listeners) {
       try {
-        listener(event);
+        const result = listener(event) as unknown;
+        if (result instanceof Promise) {
+          result.catch((err: unknown) => {
+            console.error('[byok/client] daemon event listener rejected (async)', err);
+          });
+        }
       } catch (err) {
         console.error('[byok/client] daemon event listener threw', err);
       }

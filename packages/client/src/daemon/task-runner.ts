@@ -237,6 +237,28 @@ export class TaskRunner {
    */
   private readonly pendingCancelled = new Map<string, string | undefined>();
   /**
+   * Finding #5 (Codex counterexample): taskIds currently INSIDE `handleOffer`
+   * — from the moment it decides an offer is worth processing until it
+   * reaches one of its own resolution points (decline, fail, the
+   * checkpoint-2 cancel-teardown, or successful registration into
+   * `this.tasks`). Bounded eviction on `pendingCancelled` (below) must never
+   * remove an entry for a taskId in this set: doing so is exactly the bug —
+   * block task A in `adapter.start()`, deliver A's own `task.cancel` (so
+   * `pendingCancelled` gets an entry for A while A is still in-flight),
+   * then deliver `MAX_TRACKED_TASK_IDS` more cancels for unrelated taskIds
+   * nobody ever offered — under naive oldest-wins eviction, A's entry (the
+   * single oldest) gets evicted purely because of unrelated churn, so when
+   * `adapter.start()` finally resolves, checkpoint 2 finds no cancel marker
+   * and the already-cancelled task starts a real session. See
+   * `evictPendingCancelled` below for the fix, and
+   * `task-runner-bounded-collections.test.ts` for a test mirroring this
+   * exact scenario. Membership here is naturally tiny (bounded by this
+   * device's real concurrent-offer-processing count, nowhere near
+   * `MAX_TRACKED_TASK_IDS`), so scanning past it to find an evictable entry
+   * costs nothing.
+   */
+  private readonly inFlightOffers = new Set<string>();
+  /**
    * Finding P2 (Fix 2c): taskIds that have reached a terminal outcome
    * (Complete/Failed/Cancelled) this session — populated in `finish()`.
    * While `ConnectionManager`'s stalled-cursor long-poll re-pull is frozen
@@ -260,6 +282,23 @@ export class TaskRunner {
    * pending redelivery for an older taskId even arrives, let alone gets
    * processed, for eviction to ever remove an entry that redelivery still
    * needed.
+   *
+   * Finding #5 (honesty follow-up): unlike `pendingCancelled`, plain
+   * oldest-first eviction IS correct here — every entry in this set is
+   * already fully resolved (finish() only adds a taskId after it reached a
+   * terminal outcome), so there is no "in-flight" entry an eviction could
+   * corrupt out from under a running `handleOffer()`. The assumption above
+   * is a HEURISTIC bound, not a proof: it holds as long as no single
+   * connection's genuinely-still-pending redelivery backlog ever exceeds
+   * `MAX_TRACKED_TASK_IDS` finished tasks, which is a real (if distant)
+   * possibility for an extremely long-stalled connection, not a
+   * mathematical impossibility. Should it ever be violated, the failure
+   * mode is strictly milder than `pendingCancelled`'s own pre-fix bug: a
+   * redelivered `task.offer` for an evicted, already-finished taskId would
+   * re-run `handleOffer` from scratch — at worst a duplicate
+   * claim/start/complete for a task that already succeeded once — never a
+   * task that should be dead starting a brand-new session against explicit
+   * cancellation intent.
    */
   private readonly finishedTaskIds = new Set<string>();
 
@@ -305,154 +344,166 @@ export class TaskRunner {
       return;
     }
 
-    // Finding F4, checkpoint 1 ("before claim where possible -> decline
-    // path"): a task.cancel already arrived for this exact taskId before
-    // this offer was even looked at. Decline outright — never claim, never
-    // spawn a runtime session for a task that's already dead. Checked first
-    // (ahead of every other pre-claim check below) so a pre-cancelled offer
-    // costs nothing beyond this map lookup.
-    if (this.pendingCancelled.has(taskId)) {
-      const reason = this.pendingCancelled.get(taskId);
-      this.pendingCancelled.delete(taskId);
-      this.decline(taskId, reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
-      return;
-    }
-
-    const pick = await this.pickAdapter(payload.runtime);
-    if (!pick.ok) {
-      this.decline(taskId, pick.reason, pick.retryable);
-      return;
-    }
-
-    const decision = computeEffectivePolicy(payload.policy, this.deps.permissionDefaults);
-    if (!decision.ok) {
-      this.decline(taskId, decision.reason ?? 'policy rejected', false);
-      return;
-    }
-
-    // Every check above is local/config-driven (an adapter's `detect()` is
-    // the only I/O, and it costs nothing to have run before committing) and
-    // needed no commitment from this device. Only now do we actually take
-    // the task — `task.decline` above is the alternative path for anything
-    // that got this far without claiming.
-    this.deps.send(createEnvelope('task.claim', { deviceId: this.deps.deviceId }, { taskId }));
-
-    let resolvedInstruction: string;
+    // Finding #5: mark this taskId as "in-flight" for the entire remainder
+    // of this call — `evictPendingCancelled` must never remove a
+    // `pendingCancelled` entry for a taskId in this set (see its own doc
+    // comment and `inFlightOffers`'s class-level doc comment for the exact
+    // counterexample this closes). The `finally` below clears it on every
+    // exit path (decline, fail, the checkpoint-2 cancel-teardown, or
+    // successful registration) — never leaked past this one call.
+    this.inFlightOffers.add(taskId);
     try {
-      resolvedInstruction = await this.resolveInstruction(payload.instruction);
-    } catch (err) {
-      await this.fail(taskId, `failed to resolve instruction blob: ${errorMessage(err)}`, true);
-      return;
-    }
-
-    // Finding #3 (session/workspace continuity): an offer naming a
-    // sessionRef this device has previously recorded (via a prior task's
-    // `task.complete.sessionRef`) reuses that exact workspace directory —
-    // this is what lets a runtime adapter's own resume mechanism (e.g. pi's
-    // `--session <id>`, scoped to the cwd/project a session was created
-    // under — see pi-adapter.ts) actually find the session again. An
-    // unknown or absent sessionRef is always treated as "start fresh",
-    // exactly as before this feature existed.
-    const known = payload.sessionRef ? await this.deps.sessionWorkspaces.get(payload.sessionRef) : undefined;
-
-    let workspaceDir: string;
-    try {
-      workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
-    } catch (err) {
-      await this.fail(taskId, `failed to create task workspace: ${errorMessage(err)}`, true);
-      return;
-    }
-
-    const ctx: TaskContext = { workspaceDir, policy: decision.policy, env: process.env };
-    const effectiveOffer: TaskOfferPayload = {
-      ...payload,
-      instruction: resolvedInstruction,
-      // Never forward a sessionRef this device has no recorded workspace
-      // for (stale, from another device, or simply made up) — an adapter
-      // that tries to resume an id it never minted fails outright (pi:
-      // "No session found matching '<id>'", exit 1, empirically confirmed)
-      // instead of silently starting fresh, so an unresolvable sessionRef
-      // must look identical to "none supplied" by the time it reaches the
-      // adapter, not get forwarded as a resume attempt doomed to fail.
-      sessionRef: known ? payload.sessionRef : undefined,
-    };
-
-    let session: Session;
-    try {
-      session = await pick.adapter.start(effectiveOffer, ctx);
-    } catch (err) {
-      // A PolicyUnsupportedError means this exact task can never succeed on
-      // this adapter (fail-closed policy/instruction mismatch) — not
-      // retryable. Anything else (spawn failure, missing credentials, etc)
-      // is treated as environmental and possibly transient.
-      const retryable = !(err instanceof PolicyUnsupportedError);
-      await this.fail(taskId, `adapter failed to start: ${errorMessage(err)}`, retryable);
-      return;
-    }
-
-    // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
-    // task.cancel arrived while adapter.start() was in flight — i.e. AFTER
-    // task.claim already went out above, so declining is no longer an
-    // option. Tear the just-started session down before it's ever
-    // registered as active (this.tasks.set below) or reported task.started,
-    // so pump() never begins and no zombie turn runs — then report the
-    // outcome exactly like a post-registration cancel would (M1 gap #6:
-    // task.cancelled, not task.fail).
-    if (this.pendingCancelled.has(taskId)) {
-      const reason = this.pendingCancelled.get(taskId);
-      this.pendingCancelled.delete(taskId);
-      try {
-        await session.interrupt();
-      } catch {
-        // best-effort — still report cancellation below
+      // Finding F4, checkpoint 1 ("before claim where possible -> decline
+      // path"): a task.cancel already arrived for this exact taskId before
+      // this offer was even looked at. Decline outright — never claim, never
+      // spawn a runtime session for a task that's already dead. Checked first
+      // (ahead of every other pre-claim check below) so a pre-cancelled offer
+      // costs nothing beyond this map lookup.
+      if (this.pendingCancelled.has(taskId)) {
+        const reason = this.pendingCancelled.get(taskId);
+        this.pendingCancelled.delete(taskId);
+        this.decline(taskId, reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
+        return;
       }
-      try {
-        await session.close();
-      } catch {
-        // best-effort teardown
+
+      const pick = await this.pickAdapter(payload.runtime);
+      if (!pick.ok) {
+        this.decline(taskId, pick.reason, pick.retryable);
+        return;
       }
-      this.deps.send(createEnvelope('task.cancelled', { reason }, { taskId }));
-      return;
+
+      const decision = computeEffectivePolicy(payload.policy, this.deps.permissionDefaults);
+      if (!decision.ok) {
+        this.decline(taskId, decision.reason ?? 'policy rejected', false);
+        return;
+      }
+
+      // Every check above is local/config-driven (an adapter's `detect()` is
+      // the only I/O, and it costs nothing to have run before committing) and
+      // needed no commitment from this device. Only now do we actually take
+      // the task — `task.decline` above is the alternative path for anything
+      // that got this far without claiming.
+      this.deps.send(createEnvelope('task.claim', { deviceId: this.deps.deviceId }, { taskId }));
+
+      let resolvedInstruction: string;
+      try {
+        resolvedInstruction = await this.resolveInstruction(payload.instruction);
+      } catch (err) {
+        await this.fail(taskId, `failed to resolve instruction blob: ${errorMessage(err)}`, true);
+        return;
+      }
+
+      // Finding #3 (session/workspace continuity): an offer naming a
+      // sessionRef this device has previously recorded (via a prior task's
+      // `task.complete.sessionRef`) reuses that exact workspace directory —
+      // this is what lets a runtime adapter's own resume mechanism (e.g. pi's
+      // `--session <id>`, scoped to the cwd/project a session was created
+      // under — see pi-adapter.ts) actually find the session again. An
+      // unknown or absent sessionRef is always treated as "start fresh",
+      // exactly as before this feature existed.
+      const known = payload.sessionRef ? await this.deps.sessionWorkspaces.get(payload.sessionRef) : undefined;
+
+      let workspaceDir: string;
+      try {
+        workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
+      } catch (err) {
+        await this.fail(taskId, `failed to create task workspace: ${errorMessage(err)}`, true);
+        return;
+      }
+
+      const ctx: TaskContext = { workspaceDir, policy: decision.policy, env: process.env };
+      const effectiveOffer: TaskOfferPayload = {
+        ...payload,
+        instruction: resolvedInstruction,
+        // Never forward a sessionRef this device has no recorded workspace
+        // for (stale, from another device, or simply made up) — an adapter
+        // that tries to resume an id it never minted fails outright (pi:
+        // "No session found matching '<id>'", exit 1, empirically confirmed)
+        // instead of silently starting fresh, so an unresolvable sessionRef
+        // must look identical to "none supplied" by the time it reaches the
+        // adapter, not get forwarded as a resume attempt doomed to fail.
+        sessionRef: known ? payload.sessionRef : undefined,
+      };
+
+      let session: Session;
+      try {
+        session = await pick.adapter.start(effectiveOffer, ctx);
+      } catch (err) {
+        // A PolicyUnsupportedError means this exact task can never succeed on
+        // this adapter (fail-closed policy/instruction mismatch) — not
+        // retryable. Anything else (spawn failure, missing credentials, etc)
+        // is treated as environmental and possibly transient.
+        const retryable = !(err instanceof PolicyUnsupportedError);
+        await this.fail(taskId, `adapter failed to start: ${errorMessage(err)}`, retryable);
+        return;
+      }
+
+      // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
+      // task.cancel arrived while adapter.start() was in flight — i.e. AFTER
+      // task.claim already went out above, so declining is no longer an
+      // option. Tear the just-started session down before it's ever
+      // registered as active (this.tasks.set below) or reported task.started,
+      // so pump() never begins and no zombie turn runs — then report the
+      // outcome exactly like a post-registration cancel would (M1 gap #6:
+      // task.cancelled, not task.fail).
+      if (this.pendingCancelled.has(taskId)) {
+        const reason = this.pendingCancelled.get(taskId);
+        this.pendingCancelled.delete(taskId);
+        try {
+          await session.interrupt();
+        } catch {
+          // best-effort — still report cancellation below
+        }
+        try {
+          await session.close();
+        } catch {
+          // best-effort teardown
+        }
+        this.deps.send(createEnvelope('task.cancelled', { reason }, { taskId }));
+        return;
+      }
+
+      // Claimed -> Running (M1 gap #2): report `task.started` only once the
+      // adapter session has actually started — never implied by `task.claim`.
+      this.deps.send(createEnvelope('task.started', {}, { taskId }));
+
+      // This handoff (construct `active` -> register it -> kick off `pump()`)
+      // must stay synchronous, with no `await` in between: a `task.cancel`
+      // (or `task.steer`/`task.approve`/`task.reject`) for this exact taskId
+      // can arrive and be processed by `handleEnvelope` at any `await` point,
+      // and every one of those handlers starts with `this.tasks.get(taskId)`
+      // — if this task isn't registered yet, they silently no-op (see e.g.
+      // `handleCancel`). An earlier version of this method awaited the
+      // sessionWorkspaces write (below) before registering `active` and broke
+      // exactly this: a cancel racing a task.offer lost its `interrupt()`/
+      // `task.cancelled` entirely.
+      const active: ActiveTask = {
+        taskId,
+        adapter: pick.adapter,
+        session,
+        workspaceDir,
+        summaryParts: [],
+        batcher: new ProgressBatcher(
+          (seq, events) => this.deps.send(createEnvelope('task.progress', { seq, events }, { taskId, seq })),
+          this.deps.batcherOptions,
+        ),
+      };
+      this.tasks.set(taskId, active);
+      void this.pump(active);
+
+      // Record (or refresh) this session's resumable workspace for any future
+      // task.offer that carries the same sessionRef, fire-and-forget:
+      // `session.sessionRef` is always the adapter's real, resumable
+      // identifier (see PiSession / resolveFreshSessionId) whether or not
+      // *this* dispatch was itself a resume. Deliberately not awaited — see
+      // the comment above; losing this mapping only costs a future resume
+      // opportunity, never the correctness of the task in progress.
+      void this.deps.sessionWorkspaces
+        .record(session.sessionRef, { workspaceDir, runtimeSessionId: session.sessionRef })
+        .catch(() => {});
+    } finally {
+      this.inFlightOffers.delete(taskId);
     }
-
-    // Claimed -> Running (M1 gap #2): report `task.started` only once the
-    // adapter session has actually started — never implied by `task.claim`.
-    this.deps.send(createEnvelope('task.started', {}, { taskId }));
-
-    // This handoff (construct `active` -> register it -> kick off `pump()`)
-    // must stay synchronous, with no `await` in between: a `task.cancel`
-    // (or `task.steer`/`task.approve`/`task.reject`) for this exact taskId
-    // can arrive and be processed by `handleEnvelope` at any `await` point,
-    // and every one of those handlers starts with `this.tasks.get(taskId)`
-    // — if this task isn't registered yet, they silently no-op (see e.g.
-    // `handleCancel`). An earlier version of this method awaited the
-    // sessionWorkspaces write (below) before registering `active` and broke
-    // exactly this: a cancel racing a task.offer lost its `interrupt()`/
-    // `task.cancelled` entirely.
-    const active: ActiveTask = {
-      taskId,
-      adapter: pick.adapter,
-      session,
-      workspaceDir,
-      summaryParts: [],
-      batcher: new ProgressBatcher(
-        (seq, events) => this.deps.send(createEnvelope('task.progress', { seq, events }, { taskId, seq })),
-        this.deps.batcherOptions,
-      ),
-    };
-    this.tasks.set(taskId, active);
-    void this.pump(active);
-
-    // Record (or refresh) this session's resumable workspace for any future
-    // task.offer that carries the same sessionRef, fire-and-forget:
-    // `session.sessionRef` is always the adapter's real, resumable
-    // identifier (see PiSession / resolveFreshSessionId) whether or not
-    // *this* dispatch was itself a resume. Deliberately not awaited — see
-    // the comment above; losing this mapping only costs a future resume
-    // opportunity, never the correctness of the task in progress.
-    void this.deps.sessionWorkspaces
-      .record(session.sessionRef, { workspaceDir, runtimeSessionId: session.sessionRef })
-      .catch(() => {});
   }
 
   /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
@@ -626,13 +677,49 @@ export class TaskRunner {
     await this.finish(taskId);
   }
 
-  /** M3-B: bounded insert for `pendingCancelled` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
+  /** M3-B: bounded insert for `pendingCancelled` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest SAFE-TO-EVICT entry once over cap — see `evictPendingCancelled` (finding #5: not simply "the oldest entry", which could be an in-flight offer's own cancel marker). */
   private setPendingCancelled(taskId: string, reason: string | undefined): void {
     this.pendingCancelled.set(taskId, reason);
     if (this.pendingCancelled.size > MAX_TRACKED_TASK_IDS) {
-      const oldest = this.pendingCancelled.keys().next().value;
-      if (oldest !== undefined) this.pendingCancelled.delete(oldest);
+      this.evictPendingCancelled();
     }
+  }
+
+  /**
+   * Finding #5 (Codex counterexample — see `inFlightOffers`'s class-level
+   * doc comment for the exact scenario): evicts the OLDEST entry that is
+   * NOT a taskId currently inside `handleOffer`'s in-flight window, rather
+   * than unconditionally the single oldest entry. `Map` iterates in
+   * insertion order, so this is "oldest entry that's safe to drop," which
+   * only differs from "the oldest entry, period" when that oldest entry
+   * happens to belong to a task still being processed — exactly the case
+   * that must never be evicted, since `handleOffer`'s own checkpoint 2
+   * still needs to observe it.
+   *
+   * `inFlightOffers` is naturally tiny (bounded by this device's real
+   * concurrent-offer-processing count — normally single digits, driven by
+   * how many `task.offer`s are simultaneously mid-`adapter.start()` — nowhere
+   * near `MAX_TRACKED_TASK_IDS`), so this scan is cheap in practice: it
+   * finds a safe entry at or near the front almost always. The only case
+   * where NO entry is safe to evict is every single tracked cancel
+   * belonging to a currently in-flight offer, which would require this
+   * device to have `MAX_TRACKED_TASK_IDS` offers mid-processing
+   * simultaneously — implausible, but handled without corrupting anything:
+   * this insert is simply allowed to leave the map one entry over cap
+   * rather than evict something still needed, and it shrinks back under cap
+   * as those in-flight offers resolve and their entries get CONSUMED
+   * (deleted by `handleOffer` itself) rather than evicted.
+   */
+  private evictPendingCancelled(): void {
+    for (const key of this.pendingCancelled.keys()) {
+      if (!this.inFlightOffers.has(key)) {
+        this.pendingCancelled.delete(key);
+        return;
+      }
+    }
+    console.warn(
+      `[byok/client] pendingCancelled exceeded ${MAX_TRACKED_TASK_IDS} entries with every tracked taskId currently in-flight — leaving it temporarily over cap rather than evict a marker a running handleOffer() still needs`,
+    );
   }
 
   private async handleSteer(taskId: string, text: string): Promise<void> {

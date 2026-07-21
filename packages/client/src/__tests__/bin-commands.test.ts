@@ -3,13 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import type { Daemon, DaemonConfig, DeviceRecord } from '../index';
+import type { Daemon, DaemonConfig, DeviceRecord, ServiceLifecycle } from '../index';
 import { runApproveCommand, runRejectCommand } from '../bin/commands/approve-reject';
 import { runPairCommand } from '../bin/commands/pair';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runTasksFollowCommand, runTasksListCommand } from '../bin/commands/tasks';
-import { runUnpairCommand, UnpairNotConfirmedError } from '../bin/commands/unpair';
+import { runUnpairCommand, UnpairBlockedByRunningServiceError, UnpairNotConfirmedError } from '../bin/commands/unpair';
 import { appendAuditEvent, auditLogPath } from '../bin/audit-log';
 import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -118,7 +118,14 @@ describe('bin/commands/tasks: runTasksListCommand', () => {
 
     const { log, lines } = collectLog();
     await runTasksListCommand(baseConfig(storeDir), { log });
-    expect(lines).toEqual(['t1 Complete runtime=pi updatedAt=2026-01-01T00:00:03.000Z sessionRef=s1 summary="done"']);
+    // Finding P1 #3: `summary` is redacted on disk (never the raw "done"
+    // text) — replayed from the audit log, this reconstructs to a
+    // `[redacted: N bytes]` placeholder, not the original text. Full-fidelity
+    // summaries are still available LIVE, directly off stdout, while
+    // `byok-agent start` is actually running (see `bin/commands/start.ts`).
+    expect(lines).toEqual([
+      't1 Complete runtime=pi updatedAt=2026-01-01T00:00:03.000Z sessionRef=s1 summary="[redacted: 4 bytes]"',
+    ]);
   });
 });
 
@@ -222,6 +229,72 @@ describe('bin/commands/unpair: runUnpairCommand', () => {
     input.write('n\n');
     await expect(runPromise).rejects.toThrow(UnpairNotConfirmedError);
     expect(unpair).not.toHaveBeenCalled();
+  });
+
+  describe('finding P1 #2: lifecycle-aware refusal against a running background service', () => {
+    function fakeLifecycle(status: { installed: boolean; running: boolean; detail: string }): Pick<ServiceLifecycle, 'status'> {
+      return { status: vi.fn().mockResolvedValue(status) };
+    }
+
+    it('refuses (never calling daemon.unpair(), never even prompting) when the lifecycle reports the service running', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const lifecycle = fakeLifecycle({ installed: true, running: true, detail: 'state = running' });
+
+      // confirmed:true so a throw can only come from the running-service
+      // check itself, never from the confirmation prompt.
+      await expect(runUnpairCommand({ unpair }, { confirmed: true, lifecycle })).rejects.toThrow(
+        UnpairBlockedByRunningServiceError,
+      );
+      expect(unpair).not.toHaveBeenCalled();
+    });
+
+    it('the refusal error message names the concrete remediation (service-stop) and includes the lifecycle detail', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const lifecycle = fakeLifecycle({ installed: true, running: true, detail: 'state = running' });
+
+      let caught: unknown;
+      try {
+        await runUnpairCommand({ unpair }, { confirmed: true, lifecycle });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UnpairBlockedByRunningServiceError);
+      const message = (caught as Error).message;
+      expect(message).toContain('service-stop');
+      expect(message).toContain('state = running');
+    });
+
+    it('proceeds normally when the lifecycle reports installed but NOT running', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const lifecycle = fakeLifecycle({ installed: true, running: false, detail: 'state = stopped' });
+
+      await runUnpairCommand({ unpair }, { confirmed: true, lifecycle });
+      expect(unpair).toHaveBeenCalledTimes(1);
+    });
+
+    it('proceeds normally when the lifecycle reports no service installed at all', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const lifecycle = fakeLifecycle({ installed: false, running: false, detail: '' });
+
+      await runUnpairCommand({ unpair }, { confirmed: true, lifecycle });
+      expect(unpair).toHaveBeenCalledTimes(1);
+    });
+
+    it('proceeds normally when no lifecycle was supplied at all (could not even check — e.g. unsupported platform, or win32 without --winsw-bin)', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+
+      await runUnpairCommand({ unpair }, { confirmed: true });
+      expect(unpair).toHaveBeenCalledTimes(1);
+    });
+
+    it('the success message always calls out the foreground-process residual gap, regardless of the service check result', async () => {
+      const unpair = vi.fn().mockResolvedValue(undefined);
+      const { log, lines } = collectLog();
+      const lifecycle = fakeLifecycle({ installed: false, running: false, detail: '' });
+
+      await runUnpairCommand({ unpair }, { confirmed: true, lifecycle, log });
+      expect(lines.some((l) => l.includes('foreground') && l.includes('re-write device.json'))).toBe(true);
+    });
   });
 });
 

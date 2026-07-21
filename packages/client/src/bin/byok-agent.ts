@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { createDaemon, DeviceRevokedError } from '../index';
+import { createDaemon, createServiceLifecycle, DeviceRevokedError, type ServiceLifecycle } from '../index';
 import { argValue, hasFlag, loadConfig, positionalArgs } from './config';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
 import { runPairCommand } from './commands/pair';
 import { runRuntimesCommand } from './commands/runtimes';
 import {
+  buildServiceDefinition,
   runInstallCommand,
   runServiceStartCommand,
   runServiceStatusCommand,
@@ -59,16 +60,22 @@ import { runUnpairCommand } from './commands/unpair';
  *   the on-disk device record doesn't require a live in-process daemon (see
  *   `create-daemon.ts`'s own doc comment on `unpair()`). It does NOT stop a
  *   separately running `start` process; it only affects that process' (or
- *   any future process') NEXT `start()`.
+ *   any future process') NEXT `start()` — and, per finding P1 #2, it now
+ *   refuses outright (rather than silently losing the race) when an
+ *   INSTALLED background service is currently running; see
+ *   `commands/unpair.ts`'s own doc comment.
  * - `approve`/`reject` are the one case that genuinely CAN'T work this way:
  *   `Daemon.approve`/`reject` require a live `TaskRunner` in the SAME
  *   process (`create-daemon.ts` throws "daemon is not started" otherwise),
- *   and there is no IPC to reach one running in a different process. They're
- *   still wired here (constructing a fresh `Daemon` and calling the method
- *   directly) because that's the correct shape for the day cross-process
- *   IPC exists — today, invoking them prints an honest note explaining why
- *   they're ready-but-unexercised (see `commands/approve-reject.ts`) rather
- *   than silently faking success.
+ *   and there is no IPC to reach one running in a different process — so
+ *   invoked here, they ALWAYS fail with that exact error, every time, for
+ *   every product built on this SDK, with no bundled runtime even raising an
+ *   approval yet (see `commands/approve-reject.ts`'s own doc comment).
+ *   Finding P1 #1: rather than advertise a command that can never succeed,
+ *   these two are deliberately left OUT of `usage()` below — the dispatch
+ *   below still handles them (so the code stays ready-wired for the day
+ *   cross-process IPC exists, at zero extra cost), it's just not something
+ *   this CLI tells an operator to try today.
  *
  * `pair`/`start` are the only two commands that mutate/run a live daemon in
  * THIS process, unchanged in spirit from the pre-M3-2b bin.
@@ -83,8 +90,6 @@ function usage(): never {
       '  byok-agent status [--config <path>]',
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
-      '  byok-agent approve <taskId> [--config <path>]',
-      '  byok-agent reject <taskId> [reason...] [--config <path>]',
       '  byok-agent unpair [--yes] [--config <path>]',
       '',
       '  Background OS service (launchd/systemd/WinSW) — see templates/service/**:',
@@ -93,6 +98,8 @@ function usage(): never {
       '  byok-agent service-start [--config <path>] [--name <svc>]',
       '  byok-agent service-stop [--config <path>] [--name <svc>]',
       '  byok-agent service-status [--config <path>] [--name <svc>]',
+      '',
+      '  Not listed above (ready-but-unexercised — see the header comment): approve <taskId>, reject <taskId> [reason...]',
     ].join('\n'),
   );
   process.exit(1);
@@ -164,9 +171,28 @@ async function main(): Promise<void> {
   }
 
   if (command === 'unpair') {
-    const config = loadConfig(configPathFrom(rest));
+    const configPath = configPathFrom(rest);
+    const config = loadConfig(configPath);
     const daemon = createDaemon(config);
-    return runUnpairCommand(daemon, { confirmed: hasFlag(rest, '--yes') });
+    // Finding P1 #2: best-effort — reuses the exact same
+    // ServiceDefinition/lifecycle `service.ts`'s own commands build, so
+    // "is a service installed/running" is answered from the SAME identity
+    // `install`/`service-status` would use, not a second guess. Construction
+    // itself throws on an unsupported platform, or on win32 without
+    // `--winsw-bin` (see `lifecycle/winsw.ts`) — in either case there is no
+    // way to query a service's state at all, so `lifecycle` stays
+    // `undefined` and `runUnpairCommand` proceeds without that particular
+    // check (its own success message still calls out the residual gap this
+    // leaves either way).
+    let lifecycle: ServiceLifecycle | undefined;
+    if (configPath) {
+      try {
+        lifecycle = createServiceLifecycle(buildServiceDefinition(config, configPath, rest));
+      } catch {
+        lifecycle = undefined;
+      }
+    }
+    return runUnpairCommand(daemon, { confirmed: hasFlag(rest, '--yes'), lifecycle });
   }
 
   if (

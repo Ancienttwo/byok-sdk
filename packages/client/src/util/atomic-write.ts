@@ -64,21 +64,31 @@ let tmpSeq = 0;
  *    so callers like `DeviceStore` (0600, holds a private key) get a
  *    guaranteed mode on every write, not just the one that first creates
  *    the file.
- * 4. **Works on win32.** POSIX `rename(2)` atomically replaces an existing
- *    `filePath` in one step. Windows' rename (`MoveFileEx` under libuv) can
- *    refuse to replace an existing target — most commonly `EPERM`, and on
- *    some Node/libuv versions `EEXIST` — when something transient (an
- *    antivirus scanner or search indexer briefly holding a read handle open
- *    on the destination is the usual culprit) is touching it. There is no
- *    built-in "replace even if the target is momentarily locked" primitive
- *    to fall back on, so on that error this helper removes the stale
- *    target and retries the rename once (see `renameOnto`). That reopens a
- *    tiny window where `filePath` doesn't exist — true atomic replace isn't
- *    available from userspace once Windows has refused the direct rename —
- *    but it's still strictly better than the plain `fs.writeFile` this
- *    replaces, which had no such window *not* exist at all (it truncates
- *    the live file in place, so a crash or a racing reader can see a torn
- *    file on every platform, not just a brief nonexistence window on one).
+ * 4. **Works on win32 — without ever risking the live target.** POSIX
+ *    `rename(2)` atomically replaces an existing `filePath` in one step.
+ *    Windows' rename (`MoveFileEx` under libuv) can refuse to replace an
+ *    existing target — most commonly `EPERM`, and on some Node/libuv
+ *    versions `EEXIST` — when something transient (an antivirus scanner or
+ *    search indexer briefly holding a read handle open on the destination
+ *    is the usual culprit) is touching it. An earlier version of this
+ *    helper "fixed" that by `unlink`-ing the stale target and retrying the
+ *    rename once — which is exactly backwards for a helper whose whole job
+ *    is protecting `filePath` from ever being left corrupt or missing: if
+ *    the retried rename ALSO failed (the lock wasn't transient after all),
+ *    the catch block deleted the temp file too, leaving `filePath` gone
+ *    entirely — worse than the torn write this helper exists to prevent,
+ *    and fatal for a caller like `DeviceStore` (the device's JWT + private
+ *    key live at that path with no other copy). Fixed: `renameOnto` below
+ *    NEVER unlinks `targetPath`. On `EPERM`/`EEXIST` it retries the plain
+ *    rename with a few short, bounded backoff waits (the lock is normally
+ *    gone within milliseconds); if every attempt still fails, it throws
+ *    with `filePath` left completely untouched — the caller keeps the
+ *    last-good file on disk instead of losing it, at the cost of that one
+ *    write not landing. Still strictly better than the plain
+ *    `fs.writeFile` this replaces, which truncates the live file in place
+ *    unconditionally (so a crash or a racing reader can see a torn file on
+ *    every platform, every time) rather than only failing-safe on one
+ *    platform under a transient lock.
  *
  * The caller is responsible for ensuring the parent directory of `filePath`
  * already exists (e.g. via `fs.mkdir(dir, { recursive: true })`) — this
@@ -133,29 +143,49 @@ export async function atomicWriteFile(
   }
 }
 
+/** Number of `fs.rename` attempts on a win32 `EPERM`/`EEXIST` before giving up (the first attempt plus this many retries). */
+const RENAME_RETRY_ATTEMPTS = 5;
+/** Base delay between retries, in ms — short because the usual cause (an AV scanner/indexer's transient read handle) clears within milliseconds, not seconds. Backs off linearly (`delay * attempt`) so a handle held slightly longer still has a decent chance without making the caller wait long in the common case. */
+const RENAME_RETRY_DELAY_MS = 20;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
- * `fs.rename(tmpPath, targetPath)` with the win32 replace-an-existing-file
- * fallback described in {@link atomicWriteFile}'s doc comment (point 4).
- * Split out purely for readability; tests exercise the fallback branch
- * indirectly, by mocking `fs.rename` to fail once with `EPERM` and calling
- * the public `atomicWriteFile` — real POSIX rename never takes this branch
- * itself, only Windows does.
+ * `fs.rename(tmpPath, targetPath)` with the win32 retry-on-transient-lock
+ * behavior described in {@link atomicWriteFile}'s doc comment (point 4).
+ * Split out purely for readability; tests exercise the retry branch
+ * indirectly, by mocking `fs.rename` to fail with `EPERM`/`EEXIST` and
+ * calling the public `atomicWriteFile` — real POSIX rename never takes this
+ * branch itself, only Windows does.
+ *
+ * Load-bearing invariant: `targetPath` is NEVER unlinked here, under any
+ * circumstance, including final failure. The only files this function ever
+ * removes are the TEMP file's own leftovers — never the live target. See
+ * the module doc comment (point 4) for why an earlier `unlink`-then-rename
+ * fallback was actively dangerous and got replaced with this retry loop.
  */
 async function renameOnto(tmpPath: string, targetPath: string): Promise<void> {
-  try {
-    await fs.rename(tmpPath, targetPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'EPERM' && code !== 'EEXIST') {
-      await fs.rm(tmpPath, { force: true }).catch(() => {});
-      throw err;
-    }
+  for (let attempt = 1; attempt <= RENAME_RETRY_ATTEMPTS; attempt++) {
     try {
-      await fs.rm(targetPath, { force: true });
       await fs.rename(tmpPath, targetPath);
-    } catch (fallbackErr) {
-      await fs.rm(tmpPath, { force: true }).catch(() => {});
-      throw fallbackErr;
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'EEXIST') {
+        await fs.rm(tmpPath, { force: true }).catch(() => {});
+        throw err;
+      }
+      if (attempt === RENAME_RETRY_ATTEMPTS) {
+        // Every retry still failed — the lock on `targetPath` wasn't
+        // transient after all. Clean up only the temp file and throw;
+        // `targetPath` is left exactly as it was (the caller's last-good
+        // file, not corrupted, not missing) — never unlinked.
+        await fs.rm(tmpPath, { force: true }).catch(() => {});
+        throw err;
+      }
+      await delay(RENAME_RETRY_DELAY_MS * attempt);
     }
   }
 }

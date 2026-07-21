@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import type { DaemonEvent } from '../daemon/observer';
+import { DaemonObserver, MAX_TRACKED_TASKS, type DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -278,6 +278,86 @@ describe('daemon local observability (DaemonObserver)', () => {
     expect(consoleErrorSpy).toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();
+  });
+
+  it('finding #6: an async (rejecting) listener does not produce an unhandled promise rejection, and does not break delivery to other subscribers or the real task pipeline', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const { daemon: d } = await setupDaemon(adapter);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const goodEvents: DaemonEvent[] = [];
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      // Typed as `DaemonEventListener` (`(event) => void`) but actually
+      // `async` — TypeScript's structural typing allows this at every real
+      // call site too (a promise satisfies a `void`-expected return), so this
+      // is exactly the shape a real subscriber (e.g. a CLI's async renderer)
+      // could hand `subscribe()` today.
+      d.subscribe(async () => {
+        throw new Error('async listener boom');
+      });
+      d.subscribe((e) => goodEvents.push(e));
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { instruction: 'x', policy: { mode: 'auto' } },
+          { taskId: 'task-async-throw-1', seq: server.nextSeq() },
+        ),
+      );
+
+      // The real pipeline (claim goes out over the wire) is unaffected by the rejecting async listener.
+      const claim = await server.waitFor((e) => e.type === 'task.claim');
+      expect(claim.task_id).toBe('task-async-throw-1');
+      await vi.waitFor(() => expect(taskEvents(goodEvents, 'task-async-throw-1').length).toBeGreaterThan(0));
+
+      // Give the rejected promise's microtask — and any unhandledRejection
+      // Node would schedule for it — a real chance to surface before
+      // asserting its absence.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(unhandledRejections).toEqual([]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        '[byok/client] daemon event listener rejected (async)',
+        expect.any(Error),
+      );
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  describe('DaemonObserver: standalone unit tests (no daemon/server needed)', () => {
+    it('finding P2/#11 (observer half): the task registry is bounded even when every tracked task stays nonterminal — evicts the oldest rather than growing without limit', () => {
+      const observer = new DaemonObserver();
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Every one of these is offered and never resolved (no claim/complete/
+      // fail/cancel follows) — i.e. every tracked entry stays nonterminal,
+      // exactly the case `evictIfNeeded`'s "no terminal entry available"
+      // branch has to handle without just giving up.
+      const total = MAX_TRACKED_TASKS * 2;
+      for (let i = 0; i < total; i++) {
+        observer.handleInboundEnvelope(
+          createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: `t-${i}`, seq: i + 1 }),
+        );
+      }
+
+      const tasks = observer.tasks();
+      expect(tasks).toHaveLength(MAX_TRACKED_TASKS);
+      expect(tasks.some((t) => t.taskId === 't-0')).toBe(false); // oldest evicted
+      expect(tasks.some((t) => t.taskId === `t-${total - MAX_TRACKED_TASKS - 1}`)).toBe(false);
+      expect(tasks.some((t) => t.taskId === `t-${total - MAX_TRACKED_TASKS}`)).toBe(true); // oldest SURVIVOR
+      expect(tasks.some((t) => t.taskId === `t-${total - 1}`)).toBe(true); // newest survives
+      expect(consoleWarnSpy).toHaveBeenCalled();
+
+      consoleWarnSpy.mockRestore();
+    });
   });
 
   describe('approve()/reject() — local wiring onto the same code path a server-sent task.approve/task.reject drives', () => {

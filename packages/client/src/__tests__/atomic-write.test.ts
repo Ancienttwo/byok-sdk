@@ -95,7 +95,7 @@ describe('atomicWriteFile', () => {
     expect(JSON.parse(await fs.readFile(target, 'utf8'))).toEqual({ ok: true });
   });
 
-  it('falls back to unlink-then-rename when fs.rename throws EPERM once (Windows: rename onto an existing, momentarily-locked target)', async () => {
+  it('retries the plain rename (never unlinking the target) when fs.rename throws EPERM once (Windows: rename onto an existing, momentarily-locked target)', async () => {
     dir = await tmpDir('byok-atomic-write-eperm-');
     const target = path.join(dir, 'data.json');
     await atomicWriteFile(target, JSON.stringify({ n: 0 }));
@@ -115,18 +115,20 @@ describe('atomicWriteFile', () => {
 
     await atomicWriteFile(target, JSON.stringify({ n: 1 }));
 
-    // The first (mocked, throwing) call plus the fallback's retry — proves
-    // the EPERM branch actually ran, not just that the write happened to
-    // succeed some other way.
+    // The first (mocked, throwing) call plus the retry's plain rename —
+    // proves the EPERM branch actually ran, not just that the write happened
+    // to succeed some other way. Critically, `fs.unlink`/`fs.rm` against
+    // `target` is never called anywhere in this path (see the next test for
+    // the direct proof that the target is never removed).
     expect(calls).toBeGreaterThanOrEqual(2);
     expect(JSON.parse(await fs.readFile(target, 'utf8'))).toEqual({ n: 1 });
 
-    // No leftover temp file after the fallback path either.
+    // No leftover temp file after the retry path either.
     const entries = await fs.readdir(dir);
     expect(entries).toEqual(['data.json']);
   });
 
-  it('falls back to unlink-then-rename when fs.rename throws EEXIST once', async () => {
+  it('retries the plain rename when fs.rename throws EEXIST once', async () => {
     dir = await tmpDir('byok-atomic-write-eexist-');
     const target = path.join(dir, 'data.json');
     await atomicWriteFile(target, JSON.stringify({ n: 0 }));
@@ -165,5 +167,45 @@ describe('atomicWriteFile', () => {
     await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
     const entries = await fs.readdir(dir);
     expect(entries).toEqual([]);
+  });
+
+  it('finding P1 #4: a PERSISTENTLY-failing rename (every attempt EPERM) leaves the ORIGINAL target completely intact — never deleted — and surfaces the error', async () => {
+    dir = await tmpDir('byok-atomic-write-persistent-eperm-');
+    const target = path.join(dir, 'device.json');
+    const original = JSON.stringify({ accessToken: 'original-jwt', devicePrivateKeyPem: 'original-key' });
+    await atomicWriteFile(target, original, { mode: 0o600 });
+
+    // Every single fs.rename call (initial + every retry) fails — simulates
+    // a lock on `target` that never clears within this helper's bounded
+    // retry budget (e.g. a persistently broken AV/indexer, not a transient
+    // one). The OLD (buggy) implementation would have `unlink`ed `target`
+    // before this retry loop even started, then deleted the temp file too
+    // on the retry's own failure — leaving NEITHER file. This must instead
+    // leave `target` byte-for-byte untouched.
+    const renameSpy = vi.spyOn(fs, 'rename');
+    renameSpy.mockImplementation(async () => {
+      const err = new Error('EPERM: operation not permitted, rename') as NodeJS.ErrnoException;
+      err.code = 'EPERM';
+      throw err;
+    });
+
+    await expect(atomicWriteFile(target, JSON.stringify({ accessToken: 'new-jwt-that-must-not-land' }))).rejects.toMatchObject({
+      code: 'EPERM',
+    });
+
+    // The credential is still there, unmodified — this is the load-bearing
+    // assertion: the caller keeps the LAST-GOOD file instead of losing it.
+    expect(await fs.readFile(target, 'utf8')).toBe(original);
+    const stat = await fs.stat(target);
+    expect(stat.mode & 0o777).toBe(0o600);
+
+    // Only the temp file's own leftovers are cleaned up — `target` itself
+    // was never a candidate for removal (renameSpy above never observed an
+    // `fs.rm`/`fs.unlink` call against it; this directory listing proves no
+    // stray temp file survives either).
+    const entries = await fs.readdir(dir);
+    expect(entries).toEqual(['device.json']);
+
+    renameSpy.mockRestore();
   });
 });

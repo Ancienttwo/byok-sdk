@@ -14,6 +14,14 @@ export interface ApproveRejectDeps {
  * `byok-agent start` (no IPC yet — likely M4). `daemon.approve`/`reject` are
  * wired end-to-end and ready for both prerequisites, but effectively
  * unexercised until they exist.
+ *
+ * Finding P1 #1: because of the above, `byok-agent approve`/`reject` fail
+ * with "daemon is not started" on EVERY invocation today, no exceptions —
+ * `byok-agent.ts`'s dispatch still routes to these two functions (so this
+ * stays ready-wired for the day cross-process IPC exists) but deliberately
+ * leaves both out of `usage()`'s advertised command list, so the CLI's own
+ * `--help`-equivalent output never tells an operator to run a command that
+ * cannot succeed.
  */
 const UNEXERCISED_NOTE =
   'note: approve/reject are ready-but-unexercised — no bundled runtime adapter raises an approval yet, and byok-agent has no IPC link to an already-running `start` process (that is likely M4).';

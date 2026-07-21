@@ -209,4 +209,67 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     expect(rn.pendingCancelled.has(taskId)).toBe(false);
     expect(rn.pendingCancelled.size).toBe(MAX_TRACKED_TASK_IDS - 1);
   });
+
+  it('finding #5 (Codex counterexample): an in-flight pendingCancelled marker survives MAX_TRACKED_TASK_IDS unrelated cancels inserted AFTER it, so the cancel is still honored once the blocked offer resolves', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+    const rn = internals(runner);
+
+    // Block task A in adapter.start() — A's own handleOffer() is now
+    // in-flight (this.tasks has no entry for it yet; the offer hasn't
+    // resolved).
+    const releaseStart = adapter.blockStart();
+    const taskId = 'task-A-in-flight';
+    const offerEnvelope = createEnvelope(
+      'task.offer',
+      { instruction: 'block me in adapter.start', policy: { mode: 'auto' } },
+      { taskId, seq: 1 },
+    );
+    const offerPromise = runner.handleEnvelope(offerEnvelope);
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+    expect(runner.activeTaskCount).toBe(0);
+
+    // Deliver A's OWN cancel first, while A is still blocked in start() —
+    // this is the entry that must survive.
+    await runner.handleEnvelope(
+      createEnvelope('task.cancel', { reason: 'cancel A while blocked' }, { taskId, seq: 2 }),
+    );
+    expect(rn.pendingCancelled.has(taskId)).toBe(true);
+
+    // Now deliver MAX_TRACKED_TASK_IDS more cancels for completely unrelated
+    // taskIds nobody ever offered (each is a no-op harmless entry per
+    // `pendingCancelled`'s own doc comment) — exactly Codex's counterexample:
+    // under naive "evict the single oldest entry" eviction, A's marker (the
+    // very oldest, since it was inserted first) would be evicted purely
+    // because of this unrelated churn, well before A's own offer ever
+    // resolves.
+    for (let i = 0; i < MAX_TRACKED_TASK_IDS; i++) {
+      await runner.handleEnvelope(
+        createEnvelope('task.cancel', { reason: 'unrelated churn' }, { taskId: `unrelated-${i}`, seq: 3 + i }),
+      );
+    }
+    expect(rn.pendingCancelled.size).toBe(MAX_TRACKED_TASK_IDS); // capped...
+    // ...but A's own marker specifically must have survived the churn.
+    expect(rn.pendingCancelled.has(taskId)).toBe(true);
+
+    releaseStart(); // let adapter.start() finally resolve
+    await offerPromise;
+
+    // The bug this test guards against: if A's marker had been evicted,
+    // checkpoint 2 would find nothing, report task.started, and leave the
+    // just-started session registered and running instead of tearing it
+    // down. `adapter.start()` still resolves (it's a plain stub, not
+    // cancellation-aware) and its session lands in `adapter.sessions` either
+    // way — what proves the cancel was actually honored is that it was
+    // immediately interrupted/closed and never registered as active,
+    // exactly like `task-runner-cancel-race.test.ts`'s equivalent assertion.
+    expect(sent.some((e) => e.type === 'task.started' && e.task_id === taskId)).toBe(false);
+    expect(sent.some((e) => e.type === 'task.cancelled' && e.task_id === taskId)).toBe(true);
+    expect(adapter.sessions).toHaveLength(1);
+    expect(adapter.sessions[0]?.interruptCalled).toBe(true);
+    expect(adapter.sessions[0]?.closeCalled).toBe(true);
+    expect(runner.activeTaskCount).toBe(0);
+    expect(rn.pendingCancelled.has(taskId)).toBe(false); // consumed by checkpoint 2, not evicted
+  });
 });
