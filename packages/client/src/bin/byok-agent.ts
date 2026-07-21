@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { createDaemon, createServiceLifecycle, DeviceRevokedError, type ServiceLifecycle } from '../index';
-import { argValue, hasFlag, loadConfig, positionalArgs } from './config';
+import { argValue, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
+import { runApprovalsCommand } from './commands/approvals';
+import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
 import { runPairCommand } from './commands/pair';
 import { runRuntimesCommand } from './commands/runtimes';
 import {
@@ -24,67 +26,76 @@ import { runUnpairCommand } from './commands/unpair';
  * cross-platform; see `bin/format.ts` for the plain-text-only rendering
  * this relies on.
  *
- * ## The read model — why `status`/`tasks`/`runtimes` don't talk to a running `start`
+ * ## The read model — persisted state, a live probe, and (M4 Phase 2) a live control socket
  *
- * `start` is a long-lived foreground process. `status`/`runtimes`/`tasks`/
- * `tasks --follow`/`unpair` are all separate, short-lived invocations —
- * there is no IPC control socket between them (that's likely M4;
- * deliberately not built here). Each subcommand's data source follows from
- * that constraint, not from convenience:
+ * `start` is a long-lived foreground process (or an installed background
+ * service running the same command). `status`/`runtimes`/`tasks`/
+ * `tasks --follow`/`unpair`/`approve`/`reject` are all separate, short-lived
+ * invocations. As of M4 Phase 2 there IS a local IPC channel between them —
+ * a Unix domain socket / Windows named pipe (`daemon/control-server.ts`,
+ * `bin/control-client.ts`), mutually authenticated by an HMAC handshake over
+ * a token that never crosses the wire — but it's only reachable while a
+ * `start` (foreground or service) is actually running, so every
+ * short-lived command still has an honest, historical/persisted-state
+ * fallback for when it isn't:
  *
- * - `status`/`tasks` (no `--follow`) read PERSISTED STATE ONLY:
+ * - `status`/`tasks` (no `--follow`) read PERSISTED STATE first, always:
  *   `<storeDir>/device.json` (via `DeviceStore`, for paired/deviceId — a
  *   freshly-constructed `Daemon` that never called `start()`/`pair()` in
  *   THIS process would otherwise always report `paired: false`, which would
  *   be actively wrong for an already-paired device) and
  *   `<storeDir>/audit.jsonl` (the audit log `start` appends every
  *   `DaemonEvent` to — see `bin/audit-log.ts` — replayed into a task list /
- *   last-known-connection-state via `bin/tasks-view.ts`). This is honestly
- *   a historical snapshot: if no `start` has ever run, or a lot has happened
- *   since the last one exited, that's exactly what gets reported (never
- *   faked as "live").
+ *   last-known-connection-state via `bin/tasks-view.ts`). `status`
+ *   additionally tries the control socket afterward: if reachable, a
+ *   clearly-marked `live-*` section (pid/uptime/transport/active tasks) is
+ *   appended; if not, one line says so and the persisted view above stands
+ *   on its own, never faked as "live".
  * - `runtimes` (and the compact runtime summary inside `status`) is a FRESH
  *   STANDALONE PROBE instead: it constructs the same bundled pi/claude/codex
  *   adapter set `createDaemon` would (see `bin/runtime-probe.ts`) and calls
  *   `detect()`/`capabilities()` directly, independent of whether any daemon
  *   is running. "What's on this machine right now" is more useful live than
  *   stale, and detection is cheap/side-effect-free, so there's no reason to
- *   read a historical snapshot here instead.
- * - `tasks --follow` tails `audit.jsonl` from its CURRENT end forward (like
- *   `tail -f`) rather than subscribing to a live process — see
- *   `bin/audit-log.ts`'s `followAuditLog`. Run plain `tasks` first for
- *   history.
- * - `unpair` constructs a fresh (never-started) `Daemon` and calls
- *   `.unpair()` directly — that's genuinely safe standalone, since clearing
- *   the on-disk device record doesn't require a live in-process daemon (see
- *   `create-daemon.ts`'s own doc comment on `unpair()`). It does NOT stop a
- *   separately running `start` process; it only affects that process' (or
- *   any future process') NEXT `start()` — and, per finding P1 #2, it
- *   refuses outright (rather than silently losing the race) both when an
- *   INSTALLED background service is currently confirmed running, AND (the
- *   finding's residual fix) when it cannot even confirm one ISN'T running
- *   (unsupported platform, or a `status()` query that itself failed) —
- *   the latter is bypassable with `--force`, the former never is; see
- *   `commands/unpair.ts`'s own doc comment.
- * - `approve`/`reject` are the one case that genuinely CAN'T work this way:
- *   `Daemon.approve`/`reject` require a live `TaskRunner` in the SAME
- *   process (`create-daemon.ts` throws "daemon is not started" otherwise),
- *   and there is no IPC to reach one running in a different process — so
- *   invoked from a separate short-lived CLI process, they would ALWAYS fail
- *   with that exact (confusing, sounds-like-a-bug) error, every time, for
- *   every product built on this SDK, with no bundled runtime even raising an
- *   approval yet (see `commands/approve-reject.ts`'s own doc comment).
- *   Finding P1 #1 (residual, STILL-OPEN, now fixed): these used to be
- *   dispatched anyway (just hidden from `usage()`'s advertised list), so
- *   typing `byok-agent approve <id>` still ran and still failed with that
- *   misleading message. Neither command is dispatched here at all anymore —
- *   `approve`/`reject` now fall through to the same unknown-command
- *   `usage()` path as any typo. `commands/approve-reject.ts`'s
- *   `runApproveCommand`/`runRejectCommand` (and their own direct unit
- *   tests, which inject an already-started daemon mock) remain as a
- *   ready-to-wire building block for the day cross-process IPC (M4) makes
- *   them meaningful from this CLI — this file just no longer routes to
- *   them.
+ *   read a historical snapshot here instead. The control socket deliberately
+ *   never duplicates this probe (see `control-protocol.ts`'s `status`
+ *   method doc comment) — this CLI keeps owning it.
+ * - `tasks --follow` prefers subscribing to the control socket's
+ *   `tasks.subscribe` (a genuinely live feed, full fidelity, the same
+ *   events `start`'s own stdout shows); falls back to tailing
+ *   `audit.jsonl` from its CURRENT end forward (like `tail -f`) when the
+ *   socket isn't reachable — see `bin/audit-log.ts`'s `followAuditLog`. Run
+ *   plain `tasks` first for history either way.
+ * - `unpair` tries the control socket first: if reachable, that's a
+ *   DEFINITIVE "yes, a daemon is running against this store" (foreground or
+ *   service, no distinction needed anymore) — it sends `shutdown
+ *   {reason:'unpair'}` and waits for the daemon to actually exit. Finding F6:
+ *   `device.json` is only cleared once that exit is CONFIRMED (or `--force`
+ *   is passed, logged as an explicit WARNING) — an unconfirmed exit (the RPC
+ *   failing, teardown hanging, or the exit-poll timing out) refuses instead,
+ *   since the daemon may still be running and could silently re-write the
+ *   credential (see `commands/unpair.ts`'s `UnpairExitUnconfirmedError`).
+ *   Only when the socket isn't reachable does it fall back to
+ *   the heuristic, OS-service-state-based flow this command has had since
+ *   finding P1 #2: refusing outright when an installed background service
+ *   is confirmed running, or when it cannot even confirm one ISN'T running
+ *   (bypassable with `--force`) — see `commands/unpair.ts`'s own doc
+ *   comment for the full history and residual gap that heuristic flow
+ *   still has (a foreground process is invisible to it, which is exactly
+ *   what the control-socket path above now fixes).
+ * - `approve`/`reject` call the control socket's `approvals.resolve`
+ *   directly — there's no persisted-state fallback for these (approving a
+ *   task only ever means anything against a LIVE daemon); daemon
+ *   unreachable is reported as a clear, specific error. Still honest about
+ *   what these can resolve today: no bundled runtime adapter raises an
+ *   approval yet, so a real daemon always answers `not_found` — see
+ *   `commands/approve-reject.ts`'s own doc comment.
+ * - `approvals` (finding F4: operators otherwise had no way to ever learn
+ *   an `approvalId` to pass to `approve`/`reject`) calls the control
+ *   socket's `approvals.list` and renders one line per pending approval
+ *   (approvalId/taskId/age/summary excerpt) — same no-fallback rule as
+ *   `approve`/`reject` above. See `commands/approvals.ts`'s own doc
+ *   comment.
  *
  * `pair`/`start` are the only two commands that mutate/run a live daemon in
  * THIS process, unchanged in spirit from the pre-M3-2b bin.
@@ -100,6 +111,9 @@ function usage(): never {
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
+      '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
+      '  byok-agent approve <approvalId> [--config <path>]',
+      '  byok-agent reject <approvalId> [--reason <text>] [--config <path>]',
       '',
       '  Background OS service (launchd/systemd/WinSW) — see templates/service/**:',
       '  byok-agent install [--config <path>] [--name <svc>] [--agent-bin <path>] [--node-bin <path>] [--winsw-bin <path>] [--winsw-install-dir <path>]',
@@ -188,7 +202,28 @@ async function main(): Promise<void> {
         lifecycle = undefined;
       }
     }
-    return runUnpairCommand(daemon, { confirmed: hasFlag(rest, '--yes'), lifecycle, force: hasFlag(rest, '--force') });
+    return runUnpairCommand(daemon, {
+      confirmed: hasFlag(rest, '--yes'),
+      lifecycle,
+      force: hasFlag(rest, '--force'),
+      storeDir: resolveStoreDir(config),
+      productId: config.productId,
+    });
+  }
+
+  if (command === 'approvals') {
+    const config = loadConfig(configPathFrom(rest));
+    const storeDir = resolveStoreDir(config);
+    return runApprovalsCommand(storeDir, config.productId);
+  }
+
+  if (command === 'approve' || command === 'reject') {
+    const [approvalId] = positionalArgs(rest, ['--reason', '--config']);
+    if (!approvalId) usage();
+    const config = loadConfig(configPathFrom(rest));
+    const storeDir = resolveStoreDir(config);
+    if (command === 'approve') return runApproveCommand(storeDir, config.productId, approvalId);
+    return runRejectCommand(storeDir, config.productId, approvalId, argValue(rest, '--reason'));
   }
 
   if (

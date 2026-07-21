@@ -93,6 +93,30 @@ This asymmetry is enforced by the freeze-guard regression test
 (`packages/protocol/src/__tests__/freeze-guard.test.ts`), not just documented
 here — see that file for the executable version of every bullet above.
 
+**Landed additive minor: `task.approval_resolved` (was tracked here as a
+deferred candidate; now shipped).** A daemon → server message — an explicit
+notification for the case where a pending approval was resolved entirely
+locally (the daemon's own control-socket `approvals.resolve`, a fail-closed
+`requestApproval` timeout, or a fail-closed finish/eviction rejection — see
+`packages/client/src/daemon/task-runner.ts`'s `sendApprovalResolved`), with
+no wire `task.approve`/`task.reject` ever exchanged for it. Exactly what the
+first bullet at the top of this section already allows — "a new message
+type" — so it landed with no `PROTOCOL_VERSION` bump, alongside a new
+handshake capability flag, `approval_resolved` (`CAPABILITY_FLAGS`,
+`version.ts`), that a server advertises when it understands the message; see
+§2's catalog entry and §5.2 below for the full flow and the wire shape.
+
+Before this landed, the server could only infer a local resolution after the
+fact (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`)
+once the daemon's next `task.progress`/`task.artifact`/`task.complete`
+proved it had already moved on — surfaced purely as an embedder-facing
+`task.approval_resolved_implicit` `ByokServerEvent` (`packages/server/src/
+types.ts`), never a protocol change. That inference path is untouched and
+remains the permanent N/N-1 fallback: an old daemon that predates this
+message, or a daemon talking to an old server that never advertises
+`approval_resolved`, never sends the new message at all, and the server
+keeps inferring exactly as it did before this section's previous wording.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -195,6 +219,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?` | Runtime reached `turn_end` |
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?` | Task ends `Cancelled` (server- or daemon-initiated) |
+| `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
@@ -350,48 +375,119 @@ step 4 (§4) and documents the flow end-to-end so the M1-3 client worker can
 wire an adapter's `needs_approval` event all the way through to a resumed
 session without re-deriving these rules.
 
-### 5.1 RESERVED in v1: no bundled runtime exercises this seam
+### 5.1 pi and codex: RESERVED, no seam exercised. claude: exercised as of M4 Phase 3
 
 **The entire approval round trip above — `needs_approval`,
 `task.await_approval`, `task.approve`/`task.reject`, and
-`Session.resolveApproval` — is present in the frozen v1 wire but exercised by
-ZERO bundled runtime adapter.** This was empirically confirmed, not assumed,
-for all three (M2-a/M2-b findings, `packages/client/src/adapters/*/`):
+`Session.resolveApproval` — is present in the frozen v1 wire.** Through M3 it
+was exercised by ZERO bundled runtime adapter (M2-a/M2-b findings); as of M4
+Phase 3, claude genuinely exercises it (`packages/client/src/adapters/*/`):
 
 - **pi** never emits `needs_approval` at all — it has no built-in per-call
   approval gate (`PiSession.resolveApproval` throws unconditionally).
-- **claude**'s headless mode (`claude -p`) resolves every permission decision
-  *synchronously* before the turn continues: auto-denied under a restrictive
-  `--permission-mode`, auto-granted under a permissive one. There is no pause,
-  no wire frame this adapter could ever map to `needs_approval`, and nothing
-  to resume later (`ClaudeSession.resolveApproval` throws).
+- **claude**'s `--permission-mode` ALONE still resolves every permission
+  decision *synchronously* before the turn continues, exactly as before
+  (auto-denied under a restrictive mode, auto-granted under a permissive
+  one) — that finding is unchanged. But `--permission-prompt-tool` (a
+  genuinely different flag, live-verified against the real installed
+  binary) makes claude block a turn on a real out-of-process round trip
+  instead: see §11.2's own "Claude `confirm` mode" note for the full
+  mechanism. `ClaudeSession.resolveApproval` no longer unconditionally
+  throws — it routes into that channel when one is wired up (`confirm`
+  mode), and still throws exactly as before otherwise.
 - **codex**'s `codex exec --json` resolves a sandbox-denied action
   internally with no wire-visible pause either, regardless of
-  `approval_policy` (`CodexSession.resolveApproval` throws).
+  `approval_policy` (`CodexSession.resolveApproval` throws) — pending
+  codex's own app-server migration.
 
 The schema stays because the seam is a real, intentional part of the frozen
 contract — a future runtime adapter (bundled or third-party) can implement it
-without a wire change — but a server MUST NOT assume any *currently* bundled
-runtime will ever pause a task in `AwaitApproval` on its own initiative.
+without a wire change — and a server MUST NOT assume pi or codex will ever
+pause a task in `AwaitApproval` on their own initiative; claude now can, under
+`policy.mode: 'confirm'` specifically.
 
-**Gated by the `interactive-approval` capability flag.** `CAPABILITY_FLAGS`
-(`version.ts`) includes `interactive-approval`, RESERVED as of the same
-addition that introduced it: no bundled adapter advertises it (each reports
-`approvalInteractive: false` — see §11.4), which is the honest signal that
-the seam isn't backed by anything real yet on this device.
+**The `interactive-approval` capability flag stays RESERVED — it is NOT the
+routing signal to use.** `CAPABILITY_FLAGS` (`version.ts`) includes
+`interactive-approval`; every bundled adapter, including claude, still
+reports `approvalInteractive: false` (§11.2's footnote) — this flag was never
+wired to a per-adapter signal and M4 Phase 3 deliberately does not repurpose
+it as a side effect of adding real `confirm` support. **The actual, accurate,
+per-runtime signal for whether a device can honor `confirm` is
+`RuntimeInfo.capabilities.permissionModes.includes('confirm')`** (already
+current: `true` for a claude-capable device, `false` for pi/codex-only). A
+server dispatching `policy.mode: 'confirm'` should check THAT field, not
+`approvalInteractive` — this is a known, intentional gap between two
+capability signals that should eventually converge (a future wave giving
+`interactive-approval`/`approvalInteractive` real per-adapter meaning), not
+an oversight; until then, `permissionModes` is authoritative and
+`interactive-approval` remains exactly as unreliable a signal as it always
+was.
 
-**Rule: a server MUST NOT route an approval-requiring policy to a daemon that
-hasn't advertised `interactive-approval`.** Concretely: `policy.mode:
-'confirm'`, or any policy whose fulfillment would require pausing for an
-interactive grant, must not be dispatched to a device whose `conn.hello`
-capabilities (connection-level `capabilities[]`, or the target runtime's own
-`RuntimeInfo.capabilities.approvalInteractive`) don't include it. `confirm`
-stays in the frozen `PERMISSION_MODES` enum — removing it would be a breaking
-change for no reason — but it is effectively unreachable against any of the
-three bundled runtimes today, all of which reject it fail-closed at the
-adapter level too (§11.1): the capability gate and the adapter's own
-fail-closed rejection are two independent nets against the same outcome
-(dispatching a policy no runtime present can actually honor).
+### 5.2 `task.approval_resolved` — explicit local-resolution report (additive minor)
+
+The approval flow above (§5) has always had two resolution paths: the wire
+`task.approve`/`task.reject` (server-authoritative, §4) and the daemon's own
+local control-socket `approvals.resolve` (device-owner-authoritative). Before
+this addition, the SERVER only ever learned about a *local* resolution
+implicitly — the next `task.progress`/`task.artifact`/`task.complete` for
+that task proved, after the fact, that the daemon had already moved past
+`AwaitApproval` (`ConnectionHub.resumeIfImplicitlyApproved`,
+`packages/server/src/hub.ts`). In the window between the local resolution and
+that next message, the server's own record still said `AwaitApproval` — long
+enough for a SaaS-side `TaskHandle.approve()`/`.reject()` to independently
+decide (and win) the server's authoritative record while the daemon had
+already moved on locally.
+
+**`task.approval_resolved` (D→S) closes that window.** The daemon sends it
+immediately whenever an approval resolves through any LOCAL path — the
+control socket's `approvals.resolve` RPC, a fail-closed `requestApproval`
+timeout, or a fail-closed finish/registry-eviction rejection
+(`packages/client/src/daemon/task-runner.ts`'s `sendApprovalResolved`) —
+*never* for a resolution that arrived over the wire (`task.approve`/
+`task.reject`): the server already knows its own decision, so it must never
+be echoed back. Payload: `approvalId` (the resolved `ApprovalRegistry` entry
+id), `decision` (`'approve'` or `'reject'`), `resolvedBy` (currently always
+`'local'` — a single-value enum, deliberately future-proofed for an
+additional value later without a version bump), and `at` (ISO-8601 datetime).
+Envelope `task_id` is required (routes by task, like every other `task.*`
+type); `seq` stays optional (daemon → server).
+
+**Gated on a new handshake capability flag, `approval_resolved`**
+(`CAPABILITY_FLAGS`, `version.ts`) — the N/N-1 answer for this message: an
+old server never advertises the flag in its `conn.ack`, so a new daemon
+talking to it never sends `task.approval_resolved` at all and silently falls
+back to the pre-existing implicit-inference path, unconditionally, exactly
+as before this message existed. Server-side handling
+(`ConnectionHub.onApprovalResolved`, `hub.ts`): `AwaitApproval` legally
+transitions to `Running` (the same edge `approveTask` itself uses) and emits
+a `task.approval_resolved` `ByokServerEvent` carrying
+`approvalId`/`decision`/`resolvedBy`; already-`Running` (evidence, or the
+implicit path, already got there first) is a silent idempotent no-op; any
+other state (terminal, or a state that never reached `AwaitApproval` at all)
+is a stale no-op with a logged warning, never force-failed. The pre-existing
+`resumeIfImplicitlyApproved`/`task.approval_resolved_implicit` machinery is
+completely untouched and remains the permanent fallback for the N/N-1 cases
+above; the two mechanisms can never both fire for the same resolution —
+whichever the server processes first performs the actual transition, and the
+other's own guard is already true by the time it would otherwise run.
+
+**Residual race (honest, by design — narrowed, not eliminated):** a SaaS
+decision (`TaskHandle.approve()`/`.reject()`) already in flight on the wire
+when the local resolution happens can still land on the server FIRST and
+move the record to a terminal state before `task.approval_resolved` arrives.
+When that happens, the message hits the stale-no-op branch above — exactly
+like any other late message for an already-terminal task — and the daemon
+independently treats a crossing `task.approve`/`task.reject` the same way
+(`NoPendingApprovalError`, an audit-only no-op — §5, `task-runner.ts`'s
+`handleApprove`/`handleReject`). Both sides treat the loser as a stale no-op;
+neither crashes or double-applies anything. What changed is the SIZE of the
+window this can happen in: before this addition it was open until the
+daemon's next progress message (arbitrarily long); now it is
+network-latency-sized (however long `task.approval_resolved` takes to
+reach the server) — and the only possible divergence is exactly the same
+kind §4 already accepts elsewhere: the server's terminal record disagreeing
+with a daemon that (in the reject case) already stopped, or (in the approve
+case) already continued, its own local session.
 
 ## 6. Auth flows
 
@@ -881,8 +977,12 @@ refuse to start — never silently widen or approximate it.** Every bundled
 adapter's `permission-mapping.ts` follows this uniformly, not just for tool
 names:
 
-- `confirm` mode is rejected by all three (§5.1) — none can pause for an
-  out-of-band human decision.
+- `confirm` mode is rejected by pi and codex (§5.1) — neither can pause for
+  an out-of-band human decision. claude supports it as of M4 Phase 3, via
+  `--permission-prompt-tool` (a genuinely different mechanism from
+  `--permission-mode`, live-verified against the real installed binary to
+  block a turn on a real MCP round-trip rather than resolve synchronously)
+  — see §11.2's own residual note.
 - `plan` mode is rejected by pi and codex (neither has a plan-only,
   no-execute mode); claude supports it, with a documented residual (§11.2).
 - `denyTools` is rejected by codex outright (no subtractive mechanism), and
@@ -915,14 +1015,14 @@ actively misleading in more than one case).
 |---|---|---|---|
 | `resume` | yes | yes | yes |
 | `steer` (mid-turn injection) | **yes** — the only bundled runtime that can | no — a write mid-turn queues as a follow-up turn instead of redirecting the running one | no — no in-band channel at all; SIGINT is ignored, resume only starts a new turn after the current one ends |
-| `permissionModes` | `auto`, `readonly` | `auto`, `readonly`, `plan` | `auto`, `readonly` |
-| `confirm` mode | rejected, fail-closed (no approval gate) | rejected, fail-closed (synchronous resolution, no pause to hook into) | rejected, fail-closed (no wire-visible pause under any `approval_policy`) |
+| `permissionModes` | `auto`, `readonly` | `auto`, `readonly`, `plan`, `confirm` | `auto`, `readonly` |
+| `confirm` mode | rejected, fail-closed (no approval gate) | **supported (M4 Phase 3)** — `--permission-prompt-tool` pauses the turn on a real MCP round-trip to a bundled `byok-approval-mcp` server, which relays the decision to/from this device's own daemon over its control socket; see the residual below | rejected, fail-closed (no wire-visible pause under any `approval_policy`; pending codex's app-server migration) |
 | `plan` mode | rejected (no plan-only mode without a custom extension) | **supported** — see the residual below | rejected (no plan-only mode) |
 | `allowTools` | supported | supported (via the replacive `--tools`) | rejected always (no per-tool surface) |
 | `denyTools` | supported (resolved to an equivalent allowlist in-process) | supported only within `readonly`'s own allowlist-intersection; rejected fail-closed otherwise | rejected always |
 | `network: false` | rejected, fail-closed (no sandbox) | rejected, fail-closed (no sandbox for the Bash tool) | supported (both sandbox modes this adapter ever selects default to no network) |
 | `network: true` | supported (nothing to enforce) | supported (nothing to enforce) | rejected, fail-closed (empirically doesn't restore real network access on the installed build) |
-| `interactive-approval` | no (RESERVED, §5.1) | no | no |
+| `interactive-approval` | no (RESERVED, §5.1) | no¹ | no |
 | `usage` fields filled | none | `inputTokens`, `cachedInputTokens`, `outputTokens` | `inputTokens`, `cachedInputTokens`, `outputTokens`, `reasoningTokens` |
 
 **Claude `plan` mode residual (accepted for v1):** claude's `--permission-mode
@@ -940,6 +1040,33 @@ relatively minor, fixed-path side effect. **A SaaS embedder that needs strict
 workspace confinement can simply choose not to route `policy.mode: 'plan'`
 tasks to a `claude`-capable device** — nothing in the protocol forces plan
 mode to be offered.
+
+**Claude `confirm` mode (M4 Phase 3):** `--permission-prompt-tool` makes
+claude block a turn on a real MCP round-trip to `byok-approval-mcp` (a small
+bundled stdio MCP server this adapter spawns claude with, via a generated
+`--mcp-config`), which relays the pending decision to this device's own
+daemon over its local control socket (`daemon/control-protocol.ts`'s
+`approvals.request`) and answers allow/deny once a human (server-sent
+`task.approve`/`task.reject`, or the local `byok-agent approve`/`reject`
+CLI) decides, or once a configurable timeout elapses (default 10 minutes,
+fail-closed to deny). Live-verified against the real installed binary: an
+instant decision and a several-second-delayed one both worked identically;
+a permission-prompt-tool call that never answers AT ALL was found to make
+claude abandon the turn on its own after roughly 1.5s — never actually
+reachable by this design, since `byok-approval-mcp` always eventually
+answers within its own configured ceiling. Unlike `plan` mode's residual
+above, this has no known workspace-confinement gap: the whole mechanism is
+daemon-mediated, not a claude-internal side effect.
+
+¹ `RuntimeInfo.capabilities.approvalInteractive` (§11.4) stays hardcoded
+`false` for every adapter, including claude, even after this — it was never
+wired to a per-adapter signal (`create-daemon.ts`'s `toRuntimeInfoCapabilities`
+predates any adapter actually supporting interactive approval) and this v1
+deliberately doesn't change that wire-visible flag's meaning as a side effect
+of adding `confirm` to claude's `permissionModes`. `permissionModes` already
+carries the precise, up-to-date signal (`'confirm'` present/absent);
+`approvalInteractive` remains reserved for a future wave that gives it real
+per-adapter meaning.
 
 **Connection-level `steer` capability = logical OR across every configured
 adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
@@ -1065,3 +1192,171 @@ truly-dark device stops running. The mitigation is entirely `taskLeaseMs`
 being set far larger than any realistic task duration, so this residual can
 only manifest for a device genuinely unreachable for an extended period, not
 a normal slow turn.
+
+## 13. Version-negotiation drill (M4 Phase 4)
+
+A compat-matrix exercise simulating a future minor server against today's
+daemon, and vice versa — proving the Freeze rule's stated additive-compat
+promise actually holds in real code, not just in this document, and pinning
+down exactly where it doesn't (by design). Four scenarios, each with its
+real evidence:
+
+1. **Unknown additive fields on observability-class messages are tolerated**
+   (parsed, field stripped, no throw) —
+   `packages/protocol/src/__tests__/version-negotiation-drill.test.ts` and
+   the adjacent AgentEvent-variant case already in `freeze-guard.test.ts`.
+2. **Unknown NEW message type — the ignore/skip behavior differed by
+   transport; a genuine asymmetry the drill FOUND AND FIXED:**
+   - WS (`ws-transport.ts`): tolerant per-frame — an unrecognized `type`
+     fails `decodeEnvelope` with a distinctly-catchable
+     `UnknownMessageTypeError`, the WS message handler's `catch` block
+     silently skips just that one frame, and the connection (and every
+     later, well-formed frame) is unaffected. Unchanged by this fix — it
+     was already correct.
+   - Long-poll (`long-poll-transport.ts`): **was NOT tolerant at the batch
+     level.** `EventsPollResponseSchema` used to validate the WHOLE polled
+     batch as one `z.array(EnvelopeSchema)`; a single unrecognized-type
+     entry anywhere in it failed the entire `.parse()` call, discarding
+     every other (otherwise-valid) envelope in that same batch. Because the
+     client's redelivery cursor only ever advances after a successful
+     parse, and the real server's outbox *retains and redelivers* an
+     un-acked envelope (§9) rather than dropping it after one attempt, a
+     real future-typed envelope stuck at the head of a device's backlog
+     would make that device's long-poll cursor stall on every retry — not a
+     crash, not an unbounded hang (the retry loop kept backing off exactly
+     as it does for any other failure), but a genuine, indefinite lack of
+     forward progress on that transport specifically. This is exactly the
+     failure class this drill exists to catch — a `v1.1` server adding one
+     new additive message type would have stranded every `v1.0` long-poll
+     device — so it was fixed rather than shipped as a documented gap.
+     **Fix (`long-poll-transport.ts`, `connection-manager.ts`):** the outer
+     batch shape (`events` array + `cursor`) is now validated loosely; each
+     entry is validated INDIVIDUALLY via `parseMessage` — the same
+     per-message validator `decodeEnvelope` (WS's own per-frame decode)
+     calls internally, so the two transports share one notion of "valid"
+     and cannot drift apart on it again. An entry that fails for ANY reason
+     is skipped for THIS batch — silently, no log line, batch and
+     connection otherwise unaffected — but (finding F1/R1, below) NOT every
+     failure class gets the same cursor treatment.
+
+     A skipped entry that fails with `UnknownMessageTypeError` (an entirely
+     unrecognized `type` — genuine forward-compat tolerance) and still
+     carries a numeric `seq` advances the cursor/watermark past it
+     (`ConnectionManager.noteSkippedSeq`), so a persistently-redelivered
+     unparseable entry can never stall progress again — verified directly:
+     the cursor keeps advancing through repeated redelivery of the same
+     poison payload, and a concurrent legitimate envelope is delivered with
+     no grace period needed.
+
+     **Finding F1 (cross-model adversarial review): a malformed-known-type
+     entry (a recognized `type` whose payload fails schema validation —
+     `EnvelopeValidationError`, e.g. a real `task.offer` whose
+     `PermissionPolicy` rejects an unknown constraint) must NOT get that
+     same cursor advance.** The original fix above forwarded EVERY
+     `parseMessage` failure to `onSkippedSeq` regardless of class, reasoning
+     (wrongly) that this "mirrored WS exactly". It does not: WS's blanket
+     `catch {}` drops the frame with no skip-side cursor bookkeeping AT ALL
+     (an unparseable WS frame never advances anything, so the server's
+     retain-and-redeliver semantics keep it alive on their own); long-poll's
+     `onSkippedSeq` call is an ACTIVE cursor advance with no WS equivalent.
+     Applied uniformly, it meant a genuinely malformed control message the
+     daemon never understood got silently, permanently acked — the server
+     would stop redelivering it and whatever it was offering was stuck for
+     good. F1's own fix narrowed `onSkippedSeq` to `UnknownMessageTypeError`
+     only, forwarding no `seq` at all for any other failure.
+
+     **Finding R1 (cross-model RE-review — F1's fix alone was NOT-CLOSED):
+     simply not forwarding the seq was insufficient.** A batch
+     `[bad seq2, valid seq3]` still let seq3's own INDEPENDENT success
+     silently drag the durable cursor to 3 once its handler resolved —
+     permanently acking seq2 one hop removed from the exact bug F1 set out
+     to fix, since the server would still conclude the daemon has
+     everything through 3 and stop redelivering seq2. Fix
+     (`ConnectionManager.noteValidationFailure`): a validation-failed
+     KNOWN-type entry now engages `stalledAtSeq` — the SAME machinery a
+     thrown handler failure already uses — freezing `dedupWatermark()` at
+     the durable cursor. Because `process()`'s own existing post-success
+     guard already refuses to advance the cursor past a still-unresolved
+     `stalledAtSeq` for ANY other envelope, this required zero changes to
+     `process()` itself: a later envelope in the same or a later batch
+     (seq3 above) is still delivered to its handler and its side effects
+     still run normally, but the cursor stays frozen until the stall
+     clears. `LongPollClient` additionally applies its `retryDelayMs`
+     backoff on the VERY SAME poll cycle the failure is first discovered
+     (not just from the next cycle onward — a local
+     `hadValidationFailureThisBatch` flag closes a one-cycle race a
+     synchronous read of `isStalled()` alone would miss, since the stall
+     mutation is itself deferred via `ConnectionManager`'s FIFO
+     `processingChain`), and `console.warn`s once per distinct poisoned
+     seq, never once per poll.
+
+     Explicit semantic (stated, not left implied): once the stall clears
+     (a corrected redelivery of the bad seq succeeds), the cursor advances
+     to EXACTLY that seq — it does NOT automatically jump forward to cover
+     a higher seq that already succeeded while stalled. That higher seq's
+     own `deliveredSeq` watermark already marks it "seen", so a further
+     redelivery of it is idempotently discarded before ever reaching
+     `process()` again (unlike an unknown-type SKIP, whose `onSkippedSeq`
+     callback has no redelivery dedup at all and so DOES get another
+     chance to nudge the cursor forward on a redelivery). The gap closes
+     the ordinary way any live connection closes it: a later, genuinely-new
+     envelope succeeds and its own `advanceCursor` call covers everything
+     up to that point. This is not a new limitation R1 introduces — it is
+     the pre-existing `stalledAtSeq`/`deliveredSeq` contract a real
+     thrown-handler stall already had (see this section's own "CRITICAL
+     fix" test below, which needed an explicit extra redelivery of ITS
+     skip entry to reach its own final cursor value) — R1 deliberately
+     reuses it as-is.
+
+     See `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`
+     for the full regression suite (against the real `ConnectionManager`/
+     `WsTransport`/`LongPollClient`): interleaved known/unknown/known
+     batches processed in order with the cursor advanced past all three
+     (including a trailing skip with nothing known after it, tested in
+     isolation), the persistent-redelivery/recovery case, the
+     malformed-known-type case proving the cursor stays frozen until a
+     corrected redelivery at the same seq is processed, and (R1) the
+     same-batch stall-engagement case plus the "reaching a higher seq
+     needs a later genuinely-new envelope" case above. The dedicated
+     `console.warn`-cadence and poll-backoff-timing assertions live in
+     `packages/client/src/__tests__/long-poll-validation-stall.test.ts`
+     (isolated from a real `TestServer` — see that file's own doc comment
+     for why, including a documented deviation from an original
+     fake-timer-based test plan that reproducibly hung this vitest/Node
+     combination).
+3. **Unknown fields on control/security-class schemas
+   (`PermissionPolicySchema`, the `instruction` blob-ref variant) are
+   REJECTED, fail-closed** — already established by `freeze-guard.test.ts`;
+   `version-negotiation-drill.test.ts` additionally routes both cases
+   through the real end-to-end `decodeEnvelope` entrypoint (not just the
+   isolated payload schema) to close the loop.
+4. **Handshake version negotiation: a daemon advertising an overlapping set
+   (e.g. `[1, 2]`) agrees on `1`; a disjoint set (e.g. `[2, 3]`) gets a
+   clean, typed failure, not a hang.** The schema half (`conn.hello` accepts
+   either shape; `conn.ack` can only ever express one resolved version) is
+   in `version-negotiation-drill.test.ts`. The actual negotiation DECISION —
+   `ws-server.ts`'s handshake check,
+   `payload.protocolVersions.includes(PROTOCOL_VERSION)` — is exercised for
+   real (not reimplemented) in
+   `packages/server/src/__tests__/version-negotiation.test.ts`, including a
+   race against a timeout as direct "not a hang" evidence rather than
+   relying on the test runner's own global timeout to catch a hang
+   implicitly. Confirms today's actual negotiation rule is a simple
+   membership check against the server's single `PROTOCOL_VERSION`, not yet
+   the "highest common version across an N/N-1 range" policy the "Freeze
+   rule" section above already flags as "currently a no-op in practice"
+   until a real `v:2` exists.
+
+**Adjacent honest note (gatekeeper advisory, docs-only, no code change): rate
+limiting's abrupt WS close is not a new at-most-once risk.** M4 Phase 4's
+per-device rate limiter (`CreateByokServerOptions.rateLimit`) closes a
+flooding device's WS connection (1008). Any envelope the daemon's own WS
+transport already handed to its socket write between budget exhaustion and
+that close actually landing shares the ordinary at-most-once exposure of ANY
+abrupt WS disconnect — this section's own opening line scopes the
+at-least-once guarantee to the server→daemon direction; daemon→server has no
+redelivery cursor at all (`messages.ts`: "M1 only specifies at-least-once
+server->daemon redelivery, not a daemon->server one"), so this was already
+true before rate limiting existed. A flood just makes the pre-existing
+window more likely to have something in flight at the exact moment of a
+close — it introduces no new loss mode of its own.

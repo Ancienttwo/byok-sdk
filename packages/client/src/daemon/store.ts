@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
+import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
 
 export interface DeviceRecord {
   deviceId: string;
@@ -26,7 +27,20 @@ export interface DeviceRecord {
 export class DeviceStore {
   private readonly filePath: string;
 
-  constructor(storeDir: string) {
+  /**
+   * `secureDirOptions` is a test-only DI seam (mirrors `EnsureSecureDirOptions`'s
+   * own `run`/`platform` overrides) — every real caller omits it, getting
+   * real `ensureSecureDir(storeDir)` behavior unchanged. It exists so
+   * finding R4's fail-closed contract ("on win32, an `icacls` failure makes
+   * `save()` — and thus `AuthManager.pair()` — reject with a clear typed
+   * `SecureDirHardeningError` instead of silently persisting an
+   * ACL-unprotected credential") is verifiable from a real `darwin`/`linux`
+   * CI/dev machine, not just asserted.
+   */
+  constructor(
+    storeDir: string,
+    private readonly secureDirOptions?: EnsureSecureDirOptions,
+  ) {
     this.filePath = path.join(storeDir, 'device.json');
   }
 
@@ -62,7 +76,22 @@ export class DeviceStore {
   }
 
   async save(record: DeviceRecord): Promise<void> {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
+    const storeDir = path.dirname(this.filePath);
+    // `mkdir`'s own `mode` only applies at CREATION time — a pre-existing
+    // storeDir (predating this fix, or created by something else with a
+    // more permissive mode) keeps whatever it already had until explicitly
+    // chmod'd. Re-asserted on every save, best-effort — mirrors
+    // `bin/audit-log.ts`'s `appendAuditEvent`, which has the identical gap
+    // (and the identical fix) for the same reason: a failure here (e.g. a
+    // storeDir owned by a different user) must never block the save itself.
+    // Finding F7: on win32, `ensureSecureDir` ALSO applies a restrictive
+    // DACL via `icacls` — POSIX modes alone restrict nothing there. See
+    // `util/secure-dir.ts`'s own doc comment. Finding R4: this now THROWS
+    // (`SecureDirHardeningError`) on a win32 `icacls` failure instead of
+    // warning and continuing — propagates straight out of `save()` (and so
+    // out of `AuthManager.pair()`, since nothing here catches it), before
+    // `device.json` is ever written.
+    await ensureSecureDir(storeDir, this.secureDirOptions);
     // Atomic (temp file + rename) so a concurrent reader never observes a
     // torn/partial file and a crash mid-write never corrupts the existing
     // one — see `util/atomic-write.ts`. This file holds the device private

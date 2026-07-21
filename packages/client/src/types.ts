@@ -21,6 +21,41 @@ export interface RuntimeCapabilities {
 }
 
 /**
+ * M4 Phase 3: the out-of-band approval channel `TaskRunner` (`daemon/
+ * task-runner.ts`) hands to an adapter's `start()` via `TaskContext
+ * .approvalChannel`, for a runtime whose approval mechanism genuinely needs
+ * to reach back into the daemon from OUTSIDE the adapter's own process — the
+ * claude adapter's concrete case: `claude`'s `--permission-prompt-tool`
+ * resolves a pending permission entirely inside a SEPARATE MCP-server child
+ * process claude itself spawns (see `bin/byok-approval-mcp.ts`), which has
+ * no in-process handle to this task's `Session` at all and must instead call
+ * back into the SAME daemon over its control socket. `storeDir`/`productId`
+ * are exactly what that out-of-process helper needs to find and authenticate
+ * against this daemon's control socket (`daemon/control-protocol.ts`
+ * `controlEndpointPath`/`controlTokenPath`); `taskId` is how its request gets
+ * correlated back to THIS task once it arrives. `resolve()` is the
+ * daemon-side counterpart: it resolves the single most-recently-registered
+ * pending approval for this task (via `TaskRunner.requestApproval`'s own
+ * `ApprovalRegistry` entry — see `daemon/approvals.ts`), and rejects if none
+ * is currently pending, mirroring `Session.resolveApproval`'s own
+ * no-notion-of-approval-pending fail-closed contract one level up.
+ *
+ * Optional and adapter-agnostic on purpose: only an adapter whose runtime
+ * genuinely supports an out-of-band pause (claude, today) ever reads this;
+ * every other adapter (pi, codex) ignores it exactly as before this field
+ * existed.
+ */
+export interface ApprovalChannel {
+  taskId: string;
+  storeDir: string;
+  productId: string;
+  /** Default wait (ms) before the daemon force-resolves an unanswered approval request as a fail-closed rejection — see `TaskRunner.requestApproval`. */
+  timeoutMs: number;
+  /** Resolve the single currently-pending out-of-band approval for this task. Rejects if none is pending right now. */
+  resolve(approved: boolean, reason?: string): Promise<void>;
+}
+
+/**
  * Per-task execution context handed to {@link RuntimeAdapter.start}. `policy`
  * is the already fail-closed-checked *effective* policy (offer policy merged
  * against the daemon's configured ceiling) — the adapter must obey this, not
@@ -30,6 +65,8 @@ export interface TaskContext {
   workspaceDir: string;
   policy: PermissionPolicy;
   env: NodeJS.ProcessEnv;
+  /** M4 Phase 3 — see {@link ApprovalChannel}. Optional/adapter-agnostic: unset for every adapter that never requests an out-of-band approval. */
+  approvalChannel?: ApprovalChannel;
 }
 
 /**

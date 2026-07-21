@@ -352,16 +352,38 @@ function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
     return { events };
   }
   const errors = Array.isArray(msg.errors) ? msg.errors.filter((e): e is string => typeof e === 'string') : [];
+  // Shared between both failure branches below: the SAME "errors array wins,
+  // result string is the fallback" extraction `is_error === true` has always
+  // used. `undefined` means the frame carried neither.
+  const diagnostic =
+    errors.length > 0 ? errors.join('; ') : typeof msg.result === 'string' && msg.result.length > 0 ? msg.result : undefined;
   const message =
     msg.is_error === true
-      ? errors.length > 0
-        ? errors.join('; ')
-        : typeof msg.result === 'string' && msg.result.length > 0
-          ? msg.result
-          : 'claude reported an error result'
-      : `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed`;
+      ? (diagnostic ?? 'claude reported an error result')
+      : // M4 hardening: a missing/invalid `is_error` is already fail-closed
+        // (treated as failure, never inferred as success — see above), but
+        // this branch used to report ONLY the generic fallback string, even
+        // when the frame actually carried a perfectly usable `result`/
+        // `errors` payload (real diagnostic content is only read above when
+        // `is_error === true` EXACTLY, so a malformed-but-otherwise-populated
+        // frame silently lost it). Appending `diagnostic` here (when
+        // present) preserves the fail-closed verdict — this is still always
+        // an `error` AgentEvent — while no longer discarding whatever the
+        // frame actually said. Truncated defensively: this is an
+        // unexpected/malformed frame shape, not the normal error path, so
+        // the content could in principle be arbitrarily large.
+        diagnostic
+          ? `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed; diagnostic content on the frame: ${truncateResultDiagnostic(diagnostic)}`
+          : `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed`;
   const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'error', message }] : [{ type: 'error', message }];
   return { events };
+}
+
+/** Sane upper bound on how much of a malformed `result` frame's own diagnostic content (`errors`/`result`) gets folded into the fail-closed message above — no existing truncation helper in this file to reuse (the codex adapter's equivalent, `codex-adapter.ts`'s `JSON.stringify(evt).slice(0, 200)`, lives in a different module entirely), so this is its own small, local bound rather than a shared one. */
+const RESULT_DIAGNOSTIC_MAX_CHARS = 2000;
+
+function truncateResultDiagnostic(text: string): string {
+  return text.length > RESULT_DIAGNOSTIC_MAX_CHARS ? `${text.slice(0, RESULT_DIAGNOSTIC_MAX_CHARS)}… [truncated]` : text;
 }
 
 /**

@@ -19,6 +19,7 @@
   #feed { background: #111; color: #ddd; padding: 0.75rem; height: 16rem; overflow-y: auto; font-size: 0.85rem; white-space: pre-wrap; }
   #result { margin-top: 0.5rem; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.9rem; }
   .controls { margin-bottom: 0.5rem; }
+  #approval-panel { background: #fff8e1; border: 1px solid #e6c200; border-radius: 4px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; }
   .hint { color: #666; font-size: 0.85rem; }
   .hint code { background: #f0f0f0; padding: 0.1rem 0.3rem; border-radius: 3px; }
 </style>
@@ -58,8 +59,12 @@
 
 <section id="task" hidden>
   <h2>4. Task <span id="task-id"></span></h2>
+  <div id="approval-panel" hidden>
+    <strong>Awaiting approval:</strong> <span id="approval-summary"></span>
+  </div>
   <div class="controls">
     <button id="approve" type="button">Approve</button>
+    <button id="reject" type="button">Reject</button>
     <button id="cancel" type="button">Cancel</button>
   </div>
   <pre id="feed"></pre>
@@ -200,15 +205,35 @@
     container.appendChild(link);
   }
 
+  // M4 Phase 3: the approvals panel — a task in AwaitApproval carries a
+  // human-readable `summary` of the gated action on the `await_approval`
+  // server event (already logged into the feed at line ~99 below; this
+  // surfaces the SAME data in a dedicated, non-scrolling banner instead of
+  // requiring the operator to scroll the log to find it). Cleared on any
+  // state transition OUT of AwaitApproval (Running once approved, or a
+  // terminal state once rejected) — never left showing a stale summary for
+  // a decision that's already been made.
+  function showApprovalPanel(summary) {
+    $('approval-summary').textContent = summary;
+    $('approval-panel').hidden = false;
+  }
+  function hideApprovalPanel() {
+    $('approval-panel').hidden = true;
+    $('approval-summary').textContent = '';
+  }
+
   function subscribeToTask(taskId) {
     currentSource?.close();
     $('artifacts').innerHTML = '';
+    hideApprovalPanel();
     const source = new EventSource(`/api/tasks/${taskId}/events`);
     currentSource = source;
     source.onmessage = (ev) => {
       const event = JSON.parse(ev.data);
       logLine(describeServerEvent(event));
       if (event.kind === 'artifact') void renderArtifact(event.artifact);
+      if (event.kind === 'await_approval') showApprovalPanel(event.summary);
+      if (event.kind === 'state' && event.state !== 'AwaitApproval') hideApprovalPanel();
       if (event.kind === 'state' && ['Complete', 'Failed', 'Cancelled'].includes(event.state)) {
         source.close();
         void showResult(taskId);
@@ -256,12 +281,20 @@
     subscribeToTask(currentTaskId);
   });
 
-  async function actOnTask(action) {
+  async function actOnTask(action, body) {
     if (!currentTaskId) return;
-    const res = await fetch(`/api/tasks/${currentTaskId}/${action}`, { method: 'POST' });
-    const body = await res.json();
-    logLine(`[${action}] ${res.ok ? 'ok' : body.error}`);
+    const res = await fetch(`/api/tasks/${currentTaskId}/${action}`, {
+      method: 'POST',
+      ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}),
+    });
+    const responseBody = await res.json();
+    logLine(`[${action}] ${res.ok ? 'ok' : responseBody.error}`);
+    if (res.ok && (action === 'approve' || action === 'reject')) hideApprovalPanel();
   }
   $('approve').addEventListener('click', () => actOnTask('approve'));
+  $('reject').addEventListener('click', () => {
+    const reason = prompt('Reason for rejecting (optional):') || undefined;
+    actOnTask('reject', reason ? { reason } : undefined);
+  });
   $('cancel').addEventListener('click', () => actOnTask('cancel'));
 </script>

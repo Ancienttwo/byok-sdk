@@ -39,6 +39,11 @@ export class ProgressBatcher {
     this.ensureTimer();
   }
 
+  /** M4 Phase 4 (part B.3, observability): events buffered right now, not yet flushed as a `task.progress` batch — a cheap per-task queue-depth watermark for the daemon's control-socket `status` result (see `task-runner.ts`'s `getQueueWatermarks`). */
+  get pendingCount(): number {
+    return this.buffer.length;
+  }
+
   flush(): void {
     this.clearTimer();
     if (this.buffer.length === 0) return;

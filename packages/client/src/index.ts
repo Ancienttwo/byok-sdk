@@ -36,6 +36,18 @@ export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
 
+// Finding F7: the storeDir-hardening chokepoint (`DeviceStore.save()`/
+// `control-server.ts`'s `startControlServer` both funnel through this) —
+// exported as a building block for a product's own deployment smoke checks
+// (see `templates/service/winsw/smoke-test.mjs`'s own win32-only use of it),
+// mirroring `generateWinswXml`/`nodeAgentProgram` above. Finding R4:
+// `SecureDirHardeningError` is also exported — win32 pairing (`daemon.pair()`)
+// can now reject with this typed error if `icacls` fails, and a product
+// wrapping this SDK may want to catch it specifically (e.g. to render a
+// dedicated "couldn't secure the credential directory" message).
+export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
+export type { EnsureSecureDirOptions } from './util/secure-dir';
+
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';

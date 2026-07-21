@@ -11,7 +11,7 @@ import {
   type RuntimeInfo,
 } from '@byok/protocol';
 import { WebSocket, type RawData } from 'ws';
-import type { ByokServer, ServerTaskEvent, TaskHandle } from '../index';
+import type { ByokServer, ByokServerEvent, ServerTaskEvent, TaskHandle } from '../index';
 
 /** Start `byok.hono` on an ephemeral port and wire up its WS upgrade. */
 export async function startServer(
@@ -240,4 +240,39 @@ export async function waitForTaskEvent(
     if (predicate(event)) return event;
   }
   throw new Error('task event stream ended before a matching event was seen');
+}
+
+/**
+ * Wait for `byok.events.subscribe()` (the hub-level {@link ByokServerEvent}
+ * feed — cross-task, e.g. device connect/disconnect, task creation/state
+ * changes) to produce an event matching `predicate`. Mirrors
+ * {@link waitForTaskEvent} exactly, one level up: {@link AsyncEventQueue}
+ * (`event-queue.ts`) backs both, and always replays from the start of its
+ * buffer, so calling this AFTER the triggering action already happened is
+ * safe — it isn't a race against a live push. Unlike the per-task feed, this
+ * one never closes (it's a long-lived, whole-hub feed) — only call this when
+ * `predicate` is expected to actually be satisfied; a predicate that never
+ * matches hangs forever rather than timing out.
+ */
+export async function waitForServerEvent(
+  byok: ByokServer,
+  predicate: (event: ByokServerEvent) => boolean,
+): Promise<ByokServerEvent> {
+  for await (const event of byok.events.subscribe()) {
+    if (predicate(event)) return event;
+  }
+  throw new Error('server event stream ended before a matching event was seen');
+}
+
+/** Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running) and wait for the Running event. Shared by every hub-level test that needs a task actually running before driving it further (approve/reject, implicit-approval-resume, etc). */
+export async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle): Promise<void> {
+  send(ws, createEnvelope('task.claim', { deviceId }, { taskId: handle.taskId }));
+  send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
+  await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+}
+
+/** Drives a task to AwaitApproval over `ws` and waits for the server to actually apply it. Shared by every hub-level test that needs a task parked in AwaitApproval (approve/reject, implicit-approval-resume, etc). */
+export async function moveToAwaitApproval(ws: WebSocket, handle: TaskHandle, summary = 'needs a human ok'): Promise<void> {
+  send(ws, createEnvelope('task.await_approval', { summary }, { taskId: handle.taskId }));
+  await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
 }

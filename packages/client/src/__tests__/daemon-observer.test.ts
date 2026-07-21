@@ -358,6 +358,52 @@ describe('daemon local observability (DaemonObserver)', () => {
 
       consoleWarnSpy.mockRestore();
     });
+
+    describe('finding F4: noteApprovalDispatched attaches approvalId to the matching awaiting-approval DaemonEvent', () => {
+      it('attaches the stashed approvalId to the awaiting-approval event for the matching taskId', () => {
+        const observer = new DaemonObserver();
+        const events: DaemonEvent[] = [];
+        observer.subscribe((e) => events.push(e));
+
+        observer.noteApprovalDispatched('task-a', 'appr-1');
+        observer.handleOutboundEnvelope(createEnvelope('task.await_approval', { summary: 'Bash: rm -rf /tmp' }, { taskId: 'task-a' }));
+
+        const awaiting = events.find((e) => e.kind === 'awaiting-approval');
+        if (awaiting?.kind !== 'awaiting-approval') throw new Error('unreachable');
+        expect(awaiting.approvalId).toBe('appr-1');
+      });
+
+      it('is read-and-delete: a second task.await_approval for the SAME task with no fresh dispatch call never inherits the already-consumed id', () => {
+        const observer = new DaemonObserver();
+        const events: DaemonEvent[] = [];
+        observer.subscribe((e) => events.push(e));
+
+        observer.noteApprovalDispatched('task-a', 'appr-1');
+        observer.handleOutboundEnvelope(createEnvelope('task.await_approval', { summary: 'first' }, { taskId: 'task-a' }));
+        observer.handleOutboundEnvelope(createEnvelope('task.await_approval', { summary: 'second' }, { taskId: 'task-a' }));
+
+        const awaitingEvents = events.filter((e) => e.kind === 'awaiting-approval');
+        expect(awaitingEvents).toHaveLength(2);
+        if (awaitingEvents[0]?.kind !== 'awaiting-approval' || awaitingEvents[1]?.kind !== 'awaiting-approval') {
+          throw new Error('unreachable');
+        }
+        expect(awaitingEvents[0].approvalId).toBe('appr-1');
+        expect(awaitingEvents[1].approvalId).toBeUndefined();
+      });
+
+      it('never leaks a DIFFERENT task\'s stashed approvalId onto this one\'s awaiting-approval event', () => {
+        const observer = new DaemonObserver();
+        const events: DaemonEvent[] = [];
+        observer.subscribe((e) => events.push(e));
+
+        observer.noteApprovalDispatched('task-other', 'appr-other');
+        observer.handleOutboundEnvelope(createEnvelope('task.await_approval', { summary: 'x' }, { taskId: 'task-b' }));
+
+        const awaiting = events.find((e) => e.kind === 'awaiting-approval');
+        if (awaiting?.kind !== 'awaiting-approval') throw new Error('unreachable');
+        expect(awaiting.approvalId).toBeUndefined();
+      });
+    });
   });
 
   describe('approve()/reject() — local wiring onto the same code path a server-sent task.approve/task.reject drives', () => {

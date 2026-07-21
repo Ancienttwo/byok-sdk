@@ -79,4 +79,39 @@ describe('ProgressBatcher', () => {
     batcher.flush();
     expect(emitted).toHaveLength(0);
   });
+
+  describe('pendingCount (M4 Phase 4, part B.3: observability watermark)', () => {
+    it('starts at 0 and grows with each buffered (not-yet-flushed) push', () => {
+      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 5, flushIntervalMs: 1000 });
+      expect(batcher.pendingCount).toBe(0);
+
+      batcher.push({ type: 'progress', text: 'a' });
+      expect(batcher.pendingCount).toBe(1);
+      batcher.push({ type: 'progress', text: 'b' });
+      expect(batcher.pendingCount).toBe(2);
+    });
+
+    it('drops back to 0 once flushed manually', () => {
+      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 5, flushIntervalMs: 1000 });
+      batcher.push({ type: 'progress', text: 'a' });
+      batcher.flush();
+      expect(batcher.pendingCount).toBe(0);
+    });
+
+    it('drops back to 0 once maxBatchSize triggers an automatic flush', () => {
+      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 2, flushIntervalMs: 1000 });
+      batcher.push({ type: 'progress', text: 'a' });
+      expect(batcher.pendingCount).toBe(1);
+      batcher.push({ type: 'progress', text: 'b' });
+      expect(batcher.pendingCount).toBe(0);
+    });
+
+    it('drops back to 0 once the interval timer flushes', () => {
+      const batcher = new ProgressBatcher(() => {}, { maxBatchSize: 10, flushIntervalMs: 250 });
+      batcher.push({ type: 'progress', text: 'a' });
+      expect(batcher.pendingCount).toBe(1);
+      vi.advanceTimersByTime(250);
+      expect(batcher.pendingCount).toBe(0);
+    });
+  });
 });

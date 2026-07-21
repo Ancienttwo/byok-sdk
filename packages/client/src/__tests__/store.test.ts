@@ -1,8 +1,10 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeviceStore, type DeviceRecord } from '../daemon/store';
+import { SecureDirHardeningError } from '../util/secure-dir';
+import type { Runner } from '../lifecycle/exec-runner';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -60,6 +62,29 @@ describe('DeviceStore (atomic write path)', () => {
     expect(await store.load()).toEqual(record);
   });
 
+  it('M4 Fix 3: a pre-existing storeDir with a permissive mode gets tightened to 0700 on save() (mirrors bin/audit-log.ts\'s identical fix for its own storeDir)', async () => {
+    const parent = await tmpDir('byok-device-store-mode-parent-');
+    storeDir = path.join(parent, 'permissive-store');
+    // Simulate a pre-existing, permissively-moded storeDir (predates this
+    // fix, or created by something else under a looser umask). `mkdir`'s own
+    // `mode` argument only governs permissions at CREATION time, so the
+    // pre-fix `fs.mkdir(dir, { recursive: true, mode: 0o700 })` alone never
+    // retroactively tightened an already-existing, looser-moded directory —
+    // only `audit-log.ts`'s own defensive `fs.chmod` (per-append) did, for
+    // device.json's storeDir as a side effect. This is that same fix,
+    // applied directly in `DeviceStore.save()` itself.
+    await fs.mkdir(storeDir, { mode: 0o755 });
+    const before = await fs.stat(storeDir);
+    expect(before.mode & 0o777).toBe(0o755);
+
+    const store = new DeviceStore(storeDir);
+    await store.save(record);
+
+    const after = await fs.stat(storeDir);
+    expect(after.mode & 0o777).toBe(0o700);
+    expect(await store.load()).toEqual(record);
+  });
+
   it('leaves no leftover atomic-write temp file behind after save()', async () => {
     storeDir = await tmpDir('byok-device-store-');
     const store = new DeviceStore(storeDir);
@@ -79,5 +104,31 @@ describe('DeviceStore (atomic write path)', () => {
 
     await store.clear();
     expect(await store.load()).toBeUndefined();
+  });
+
+  // Finding R4 (cross-model re-review — F7 residual): verifying the actual
+  // claim ("DeviceStore.save -> pairing fails with a clear typed error"),
+  // not just asserting it — `secureDirOptions` (a test-only DI seam, see
+  // `store.ts`'s own doc comment) lets a real darwin/linux dev/CI machine
+  // exercise the win32 fail-closed path deterministically.
+  it('finding R4: on win32, an icacls failure makes save() reject with SecureDirHardeningError and device.json is never written', async () => {
+    storeDir = await tmpDir('byok-device-store-r4-');
+    const run = vi.fn<Runner>().mockResolvedValue({ code: 5, stdout: '', stderr: 'Access is denied.' });
+    const store = new DeviceStore(storeDir, { platform: 'win32', run });
+
+    await expect(store.save(record)).rejects.toBeInstanceOf(SecureDirHardeningError);
+    expect(await store.load()).toBeUndefined(); // device.json was never persisted
+    await expect(fs.stat(path.join(storeDir, 'device.json'))).rejects.toThrow();
+  });
+
+  it('finding R4: the storeDir itself still gets created even when the later icacls step fails (mkdir/chmod ran first)', async () => {
+    storeDir = await tmpDir('byok-device-store-r4-mkdir-');
+    const nestedStoreDir = path.join(storeDir, 'nested-product-id');
+    const run = vi.fn<Runner>().mockRejectedValue(Object.assign(new Error('spawn icacls ENOENT'), { code: 'ENOENT' }));
+    const store = new DeviceStore(nestedStoreDir, { platform: 'win32', run });
+
+    await expect(store.save(record)).rejects.toBeInstanceOf(SecureDirHardeningError);
+    const stat = await fs.stat(nestedStoreDir);
+    expect(stat.isDirectory()).toBe(true);
   });
 });

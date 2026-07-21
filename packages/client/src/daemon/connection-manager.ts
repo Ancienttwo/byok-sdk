@@ -112,6 +112,14 @@ export class ConnectionManager {
    * transport was active is ever stranded when the other takes over.
    */
   private readonly outbox: Envelope[] = [];
+  /**
+   * Finding F5(b): how many envelopes `drainOutbox`'s long-poll branch has
+   * currently spliced OUT of `this.outbox` for an in-flight (not yet
+   * confirmed delivered) `postBatch` call — 0 the rest of the time. See
+   * `outboxLength`'s own doc comment for why this needs to be tracked
+   * separately from `this.outbox.length` at all.
+   */
+  private inFlightBatchSize = 0;
   private draining = false;
   private stopped = false;
   private revoked = false;
@@ -156,6 +164,37 @@ export class ConnectionManager {
    * exits. See `drainRetryDelay`.
    */
   private cancelPendingDrainRetry: (() => void) | undefined;
+  /**
+   * The capabilities the CURRENTLY connected server advertised in its
+   * `conn.ack` — untyped `string[]` (forward-compat: a server may advertise
+   * a flag this build doesn't recognize yet), populated by {@link onAcked}
+   * and read by {@link getServerCapabilities}. Empty until the very first
+   * successful handshake.
+   *
+   * Finding R2 (cross-model re-review — was P1): strictly PER-CONNECTION,
+   * not per-daemon-lifetime. Cleared to `[]` the instant the acked WS
+   * connection ends for ANY reason — an ordinary disconnect (`onWsOutcome`'s
+   * `acked` branch), `stop()`, or a transport switch to long-poll
+   * (`enterLongPoll`) — and only ever repopulated by a FRESH `conn.ack`.
+   * The previous version of this doc comment claimed long-poll mode simply
+   * "stays at whatever the last real WS `conn.ack` said" — that was the bug:
+   * a daemon that once learned e.g. `approval_resolved` from an earlier WS
+   * session kept believing it applied to whatever it's connected to NOW,
+   * even after a disconnect/degrade where nothing has actually confirmed
+   * that's still true (a reconnect could land on a DIFFERENT server behind a
+   * load balancer; long-poll fallback itself never performs an equivalent
+   * handshake at all). Concretely, `TaskRunner.sendApprovalResolved` gates
+   * `task.approval_resolved` on this list — sending it to a server that
+   * doesn't actually understand it over the long-poll path would get a
+   * batch-level 400 from `MessagesSendRequestSchema` (protocol §8.2), which
+   * `drainOutbox`'s retry-the-same-batch-forever loop then head-of-line
+   * blocks EVERY envelope queued behind it on, permanently. Clearing this
+   * eagerly means that gate reliably fails closed (falls back to the
+   * pre-existing implicit-resume inference, unconditionally — see
+   * `sendApprovalResolved`'s own doc comment) the moment the connection that
+   * advertised the capability is no longer the one actually in use.
+   */
+  private serverCapabilities: string[] = [];
 
   constructor(private readonly opts: ConnectionManagerOptions) {
     this.ws = new WsTransport({
@@ -170,7 +209,7 @@ export class ConnectionManager {
       onStateChange: (state) => {
         if (!this.stopped && !this.revoked) this.opts.onStateChange?.(state);
       },
-      onAcked: () => this.onAcked(),
+      onAcked: (capabilities) => this.onAcked(capabilities),
       onConnectOutcome: (acked, err) => this.onWsOutcome(acked, err),
       backoff: opts.backoff,
       liveness: opts.liveness,
@@ -188,6 +227,17 @@ export class ConnectionManager {
       getCursor: () => this.dedupWatermark(),
       onEnvelope: (envelope) => this.deliver(envelope),
       onRevoked: () => this.enterRevoked(),
+      // M4 Phase 4 (version-negotiation drill fix): a batch entry
+      // LongPollClient couldn't parse into a known Envelope at all (an
+      // unrecognized message type) still needs its cursor/watermark
+      // advanced past it, exactly like a successfully-processed envelope
+      // would — see `noteSkippedSeq`'s own doc comment.
+      onSkippedSeq: (seq) => this.noteSkippedSeq(seq),
+      // Finding R1: a batch entry LongPollClient recognized the TYPE of but
+      // whose payload failed validation — a genuine delivery failure at
+      // that seq, engaged the same way a thrown handler failure is (see
+      // `noteValidationFailure`'s own doc comment).
+      onValidationFailedSeq: (seq) => this.noteValidationFailure(seq),
       // Finding P2 (Fix 2a): lets the long-poll loop distinguish "this
       // non-empty batch was a stalled backlog re-pull, no cursor progress
       // was made" from ordinary forward progress, so it can back off
@@ -261,7 +311,19 @@ export class ConnectionManager {
         }
 
         const batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
-        const ok = await this.longPoll.postBatch(batch);
+        // Finding F5(b): tracked for the DURATION of the `postBatch` await —
+        // `batch` has already left `this.outbox` (spliced out above) but
+        // isn't confirmed delivered yet, so a plain `this.outbox.length`
+        // read right now would UNDERCOUNT it entirely (this is exactly what
+        // a stalled/hung `postBatch` call means: neither queued nor
+        // delivered, just stuck). See `outboxLength`'s own doc comment.
+        this.inFlightBatchSize = batch.length;
+        let ok: boolean;
+        try {
+          ok = await this.longPoll.postBatch(batch);
+        } finally {
+          this.inFlightBatchSize = 0;
+        }
         if (ok) continue; // loop back around — more may be queued, or the next chunk still needs sending
 
         this.outbox.unshift(...batch); // retry, preserving order — same objects, same ids (finding F1)
@@ -309,6 +371,19 @@ export class ConnectionManager {
     return this.mode === 'long-poll';
   }
 
+  /**
+   * The capabilities the CURRENTLY connected server advertised in its
+   * `conn.ack` — e.g. lets a caller gate a daemon->server message on whether
+   * THIS server understands it before sending (see `task-runner.ts`'s
+   * `sendApprovalResolved`, gated on `approval_resolved`). Empty before the
+   * first handshake completes, AND (finding R2) once again empty after any
+   * disconnect/degrade — see `serverCapabilities`'s own doc comment for why
+   * this is strictly per-connection rather than "sticky" across one.
+   */
+  getServerCapabilities(): readonly string[] {
+    return this.serverCapabilities;
+  }
+
   isConnected(): boolean {
     return this.mode === 'ws' && this.ws.isOpen;
   }
@@ -353,14 +428,99 @@ export class ConnectionManager {
    * disk — otherwise a `stop()` racing a just-processed envelope's
    * persistence could lose that cursor advance, or leave a handler running
    * unobserved after the daemon reports itself stopped.
+   *
+   * Finding F5(b) (cross-model adversarial review): `drainTimeoutMs`, when
+   * passed, bounds how long this waits for the shared outbox (`this.outbox`
+   * — Design B) to actually finish draining BEFORE flipping `this.stopped`
+   * and closing the transports. Before this fix, `stop()` set `stopped`
+   * synchronously and never waited for `drainOutbox` at all: an envelope
+   * `send()` had just pushed moments earlier (e.g. `TaskRunner.shutdownTask`'s
+   * own `task.fail`, sent right before `create-daemon.ts`'s
+   * `performControlShutdown` calls this) could still be sitting UNSENT in
+   * `this.outbox` — mid long-poll retry backoff, or simply not yet picked up
+   * by the fire-and-forget `drainOutbox()` `send()` kicked off — and this
+   * method would happily proceed to `stopped = true` / `ws.close()` regardless,
+   * after which NOTHING ever drains it again: silently lost, even though
+   * `TaskRunner` believed it had been sent. `drainTimeoutMs` omitted (the
+   * default) preserves the EXACT prior behavior for every other existing
+   * caller (an ordinary `daemon.stop()`/`unpair()`) — only the control-socket
+   * shutdown path opts into the bounded wait (see `create-daemon.ts`'s
+   * `performControlShutdown`). This can never claim delivery that didn't
+   * happen: on a timeout, whatever's still queued stays exactly where it is
+   * (readable via {@link outboxLength} immediately after this resolves) —
+   * it does NOT force-flush or pretend success.
    */
-  async stop(): Promise<void> {
+  async stop(drainTimeoutMs?: number): Promise<void> {
+    if (drainTimeoutMs !== undefined) {
+      await this.waitForOutboxDrained(drainTimeoutMs);
+    }
     this.stopped = true;
+    // Finding R2: this daemon's own connection is ending — whatever the
+    // server last advertised no longer applies to anything (there's nothing
+    // left to send to). See `serverCapabilities`'s own doc comment.
+    this.serverCapabilities = [];
     if (this.wsRetryTimer) clearInterval(this.wsRetryTimer);
     this.longPoll.stop();
     this.ws.close();
     await this.processingChain;
     await this.pendingCursorSave;
+  }
+
+  /**
+   * Finding F5(b): how many envelopes are neither confirmed delivered NOR
+   * safely re-queued — meant to be read right after a bounded {@link stop}
+   * call returns, to know honestly whether the drain actually finished (0)
+   * or timed out with something still stuck (>0). See `create-daemon.ts`'s
+   * `performControlShutdown`, which surfaces this on the `shutdown-complete`
+   * audit event rather than silently claiming everything was delivered.
+   *
+   * Deliberately `this.outbox.length + this.inFlightBatchSize`, NOT just
+   * `this.outbox.length` alone: `drainOutbox`'s long-poll branch SPLICES a
+   * batch out of `this.outbox` before awaiting `postBatch` (so a concurrent
+   * `send()` sees an accurate, non-double-counted queue) — while that POST
+   * is in flight (or, this finding's whole point, genuinely STALLED and
+   * never resolving), those envelopes have already left `this.outbox` but
+   * are not delivered either. Reading `this.outbox.length` alone at exactly
+   * that moment would undercount to 0 — silently implying full delivery
+   * for the one case (a hung POST) this finding exists to catch honestly.
+   */
+  outboxLength(): number {
+    return this.outbox.length + this.inFlightBatchSize;
+  }
+
+  /**
+   * Finding F5(b): polls {@link outboxLength} (not `this.outbox.length`
+   * alone — see that method's own doc comment for why a spliced-out,
+   * in-flight batch would otherwise be invisible here) rather than hooking
+   * a single `drainOutbox()` promise directly — a drain in progress can
+   * itself loop through multiple retry/backoff cycles (`drainRetryDelay`)
+   * while the server is unreachable, and a fresh, INDEPENDENT
+   * `drainOutbox()` call can also be triggered concurrently (`send()`, a
+   * mode switch's own `void this.drainOutbox()`) — polling the one thing
+   * that actually matters (is anything still undelivered) can never go
+   * stale the way capturing one specific in-flight promise reference
+   * could. Kicks off one more `drainOutbox()` attempt itself first
+   * (harmless no-op if one is already running — see its own re-entrancy
+   * guard) in case nothing is currently actively retrying (e.g. WS just
+   * dropped and long-poll hasn't taken over yet), so this bounded wait
+   * isn't just passively hoping something else happens to be making
+   * progress.
+   */
+  private waitForOutboxDrained(timeoutMs: number): Promise<void> {
+    if (this.outboxLength() === 0) return Promise.resolve();
+    void this.drainOutbox();
+    return new Promise((resolve) => {
+      const deadline = Date.now() + timeoutMs;
+      const poll = (): void => {
+        if (this.outboxLength() === 0 || this.stopped || this.revoked || Date.now() >= deadline) {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(poll, 20);
+        timer.unref?.();
+      };
+      poll();
+    });
   }
 
   /**
@@ -469,6 +629,121 @@ export class ConnectionManager {
     }
   }
 
+  /**
+   * M4 Phase 4 (version-negotiation drill fix): `LongPollClient` calls this
+   * for a batch entry it could not parse into a known `Envelope` at all (an
+   * unrecognized message type — mirrors `ws-transport.ts`'s identical
+   * per-frame tolerance, see `long-poll-transport.ts`'s own doc comment on
+   * `parseLooseEventsPollResponse`) but which still carried a numeric,
+   * task-class envelope-level `seq` (the caller only invokes this for a
+   * `task.`-prefixed type — see `long-poll-transport.ts`'s own
+   * `extractSkippableSeq`; `conn.*`-shaped or type-less entries never reach
+   * here at all, mirroring F2's "conn.* is never cursor-tracked" rule).
+   * There is no real `Envelope` to hand to a handler — a genuinely
+   * unrecognized type has nothing this build could ever act on.
+   *
+   * GATEKEEPER-CAUGHT REGRESSION (fixed here): this used to call
+   * `advanceCursor(seq)` DIRECTLY, synchronously, the instant a skip was
+   * detected in `LongPollClient.loop()`'s per-entry for-loop. That is NOT
+   * "instantaneous and race-free" the way the previous version of this
+   * comment claimed — the hazard was never the skip racing against itself,
+   * it was the skip racing AHEAD of an EARLIER real envelope in the SAME
+   * batch that is still in flight on `processingChain` (`deliver()`, above,
+   * only ever CHAINS `process()` onto that promise chain — it never awaits
+   * it before returning). Concretely, batch `[real seq1, unknown seq2]`:
+   * `deliver(seq1)` chains `process(seq1)` but returns immediately without
+   * running it; the for-loop then reaches `seq2` and (pre-fix) called
+   * `advanceCursor(2)` synchronously, BEFORE `process(seq1)` had even
+   * started, let alone failed. If `seq1`'s handler then failed,
+   * `stalledAtSeq` became 1 — but the durable cursor was already 2, so
+   * `dedupWatermark()` returned 2, and every future redelivery of seq1 was
+   * dedup-dropped as "already past the cursor" forever: permanent envelope
+   * loss, exactly the F3 bug class the whole `stalledAtSeq`/frozen-watermark
+   * mechanism exists to prevent.
+   *
+   * Fix: the cursor-advancing half is now CHAINED onto `processingChain`
+   * too, exactly like `process()`'s own post-handler bookkeeping — so it
+   * only ever runs once every earlier envelope already queued ahead of it
+   * has fully settled (success or failure), and can observe `stalledAtSeq`'s
+   * REAL, up-to-date value rather than whatever it happened to be at the
+   * instant the skip was first noticed. The guard mirrors `process()`'s own
+   * success-path guard exactly: never advance past a still-unresolved
+   * earlier failure, unless (degenerate, cannot really happen for a skip)
+   * this exact seq IS the stalled one.
+   *
+   * `noteDelivered` (the eager, in-memory watermark) stays UNCHAINED —
+   * called immediately, unconditionally, regardless of `stalledAtSeq` —
+   * matching `deliver()`'s own eager, unconditional call for a real
+   * envelope: its only job is "don't re-pull something already handed off,"
+   * independent of outcome, and that property does not depend on FIFO
+   * ordering the way the DURABLE cursor does.
+   *
+   * Deliberately NO top-level `dedupWatermark() <= seq` early-return before
+   * queuing the chained callback (an earlier draft of this fix had one, and
+   * it was itself subtly wrong): `deliveredSeq` can already reflect a seq
+   * from the FIRST time it was ever seen, while the DURABLE cursor is still
+   * behind it because a stall intervened before that seq's chained
+   * advancement ran — a pre-check keyed on `deliveredSeq` would then
+   * wrongly treat a LATER redelivery of the same seq (arriving once the
+   * stall has since cleared) as "already accounted for" and never queue
+   * another attempt, permanently stranding the cursor one seq short. Always
+   * queuing is safe and cheap: `advanceCursor`'s own `seq <= this.cursor`
+   * guard already makes a genuinely-redundant call a no-op, so there is no
+   * correctness reason to short-circuit earlier, only a (here, unnecessary)
+   * micro-optimization one.
+   */
+  private noteSkippedSeq(seq: number): void {
+    this.noteDelivered(seq);
+    this.processingChain = this.processingChain.then(() => {
+      if (this.stalledAtSeq === undefined || seq === this.stalledAtSeq) {
+        this.advanceCursor(seq);
+      }
+    });
+  }
+
+  /**
+   * Finding R1 (cross-model re-review — was NOT-CLOSED against F1):
+   * `LongPollClient` calls this for a batch entry whose `type` it
+   * recognized but whose payload failed schema validation
+   * ({@link EnvelopeValidationError}) — a genuine delivery failure at that
+   * seq, unlike `noteSkippedSeq`'s forward-compat case. Deliberately mirrors
+   * `process()`'s own catch block (`if (tracked && this.stalledAtSeq ===
+   * undefined) this.stalledAtSeq = envelope.seq;`) as closely as possible:
+   * the SAME "only the lowest unresolved failure holds the stall" rule, the
+   * SAME resulting freeze of `dedupWatermark()` at the durable cursor
+   * (protocol §9 keeps this seq alive), and — because it's the SAME
+   * `stalledAtSeq` field `process()`'s own post-success guard already
+   * checks — anything ELSE delivered after this seq (same batch or a later
+   * one) is automatically held back from advancing the cursor too, with
+   * zero changes needed to `process()` itself.
+   *
+   * Chained onto `processingChain` for exactly the reason `noteSkippedSeq`
+   * documents for its own identical chaining (see that method's sibling
+   * doc comment on `LongPollClient`, "GATEKEEPER-CAUGHT REGRESSION"): an
+   * EARLIER real envelope in the SAME batch may still be in flight on that
+   * FIFO chain when this is called (`deliver()` only ever chains
+   * `process()` onto it, never awaits before returning) — mutating
+   * `stalledAtSeq` synchronously here could race ahead of that still-
+   * unresolved earlier envelope. Chaining instead guarantees this only
+   * takes effect once every earlier-queued envelope has already settled,
+   * and reads `stalledAtSeq`'s real, up-to-date value rather than whatever
+   * it happened to be the instant the failure was first noticed.
+   *
+   * No `noteDelivered` call here (contrast `noteSkippedSeq`, which does
+   * call it): a validation-failed entry never becomes a real `Envelope` and
+   * never reaches `deliver()`, so it was never "delivered" in the eager
+   * in-memory-watermark sense that field tracks — there is nothing for it
+   * to eagerly mark. Once a corrected redelivery of this exact seq DOES
+   * arrive as a real envelope, it flows through the ordinary `deliver()`
+   * path (which calls `noteDelivered` itself) and, on success, clears the
+   * stall via `process()`'s own existing logic — no special-casing needed.
+   */
+  private noteValidationFailure(seq: number): void {
+    this.processingChain = this.processingChain.then(() => {
+      if (this.stalledAtSeq === undefined) this.stalledAtSeq = seq;
+    });
+  }
+
   private advanceCursor(seq: number): void {
     if (this.cursor !== undefined && seq <= this.cursor) return;
     this.cursor = seq;
@@ -497,7 +772,8 @@ export class ConnectionManager {
    * connection stays open indefinitely, so it never reaches `onWsOutcome`
    * (which is close-only) at all.
    */
-  private onAcked(): void {
+  private onAcked(capabilities: string[]): void {
+    this.serverCapabilities = capabilities;
     this.consecutiveFailures = 0;
     this.notifySettled();
     if (this.mode === 'long-poll') this.exitLongPoll();
@@ -506,6 +782,14 @@ export class ConnectionManager {
 
   private onWsOutcome(acked: boolean, err?: unknown): void {
     if (this.stopped || this.revoked) return;
+
+    // Finding R2: this specific attempt WAS acked at some point but has now
+    // closed — the connection that advertised `serverCapabilities` is gone.
+    // Cleared BEFORE the `if (acked) return;` early-out below, so this runs
+    // on every acked-then-closed outcome regardless of what happens next
+    // (a fast auto-reconnect, a slower one, or none at all pending
+    // `enterLongPoll`) — only a FRESH `conn.ack` (`onAcked`) repopulates it.
+    if (acked) this.serverCapabilities = [];
 
     if (err instanceof WsUnexpectedStatusError && err.status === 401) {
       // Reactive renewal (protocol §6.2): the cached token was rejected on
@@ -535,6 +819,12 @@ export class ConnectionManager {
 
   private enterLongPoll(): void {
     this.mode = 'long-poll';
+    // Finding R2: defensive/belt-and-suspenders — in practice the acked
+    // disconnect that precedes this already cleared it via `onWsOutcome`
+    // above, but long-poll performs no equivalent handshake of its own
+    // (docs/protocol.md §8.1), so this transport must never be able to
+    // observe a stale, non-empty `serverCapabilities` from here on either.
+    this.serverCapabilities = [];
     this.ws.stopAutoReconnect();
     this.opts.onStateChange?.('degraded');
     this.longPoll.start();

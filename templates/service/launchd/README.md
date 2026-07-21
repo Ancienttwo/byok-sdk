@@ -97,6 +97,20 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
 would just have `KeepAlive` restart it immediately, since that's the same
 mechanism as the crash-restart guarantee working as designed.
 
+## Talking to the running service (M4 Phase 2: the control socket)
+
+Once installed, the service is reachable through a local control socket at
+`~/.byok/<productId>/control.sock` (a Unix domain socket; falls back to a
+short, deterministic path under `$TMPDIR` if the natural one would exceed
+macOS's 104-byte `sun_path` limit), authenticated by a per-run token at
+`~/.byok/<productId>/control.token` (mode 0600 — never transmitted over the
+socket itself, only used to compute an HMAC proof each side shows the
+other). `byok-agent status`, `tasks --follow`, `unpair`, `approve`, and
+`reject` all talk to the running service through this socket automatically
+— no separate flag needed — falling back to a persisted-state view (or, for
+`unpair`, the OS-service-state check described above) whenever the socket
+isn't reachable (the service isn't running, or predates this feature).
+
 ## Verifying it yourself
 
 ```bash
@@ -108,7 +122,12 @@ running a harmless placeholder command, asserts real `launchctl print`
 output shows it loaded and running, stops it, starts it again, uninstalls
 it, and asserts it's really gone — then cleans up unconditionally (even on
 failure). This is the same script used to verify this recipe on a real
-macOS machine during M3-4's own development.
+macOS machine during M3-4's own development. It then additionally installs
+a SECOND scratch LaunchAgent running the real `byok-agent start` (paired
+against a real, ephemeral `@byok/server`) and confirms `byok-agent status`
+reaches its control socket live (M4 Phase 2 — see
+`packages/client/scripts/control-socket-check.mjs`), before uninstalling
+that one too.
 
 ## What's explicitly out of scope
 

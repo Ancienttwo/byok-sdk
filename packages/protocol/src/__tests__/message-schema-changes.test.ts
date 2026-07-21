@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   ConnHelloPayloadSchema,
+  DAEMON_TO_SERVER_TYPES,
   EnvelopeSchema,
   RuntimeInfoSchema,
+  TaskApprovalResolvedPayloadSchema,
   TaskClaimPayloadSchema,
   TaskOfferPayloadSchema,
   createEnvelope,
+  decodeEnvelope,
   parseMessage,
 } from '../index';
 
@@ -213,5 +216,109 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     const parsed = parseMessage(envelope);
     expect(parsed.task_id).toBe('task-1');
     expect('taskId' in parsed.payload).toBe(false);
+  });
+});
+
+/**
+ * M4 (additive-minor): `task.approval_resolved` — daemon -> server report of
+ * a LOCALLY-resolved approval (see `messages.ts`'s own doc comment on
+ * `TaskApprovalResolvedPayloadSchema` for the full rationale). Additive-only:
+ * a new message type + a new capability flag, no `PROTOCOL_VERSION` bump
+ * (docs/protocol.md "Freeze rule").
+ */
+describe('task.approval_resolved (additive-minor message)', () => {
+  it('is registered as a daemon -> server type', () => {
+    expect(DAEMON_TO_SERVER_TYPES).toContain('task.approval_resolved');
+  });
+
+  it('schema round-trip: a well-formed payload parses with every field intact', () => {
+    const result = TaskApprovalResolvedPayloadSchema.safeParse({
+      approvalId: 'appr-1',
+      decision: 'approve',
+      resolvedBy: 'local',
+      at: '2026-01-01T00:00:00.000Z',
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    expect(result.data).toEqual({
+      approvalId: 'appr-1',
+      decision: 'approve',
+      resolvedBy: 'local',
+      at: '2026-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('accepts decision: reject too', () => {
+    const result = TaskApprovalResolvedPayloadSchema.safeParse({
+      approvalId: 'appr-2',
+      decision: 'reject',
+      resolvedBy: 'local',
+      at: '2026-01-01T00:00:00.000Z',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an unrecognized decision value', () => {
+    const result = TaskApprovalResolvedPayloadSchema.safeParse({
+      approvalId: 'appr-1',
+      decision: 'maybe',
+      resolvedBy: 'local',
+      at: '2026-01-01T00:00:00.000Z',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a resolvedBy value other than 'local' (single-value enum today, future-proof for an additive future member)", () => {
+    const result = TaskApprovalResolvedPayloadSchema.safeParse({
+      approvalId: 'appr-1',
+      decision: 'approve',
+      resolvedBy: 'operator-cli',
+      at: '2026-01-01T00:00:00.000Z',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('unknown-field tolerance: an unrecognized sibling field is silently stripped, not rejected (observability-class, not control/security)', () => {
+    const result = TaskApprovalResolvedPayloadSchema.safeParse({
+      approvalId: 'appr-1',
+      decision: 'approve',
+      resolvedBy: 'local',
+      at: '2026-01-01T00:00:00.000Z',
+      futureField: 'from a newer minor version',
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    expect('futureField' in result.data).toBe(false);
+  });
+
+  it('envelope.task_id is required (routes by task, like every other task.* type)', () => {
+    const envelope = createEnvelope(
+      'task.approval_resolved',
+      { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: '2026-01-01T00:00:00.000Z' },
+      { taskId: 'task-1' },
+    );
+    expect(EnvelopeSchema.safeParse(envelope).success).toBe(true);
+    const { task_id: _taskId, ...withoutTaskId } = envelope as Record<string, unknown>;
+    expect(EnvelopeSchema.safeParse(withoutTaskId).success).toBe(false);
+  });
+
+  it('envelope.seq stays optional (daemon -> server type, same as every other one)', () => {
+    const envelope = createEnvelope(
+      'task.approval_resolved',
+      { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: '2026-01-01T00:00:00.000Z' },
+      { taskId: 'task-1' },
+    );
+    expect('seq' in envelope).toBe(false);
+  });
+
+  it('round-trips through the real wire entrypoint (decodeEnvelope on an encoded line)', () => {
+    const envelope = createEnvelope(
+      'task.approval_resolved',
+      { approvalId: 'appr-1', decision: 'reject', resolvedBy: 'local', at: '2026-01-01T00:00:00.000Z' },
+      { taskId: 'task-1' },
+    );
+    const wireLine = `${JSON.stringify(envelope)}\n`;
+    const decoded = decodeEnvelope(wireLine);
+    expect(decoded).toEqual(envelope);
   });
 });

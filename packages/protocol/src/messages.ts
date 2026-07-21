@@ -317,6 +317,50 @@ export const TaskCancelledPayloadSchema = z.object({
 });
 export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
 
+/**
+ * daemon -> server: a pending `task.await_approval` was resolved entirely
+ * LOCALLY on the device — the local control-socket `approvals.resolve` RPC,
+ * a fail-closed `requestApproval` timeout, or a fail-closed eviction/finish
+ * rejection (see `packages/client`'s `task-runner.ts`/`approvals.ts`) —
+ * *without* a wire `task.approve`/`task.reject` ever having been exchanged
+ * for it. This is the additive-minor answer to a gap the M4 Phase 3 approval
+ * work left open (see the "Deferred additive candidate" note this schema
+ * resolves, `docs/protocol.md`): today the server only learns of a local
+ * resolution IMPLICITLY, after the fact, once the daemon's next
+ * `task.progress`/`task.artifact`/`task.complete` proves the task already
+ * moved on (`ConnectionHub.resumeIfImplicitlyApproved`,
+ * `packages/server/src/hub.ts`) — a window in which a SaaS-side
+ * `TaskHandle.approve()`/`.reject()` can independently decide (and win) the
+ * server's own authoritative record before that evidence ever arrives. This
+ * message lets the daemon report the local resolution explicitly and
+ * immediately, narrowing that window from "until the next progress message"
+ * down to ordinary network latency; the implicit-inference path stays as-is,
+ * unconditionally, as the compatibility fallback for an old server that
+ * never advertises the `approval_resolved` capability flag (`version.ts`) or
+ * an old daemon that predates this message entirely.
+ *
+ * Observability-class tolerance applies (not control/security — see the
+ * freeze rule's asymmetry, `docs/protocol.md`): this is a daemon reporting
+ * what it already did locally, not a payload that grants/denies anything on
+ * its own — the receiving server's own state machine (`TASK_TRANSITIONS`,
+ * `task-state.ts`) is still what decides whether the reported resolution is
+ * legal to apply. Plain `z.object()` (not `.strict()`), same as every other
+ * non-control payload in this file.
+ *
+ * `resolvedBy` is a single-value enum (`'local'`) rather than a bare string:
+ * deliberately future-proof (a later wave could add e.g. `'operator-cli'` as
+ * a DISTINCT value without a version bump — a new enum member is additive,
+ * same as a new message type or capability flag), while still being a closed,
+ * typed shape today rather than an open string a typo could silently widen.
+ */
+export const TaskApprovalResolvedPayloadSchema = z.object({
+  approvalId: z.string(),
+  decision: z.enum(['approve', 'reject']),
+  resolvedBy: z.enum(['local']),
+  at: z.iso.datetime({ offset: true }),
+});
+export type TaskApprovalResolvedPayload = z.infer<typeof TaskApprovalResolvedPayloadSchema>;
+
 // ---------------------------------------------------------------------------
 // registry — single source of truth mapping message type -> payload schema
 // ---------------------------------------------------------------------------
@@ -338,6 +382,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'task.complete': TaskCompletePayloadSchema,
   'task.fail': TaskFailPayloadSchema,
   'task.cancelled': TaskCancelledPayloadSchema,
+  'task.approval_resolved': TaskApprovalResolvedPayloadSchema,
 } as const;
 
 export type MessageType = keyof typeof MESSAGE_PAYLOAD_SCHEMAS;
@@ -380,4 +425,5 @@ export const DAEMON_TO_SERVER_TYPES = [
   'task.complete',
   'task.fail',
   'task.cancelled',
+  'task.approval_resolved',
 ] as const satisfies readonly MessageType[];

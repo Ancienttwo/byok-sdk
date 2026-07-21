@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import type { Daemon, ServiceLifecycle } from '../../index';
+import { connectControlClient, isControlDaemonGone } from '../control-client';
 
 /** Thrown when `unpair` didn't get a `--yes`/confirmed and either declined interactively or has no TTY to prompt on. Caught by `byok-agent.ts`'s top-level handler like any other error (clean message, exit 1) — never left to hang. */
 export class UnpairNotConfirmedError extends Error {
@@ -62,6 +63,34 @@ export class UnpairUnknownDaemonStateError extends Error {
   }
 }
 
+/**
+ * Finding F6 (cross-model adversarial review): thrown instead of clearing
+ * the store on the LIVE (control-socket) unpair path when the daemon's
+ * actual exit could NOT be confirmed — the shutdown RPC request itself
+ * failed/never got through, teardown hung past `waitForControlExit`'s
+ * deadline, or the exit-poll otherwise never observed `isControlDaemonGone`
+ * before timing out. All three collapse to the same observable signal
+ * (`exited === false`): a daemon that never actually received/finished the
+ * shutdown is presumably STILL RUNNING, with its `AuthManager`'s proactive
+ * renewal timer ready to write a fresh `device.json` right back over
+ * whatever `unpair()` is about to clear — clearing anyway (the pre-fix
+ * behavior) meant the log line had to openly admit "did not confirm exit...
+ * local device identity has still been cleared" as if that were routine,
+ * when it is exactly the silently-self-reverting hazard finding P1 #2
+ * originally set out to close. Bypassable via `--force`, same shape as
+ * {@link UnpairUnknownDaemonStateError} — this means "can't confirm it
+ * actually stopped", an explicit, logged-as-unsafe override, never a
+ * silent default.
+ */
+export class UnpairExitUnconfirmedError extends Error {
+  constructor() {
+    super(
+      'unpair refused: the daemon was told to shut down over the control socket but did not confirm exit before the timeout — it may still be running, and its next proactive token renewal could silently re-write device.json, undoing this unpair. Verify no `byok-agent` process is still running against this store and retry, or pass --force to clear the local credential anyway (unsafe — see UnpairExitUnconfirmedError\'s own doc comment).',
+    );
+    this.name = 'UnpairExitUnconfirmedError';
+  }
+}
+
 export interface UnpairDeps {
   log?: (line: string) => void;
   /** `--yes`: skip the confirmation prompt entirely. */
@@ -90,8 +119,31 @@ export interface UnpairDeps {
    * actively confirmed the service IS running
    * ({@link UnpairBlockedByRunningServiceError} is unconditional either
    * way) — `--force` overrides uncertainty, never a known-unsafe result.
+   *
+   * Finding F6: this SAME flag also overrides the LIVE (control-socket)
+   * path's own exit-confirmation gate — see
+   * {@link UnpairExitUnconfirmedError}. One flag, two independent unsafe
+   * overrides (whichever path this invocation actually took), each logged
+   * as an explicit WARNING rather than silently accepted.
    */
   force?: boolean;
+  /**
+   * M4 Phase 2: `storeDir`/`productId` to attempt a LIVE control-socket
+   * unpair before ever falling back to the service-state-based flow below
+   * — see this file's own module doc comment. Omitting either (e.g. an
+   * older test exercising only the fallback path) skips straight to that
+   * flow, exactly as before this feature existed.
+   */
+  storeDir?: string;
+  productId?: string;
+  /** DI for tests: substitute the real control-socket connection attempt. */
+  connectControl?: typeof connectControlClient;
+  /** DI for tests: substitute the real "has the daemon actually exited" probe. */
+  isControlDaemonGone?: typeof isControlDaemonGone;
+  /** How long to wait for the daemon to actually exit after `shutdown` is sent, before giving up (the store is still cleared either way — see the live-path log message). Default 15000ms. */
+  controlExitTimeoutMs?: number;
+  /** Poll interval while waiting for exit. Default 300ms. */
+  controlExitPollIntervalMs?: number;
 }
 
 /**
@@ -155,6 +207,36 @@ async function checkServiceState(lifecycle: Pick<ServiceLifecycle, 'status'> | u
  * stdin input that will never arrive — this CLI must work headless (see
  * `byok-agent.ts`'s header comment).
  *
+ * ## M4 Phase 2: the control socket makes live unpair actually possible
+ *
+ * When `deps.storeDir`/`deps.productId` are supplied (the real
+ * `byok-agent.ts` dispatch always supplies them), this first tries the
+ * control socket (`control-client.ts`). If a `byok-agent start` — foreground
+ * OR installed as a service, no distinction needed anymore — is genuinely
+ * reachable right now, that's a definitively confirmed "yes, something is
+ * running against this store", strictly better than the OS-service-state
+ * GUESS the rest of this doc comment describes: after confirming, this
+ * sends `shutdown {reason:'unpair'}`, then waits for the daemon to actually
+ * exit (polling `isControlDaemonGone` — both the control token file gone AND
+ * a fresh connect refused).
+ *
+ * Finding F6 (cross-model adversarial review, fixed same session): that
+ * exit confirmation is now load-bearing, not advisory — clearing the store
+ * only proceeds when `exited` is true, OR the caller passed `--force`
+ * (logged as an explicit WARNING either way). Before this fix, `daemon
+ * .unpair()` ran UNCONDITIONALLY regardless of whether the daemon ever
+ * actually confirmed exit — a shutdown RPC that failed outright, teardown
+ * that hung, or an exit-poll that simply timed out all still cleared
+ * `device.json` as if the daemon were confirmed gone, when it might still be
+ * fully running with its `AuthManager`'s proactive renewal timer poised to
+ * write a fresh credential right back — the exact silently-self-reverting
+ * hazard finding P1 #2 (below) was originally about, reopened on this one
+ * path. See {@link UnpairExitUnconfirmedError}. Only when the control socket
+ * is NOT reachable AT ALL (daemon not running at all, or an older daemon
+ * build predating this feature) does this fall through to the heuristic,
+ * OS-service-state-based flow this whole doc comment otherwise describes —
+ * untouched, including every refusal below.
+ *
  * ## Finding P1 #2: unpair used to silently fail (and self-revert) against a running daemon
  *
  * Clearing `device.json` on disk does nothing to a SEPARATE, already-running
@@ -204,16 +286,118 @@ async function checkServiceState(lifecycle: Pick<ServiceLifecycle, 'status'> | u
  *   needing `--force` — this fix does not make every unpair require
  *   `--force`, only the genuinely-unconfirmable ones.
  * - A `start` running directly in the foreground (no OS service involved)
- *   cannot be detected at all from a separate short-lived CLI invocation,
- *   even when the OS-service check above comes back clean — this residual
- *   gap is called out explicitly in the success message below every time,
- *   not just in a doc comment nobody reads at the terminal. Fully-safe live
- *   unpair (able to confirm/stop ANY running daemon, foreground included)
- *   needs the M4 control socket.
+ *   used to be undetectable at all from a separate short-lived CLI
+ *   invocation, even when the OS-service check above came back clean. The
+ *   M4 control-socket path above now closes exactly this gap — a reachable
+ *   control socket is a definitive "yes, something is running" regardless
+ *   of whether it's a foreground process or an installed service. This
+ *   heuristic OS-service-state flow (and its residual "foreground daemon
+ *   is invisible" gap) only still applies when the control socket itself
+ *   isn't reachable at all.
  */
+
+/**
+ * Shared confirmation prompt for BOTH the live (control-socket) and
+ * fallback (OS-service-state) unpair paths in {@link runUnpairCommand}
+ * below: `--yes` (`deps.confirmed`) skips it outright; an interactive TTY
+ * gets a y/N prompt; a non-TTY invocation (background/CI) throws
+ * {@link UnpairNotConfirmedError} immediately rather than hanging on stdin
+ * input that will never arrive.
+ */
+async function confirmUnpair(deps: Pick<UnpairDeps, 'confirmed' | 'isTTY' | 'input' | 'output'>, isTTY: boolean): Promise<void> {
+  if (deps.confirmed) return;
+  if (!isTTY) {
+    throw new UnpairNotConfirmedError();
+  }
+  const rl = createInterface({ input: deps.input ?? process.stdin, output: deps.output ?? process.stdout });
+  let answer: string;
+  try {
+    answer = await rl.question(
+      'This clears the locally paired device identity; the next `start` will require re-pairing. Continue? [y/N] ',
+    );
+  } finally {
+    rl.close();
+  }
+  if (!/^y(es)?$/i.test(answer.trim())) {
+    throw new UnpairNotConfirmedError();
+  }
+}
+
+/** Cancellable-by-nothing plain delay — this poll loop is itself bounded by `timeoutMs`, so no separate abort signal is needed. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForControlExit(
+  storeDir: string,
+  productId: string,
+  checkGone: typeof isControlDaemonGone,
+  timeoutMs: number,
+  pollIntervalMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await checkGone(storeDir, productId)) return true;
+    if (Date.now() >= deadline) return false;
+    await delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())));
+  }
+}
+
 export async function runUnpairCommand(daemon: Pick<Daemon, 'unpair'>, deps: UnpairDeps = {}): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const isTTY = deps.isTTY ?? Boolean(process.stdin.isTTY);
+
+  if (deps.storeDir !== undefined && deps.productId !== undefined) {
+    const connectControl = deps.connectControl ?? connectControlClient;
+    const conn = await connectControl({ storeDir: deps.storeDir, productId: deps.productId });
+    if (conn.ok) {
+      try {
+        // Declining (or a non-TTY throw) must not leak this connection —
+        // the `finally` below closes it regardless of which way this
+        // settles, including the confirmation-declined path, which used to
+        // fall straight through to the thrown error without ever reaching
+        // `conn.client.close()`.
+        await confirmUnpair(deps, isTTY);
+        // Best-effort: the daemon has already responded `ok` by the time
+        // `request()` resolves (or the connection simply drops as it tears
+        // itself down) — either way, the poll below is the real
+        // confirmation, not this call's own success/failure.
+        await conn.client.request('shutdown', { reason: 'unpair' }).catch(() => {});
+      } finally {
+        conn.client.close();
+      }
+
+      const checkGone = deps.isControlDaemonGone ?? isControlDaemonGone;
+      const exited = await waitForControlExit(
+        deps.storeDir,
+        deps.productId,
+        checkGone,
+        deps.controlExitTimeoutMs ?? 15_000,
+        deps.controlExitPollIntervalMs ?? 300,
+      );
+
+      // Finding F6: fail closed on an unconfirmed exit — see
+      // UnpairExitUnconfirmedError's own doc comment. Covers all three named
+      // failure shapes (the shutdown RPC itself failing, teardown hanging,
+      // or the exit-poll simply timing out): every one of them means
+      // `exited` is false here, so this one gate gets all three.
+      if (!exited && !deps.force) {
+        throw new UnpairExitUnconfirmedError();
+      }
+
+      await daemon.unpair();
+      if (exited) {
+        log(
+          'unpaired: the running daemon was told to shut down over the control socket, confirmed exited, and the local device identity has been cleared.',
+        );
+      } else {
+        log(
+          'unpaired: local device identity cleared. WARNING: --force was used to proceed even though the daemon did NOT confirm exit within the timeout after being told to shut down over the control socket — if it is still running, its next proactive token renewal will re-write device.json and silently undo this unpair. Verify no byok-agent process is still running against this store.',
+        );
+      }
+      return;
+    }
+  }
 
   const serviceState = await checkServiceState(deps.lifecycle);
   if (serviceState.outcome === 'confirmed-running') {
@@ -223,32 +407,16 @@ export async function runUnpairCommand(daemon: Pick<Daemon, 'unpair'>, deps: Unp
     throw new UnpairUnknownDaemonStateError(serviceState.reason);
   }
 
-  if (!deps.confirmed) {
-    if (!isTTY) {
-      throw new UnpairNotConfirmedError();
-    }
-    const rl = createInterface({ input: deps.input ?? process.stdin, output: deps.output ?? process.stdout });
-    let answer: string;
-    try {
-      answer = await rl.question(
-        'This clears the locally paired device identity; the next `start` will require re-pairing. Continue? [y/N] ',
-      );
-    } finally {
-      rl.close();
-    }
-    if (!/^y(es)?$/i.test(answer.trim())) {
-      throw new UnpairNotConfirmedError();
-    }
-  }
+  await confirmUnpair(deps, isTTY);
 
   await daemon.unpair();
   if (serviceState.outcome === 'unknown') {
     log(
-      `unpaired: local device identity cleared. WARNING: --force was used to proceed WITHOUT confirming no background service/daemon is running (${serviceState.reason}) — if one IS running against this same store, its next proactive token renewal will re-write device.json and silently undo this unpair. Stop it yourself, then re-run unpair to verify. (True cross-process live unpair needs the M4 control socket.)`,
+      `unpaired: local device identity cleared. WARNING: --force was used to proceed WITHOUT confirming no background service/daemon is running (${serviceState.reason}) — if one IS running against this same store, its next proactive token renewal will re-write device.json and silently undo this unpair. Stop it yourself, then re-run unpair to verify. (Live unpair over the control socket, above, is used automatically whenever it's reachable.)`,
     );
   } else {
     log(
-      'unpaired: local device identity cleared. NOTE: this cannot detect or stop a `byok-agent start` running directly in the foreground (no OS service involved) — if one is running against this same store, its next proactive token renewal will re-write device.json and silently undo this unpair; stop that process yourself first. (An installed background SERVICE is checked automatically; true cross-process live unpair needs the M4 control socket.)',
+      'unpaired: local device identity cleared. NOTE: this cannot detect or stop a `byok-agent start` running directly in the foreground with no reachable control socket (an older daemon build, or one that failed to bind it) — if one is running against this same store, its next proactive token renewal will re-write device.json and silently undo this unpair; stop that process yourself first. (An installed background SERVICE is checked automatically; a reachable control socket is used automatically and is the fully-safe path — see above.)',
     );
   }
 }

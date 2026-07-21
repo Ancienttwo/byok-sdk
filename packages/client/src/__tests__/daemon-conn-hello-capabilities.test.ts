@@ -74,12 +74,16 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     });
 
     // claude: no mid-turn steer (writes queue as a follow-up turn instead —
-    // see claude-adapter.ts), but does support the extra `plan` permission mode.
+    // see claude-adapter.ts), but does support the extra `plan` permission
+    // mode, and (M4 Phase 3) `confirm` via --permission-prompt-tool.
+    // `approvalInteractive` stays `false` regardless — see
+    // `toRuntimeInfoCapabilities`'s own doc comment in create-daemon.ts:
+    // that flag is hardcoded, not derived from `capabilities().permissionModes`.
     expect(byId.get('claude')).toEqual({
       steer: false,
       resume: true,
       approvalInteractive: false,
-      permissionModes: ['auto', 'readonly', 'plan'],
+      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     });
 
     // codex: no mid-turn steer (codex exec has no in-band channel — see

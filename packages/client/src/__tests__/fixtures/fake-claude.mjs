@@ -202,6 +202,11 @@ function runProbeOrTurnFlow() {
 
   // Exactly the flags packages/client/src/adapters/claude/claude-adapter.ts
   // can ever construct today — see the module doc comment above.
+  // M4 Phase 3: --permission-prompt-tool/--mcp-config/--strict-mcp-config
+  // added for `confirm` mode (see permission-mapping.ts's confirm-mode doc
+  // comment) — a regression here (a flag rename/removal on the adapter side
+  // with no matching update here) must fail a test via "unknown option",
+  // exactly like every other flag in this map.
   const FLAG_TAKES_VALUE = {
     '-p': false,
     '--input-format': true,
@@ -210,6 +215,9 @@ function runProbeOrTurnFlow() {
     '--resume': true,
     '--permission-mode': true,
     '--tools': true,
+    '--permission-prompt-tool': true,
+    '--mcp-config': true,
+    '--strict-mcp-config': false,
   };
 
   for (let i = 0; i < argv.length; i++) {

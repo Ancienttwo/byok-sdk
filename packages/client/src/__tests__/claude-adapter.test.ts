@@ -1,10 +1,12 @@
 import { fileURLToPath } from 'node:url';
+import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import type { SpawnFn } from '../adapters/claude/process-client';
 import type { Session, TaskContext } from '../types';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -91,9 +93,9 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   }, 8000);
 
-  it('capabilities() advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm mode excluded)', () => {
+  it('capabilities() advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm mode included as of M4 Phase 3)', () => {
     const adapter = fakeClaudeAdapter();
-    expect(adapter.capabilities()).toEqual({ steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan'] });
+    expect(adapter.capabilities()).toEqual({ steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] });
   });
 
   it('start() drives the canned prompt sequence into normalized AgentEvents (Bash tool_use/tool_result, progress, turn_end)', async () => {
@@ -152,11 +154,80 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/simulated crash for stderr-capture test/);
   });
 
-  it('fails closed on a policy claude cannot express ("confirm"), without ever spawning a process', async () => {
+  it('M4 Phase 3: confirm mode with no approval channel wired up fails closed (internal-consistency check — TaskRunner always populates one; a missing one means something upstream is badly wired)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
     ctx.policy = { mode: 'confirm' };
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/cannot express permission mode "confirm"/);
+    // approvalChannel deliberately left unset.
+    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/requires policy.mode "confirm".*approval channel/);
+  });
+
+  it('M4 Phase 3: confirm mode with an approval channel appends --permission-prompt-tool/--mcp-config/--strict-mcp-config on top of the deny-by-default baseline, and writes a matching mcp-config file', async () => {
+    const spawnCalls: { command: string; args: string[] }[] = [];
+    // Cast rather than fight `SpawnFn`'s (`typeof spawn`) overloaded shape —
+    // `ClaudeProcessClient` only ever calls it the one way (command, args,
+    // options all present), which is all this spy needs to actually work.
+    const spyingSpawnFn = ((command: string, args: readonly string[] = [], options: object = {}) => {
+      const argsArray = [...args];
+      spawnCalls.push({ command, args: argsArray });
+      return realSpawn(command, argsArray, options);
+    }) as unknown as SpawnFn;
+    const resolveSpy = vi.fn(async () => {});
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: spyingSpawnFn,
+      resolveApprovalMcpBin: () => ({ command: 'fake-approval-mcp-command', args: ['--fixture-arg'], source: 'env' }),
+    });
+    const ctx = await makeCtx();
+    ctx.policy = { mode: 'confirm' };
+    ctx.approvalChannel = {
+      taskId: 'task-confirm-1',
+      storeDir: '/fake/store-dir',
+      productId: 'fake-product',
+      timeoutMs: 123456,
+      resolve: resolveSpy,
+    };
+
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+
+    expect(spawnCalls).toHaveLength(1);
+    const args = spawnCalls[0]?.args ?? [];
+    expect(args).toContain('--permission-mode');
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('default');
+    expect(args).toContain('--permission-prompt-tool');
+    expect(args[args.indexOf('--permission-prompt-tool') + 1]).toBe('mcp__byokapproval__approval_prompt');
+    expect(args).toContain('--mcp-config');
+    expect(args).toContain('--strict-mcp-config');
+
+    const mcpConfigPath = args[args.indexOf('--mcp-config') + 1];
+    expect(typeof mcpConfigPath).toBe('string');
+    if (typeof mcpConfigPath !== 'string') throw new Error('unreachable');
+    const mcpConfigRaw = await fs.readFile(mcpConfigPath, 'utf8');
+    const mcpConfig = JSON.parse(mcpConfigRaw);
+    expect(mcpConfig).toEqual({
+      mcpServers: {
+        byokapproval: {
+          command: 'fake-approval-mcp-command',
+          args: ['--fixture-arg'],
+          env: {
+            BYOK_STORE_DIR: '/fake/store-dir',
+            BYOK_PRODUCT_ID: 'fake-product',
+            BYOK_TASK_ID: 'task-confirm-1',
+            BYOK_APPROVAL_TIMEOUT_MS: '123456',
+          },
+        },
+      },
+    });
+
+    // resolveApproval() routes through the injected approvalChannel, not a throw.
+    await session.resolveApproval(true, 'approved by test');
+    expect(resolveSpy).toHaveBeenCalledWith(true, 'approved by test');
+
+    // close() removes the temp mcp-config directory (best-effort cleanup).
+    await session.close();
+    openSessions.pop();
+    await expect(fs.access(mcpConfigPath)).rejects.toThrow();
   });
 
   it('fails closed on a blob-ref instruction (no blob fetch in M2)', async () => {
@@ -324,12 +395,12 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(events.some((e) => e.type === 'artifact')).toBe(false);
   });
 
-  it('resolveApproval() throws a descriptive not-supported error rather than silently no-op\'ing (claude never emits needs_approval — see the adapter\'s own doc comment)', async () => {
+  it('resolveApproval() throws a descriptive not-supported error rather than silently no-op\'ing when no approval channel is wired up (every mode other than confirm — see the adapter\'s own doc comment)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
-    await expect(session.resolveApproval(true)).rejects.toThrow(/does not support approval resume/);
+    await expect(session.resolveApproval(true)).rejects.toThrow(/no approval channel for this session/);
   });
 
   it('steer() throws a descriptive not-supported error (mid-turn stdin writes were empirically found to queue, not redirect)', async () => {

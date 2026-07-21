@@ -27,7 +27,7 @@
 //
 // Requires @byok/client already built (`pnpm --filter @byok/client build`).
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -66,7 +66,7 @@ try {
 // what failed the first version of this script in CI on windows-latest).
 // `pathToFileURL` converts a native absolute path to a correct `file://`
 // URL on every platform, which `import()` always accepts.
-const { createServiceLifecycle } = await import(pathToFileURL(clientDistIndex).href);
+const { createServiceLifecycle, ensureSecureDir } = await import(pathToFileURL(clientDistIndex).href);
 
 const name = `byok-winsw-smoke-${process.pid}`;
 const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-winsw-smoke-'));
@@ -98,8 +98,53 @@ async function assertScState(expected) {
   console.log(`PASS: sc.exe reports ${expected}`);
 }
 
+/**
+ * Finding F7: real, win32-only proof that `ensureSecureDir` (the one
+ * chokepoint `DeviceStore.save()`/`control-server.ts`'s `startControlServer`
+ * both funnel `storeDir` creation through — see `util/secure-dir.ts`) genuinely
+ * removes inherited ACEs and grants the current user/SYSTEM/Administrators
+ * via a real `icacls` invocation, not just that this codebase's own darwin/
+ * linux-run unit tests (`secure-dir.test.ts`, which inject a fake `run` and
+ * `platform` since neither a real Windows host nor a real `icacls` binary is
+ * available there) believe it constructs the right argv. Deliberately
+ * conservative: only checks for the ABSENCE of the `(I)` (inherited) flag and
+ * the PRESENCE of the three expected principal names in `icacls`'s own
+ * read-back output — not a byte-for-byte ACL comparison, which would be
+ * brittle across Windows/icacls versions and locales.
+ */
+async function assertStoreDirAclHardened() {
+  console.log('==> finding F7: storeDir Windows ACL hardening (icacls)');
+  const aclWorkDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-acl-smoke-'));
+  const secureDir = path.join(aclWorkDir, 'store');
+  try {
+    await ensureSecureDir(secureDir);
+
+    const { stdout: icaclsOutput } = await execFileAsync('icacls', [secureDir]);
+    console.log(`    icacls ${secureDir}:\n${icaclsOutput}`);
+
+    if (/\(I\)/.test(icaclsOutput)) {
+      throw new Error(`expected icacls to report NO inherited (I) ACEs after ensureSecureDir, got:\n${icaclsOutput}`);
+    }
+
+    const currentUser = os.userInfo().username;
+    const missing = [];
+    if (!icaclsOutput.toLowerCase().includes(currentUser.toLowerCase())) missing.push(`current user (${currentUser})`);
+    if (!/\bSYSTEM\b/i.test(icaclsOutput)) missing.push('SYSTEM');
+    if (!/\bAdministrators\b/i.test(icaclsOutput)) missing.push('Administrators');
+    if (missing.length > 0) {
+      throw new Error(`expected icacls to grant ${missing.join(', ')}, got:\n${icaclsOutput}`);
+    }
+
+    console.log('PASS: storeDir has no inherited ACEs and grants the current user/SYSTEM/Administrators');
+  } finally {
+    await fs.rm(aclWorkDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 let failed = false;
 try {
+  await assertStoreDirAclHardened();
+
   console.log(`==> installing WinSW service (name=${name})`);
   await lifecycle.install();
 
@@ -153,6 +198,27 @@ try {
   console.log('PASS: service removed from the SCM after uninstall');
 
   console.log('==> WinSW service lifecycle smoke: PASS');
+
+  // M4 Phase 2 addendum: the checks above deliberately run a harmless
+  // placeholder command (see the header comment) to isolate service
+  // lifecycle MECHANICS from the daemon/control-socket concern -- this
+  // separate, throwaway service instance runs the REAL `byok-agent start`
+  // (paired against a real, ephemeral @byok/server this helper also boots)
+  // and proves `byok-agent status` reaches its control socket live over a
+  // Windows named pipe. See
+  // packages/client/scripts/control-socket-check.mjs's own header comment.
+  console.log('==> M4 Phase 2: control socket check (separate scratch service running the real byok-agent)');
+  const controlSocketCheck = path.join(repoRoot, 'packages', 'client', 'scripts', 'control-socket-check.mjs');
+  const checkExitCode = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [controlSocketCheck, `${name}-ctlsocket`, '--winsw-bin', winswBin], {
+      stdio: 'inherit',
+    });
+    child.once('error', reject);
+    child.once('exit', (code) => resolve(code));
+  });
+  if (checkExitCode !== 0) {
+    throw new Error(`control-socket-check.mjs exited with code ${checkExitCode}`);
+  }
 } catch (err) {
   failed = true;
   console.error('FAIL:', err instanceof Error ? err.stack : err);

@@ -97,6 +97,7 @@ interface EnvelopeShapeOptions {
   'task.complete': { taskId: string; seq?: number };
   'task.fail': { taskId: string; seq?: number };
   'task.cancelled': { taskId: string; seq?: number };
+  'task.approval_resolved': { taskId: string; seq?: number };
 }
 
 interface EnvelopeCommonOptions {

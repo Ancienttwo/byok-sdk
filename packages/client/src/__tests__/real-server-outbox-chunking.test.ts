@@ -44,7 +44,19 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
   });
 
   it('queuing more than MAX_MESSAGES_PER_BATCH envelopes while long-poll-only still delivers every one, chunked, with the server never 400ing', async () => {
-    real = await startRealServerWithoutWebSocket({ productId: 'test-product', longPollHoldMs: 200 });
+    // M4 Phase 4: the real server now enforces a per-device inbound rate
+    // limit by default (50 msg/s sustained, burst 100 — see
+    // CreateByokServerOptions.rateLimit) — an orthogonal concern from this
+    // test's own purpose (proving outbox CHUNKING, finding P1). This test
+    // deliberately floods 300 envelopes near-instantly, which the default
+    // burst would otherwise legitimately throttle; a generous explicit
+    // override here keeps that unrelated feature from interfering with what
+    // this test actually verifies.
+    real = await startRealServerWithoutWebSocket({
+      productId: 'test-product',
+      longPollHoldMs: 200,
+      rateLimit: { messagesPerSecond: 1000, burst: 500 },
+    });
 
     const storeDir = await tmpDir('byok-outbox-chunk-store-');
     const auth = new AuthManager({ serverUrl: real.url, store: new DeviceStore(storeDir) });

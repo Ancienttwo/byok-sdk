@@ -5,11 +5,13 @@ import {
   DAEMON_TO_SERVER_TYPES,
   encodeEnvelope,
   PROTOCOL_VERSION,
+  TASK_STATES,
   type CreateEnvelopeOptions,
   type Envelope,
   type MessageType,
   type PermissionPolicy,
   type RuntimeInfo,
+  type TaskApprovalResolvedPayload,
   type TaskArtifactPayload,
   type TaskAwaitApprovalPayload,
   type TaskCancelledPayload,
@@ -24,10 +26,12 @@ import {
 import type { DeviceRegistry } from './auth';
 import { AsyncEventQueue } from './event-queue';
 import { generateTaskId } from './ids';
+import { RateLimiter } from './rate-limiter';
 import type { TaskStore } from './task-store';
 import type {
   ByokServerEvent,
   DispatchInput,
+  HubStats,
   MachineInfo,
   ServerTaskEvent,
   TaskHandle,
@@ -187,6 +191,50 @@ type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'
  * section further down for the full design, including why this does not
  * reintroduce the disconnect-alone-fails-the-task bug M1 removed above.
  */
+/**
+ * M4 Phase 3: thrown by {@link ConnectionHub.approveTask}/{@link
+ * ConnectionHub.rejectTask} for a `taskId` this hub has no record of at all
+ * — mirrors `task-store.ts`'s `IllegalTaskTransitionError` (typed error
+ * class + `instanceof` dispatch is this codebase's own established idiom for
+ * mapping a domain error to the right status code). Distinguished from
+ * {@link TaskNotAwaitingApprovalError} so a caller CAN tell the two failure
+ * modes apart (e.g. 404 vs. 409) instead of only ever seeing a single
+ * generic `Error`. There is no bearer-authed HTTP route for this on
+ * `http.ts`'s own app (see that file's own closing comment for why) — the
+ * supported entry point is calling `approveTask`/`rejectTask` directly, or
+ * via `TaskHandle.approve()`/`reject()` (thin wrappers over the same two
+ * methods); an embedder builds its own operator-facing surface on top of
+ * that, exactly like `examples/basic/server.ts`'s own
+ * `/api/tasks/:taskId/approve`/`reject` routes do.
+ */
+export class UnknownTaskError extends Error {
+  constructor(public readonly taskId: string) {
+    super(`unknown taskId: ${taskId}`);
+    this.name = 'UnknownTaskError';
+  }
+}
+
+/**
+ * Thrown by {@link ConnectionHub.approveTask}/{@link ConnectionHub.rejectTask}
+ * when the task exists but isn't currently `AwaitApproval` — see {@link
+ * UnknownTaskError}'s own doc comment for why this is a distinct class.
+ * `verb` keeps the exact pre-existing message wording per call site
+ * ("cannot approve ..." vs. "cannot reject ...") byte-for-byte unchanged —
+ * this message is user-visible today (e.g. `examples/basic`'s own
+ * `/api/tasks/:taskId/approve` surfaces `err.message` straight to the
+ * caller), so only the error's TYPE changes here, not its text.
+ */
+export class TaskNotAwaitingApprovalError extends Error {
+  constructor(
+    public readonly taskId: string,
+    public readonly state: TaskState,
+    verb: 'approve' | 'reject',
+  ) {
+    super(`cannot ${verb} task ${taskId}: not awaiting approval (state ${state})`);
+    this.name = 'TaskNotAwaitingApprovalError';
+  }
+}
+
 export class ConnectionHub {
   private readonly connections = new Map<string, ConnectionState>();
   private readonly outboxes = new Map<string, DeviceOutbox>();
@@ -206,12 +254,40 @@ export class ConnectionHub {
   private readonly taskActivity = new Map<string, number>();
   /** The task-lease reaper's own periodic sweep timer — see the constructor and `sweepLeases` below. */
   private readonly leaseReaperTimer: ReturnType<typeof setInterval>;
+  /** {@link ConnectionHub.stats}'s `uptimeMs` origin — this hub's own construction instant. */
+  private readonly startedAtMs = Date.now();
+  /** {@link ConnectionHub.stats}'s `envelopesIn` — every {@link handleInbound} call, every outcome. */
+  private envelopesInCount = 0;
+  /** {@link ConnectionHub.stats}'s `envelopesOut` — every envelope built via the single outbound choke point, {@link sendToDevice}. */
+  private envelopesOutCount = 0;
+  /** {@link ConnectionHub.stats}'s `dedupDrops` (N3). */
+  private dedupDropCount = 0;
+  /** {@link ConnectionHub.stats}'s `rateLimitEvents` — see {@link handleRateLimited}. */
+  private rateLimitEventCount = 0;
+  /**
+   * M4 Phase 4 (gatekeeper LOW advisory): devices that have already had a
+   * `device.rate_limited` embedder event emitted for their CURRENT
+   * over-budget episode — see {@link handleRateLimited}'s own doc comment.
+   * Coalescing state only; {@link rateLimitEventCount} still counts every
+   * single hit regardless of what this suppresses.
+   */
+  private readonly rateLimitEventEmittedFor = new Set<string>();
 
   constructor(
     private readonly taskStore: TaskStore,
     private readonly devices: DeviceRegistry,
     /** See {@link CreateByokServerOptions.taskLeaseMs} — already defaulted by `createByokServer` before reaching here. */
     private readonly taskLeaseMs: number,
+    /**
+     * M4 Phase 4 (part A): per-device inbound-envelope token bucket — see
+     * {@link CreateByokServerOptions.rateLimit} (already defaulted by
+     * `createByokServer` before reaching here) and {@link handleInbound}'s
+     * own doc comment for where it's enforced. Defaults to a fresh
+     * default-configured `RateLimiter` so every existing direct-construction
+     * call site (this hub is constructed directly by several tests) keeps
+     * working unchanged.
+     */
+    private readonly rateLimiter: RateLimiter = new RateLimiter(),
   ) {
     // A short (e.g. test-injected) taskLeaseMs sweeps at its own
     // granularity so a short lease is still caught promptly; a realistic
@@ -391,6 +467,14 @@ export class ConnectionHub {
    * path (`POST /byok/messages`, `http.ts`) in place of reaching into
    * per-type handlers directly. Runs a fixed gate, in order:
    *
+   * 0. **rate limit (M4 Phase 4, part A)** — one token debited from this
+   *    device's bucket ({@link rateLimiter}) for EVERY inbound envelope,
+   *    before anything else runs (including the type-allow check below) —
+   *    a flood of garbage-typed envelopes must cost the same budget as a
+   *    flood of well-formed ones. Checked first specifically so an
+   *    over-budget device is turned away as cheaply as possible, before any
+   *    taskStore lookup or dedup bookkeeping. See {@link handleRateLimited}
+   *    for what happens on exceed (never a silent drop).
    * 1. **type-allow (P2)** — only {@link DAEMON_TO_SERVER_TYPES} may pass; a
    *    server -> daemon type (or anything unrecognized, e.g. a stale/future
    *    `conn.hello` outside the handshake) arriving inbound is rejected
@@ -412,9 +496,22 @@ export class ConnectionHub {
    * Returns which outcome applied. A duplicate still counts as `accepted` on
    * the `POST /byok/messages` wire (§8.2) — an idempotent replay is a
    * wire-level success even though no handler ran a second time; only
-   * `rejected` (gate steps 1-2) is excluded from that count.
+   * `rejected`/`rate_limited` (gate steps 0-2) are excluded from that count.
    */
-  handleInbound(deviceId: string, envelope: Envelope): 'accepted' | 'duplicate' | 'rejected' {
+  handleInbound(deviceId: string, envelope: Envelope): 'accepted' | 'duplicate' | 'rejected' | 'rate_limited' {
+    this.envelopesInCount++;
+
+    if (!this.rateLimiter.consume(deviceId)) {
+      this.handleRateLimited(deviceId);
+      return 'rate_limited';
+    }
+    // Back under budget — clear any earlier suppression (see
+    // `rateLimitEventEmittedFor`'s own doc comment) so the NEXT time this
+    // device floods, it's treated as a fresh episode and gets its own
+    // embedder event rather than being silently coalesced into a flood it
+    // already recovered from.
+    this.rateLimitEventEmittedFor.delete(deviceId);
+
     if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) {
       return 'rejected';
     }
@@ -429,11 +526,60 @@ export class ConnectionHub {
     }
 
     if (this.checkAndRecordDuplicate(deviceId, envelope.id)) {
+      this.dedupDropCount++;
       return 'duplicate';
     }
 
     this.dispatchToHandler(deviceId, taskId, envelope);
     return 'accepted';
+  }
+
+  /**
+   * M4 Phase 4 (part A): `deviceId` just exceeded its inbound-envelope rate
+   * limit. Never a silent drop: counts the occurrence
+   * ({@link rateLimitEventCount}, surfaced via {@link stats} — every single
+   * hit, unconditionally) and, the FIRST time in this over-budget episode
+   * only, emits an embedder-facing `device.rate_limited`
+   * {@link ByokServerEvent} — see that variant's own doc comment (`types.ts`)
+   * for the full per-transport enforcement shape.
+   *
+   * Gatekeeper LOW advisory (event amplification): a single flood can make
+   * `handleInbound` call this many times in a row — e.g. several WS frames
+   * already in flight before the close below actually lands, or a
+   * long-poll device retrying its `POST /byok/messages` before its bucket
+   * has refilled. Without coalescing, an embedder subscribed to
+   * `events.subscribe()` would see one `device.rate_limited` per hit, which
+   * is noisy for what is really ONE ongoing episode of one device
+   * flooding. `rateLimitEventEmittedFor` suppresses the repeats: this
+   * method only pushes the event the first time it sees a given `deviceId`
+   * since `handleInbound`'s own success path last cleared it (i.e. since
+   * this device was last confirmed back under budget) — the COUNTER above
+   * is entirely unaffected by this and still increments on every call,
+   * unconditionally.
+   *
+   * This method only handles the WS half of the enforcement shape (closing
+   * the live connection, if any, so the client's existing backoff+reconnect
+   * takes over — mirrors `takeOverAsLongPoll`'s own `ws.close`, the only
+   * other place this hub closes a device's socket directly); a long-poll
+   * device has no live `ws` to close here at all (`conn.ws` is `undefined`
+   * while long-polling — see {@link ConnectionState}), so `http.ts`'s
+   * `/byok/messages` handler maps this same `'rate_limited'` `handleInbound`
+   * outcome to an HTTP 429 for that transport instead.
+   */
+  private handleRateLimited(deviceId: string): void {
+    this.rateLimitEventCount++;
+    if (!this.rateLimitEventEmittedFor.has(deviceId)) {
+      this.rateLimitEventEmittedFor.add(deviceId);
+      const at = new Date().toISOString();
+      this.serverEvents.push({ kind: 'device.rate_limited', deviceId, at });
+    }
+    const conn = this.connections.get(deviceId);
+    if (conn?.ws) {
+      // 1008 = Policy Violation (RFC 6455) — distinct from the 1002
+      // protocol-error closes ws-server.ts uses for a malformed handshake;
+      // this connection was well-formed, it just sent too much of it.
+      conn.ws.close(1008, 'rate limit exceeded');
+    }
   }
 
   /**
@@ -514,6 +660,9 @@ export class ConnectionHub {
       case 'task.cancelled':
         this.onCancelled(envelope.task_id, envelope.payload);
         return;
+      case 'task.approval_resolved':
+        this.onApprovalResolved(envelope.task_id, envelope.payload);
+        return;
       default:
         // conn.hello is handled during the handshake (ws-server.ts); the
         // remaining types (conn.ack/task.offer/approve/reject/cancel/steer)
@@ -575,7 +724,8 @@ export class ConnectionHub {
   private onProgress(taskId: string, payload: TaskProgressPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
-    if (record.state !== 'Running') {
+    const resumed = this.resumeIfImplicitlyApproved(record);
+    if (resumed.state !== 'Running') {
       this.forceFailOrDrop(taskId, 'task.progress received while not Running');
       return;
     }
@@ -589,7 +739,8 @@ export class ConnectionHub {
   private onArtifact(taskId: string, payload: TaskArtifactPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
-    if (record.state !== 'Running') {
+    const resumed = this.resumeIfImplicitlyApproved(record);
+    if (resumed.state !== 'Running') {
       this.forceFailOrDrop(taskId, 'task.artifact received while not Running');
       return;
     }
@@ -620,6 +771,11 @@ export class ConnectionHub {
     // Terminal messages arriving for an already-terminal task are stale/
     // duplicate (§9) — drop silently, not a warning.
     if (isTerminal(record.state)) return;
+    // Implicit-resume first (no-op unless still AwaitApproval) so a task
+    // completing right after a LOCAL-only approval lands on the normal
+    // Running -> Complete edge below, not the illegal AwaitApproval ->
+    // Complete edge — see resumeIfImplicitlyApproved's own doc comment.
+    this.resumeIfImplicitlyApproved(record);
     const result: TaskResult = {
       state: 'Complete',
       summary: payload.summary,
@@ -658,6 +814,89 @@ export class ConnectionHub {
     this.applyOrFail(taskId, 'Cancelled', { result: { state: 'Cancelled', reason: payload.reason } });
   }
 
+  /**
+   * M4 (additive-minor, `task.approval_resolved`): the EXPLICIT counterpart
+   * to {@link resumeIfImplicitlyApproved} — a daemon that resolved a pending
+   * approval entirely LOCALLY now reports it immediately, instead of the
+   * server only finding out after the fact once evidence (a later
+   * `task.progress`/`task.artifact`/`task.complete`) proves it.
+   *
+   * Relationship to the implicit path (both stay, permanently — this is not
+   * a replacement): {@link resumeIfImplicitlyApproved} remains completely
+   * untouched as the fallback for (a) an old daemon that predates this
+   * message, and (b) a daemon connected to an old server that never
+   * advertised the `approval_resolved` capability flag (`version.ts`) at
+   * handshake time — in either case the daemon never sends this message at
+   * all (see `packages/client`'s `task-runner.ts`), and the server keeps
+   * inferring the resolution from evidence exactly as it did before this
+   * message existed. When THIS message does arrive first, it already moves
+   * the record out of `AwaitApproval` (see below) — so by the time any
+   * following `task.progress`/etc. reaches `onProgress`/`onArtifact`/
+   * `onComplete`, `resumeIfImplicitlyApproved`'s own `record.state !==
+   * 'AwaitApproval'` guard is already true and it no-ops, never firing its
+   * own `task.approval_resolved_implicit` event a second time for the same
+   * resolution. The two mechanisms race harmlessly: whichever one the
+   * server processes first is the one that actually performs the
+   * transition; the other is naturally inert once it runs.
+   *
+   * Three outcomes, mirroring this file's existing per-type idempotency
+   * conventions:
+   *   - `AwaitApproval` (the expected case): legal transition to `Running`
+   *     (an existing `TASK_TRANSITIONS` edge, the same one `approveTask`
+   *     itself uses) plus a `task.approval_resolved` {@link ByokServerEvent}
+   *     carrying `approvalId`/`decision`/`resolvedBy` for an embedder to
+   *     observe.
+   *   - Already `Running` (evidence — or the implicit path — already beat
+   *     this message to it): idempotent no-op, silent, mirroring
+   *     `onStarted`'s own already-running guard.
+   *   - Terminal, or a state that was never `AwaitApproval` in the first
+   *     place (`Offered`/`Claimed` — a genuinely out-of-sequence report):
+   *     stale no-op with a `console.warn`, matching this file's existing
+   *     stale-message convention (`forceFailOrDrop`, `handleInbound`'s
+   *     ownership-mismatch drop) — never force-failed, since a late/
+   *     redelivered report about a task that has already moved on is not
+   *     evidence of anything currently wrong with it.
+   *
+   * This is also the residual-race resolution the accompanying protocol/docs
+   * update documents: a SaaS decision (`approveTask`/`rejectTask`) already in
+   * flight when the local resolution happens can still land on the server
+   * FIRST and move the record to a terminal state before this message
+   * arrives — in that case this message hits the terminal branch above and
+   * is a stale no-op, exactly like any other late message for an
+   * already-terminal task. The window for that crossing is now
+   * network-latency-sized (how long this message takes to arrive), not
+   * "until the next progress message" the way the pre-existing implicit-only
+   * inference left it.
+   */
+  private onApprovalResolved(taskId: string, payload: TaskApprovalResolvedPayload): void {
+    const record = this.taskStore.get(taskId);
+    if (!record) return;
+    if (record.state === 'Running') return; // evidence (or the implicit path) already beat this message to it — idempotent no-op, mirrors onStarted's own guard.
+    if (record.state !== 'AwaitApproval') {
+      // Terminal (a SaaS decision — or a redelivered terminal message —
+      // already crossed this one and won), or a state that never reached
+      // AwaitApproval at all (Offered/Claimed) — genuinely stale/
+      // out-of-sequence either way. Never force-failed: a late report about
+      // a task that has already moved on is not itself evidence of anything
+      // wrong with that task.
+      console.warn(
+        `[byok/server] dropping task.approval_resolved for ${taskId}: not awaiting approval (state ${record.state})`,
+      );
+      return;
+    }
+    this.applyOrFail(taskId, 'Running', {});
+    const after = this.taskStore.get(taskId);
+    if (after?.state !== 'Running') return; // defensive: AwaitApproval -> Running is always a legal TASK_TRANSITIONS edge, so applyOrFail should never actually fall back to Failed here.
+    this.serverEvents.push({
+      kind: 'task.approval_resolved',
+      taskId,
+      approvalId: payload.approvalId,
+      decision: payload.decision,
+      resolvedBy: payload.resolvedBy,
+      at: after.updatedAt,
+    });
+  }
+
   // ---------------------------------------------------------------------
   // transition helpers — the single place "illegal transition" is handled
   // ---------------------------------------------------------------------
@@ -676,6 +915,58 @@ export class ConnectionHub {
       return;
     }
     this.forceFailOrDrop(taskId, `illegal transition ${record.state} -> ${target}`);
+  }
+
+  /**
+   * M4 Phase 3 hardening (orchestrator-directed fix for the server-state-
+   * machine trace finding): a task can be resolved entirely OUT-OF-BAND, on
+   * the daemon side only (M4 Phase 3's local `approvals.resolve`
+   * control-socket path, `packages/client`) — the server never sees a wire
+   * `task.approve`/`task.reject` for it, so its own record sits in
+   * `AwaitApproval` even though the daemon already resumed and moved on.
+   *
+   * The daemon is the execution authority in this security model (the SaaS
+   * only ever *proposes* — see docs/spec.md); the daemon sending ANY further
+   * task.* traffic for a task the server still thinks is `AwaitApproval` is
+   * itself sufficient proof the approval was resolved locally, one way or
+   * another. Rather than force-failing/dropping that traffic (the pre-fix
+   * behavior — `onProgress`/`onArtifact`'s own `!== 'Running'` guard,
+   * `onComplete`'s illegal-transition fallback), this applies the exact same
+   * `AwaitApproval -> Running` edge `approveTask` already uses (a
+   * pre-existing legal `TASK_TRANSITIONS` edge, not a new one) through the
+   * normal transition path — `taskStore.transition` + `onStateChange`, same
+   * as `applyOrFail`'s own legal-transition branch — so every existing
+   * consumer of task state (§, `TaskHandle.events()`, the lease reaper's
+   * `taskActivity`) observes it exactly as it would a real wire
+   * `task.approve`. Then emits `task.approval_resolved_implicit` (a
+   * `ByokServerEvent`, NOT a wire message — see that type's own doc comment)
+   * so an embedder can distinguish this from an operator-driven approval.
+   *
+   * M4 (additive-minor, superseding this method's own former "deferred"
+   * framing): a first-class `task.approval_resolved` WIRE notification now
+   * exists (`onApprovalResolved`, below) — a daemon that supports it, talking
+   * to a server that advertised the `approval_resolved` capability flag
+   * (`version.ts`), reports a local resolution explicitly and immediately
+   * instead of leaving the server to infer it here. This method is
+   * UNTOUCHED and remains the permanent fallback for the N/N-1 cases where
+   * that explicit report never arrives (an old daemon, or an old server this
+   * daemon is talking to) — see `onApprovalResolved`'s own doc comment for
+   * the full relationship between the two paths, including why they can
+   * never both fire for the same resolution.
+   *
+   * No-op (returns `record` unchanged) for any state other than
+   * `AwaitApproval` — every other guard (terminal, pre-claim, already-
+   * Running) keeps exactly its current behavior. `onFail`/`onCancelled`
+   * never call this: `Failed`/`Cancelled` are already direct, legal edges
+   * from `AwaitApproval`, so they never hit the illegal-transition path this
+   * exists to avoid in the first place.
+   */
+  private resumeIfImplicitlyApproved(record: TaskSnapshot): TaskSnapshot {
+    if (record.state !== 'AwaitApproval') return record;
+    const updated = this.taskStore.transition(record.taskId, 'Running', {});
+    this.onStateChange(updated);
+    this.serverEvents.push({ kind: 'task.approval_resolved_implicit', taskId: record.taskId, at: updated.updatedAt });
+    return updated;
   }
 
   /**
@@ -957,11 +1248,24 @@ export class ConnectionHub {
     }
   }
 
-  private async approveTask(taskId: string): Promise<void> {
+  /**
+   * M4 Phase 3: made public (was private through M3) so an embedder can call
+   * it directly from its own operator-facing surface — there is no
+   * bearer-authed HTTP route for this on `http.ts`'s own app (see
+   * `UnknownTaskError`'s own doc comment for why, and
+   * `examples/basic/server.ts`'s `/api/tasks/:taskId/approve` for the
+   * intended shape of that embedder-built surface). See this file's own
+   * `UnknownTaskError`/`TaskNotAwaitingApprovalError` doc comments for why
+   * the two failure modes are now distinct typed errors rather than a
+   * single generic `Error`. Every thrown message's TEXT is byte-for-byte
+   * unchanged from M2/M3 — only the error's type changed (this is still also
+   * reachable via `TaskHandle.approve()`, unaffected).
+   */
+  async approveTask(taskId: string): Promise<void> {
     const record = this.taskStore.get(taskId);
-    if (!record) throw new Error(`unknown taskId: ${taskId}`);
+    if (!record) throw new UnknownTaskError(taskId);
     if (record.state !== 'AwaitApproval') {
-      throw new Error(`cannot approve task ${taskId}: not awaiting approval (state ${record.state})`);
+      throw new TaskNotAwaitingApprovalError(taskId, record.state, 'approve');
     }
     this.applyOrFail(taskId, 'Running', {});
     if (record.deviceId) {
@@ -969,11 +1273,12 @@ export class ConnectionHub {
     }
   }
 
-  private async rejectTask(taskId: string, reason?: string): Promise<void> {
+  /** M4 Phase 3: made public — see {@link ConnectionHub.approveTask}'s own doc comment for the full rationale (identical reasoning applies here). */
+  async rejectTask(taskId: string, reason?: string): Promise<void> {
     const record = this.taskStore.get(taskId);
-    if (!record) throw new Error(`unknown taskId: ${taskId}`);
+    if (!record) throw new UnknownTaskError(taskId);
     if (record.state !== 'AwaitApproval') {
-      throw new Error(`cannot reject task ${taskId}: not awaiting approval (state ${record.state})`);
+      throw new TaskNotAwaitingApprovalError(taskId, record.state, 'reject');
     }
     this.applyOrFail(taskId, 'Failed', {
       result: { state: 'Failed', reason: reason ?? 'approval rejected', retryable: false },
@@ -1024,6 +1329,7 @@ export class ConnectionHub {
     payload: Parameters<typeof createEnvelope<T>>[1],
     opts: Omit<CreateEnvelopeOptions<T>, 'seq' | 'v' | 'id' | 'ts'>,
   ): Extract<Envelope, { type: T }> {
+    this.envelopesOutCount++;
     const outbox = this.getOrCreateOutbox(deviceId);
     const seq = outbox.nextSeq++;
     // `createEnvelope`'s own public signature conditionally requires `opts`
@@ -1125,5 +1431,40 @@ export class ConnectionHub {
 
   listTasks(): TaskSnapshot[] {
     return this.taskStore.list();
+  }
+
+  // ---------------------------------------------------------------------
+  // observability (M4 Phase 4, part B.1) — in-process only; see
+  // `types.ts`'s `HubStats`/`CreateByokServerOptions.healthzRoute` doc
+  // comments for why this is never exposed over HTTP by this SDK itself.
+  // ---------------------------------------------------------------------
+
+  /**
+   * A plain, serializable snapshot of this hub's current state, derived from
+   * existing structures (`connections`, `taskStore`) plus the small counters
+   * this file already maintains for exactly this purpose — no new
+   * bookkeeping structures beyond those counters. See {@link HubStats}
+   * (`types.ts`) for the full field-by-field contract.
+   */
+  stats(): HubStats {
+    const taskCountsByState = Object.fromEntries(TASK_STATES.map((state) => [state, 0])) as Record<TaskState, number>;
+    for (const record of this.taskStore.list()) {
+      taskCountsByState[record.state]++;
+    }
+
+    let connectedDeviceCount = 0;
+    for (const conn of this.connections.values()) {
+      if (conn.connected) connectedDeviceCount++;
+    }
+
+    return {
+      connectedDeviceCount,
+      taskCountsByState,
+      envelopesIn: this.envelopesInCount,
+      envelopesOut: this.envelopesOutCount,
+      dedupDrops: this.dedupDropCount,
+      rateLimitEvents: this.rateLimitEventCount,
+      uptimeMs: Date.now() - this.startedAtMs,
+    };
   }
 }

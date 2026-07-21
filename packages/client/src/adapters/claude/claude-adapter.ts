@@ -1,8 +1,12 @@
 import { execFile } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
 import {
   PolicyUnsupportedError,
+  type ApprovalChannel,
   type RuntimeAdapter,
   type RuntimeCapabilities,
   type RuntimeDetectResult,
@@ -10,9 +14,14 @@ import {
   type TaskContext,
 } from '../../types';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
+import { resolveApprovalMcpBin, type ResolvedApprovalMcpBin } from './resolve-approval-mcp-bin';
 import { mapPermissionPolicyToClaudeArgs } from './permission-mapping';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
+import { APPROVAL_TOOL_NAME } from '../../bin/approval-mcp-server';
+
+/** The MCP server NAME this adapter registers `byok-approval-mcp` under in the generated `--mcp-config` (arbitrary, local to this file) — combined with {@link APPROVAL_TOOL_NAME} (imported, single-sourced from `bin/approval-mcp-server.ts` so the two can never independently drift) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. */
+const APPROVAL_MCP_SERVER_NAME = 'byokapproval';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,11 +32,19 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Best-effort teardown of the temp `--mcp-config` directory `start()` creates for `confirm` mode (see its own doc comment) — never throws, since a cleanup failure must never mask the real error/result it's cleaning up after. No-ops when `dir` is `undefined` (every mode other than `confirm`). */
+async function cleanupApprovalMcpConfigDir(dir: string | undefined): Promise<void> {
+  if (!dir) return;
+  await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+}
+
 export interface ClaudeAdapterOptions {
   /** Override bin resolution — tests substitute the fake-claude fixture script. */
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
   spawnFn?: SpawnFn;
+  /** M4 Phase 3: override `byok-approval-mcp` bin resolution — tests substitute a fixture script instead of computing a real dist path. Mirrors `resolveBin` above. */
+  resolveApprovalMcpBin?: () => ResolvedApprovalMcpBin;
 }
 
 /**
@@ -79,9 +96,42 @@ export interface ClaudeAdapterOptions {
  * not have.
  *
  * `PermissionPolicy.mode: 'confirm'` — the policy mode whose whole point is
- * "ask a human, then proceed" — is therefore rejected outright at
- * `start()` (fail-closed, see `permission-mapping.ts`), never silently
- * downgraded to auto-accept or auto-deny.
+ * "ask a human, then proceed" — was therefore rejected outright at
+ * `start()` through M2/M3 (fail-closed, see `permission-mapping.ts`), never
+ * silently downgraded to auto-accept or auto-deny.
+ *
+ * ## M4 Phase 3 update: a genuine out-of-band pause DOES exist — it is
+ * just invisible to everything written above
+ *
+ * `--permission-prompt-tool` (a DIFFERENT flag from `--permission-mode`,
+ * undocumented in `claude --help`'s own output on the installed 2.1.216
+ * binary but empirically confirmed accepted — an unrecognized flag is
+ * rejected outright with `error: unknown option`, this one is not) makes
+ * claude block a turn on a real MCP round-trip to a server it spawns
+ * itself, waiting for that server to answer allow/deny before continuing —
+ * genuinely pausing, for real wall-clock time (live-verified: an instant
+ * allow/deny, AND a deliberate multi-second delayed answer, both worked
+ * identically; only a permission-prompt-tool call that never answers AT
+ * ALL was found to make claude abandon the turn on its own, after roughly
+ * 1.5s — never actually reachable by this design, since the bundled
+ * `bin/byok-approval-mcp.ts` always eventually answers within its own
+ * configured ceiling).
+ *
+ * Everything above this section remains true and is NOT superseded by
+ * this: claude's own stream-json output still emits nothing while this
+ * pause is in progress — the gap between a `tool_use` frame and its
+ * `tool_result` is indistinguishable from ordinary model latency on the
+ * wire, and there is still no `needs_approval`-shaped frame this adapter's
+ * event mapper could ever produce. The pause is real, but it is invisible
+ * to `ClaudeSession.events` and to `task-runner.ts`'s `pump()` entirely —
+ * it is only ever observable from OUTSIDE this adapter's own process, by
+ * the separate MCP-server child process claude itself spawns. This is why
+ * `confirm` mode's daemon-side wiring (`task-runner.ts`'s `requestApproval`,
+ * `types.ts`'s `ApprovalChannel`) is driven from the control socket, not
+ * from any `AgentEvent` — see those files' own doc comments for the full
+ * design this finding drove. `confirm` is now SUPPORTED (see
+ * `permission-mapping.ts` and `resolveApproval()` below), still fail-closed
+ * whenever no approval channel was actually wired up for this session.
  *
  * ## Steering was also found unsupported (a second, related finding)
  *
@@ -117,7 +167,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan'] };
+    // M4 Phase 3: 'confirm' added — see permission-mapping.ts's confirm-mode
+    // doc comment for the empirical basis (`--permission-prompt-tool`,
+    // live-verified against the real installed binary).
+    return { steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] };
   }
 
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
@@ -128,6 +181,58 @@ export class ClaudeAdapter implements RuntimeAdapter {
     const mapping = mapPermissionPolicyToClaudeArgs(ctx.policy);
     if (!mapping.ok) {
       throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by claude adapter');
+    }
+
+    // M4 Phase 3: `confirm` mode's approval channel. Generating the
+    // temp --mcp-config file is a real filesystem side effect (see
+    // permission-mapping.ts's `needsApprovalMcp` doc comment for why this
+    // lives here, in start(), rather than in the pure mapping function) —
+    // deliberately OUTSIDE ctx.workspaceDir (a fresh, 0700 os.tmpdir()
+    // subdirectory instead) so it never shows up to the agent's own
+    // workspace-scoped Read/Glob/Grep, even though its contents (a storeDir
+    // path, productId, and this taskId — no secret/token material at all;
+    // the actual control-socket auth token stays under storeDir, unrelated
+    // to this file) would be low-value to an agent that found it anyway.
+    let approvalMcpConfigDir: string | undefined;
+    if (mapping.needsApprovalMcp) {
+      if (!ctx.approvalChannel) {
+        // Internal-consistency fail-closed: TaskRunner always populates this
+        // (see task-runner.ts's handleOffer) — a missing one here means
+        // something upstream is badly wired, not a normal policy rejection.
+        throw new PolicyUnsupportedError(
+          'claude adapter requires policy.mode "confirm" to be started with an approval channel (TaskContext.approvalChannel) — none was provided',
+        );
+      }
+      const approvalMcpBin = (this.options.resolveApprovalMcpBin ?? resolveApprovalMcpBin)();
+      approvalMcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-approval-mcp-'));
+      await fs.chmod(approvalMcpConfigDir, 0o700).catch(() => {});
+      const mcpConfigPath = path.join(approvalMcpConfigDir, 'mcp-config.json');
+      const mcpConfig = {
+        mcpServers: {
+          [APPROVAL_MCP_SERVER_NAME]: {
+            command: approvalMcpBin.command,
+            args: approvalMcpBin.args,
+            env: {
+              BYOK_STORE_DIR: ctx.approvalChannel.storeDir,
+              BYOK_PRODUCT_ID: ctx.approvalChannel.productId,
+              BYOK_TASK_ID: ctx.approvalChannel.taskId,
+              BYOK_APPROVAL_TIMEOUT_MS: String(ctx.approvalChannel.timeoutMs),
+            },
+          },
+        },
+      };
+      await fs.writeFile(mcpConfigPath, JSON.stringify(mcpConfig), { mode: 0o600 });
+      mapping.args = [
+        ...mapping.args,
+        '--permission-prompt-tool',
+        `mcp__${APPROVAL_MCP_SERVER_NAME}__${APPROVAL_TOOL_NAME}`,
+        '--mcp-config',
+        mcpConfigPath,
+        // Never let this task's confirm-mode run pick up some OTHER MCP
+        // server from ambient project/user config — the approval channel is
+        // the only MCP server this invocation should ever see.
+        '--strict-mcp-config',
+      ];
     }
 
     const bin = this.resolveBin();
@@ -184,6 +289,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       sessionRef = await client.waitForInit();
     } catch (err) {
       client.kill();
+      await cleanupApprovalMcpConfigDir(approvalMcpConfigDir);
       throw err;
     }
 
@@ -197,12 +303,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // to the caller at all. Fail closed instead of trusting the assumption.
     if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
       client.kill();
+      await cleanupApprovalMcpConfigDir(approvalMcpConfigDir);
       throw new Error(
         `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef}) — refusing to continue in a possibly-wrong session (fail-closed)`,
       );
     }
 
-    return new ClaudeSession(sessionRef, client, ctx.workspaceDir);
+    return new ClaudeSession(sessionRef, client, ctx.workspaceDir, ctx.approvalChannel, approvalMcpConfigDir);
   }
 
   /**
@@ -246,6 +353,10 @@ class ClaudeSession implements Session {
     public readonly sessionRef: string,
     private readonly client: ClaudeProcessClient,
     private readonly workspaceDir: string,
+    /** M4 Phase 3: set only when this session was started under `policy.mode: 'confirm'` — see `resolveApproval()`. */
+    private readonly approvalChannel?: ApprovalChannel,
+    /** M4 Phase 3: the temp `--mcp-config` directory `start()` created for this session, if any — removed in `close()`. */
+    private readonly approvalMcpConfigDir?: string,
   ) {}
 
   get events(): AsyncIterable<AgentEvent> {
@@ -362,11 +473,36 @@ class ClaudeSession implements Session {
 
   async close(): Promise<void> {
     this.client.kill();
+    await cleanupApprovalMcpConfigDir(this.approvalMcpConfigDir);
   }
 
-  async resolveApproval(): Promise<void> {
-    throw new Error(
-      'claude adapter does not support approval resume: claude never emits needs_approval — every permission decision in headless mode is resolved synchronously (auto-denied under a restrictive --permission-mode, auto-granted under a permissive one) before this adapter ever sees the corresponding frame, so there is nothing to resume later',
-    );
+  /**
+   * M4 Phase 3: routes into the out-of-band approval channel `start()`
+   * threaded through from `TaskContext.approvalChannel` — see that type's
+   * own doc comment (`../../types.ts`) for the full design, and
+   * `permission-mapping.ts`'s `confirm`-mode doc comment for the empirical
+   * basis. `approved`/`reason` map directly onto `ApprovalChannel.resolve`'s
+   * own parameters, which in turn resolve the SAME `ApprovalRegistry` entry
+   * `bin/byok-approval-mcp.ts`'s pending `approvals.request` control call is
+   * awaiting — answering that call is what lets claude's own blocked
+   * `tools/call` (and therefore the paused turn) proceed.
+   *
+   * Still throws when no channel is present — every adapter/session that
+   * ISN'T running under `confirm` mode (the overwhelming majority) has
+   * nothing to resolve, and a caller receiving `task.approve`/`task.reject`
+   * for one of those implies something upstream expected approval support
+   * that isn't there, exactly as this method's doc comment always said.
+   * `ApprovalChannel.resolve` itself throws the equally-descriptive "no
+   * pending approval" error for the narrower case (confirm mode, but nothing
+   * currently pending) — this method doesn't need its own separate check for
+   * that.
+   */
+  async resolveApproval(approved: boolean, reason?: string): Promise<void> {
+    if (!this.approvalChannel) {
+      throw new Error(
+        'claude adapter has no approval channel for this session (not running under policy.mode "confirm") — under every other mode, claude resolves every permission decision synchronously (auto-denied under a restrictive --permission-mode, auto-granted under a permissive one) before this adapter ever sees the corresponding frame, so there is nothing to resume later',
+      );
+    }
+    await this.approvalChannel.resolve(approved, reason);
   }
 }

@@ -10,6 +10,7 @@ import {
   partitionAgentEvents,
   type Envelope,
 } from '@byok/protocol';
+import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
@@ -101,6 +102,9 @@ describe('unknown AgentEvent tolerance on the client inbound path (pre-freeze pr
       },
       blobClient: unusedBlobClient,
       sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-envelope-tolerance-store-')),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir: 'unused-store-dir',
+      productId: 'unused-product-id',
     };
     const runner = new TaskRunner(deps);
 
