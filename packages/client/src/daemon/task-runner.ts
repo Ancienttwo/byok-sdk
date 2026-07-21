@@ -17,6 +17,24 @@ import type { SessionWorkspaceStore } from './session-workspace-store';
 /** Inline artifact payloads must stay under this many UTF-8 bytes — mirrors the frozen `TaskArtifactPayloadSchema.inline` limit in `packages/protocol` (see docs/protocol.md §7). Anything bigger goes through the blob client. */
 const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
 
+/**
+ * M3-B: cap for both `finishedTaskIds` and `pendingCancelled` below (each
+ * gains one entry per finished/cancelled task and was never pruned) — fine
+ * for the short-lived CLI invocations M0-M2 ran as, but M3 turns the daemon
+ * into a background service meant to stay up for weeks, so unbounded growth
+ * here is a real, if slow, memory leak. Each collection evicts its OLDEST
+ * (first-inserted) entry once over this cap — the same bounded-ring idiom
+ * `ConnectionHub`'s per-device dedup window already uses server-side
+ * (packages/server/src/hub.ts's `DEDUP_RING_CAPACITY`), just applied here to
+ * task ids. `Map`/`Set` iterate in insertion order (ECMA-262), so "oldest"
+ * always means "finished/cancelled longest ago" — neither collection is
+ * touched on a read, only on insert, so eviction order depends purely on
+ * insertion time. See `finishedTaskIds` and `pendingCancelled`'s own doc
+ * comments below for why a cap this size can't remove an entry either
+ * invariant still needs.
+ */
+export const MAX_TRACKED_TASK_IDS = 2000;
+
 export interface TaskRunnerDeps {
   adapters: RuntimeAdapter[];
   runtimeAllowlist?: string[];
@@ -205,6 +223,17 @@ export class TaskRunner {
    * checkpoint handles it; a cancel for a taskId that's already active,
    * already finished, or never offered at all leaves a harmless entry that
    * nothing will ever consult.
+   *
+   * M3-B: that last sentence is exactly the unbounded-growth vector this
+   * needed closed for long-lived operation — a cancel for a taskId nobody
+   * ever claims (unknown, already active, or already finished) leaves a
+   * permanent entry with nothing left to consume it. Bounded to
+   * `MAX_TRACKED_TASK_IDS` via `setPendingCancelled` below, oldest evicted
+   * first: safe because every entry this field's correctness actually
+   * depends on is consumed (deleted) by one of `handleOffer`'s two
+   * checkpoints within that SAME task's own offer-processing window — one
+   * in-flight task's startup latency, nowhere near enough churn for eviction
+   * to remove an entry still inside its consuming window before it's read.
    */
   private readonly pendingCancelled = new Map<string, string | undefined>();
   /**
@@ -219,6 +248,18 @@ export class TaskRunner {
    * that's already active (`this.tasks`) or already finished (this set) as
    * a no-op — never a second `adapter.start()` call, which would orphan the
    * first session.
+   *
+   * M3-B: unbounded otherwise — a long-lived daemon that's finished many
+   * thousands of tasks over its uptime would keep every single taskId
+   * forever. Bounded to `MAX_TRACKED_TASK_IDS` via `addFinishedTaskId`
+   * below, oldest evicted first. Safe for the redelivery-idempotency
+   * invariant above because the stalled-cursor scenario above redelivers
+   * this device's own recent backlog for one connection, not an arbitrary
+   * point in this daemon's whole history — this device would have to claim
+   * and finish `MAX_TRACKED_TASK_IDS` more tasks before a genuinely-still-
+   * pending redelivery for an older taskId even arrives, let alone gets
+   * processed, for eviction to ever remove an entry that redelivery still
+   * needed.
    */
   private readonly finishedTaskIds = new Set<string>();
 
@@ -556,8 +597,9 @@ export class TaskRunner {
       // see the class-level doc on `pendingCancelled` and the two
       // checkpoints in handleOffer). A genuinely stale/unknown/already-
       // finished taskId just leaves a harmless, never-consulted entry —
-      // identical in effect to the old silent-drop behavior for that case.
-      this.pendingCancelled.set(taskId, reason);
+      // identical in effect to the old silent-drop behavior for that case
+      // (M3-B: except now bounded — see `setPendingCancelled`).
+      this.setPendingCancelled(taskId, reason);
       return;
     }
     try {
@@ -582,6 +624,15 @@ export class TaskRunner {
     // `task.fail({reason:'cancelled'})`.
     this.deps.send(createEnvelope('task.cancelled', { reason }, { taskId }));
     await this.finish(taskId);
+  }
+
+  /** M3-B: bounded insert for `pendingCancelled` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
+  private setPendingCancelled(taskId: string, reason: string | undefined): void {
+    this.pendingCancelled.set(taskId, reason);
+    if (this.pendingCancelled.size > MAX_TRACKED_TASK_IDS) {
+      const oldest = this.pendingCancelled.keys().next().value;
+      if (oldest !== undefined) this.pendingCancelled.delete(oldest);
+    }
   }
 
   private async handleSteer(taskId: string, text: string): Promise<void> {
@@ -647,11 +698,20 @@ export class TaskRunner {
     if (!active) return;
     active.batcher.stop();
     this.tasks.delete(taskId);
-    this.finishedTaskIds.add(taskId); // finding P2 (Fix 2c) — see its own doc comment
+    this.addFinishedTaskId(taskId); // finding P2 (Fix 2c) — see its own doc comment
     try {
       await active.session.close();
     } catch {
       // best-effort teardown
+    }
+  }
+
+  /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
+  private addFinishedTaskId(taskId: string): void {
+    this.finishedTaskIds.add(taskId);
+    if (this.finishedTaskIds.size > MAX_TRACKED_TASK_IDS) {
+      const oldest = this.finishedTaskIds.values().next().value;
+      if (oldest !== undefined) this.finishedTaskIds.delete(oldest);
     }
   }
 
