@@ -271,8 +271,22 @@ export async function claimAndStart(ws: WebSocket, deviceId: string, handle: Tas
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
 
-/** Drives a task to AwaitApproval over `ws` and waits for the server to actually apply it. Shared by every hub-level test that needs a task parked in AwaitApproval (approve/reject, implicit-approval-resume, etc). */
-export async function moveToAwaitApproval(ws: WebSocket, handle: TaskHandle, summary = 'needs a human ok'): Promise<void> {
-  send(ws, createEnvelope('task.await_approval', { summary }, { taskId: handle.taskId }));
+/**
+ * Drives a task to AwaitApproval over `ws` and waits for the server to
+ * actually apply it. Shared by every hub-level test that needs a task
+ * parked in AwaitApproval (approve/reject, implicit-approval-resume, etc).
+ *
+ * `approvalId` (M5, approval targeting): optional — omitted entirely
+ * matches every pre-M5 call site's behavior (a legacy daemon that never
+ * reports one); passed through verbatim when a test needs the server to
+ * have recorded a specific `pendingApprovalId` for the task.
+ */
+export async function moveToAwaitApproval(
+  ws: WebSocket,
+  handle: TaskHandle,
+  summary = 'needs a human ok',
+  approvalId?: string,
+): Promise<void> {
+  send(ws, createEnvelope('task.await_approval', { summary, approvalId }, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
 }

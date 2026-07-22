@@ -79,6 +79,18 @@ interface ConnectionState {
   lastSeen: string;
   runtimes?: RuntimeInfo[];
   /**
+   * M5 (approval targeting, hello-capability plumbing): the capability flags
+   * this connection's `conn.hello` advertised — `undefined` for a device
+   * this hub has never seen a hello from at all (mirrors `runtimes`' own
+   * optionality). Read by {@link ConnectionHub.getDeviceCapabilities}.
+   * Carried forward across a WS -> long-poll transport switch
+   * ({@link takeOverAsLongPoll}) exactly like `runtimes` already is — a
+   * device doesn't re-send `conn.hello` just because its transport changed,
+   * so whatever it advertised on its live WS handshake must survive the
+   * switch, not silently reset to `undefined`.
+   */
+  capabilities?: readonly string[];
+  /**
    * Epoch-ms instant this device most recently transitioned from alive to
    * dark (set by {@link ConnectionHub.handleDisconnect}), or `undefined`
    * while alive. This is the task-lease reaper's condition (b) clock start —
@@ -130,7 +142,7 @@ interface TaskRuntime {
 }
 
 /** Fields hub.ts ever patches alongside a state transition. */
-type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result'>>;
+type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result' | 'pendingApprovalId' | 'claimedRuntime'>>;
 
 /**
  * The connection hub: tracks each device's live transport (WS or long-poll —
@@ -235,6 +247,36 @@ export class TaskNotAwaitingApprovalError extends Error {
   }
 }
 
+/**
+ * M5 (approval targeting): thrown by {@link ConnectionHub.approveTask}/
+ * {@link ConnectionHub.rejectTask} when an operator-supplied
+ * `opts.approvalId` is provided but does NOT match this hub's own
+ * last-recorded {@link TaskSnapshot.pendingApprovalId} for `taskId` — i.e.
+ * the caller is targeting a SPECIFIC approval that this server's record
+ * shows has already been superseded by a newer one (see `onAwaitApproval`'s
+ * own doc comment for how that happens). Distinct from
+ * {@link TaskNotAwaitingApprovalError} (the task isn't `AwaitApproval` at
+ * all right now — checked FIRST, so it still wins when both would apply):
+ * this error means the task genuinely IS awaiting approval, just not the one
+ * the caller thinks it is. Thrown before any state change and before any
+ * wire message is sent — a stale-id call has zero side effects, same as any
+ * other validation failure in this file.
+ */
+export class StaleApprovalError extends Error {
+  constructor(
+    public readonly taskId: string,
+    public readonly requestedApprovalId: string,
+    public readonly currentApprovalId: string | undefined,
+  ) {
+    super(
+      `cannot resolve approval ${requestedApprovalId} for task ${taskId}: the currently pending approval is ${
+        currentApprovalId ?? '(none recorded)'
+      }`,
+    );
+    this.name = 'StaleApprovalError';
+  }
+}
+
 export class ConnectionHub {
   private readonly connections = new Map<string, ConnectionState>();
   private readonly outboxes = new Map<string, DeviceOutbox>();
@@ -317,10 +359,21 @@ export class ConnectionHub {
   // connection lifecycle — called from ws-server.ts / http.ts
   // ---------------------------------------------------------------------
 
-  /** A daemon completed the WS handshake (`conn.hello`). Does not itself send `conn.ack` or redeliver — see {@link sendConnAck}/{@link redeliverAfterReconnect}. */
-  registerConnection(deviceId: string, ws: WebSocket, runtimes: RuntimeInfo[] | undefined): void {
+  /**
+   * A daemon completed the WS handshake (`conn.hello`). Does not itself send
+   * `conn.ack` or redeliver — see {@link sendConnAck}/{@link redeliverAfterReconnect}.
+   *
+   * `capabilities` (M5, hello-capability plumbing): the daemon's own
+   * `conn.hello.capabilities` — previously silently ignored end to end (a
+   * verified gap: `ws-server.ts` forwarded only `runtimes`). Optional so
+   * every pre-M5 direct-construction call site (several tests construct a
+   * `ConnectionHub` and call this directly) keeps working unchanged; a
+   * connection this hub never learns capabilities for simply reads back
+   * `undefined` from {@link getDeviceCapabilities}.
+   */
+  registerConnection(deviceId: string, ws: WebSocket, runtimes: RuntimeInfo[] | undefined, capabilities?: readonly string[]): void {
     const at = new Date().toISOString();
-    this.connections.set(deviceId, { ws, connected: true, lastSeen: at, runtimes });
+    this.connections.set(deviceId, { ws, connected: true, lastSeen: at, runtimes, capabilities });
     this.serverEvents.push({ kind: 'device.connected', deviceId, at });
     // Last-transport-wins (§8): a WS connection supersedes any long-poll
     // request currently held open for this device — let it complete now
@@ -433,7 +486,12 @@ export class ConnectionHub {
       // Detach first so the 'close' event this triggers sees a connection
       // state that's already moved on and skips handleDisconnect's
       // task-failure logic — the device isn't gone, it's switching transport.
-      this.connections.set(deviceId, { connected: true, lastSeen: at, runtimes: conn.runtimes });
+      // M5: `capabilities` carried forward alongside `runtimes` — a device
+      // doesn't re-send `conn.hello` just because its transport switched, so
+      // whatever it advertised on the live WS handshake must survive this
+      // switch, not silently reset to `undefined` (see `ConnectionState.
+      // capabilities`'s own doc comment).
+      this.connections.set(deviceId, { connected: true, lastSeen: at, runtimes: conn.runtimes, capabilities: conn.capabilities });
       ws.close(1000, 'superseded by long-poll connection');
     } else if (!conn) {
       this.connections.set(deviceId, { connected: true, lastSeen: at });
@@ -679,8 +737,25 @@ export class ConnectionHub {
     this.taskActivity.set(taskId, Date.now());
   }
 
-  /** Ownership (record.deviceId matching the connection's authenticated deviceId) is enforced centrally by {@link handleInbound} (N2) before this runs; only the idempotent-claim CAS and the first-claim device patch happen here. */
-  private onClaim(deviceId: string, taskId: string, _payload: TaskClaimPayload): void {
+  /**
+   * Ownership (record.deviceId matching the connection's authenticated
+   * deviceId) is enforced centrally by {@link handleInbound} (N2) before this
+   * runs; only the idempotent-claim CAS and the first-claim device patch
+   * happen here.
+   *
+   * M5 (claimed runtime, docs/protocol.md §3.1): `payload.runtime` — the
+   * ACTUAL adapter the daemon selected (`TaskRunner.pickAdapter`,
+   * `packages/client`'s `task-runner.ts`) — is recorded into
+   * `TaskSnapshot.claimedRuntime` alongside the device patch, distinct from
+   * the pre-existing `TaskSnapshot.runtime` (the merely REQUESTED runtime,
+   * untouched here and set only once, at `dispatch()` time). Only ever
+   * written on the FIRST real claim: the idempotent-CAS early return above
+   * fires before this for a retried claim from a device that already owns
+   * the task, so a redelivered/retried `task.claim` can never overwrite an
+   * already-recorded `claimedRuntime` — including with a stale or absent
+   * value from an out-of-order retry.
+   */
+  private onClaim(deviceId: string, taskId: string, payload: TaskClaimPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
     // Claim is an idempotent CAS: a retried claim from the device that
@@ -688,7 +763,7 @@ export class ConnectionHub {
     // effect land before retrying) is a no-op, not an illegal-transition
     // failure.
     if (record.state === 'Claimed' || record.state === 'Running') return;
-    this.applyOrFail(taskId, 'Claimed', { deviceId });
+    this.applyOrFail(taskId, 'Claimed', { deviceId, claimedRuntime: payload.runtime });
     // NOTE (M1 gap #2): claiming no longer implies Running — the daemon
     // reports that explicitly via task.started (see onStarted) once its
     // runtime session actually starts.
@@ -758,8 +833,39 @@ export class ConnectionHub {
     // AwaitApproval -> AwaitApproval is deliberately NOT in TASK_TRANSITIONS
     // (task-state.ts) — this early return is where the idempotency lives
     // instead.
-    if (record.state === 'AwaitApproval') return;
-    this.applyOrFail(taskId, 'AwaitApproval', {});
+    if (record.state === 'AwaitApproval') {
+      // M5 (approval targeting): a re-delivered/duplicate task.await_approval
+      // while already AwaitApproval is normally a pure idempotent no-op (see
+      // above) — but if it carries a DIFFERENT approvalId than what's
+      // currently stored, the daemon has moved on to a fresh approval (e.g.
+      // resolved the previous one entirely locally, then dispatched a new
+      // one) that this server's own record hasn't caught up to yet (no
+      // `approval_resolved` capability negotiated, or a legacy daemon).
+      // Updating the stored id here — via `setPendingApprovalId`, NOT
+      // `transition` (which `AwaitApproval -> AwaitApproval` would reject as
+      // illegal) — is what keeps a later `approveTask`/`rejectTask` from
+      // matching against an id the daemon has already superseded.
+      //
+      // `setPendingApprovalId` is OPTIONAL on `TaskStore` (a legacy embedder
+      // store predating M5 never implements it) — guarded here; a store
+      // without it simply never persists the superseding id, degrading to
+      // untargeted behavior (see `TaskStore.setPendingApprovalId`'s own doc
+      // comment). The observability push below still fires regardless, since
+      // it's about surfacing the NEW summary to an operator, independent of
+      // whether the store could record the id.
+      if (payload.approvalId !== undefined && payload.approvalId !== record.pendingApprovalId) {
+        this.taskStore.setPendingApprovalId?.(taskId, payload.approvalId);
+        // S2 fix: previously this branch updated the stored id and returned
+        // silently — an operator watching TaskHandle.events() kept seeing
+        // approval A's summary even though the stored target had already
+        // moved to B. Re-emit the SAME event the main (first-entry) branch
+        // below emits, carrying the NEW summary/approvalId, so an operator
+        // UI re-renders the approval prompt it's showing.
+        this.runtimes.get(taskId)?.queue.push({ kind: 'await_approval', summary: payload.summary });
+      }
+      return;
+    }
+    this.applyOrFail(taskId, 'AwaitApproval', { pendingApprovalId: payload.approvalId });
     const after = this.taskStore.get(taskId);
     if (after?.state !== 'AwaitApproval') return; // fell back to Failed, or task was unknown
     this.runtimes.get(taskId)?.queue.push({ kind: 'await_approval', summary: payload.summary });
@@ -884,9 +990,33 @@ export class ConnectionHub {
       );
       return;
     }
+    // M5 (approval targeting): both sides know a SPECIFIC approvalId here —
+    // the daemon's own report, and this server's own last-recorded
+    // `pendingApprovalId` (set by `onAwaitApproval`). If they disagree, the
+    // daemon has already moved on to resolving a DIFFERENT (newer) approval
+    // than the one this message is about — applying it anyway would
+    // incorrectly move this record to `Running` for the wrong approval.
+    // Stale no-op: warn, leave state untouched entirely — deliberately NOT
+    // `resumeIfImplicitlyApproved`'s unconditional AwaitApproval->Running
+    // edge either, since that path is for "moved on with no explicit id info
+    // at all," a materially different situation from "we have two specific,
+    // disagreeing ids."
+    if (payload.approvalId !== undefined && record.pendingApprovalId !== undefined && payload.approvalId !== record.pendingApprovalId) {
+      console.warn(
+        `[byok/server] stale task.approval_resolved for ${taskId}: reported approvalId ${payload.approvalId} does not match the currently pending ${record.pendingApprovalId}`,
+      );
+      return;
+    }
     this.applyOrFail(taskId, 'Running', {});
     const after = this.taskStore.get(taskId);
     if (after?.state !== 'Running') return; // defensive: AwaitApproval -> Running is always a legal TASK_TRANSITIONS edge, so applyOrFail should never actually fall back to Failed here.
+    // M5 (hello-capability plumbing): `targeted` is observability-only,
+    // driven by the REPORTING device's advertised capability flag, not by
+    // whether this particular message happened to carry a matching id (see
+    // `ByokServerEvent`'s own doc comment, `types.ts`, and the
+    // `approval-targeting` flag's own doc comment, `version.ts`).
+    const targeted =
+      record.deviceId !== undefined && (this.getDeviceCapabilities(record.deviceId)?.includes('approval-targeting') ?? false);
     this.serverEvents.push({
       kind: 'task.approval_resolved',
       taskId,
@@ -894,12 +1024,46 @@ export class ConnectionHub {
       decision: payload.decision,
       resolvedBy: payload.resolvedBy,
       at: after.updatedAt,
+      targeted,
     });
   }
 
   // ---------------------------------------------------------------------
   // transition helpers — the single place "illegal transition" is handled
   // ---------------------------------------------------------------------
+
+  /**
+   * M5 (approval targeting): single low-level wrapper around
+   * `TaskStore.transition` that every ACTUAL state-changing write in this
+   * file goes through — {@link applyOrFail}'s legal-transition branch,
+   * {@link forceFailOrDrop}, and {@link resumeIfImplicitlyApproved} (the one
+   * caller that transitions WITHOUT going through `applyOrFail` at all).
+   * Two responsibilities, folded in here once rather than duplicated at
+   * each call site:
+   *
+   *   1. Clears `pendingApprovalId` whenever `record` is LEAVING
+   *      `AwaitApproval` (`record.state === 'AwaitApproval' && to !==
+   *      'AwaitApproval'`) — the id this hub last recorded for a task's
+   *      pending approval ({@link onAwaitApproval}) is meaningless the
+   *      instant that task is no longer awaiting it. Clearing it here,
+   *      centrally, is what guarantees a FUTURE `AwaitApproval` cycle for
+   *      the SAME task always starts from a clean slate instead of silently
+   *      inheriting a stale id from a previous cycle (which would make a
+   *      stale-approval check against the NEW cycle's real pending id
+   *      spuriously pass just because a leftover value happened to still be
+   *      sitting in the record).
+   *   2. Calls {@link onStateChange} — every call site already did this
+   *      immediately after its own `transition` call; folding it in here
+   *      removes the duplication and the chance of a future call site
+   *      forgetting it.
+   */
+  private transitionTask(taskId: string, record: TaskSnapshot, to: TaskState, patch: TaskPatch): TaskSnapshot {
+    const finalPatch: TaskPatch =
+      record.state === 'AwaitApproval' && to !== 'AwaitApproval' ? { ...patch, pendingApprovalId: undefined } : patch;
+    const updated = this.taskStore.transition(taskId, to, finalPatch);
+    this.onStateChange(updated);
+    return updated;
+  }
 
   /**
    * Apply `taskId`'s state -> `target`. If that's illegal per
@@ -910,8 +1074,7 @@ export class ConnectionHub {
     const record = this.taskStore.get(taskId);
     if (!record) return;
     if (canTransition(record.state, target)) {
-      const updated = this.taskStore.transition(taskId, target, patch);
-      this.onStateChange(updated);
+      this.transitionTask(taskId, record, target, patch);
       return;
     }
     this.forceFailOrDrop(taskId, `illegal transition ${record.state} -> ${target}`);
@@ -963,8 +1126,12 @@ export class ConnectionHub {
    */
   private resumeIfImplicitlyApproved(record: TaskSnapshot): TaskSnapshot {
     if (record.state !== 'AwaitApproval') return record;
-    const updated = this.taskStore.transition(record.taskId, 'Running', {});
-    this.onStateChange(updated);
+    // M5: routed through the shared `transitionTask` chokepoint (not
+    // `taskStore.transition` + `onStateChange` directly, as before) so
+    // `pendingApprovalId` is cleared here exactly like every other path that
+    // leaves `AwaitApproval` — this is the one caller in this file that
+    // transitions without going through `applyOrFail` at all.
+    const updated = this.transitionTask(record.taskId, record, 'Running', {});
     this.serverEvents.push({ kind: 'task.approval_resolved_implicit', taskId: record.taskId, at: updated.updatedAt });
     return updated;
   }
@@ -979,17 +1146,24 @@ export class ConnectionHub {
     const record = this.taskStore.get(taskId);
     if (!record) return;
     if (canTransition(record.state, 'Failed')) {
-      const updated = this.taskStore.transition(taskId, 'Failed', {
+      this.transitionTask(taskId, record, 'Failed', {
         result: { state: 'Failed', reason, retryable: false },
       });
-      this.onStateChange(updated);
       return;
     }
     console.warn(`[byok/server] dropping message for ${taskId} (state ${record.state}): ${reason}`);
   }
 
   private onStateChange(record: TaskSnapshot): void {
-    this.serverEvents.push({ kind: 'task.state', taskId: record.taskId, state: record.state, at: record.updatedAt });
+    this.serverEvents.push({
+      kind: 'task.state',
+      taskId: record.taskId,
+      state: record.state,
+      at: record.updatedAt,
+      // M5 (claimed runtime): mirrors the snapshot's own field verbatim —
+      // see ByokServerEvent's 'task.state' variant doc comment (types.ts).
+      claimedRuntime: record.claimedRuntime,
+    });
     if (isTerminal(record.state)) {
       // Lease-reaper bookkeeping ends here for every terminal path, not just
       // the reaper's own reapTask() — see the "task-lease reaper" section
@@ -1217,11 +1391,11 @@ export class ConnectionHub {
       cancel(reason?: string): Promise<void> {
         return hub.cancelTask(taskId, reason);
       },
-      approve(): Promise<void> {
-        return hub.approveTask(taskId);
+      approve(opts?: { approvalId?: string }): Promise<void> {
+        return hub.approveTask(taskId, opts);
       },
-      reject(reason?: string): Promise<void> {
-        return hub.rejectTask(taskId, reason);
+      reject(reason?: string, opts?: { approvalId?: string }): Promise<void> {
+        return hub.rejectTask(taskId, reason, opts);
       },
       steer(text: string): Promise<void> {
         return hub.steerTask(taskId, text);
@@ -1261,30 +1435,58 @@ export class ConnectionHub {
    * unchanged from M2/M3 — only the error's type changed (this is still also
    * reachable via `TaskHandle.approve()`, unaffected).
    */
-  async approveTask(taskId: string): Promise<void> {
+  /**
+   * M5 (approval targeting, docs/protocol.md §5.3): `opts.approvalId`
+   * targets a SPECIFIC pending approval rather than "whichever one is
+   * currently pending" (the pre-M5 default, unchanged when `opts` is
+   * omitted). Validated FIRST, before any state change or wire send: if
+   * `opts.approvalId` is supplied and this hub has a recorded
+   * `pendingApprovalId` for `taskId` that DIFFERS, throws
+   * {@link StaleApprovalError} — no transition, no `task.approve` sent. If
+   * this hub never recorded a `pendingApprovalId` (a legacy daemon that
+   * never reported one), the call proceeds untargeted exactly as before.
+   * The outgoing `task.approve` carries `approvalId`: the caller-supplied
+   * one if given, else this hub's own recorded one, else omitted entirely
+   * (legacy wire shape) — so the daemon can apply its own exact-match check
+   * whenever this server has an id to offer at all.
+   */
+  async approveTask(taskId: string, opts?: { approvalId?: string }): Promise<void> {
     const record = this.taskStore.get(taskId);
     if (!record) throw new UnknownTaskError(taskId);
     if (record.state !== 'AwaitApproval') {
       throw new TaskNotAwaitingApprovalError(taskId, record.state, 'approve');
     }
+    if (opts?.approvalId !== undefined && record.pendingApprovalId !== undefined && opts.approvalId !== record.pendingApprovalId) {
+      throw new StaleApprovalError(taskId, opts.approvalId, record.pendingApprovalId);
+    }
     this.applyOrFail(taskId, 'Running', {});
     if (record.deviceId) {
-      this.sendToDevice(record.deviceId, 'task.approve', {}, { taskId });
+      const approvalId = opts?.approvalId ?? record.pendingApprovalId;
+      this.sendToDevice(record.deviceId, 'task.approve', { approvalId }, { taskId });
     }
   }
 
-  /** M4 Phase 3: made public — see {@link ConnectionHub.approveTask}'s own doc comment for the full rationale (identical reasoning applies here). */
-  async rejectTask(taskId: string, reason?: string): Promise<void> {
+  /**
+   * M4 Phase 3: made public — see {@link ConnectionHub.approveTask}'s own
+   * doc comment for the full rationale (identical reasoning applies here).
+   * M5: same `opts.approvalId` targeting semantics as `approveTask` above —
+   * see that method's own doc comment.
+   */
+  async rejectTask(taskId: string, reason?: string, opts?: { approvalId?: string }): Promise<void> {
     const record = this.taskStore.get(taskId);
     if (!record) throw new UnknownTaskError(taskId);
     if (record.state !== 'AwaitApproval') {
       throw new TaskNotAwaitingApprovalError(taskId, record.state, 'reject');
     }
+    if (opts?.approvalId !== undefined && record.pendingApprovalId !== undefined && opts.approvalId !== record.pendingApprovalId) {
+      throw new StaleApprovalError(taskId, opts.approvalId, record.pendingApprovalId);
+    }
     this.applyOrFail(taskId, 'Failed', {
       result: { state: 'Failed', reason: reason ?? 'approval rejected', retryable: false },
     });
     if (record.deviceId) {
-      this.sendToDevice(record.deviceId, 'task.reject', { reason }, { taskId });
+      const approvalId = opts?.approvalId ?? record.pendingApprovalId;
+      this.sendToDevice(record.deviceId, 'task.reject', { reason, approvalId }, { taskId });
     }
   }
 
@@ -1423,6 +1625,23 @@ export class ConnectionHub {
         runtimes: conn?.runtimes,
       };
     });
+  }
+
+  /**
+   * M5 (approval targeting, hello-capability plumbing): the capability flags
+   * `deviceId`'s CURRENT connection advertised in its `conn.hello` —
+   * `undefined` if this hub has no connection state for the device at all,
+   * or one that never had capabilities recorded (a pre-M5 daemon, or a
+   * device this hub only ever saw over long-poll with no prior WS hello —
+   * see `ConnectionState.capabilities`'s own doc comment). Read fresh from
+   * live connection state, mirroring `listMachines()`'s own convention; an
+   * embedder can use this to distinguish a targeting-capable device from a
+   * legacy one for its own observability/UI purposes (see `version.ts`'s
+   * `approval-targeting` flag doc comment for why this is informational
+   * only, never a correctness gate).
+   */
+  getDeviceCapabilities(deviceId: string): readonly string[] | undefined {
+    return this.connections.get(deviceId)?.capabilities;
   }
 
   getTask(taskId: string): TaskSnapshot | undefined {

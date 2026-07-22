@@ -4,13 +4,15 @@ import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import {
   createEnvelope,
+  RuntimeIdSchema,
   type BlobRef,
   type Envelope,
   type PermissionPolicy,
+  type RuntimeId,
   type TaskOfferPayload,
 } from '@byok/protocol';
 import { PolicyUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
-import type { ApprovalDecision, ApprovalOrigin, ApprovalRegistry } from './approvals';
+import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
 import { buildRuntimeEnv } from './environment';
@@ -218,11 +220,33 @@ interface ActiveTask {
 interface QueuedApprovalRequest {
   summary: string;
   resolve: (result: { approved: boolean; reason?: string }) => void;
+  /**
+   * C1 (cross-model review, P1): forwarded verbatim to `dispatchApproval`
+   * once this request is actually dispatched (`dispatchNextQueuedApproval`)
+   * — see `requestApproval`'s own doc comment for why this exists at all.
+   */
+  onOrigin?: (origin: ApprovalOrigin) => void;
 }
 
 type PickResult =
   | { ok: true; adapter: RuntimeAdapter }
   | { ok: false; reason: string; retryable: boolean };
+
+/**
+ * M5 (claimed runtime): `RuntimeAdapter.id` is a bare `string` (`../types.ts`)
+ * — deliberately wider than the frozen wire `RuntimeIdSchema`, so a custom,
+ * embedder-supplied adapter for a runtime this protocol doesn't know about
+ * can still be plugged in. `task.claim.runtime` (`TaskClaimPayloadSchema`)
+ * is narrower (`'pi' | 'claude' | 'codex'`), so the picked adapter's id must
+ * be checked before it can be sent on the wire — mirrors `create-daemon.ts`'s
+ * own `isRuntimeId` gate for `conn.hello.runtimes` reporting. An adapter
+ * whose id isn't one of these is simply omitted from `task.claim.runtime`
+ * (never sent as an invalid enum value), the same fail-closed-by-omission
+ * shape `detectRuntimes` already applies.
+ */
+function isKnownRuntimeId(id: string): id is RuntimeId {
+  return RuntimeIdSchema.safeParse(id).success;
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -584,10 +608,10 @@ export class TaskRunner {
         await this.handleSteer(envelope.task_id, envelope.payload.text);
         return;
       case 'task.approve':
-        await this.handleApprove(envelope.task_id);
+        await this.handleApprove(envelope.task_id, envelope.payload.approvalId);
         return;
       case 'task.reject':
-        await this.handleReject(envelope.task_id, envelope.payload.reason);
+        await this.handleReject(envelope.task_id, envelope.payload.reason, envelope.payload.approvalId);
         return;
       default:
         return; // conn.* and daemon->server-only types are handled elsewhere / not applicable
@@ -656,7 +680,24 @@ export class TaskRunner {
       // needed no commitment from this device. Only now do we actually take
       // the task — `task.decline` above is the alternative path for anything
       // that got this far without claiming.
-      this.deps.send(createEnvelope('task.claim', { deviceId: this.deps.deviceId }, { taskId }));
+      this.deps.send(
+        createEnvelope(
+          'task.claim',
+          {
+            deviceId: this.deps.deviceId,
+            // M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter
+            // `pickAdapter` just selected — covers both the explicit-runtime
+            // path (`payload.runtime` named one) and the auto-select
+            // (pi-first) path (`payload.runtime` was absent) uniformly,
+            // since `pick.adapter` already reflects whichever one won either
+            // way. Distinct from `payload.runtime` (the merely REQUESTED
+            // runtime): this is what closes the gap where an auto-selected
+            // task left the server never learning which runtime actually ran.
+            runtime: isKnownRuntimeId(pick.adapter.id) ? pick.adapter.id : undefined,
+          },
+          { taskId },
+        ),
+      );
 
       let resolvedInstruction: string;
       try {
@@ -849,9 +890,86 @@ export class TaskRunner {
 
         if (event.type === 'needs_approval') {
           active.batcher.flush();
-          this.deps.send(
-            createEnvelope('task.await_approval', { summary: event.summary }, { taskId: active.taskId }),
-          );
+          // Acceptance finding 1 (dormant branch bypassing the approval
+          // registry): this used to mint its own approvalId and stamp it
+          // onto `active.pendingApprovalId` directly, entirely bypassing
+          // `deps.approvalRegistry` — no registry entry ever existed for it,
+          // and nothing ever cleared this field for it either (clearing
+          // lived ONLY in `dispatchApproval`'s own `onResolve` callback,
+          // which is registered only when a request actually goes through
+          // the registry). For a hypothetical adapter mixing this
+          // stream-based path with the out-of-band `approvalChannel` path
+          // on the SAME task (e.g. a custom session whose `resolveApproval()`
+          // sometimes delegates to `ctx.approvalChannel.resolve()`), that
+          // meant: this event could clobber an already-dispatched channel
+          // approval's id (a later wire decision for the REAL dispatched
+          // approval would then look stale and be dropped); a resolved
+          // dormant approval left a stale id blocking every later
+          // `requestApproval` call for this task until the task finished;
+          // and routing a wire decision through `ctx.approvalChannel.resolve()`
+          // for a dormant id that was never registered threw
+          // `ApprovalNotFoundError` — not treated as benign staleness by
+          // `handleApprove`/`handleReject` — failing the task outright.
+          //
+          // Fix: reuse `requestApproval`, the SAME entry point a real
+          // out-of-band approval (MCP-triggered) goes through. This gives
+          // the dormant path the exact same lifecycle: it queues (rather
+          // than clobbers) behind an already-dispatched approval for this
+          // task, registers in `deps.approvalRegistry` once actually
+          // dispatched, and arms the same timeout — see
+          // `task-runner-approval.test.ts`'s mixed-path regression test.
+          //
+          // C1 (cross-model review, P1): reusing `requestApproval` fixed the
+          // registry-bypass above, but its returned promise used to be
+          // discarded outright (`void`d with no continuation at all). That
+          // was harmless for the WIRE path — `handleApprove`/`handleReject`
+          // already call `active.session.resolveApproval()` themselves,
+          // directly, before ever touching the registry (see
+          // `clearPendingApproval`'s own doc comment) — but a decision that
+          // resolves THIS registry entry any OTHER way (the local
+          // control-socket CLI's `approvals.resolve`, this request's own
+          // `dispatchApproval` timeout, or a bounded-eviction fallback in
+          // `ApprovalRegistry.register`) never goes through
+          // `handleApprove`/`handleReject` at all — so nothing ever called
+          // `session.resolveApproval()` for it. The runtime session stayed
+          // paused forever even though the daemon (and, for a `'local'`
+          // origin, the server too, via `sendApprovalResolved`) already
+          // considered the approval resolved.
+          //
+          // Fix: chain a continuation onto the SAME promise that forwards
+          // the decision into `active.session.resolveApproval()` — but ONLY
+          // when the resolution's origin is NOT `'wire'`, since the wire
+          // path already did that itself, synchronously, before this
+          // registry entry was ever resolved; forwarding again here would
+          // double-resolve the session. `origin` is deliberately NOT part of
+          // the promise's own resolved value — that shape (`{approved,
+          // reason}`) is `requestApproval`'s public contract, asserted
+          // exactly by this file's own tests and relied on by
+          // `byok-approval-mcp.ts`/`create-daemon.ts`'s control socket —
+          // instead it's threaded through via the optional `onOrigin`
+          // callback parameter (additive, invisible to every other caller).
+          // See `task-runner-approval.test.ts`'s "C1" describe block for the
+          // local-resolve / wire-resolve / timeout regression tests, and
+          // `clearPendingApproval`'s own doc comment for the sibling wire
+          // half of this exact design.
+          const { taskId } = active;
+          let resolutionOrigin: ApprovalOrigin = 'local';
+          void this.requestApproval(taskId, event.summary, (origin) => {
+            resolutionOrigin = origin;
+          }).then(async ({ approved, reason }) => {
+            if (resolutionOrigin === 'wire') return;
+            // The task may have finished (completed/failed/cancelled) by the
+            // time this settles — look it up fresh rather than trust the
+            // `active` closed over above, mirroring every other post-await
+            // guard in this method (e.g. this loop's own stray-event check,
+            // and the catch block below).
+            if (this.tasks.get(taskId) !== active) return;
+            try {
+              await active.session.resolveApproval(approved, reason);
+            } catch (err) {
+              await this.fail(taskId, `failed to resume session after approval decision: ${errorMessage(err)}`, false);
+            }
+          });
           continue;
         }
         if (event.type === 'turn_end') {
@@ -1112,8 +1230,25 @@ export class TaskRunner {
    * {@link MAX_PENDING_APPROVALS_PER_TASK}: a request arriving once this
    * task's queue is already full is rejected fail-closed immediately,
    * mirroring the unknown/inactive-taskId case above.
+   *
+   * C1 (cross-model review, P1): `onOrigin`, if supplied, is invoked
+   * synchronously — strictly BEFORE this method's own returned promise
+   * resolves — with the `ApprovalOrigin` (`'wire' | 'local'`) the eventual
+   * decision actually resolved through (see `ApprovalRegistry.resolve`'s own
+   * `origin` parameter). Purely additive/internal: every existing caller
+   * (`byok-approval-mcp.ts`, `create-daemon.ts`'s control socket, this file's
+   * own tests) omits it and observes exactly the same `{approved, reason}`
+   * resolution as before. `pump()`'s dormant `needs_approval` branch is the
+   * one caller that supplies it, to decide whether it still needs to
+   * forward the decision into `active.session.resolveApproval()` itself —
+   * see that branch's own doc comment for why origin can't simply ride
+   * along on the resolved value instead.
    */
-  async requestApproval(taskId: string, summary: string): Promise<{ approved: boolean; reason?: string }> {
+  async requestApproval(
+    taskId: string,
+    summary: string,
+    onOrigin?: (origin: ApprovalOrigin) => void,
+  ): Promise<{ approved: boolean; reason?: string }> {
     const active = this.tasks.get(taskId);
     if (!active) {
       return { approved: false, reason: 'task is not currently active on this device' };
@@ -1127,11 +1262,11 @@ export class TaskRunner {
         };
       }
       return new Promise((resolve) => {
-        active.approvalQueue.push({ summary, resolve });
+        active.approvalQueue.push({ summary, resolve, onOrigin });
       });
     }
 
-    return this.dispatchApproval(active, summary);
+    return this.dispatchApproval(active, summary, onOrigin);
   }
 
   /**
@@ -1143,8 +1278,19 @@ export class TaskRunner {
    * (`requestApproval`, nothing else pending for this task) or from
    * `dispatchNextQueuedApproval` once the previously-dispatched request for
    * this same task resolves.
+   *
+   * C1: `onOrigin` — see `requestApproval`'s own doc comment — is forwarded
+   * verbatim from whichever caller dispatched this (directly, or via
+   * `QueuedApprovalRequest.onOrigin` once `dispatchNextQueuedApproval` pulls
+   * it off the queue) and invoked from the registered `onResolve` callback
+   * below, BEFORE `resolve(...)` — so it always fires strictly before this
+   * method's own returned promise settles.
    */
-  private dispatchApproval(active: ActiveTask, summary: string): Promise<{ approved: boolean; reason?: string }> {
+  private dispatchApproval(
+    active: ActiveTask,
+    summary: string,
+    onOrigin?: (origin: ApprovalOrigin) => void,
+  ): Promise<{ approved: boolean; reason?: string }> {
     const { taskId } = active;
     const approvalId = randomUUID();
     active.pendingApprovalId = approvalId;
@@ -1158,7 +1304,10 @@ export class TaskRunner {
     // this turn should reach the server before the task's state moves to
     // AwaitApproval, not sit buffered behind an indefinite pause.
     active.batcher.flush();
-    this.deps.send(createEnvelope('task.await_approval', { summary }, { taskId }));
+    // M5 (approval targeting): approvalId is always included — see
+    // TaskAwaitApprovalPayloadSchema's own doc comment (@byok/protocol) for
+    // why no capability gating is needed to send it safely.
+    this.deps.send(createEnvelope('task.await_approval', { summary, approvalId }, { taskId }));
 
     const timeoutMs = this.deps.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     return new Promise((resolve) => {
@@ -1188,6 +1337,11 @@ export class TaskRunner {
           if (origin === 'local') {
             this.sendApprovalResolved(taskId, approvalId, decision);
           }
+          // C1: fires BEFORE `resolve(...)` below — a caller chaining
+          // `.then()` onto this method's returned promise (`pump()`'s
+          // dormant `needs_approval` branch) must already be able to see
+          // this origin by the time that continuation runs.
+          onOrigin?.(origin);
           resolve({ approved: decision === 'approve', reason });
           this.dispatchNextQueuedApproval(active);
         },
@@ -1236,7 +1390,95 @@ export class TaskRunner {
   private dispatchNextQueuedApproval(active: ActiveTask): void {
     const next = active.approvalQueue.shift();
     if (!next) return;
-    void this.dispatchApproval(active, next.summary).then(next.resolve);
+    void this.dispatchApproval(active, next.summary, next.onOrigin).then(next.resolve);
+  }
+
+  /**
+   * Acceptance finding 1 (dormant `needs_approval` branch bypassing the
+   * approval registry): resolves whatever `deps.approvalRegistry` entry
+   * `pendingId` names (if any — a caller passes `undefined` when nothing was
+   * pending to begin with), tagged `'wire'` — the same origin
+   * `ctx.approvalChannel.resolve` already uses for a server-sent
+   * `task.approve`/`task.reject` (see `ApprovalOrigin`'s own doc comment:
+   * `'wire'` is what keeps `sendApprovalResolved` from echoing
+   * `task.approval_resolved` back to a server that already knows this
+   * decision, since it sent it).
+   *
+   * Needed because `active.session.resolveApproval()` is adapter-defined:
+   * - A channel-based session (claude) already resolves this exact registry
+   *   entry itself, via `ctx.approvalChannel.resolve` (`handleOffer` above)
+   *   — by the time this runs, that entry is already gone, so this call
+   *   throws `ApprovalNotFoundError`, swallowed below: the same
+   *   first-resolution-wins race every other caller of `.resolve()` in this
+   *   file already treats as benign (see e.g. `dispatchApproval`'s own
+   *   timeout branch).
+   * - A stream-based session (the dormant `needs_approval` path in `pump()`,
+   *   now dispatched via `requestApproval` exactly like a real out-of-band
+   *   approval) resolves ONLY through its own in-process `resolveApproval()`
+   *   call — nothing else ever touches `deps.approvalRegistry` for it, so
+   *   without this call its registry entry and `active.pendingApprovalId`
+   *   would otherwise linger until this approval's own timeout (or the task
+   *   finishing) instead of clearing the moment the decision actually lands
+   *   — which would leave any OTHER approval queued behind it
+   *   (`active.approvalQueue`) stuck waiting for that same timeout.
+   *
+   * Called from `handleApprove`/`handleReject` AFTER `active.session
+   * .resolveApproval()` has already been given the decision — never before,
+   * since for the channel-based case that call is what actually resolves
+   * the registry entry `pendingId` names.
+   *
+   * CRITICAL follow-up to finding 1 above: `pendingId` is a required
+   * parameter — deliberately NOT read from `active.pendingApprovalId` inside
+   * this method (indeed, this method no longer takes `active` at all). For a
+   * channel-based session (claude), the `await active.session
+   * .resolveApproval()` in `handleApprove`/`handleReject` BELOW THIS CALL is
+   * exactly what synchronously drives `ctx.approvalChannel.resolve` ->
+   * `approvalRegistry.resolve(A)` -> A's own `onResolve`
+   * (`dispatchApproval` above) -> `dispatchNextQueuedApproval` — and that
+   * last step, still inside the SAME synchronous call and therefore still
+   * strictly BEFORE the caller's own `await` settles, dispatches the next
+   * queued approval (B) and reassigns `active.pendingApprovalId = B`. A
+   * caller that read `active.pendingApprovalId` only AFTER that `await`
+   * returned (as this method itself used to, before it took `pendingId` as a
+   * parameter) would therefore observe B, not A — resolving B (silently,
+   * with A's decision: an auto-approve or a force-reject of an approval no
+   * one ever actually decided) instead of the already-gone entry for A this
+   * call is actually meant to (harmlessly) no-op against. Callers now
+   * capture the target id BEFORE that await (`handleApprove`/`handleReject`
+   * below) so this can only ever be asked to resolve the id it was meant to
+   * all along. See `task-runner-approval.test.ts`'s channel-routing
+   * regression test for this exact interleaving reproduced end to end.
+   */
+  private clearPendingApproval(pendingId: string | undefined, decision: ApprovalDecision, reason: string | undefined): void {
+    if (pendingId === undefined) return;
+    try {
+      this.deps.approvalRegistry.resolve(pendingId, decision, reason, 'wire');
+    } catch (err) {
+      // C3 (cross-model review, P2): narrowed to ONLY the benign
+      // already-resolved race this catch was ever meant to cover — a bare
+      // `catch {}` here used to swallow EVERYTHING, but
+      // `ApprovalRegistry.resolve` deletes the entry BEFORE invoking its
+      // registered `onResolve` callback (`dispatchApproval` above), so a
+      // genuine bug in that callback (`sendApprovalResolved` throwing,
+      // `dispatchNextQueuedApproval` failing to dispatch the next queued
+      // approval, this same file's own `onOrigin` hook throwing) vanished
+      // here too, silently, with nothing ever finding out.
+      if (err instanceof ApprovalNotFoundError) {
+        // Already resolved via ctx.approvalChannel.resolve (the channel-based
+        // adapter path) — benign, same first-resolution-wins guarantee
+        // `ApprovalRegistry` already documents on its own `resolve()` method.
+        return;
+      }
+      // Anything else is a genuine failure, not a benign race — propagate
+      // it to the caller's existing error handling. Neither `handleApprove`
+      // nor `handleReject` wraps this call in a try/catch of their own, so
+      // this bubbles all the way up through `handleEnvelope` to
+      // `ConnectionManager.process()`'s own existing catch, which logs it
+      // and leaves the cursor unadvanced so a reconnect redelivers this
+      // exact `task.approve`/`task.reject` for a retry — the same handling
+      // every other envelope-handler failure already gets.
+      throw err;
+    }
   }
 
   /**
@@ -1259,9 +1501,37 @@ export class TaskRunner {
    * couldn't resume for some real reason) still fails the task exactly as
    * before.
    */
-  private async handleApprove(taskId: string): Promise<void> {
+  private async handleApprove(taskId: string, approvalId: string | undefined): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
+    // M5 (approval targeting, docs/protocol.md): checked FIRST, before ever
+    // touching active.session. Closes the race NoPendingApprovalError alone
+    // could not: approval A resolves, approval B is dispatched next for the
+    // SAME task (active.pendingApprovalId now B), and a LATE task.approve
+    // meant for A arrives after. Pre-M5, `ctx.approvalChannel.resolve`
+    // always resolved "whichever approval is currently pending" (B),
+    // silently applying A's decision to B. A mismatch here is an
+    // audit-only no-op via the same onStaleApprovalDecision hook
+    // NoPendingApprovalError already uses. An absent approvalId (legacy
+    // server, or one that never recorded an id) preserves the pre-M5
+    // behavior exactly: resolve whichever approval is currently pending.
+    if (approvalId !== undefined && approvalId !== active.pendingApprovalId) {
+      this.deps.onStaleApprovalDecision?.(
+        taskId,
+        'approve',
+        `approvalId ${approvalId} does not match the currently pending approval` +
+          (active.pendingApprovalId ? ` (${active.pendingApprovalId})` : ' (none pending)'),
+      );
+      return;
+    }
+    // CRITICAL: captured BEFORE the await below — see `clearPendingApproval`'s
+    // own doc comment for exactly why reading `active.pendingApprovalId`
+    // only AFTER `resolveApproval()` settles is wrong: for a channel-based
+    // session, that same await's own synchronous side effects (racing
+    // through `approvalRegistry.resolve` -> `dispatchNextQueuedApproval`)
+    // can already have reassigned it to a different, queued approval by the
+    // time control returns here.
+    const resolvedId = approvalId ?? active.pendingApprovalId;
     try {
       await active.session.resolveApproval(true);
     } catch (err) {
@@ -1270,7 +1540,10 @@ export class TaskRunner {
         return;
       }
       await this.fail(taskId, `failed to resume session after approval: ${errorMessage(err)}`, false);
+      return;
     }
+    // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
+    this.clearPendingApproval(resolvedId, 'approve', undefined);
   }
 
   /**
@@ -1296,9 +1569,30 @@ export class TaskRunner {
    * daemon must still conform to that regardless of whether telling the
    * session about it succeeded.
    */
-  private async handleReject(taskId: string, reason: string | undefined): Promise<void> {
+  private async handleReject(taskId: string, reason: string | undefined, approvalId: string | undefined): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
+    // M5 (approval targeting): same validate-first mismatch check as
+    // handleApprove above — see that method's own comment for the full
+    // race this closes. Returned early here means NONE of the
+    // interrupt+task.fail+finish sequence below runs for a stale decision:
+    // the currently-pending (different) approval stays untouched and the
+    // task is not torn down.
+    if (approvalId !== undefined && approvalId !== active.pendingApprovalId) {
+      this.deps.onStaleApprovalDecision?.(
+        taskId,
+        'reject',
+        `approvalId ${approvalId} does not match the currently pending approval` +
+          (active.pendingApprovalId ? ` (${active.pendingApprovalId})` : ' (none pending)'),
+      );
+      return;
+    }
+    // CRITICAL: captured BEFORE the await below — see handleApprove above
+    // and `clearPendingApproval`'s own doc comment for the full race this
+    // closes (identical here: a channel-based session's own resolution,
+    // still inside this await, can already have reassigned
+    // `active.pendingApprovalId` to a different, queued approval).
+    const resolvedId = approvalId ?? active.pendingApprovalId;
     try {
       await active.session.resolveApproval(false, reason);
     } catch (err) {
@@ -1308,6 +1602,13 @@ export class TaskRunner {
       }
       // best-effort — still report the rejection outcome below
     }
+    // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
+    // Must run BEFORE `finish()` below — its own fail-closed cleanup
+    // defaults to origin 'local' (see `ApprovalRegistry.resolve`'s default
+    // parameter), which would incorrectly echo `task.approval_resolved`
+    // back to a server that already knows this decision (it sent this
+    // task.reject itself) if this hadn't already cleared it as 'wire' here.
+    this.clearPendingApproval(resolvedId, 'reject', reason);
     try {
       await active.session.interrupt();
     } catch {

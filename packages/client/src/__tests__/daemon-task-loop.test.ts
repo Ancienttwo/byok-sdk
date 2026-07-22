@@ -62,6 +62,13 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
     const claim = await server.waitFor((e) => e.type === 'task.claim');
     expect(claim.payload).toMatchObject({ deviceId: 'device-1' });
     expect('taskId' in claim.payload).toBe(false);
+    // M5 (claimed runtime): the default StubRuntimeAdapter's id ('stub') is
+    // not one of the frozen RuntimeIdSchema values, so it must be omitted
+    // from task.claim.runtime entirely rather than sent as an invalid enum
+    // value — mirrors create-daemon.ts's own isRuntimeId gate for
+    // conn.hello.runtimes reporting. See the dedicated describe block below
+    // for the recognized-runtime-id cases.
+    expect('runtime' in claim.payload).toBe(false);
 
     // M1 gap #2: `task.claim` no longer implies `Running` — `task.started`
     // is the explicit, separate signal the adapter session actually started.
@@ -293,8 +300,44 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
     await vi.waitFor(() => expect(adapter.sessions[0]?.steerCalls).toEqual(['focus on tests']));
   });
 
+  describe('task.claim reports the actually-selected runtime (M5, requested vs. claimed)', () => {
+    it('an explicit-runtime offer: task.claim carries that same runtime as the actual pick', async () => {
+      const adapter = new StubRuntimeAdapter('pi');
+      await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { instruction: 'x', policy: { mode: 'auto' }, runtime: 'pi' },
+          { taskId: 'task-runtime-explicit', seq: server.nextSeq() },
+        ),
+      );
+
+      const claim = await server.waitFor((e) => e.type === 'task.claim');
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', runtime: 'pi' });
+    });
+
+    it('an offer naming NO runtime: task.claim still carries the auto-selected (pi-first) adapter this device actually picked, not merely an absence', async () => {
+      const adapter = new StubRuntimeAdapter('claude');
+      await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { instruction: 'x', policy: { mode: 'auto' } }, // no `runtime` — daemon auto-selects
+          { taskId: 'task-runtime-auto', seq: server.nextSeq() },
+        ),
+      );
+
+      const claim = await server.waitFor((e) => e.type === 'task.claim');
+      // This is the exact gap the feature closes: before, the server never
+      // learned which runtime an auto-selected task actually ran on.
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', runtime: 'claude' });
+    });
+  });
+
   describe('approval resume (protocol §5)', () => {
-    async function offerAndAwaitApproval(taskId: string): Promise<{ adapter: StubRuntimeAdapter }> {
+    async function offerAndAwaitApproval(taskId: string): Promise<{ adapter: StubRuntimeAdapter; approvalId: string }> {
       const adapter = new StubRuntimeAdapter();
       await setupDaemon(adapter);
 
@@ -312,8 +355,17 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
       adapter.sessions[0]?.emit({ type: 'needs_approval', summary: 'about to do something sensitive' });
       const awaitApproval = await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
       expect(awaitApproval.payload).toMatchObject({ summary: 'about to do something sensitive' });
+      // M5 (approval targeting): this exercises the DORMANT `needs_approval`
+      // AgentEvent branch in `pump()` (no bundled adapter emits it on its
+      // own event stream — see task-runner.ts's own doc comment — but a
+      // stub session emitting it directly, as this test does, still drives
+      // it). A real per-approval id must now be stamped here too, mirroring
+      // `dispatchApproval`'s own bookkeeping.
+      if (awaitApproval.type !== 'task.await_approval') throw new Error('unreachable');
+      const approvalId = awaitApproval.payload.approvalId;
+      expect(approvalId).toEqual(expect.any(String));
 
-      return { adapter };
+      return { adapter, approvalId: approvalId! };
     }
 
     it('task.approve resolves approval(true) and progress resumes to completion', async () => {
@@ -346,6 +398,34 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
       expect(session?.resolveApprovalCalls).toEqual([{ approved: false, reason: 'not authorized' }]);
       expect(session?.interruptCalled).toBe(true);
       expect(session?.closeCalled).toBe(true);
+    });
+
+    it('M5 (approval targeting): a task.approve carrying a WRONG approvalId for this pump()-dispatched approval is an audit-only no-op — the session is untouched and no task.fail is sent', async () => {
+      const { adapter, approvalId } = await offerAndAwaitApproval('task-approve-stale-1');
+      const session = adapter.sessions[0];
+
+      const staleDecisions: Array<{ decision: string; reason?: string }> = [];
+      daemon?.subscribe((e) => {
+        if (e.kind === 'stale-approval-decision') staleDecisions.push({ decision: e.decision, reason: e.reason });
+      });
+
+      expect(approvalId).not.toBe('a-completely-different-id');
+      server.send(
+        createEnvelope('task.approve', { approvalId: 'a-completely-different-id' }, { taskId: 'task-approve-stale-1', seq: server.nextSeq() }),
+      );
+
+      await vi.waitFor(() => expect(staleDecisions).toHaveLength(1));
+      expect(staleDecisions[0]?.decision).toBe('approve');
+
+      // The session was never told to resolve anything, and the task was
+      // never failed — it stays paused, still resolvable by the CORRECT id.
+      expect(session?.resolveApprovalCalls).toEqual([]);
+      expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === 'task-approve-stale-1')).toBe(false);
+
+      // The matching decision still works afterward — proving the task is
+      // genuinely still alive/pending, not silently corrupted.
+      server.send(createEnvelope('task.approve', { approvalId }, { taskId: 'task-approve-stale-1', seq: server.nextSeq() }));
+      await vi.waitFor(() => expect(session?.resolveApprovalCalls).toEqual([{ approved: true }]));
     });
   });
 });

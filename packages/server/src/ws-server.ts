@@ -117,7 +117,9 @@ function handleConnection(ws: WebSocket, deviceId: string, deps: AttachDeps): vo
     }
 
     helloReceived = true;
-    deps.hub.registerConnection(deviceId, ws, payload.runtimes);
+    // M5 (hello-capability plumbing): previously only `runtimes` was
+    // forwarded — `payload.capabilities` was silently ignored end to end.
+    deps.hub.registerConnection(deviceId, ws, payload.runtimes, payload.capabilities);
     deps.hub.sendConnAck(deviceId, SUPPORTED_CAPABILITIES);
     // Reconnection procedure step 3 (§9): redeliver anything still relevant
     // sent since the daemon's last-seen `seq`. Omitted on a device's

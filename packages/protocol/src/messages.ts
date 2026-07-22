@@ -150,8 +150,20 @@ export type TaskOfferPayload = z.infer<typeof TaskOfferPayloadSchema>;
  * task's existing message stream (e.g. `task.progress` resuming, or
  * `task.fail`/`task.cancelled` if resuming turns out to be impossible) — no
  * new ack message type is introduced. See docs/protocol.md "Approval flow".
+ *
+ * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): OPTIONAL target
+ * identity for the SPECIFIC pending approval this decision resolves, rather
+ * than "whichever one is currently pending" (the pre-M5 behavior, and still
+ * what happens when this field is absent — a legacy server that never
+ * learned an id, or one talking to a legacy daemon). When present, the
+ * daemon compares it against its own currently-dispatched approval id
+ * (`ActiveTask.pendingApprovalId`, `packages/client`'s `task-runner.ts`) and
+ * treats a mismatch as a stale, audit-only no-op instead of resolving
+ * whatever happens to be pending right now — see `TaskRunner.handleApprove`.
  */
-export const TaskApprovePayloadSchema = z.object({});
+export const TaskApprovePayloadSchema = z.object({
+  approvalId: z.string().optional(),
+});
 export type TaskApprovePayload = z.infer<typeof TaskApprovePayloadSchema>;
 
 /**
@@ -161,9 +173,14 @@ export type TaskApprovePayload = z.infer<typeof TaskApprovePayloadSchema>;
  * server moves its own record `AwaitApproval -> Failed` immediately; this
  * message just tells the daemon to stop, and the daemon reports the outcome
  * via its existing `task.fail` terminal message.
+ *
+ * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): same optional
+ * targeting semantics as `TaskApprovePayloadSchema.approvalId` above, applied
+ * to the reject path (`TaskRunner.handleReject`).
  */
 export const TaskRejectPayloadSchema = z.object({
   reason: z.string().optional(),
+  approvalId: z.string().optional(),
 });
 export type TaskRejectPayload = z.infer<typeof TaskRejectPayloadSchema>;
 
@@ -204,10 +221,25 @@ export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
  *
  * Claiming no longer implies the task is `Running` (M1 gap #2) — see
  * `task.started`.
+ *
+ * `runtime` (M5, additive-minor — docs/protocol.md §3.1): the ACTUAL
+ * adapter this device selected for the task, distinct from `task.offer`'s
+ * own `runtime` (the merely REQUESTED one, `TaskOfferPayloadSchema.runtime`
+ * above). When an offer names no runtime the daemon auto-selects (pi-first —
+ * `TaskRunner.pickAdapter`, `packages/client`'s `task-runner.ts`), and before
+ * this field existed the server had no way to learn which adapter actually
+ * ran — `TaskSnapshot.runtime` (`packages/server`'s `types.ts`) only ever
+ * recorded what was requested. Plain optional property on this already-
+ * tolerant `z.object()`: an old server simply never reads it, so this needed
+ * no version bump and no emission gating (same shape as `approvalId` on
+ * `task.await_approval`/`task.approve`/`task.reject`, §5.3) — a new daemon
+ * sends it unconditionally, regardless of whether the connected server is
+ * new enough to store it.
  */
 export const TaskClaimPayloadSchema = z.object({
   deviceId: z.string(),
   agentId: z.string().optional(),
+  runtime: RuntimeIdSchema.optional(),
 });
 export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
 
@@ -272,9 +304,25 @@ export const TaskArtifactPayloadSchema = z.object({
 });
 export type TaskArtifactPayload = z.infer<typeof TaskArtifactPayloadSchema>;
 
-/** daemon -> server: task is blocked on an out-of-band approval. */
+/**
+ * daemon -> server: task is blocked on an out-of-band approval.
+ *
+ * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): the daemon's own
+ * locally-generated identity for THIS SPECIFIC pending approval
+ * (`ApprovalRegistry`, `packages/client`'s `approvals.ts`) — included
+ * unconditionally by an M5+ daemon, regardless of whether the connected
+ * server has advertised the `approval-targeting` capability flag
+ * (`version.ts`; see that flag's own doc comment for why no emission gating
+ * is needed here — it's a tolerant `z.object()` field, so an older server
+ * simply ignores it). Optional purely for wire tolerance with a pre-M5
+ * daemon build that never set it at all: a server that never learns an id
+ * for a task's current approval can't target a later `approve`/`reject`
+ * decision and falls back to resolving "whichever approval is currently
+ * pending" — the same behavior every server had before this field existed.
+ */
 export const TaskAwaitApprovalPayloadSchema = z.object({
   summary: z.string(),
+  approvalId: z.string().optional(),
 });
 export type TaskAwaitApprovalPayload = z.infer<typeof TaskAwaitApprovalPayloadSchema>;
 

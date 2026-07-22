@@ -47,6 +47,32 @@ export const PROTOCOL_VERSION = 1;
  * `interactive-approval`, this one IS exercised the moment both sides
  * support it — there is no reserved/dormant period for it.
  */
-export const CAPABILITY_FLAGS = ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved'] as const;
+/**
+ * `approval-targeting` (M5, additive-minor): unlike `approval_resolved`
+ * above, this flag is purely INFORMATIONAL/semantic, not a functional gate.
+ * `task.await_approval`/`task.approve`/`task.reject` all carry their new
+ * `approvalId` field UNCONDITIONALLY on both sides once each peer is
+ * upgraded -- the wire is tolerant (a plain, non-`.strict()` `z.object()`
+ * field, `messages.ts`), so no version/capability negotiation is needed just
+ * to send it safely; an older peer that doesn't recognize the field simply
+ * never reads it. Receivers decide whether to apply exact-match targeting
+ * by FIELD PRESENCE on the specific message at hand (does this particular
+ * `task.approve`/`task.reject`/`onApprovalResolved` payload carry an
+ * `approvalId`, and does a stored one exist to compare it against?), never
+ * by checking this flag -- see `ConnectionHub.approveTask`/`rejectTask`/
+ * `onApprovalResolved` and `TaskRunner.handleApprove`/`handleReject`
+ * (`packages/client`'s `task-runner.ts`). This flag exists only so each side
+ * can advertise, and an embedder/operator can observe (`ConnectionHub.
+ * getDeviceCapabilities`), whether the OTHER side is new enough to
+ * participate in targeting at all -- the same N/N-1-safe shape as every
+ * other flag here, just consumed for observability instead of gating.
+ */
+export const CAPABILITY_FLAGS = [
+  'steer',
+  'blob-upload',
+  'interactive-approval',
+  'approval_resolved',
+  'approval-targeting',
+] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
