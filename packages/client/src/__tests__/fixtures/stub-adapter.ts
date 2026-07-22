@@ -120,20 +120,61 @@ export class StubSession implements Session {
   }
 }
 
+/**
+ * Default `capabilities()` result for a {@link StubRuntimeAdapter} that
+ * doesn't override it — deliberately the MOST permissive set (all four
+ * `PermissionMode`s), not any one real bundled adapter's actual declared
+ * set. `StubRuntimeAdapter` is a generic, anonymous test double used all
+ * over this suite for scenarios that have nothing to do with per-runtime
+ * capability matching (e.g. the out-of-band approval flow, which is
+ * `TaskRunner`-level and adapter-agnostic) — many of those pre-existing
+ * tests offer `policy: { mode: 'confirm' }` against a bare
+ * `new StubRuntimeAdapter()` and rely on it being accepted. Mirrors this
+ * suite's own established convention for a "can do anything" double (see
+ * e.g. `task-runner-approval.test.ts`'s `ChannelRoutingAdapter` /
+ * `confirm-mode-approval-e2e.test.ts`'s `ApprovalAwareAdapter`, each a
+ * hand-rolled adapter narrowed to `permissionModes: ['confirm']` for ITS
+ * specific test). A test that specifically wants to simulate a
+ * capability-RESTRICTED adapter (pi/codex-like: no `confirm`/`plan`) passes
+ * an explicit `capabilities` override via the 3rd constructor param instead
+ * of relying on this default.
+ */
+const DEFAULT_STUB_CAPABILITIES: RuntimeCapabilities = {
+  steer: true,
+  resume: true,
+  permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+};
+
 /** In-memory RuntimeAdapter double: records every start() call and its resulting session. */
 export class StubRuntimeAdapter implements RuntimeAdapter {
   readonly id: string;
   readonly startCalls: Array<{ task: TaskOfferPayload; ctx: TaskContext }> = [];
   readonly sessions: StubSession[] = [];
   private readonly detectResult: RuntimeDetectResult;
+  private readonly capabilitiesResult: RuntimeCapabilities;
   private sessionCounter = 0;
   /** When set, start() throws this instead of returning a session (for testing the daemon's failure paths). */
   startError: Error | undefined;
   private startGate: Promise<void> | undefined;
 
-  constructor(id = 'stub', detectResult: RuntimeDetectResult = { present: true, version: '0.0.0' }) {
+  /**
+   * M5 batch-3 (workstream 1): `capabilities` is a new, optional 3rd
+   * constructor param — defaults to {@link DEFAULT_STUB_CAPABILITIES} (see
+   * its own doc comment for why that default is maximally permissive
+   * rather than modeled on any one real adapter). Lets a test simulate an
+   * adapter's real declared `permissionModes` (e.g. a confirm-capable,
+   * claude-like stub, or a pi/codex-like stub that can't express
+   * `confirm`/`plan`) for `TaskRunner.pickAdapter`'s capability-match gate
+   * without needing the real bundled adapters + fake-CLI fixtures.
+   */
+  constructor(
+    id = 'stub',
+    detectResult: RuntimeDetectResult = { present: true, version: '0.0.0' },
+    capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
+  ) {
     this.id = id;
     this.detectResult = detectResult;
+    this.capabilitiesResult = capabilities;
   }
 
   async detect(): Promise<RuntimeDetectResult> {
@@ -141,7 +182,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
   }
 
   capabilities(): RuntimeCapabilities {
-    return { steer: true, resume: true, permissionModes: ['auto', 'readonly'] };
+    return this.capabilitiesResult;
   }
 
   /**

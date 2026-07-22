@@ -445,3 +445,78 @@ always-included platform baseline) can still read any file under that
 process running as that same user could. The allowlist narrows what an
 agent inherits *as environment variables*; it says nothing about, and does
 not restrict, what the runtime's own tools can read from disk.
+
+**M5 batch-3: offers requesting `workspaceRoot` are declined until
+enforcement exists.** `PermissionPolicy.workspaceRoot` is real wire shape —
+it survives the offer/ceiling policy merge (`daemon/policy.ts`'s
+`computeEffectivePolicy`) and is handed to the selected adapter as
+`ctx.policy.workspaceRoot` — but, per the confinement-by-convention picture
+above, no bundled adapter reads or enforces that field; every adapter's real
+confinement comes from `ctx.workspaceDir` alone. A `task.offer` whose own
+policy sets `workspaceRoot` is therefore declined fail-closed, pre-claim
+(`TaskRunner.handleOffer`) rather than silently accepted as if it were a live
+control. A device operator's own configured ceiling
+(`DaemonConfig.permissionDefaults.workspaceRoot`) is a different, trusted-
+local-config case — it is not declined, but it does produce a loud one-time
+`console.warn` at daemon start, so the operator learns the value is inert
+instead of trusting it silently.
+
+## Runtime auto-selection: pi is the fallback, not the default
+
+M5 batch-3 also tightened `TaskRunner.pickAdapter`'s no-explicit-runtime
+path. Two related fixes:
+
+- **Selection order.** Auto-select now tries runtimes in an explicit
+  `DaemonConfig.runtimePreference` order (default `['claude', 'codex',
+  'pi']`, pi **last**) instead of whatever order the bundled adapter array
+  happened to be constructed in — which, before this change, silently made
+  pi the de-facto default whenever it was present, contradicting the product
+  decision that pi is a fallback runtime, not the preferred one.
+- **Capability matching at admission.** Before claiming, the daemon now
+  checks whether the candidate adapter can even express the offer's
+  `PermissionPolicy.mode` (via that adapter's own declared
+  `capabilities().permissionModes`) — pi and codex cannot express
+  `confirm`/`plan`; claude can. Auto-select skips a non-supporting candidate
+  and keeps walking the preference order; if nothing eligible supports the
+  mode, or an explicitly-requested runtime can't express it, the offer is
+  declined fail-closed, pre-claim. Previously this mismatch surfaced only
+  once `adapter.start()` threw `PolicyUnsupportedError` — after the task was
+  already claimed — which both wasted a claim/fail round trip and could pick
+  an incapable adapter over a capable one that was sitting right there. That
+  post-claim `PolicyUnsupportedError` path is unchanged and remains as
+  defense-in-depth.
+
+## Resource limits: daemon-enforced, not kernel-enforced
+
+M5 batch-3 (workstream 2) adds daemon-authoritative enforcement for two
+resource ceilings:
+
+- **`TaskOfferPayload.limits.maxDurationMs`** (wire field) — a per-task
+  wall-clock timer, armed when the task is claimed and registered as active.
+  On expiry: best-effort `session.interrupt()`, escalating to a hard
+  `session.close()` if `interrupt()` doesn't settle within the same grace
+  window (`shutdownInterruptTimeoutMs`), then `task.fail` with `retryable:
+  false` and a reason prefixed `resource limit exceeded: maxDurationMs`. The
+  timer is cleared on every terminal outcome, so a task that finishes
+  normally is never affected.
+- **`DaemonConfig.maxTaskOutputBytes`** (device-local config, not a wire
+  field — default 64 MiB) — accumulated agent-event output, counted as an
+  approximate serialized-payload-length per event as it flows through
+  `TaskRunner.pump`. Same teardown on exceed, reason prefixed `resource limit
+  exceeded: maxTaskOutputBytes`.
+
+**`limits.maxTokens` remains declined fail-closed, pre-claim** (see above) —
+unlike the two limits above, no bundled adapter counts tokens at all, so
+there is nothing here to enforce.
+
+Both enforcement mechanisms above are DAEMON-SIDE only — a `setTimeout` and
+an in-process byte counter, not a kernel/cgroup/rlimit-level ceiling. A
+misbehaving or compromised runtime process that ignores `interrupt()`/
+`close()` (a hung syscall, or a process that traps or ignores SIGTERM) can
+still consume wall-clock time or produce output beyond these limits for as
+long as the underlying OS process keeps running — the daemon's own
+accounting and teardown attempt simply stop once it reports the task
+failed. Treat these as cooperative resource governance for well-behaved
+runtimes, not a sandbox boundary — the same caveat this document's
+"Workspace confinement is a convention, not a sandbox" section already
+applies to filesystem confinement.

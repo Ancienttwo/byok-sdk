@@ -26,10 +26,19 @@ import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { SessionWorkspaceStore } from './session-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
-import { TaskRunner, type TaskRunnerDeps } from './task-runner';
+import { DEFAULT_MAX_TASK_OUTPUT_BYTES, TaskRunner, type TaskRunnerDeps } from './task-runner';
 import type { ProgressBatcherOptions } from './progress-batcher';
 
-/** M4 Phase 2: bound on how long the control socket's `shutdown` RPC waits for `TaskRunner.shutdownActiveTasks` before proceeding to the rest of teardown regardless — an active task's `session.interrupt()` hanging (a misbehaving runtime adapter) must never block the daemon from actually stopping. */
+/**
+ * M4 Phase 2 (originally control-socket-only). M5 batch-3 (workstream 2):
+ * now the shared DEFAULT for every graceful-shutdown path via
+ * `runShutdownSequence` — overridable per-daemon via
+ * `DaemonConfig.shutdownGraceMs`. Bound on how long the graceful-shutdown
+ * sequence waits for `TaskRunner.shutdownActiveTasks` before proceeding to
+ * the rest of teardown regardless — an active task's `session.interrupt()`
+ * hanging (a misbehaving runtime adapter) must never block the daemon from
+ * actually stopping.
+ */
 const SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS = 10_000;
 
 /** Finding F5(b): default bound on how long `performControlShutdown` waits for the outbox to actually drain before closing the connection — see `ConnectionManager.stop`'s own doc comment. Overridable via `DaemonOverrides.shutdown.outboxDrainTimeoutMs`. */
@@ -79,6 +88,59 @@ export interface DaemonConfig {
    * unchanged from M1/M2.
    */
   runtimeAllowlist?: string[];
+  /**
+   * M5 batch-3 (workstream 1): explicit auto-select priority order for
+   * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
+   * — tried in listed order; the first candidate that is both PRESENT
+   * (`adapter.detect()`) and CAPABLE (declares the offer's
+   * `PermissionPolicy.mode` in its own `capabilities().permissionModes` —
+   * see `adapterSupportsMode`) wins. Unset defaults to
+   * `DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',
+   * 'pi']` — pi LAST, deliberately.
+   *
+   * Product decision: pi is this SDK's FALLBACK runtime, not its default.
+   * Before this field existed, the auto-select path had no notion of
+   * priority at all — it simply walked `deps.adapters` in whatever order
+   * `buildDefaultAdapters`/the embedder constructed them, which for
+   * `createDaemon`'s bundled set meant `ALL_RUNTIME_IDS`'s construction
+   * order (`['pi', 'claude', 'codex']`) doubled as the de-facto selection
+   * priority — silently making pi the default winner whenever it was
+   * present, for no better reason than being listed first in an array never
+   * meant to encode a priority. This field makes the real priority an
+   * explicit, independently-configurable decision instead of an accident of
+   * construction order — see `ALL_RUNTIME_IDS`'s own doc comment below for
+   * the construction-vs-selection-order split this introduces.
+   *
+   * Only affects the auto-select (no `task.offer.runtime`) path — an offer
+   * naming an explicit runtime is unaffected (unchanged semantics: that
+   * exact adapter is used, or the offer is declined; never a fallback
+   * substitution). Independent of `runtimeAllowlist` above (which restricts
+   * WHICH runtimes are eligible at all): this only orders the attempt
+   * sequence among whatever that allowlist, if set, already let through.
+   */
+  runtimePreference?: RuntimeId[];
+  /**
+   * The device operator's configured policy CEILING — every `task.offer`'s
+   * own policy is merged against this and fail-closed-rejected if it asks
+   * for more latitude than this allows (`daemon/policy.ts`'s
+   * `computeEffectivePolicy`).
+   *
+   * M5 batch-3 (workstream 1): `workspaceRoot` set on THIS ceiling is still
+   * merged into the effective policy handed to an adapter as
+   * `ctx.policy.workspaceRoot` (`computeEffectivePolicy` is unchanged) — but
+   * no bundled adapter (pi/claude/codex) actually reads or enforces it;
+   * every adapter derives its real confinement from `ctx.workspaceDir` (the
+   * daemon-created per-task directory) instead — see docs/security.md's
+   * "Workspace confinement is a convention, not a sandbox" section. Setting
+   * it here is therefore silently inert rather than actively dangerous by
+   * itself (an OFFER independently asking for its OWN `workspaceRoot` is a
+   * separate, fail-closed-declined case — see `TaskRunner.handleOffer` —
+   * precisely because THAT looks like a live security control when it
+   * isn't). `start()` below logs a loud, one-time `console.warn` whenever
+   * this ceiling sets `workspaceRoot`, so an operator who configured it
+   * expecting real enforcement finds out immediately instead of trusting a
+   * control nothing honors.
+   */
   permissionDefaults?: PermissionPolicy;
   storeDir?: string;
   /** Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`. */
@@ -112,6 +174,35 @@ export interface DaemonConfig {
    * `http:`/`https:`/`ws:`/`wss:`), which is refused unconditionally.
    */
   dangerouslyAllowInsecureRemote?: boolean;
+  /**
+   * M5 batch-3 (workstream 2): caps accumulated (approximate,
+   * serialized-event-length) agent-event output bytes this daemon will
+   * tolerate for a single task before tearing it down as a resource-limit
+   * violation (`task.fail`, `retryable: false`, reason prefixed
+   * `resource limit exceeded: maxTaskOutputBytes` — see
+   * `MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner.ts`) — see
+   * `TaskRunner.pump`'s own doc comment for exactly what's counted and what
+   * isn't. Default {@link DEFAULT_MAX_TASK_OUTPUT_BYTES} (64 MiB) when
+   * unset.
+   *
+   * `0` or a negative number is a config validation error, thrown
+   * synchronously from `createDaemonWithAdapters`/`createDaemon` — NOT a
+   * supported way to disable the cap. Pass `Number.POSITIVE_INFINITY`
+   * explicitly instead to opt out of enforcement altogether.
+   */
+  maxTaskOutputBytes?: number;
+  /**
+   * M5 batch-3 (workstream 2): deadline bound on the graceful-shutdown
+   * sequence's own wait for `TaskRunner.shutdownActiveTasks` to finish
+   * interrupting/failing every active task before this daemon proceeds to
+   * actually stop regardless — see `runShutdownSequence`'s own doc comment
+   * for the full sequence this bounds, and for why every graceful-shutdown
+   * path (`stop()`, `unpair()`, the control socket's `shutdown` RPC) now
+   * shares it. Default 10s (`SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS`) — the same
+   * bound the control-socket shutdown path already used before this field
+   * existed.
+   */
+  shutdownGraceMs?: number;
 }
 
 export interface DaemonStatus {
@@ -285,12 +376,27 @@ function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
 }
 
 /**
- * Canonical construction order for `createDaemon`'s bundled adapter set —
- * also the priority order `TaskRunner.pickAdapter` falls back to when a
- * `task.offer` names no explicit runtime (`task-runner.ts`: first adapter
- * whose `detect()` finds it present on the device wins). Pi first preserves
- * the exact M0/M1 default behavior (pi was the only adapter that ever
- * existed then).
+ * Canonical construction/identity order for `createDaemon`'s bundled adapter
+ * set (`buildDefaultAdapters` below) and for `conn.hello.runtimes`
+ * reporting order (`detectRuntimes`) — this is NOT the auto-select priority
+ * order.
+ *
+ * M5 batch-3 (workstream 1): auto-select priority now lives entirely in
+ * `task-runner.ts`, as its own explicit order independent of this one — see
+ * `DEFAULT_RUNTIME_PREFERENCE`/`TaskRunner.pickAdapter`, overridable
+ * per-daemon via `DaemonConfig.runtimePreference` above. Before this change,
+ * `pickAdapter`'s no-runtime branch walked `deps.adapters` directly (this
+ * array's own construction order), so listing pi first here silently made
+ * it the de-facto DEFAULT auto-selected runtime whenever present — the
+ * opposite of the product decision that pi is the FALLBACK runtime (tried
+ * only once nothing better is available/capable), not the default. That
+ * conflation is why this constant's order and the auto-select order are now
+ * two independent things: this one stays `['pi', 'claude', 'codex']`
+ * (unchanged — still a perfectly fine construction/reporting order, and
+ * changing it would needlessly reshuffle `conn.hello.runtimes` for no
+ * reason), while `DEFAULT_RUNTIME_PREFERENCE` states the actual selection
+ * priority explicitly (`['claude', 'codex', 'pi']`, pi last) instead of
+ * leaving it as an implicit side effect of this list's order.
  */
 const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
@@ -326,6 +432,18 @@ export function createDaemonWithAdapters(
   adapters: RuntimeAdapter[],
   overrides: DaemonOverrides = {},
 ): Daemon {
+  // M5 batch-3 (workstream 2): validated synchronously, up front — see
+  // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
+  // zero/negative-is-an-error / `Number.POSITIVE_INFINITY`-is-the-real-
+  // opt-out pin. `configured > 0` is `false` for `NaN`, `0`, and any
+  // negative number, and `true` for `Number.POSITIVE_INFINITY` — exactly the
+  // three-way split this config wants.
+  if (config.maxTaskOutputBytes !== undefined && !(config.maxTaskOutputBytes > 0)) {
+    throw new Error(
+      `DaemonConfig.maxTaskOutputBytes must be a positive number (or omitted to use the ${DEFAULT_MAX_TASK_OUTPUT_BYTES}-byte default) — got ${config.maxTaskOutputBytes}. Pass Number.POSITIVE_INFINITY to explicitly disable the cap; 0 or a negative number is rejected rather than silently treated as "disabled".`,
+    );
+  }
+
   const storeDir = config.storeDir ?? DeviceStore.defaultDir(config.productId);
   const store = new DeviceStore(storeDir);
   const cursorStore = new CursorStore(storeDir);
@@ -443,6 +561,21 @@ export function createDaemonWithAdapters(
       throw new Error('device is not paired yet; call pair(pairingCode) first');
     }
 
+    // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own
+    // doc comment above — a configured ceiling `workspaceRoot` is merged
+    // into every task's effective policy but enforced by no bundled adapter.
+    // Logged once per `start()` (not per task, not per offer) — same
+    // operator-facing, non-fatal `console.warn` convention `checkServerUrl`'s
+    // `dangerouslyAllowInsecureRemote` warning above already uses in this
+    // file. This is purely a LOCAL-ceiling warning: an OFFER independently
+    // asking for its own `workspaceRoot` is a different, fail-closed-declined
+    // case handled by `TaskRunner.handleOffer`, not here.
+    if (config.permissionDefaults?.workspaceRoot !== undefined) {
+      console.warn(
+        `[byok/client] WARNING: permissionDefaults.workspaceRoot ("${config.permissionDefaults.workspaceRoot}") is configured, but no bundled runtime adapter (pi/claude/codex) enforces PermissionPolicy.workspaceRoot — every adapter confines a task to ctx.workspaceDir instead. This ceiling value has no enforcement effect; see docs/security.md's "Workspace confinement is a convention, not a sandbox" section.`,
+      );
+    }
+
     startedAt = Date.now();
     // M4 Phase 2: a second start() on THIS SAME Daemon instance (e.g. the
     // revoke -> re-pair -> start() again recovery flow) restarts its own
@@ -484,6 +617,8 @@ export function createDaemonWithAdapters(
     const deps: TaskRunnerDeps = {
       adapters,
       runtimeAllowlist: config.runtimeAllowlist,
+      // M5 batch-3: see `DaemonConfig.runtimePreference`'s own doc comment above.
+      runtimePreference: config.runtimePreference,
       permissionDefaults: config.permissionDefaults,
       workspaceRoot: config.workspaceRoot,
       deviceId: record.deviceId,
@@ -518,6 +653,8 @@ export function createDaemonWithAdapters(
       approvalTimeoutMs: overrides.approvalTimeoutMs,
       // Finding F5(a): see TaskRunnerDeps.shutdownInterruptTimeoutMs's own doc comment.
       shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,
+      // M5 batch-3 (workstream 2): see DaemonConfig.maxTaskOutputBytes's own doc comment — already validated above.
+      maxTaskOutputBytes: config.maxTaskOutputBytes,
       // M4 Phase 3 hardening: bridges TaskRunner's stale-approval-race
       // finding out to the SAME local observability seam every other
       // daemon-local event already uses (see observer.ts's own module doc
@@ -578,16 +715,62 @@ export function createDaemonWithAdapters(
   }
 
   /**
-   * `opts.drainTimeoutMs` (finding F5(b)): threaded through to
-   * `ConnectionManager.stop` — omitted here (the default, e.g. from the
-   * public `Daemon.stop()`/`unpair()` paths) preserves the exact prior
-   * behavior (no bounded wait); only `performControlShutdown` below passes
-   * one, since that's the path a just-sent `task.fail` (from
-   * `TaskRunner.shutdownTask`) actually needs a chance to drain before the
-   * connection closes out from under it.
+   * M5 batch-3 (workstream 2): the ONE graceful-shutdown sequence, shared by
+   * every path that stops this daemon while it might have active tasks —
+   * closes the M5 ledger item "SIGTERM path doesn't send task.fail". Before
+   * this, `stop()` and `performControlShutdown` were two INDEPENDENT
+   * implementations: `stop()` just dropped the connection outright with no
+   * notion of active tasks at all, so the OS-signal path
+   * (`bin/commands/start.ts`'s SIGINT/SIGTERM handler -> this daemon's own
+   * public `stop()`) never sent `task.fail` for whatever was still running.
+   * Now there is exactly one teardown sequence, and every caller (`stop()`,
+   * `unpair()` via `stop()`, and `performControlShutdown`) shares it: stop
+   * accepting new offers -> best-effort interrupt+fail every active task,
+   * over the STILL-OPEN connection (`TaskRunner.shutdownActiveTasks`,
+   * deadline-bounded by `config.shutdownGraceMs` — default
+   * `SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS` — so a hung task teardown can never
+   * block this daemon from actually stopping) -> bounded wait for that
+   * outbox to actually drain (finding F5(b)) -> close the connection / stop
+   * the auth renewal timer / close the control socket.
+   *
+   * CRITICAL preservation (M4 Phase 2 fix, unchanged by this refactor): the
+   * connection must not close until AFTER `shutdownActiveTasks` has actually
+   * enqueued its `task.fail`(s) — see `performControlShutdown`'s own doc
+   * comment for the exact regression (`start.ts` used to wake on the earlier
+   * `shutdown-requested` event and race `daemon.stop()` ahead of the
+   * still-in-flight send) this ordering fixes. That ordering is unchanged
+   * here: stopAcceptingOffers -> shutdownActiveTasks -> THEN connection
+   * teardown, for every caller alike, including the OS-signal path that
+   * previously skipped straight to connection teardown.
+   *
+   * Idempotent: a second call (e.g. `performControlShutdown`'s own internal
+   * call, followed by `bin/commands/start.ts`'s subsequent `daemon.stop()`
+   * once `shutdown-complete` wakes it — see that file's own doc comment)
+   * finds `runner`'s active-task map already empty (the first call's own
+   * `finish()`s already deleted every entry), so `shutdownActiveTasks` sends
+   * nothing the second time; `stopAcceptingOffers` is already idempotent by
+   * its own contract; `connection.stop()` is documented idempotent
+   * (`connection-manager.ts`); and `controlServerHandle` is reassigned to
+   * `undefined` after the first close, so a second call's `?.close()` is a
+   * no-op. See `daemon-control-socket.test.ts`'s "REGRESSION
+   * (gatekeeper-caught)" test for exactly this double-teardown shape (a
+   * control-socket shutdown followed by `runStartCommand`'s own
+   * `daemon.stop()`), which must neither double-fail a task nor throw.
    */
-  async function stop(opts: { drainTimeoutMs?: number } = {}): Promise<void> {
-    await connection?.stop(opts.drainTimeoutMs);
+  async function runShutdownSequence(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+    runner?.stopAcceptingOffers();
+    const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
+    const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
+    await Promise.race([activeTeardown, delay(graceMs)]);
+    // Finding F5(b): bounded wait for the outbox (e.g. the task.fail(s)
+    // shutdownActiveTasks just enqueued) to actually drain before closing
+    // the connection out from under it — see ConnectionManager.stop's own
+    // doc comment for why an unbounded wait wasn't safe to make the
+    // universal default, and ConnectionManager.outboxLength's own doc
+    // comment for the honest-audit read a caller may take afterward.
+    const drainTimeoutMs =
+      opts.drainTimeoutMs ?? overrides.shutdown?.outboxDrainTimeoutMs ?? DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS;
+    await connection?.stop(drainTimeoutMs);
     auth.stop();
     connectionState = 'closed';
     // M4 Phase 2: stop the control socket in every shutdown path — this is
@@ -597,6 +780,19 @@ export function createDaemonWithAdapters(
     // through, so nothing else needs its own control-socket teardown logic.
     await controlServerHandle?.close();
     controlServerHandle = undefined;
+  }
+
+  /**
+   * Public `Daemon.stop()` (also `unpair()`'s own teardown, below) — see
+   * `runShutdownSequence`'s own doc comment for the sequence this now runs.
+   * `opts` is an internal-only extension of the public `stop(): Promise<void>`
+   * interface (this file already has the analogous `performControlShutdown`
+   * convention of calling this closure directly with extra options a plain
+   * `Daemon.stop()` caller never needs to pass): `performControlShutdown`
+   * below supplies its own `reason` instead of this default.
+   */
+  async function stop(opts: { drainTimeoutMs?: number; reason?: string } = {}): Promise<void> {
+    await runShutdownSequence(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
   }
 
   /**
@@ -690,29 +886,34 @@ export function createDaemonWithAdapters(
   /**
    * The control socket's `shutdown` RPC — see this method's own protocol
    * doc comment (`control-protocol.ts`'s `ShutdownParams`) for the wire
-   * contract. Order matters: offers must stop being claimed BEFORE active
-   * tasks are torn down (so nothing new sneaks in claimed while that
-   * happens), and active tasks must be reported failed BEFORE the
-   * connection itself is closed (so that `task.fail` actually reaches the
-   * server) — see `TaskRunner.shutdownActiveTasks`'s own doc comment.
-   * Invoked from the RPC handler via `setImmediate` (see `controlMethods`
-   * below) so the `{acknowledged:true}` response has already been written
-   * to the wire before any of this runs.
+   * contract. M5 batch-3 (workstream 2): delegates the actual teardown
+   * sequence to `runShutdownSequence` — see that function's own doc comment
+   * for the full "stop accepting -> fail active tasks -> drain -> close"
+   * sequence every graceful-shutdown path now shares — and wraps it with
+   * this RPC's own audit events. Invoked from the RPC handler via
+   * `setImmediate` (see `controlMethods` below) so the `{acknowledged:true}`
+   * response has already been written to the wire before any of this runs.
    *
-   * Gatekeeper-confirmed regression (fixed here): `noteShutdownRequested`
-   * fires SYNCHRONOUSLY, before `shutdownActiveTasks` even calls
+   * Gatekeeper-confirmed regression (fixed pre-M5; PRESERVED, not
+   * reintroduced, by this refactor): `noteShutdownRequested` fires
+   * SYNCHRONOUSLY, before `shutdownActiveTasks` even calls
    * `session.interrupt()` — `observer.emit()` calls its listeners
    * synchronously, so `bin/commands/start.ts`'s subscriber used to be woken
    * IMMEDIATELY, race ahead, and call `daemon.stop()` (which sets
    * `ConnectionManager.stopped = true` synchronously) before the active
    * task's `task.fail` was ever sent — silently stranding it in a
    * post-`stopped` outbox that `drainOutbox` refuses to flush. Fixed by
-   * emitting a SEPARATE, later `shutdown-complete` event only once THIS
-   * function's own `stop()` call below has fully resolved — `start.ts` now
-   * waits for that one instead, so it can never race ahead of this
-   * function's own internal ordering. `shutdown-requested` is kept as an
-   * earlier, informational-only audit marker; nothing may gate teardown
-   * decisions on it.
+   * emitting a SEPARATE, later `shutdown-complete` event only once
+   * `runShutdownSequence` below has fully resolved — `start.ts` now waits
+   * for that one instead, so it can never race ahead of this function's own
+   * internal ordering. `shutdown-requested` is kept as an earlier,
+   * informational-only audit marker; nothing may gate teardown decisions on
+   * it. The ordering itself (stopAcceptingOffers -> shutdownActiveTasks ->
+   * THEN connection teardown) now lives inside `runShutdownSequence` rather
+   * than duplicated in this function's own body, but the observable
+   * guarantee `start.ts` depends on — `shutdown-complete` fires only after
+   * every active task's `task.fail` has actually been enqueued and the
+   * connection has begun closing — is unchanged.
    */
   async function performControlShutdown(reason: ShutdownReason | undefined): Promise<void> {
     const effectiveReason = reason ?? 'operator';
@@ -720,32 +921,24 @@ export function createDaemonWithAdapters(
     // Hardening finding (P2 re-gate): `noteShutdownComplete` now fires in a
     // `finally` — `start.ts`'s own wait for THIS event (see the doc comment
     // above) is what makes `runStartCommand` return at all. Before this fix,
-    // a throw anywhere in the body below (stopAcceptingOffers/
-    // shutdownActiveTasks/stop() are all best-effort in their OWN
-    // implementations today, but nothing here guaranteed one of them could
-    // never throw in the future) would propagate out of this function
-    // without ever emitting `shutdown-complete`, leaving `start.ts` waiting
-    // forever — exactly the class of hang this event was introduced to
-    // prevent in the first place. `finally` runs on both the success path
-    // and any throw, and does not swallow the throw itself (it still
-    // propagates to this function's own caller — the `shutdown` control
-    // method's `.catch()` in `controlMethods` below — afterward).
+    // a throw anywhere in the body below (every step `runShutdownSequence`
+    // takes is best-effort in its OWN implementation today, but nothing here
+    // guaranteed one of them could never throw in the future) would
+    // propagate out of this function without ever emitting
+    // `shutdown-complete`, leaving `start.ts` waiting forever — exactly the
+    // class of hang this event was introduced to prevent in the first
+    // place. `finally` runs on both the success path and any throw, and does
+    // not swallow the throw itself (it still propagates to this function's
+    // own caller — the `shutdown` control method's `.catch()` in
+    // `controlMethods` below — afterward).
     try {
-      runner?.stopAcceptingOffers();
-      const activeTeardown = runner?.shutdownActiveTasks(`control socket shutdown (${effectiveReason})`) ?? Promise.resolve();
-      await Promise.race([activeTeardown, delay(SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS)]);
-      // Finding F5(b): bounded wait for the outbox (e.g. the task.fail(s)
-      // shutdownActiveTasks just enqueued) to actually drain — see
-      // ConnectionManager.stop's own doc comment for why an unbounded wait
-      // wasn't safe to make the universal default, and ConnectionManager
-      // .outboxLength's doc comment for the honest-audit read right below.
-      await stop({ drainTimeoutMs: overrides.shutdown?.outboxDrainTimeoutMs ?? DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS });
+      await runShutdownSequence(`control socket shutdown (${effectiveReason})`);
     } finally {
-      // Finding F5(b): read AFTER stop() returns — 0 means the drain
-      // genuinely finished in time; a positive count is an honest record
-      // that this many envelopes (almost certainly including a task.fail
-      // shutdownActiveTasks just sent) never actually left the outbox,
-      // rather than the audit log silently implying full delivery.
+      // Finding F5(b): read AFTER runShutdownSequence() returns — 0 means
+      // the drain genuinely finished in time; a positive count is an honest
+      // record that this many envelopes (almost certainly including a
+      // task.fail shutdownActiveTasks just sent) never actually left the
+      // outbox, rather than the audit log silently implying full delivery.
       observer.noteShutdownComplete(effectiveReason, connection?.outboxLength() ?? 0);
     }
   }

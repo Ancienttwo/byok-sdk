@@ -139,7 +139,11 @@ describe('bin/commands/runtimes: runRuntimesCommand', () => {
       ],
     });
     expect(lines).toEqual([
-      'pi: present version=1.2.3 authPresent=true capabilities=steer,resume modes=auto,readonly',
+      // M5 batch-3: StubRuntimeAdapter's default capabilities are
+      // deliberately maximally permissive (all four modes) — see
+      // fixtures/stub-adapter.ts's `DEFAULT_STUB_CAPABILITIES` doc comment —
+      // not modeled on the real pi adapter's own narrower declared set.
+      'pi: present version=1.2.3 authPresent=true capabilities=steer,resume modes=auto,readonly,plan,confirm',
       'claude: absent',
     ]);
   });

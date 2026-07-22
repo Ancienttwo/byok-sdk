@@ -317,7 +317,7 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
       expect(claim.payload).toMatchObject({ deviceId: 'device-1', runtime: 'pi' });
     });
 
-    it('an offer naming NO runtime: task.claim still carries the auto-selected (pi-first) adapter this device actually picked, not merely an absence', async () => {
+    it('an offer naming NO runtime: task.claim still carries the auto-selected adapter this device actually picked, not merely an absence (single-candidate case; see task-runner-runtime-selection.test.ts for multi-candidate order)', async () => {
       const adapter = new StubRuntimeAdapter('claude');
       await setupDaemon(adapter);
 

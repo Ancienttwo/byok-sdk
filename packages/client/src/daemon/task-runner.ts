@@ -5,8 +5,10 @@ import path from 'node:path';
 import {
   createEnvelope,
   RuntimeIdSchema,
+  type AgentEvent,
   type BlobRef,
   type Envelope,
+  type PermissionMode,
   type PermissionPolicy,
   type RuntimeId,
   type TaskOfferPayload,
@@ -113,9 +115,45 @@ const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
  */
 export const MAX_TRACKED_TASK_IDS = 2000;
 
+/**
+ * M5 batch-3 (workstream 2): stable, documented reason PREFIX a `task.fail`
+ * carries when `payload.limits.maxDurationMs` (daemon-authoritative
+ * wall-clock enforcement — see `armMaxDurationTimer`) is exceeded. Only the
+ * prefix itself is the contract an embedder can match against
+ * (`reason.startsWith(...)`); everything after it is human-readable detail,
+ * not part of the stable shape.
+ */
+export const MAX_DURATION_EXCEEDED_REASON_PREFIX = 'resource limit exceeded: maxDurationMs';
+
+/** M5 batch-3 (workstream 2): same contract as {@link MAX_DURATION_EXCEEDED_REASON_PREFIX}, for `DaemonConfig.maxTaskOutputBytes` — see `TaskRunner.pump`'s own per-event byte counting. */
+export const MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX = 'resource limit exceeded: maxTaskOutputBytes';
+
+/**
+ * M5 batch-3 (workstream 2): default cap (64 MiB) on accumulated
+ * (approximate) agent-event output bytes this daemon tolerates for a single
+ * task before tearing it down as a resource-limit violation — see
+ * `TaskRunnerDeps.maxTaskOutputBytes` and `DaemonConfig.maxTaskOutputBytes`
+ * (`create-daemon.ts`) for the full contract, including the
+ * zero/negative-is-a-config-error / `Number.POSITIVE_INFINITY`-is-the-real-
+ * opt-out pin.
+ */
+export const DEFAULT_MAX_TASK_OUTPUT_BYTES = 64 * 1024 * 1024;
+
 export interface TaskRunnerDeps {
   adapters: RuntimeAdapter[];
   runtimeAllowlist?: string[];
+  /**
+   * M5 batch-3 (workstream 1): auto-select priority order for `pickAdapter`'s
+   * no-explicit-runtime branch — see `DaemonConfig.runtimePreference`'s own
+   * doc comment (`create-daemon.ts`) for the full rationale behind this
+   * existing at all. Unset defaults to {@link DEFAULT_RUNTIME_PREFERENCE}
+   * (pi LAST, deliberately — product decision: pi is this SDK's fallback
+   * runtime, not its default). Independent of `runtimeAllowlist` above
+   * (which restricts WHICH runtimes are eligible at all) — this only orders
+   * the attempt sequence among whatever that allowlist, if set, already let
+   * through.
+   */
+  runtimePreference?: RuntimeId[];
   /** M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment (`create-daemon.ts`) — the per-device, per-runtime env-allowlist override `handleOffer` merges into `buildRuntimeEnv`'s `locallyAllowedNames`. */
   runtimeEnvironment?: Record<string, { allow?: string[] }>;
   permissionDefaults?: PermissionPolicy;
@@ -171,8 +209,17 @@ export interface TaskRunnerDeps {
    * to supply one — mirrors `onStaleApprovalDecision`'s own contract.
    */
   onApprovalDispatched?: (taskId: string, approvalId: string) => void;
-  /** Finding F5(a): overrides {@link DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS} — see `shutdownTask`'s own doc comment. */
+  /** Finding F5(a): overrides {@link DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS} — see `teardownActiveTask`'s own doc comment. Also the grace window `teardownActiveTask`'s hard-kill escalation (`session.close()`) gets once `session.interrupt()` itself fails to settle in time — see that method's own doc comment for why the same window is reused for both steps. */
   shutdownInterruptTimeoutMs?: number;
+  /**
+   * M5 batch-3 (workstream 2): overrides {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}
+   * — see that constant's own doc comment and `DaemonConfig.maxTaskOutputBytes`
+   * (`create-daemon.ts`) for the full contract. Validated (rejecting
+   * zero/negative) at the `DaemonConfig` layer, not here — this seam trusts
+   * its caller, same as every other optional numeric override on this
+   * interface (`shutdownInterruptTimeoutMs`, `approvalTimeoutMs`).
+   */
+  maxTaskOutputBytes?: number;
   /**
    * M4 (additive-minor, `task.approval_resolved`): the negotiated
    * `conn.ack.capabilities` of the CURRENTLY (or most recently) connected
@@ -214,6 +261,49 @@ interface ActiveTask {
    * Bounded by {@link MAX_PENDING_APPROVALS_PER_TASK}.
    */
   approvalQueue: QueuedApprovalRequest[];
+  /**
+   * M5 batch-3 (workstream 2): the wall-clock timer enforcing
+   * `payload.limits.maxDurationMs` for this task, if the offer set one — see
+   * `armMaxDurationTimer`. `undefined` when no `maxDurationMs` was set.
+   * Cleared unconditionally at the top of `finish()` so every terminal
+   * outcome (success, fail, cancel, or daemon shutdown) leaves no dangling
+   * timer and can never fire a stray fail for a task that already ended a
+   * different way.
+   */
+  maxDurationTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * M5 batch-3 (workstream 2): running total of accumulated agent-event
+   * output bytes counted so far for `DaemonConfig.maxTaskOutputBytes`
+   * enforcement — see `TaskRunner.pump`'s own per-event counting for exactly
+   * what's counted (a serialized-payload-length approximation, not an exact
+   * wire-byte accountant).
+   */
+  outputBytesSoFar: number;
+  /**
+   * M5 batch-3 (workstream 2): set at the very start of
+   * `teardownActiveTask`, before either `session.interrupt()` or its
+   * hard-kill `session.close()` escalation runs. Both are real teardown
+   * primitives that MAY end this task's own `session.events` iterable as a
+   * side effect (e.g. claude's `interrupt()`/`close()` are both
+   * `client.kill()`, which SIGTERMs the process — killing it ends the
+   * stdout stream that backs `events`). Without this flag, `pump()`'s own
+   * "the events iterable ended without an explicit turn_end" fallback
+   * (which exists for a genuinely UNEXPECTED adapter/process crash) can't
+   * tell that apart from a teardown *this* runner itself just triggered, and
+   * would report its OWN `task.fail` (retryable: true, "runtime session
+   * ended without completing the task") — racing `teardownActiveTask`'s own
+   * intended, more specific outcome, and potentially winning it: for a
+   * fast-closing session, `pump()`'s reaction to the queue ending is a
+   * SHORTER chain than `teardownActiveTask`'s own remaining steps (a
+   * possible hard-kill await, an identity re-check, then send+finish).
+   * `finish()` deletes this task from `this.tasks` BEFORE calling
+   * `session.close()` for exactly the same reason (see `handleCancel`'s own
+   * doc comment on `pump`'s identity check) — this flag covers the
+   * additional window `teardownActiveTask`'s own PRE-finish() hard-kill
+   * `close()` call opens that the delete-before-close ordering alone
+   * doesn't.
+   */
+  beingTornDown?: boolean;
 }
 
 /** One not-yet-dispatched `requestApproval` call waiting its turn — see `ActiveTask.approvalQueue`. */
@@ -248,8 +338,123 @@ function isKnownRuntimeId(id: string): id is RuntimeId {
   return RuntimeIdSchema.safeParse(id).success;
 }
 
+/**
+ * M5 batch-3 (workstream 1): default auto-select priority order — claude,
+ * then codex, then pi LAST. Product decision: pi is this SDK's FALLBACK
+ * runtime (tried only once nothing better is available/capable), not the
+ * default it silently was before this change (see `ALL_RUNTIME_IDS`'s own
+ * doc comment, `create-daemon.ts`, for how the old accidental default arose).
+ * Overridable per-daemon via `DaemonConfig.runtimePreference` /
+ * `TaskRunnerDeps.runtimePreference`; this is only the fallback when that's
+ * left unset.
+ */
+const DEFAULT_RUNTIME_PREFERENCE: readonly RuntimeId[] = ['claude', 'codex', 'pi'];
+
+/**
+ * Reorders `candidates` by `preference` (lower index tried first), appending
+ * every candidate whose id isn't named in `preference` at all — e.g. a
+ * product-supplied adapter for a runtime id outside the frozen
+ * `RuntimeIdSchema` enum (`RuntimeAdapter.id` is deliberately a plain
+ * `string`, wider than `RuntimeId` — see `types.ts`'s own doc comment) —
+ * after every ranked one, in their original relative order. Safe because
+ * `Array.prototype.sort` has been a stable sort since ES2019: two candidates
+ * that tie on rank (both unranked, or the same explicit rank) never get
+ * reordered relative to each other. This guarantees a candidate already
+ * present in `deps.adapters` is never silently dropped from auto-select just
+ * because `preference` doesn't happen to mention its id.
+ */
+function orderByPreference(candidates: readonly RuntimeAdapter[], preference: readonly string[]): RuntimeAdapter[] {
+  const rank = new Map(preference.map((id, index) => [id, index]));
+  return [...candidates].sort((a, b) => (rank.get(a.id) ?? preference.length) - (rank.get(b.id) ?? preference.length));
+}
+
+/**
+ * M5 batch-3 (workstream 1): whether `adapter` can express `mode` AT ALL —
+ * consults the exact same `RuntimeCapabilities.permissionModes` already
+ * reported on the wire (`create-daemon.ts`'s `toRuntimeInfoCapabilities`)
+ * rather than instantiating or probing anything new. A pure, synchronous,
+ * zero-I/O check — deliberately consulted BEFORE `adapter.detect()` in
+ * `pickAdapter` below, so a structurally-incapable candidate never pays for
+ * a real subprocess probe it could never have won anyway.
+ *
+ * This is a NEW pre-claim gate (M5 batch-3). The pre-existing POST-claim
+ * gate — `adapter.start()` throwing `PolicyUnsupportedError` for a policy it
+ * can't express (e.g. pi's own `mapPermissionPolicyToPiArgs` rejecting
+ * `confirm`/`plan`, `pi/permission-mapping.ts`) — is UNCHANGED and stays in
+ * place as defense-in-depth for any mismatch this capability check doesn't
+ * happen to catch (e.g. a future adapter whose declared `permissionModes`
+ * doesn't perfectly match its own mapping's real behavior). Before this
+ * gate existed, a `confirm`-mode task auto-selected (or explicitly
+ * requested) onto an adapter that can't express it would claim first and
+ * only discover the mismatch once `adapter.start()` actually threw —
+ * needlessly occupying the claim when a capable adapter may have been
+ * sitting right there (auto path) or simply wasting a claim/fail round trip
+ * for no possible outcome (explicit path).
+ */
+function adapterSupportsMode(adapter: RuntimeAdapter, mode: PermissionMode): boolean {
+  return adapter.capabilities().permissionModes.includes(mode);
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * M5 batch-3 (workstream 2): races `fn()` against `timeoutMs`, resolving
+ * `true` once `fn()` itself settles (success OR rejection — a rejection is
+ * swallowed here, the same best-effort contract every teardown call in this
+ * file already applies to `session.interrupt()`/`session.close()`) and
+ * `false` if `timeoutMs` elapses first with `fn()` still pending. Unlike a
+ * plain `Promise.race`, the caller can tell WHICH one won —
+ * `teardownActiveTask` needs that to decide whether to escalate to a hard
+ * kill.
+ */
+function raceSettleFirst(fn: () => Promise<void>, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(false);
+      }
+    }, timeoutMs);
+    timer.unref?.();
+    void (async () => {
+      try {
+        await fn();
+      } catch {
+        // best-effort — the caller only cares whether this settled in time
+      }
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(true);
+      }
+    })();
+  });
+}
+
+/**
+ * M5 batch-3 (workstream 2): approximate output size of one normalized
+ * `AgentEvent`, for `DaemonConfig.maxTaskOutputBytes` enforcement (`pump`
+ * below) — the UTF-8 byte length of `JSON.stringify(event)`. This is a
+ * serialized-payload-length APPROXIMATION of the event's eventual wire cost,
+ * not an exact accountant: `task.progress` batching/envelope framing
+ * overhead is not included, and for an `artifact` event this counts only the
+ * event's own `{name, contentType}` shape — the artifact's actual file bytes
+ * are read/uploaded separately by `sendArtifact` and are NOT counted here
+ * (capping that would need a different hook; out of scope for this cap).
+ * Good enough to catch a genuinely runaway task without needing an exact
+ * wire-byte accountant. Never throws: a shape `JSON.stringify` can't handle
+ * (it never should for a well-formed `AgentEvent`) counts as 0 bytes rather
+ * than crashing the task loop over an accounting nicety.
+ */
+function estimateEventBytes(event: AgentEvent): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(event), 'utf8');
+  } catch {
+    return 0;
+  }
 }
 
 type OpenArtifactResult = { ok: true; handle: FileHandle } | { ok: false; reason: string };
@@ -499,6 +704,11 @@ export class TaskRunner {
     return this.tasks.size;
   }
 
+  /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
+  private get maxTaskOutputBytes(): number {
+    return this.deps.maxTaskOutputBytes ?? DEFAULT_MAX_TASK_OUTPUT_BYTES;
+  }
+
   /**
    * M4 Phase 4 (part B.3, observability): per-active-task queue watermarks
    * for the control socket's `status` result — see
@@ -563,37 +773,113 @@ export class TaskRunner {
   }
 
   /**
-   * Finding F5(a): `session.interrupt()` is now raced against its own
-   * bounded deadline ({@link DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS}) rather
-   * than awaited unconditionally — see that constant's own doc comment for
-   * why an unbounded `await` here meant `task.fail` was silently never
-   * sent at all for a task whose adapter's `interrupt()` hangs. The
-   * interrupt attempt itself is wrapped so it can never reject/throw past
-   * the race (synchronously OR via a rejected promise) — only ever
-   * best-effort, exactly as before; `task.fail` is now sent and `finish()`
-   * called UNCONDITIONALLY once EITHER settles, not only on the (hopefully
-   * common) path where interrupt itself resolved first.
+   * M5 batch-3 (workstream 2): the ONE shared per-task teardown sequence —
+   * "reuse the exact interrupt/teardown machinery `shutdownActiveTasks`
+   * uses, do not invent a second teardown path" applies to BOTH callers:
+   * graceful daemon shutdown ({@link shutdownTask}, `retryable: true`) and
+   * resource-limit enforcement ({@link failActiveTaskForResourceLimit},
+   * `retryable: false`, wall-clock `maxDurationMs` / output-cap
+   * `maxTaskOutputBytes`).
+   *
+   * Finding F5(a) (pre-existing, unchanged by this refactor):
+   * `session.interrupt()` is raced against `timeoutMs`
+   * ({@link DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS}, overridable via
+   * `TaskRunnerDeps.shutdownInterruptTimeoutMs`) rather than awaited
+   * unconditionally, so a hung `interrupt()` (a misbehaving adapter) can
+   * never block `task.fail` from being sent at all.
+   *
+   * New in this batch — hard-kill escalation: when `interrupt()` does NOT
+   * settle within that same grace window, `session.close()` is tried next
+   * (ALSO raced against `timeoutMs`, for the identical reason: a hung
+   * `close()` must not be able to block this forever either — which matters
+   * far more here than it used to for the pre-existing graceful-shutdown-only
+   * caller, since THAT path is additionally bounded by an outer deadline
+   * (`SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS`/`DaemonConfig.shutdownGraceMs`,
+   * `create-daemon.ts`), while resource-limit enforcement fires during
+   * ordinary operation with no such outer bound watching it). `close()` is
+   * every adapter's harder teardown primitive — an actual process-level kill
+   * (SIGTERM, or `taskkill /F` on Windows — see e.g.
+   * `ClaudeProcessClient.kill()`/`PiRpcClient.kill()`) as opposed to pi's own
+   * soft in-band `interrupt()` (an RPC `abort` message that leaves the
+   * process alive and resumable) — so escalating to it is the closest thing
+   * to a "hard kill" the `Session` interface exposes. `finish()` below calls
+   * `session.close()` again regardless (documented idempotent) — this isn't
+   * a substitute for that, only an earlier, bounded attempt at actually
+   * stopping a stuck runtime before this method gives up and reports failure
+   * anyway.
+   *
+   * Re-checks task identity (`this.tasks.get(...) === active`) immediately
+   * before sending `task.fail`: the interrupt/hard-kill race above has await
+   * points during which a DIFFERENT path (a racing `task.cancel`/
+   * `task.reject`, or the session completing normally on its own) may have
+   * already finished this exact task and sent its own terminal message.
+   * Sending a SECOND terminal message for an already-finished task would be
+   * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
+   * identity-check guard for the same class of race.
    */
-  private async shutdownTask(active: ActiveTask, reason: string): Promise<void> {
+  private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean): Promise<void> {
+    // See `ActiveTask.beingTornDown`'s own doc comment: must be set BEFORE
+    // either step below, since either one (not just the hard-kill escalation)
+    // can end this task's `session.events` iterable as a side effect.
+    active.beingTornDown = true;
     const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
-    const interruptSettled = (async (): Promise<void> => {
-      try {
-        await active.session.interrupt();
-      } catch {
-        // best-effort — still report the failure below regardless
-      }
-    })();
-    await Promise.race([
-      interruptSettled,
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, timeoutMs);
-        timer.unref?.();
-      }),
-    ]);
-    this.deps.send(
-      createEnvelope('task.fail', { reason: `daemon shutting down: ${reason}`, retryable: true }, { taskId: active.taskId }),
-    );
+    const interrupted = await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
+    if (!interrupted) {
+      await raceSettleFirst(() => active.session.close(), timeoutMs);
+    }
+    if (this.tasks.get(active.taskId) !== active) return;
+    this.deps.send(createEnvelope('task.fail', { reason, retryable }, { taskId: active.taskId }));
     await this.finish(active.taskId);
+  }
+
+  /** Graceful-shutdown caller of {@link teardownActiveTask} — see `shutdownActiveTasks`'s own doc comment. `retryable: true`: nothing about the task/policy itself was ever at fault, only this device's own availability right now. */
+  private async shutdownTask(active: ActiveTask, reason: string): Promise<void> {
+    await this.teardownActiveTask(active, `daemon shutting down: ${reason}`, true);
+  }
+
+  /**
+   * M5 batch-3 (workstream 2): shared entry point for both resource-limit
+   * enforcers (wall-clock `maxDurationMs` — {@link armMaxDurationTimer} —
+   * and output-cap `maxTaskOutputBytes` — see `pump`). Looks the task up
+   * FRESH by id and no-ops if it's already gone — finished via any other
+   * path (normal completion, cancel, reject, daemon shutdown, or a
+   * DIFFERENT resource-limit trip already caught it first). `retryable:
+   * false` unconditionally: hitting a configured resource ceiling is never a
+   * transient/environmental failure a retry could fix — the same task under
+   * the same limits would just hit it again.
+   */
+  private async failActiveTaskForResourceLimit(taskId: string, reason: string): Promise<void> {
+    const active = this.tasks.get(taskId);
+    if (!active) return;
+    await this.teardownActiveTask(active, reason, false);
+  }
+
+  /**
+   * M5 batch-3 (workstream 2): daemon-authoritative wall-clock enforcement
+   * for `payload.limits.maxDurationMs` — previously accepted and silently
+   * ignored (see `handleOffer`'s own doc comment on the `limits.maxTokens`
+   * gate for the historical context this superseded). Armed once, at the
+   * moment this task is registered as active (`handleOffer`, still inside
+   * the synchronous construct -> register -> arm -> pump handoff — arming a
+   * timer is synchronous, `setTimeout` never invokes its callback in the
+   * same tick, so this doesn't reopen the race that handoff's own doc
+   * comment guards against). Cleared unconditionally in `finish()` so every
+   * terminal outcome leaves no dangling timer and can never double-fail an
+   * already-finished task — the fresh `this.tasks.get` lookup in
+   * `failActiveTaskForResourceLimit`/`teardownActiveTask`'s own identity
+   * re-check is the second, belt-and-suspenders layer of that same guarantee
+   * for the rare case the timer's callback was already scheduled before
+   * `finish()` had a chance to clear it.
+   */
+  private armMaxDurationTimer(active: ActiveTask, maxDurationMs: number): void {
+    const timer = setTimeout(() => {
+      void this.failActiveTaskForResourceLimit(
+        active.taskId,
+        `${MAX_DURATION_EXCEEDED_REASON_PREFIX}: task exceeded its configured wall-clock limit of ${maxDurationMs}ms`,
+      );
+    }, maxDurationMs);
+    timer.unref?.();
+    active.maxDurationTimer = timer;
   }
 
   async handleEnvelope(envelope: Envelope): Promise<void> {
@@ -663,7 +949,58 @@ export class TaskRunner {
         return;
       }
 
-      const pick = await this.pickAdapter(payload.runtime);
+      // M5 batch-3 (workstream 1): `limits.maxTokens` has no hard-enforcement
+      // path on ANY bundled runtime adapter today — nothing actually counts
+      // or caps tokens against it. Silently accepting the offer would let a
+      // caller believe a token ceiling is in effect when nothing checks it;
+      // declining fail-closed, pre-claim, is honest about that gap and lets
+      // the dispatcher route the task elsewhere instead of running
+      // unbounded. `retryable: true` — a different device's adapter set (or
+      // a future SDK version) might genuinely enforce this, so re-routing
+      // can help even though nothing here can. `limits.maxDurationMs` is
+      // deliberately left OUT of this admission gate: unlike maxTokens, it
+      // IS hard-enforced — daemon-authoritative, at the TaskRunner layer
+      // itself (a wall-clock timer armed once this task is registered as
+      // active — see `armMaxDurationTimer` — not delegated to any adapter),
+      // so there is no gap here to decline fail-closed for.
+      if (payload.limits?.maxTokens !== undefined) {
+        this.decline(
+          taskId,
+          `offer requests limits.maxTokens (${payload.limits.maxTokens}), which no bundled runtime adapter enforces — declining fail-closed rather than silently ignoring it`,
+          true,
+        );
+        return;
+      }
+
+      // M5 batch-3 (workstream 1): `policy.workspaceRoot` IS merged into the
+      // effective policy handed to the adapter (`computeEffectivePolicy`,
+      // policy.ts) as `ctx.policy.workspaceRoot` — but no bundled adapter
+      // actually reads or enforces it; every adapter derives its real
+      // confinement from `ctx.workspaceDir` (the daemon-created per-task
+      // directory) instead (see docs/security.md's "Workspace confinement is
+      // a convention, not a sandbox" section). An OFFER that asks for this
+      // control is asking for something that looks live but isn't — decline
+      // it fail-closed rather than silently accept an unenforced security
+      // constraint. Deliberately checks the RAW offer's own
+      // `payload.policy.workspaceRoot`, never the merged/effective policy:
+      // `computeEffectivePolicy` falls back to the device's configured
+      // CEILING's `workspaceRoot` when the offer itself didn't set one
+      // (policy.ts), and that ceiling-only case is a separate, operator-owned
+      // decision handled by a one-time startup warning instead (see
+      // `create-daemon.ts`'s `start()`) — checking the effective value here
+      // would incorrectly decline every single offer once an operator
+      // configures ANY ceiling workspaceRoot, not just the ones that actually
+      // asked for one.
+      if (payload.policy.workspaceRoot !== undefined) {
+        this.decline(
+          taskId,
+          'offer policy requests workspaceRoot, which no bundled runtime adapter enforces — declining fail-closed rather than silently accepting an unenforced security control',
+          true,
+        );
+        return;
+      }
+
+      const pick = await this.pickAdapter(payload.runtime, payload.policy.mode);
       if (!pick.ok) {
         this.decline(taskId, pick.reason, pick.retryable);
         return;
@@ -688,11 +1025,13 @@ export class TaskRunner {
             // M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter
             // `pickAdapter` just selected — covers both the explicit-runtime
             // path (`payload.runtime` named one) and the auto-select
-            // (pi-first) path (`payload.runtime` was absent) uniformly,
-            // since `pick.adapter` already reflects whichever one won either
-            // way. Distinct from `payload.runtime` (the merely REQUESTED
-            // runtime): this is what closes the gap where an auto-selected
-            // task left the server never learning which runtime actually ran.
+            // (preference-ordered, pi last by default — M5 batch-3, see
+            // `DEFAULT_RUNTIME_PREFERENCE`) path (`payload.runtime` was
+            // absent) uniformly, since `pick.adapter` already reflects
+            // whichever one won either way. Distinct from `payload.runtime`
+            // (the merely REQUESTED runtime): this is what closes the gap
+            // where an auto-selected task left the server never learning
+            // which runtime actually ran.
             runtime: isKnownRuntimeId(pick.adapter.id) ? pick.adapter.id : undefined,
           },
           { taskId },
@@ -846,8 +1185,15 @@ export class TaskRunner {
           this.deps.batcherOptions,
         ),
         approvalQueue: [],
+        outputBytesSoFar: 0,
       };
       this.tasks.set(taskId, active);
+      // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
+      // comment — still inside the synchronous construct -> register -> arm
+      // -> pump handoff described just below (no `await` yet).
+      if (payload.limits?.maxDurationMs !== undefined) {
+        this.armMaxDurationTimer(active, payload.limits.maxDurationMs);
+      }
       void this.pump(active);
 
       // Record (or refresh) this session's resumable workspace for any future
@@ -887,6 +1233,24 @@ export class TaskRunner {
         // guarantees for genuinely stale terminal messages. Mirrors the
         // same check already used below for the non-turn_end loop exits.
         if (this.tasks.get(active.taskId) !== active) return;
+
+        // M5 batch-3 (workstream 2): DaemonConfig.maxTaskOutputBytes
+        // enforcement — see `estimateEventBytes`'s own doc comment for
+        // exactly what's counted (a serialized-payload-length
+        // approximation) and what isn't (batching overhead; an artifact's
+        // actual file bytes, uploaded separately by `sendArtifact`). Checked
+        // here, before any per-event-type handling below, so a task that's
+        // about to be torn down for this never pays for `sendArtifact`'s own
+        // disk I/O or dispatches a pointless approval request first.
+        active.outputBytesSoFar += estimateEventBytes(event);
+        if (active.outputBytesSoFar > this.maxTaskOutputBytes) {
+          active.batcher.flush();
+          await this.failActiveTaskForResourceLimit(
+            active.taskId,
+            `${MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX}: task emitted approximately ${active.outputBytesSoFar} bytes of output (serialized-event-length approximation), exceeding the configured limit of ${this.maxTaskOutputBytes} bytes`,
+          );
+          return;
+        }
 
         if (event.type === 'needs_approval') {
           active.batcher.flush();
@@ -1001,11 +1365,16 @@ export class TaskRunner {
       // session). Check identity against the tasks map — if something else
       // already finished this exact active task, its own message
       // (task.cancelled / task.fail) already reported the outcome; this is
-      // not a second failure.
-      if (this.tasks.get(active.taskId) !== active) return;
+      // not a second failure. M5 batch-3 (workstream 2): `beingTornDown` is
+      // the SAME guard for `teardownActiveTask`'s own controlled teardown
+      // (graceful shutdown / resource-limit enforcement) — see
+      // `ActiveTask.beingTornDown`'s own doc comment for why the identity
+      // check alone doesn't cover that path's pre-finish() hard-kill
+      // `close()` call.
+      if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
       await this.fail(active.taskId, 'runtime session ended without completing the task', true);
     } catch (err) {
-      if (this.tasks.get(active.taskId) !== active) return;
+      if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
       active.batcher.flush();
       await this.fail(active.taskId, `runtime error: ${errorMessage(err)}`, true);
     }
@@ -1635,6 +2004,16 @@ export class TaskRunner {
   private async finish(taskId: string): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
+    // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
+    // comment — `finish()` is the single choke point every terminal outcome
+    // (normal completion, fail, cancel, or daemon shutdown) already funnels
+    // through, so clearing here (unconditionally, before anything else)
+    // guarantees no leaked timer and no stray fail after this task has
+    // already ended a different way.
+    if (active.maxDurationTimer) {
+      clearTimeout(active.maxDurationTimer);
+      active.maxDurationTimer = undefined;
+    }
     active.batcher.stop();
     this.tasks.delete(taskId);
     this.addFinishedTaskId(taskId); // finding P2 (Fix 2c) — see its own doc comment
@@ -1695,7 +2074,34 @@ export class TaskRunner {
     return dir;
   }
 
-  private async pickAdapter(requestedRuntime: string | undefined): Promise<PickResult> {
+  /**
+   * M5 batch-3 (workstream 1): selects which adapter runs this offer, now
+   * gated on both PRESENCE (`adapter.detect()`, as before) and CAPABILITY
+   * (`adapterSupportsMode` — can this adapter even express `policyMode`?
+   * new in this batch) — pre-claim, in both the explicit-runtime and
+   * auto-select branches.
+   *
+   * Explicit-runtime branch (`requestedRuntime` set): semantics otherwise
+   * unchanged from before this batch — allowlist and known-adapter checks
+   * first, THEN the new capability check, THEN presence. A capability
+   * mismatch here is a permanent characteristic of naming THIS runtime with
+   * THIS policy (e.g. pi never supports `confirm`, on any device, by
+   * design — `pi/permission-mapping.ts`) — `retryable: false`, the same
+   * class as "not in allowlist"/"unknown runtime" above it, since retrying
+   * this exact (runtime, mode) pair anywhere changes nothing.
+   *
+   * Auto-select branch (`requestedRuntime` absent): candidates are ordered
+   * by `runtimePreference` (default {@link DEFAULT_RUNTIME_PREFERENCE}) —
+   * see `orderByPreference` — then walked in that order; a candidate that
+   * can't express `policyMode` is skipped (not detected at all — capability
+   * is checked first, cheaper than a real subprocess probe) and the walk
+   * continues down the preference order, exactly as "skip non-supporting
+   * adapters and continue down the order" describes. If NOTHING eligible
+   * supports the mode, `retryable: true` — unlike the explicit branch, this
+   * is device-specific (which runtimes happen to be installed here), so a
+   * different device's installed runtime set might satisfy it.
+   */
+  private async pickAdapter(requestedRuntime: string | undefined, policyMode: PermissionMode): Promise<PickResult> {
     const allowlist = this.deps.runtimeAllowlist;
 
     if (requestedRuntime) {
@@ -1710,6 +2116,13 @@ export class TaskRunner {
       if (!adapter) {
         return { ok: false, reason: `unknown runtime "${requestedRuntime}"`, retryable: false };
       }
+      if (!adapterSupportsMode(adapter, policyMode)) {
+        return {
+          ok: false,
+          reason: `runtime "${requestedRuntime}" cannot express permission mode "${policyMode}"`,
+          retryable: false,
+        };
+      }
       const detected = await adapter.detect();
       if (!detected.present) {
         return {
@@ -1721,13 +2134,21 @@ export class TaskRunner {
       return { ok: true, adapter };
     }
 
-    const candidates = allowlist
-      ? this.deps.adapters.filter((a) => allowlist.includes(a.id))
-      : this.deps.adapters;
+    const eligible = allowlist ? this.deps.adapters.filter((a) => allowlist.includes(a.id)) : this.deps.adapters;
+    // M5 batch-3: product decision — pi is the FALLBACK runtime, not the
+    // default. Ordered independently of `deps.adapters`'s own construction
+    // order (which stays whatever `buildDefaultAdapters`/the embedder built
+    // it as — see `ALL_RUNTIME_IDS`'s doc comment, `create-daemon.ts`).
+    const candidates = orderByPreference(eligible, this.deps.runtimePreference ?? DEFAULT_RUNTIME_PREFERENCE);
     for (const adapter of candidates) {
+      if (!adapterSupportsMode(adapter, policyMode)) continue;
       const detected = await adapter.detect();
       if (detected.present) return { ok: true, adapter };
     }
-    return { ok: false, reason: 'no available runtime found on this device', retryable: true };
+    return {
+      ok: false,
+      reason: `no available runtime on this device can express permission mode "${policyMode}"`,
+      retryable: true,
+    };
   }
 }
