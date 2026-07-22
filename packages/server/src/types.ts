@@ -138,8 +138,18 @@ export interface TaskHandle {
   readonly taskId: string;
   events(): AsyncIterable<ServerTaskEvent>;
   cancel(reason?: string): Promise<void>;
-  approve(): Promise<void>;
-  reject(reason?: string): Promise<void>;
+  /**
+   * M5 (approval targeting, docs/protocol.md §5.3): `opts.approvalId`
+   * targets a SPECIFIC pending approval rather than "whichever one is
+   * currently pending" (the default when `opts` is omitted, unchanged from
+   * pre-M5). Thin wrapper over `ConnectionHub.approveTask` (`hub.ts`) — see
+   * that method's own doc comment for the full targeting/staleness
+   * semantics, including when this throws `StaleApprovalError` (exported
+   * from the package index for a caller to catch/inspect).
+   */
+  approve(opts?: { approvalId?: string }): Promise<void>;
+  /** M5: same `opts.approvalId` targeting semantics as {@link approve} above. */
+  reject(reason?: string, opts?: { approvalId?: string }): Promise<void>;
   steer(text: string): Promise<void>;
   result(): Promise<TaskResult>;
 }
@@ -159,6 +169,16 @@ export interface TaskSnapshot {
   taskId: string;
   state: TaskState;
   instruction: string;
+  /**
+   * The REQUESTED runtime — `DispatchInput.runtime`, forwarded verbatim into
+   * `task.offer.runtime`. Set once at `dispatch()` time and never touched
+   * again afterward, regardless of what the daemon actually ends up running.
+   * `undefined` means "no preference was expressed" (the daemon auto-selects,
+   * pi-first) — NOT "the daemon ran no runtime". Contrast with
+   * {@link claimedRuntime}, the ACTUAL runtime the daemon reports having
+   * picked; see that field's own doc comment for the full requested-vs-
+   * claimed distinction (docs/protocol.md §3.1).
+   */
   runtime?: RuntimeId;
   policy: PermissionPolicy;
   deviceId?: string;
@@ -166,6 +186,35 @@ export interface TaskSnapshot {
   createdAt: string;
   updatedAt: string;
   result?: TaskResult;
+  /**
+   * M5 (approval targeting, docs/protocol.md §5.3): the daemon-reported
+   * `approvalId` for the CURRENT `AwaitApproval` cycle, if this server has
+   * learned one (`ConnectionHub.onAwaitApproval`, `hub.ts`) — `undefined`
+   * whenever the task isn't currently awaiting approval, OR it is but no id
+   * was ever reported for it (a legacy daemon). Cleared centrally the
+   * instant the task LEAVES `AwaitApproval` (`ConnectionHub`'s
+   * `transitionTask`), so a later `AwaitApproval` cycle for the same task
+   * never inherits a stale id from a previous one. `approveTask`/
+   * `rejectTask` compare an operator-supplied target id against this field
+   * to decide whether a decision is stale (`StaleApprovalError`) — see
+   * `hub.ts` for the full mechanism.
+   */
+  pendingApprovalId?: string;
+  /**
+   * M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter the
+   * daemon reports having selected for this task (`task.claim.runtime`,
+   * `ConnectionHub.onClaim` — `hub.ts`) — covers both the explicit-runtime
+   * path (echoes {@link runtime}) and the auto-select/pi-first path (a value
+   * where {@link runtime} is `undefined`, since no preference was ever
+   * requested). `undefined` until the first `task.claim` for this task
+   * arrives, and forever after for a legacy daemon that predates this field
+   * (an old daemon's `task.claim` simply omits it). Set exactly once, at the
+   * `Offered -> Claimed` transition, and never modified again afterward — a
+   * retried/idempotent claim from the same device is a no-op that never
+   * reaches `onClaim`'s patch at all (see `onClaim`'s own doc comment), so
+   * this can never be silently overwritten by a redelivered claim.
+   */
+  claimedRuntime?: RuntimeId;
 }
 
 /**
@@ -178,7 +227,22 @@ export type ByokServerEvent =
   | { kind: 'device.connected'; deviceId: string; at: string }
   | { kind: 'device.disconnected'; deviceId: string; at: string }
   | { kind: 'task.created'; taskId: string; at: string }
-  | { kind: 'task.state'; taskId: string; state: TaskState; at: string }
+  | {
+      kind: 'task.state';
+      taskId: string;
+      state: TaskState;
+      at: string;
+      /**
+       * M5 (claimed runtime): mirrors {@link TaskSnapshot.claimedRuntime} at
+       * the moment of this transition — `undefined` until (and unless) the
+       * daemon's `task.claim` reported one, so it first appears on the
+       * `Offered -> Claimed` event and stays whatever value it had from then
+       * on for every later transition of the same task. See that field's own
+       * doc comment for the requested-vs-claimed distinction
+       * (docs/protocol.md §3.1).
+       */
+      claimedRuntime?: RuntimeId;
+    }
   /**
    * M4 Phase 3 hardening (orchestrator-directed): the daemon resolved a
    * pending approval entirely locally (M4 Phase 3's local `approvals.resolve`
@@ -213,10 +277,21 @@ export type ByokServerEvent =
    * `onApprovalResolved`'s own doc comment (`hub.ts`) for the full
    * relationship.
    */
-  | ({ kind: 'task.approval_resolved'; taskId: string; at: string } & Pick<
-      TaskApprovalResolvedPayload,
-      'approvalId' | 'decision' | 'resolvedBy'
-    >)
+  | ({
+      kind: 'task.approval_resolved';
+      taskId: string;
+      at: string;
+      /**
+       * M5 (hello-capability plumbing, docs/protocol.md §5.3): whether the
+       * REPORTING device advertised the `approval-targeting` capability flag
+       * (`version.ts`) in its `conn.hello` — an observability-only signal
+       * (see that flag's own doc comment: it never gates matching, which is
+       * always decided by field presence on the specific message). `false`
+       * for a legacy daemon, or one whose connection capabilities this hub
+       * never recorded (see `ConnectionHub.getDeviceCapabilities`).
+       */
+      targeted: boolean;
+    } & Pick<TaskApprovalResolvedPayload, 'approvalId' | 'decision' | 'resolvedBy'>)
   /**
    * M4 Phase 4 (part A): `deviceId` exceeded its inbound-envelope rate limit
    * (`CreateByokServerOptions.rateLimit`, enforced in

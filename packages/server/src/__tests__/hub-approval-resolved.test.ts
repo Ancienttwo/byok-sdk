@@ -2,7 +2,10 @@ import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok/protocol';
 import type { WebSocket } from 'ws';
-import { createByokServer } from '../index';
+import { DeviceRegistry } from '../auth';
+import { ConnectionHub } from '../hub';
+import { createByokServer, type ByokServerEvent } from '../index';
+import { InMemoryTaskStore } from '../task-store';
 import {
   claimAndStart,
   connectFakeDaemon,
@@ -242,6 +245,94 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     warnSpy.mockRestore();
   });
 
+  it('M5 (approval targeting): await_approval(A) stored, await_approval(B) re-delivered for the SAME task while still AwaitApproval, then approval_resolved(A) arrives — task stays AwaitApproval, never Running', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode();
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
+    ws = daemon.ws;
+
+    const handle = await byok.dispatch({ instruction: 'needs a human ok' });
+    await claimAndStart(ws, daemon.deviceId, handle);
+
+    // A: the first await_approval, stored as this task's pendingApprovalId.
+    await moveToAwaitApproval(ws, handle, 'first (A)', 'appr-A');
+    expect(byok.tasks.get(handle.taskId)?.pendingApprovalId).toBe('appr-A');
+
+    // B: the daemon has moved on (e.g. resolved A entirely locally with no
+    // approval_resolved capability negotiated) and dispatched a fresh
+    // approval for the SAME task — re-sent while the server's own record is
+    // STILL AwaitApproval (AwaitApproval -> AwaitApproval is not a state
+    // transition, so this must update pendingApprovalId in place, not be
+    // rejected as illegal).
+    send(ws, createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId: handle.taskId }));
+    // No new 'state' event fires (still AwaitApproval) — wait on a distinct,
+    // observable side effect instead: a marker task proves ordering without
+    // an arbitrary sleep.
+    const marker = await byok.dispatch({ instruction: 'marker task' });
+    await claimAndStart(ws, daemon.deviceId, marker);
+    expect(byok.tasks.get(handle.taskId)?.pendingApprovalId).toBe('appr-B');
+    expect(byok.tasks.get(handle.taskId)?.state).toBe('AwaitApproval'); // unchanged
+
+    // A late task.approval_resolved arrives, carrying A's now-superseded id.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    send(
+      ws,
+      createEnvelope(
+        'task.approval_resolved',
+        { approvalId: 'appr-A', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() },
+        { taskId: handle.taskId },
+      ),
+    );
+    send(ws, createEnvelope('task.progress', { seq: 1, events: [{ type: 'progress', text: 'marker' }] }, { taskId: marker.taskId }));
+    await waitForTaskEvent(marker, (e) => e.kind === 'agent');
+
+    // The task stays AwaitApproval — the stale report for A must NOT move
+    // it to Running (that would be resuming the WRONG approval).
+    expect(byok.tasks.get(handle.taskId)?.state).toBe('AwaitApproval');
+    expect(byok.tasks.get(handle.taskId)?.pendingApprovalId).toBe('appr-B');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('stale task.approval_resolved'));
+    warnSpy.mockRestore();
+  });
+
+  it('S2 (cross-model review finding, P1): await_approval(B) re-delivered while already AwaitApproval re-emits the await_approval ServerTaskEvent carrying B\'s summary — previously the same-state branch updated pendingApprovalId and returned silently, leaving an operator watching TaskHandle.events() still showing A\'s summary', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode();
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
+    ws = daemon.ws;
+
+    const handle = await byok.dispatch({ instruction: 'needs a human ok' });
+    await claimAndStart(ws, daemon.deviceId, handle);
+    await moveToAwaitApproval(ws, handle, 'first (A)', 'appr-A');
+
+    // B supersedes A while the record is STILL AwaitApproval — the exact
+    // same-state redelivery `hub-approval-resolved.test.ts`'s sibling test
+    // above already covers for `pendingApprovalId`; this test's own focus is
+    // the previously-missing OBSERVABILITY event, not the stored id.
+    send(ws, createEnvelope('task.await_approval', { summary: 'second (B)', approvalId: 'appr-B' }, { taskId: handle.taskId }));
+
+    const event = await waitForTaskEvent(handle, (e) => e.kind === 'await_approval' && e.summary === 'second (B)');
+    if (event.kind !== 'await_approval') throw new Error('unreachable');
+    expect(event.summary).toBe('second (B)');
+    expect(byok.tasks.get(handle.taskId)?.pendingApprovalId).toBe('appr-B');
+
+    // Sanity: a redelivery carrying the SAME id (B again, not a new
+    // approval) must NOT re-emit yet another event — only a genuinely NEW id
+    // triggers the re-emission (mirrors the pendingApprovalId-update guard's
+    // own `payload.approvalId !== record.pendingApprovalId` condition,
+    // hub.ts). Mirrors this file's own `implicitFired` race idiom above for
+    // asserting a negative without an arbitrary blind sleep.
+    send(ws, createEnvelope('task.await_approval', { summary: 'second (B) resent', approvalId: 'appr-B' }, { taskId: handle.taskId }));
+    const sawAnotherEvent = await Promise.race([
+      waitForTaskEvent(handle, (e) => e.kind === 'await_approval' && e.summary === 'second (B) resent').then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 200)),
+    ]);
+    expect(sawAnotherEvent).toBe(false);
+  });
+
   it('an unknown taskId is a silent no-op (no crash, no event, mirrors every other handler\'s missing-record guard)', async () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
@@ -264,5 +355,107 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const handle = await byok.dispatch({ instruction: 'still alive' });
     await claimAndStart(ws, daemon.deviceId, handle);
     expect(byok.tasks.get(handle.taskId)?.state).toBe('Running');
+  });
+
+  /**
+   * Acceptance finding: the `targeted` field on the emitted
+   * `task.approval_resolved` `ByokServerEvent` (`onApprovalResolved`,
+   * `hub.ts:~1013`) had no coverage — every existing server test passes
+   * `undefined` capabilities to `registerConnection`, so `targeted` was only
+   * ever exercised on its `false` branch, and only incidentally.
+   *
+   * These two tests construct a raw `ConnectionHub` directly and drive it
+   * with `handleInbound` (mirroring `hub-approve-reject.test.ts`'s own M5
+   * "approveTask/rejectTask opts.approvalId" describe block) instead of this
+   * file's usual full-stack `createByokServer` + `connectFakeDaemon`
+   * harness: `test-support.ts`'s `connectFakeDaemonWs` hard-codes an empty
+   * `conn.hello.capabilities: []` with no way to override it, so the
+   * full-stack helpers have no way to negotiate the `approval-targeting`
+   * flag this needs — `registerConnection`'s own explicit `capabilities`
+   * parameter (`hub.ts`) is the direct route.
+   */
+  describe('M5 (hello-capability plumbing): targeted field on the emitted task.approval_resolved event', () => {
+    /**
+     * Mirrors `waitForServerEvent` (`test-support.ts`), which takes a full
+     * `ByokServer` — these tests construct a raw `ConnectionHub` instead, so
+     * that helper doesn't apply here. Same safety as the original: both are
+     * backed by the same `AsyncEventQueue` (`event-queue.ts`), whose
+     * `subscribe()` always replays from the start of its buffer, so calling
+     * this AFTER the triggering (synchronous) `handleInbound` call already
+     * ran is safe — not a race against a live push.
+     */
+    async function waitForHubEvent(
+      hub: ConnectionHub,
+      predicate: (event: ByokServerEvent) => boolean,
+    ): Promise<ByokServerEvent> {
+      for await (const event of hub.subscribeServerEvents()) {
+        if (predicate(event)) return event;
+      }
+      throw new Error('server event stream ended before a matching event was seen');
+    }
+
+    it('a daemon that advertised the approval-targeting capability produces targeted: true on the emitted event', async () => {
+      const taskStore = new InMemoryTaskStore();
+      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
+      const deviceId = 'device-targeted-capability';
+      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
+      hub.registerConnection(deviceId, fakeWs, undefined, ['approval-targeting']);
+
+      const handle = await hub.dispatch({ instruction: 'needs a human ok', deviceId });
+      const { taskId } = handle;
+      hub.handleInbound(deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
+      hub.handleInbound(deviceId, createEnvelope('task.started', {}, { taskId }));
+      hub.handleInbound(
+        deviceId,
+        createEnvelope('task.await_approval', { summary: 'needs a human ok', approvalId: 'appr-targeted' }, { taskId }),
+      );
+      expect(taskStore.get(taskId)?.state).toBe('AwaitApproval');
+
+      hub.handleInbound(
+        deviceId,
+        createEnvelope(
+          'task.approval_resolved',
+          { approvalId: 'appr-targeted', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() },
+          { taskId },
+        ),
+      );
+
+      const event = await waitForHubEvent(hub, (e) => e.kind === 'task.approval_resolved' && e.taskId === taskId);
+      if (event.kind !== 'task.approval_resolved') throw new Error('unreachable');
+      expect(event.targeted).toBe(true);
+      expect(taskStore.get(taskId)?.state).toBe('Running');
+    });
+
+    it('a legacy daemon with no capabilities advertised at all produces targeted: false on the emitted event', async () => {
+      const taskStore = new InMemoryTaskStore();
+      const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000);
+      const deviceId = 'device-legacy-no-capabilities';
+      const fakeWs = { send: vi.fn() } as unknown as WebSocket;
+      hub.registerConnection(deviceId, fakeWs, undefined); // no capabilities arg — every pre-M5/legacy call site's shape.
+
+      const handle = await hub.dispatch({ instruction: 'needs a human ok', deviceId });
+      const { taskId } = handle;
+      hub.handleInbound(deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
+      hub.handleInbound(deviceId, createEnvelope('task.started', {}, { taskId }));
+      hub.handleInbound(
+        deviceId,
+        createEnvelope('task.await_approval', { summary: 'needs a human ok', approvalId: 'appr-legacy' }, { taskId }),
+      );
+      expect(taskStore.get(taskId)?.state).toBe('AwaitApproval');
+
+      hub.handleInbound(
+        deviceId,
+        createEnvelope(
+          'task.approval_resolved',
+          { approvalId: 'appr-legacy', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() },
+          { taskId },
+        ),
+      );
+
+      const event = await waitForHubEvent(hub, (e) => e.kind === 'task.approval_resolved' && e.taskId === taskId);
+      if (event.kind !== 'task.approval_resolved') throw new Error('unreachable');
+      expect(event.targeted).toBe(false);
+      expect(taskStore.get(taskId)?.state).toBe('Running');
+    });
   });
 });

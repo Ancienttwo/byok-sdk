@@ -4,7 +4,8 @@
     "steer",
     "blob-upload",
     "interactive-approval",
-    "approval_resolved"
+    "approval_resolved",
+    "approval-targeting"
   ],
   "permissionModes": [
     "auto",
@@ -408,7 +409,11 @@
     "task.approve": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
+      "properties": {
+        "approvalId": {
+          "type": "string"
+        }
+      },
       "additionalProperties": false
     },
     "task.reject": {
@@ -416,6 +421,9 @@
       "type": "object",
       "properties": {
         "reason": {
+          "type": "string"
+        },
+        "approvalId": {
           "type": "string"
         }
       },
@@ -453,6 +461,14 @@
         },
         "agentId": {
           "type": "string"
+        },
+        "runtime": {
+          "type": "string",
+          "enum": [
+            "pi",
+            "claude",
+            "codex"
+          ]
         }
       },
       "required": [
@@ -735,6 +751,9 @@
       "type": "object",
       "properties": {
         "summary": {
+          "type": "string"
+        },
+        "approvalId": {
           "type": "string"
         }
       },
@@ -1261,7 +1280,11 @@
           },
           "payload": {
             "type": "object",
-            "properties": {},
+            "properties": {
+              "approvalId": {
+                "type": "string"
+              }
+            },
             "additionalProperties": false
           }
         },
@@ -1314,6 +1337,9 @@
             "type": "object",
             "properties": {
               "reason": {
+                "type": "string"
+              },
+              "approvalId": {
                 "type": "string"
               }
             },
@@ -1486,6 +1512,14 @@
               },
               "agentId": {
                 "type": "string"
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "pi",
+                  "claude",
+                  "codex"
+                ]
               }
             },
             "required": [
@@ -1988,6 +2022,9 @@
             "type": "object",
             "properties": {
               "summary": {
+                "type": "string"
+              },
+              "approvalId": {
                 "type": "string"
               }
             },
@@ -3293,7 +3330,11 @@
                   },
                   "payload": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                      "approvalId": {
+                        "type": "string"
+                      }
+                    },
                     "additionalProperties": false
                   }
                 },
@@ -3346,6 +3387,9 @@
                     "type": "object",
                     "properties": {
                       "reason": {
+                        "type": "string"
+                      },
+                      "approvalId": {
                         "type": "string"
                       }
                     },
@@ -3518,6 +3562,14 @@
                       },
                       "agentId": {
                         "type": "string"
+                      },
+                      "runtime": {
+                        "type": "string",
+                        "enum": [
+                          "pi",
+                          "claude",
+                          "codex"
+                        ]
                       }
                     },
                     "required": [
@@ -4020,6 +4072,9 @@
                     "type": "object",
                     "properties": {
                       "summary": {
+                        "type": "string"
+                      },
+                      "approvalId": {
                         "type": "string"
                       }
                     },
@@ -4753,7 +4808,11 @@
                   },
                   "payload": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                      "approvalId": {
+                        "type": "string"
+                      }
+                    },
                     "additionalProperties": false
                   }
                 },
@@ -4806,6 +4865,9 @@
                     "type": "object",
                     "properties": {
                       "reason": {
+                        "type": "string"
+                      },
+                      "approvalId": {
                         "type": "string"
                       }
                     },
@@ -4978,6 +5040,14 @@
                       },
                       "agentId": {
                         "type": "string"
+                      },
+                      "runtime": {
+                        "type": "string",
+                        "enum": [
+                          "pi",
+                          "claude",
+                          "codex"
+                        ]
                       }
                     },
                     "required": [
@@ -5480,6 +5550,9 @@
                     "type": "object",
                     "properties": {
                       "summary": {
+                        "type": "string"
+                      },
+                      "approvalId": {
                         "type": "string"
                       }
                     },

@@ -102,3 +102,49 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     }
   });
 });
+
+/**
+ * C2 (cross-model review, P2): `computeCapabilities` (`create-daemon.ts`)
+ * used to emit only `steer`/`blob-upload` on `conn.hello.capabilities` — the
+ * CONNECTION-level flags, distinct from the per-runtime
+ * `conn.hello.runtimes[].capabilities` matrix the describe block above
+ * covers. This daemon has unconditionally included `approvalId` on
+ * `task.await_approval`/`task.approve`/`task.reject` since M5, but never
+ * advertised the `approval-targeting` flag saying so, so the server's own
+ * `targeted` marking (`ConnectionHub.approveTask`/`rejectTask`,
+ * `packages/server/src/hub.ts`) always treated every daemon as legacy.
+ */
+describe('conn.hello.capabilities (C2: approval-targeting)', () => {
+  let server: TestServer;
+  let daemon: Daemon | undefined;
+
+  beforeEach(async () => {
+    server = await TestServer.start();
+  });
+
+  afterEach(async () => {
+    await daemon?.stop();
+    await server.close();
+  });
+
+  it('advertises approval-targeting unconditionally, alongside the pre-existing steer/blob-upload flags', async () => {
+    const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'path' }) });
+
+    const workspaceRoot = await tmpDir('byok-conn-hello-capflags-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-capflags-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      [pi],
+    );
+    await daemon.pair('pairing-code');
+    await daemon.start();
+
+    const hello = await server.waitFor((e) => e.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+
+    expect(hello.payload.capabilities).toContain('approval-targeting');
+    // Unconditional, exactly like `blob-upload` — not gated on any
+    // adapter's own `capabilities()` the way `steer` is.
+    expect(hello.payload.capabilities).toContain('blob-upload');
+  });
+});

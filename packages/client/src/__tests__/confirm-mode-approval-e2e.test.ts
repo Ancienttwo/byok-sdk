@@ -439,4 +439,168 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     conn.client.close();
   });
+
+  /**
+   * M5 (approval targeting, docs/protocol.md §5.3): the race decisions (d)/
+   * (e) above close ("a stale decision for the SAME still-current approval
+   * is a no-op") left one gap open — a LATE decision for a DIFFERENT,
+   * already-superseded approval on the SAME task would previously resolve
+   * "whichever approval is currently pending" (the new one), silently
+   * misapplying a decision meant for the old one. These two tests are that
+   * exact scenario: approval A resolves locally, approval B is dispatched
+   * next for the SAME task, and a late wire decision carrying A's id arrives
+   * after — `TaskRunner.handleApprove`/`handleReject`'s new
+   * exact-match-against-`active.pendingApprovalId` check (gated on the
+   * wire's optional `approvalId`) is what closes it.
+   */
+  it('(f) [M5 approval targeting] A resolved locally, B dispatched next for the SAME task — a late wire task.approve carrying A\'s (superseded) id is an audit-only no-op; B stays pending and later resolves normally', async () => {
+    const adapter = new ApprovalAwareAdapter();
+    const built = await pairedAndStarted('acme-confirm-targeting-approve', adapter);
+    daemon = built.daemon;
+
+    const events: DaemonEvent[] = [];
+    built.daemon.subscribe((e) => events.push(e));
+
+    const taskId = 't-targeting-approve-1';
+    server.send(
+      createEnvelope('task.offer', { instruction: 'do gated work', policy: { mode: 'confirm' } }, { taskId, seq: server.nextSeq() }),
+    );
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+
+    // A: dispatched, then resolved LOCALLY via the CLI's approvals.resolve
+    // (never touches the session — see test (b) above).
+    const requestA = conn.client.request<ApprovalsRequestResult>('approvals.request', { taskId, summary: 'first (A)' });
+    const awaitA = await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
+    if (awaitA.type !== 'task.await_approval') throw new Error('unreachable');
+    const approvalIdA = awaitA.payload.approvalId;
+    expect(approvalIdA).toEqual(expect.any(String));
+    await conn.client.request('approvals.resolve', { approvalId: approvalIdA, decision: 'approve' });
+    await requestA;
+
+    // B: a FRESH approvals.request for the SAME task — dispatched
+    // immediately since A's slot is now free, with its OWN distinct id.
+    const requestB = conn.client.request<ApprovalsRequestResult>('approvals.request', { taskId, summary: 'second (B)' });
+    const awaitB = await server.waitFor(
+      (e) => e.type === 'task.await_approval' && e.task_id === taskId && e.payload.approvalId !== approvalIdA,
+    );
+    if (awaitB.type !== 'task.await_approval') throw new Error('unreachable');
+    const approvalIdB = awaitB.payload.approvalId;
+    expect(approvalIdB).toEqual(expect.any(String));
+    expect(approvalIdB).not.toBe(approvalIdA);
+
+    // The late wire task.approve — as if the server's own decision for A
+    // finally went out only after the daemon had ALREADY moved on to B.
+    server.send(createEnvelope('task.approve', { approvalId: approvalIdA }, { taskId, seq: server.nextSeq() }));
+    await vi.waitFor(() => {
+      expect(
+        events.some((e) => e.kind === 'stale-approval-decision' && e.taskId === taskId && e.decision === 'approve'),
+      ).toBe(true);
+    });
+
+    // B is still the one pending — the stale message for A did not resolve
+    // it — and the session was never touched by either A's local resolve or
+    // the stale message (mirrors test (b)'s own "never called" assertion).
+    const listAfterStale = await conn.client.request<ApprovalsListResult>('approvals.list');
+    expect(listAfterStale.approvals).toHaveLength(1);
+    expect(listAfterStale.approvals[0]?.approvalId).toBe(approvalIdB);
+    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([]);
+    expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === taskId)).toBe(false);
+
+    // B resolves normally afterward — proving it was never torn down or
+    // corrupted by the stale message that raced it.
+    await conn.client.request('approvals.resolve', { approvalId: approvalIdB, decision: 'approve' });
+    await expect(requestB).resolves.toEqual({ approved: true, reason: undefined });
+
+    conn.client.close();
+  });
+
+  it('(g) [M5 approval targeting] A resolved locally, B dispatched next for the SAME task — a late wire task.reject carrying A\'s (superseded) id is an audit-only no-op; B stays pending, the session is not interrupted, and the task is not failed', async () => {
+    const adapter = new ApprovalAwareAdapter();
+    const built = await pairedAndStarted('acme-confirm-targeting-reject', adapter);
+    daemon = built.daemon;
+
+    const events: DaemonEvent[] = [];
+    built.daemon.subscribe((e) => events.push(e));
+
+    const taskId = 't-targeting-reject-1';
+    server.send(
+      createEnvelope('task.offer', { instruction: 'do gated work', policy: { mode: 'confirm' } }, { taskId, seq: server.nextSeq() }),
+    );
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+
+    const requestA = conn.client.request<ApprovalsRequestResult>('approvals.request', { taskId, summary: 'first (A)' });
+    const awaitA = await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
+    if (awaitA.type !== 'task.await_approval') throw new Error('unreachable');
+    const approvalIdA = awaitA.payload.approvalId;
+    await conn.client.request('approvals.resolve', { approvalId: approvalIdA, decision: 'approve' });
+    await requestA;
+
+    const requestB = conn.client.request<ApprovalsRequestResult>('approvals.request', { taskId, summary: 'second (B)' });
+    const awaitB = await server.waitFor(
+      (e) => e.type === 'task.await_approval' && e.task_id === taskId && e.payload.approvalId !== approvalIdA,
+    );
+    if (awaitB.type !== 'task.await_approval') throw new Error('unreachable');
+    const approvalIdB = awaitB.payload.approvalId;
+
+    // The late wire task.reject carries A's superseded id.
+    server.send(
+      createEnvelope('task.reject', { reason: 'stale server-side reject', approvalId: approvalIdA }, { taskId, seq: server.nextSeq() }),
+    );
+    await vi.waitFor(() => {
+      expect(
+        events.some((e) => e.kind === 'stale-approval-decision' && e.taskId === taskId && e.decision === 'reject'),
+      ).toBe(true);
+    });
+
+    // B stays pending, the session was never interrupted (handleReject's
+    // interrupt+task.fail+finish sequence never ran for the stale message),
+    // and the task itself was never failed.
+    const listAfterStale = await conn.client.request<ApprovalsListResult>('approvals.list');
+    expect(listAfterStale.approvals).toHaveLength(1);
+    expect(listAfterStale.approvals[0]?.approvalId).toBe(approvalIdB);
+    expect(adapter.sessions[0]?.interruptCalls).toBe(0);
+    expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === taskId)).toBe(false);
+
+    // B resolves normally afterward.
+    await conn.client.request('approvals.resolve', { approvalId: approvalIdB, decision: 'reject', reason: 'B declined' });
+    await expect(requestB).resolves.toEqual({ approved: false, reason: 'B declined' });
+
+    conn.client.close();
+  });
+
+  it('(h) [M5 approval targeting, compat] a wire task.approve with NO approvalId still resolves whichever approval is currently pending — untargeted behavior is unchanged from pre-M5 (a legacy server never learned/sent an id)', async () => {
+    const adapter = new ApprovalAwareAdapter();
+    const built = await pairedAndStarted('acme-confirm-targeting-compat', adapter);
+    daemon = built.daemon;
+
+    const taskId = 't-targeting-compat-1';
+    server.send(
+      createEnvelope('task.offer', { instruction: 'do gated work', policy: { mode: 'confirm' } }, { taskId, seq: server.nextSeq() }),
+    );
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+
+    const requestPromise = conn.client.request<ApprovalsRequestResult>('approvals.request', {
+      taskId,
+      summary: 'Bash: legacy server, no approvalId',
+    });
+    await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
+
+    // A legacy (pre-M5) server's task.approve carries no approvalId at all.
+    server.send(createEnvelope('task.approve', {}, { taskId, seq: server.nextSeq() }));
+
+    const outcome = await requestPromise;
+    expect(outcome).toEqual({ approved: true, reason: undefined });
+    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([{ approved: true }]);
+
+    conn.client.close();
+  });
 });

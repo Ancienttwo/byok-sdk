@@ -206,16 +206,16 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `runtimes?`, `cursor?` | Opening (or reopening) the WSS connection |
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
-| `task.approve` | S→D | **required** | **required** | `{}` | `TaskHandle.approve()` while `AwaitApproval` |
-| `task.reject` | S→D | **required** | **required** | `reason?` | `TaskHandle.reject()` while `AwaitApproval` |
+| `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
+| `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
 | `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
-| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?` | Daemon accepts an offer (idempotent CAS) |
+| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `runtime?` (M5, additive — §3.1) | Daemon accepts an offer (idempotent CAS) |
 | `task.started` | D→S | **required** | optional | `{}` | Daemon actually starts the runtime session — `Claimed → Running` |
 | `task.decline` | D→S | **required** | optional | `reason`, `retryable?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
-| `task.await_approval` | D→S | **required** | optional | `summary` | Runtime raised `needs_approval` |
+| `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
 | `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?` | Runtime reached `turn_end` |
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?` | Task ends `Cancelled` (server- or daemon-initiated) |
@@ -283,6 +283,13 @@ alone.
 `task.started` is idempotent the same way `task.claim` is: a repeat
 `task.started` from the device that already owns a `Running` task is a
 no-op, not an illegal-transition error.
+
+**`task.claim.runtime` (M5, additive minor): the ACTUALLY-selected runtime,
+distinct from `task.offer.runtime`/`TaskSnapshot.runtime` (the merely
+REQUESTED one, unchanged by this addition) — when an offer names no runtime
+the daemon auto-selects (pi-first), and this field is what lets the server
+finally learn which adapter it picked, recorded separately as
+`TaskSnapshot.claimedRuntime`.**
 
 ### 3.2 Declined vs. Failed (M1 gap #5)
 
@@ -499,7 +506,104 @@ network-latency-sized (however long `task.approval_resolved` takes to
 reach the server) — and the only possible divergence is exactly the same
 kind §4 already accepts elsewhere: the server's terminal record disagreeing
 with a daemon that (in the reject case) already stopped, or (in the approve
-case) already continued, its own local session.
+case) already continued, its own local session. **§5.3's `approvalId`
+targeting narrows an ADJACENT race further still** — a late `task.approve`/
+`task.reject` that arrives not for a terminal task, but for the SAME task's
+NEXT approval cycle (a different, still-`AwaitApproval` pending id) — but,
+per that section's own residual-race note, does not eliminate it either.
+
+### 5.3 `approvalId` targeting (additive minor)
+
+**Problem this closes (M5):** none of `task.await_approval`/`task.approve`/
+`task.reject` carried any identity for *which* pending approval a decision
+was about — only "the one currently pending for this task." A daemon
+generates its own `approvalId` locally (`ApprovalRegistry`,
+`packages/client`'s `approvals.ts`) the moment it dispatches one, but that id
+never reached the wire before M5. As long as a task only ever has ONE
+approval in its whole lifetime this is harmless; it stops being harmless the
+moment a SECOND approval (B) gets dispatched for the SAME task before a
+decision for the FIRST one (A) has round-tripped all the way through the
+server and back — e.g. A resolves entirely locally (the control socket's
+`approvals.resolve`), B is dispatched next, and only THEN does a slow/queued
+server-side decision for A finally arrive as a wire `task.approve`/
+`task.reject`. Pre-M5, the daemon had no way to tell A's decision from B's:
+`TaskContext.approvalChannel.resolve` always resolved "whichever approval is
+CURRENTLY pending" — i.e. B — silently misapplying A's decision to it.
+
+**The fix: all three carry an optional `approvalId`.**
+`task.await_approval.approvalId` is the daemon's own generated id for the
+approval it's reporting — included unconditionally by an M5+ daemon (no
+capability gating needed to send it safely; see below).
+`task.approve.approvalId`/`task.reject.approvalId` let a decision target
+that SAME specific approval rather than "whichever is current." All three
+fields are plain optional properties on already-tolerant `z.object()`
+payloads — an old peer that doesn't recognize the field simply never reads
+it, so this needed no version bump and no emission gating on either side.
+
+**Matching semantics, both sides field-presence-driven (never
+capability-driven — see below):**
+
+- **Daemon** (`TaskRunner.handleApprove`/`handleReject`, `task-runner.ts`):
+  if the incoming `task.approve`/`task.reject` carries an `approvalId` that
+  does NOT match this task's own currently-dispatched
+  `ActiveTask.pendingApprovalId`, the decision is a stale, audit-only no-op —
+  logged via the same `onStaleApprovalDecision` hook `NoPendingApprovalError`
+  already uses, never resolving anything and never tearing the task down.
+  Absent `approvalId` (a legacy server, or one that never recorded an id)
+  preserves the pre-M5 behavior exactly: resolve whichever approval is
+  currently pending. The daemon-side check is always the AUTHORITATIVE gate
+  — see the residual race below for why.
+- **Server** (`ConnectionHub.onAwaitApproval`/`approveTask`/`rejectTask`/
+  `onApprovalResolved`, `hub.ts`): `TaskSnapshot.pendingApprovalId` records
+  the daemon's last-reported id for a task's CURRENT `AwaitApproval` cycle,
+  updated even across a re-delivered/updated `task.await_approval` while
+  still `AwaitApproval` (the daemon moved on to a fresh approval before the
+  server's record left the state), and cleared centrally the instant the
+  task leaves `AwaitApproval` for any reason, so a later cycle never inherits
+  a stale id. `approveTask(taskId, {approvalId})`/`rejectTask(taskId, reason,
+  {approvalId})` validate BEFORE any state change: a caller-supplied id that
+  disagrees with the recorded one throws a typed `StaleApprovalError` (no
+  transition, no wire send) — distinct from the pre-existing
+  `TaskNotAwaitingApprovalError` (task isn't `AwaitApproval` at all right
+  now, checked first). `onApprovalResolved` gains the mirror check: a
+  reported `approvalId` that disagrees with the recorded one is a stale
+  no-op (warned, state untouched) rather than resuming the wrong approval.
+
+**A new handshake capability flag, `approval-targeting`** (`CAPABILITY_FLAGS`,
+`version.ts`), is purely informational — unlike `approval_resolved` (§5.2),
+it gates nothing. Both sides already emit `approvalId` unconditionally the
+moment they're upgraded; a receiver decides whether to apply exact-match
+targeting by FIELD PRESENCE on the specific message at hand, never by
+checking this flag. It exists only so each side can advertise, and an
+embedder/operator can observe (`ConnectionHub.getDeviceCapabilities` — M5
+also plumbs a previously-ignored gap where `conn.hello.capabilities` was
+silently dropped end to end, forwarding only `runtimes`), whether the OTHER
+side is new enough to participate in targeting at all.
+
+**Residual race (honest, by design — narrowed, not eliminated): this server
+knows a task's `pendingApprovalId` only up to its LAST delivered
+`task.await_approval` — this narrows the window, it does not close it.** The
+server's own record of "the current approval" always LAGS the daemon by at
+least one round trip: the daemon can locally resolve its current approval and
+dispatch a brand-new one at any instant the server has no way to observe
+until the next `task.await_approval` actually arrives. A server-side
+`approveTask`/`rejectTask` call issued in that exact gap has nothing stale to
+compare against yet (`record.pendingApprovalId` is still the OLD id, because
+nothing newer has been reported) — the `StaleApprovalError` check can only
+ever catch a mismatch the server ALREADY knows about, never one that's still
+in flight. The DAEMON-side exact-match check
+(`ActiveTask.pendingApprovalId`) is therefore the authoritative gate, not the
+server-side one: even when a server-side decision sails through validation
+unaware anything changed, the wire message it sends still carries whatever
+`approvalId` the server believed was current, and the daemon's own
+up-to-the-instant comparison is what correctly resolves it as a no-op if the
+daemon has already moved past it. What targeting changes is that
+`pendingApprovalId` now exists on the server side at all: without it, every
+decision was untargeted and every one of these crossing cases resolved
+"whichever is current" silently, with no way to detect a misapplication
+after the fact. With it, late/cross decisions for a SUPERSEDED approval
+become detectable no-ops on at least one side (usually both) instead of
+silent misapplications — narrower, never zero.
 
 ## 6. Auth flows
 

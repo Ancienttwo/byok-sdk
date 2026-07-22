@@ -31,6 +31,15 @@ export type {
 } from './types';
 export type { CreateTaskInput, TaskRecord, TaskStore } from './task-store';
 export { IllegalTaskTransitionError, InMemoryTaskStore } from './task-store';
+/**
+ * M5 (approval targeting, docs/protocol.md §5.3): previously unreachable via
+ * this package's public entry point (only importable from the internal
+ * `./hub` path) — `TaskHandle.approve`/`reject`'s `opts.approvalId` targeting
+ * (`types.ts`) throws this, so a caller needs it exported here to
+ * `instanceof`-check/inspect it. See `hub.ts`'s own doc comment for the full
+ * staleness semantics.
+ */
+export { StaleApprovalError } from './hub';
 export { PairingCodeInvalidError } from './pairing';
 export type {
   AccessTokenClaims,

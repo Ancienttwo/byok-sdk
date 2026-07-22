@@ -181,11 +181,27 @@ app.get('/api/tasks/:taskId/events', (c) => {
   });
 });
 
+// M5 (approval targeting): an optional `approvalId` in the request body
+// targets one specific pending approval rather than "whichever one is
+// currently pending" (the untargeted default when omitted, unchanged from
+// pre-M5) — see `TaskHandle.approve`'s own doc comment (`@byok/server`'s
+// `types.ts`). A caller that already knows the approvalId it's acting on
+// (e.g. an operator UI rendering `TaskSnapshot.pendingApprovalId`, or
+// reacting to a `task.await_approval` ServerTaskEvent) passes it through
+// here so a stale decision against a since-superseded approval throws
+// `StaleApprovalError` instead of silently resolving the WRONG one.
 app.post('/api/tasks/:taskId/approve', async (c) => {
   const handle = handles.get(c.req.param('taskId'));
   if (!handle) return c.json({ error: 'unknown taskId' }, 404);
+  let approvalId: string | undefined;
   try {
-    await handle.approve();
+    approvalId = (await c.req.json())?.approvalId;
+  } catch {
+    // no body / not JSON — approve untargeted (whichever approval is
+    // currently pending), same as pre-M5.
+  }
+  try {
+    await handle.approve(approvalId !== undefined ? { approvalId } : undefined);
     return c.json({ ok: true });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);
@@ -207,13 +223,18 @@ app.post('/api/tasks/:taskId/reject', async (c) => {
   const handle = handles.get(c.req.param('taskId'));
   if (!handle) return c.json({ error: 'unknown taskId' }, 404);
   let reason: string | undefined;
+  let approvalId: string | undefined;
   try {
-    reason = (await c.req.json())?.reason;
+    const body = await c.req.json();
+    reason = body?.reason;
+    // M5 (approval targeting): same optional targeting as /approve above —
+    // see that route's own comment.
+    approvalId = body?.approvalId;
   } catch {
-    // no body / not JSON — reject with no reason
+    // no body / not JSON — reject with no reason, untargeted
   }
   try {
-    await handle.reject(reason);
+    await handle.reject(reason, approvalId !== undefined ? { approvalId } : undefined);
     return c.json({ ok: true });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);

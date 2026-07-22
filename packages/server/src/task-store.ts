@@ -59,6 +59,38 @@ export interface TaskStore {
    * some tests match on.
    */
   transition(taskId: string, to: TaskState, patch?: Partial<Omit<TaskRecord, 'taskId' | 'state'>>): TaskRecord;
+  /**
+   * M5 (approval targeting): update `taskId`'s `pendingApprovalId` WITHOUT a
+   * state transition. Needed because `AwaitApproval -> AwaitApproval` is
+   * deliberately not a legal `TASK_TRANSITIONS` edge (`@byok/protocol`'s
+   * `task-state.ts`) — self-transitions aren't part of the frozen wire state
+   * machine, so `transition` above cannot be used to update this field while
+   * the record STAYS in `AwaitApproval` — yet a re-sent/updated
+   * `task.await_approval` carrying a NEWER id while the record is ALREADY
+   * `AwaitApproval` must still be reflected (see `ConnectionHub.
+   * onAwaitApproval`, `hub.ts`). Every state-CHANGING write still goes
+   * through `transition`; this is the one narrow exception for a same-state
+   * field update. Returns `undefined` for an unknown `taskId` rather than
+   * throwing — this is a best-effort bookkeeping update, not a
+   * state-machine-enforced operation like `transition`.
+   *
+   * OPTIONAL: a `TaskStore` implementation predating M5 (a custom embedder
+   * store written against the pre-M5 interface) doesn't have this method at
+   * all — every call site in `hub.ts` guards its absence with `?.()`. A
+   * store that omits it simply never records a superseding
+   * `pendingApprovalId` on the same-state redelivery path (the first entry
+   * into `AwaitApproval` still records one via `transition`'s own patch,
+   * same as ever); an operator-supplied `opts.approvalId` on
+   * `approveTask`/`rejectTask` then has nothing recorded to compare against
+   * and proceeds untargeted, exactly like a legacy daemon that never
+   * reported an id at all — a graceful degrade, not a broken embedder.
+   * Every CURRENT implementation in this package ({@link InMemoryTaskStore},
+   * `sqlite-task-store.ts`'s `SqliteTaskStore`) still implements it as a
+   * required, always-present method — optionality is a concession to
+   * EXISTING third-party implementations of this interface, not a hint that
+   * a new one should skip it.
+   */
+  setPendingApprovalId?(taskId: string, pendingApprovalId: string | undefined): TaskRecord | undefined;
 }
 
 /**
@@ -121,6 +153,27 @@ export class InMemoryTaskStore implements TaskStore {
       state: to,
       updatedAt: new Date().toISOString(),
     };
+    this.tasks.set(taskId, updated);
+    return updated;
+  }
+
+  /**
+   * See {@link TaskStore.setPendingApprovalId}'s own doc comment for the
+   * full rationale. State-guarded (S3 hardening): a write only applies while
+   * `taskId` is still `AwaitApproval` — mirrors `SqliteTaskStore`'s own `AND
+   * state = 'AwaitApproval'` CAS predicate (`sqlite-task-store.ts`) for
+   * symmetry between the two reference implementations, guarding against a
+   * laggard caller resurrecting a pending id after the task already left
+   * `AwaitApproval` (e.g. a queued/delayed `task.await_approval` processed
+   * after a real `approveTask`/`rejectTask` already transitioned it
+   * elsewhere). A non-matching call is a no-op: returns the record exactly
+   * as it currently stands, not the caller's requested (rejected) value.
+   */
+  setPendingApprovalId(taskId: string, pendingApprovalId: string | undefined): TaskRecord | undefined {
+    const record = this.tasks.get(taskId);
+    if (!record) return undefined;
+    if (record.state !== 'AwaitApproval') return record;
+    const updated: TaskRecord = { ...record, pendingApprovalId, updatedAt: new Date().toISOString() };
     this.tasks.set(taskId, updated);
     return updated;
   }
