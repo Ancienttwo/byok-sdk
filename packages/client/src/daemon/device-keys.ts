@@ -31,7 +31,7 @@ function publicKeyToBase64Url(publicKey: KeyObject): string {
   return jwk.x;
 }
 
-/** PKCS8 PEM — the on-disk fallback form (0600 file under storeDir; OS keychain is M3). */
+/** PKCS8 PEM — the on-disk storage form (0600 file under storeDir). OS keychain integration is deferred (tracked as a future roadmap item, not promised for any specific milestone). */
 export function exportPrivateKeyPem(privateKey: KeyObject): string {
   return privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
 }

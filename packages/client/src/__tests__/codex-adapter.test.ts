@@ -69,6 +69,11 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(adapter.capabilities()).toEqual({ steer: false, resume: true, permissionModes: ['auto', 'readonly'] });
   });
 
+  it('environmentRequirements() declares no credential env vars (M5 — same deliberate ToS posture as claude: codex authenticates via its own OAuth session, not an env var)', () => {
+    const adapter = fakeCodexAdapter();
+    expect(adapter.environmentRequirements?.()).toEqual({ credentialNames: [] });
+  });
+
   it('start() resolves sessionRef from thread.started and drives the canned sequence into normalized AgentEvents', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();

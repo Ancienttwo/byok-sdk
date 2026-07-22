@@ -8,6 +8,7 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
+import { assertServerUrlAllowed } from './url';
 import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
 import type { ControlMethods, ControlServerHandle } from './control-server';
@@ -82,6 +83,35 @@ export interface DaemonConfig {
   storeDir?: string;
   /** Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`. */
   branding?: DaemonBranding;
+  /**
+   * M5: per-device, per-runtime escape hatch into the environment allowlist
+   * `task-runner.ts` builds each task's spawn environment from
+   * (`daemon/environment.ts`'s `buildRuntimeEnv`) — keyed by runtime id
+   * (`'pi' | 'claude' | 'codex'`, though not typed that narrowly here since
+   * an id with no matching adapter is simply never looked up). `allow`
+   * entries are exact variable names or `*`-suffixed prefixes, merged in
+   * alongside that runtime adapter's own declared
+   * `environmentRequirements()` — this can never override the hard
+   * `BYOK_*` deny (see `environment.ts`'s own doc comment).
+   */
+  runtimeEnvironment?: Record<string, { allow?: string[] }>;
+  /**
+   * M5: explicit escape hatch for `url.ts`'s `assertServerUrlAllowed` — see
+   * that function's own doc comment for the full allow/deny rule. Default
+   * (unset/`false`): a `serverUrl` using plaintext `ws:`/`http:` is only
+   * accepted when its host is loopback (`localhost`/`*.localhost`,
+   * `127.0.0.0/8`, `::1`); anything else over plaintext throws a typed
+   * `InsecureServerUrlError` from `pair()`/`start()` below, BEFORE any
+   * network call is attempted, rather than silently sending the pairing
+   * code / device credentials to a remote host in the clear. Set this
+   * `true` only when you have deliberately decided to accept that risk
+   * (e.g. a trusted private network with no TLS terminator in front of the
+   * server) — doing so also logs a loud `console.warn` (see
+   * `checkServerUrl`, this file) every time it actually changes the
+   * outcome. Never overrides an unsupported scheme (anything other than
+   * `http:`/`https:`/`ws:`/`wss:`), which is refused unconditionally.
+   */
+  dangerouslyAllowInsecureRemote?: boolean;
 }
 
 export interface DaemonStatus {
@@ -139,7 +169,7 @@ export interface Daemon {
   reject(taskId: string, reason?: string): Promise<void>;
 }
 
-/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options or a runtime beyond the three bundled ones. */
+/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
 export interface DaemonOverrides {
   backoff?: BackoffOptions;
   batch?: ProgressBatcherOptions;
@@ -176,20 +206,25 @@ function isRuntimeId(id: string): id is RuntimeId {
  * `RuntimeInfo.capabilities` shape (`@byok/protocol`'s `RuntimeCapabilities`
  * — the same field names, but all-optional, plus `approvalInteractive`).
  *
- * `approvalInteractive` is hardcoded `false` rather than derived: none of
- * the three bundled adapters (pi/claude/codex) has interactive approval —
- * verified per-adapter, not assumed. Each one's own `resolveApproval()`
- * either throws outright (codex: "codex exec never emits a
- * needs_approval-equivalent event"; claude: "every permission decision ...
- * resolved synchronously ... before this adapter ever sees the
- * corresponding frame") or has no notion of pausing for approval at all
- * (pi's `PiSession.resolveApproval` has the identical throwing contract —
- * see `../types.ts`'s `Session.resolveApproval` doc comment for why an
- * adapter with no `needs_approval` notion must throw here rather than
- * silently no-op). There is no existing signal on `RuntimeAdapter` this
- * could be read from instead — `interactive-approval` (`CAPABILITY_FLAGS`,
- * `@byok/protocol`) is explicitly documented as RESERVED/unexercised until
- * a later wave wires up the seam these adapters don't implement yet.
+ * `approvalInteractive` is hardcoded `false` regardless of adapter — this is
+ * now stale as a "no adapter supports it" claim: as of M4 Phase 3, claude
+ * genuinely does support interactive approval, via `--permission-prompt-tool`
+ * routing `ClaudeSession.resolveApproval` into the local out-of-process MCP
+ * approval channel (`bin/byok-approval-mcp.ts`) under `policy.mode:
+ * 'confirm'` — see docs/protocol.md §5.1/§11.2 for the full mechanism. pi and
+ * codex are unchanged: neither has any notion of pausing for approval
+ * (`resolveApproval()` throws unconditionally for both — see `../types.ts`'s
+ * `Session.resolveApproval` doc comment for why that's the correct contract
+ * for an adapter with no `needs_approval` notion).
+ *
+ * This flag is still reported `false` here regardless, pending a later
+ * capability-honesty pass that gives `approvalInteractive`/
+ * `interactive-approval` (`CAPABILITY_FLAGS`, `@byok/protocol`) real
+ * per-adapter meaning — docs/protocol.md §5.1 tracks this as a known,
+ * intentional gap between two capability signals, not an oversight. Until
+ * that pass lands, `RuntimeInfo.capabilities.permissionModes` is the only
+ * accurate signal for whether a device can honor `confirm`: a server should
+ * check `permissionModes.includes('confirm')`, not this field.
  */
 function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRuntimeCapabilities {
   return {
@@ -323,7 +358,52 @@ export function createDaemonWithAdapters(
   }
   let auth = buildAuthManager();
 
+  /**
+   * M5: `assertServerUrlAllowed`'s call site — see that function's own doc
+   * comment (`url.ts`) for why `pair()`/`start()` are the right (and only
+   * needed) two places to call it from. Checked WITHOUT the escape hatch
+   * FIRST, deliberately: that is the only way to tell whether
+   * `dangerouslyAllowInsecureRemote` actually changed the outcome (as
+   * opposed to being set but inert, e.g. against a `serverUrl` that was
+   * already loopback) — only a hatch that genuinely let something through
+   * deserves the loud warning below, emitted via the exact same
+   * `console.warn('[byok/client] ...')` convention this file already uses
+   * for its other non-fatal, operator-facing warnings (see the
+   * control-socket bind-failure warning in `start()`).
+   *
+   * F2 (fixed here): `config.dangerouslyAllowInsecureRemote` being set only
+   * means "forgive a plaintext-to-non-loopback rejection" — it does NOT mean
+   * "forgive literally any rejection this gate can ever produce." An
+   * unsupported scheme (e.g. `ftp:`) or a `serverUrl` that fails to parse as
+   * a URL at all is refused by `assertServerUrlAllowed` UNCONDITIONALLY,
+   * regardless of `dangerouslyAllowInsecureRemote` (see that function's own
+   * doc comment) — the previous version of this catch block forwarded the
+   * hatch's boolean straight past that distinction and warned-and-proceeded
+   * for EVERY rejection once the flag was set. Fixed by re-running the exact
+   * same check WITH the hatch passed through once the flag is confirmed set;
+   * only a second call that ALSO passes proves the hatch genuinely covers
+   * this specific rejection and earns the warn-and-proceed below. If the
+   * second call throws too, that throw propagates out of this function
+   * unchanged (nothing here catches it) — correctly, since the hatch was
+   * never going to cover this rejection in the first place.
+   */
+  function checkServerUrl(): void {
+    try {
+      assertServerUrlAllowed(config.serverUrl);
+    } catch (err) {
+      if (!config.dangerouslyAllowInsecureRemote) throw err;
+      assertServerUrlAllowed(config.serverUrl, { dangerouslyAllowInsecureRemote: true });
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[byok/client] WARNING: dangerouslyAllowInsecureRemote is set — proceeding with an insecure server URL (${config.serverUrl}). ` +
+          `Device credentials and task data will be sent in the clear to a non-loopback host. This should never be used in a real ` +
+          `deployment. (${reason})`,
+      );
+    }
+  }
+
   async function pair(pairingCode: string): Promise<DeviceRecord> {
+    checkServerUrl();
     // Finding F5: capture whatever device is currently on disk for this
     // serverUrl (if any) BEFORE pairing — `auth.pair()` mints/persists a
     // brand new deviceId (the server always does, even on a same-keypair
@@ -341,6 +421,7 @@ export function createDaemonWithAdapters(
   }
 
   async function start(): Promise<void> {
+    checkServerUrl();
     const record = await auth.loadExisting();
     if (!record) {
       throw new Error('device is not paired yet; call pair(pairingCode) first');
@@ -390,6 +471,8 @@ export function createDaemonWithAdapters(
       permissionDefaults: config.permissionDefaults,
       workspaceRoot: config.workspaceRoot,
       deviceId: record.deviceId,
+      // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
+      runtimeEnvironment: config.runtimeEnvironment,
       // M3-2a: `send` is already this file's OWN closure (not something
       // `TaskRunner` builds) — every `task.claim`/`task.started`/
       // `task.progress`/`task.artifact`/`task.await_approval`/

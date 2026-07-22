@@ -205,7 +205,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 |---|---|---|---|---|---|
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `runtimes?`, `cursor?` | Opening (or reopening) the WSS connection |
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
-| `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `sessionRef?`, `workspaceHint?`, `limits?` | `dispatch()` targets a device |
+| `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.approve` | S→D | **required** | **required** | `{}` | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?` | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -220,6 +220,18 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
+
+**`TaskOfferPayload.workspaceHint` is RESERVED — currently ignored end to
+end.** The field exists on the wire (`TaskOfferPayloadSchema`,
+`packages/protocol/src/messages.ts`) but nothing reads it today: no bundled
+adapter (pi/claude/codex) consults it, no `task-runner.ts` code threads it
+into an adapter's `workspaceDir` resolution, and the public SDK's own
+`DispatchInput` (`packages/server/src/types.ts`, the input to
+`ByokServer.dispatch`) has no field for a caller to set it through in the
+first place. Do not rely on it to influence workspace selection — a real
+implementation (what it should override or merely suggest, relative to the
+existing `sessionRef`-keyed workspace mapping) is an undesigned follow-on
+task, not something already wired up behind this field.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
