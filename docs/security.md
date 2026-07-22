@@ -40,6 +40,7 @@ around it.
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
+| The daemon's own ambient environment (`process.env` — may hold secrets unrelated to any runtime: `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc., set for the daemon's own deployment) | Whatever process/container/service manager launched the daemon | **M5: no longer forwarded to a spawned agent in full.** `task-runner.ts` builds each task's child-process environment from a per-runtime allowlist (`daemon/environment.ts`'s `buildRuntimeEnv`) instead of handing over `process.env` verbatim — see the env-allowlist paragraph below |
 
 The audit log is itself worth calling out as a defended asset, not just a
 record: `packages/client/src/bin/audit-log.ts` deliberately never persists a
@@ -58,6 +59,48 @@ reports — `claude auth status --json`'s `loggedIn` field
 (`adapters/claude/claude-adapter.ts`), `codex login status`'s human-readable
 report (`adapters/codex/codex-adapter.ts`), and pi's env-var-name-only check
 — never a file read of `~/.claude`, `~/.codex`, or `~/.pi`.
+
+**Environment allowlist (M5)**: the accurate framing for the daemon's own
+ambient environment (distinct from the on-disk credential storage above) is
+this — the daemon does not persist or transmit runtime credentials;
+environment-based credentials may be selectively inherited into the chosen
+local runtime process (per-runtime allowlist). Before M5, `task-runner.ts`
+handed every spawned adapter `process.env` verbatim: any credential-shaped
+variable in the daemon's own environment (set for the daemon's own
+deployment, unrelated to any runtime) was inherited by every task
+regardless of which runtime ran it. `daemon/environment.ts`'s
+`buildRuntimeEnv` replaces that with an explicit, per-runtime allowlist —
+a small always-included platform baseline (`PATH`/`HOME`/locale/etc), plus
+whichever credential/config variable names the SPECIFIC selected runtime
+adapter declares it actually needs (`RuntimeAdapter.environmentRequirements()`
+— e.g. pi's `KNOWN_PROVIDER_ENV_VARS`, since pi authenticates via provider
+env vars; claude and codex declare none, since both authenticate via their
+own CLI-managed OAuth session, not an env var — env-based API-key
+passthrough for those two remains a separate, pending product decision),
+plus an optional per-device local override (`DaemonConfig.runtimeEnvironment`).
+This SDK's own control-plane variables (`BYOK_*`) are hard-denied
+unconditionally, even against that local override — a spawned agent must
+never be able to observe the daemon's own internal wiring.
+
+**Proxy variables are part of the baseline, deliberately (M5, finding F3)**:
+`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`ALL_PROXY`, plus their lowercase
+`http_proxy`-style variants (the conventional spelling most Unix tools
+actually check — some tools honor only one casing, some check both), pass
+through by default as part of the always-included platform baseline
+(`daemon/environment.ts`'s `BASE_PLATFORM_ALLOWLIST`), not gated behind any
+runtime adapter's own declared requirements. This is a deliberate
+trade-off, not an oversight: stripping proxy configuration by default would
+silently break every agent CLI running behind a corporate proxy — no
+outbound network access at all, with no clear signal why — which is a worse
+default than forwarding a proxy URL. The trade-off's cost is explicit: a
+proxy URL may itself embed proxy credentials
+(`http://user:pass@proxy.example.com:8080`), and this SDK forwards it to the
+spawned runtime unconditionally, same as any other baseline variable. That
+is judged acceptable because the runtime's own network traffic already
+transits that same proxy either way — the proxy already sees, and the
+embedded credential already authenticates, every request the runtime makes
+regardless of whether this SDK forwards the variable or the operator
+configures it some other way.
 
 ## Attack surfaces
 
@@ -81,6 +124,27 @@ provides: `packages/client/src/daemon/url.ts` maps whatever scheme is
 configured (`ws:`/`wss:`, `http:`/`https:`) — running a production deployment
 over plain `ws:`/`http:` is an operator misconfiguration this code does not
 prevent.
+
+**Transport-security gate (M5)**: the paragraph above is now narrower than it
+used to be. `url.ts`'s `assertServerUrlAllowed` is called at both real entry
+points a configured `serverUrl` reaches (`create-daemon.ts`'s `pair()` and
+`start()`, which between them cover ws-transport, the long-poll fallback, and
+blob-client — all three read the same `DaemonConfig.serverUrl`, never a URL
+of their own) — `https:`/`wss:` are always allowed, but plain `ws:`/`http:`
+is now accepted only when the host is loopback (`localhost`/`*.localhost`,
+`127.0.0.0/8`, `::1`); a plaintext URL to any other host is refused with a
+typed `InsecureServerUrlError` before `pair()`/`start()` ever attempt a
+network call, so a device can no longer be pointed at a genuinely remote host
+in the clear by accident. The one remaining escape hatch is explicit and
+opt-in: `DaemonConfig.dangerouslyAllowInsecureRemote: true` — intended only
+for a deliberately-understood exception (e.g. a private network with no TLS
+terminator in front of the server) — and every time it actually changes the
+outcome (as opposed to being set but inert against an already-loopback URL),
+the daemon logs a loud `console.warn` naming the offending URL. This gate
+does not add encryption of its own; it only closes off the plaintext-to-
+remote combination by default. An unsupported scheme (anything other than
+`http:`/`https:`/`ws:`/`wss:`) is refused unconditionally, regardless of that
+escape hatch.
 
 ### 2. Control socket (local IPC)
 
@@ -369,3 +433,15 @@ well-behaved tool implementations, not a chroot/container/seccomp boundary
 this SDK enforces or verifies independently. A SaaS embedder with a
 genuinely hostile or untrusted instruction source should not treat the
 workspace directory alone as sufficient isolation.
+
+The same honest framing applies to the M5 environment allowlist (see
+`buildRuntimeEnv`, above): filtering `process.env` down to a per-runtime
+allowlist prevents *accidental* environment spread — an unrelated secret
+sitting in the daemon's own environment no longer leaks into every spawned
+agent by default — it is not a sandbox either. Native execution is still
+native execution: an agent process spawned with `HOME` set (part of the
+always-included platform baseline) can still read any file under that
+`HOME` its own OS-level file permissions allow, exactly as any other
+process running as that same user could. The allowlist narrows what an
+agent inherits *as environment variables*; it says nothing about, and does
+not restrict, what the runtime's own tools can read from disk.

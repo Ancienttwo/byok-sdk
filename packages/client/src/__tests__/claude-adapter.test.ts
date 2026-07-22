@@ -98,6 +98,11 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(adapter.capabilities()).toEqual({ steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] });
   });
 
+  it('environmentRequirements() declares no credential env vars (M5 — deliberate ToS posture: env-based API key passthrough for claude is a separate, pending product decision)', () => {
+    const adapter = fakeClaudeAdapter();
+    expect(adapter.environmentRequirements?.()).toEqual({ credentialNames: [] });
+  });
+
   it('start() drives the canned prompt sequence into normalized AgentEvents (Bash tool_use/tool_result, progress, turn_end)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();

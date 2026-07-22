@@ -1,4 +1,7 @@
 import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok/protocol';
+import type { RuntimeEnvironmentRequirements } from './daemon/environment';
+
+export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 
 /**
  * Result of probing whether a runtime is usable on this machine. `authPresent`
@@ -110,12 +113,27 @@ export interface Session {
  * storage (OAuth tokens, API keys on disk, `~/.claude`, `~/.codex`, `~/.pi`
  * auth state, etc). Presence checks are limited to environment variable
  * *names* (see {@link RuntimeDetectResult.authPresent}).
+ *
+ * M5: separately, {@link RuntimeAdapter.environmentRequirements} below
+ * declares which environment variable NAMES (never values inspected here
+ * either) this adapter's runtime needs forwarded into its own spawned
+ * process — see that method's own doc comment and `daemon/environment.ts`.
  */
 export interface RuntimeAdapter {
   id: string;
   detect(): Promise<RuntimeDetectResult>;
   capabilities(): RuntimeCapabilities;
   start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session>;
+  /**
+   * M5: declares which environment variable names (exact, or `*`-suffixed
+   * prefix) this runtime's own CLI needs beyond the always-included
+   * platform baseline (`daemon/environment.ts`'s `buildRuntimeEnv`) —
+   * `task-runner.ts` builds each task's `TaskContext.env` from this instead
+   * of ever handing a spawned agent the daemon's raw `process.env` again.
+   * Optional and fail-closed by omission: an adapter that doesn't implement
+   * this gets the platform baseline ONLY, never an implicit "everything."
+   */
+  environmentRequirements?(): RuntimeEnvironmentRequirements;
 }
 
 /**

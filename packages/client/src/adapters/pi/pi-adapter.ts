@@ -6,6 +6,7 @@ import {
   type RuntimeAdapter,
   type RuntimeCapabilities,
   type RuntimeDetectResult,
+  type RuntimeEnvironmentRequirements,
   type Session,
   type TaskContext,
 } from '../../types';
@@ -77,6 +78,19 @@ export class PiAdapter implements RuntimeAdapter {
     return { steer: true, resume: true, permissionModes: ['auto', 'readonly'] };
   }
 
+  /**
+   * M5: pi authenticates to its ~30 supported providers via env-var API
+   * keys — `detect()`'s own `authPresent` probe above checks this identical
+   * list — so these MUST keep flowing into pi's spawned process or pi auth
+   * breaks entirely. `KNOWN_PROVIDER_ENV_VARS` above is the single source
+   * of truth, reused here rather than duplicated. No `baseNames`: nothing
+   * in this adapter or `rpc-client.ts` reads a pi-specific config-discovery
+   * variable beyond the platform baseline (`daemon/environment.ts`).
+   */
+  environmentRequirements(): RuntimeEnvironmentRequirements {
+    return { credentialNames: KNOWN_PROVIDER_ENV_VARS };
+  }
+
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('pi adapter only supports string instructions in M0 (no blob-ref fetch yet)');
@@ -119,10 +133,11 @@ export class PiAdapter implements RuntimeAdapter {
     // resume it. `TaskOfferPayload.workspaceHint` remains unimplemented (no
     // caller populates `DispatchInput` with it yet, and its intended
     // semantics — e.g. does it override or merely suggest a workspace
-    // relative to the sessionRef mapping? — are undocumented in
-    // docs/protocol.md beyond the wire field existing); a real
-    // implementation is a genuine follow-on design task, not a mechanical
-    // fix, and is intentionally left alone here.
+    // relative to the sessionRef mapping? — are still undesigned; see
+    // docs/protocol.md §2's note on this field for the explicit
+    // reserved/ignored status); a real implementation is a genuine
+    // follow-on design task, not a mechanical fix, and is intentionally
+    // left alone here.
     const resumeSessionId = task.sessionRef;
     const args = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
 

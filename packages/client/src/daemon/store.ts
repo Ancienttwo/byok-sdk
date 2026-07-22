@@ -10,7 +10,7 @@ export interface DeviceRecord {
   accessToken: string;
   /** ISO-8601 expiry for `accessToken` (our best knowledge of it — see auth-manager.ts for how this is derived after `/byok/pair`, which reports no explicit expiry itself). */
   expiresAt: string;
-  /** Ed25519 private key, PKCS8 PEM. Never leaves this device (0600 file fallback; OS keychain is M3). */
+  /** Ed25519 private key, PKCS8 PEM. Never leaves this device. Stored as a 0600 file; OS keychain integration is deferred (tracked as a future roadmap item, not promised for any specific milestone). */
   devicePrivateKeyPem: string;
   /** Ed25519 public key, base64url — re-sent verbatim on a post-revocation re-pair (protocol §6.3). */
   devicePublicKey: string;
@@ -22,7 +22,8 @@ export interface DeviceRecord {
  * the ONLY credential material the daemon itself ever holds — never a
  * runtime's own credentials (see the credential-isolation rule on
  * `RuntimeAdapter`). Stored 0600 under `storeDir` (default
- * `~/.byok/<productId>/`); OS keychain storage is M3.
+ * `~/.byok/<productId>/`); OS keychain storage is deferred (tracked as a
+ * future roadmap item, not promised for any specific milestone).
  */
 export class DeviceStore {
   private readonly filePath: string;

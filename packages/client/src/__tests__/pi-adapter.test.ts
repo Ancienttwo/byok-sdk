@@ -198,6 +198,25 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const adapter = fakePiAdapter();
     expect(adapter.capabilities()).toEqual({ steer: true, resume: true, permissionModes: ['auto', 'readonly'] });
   });
+
+  it('environmentRequirements() declares the known provider credential env vars (M5) — the same single source of truth detect()\'s own authPresent probe uses', () => {
+    const adapter = fakePiAdapter();
+    expect(adapter.environmentRequirements?.()).toEqual({
+      credentialNames: [
+        'ANTHROPIC_API_KEY',
+        'ANTHROPIC_OAUTH_TOKEN',
+        'OPENAI_API_KEY',
+        'GEMINI_API_KEY',
+        'AZURE_OPENAI_API_KEY',
+        'DEEPSEEK_API_KEY',
+        'GROQ_API_KEY',
+        'MISTRAL_API_KEY',
+        'OPENROUTER_API_KEY',
+        'XAI_API_KEY',
+        'ZAI_API_KEY',
+      ],
+    });
+  });
 });
 
 describe('PiAdapter against the real installed optionalDependency (no network/API key required)', () => {

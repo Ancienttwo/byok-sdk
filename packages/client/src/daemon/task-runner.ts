@@ -13,6 +13,7 @@ import { PolicyUnsupportedError, type RuntimeAdapter, type Session, type TaskCon
 import type { ApprovalDecision, ApprovalOrigin, ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
+import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
 import { ProgressBatcher, type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
@@ -113,6 +114,8 @@ export const MAX_TRACKED_TASK_IDS = 2000;
 export interface TaskRunnerDeps {
   adapters: RuntimeAdapter[];
   runtimeAllowlist?: string[];
+  /** M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment (`create-daemon.ts`) — the per-device, per-runtime env-allowlist override `handleOffer` merges into `buildRuntimeEnv`'s `locallyAllowedNames`. */
+  runtimeEnvironment?: Record<string, { allow?: string[] }>;
   permissionDefaults?: PermissionPolicy;
   workspaceRoot: string;
   deviceId: string;
@@ -684,7 +687,18 @@ export class TaskRunner {
       const ctx: TaskContext = {
         workspaceDir,
         policy: decision.policy,
-        env: process.env,
+        // M5: no longer `process.env` verbatim (see `environment.ts`'s own
+        // module doc comment for the credential-leak gap that closed) —
+        // built fresh per task from the SPECIFIC adapter `pickAdapter`
+        // above already selected, so this always runs after adapter
+        // selection: `pick.adapter.environmentRequirements?.()` (undefined
+        // ⇒ platform baseline only, fail-closed) plus this device's own
+        // `runtimeEnvironment` override, keyed by that same adapter's `id`.
+        env: buildRuntimeEnv({
+          ambient: process.env,
+          requirements: pick.adapter.environmentRequirements?.(),
+          locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.adapter.id]?.allow,
+        }),
         // M4 Phase 3: adapter-agnostic and cheap to always populate — only an
         // adapter whose runtime genuinely supports an out-of-band approval
         // pause (claude, today) ever reads this. `resolve` is a closure over

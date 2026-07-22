@@ -6,6 +6,10 @@ export type {
   TaskContext,
 } from './types';
 export { PolicyUnsupportedError } from './types';
+// M5: per-runtime environment allowlist — part of the `RuntimeAdapter`
+// contract's `environmentRequirements()` method (a custom adapter supplied
+// to `createDaemonWithAdapters` implements this too). See `daemon/environment.ts`.
+export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding } from './daemon/create-daemon';

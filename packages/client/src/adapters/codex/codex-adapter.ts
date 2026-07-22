@@ -7,6 +7,7 @@ import {
   type RuntimeAdapter,
   type RuntimeCapabilities,
   type RuntimeDetectResult,
+  type RuntimeEnvironmentRequirements,
   type Session,
   type TaskContext,
 } from '../../types';
@@ -124,6 +125,19 @@ export class CodexAdapter implements RuntimeAdapter {
 
   capabilities(): RuntimeCapabilities {
     return { steer: false, resume: true, permissionModes: ['auto', 'readonly'] };
+  }
+
+  /**
+   * M5: same deliberate posture as the claude adapter (see its own doc
+   * comment) — codex authenticates via its own `codex login`-managed
+   * ChatGPT OAuth session (`probeAuthPresent` above), not an env var, so
+   * there is no credential env var this adapter needs forwarded; env-based
+   * API-key passthrough remains a separate, pending product decision. No
+   * `baseNames` either: nothing in this adapter reads a codex-specific
+   * config-discovery variable (e.g. `CODEX_HOME`) today.
+   */
+  environmentRequirements(): RuntimeEnvironmentRequirements {
+    return { credentialNames: [] };
   }
 
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {

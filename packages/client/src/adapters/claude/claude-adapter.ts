@@ -10,6 +10,7 @@ import {
   type RuntimeAdapter,
   type RuntimeCapabilities,
   type RuntimeDetectResult,
+  type RuntimeEnvironmentRequirements,
   type Session,
   type TaskContext,
 } from '../../types';
@@ -171,6 +172,23 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // doc comment for the empirical basis (`--permission-prompt-tool`,
     // live-verified against the real installed binary).
     return { steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] };
+  }
+
+  /**
+   * M5: deliberate product-boundary decision, not an oversight — byok's
+   * current ToS posture for claude is login-state-only (`claude auth
+   * login`'s own OAuth session — see `probeAuthPresent` below), so this
+   * adapter declares NO credential env vars at all; env-based API-key
+   * passthrough for claude is a separate, still-pending product decision.
+   * A product that genuinely needs it can opt in locally per-device via
+   * `DaemonConfig.runtimeEnvironment.claude.allow` (`create-daemon.ts`).
+   * `baseNames` is empty too: nothing in this adapter reads a
+   * claude-specific config-discovery variable (e.g. `CLAUDE_CONFIG_DIR`)
+   * today — if a future version of this adapter starts reading one, it
+   * belongs here, not left to rely on the platform baseline alone.
+   */
+  environmentRequirements(): RuntimeEnvironmentRequirements {
+    return { credentialNames: [] };
   }
 
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
