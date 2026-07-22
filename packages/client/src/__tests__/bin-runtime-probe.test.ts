@@ -34,7 +34,12 @@ describe('bin/runtime-probe: probeRuntimes', () => {
       authPresent: true,
       steer: true,
       resume: true,
-      permissionModes: ['auto', 'readonly'],
+      // M5 batch-3: StubRuntimeAdapter's default capabilities are
+      // deliberately maximally permissive (all four modes) — see
+      // fixtures/stub-adapter.ts's `DEFAULT_STUB_CAPABILITIES` doc comment —
+      // not modeled on the real pi adapter's own narrower declared set
+      // (pi-adapter.test.ts pins that real set separately).
+      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     });
   });
 
@@ -48,7 +53,7 @@ describe('bin/runtime-probe: probeRuntimes', () => {
       authPresent: undefined,
       steer: true,
       resume: true,
-      permissionModes: ['auto', 'readonly'],
+      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     });
   });
 

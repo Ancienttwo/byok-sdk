@@ -287,8 +287,10 @@ no-op, not an illegal-transition error.
 **`task.claim.runtime` (M5, additive minor): the ACTUALLY-selected runtime,
 distinct from `task.offer.runtime`/`TaskSnapshot.runtime` (the merely
 REQUESTED one, unchanged by this addition) — when an offer names no runtime
-the daemon auto-selects (pi-first), and this field is what lets the server
-finally learn which adapter it picked, recorded separately as
+the daemon auto-selects in `claude → codex → pi` order (pi is the fallback,
+tried last, only once nothing more capable is available; overridable
+per-daemon via `DaemonConfig.runtimePreference`), and this field is what lets
+the server finally learn which adapter it picked, recorded separately as
 `TaskSnapshot.claimedRuntime`.**
 
 ### 3.2 Declined vs. Failed (M1 gap #5)
