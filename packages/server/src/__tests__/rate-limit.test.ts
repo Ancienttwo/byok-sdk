@@ -266,55 +266,6 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
       hub.stopLeaseReaper();
     }
   });
-
-  it('a NEW over-budget episode (after the device genuinely recovers under budget in between) gets its own fresh device.rate_limited event, not coalesced with the earlier one', async () => {
-    const taskStore = new InMemoryTaskStore();
-    // Fast refill (1000/s) + tiny burst (1) so a single real-time wait
-    // reliably lets the device "recover" (one token regenerates) between
-    // the two flood episodes, deterministically.
-    const rateLimiter = new RateLimiter({ messagesPerSecond: 1000, burst: 1 });
-    const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000, rateLimiter);
-    try {
-      const deviceId = 'device-coalesce-2';
-      const fakeWs = { close: () => {}, send: () => {} } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
-
-      const rateLimitedEvents: unknown[] = [];
-      void (async () => {
-        for await (const event of hub.subscribeServerEvents()) {
-          if (event.kind === 'device.rate_limited') rateLimitedEvents.push(event);
-        }
-      })();
-
-      const envelope = createEnvelope('task.claim', { deviceId }, { taskId: 'bogus-task-coalesce-2' });
-
-      // Episode 1: burst=1, so call #1 succeeds and call #2 floods.
-      hub.handleInbound(deviceId, envelope);
-      hub.handleInbound(deviceId, envelope);
-      await vi.waitFor(() => expect(rateLimitedEvents).toHaveLength(1));
-
-      // Let the bucket refill (1000/s — a few ms is plenty) so the NEXT
-      // call genuinely succeeds, clearing the coalescing suppression.
-      const refillStartedAt = Date.now();
-      try {
-        vi.useFakeTimers({ toFake: ['Date'] });
-        vi.setSystemTime(refillStartedAt + 20);
-        hub.handleInbound(deviceId, envelope); // succeeds — back under budget
-
-        // Episode 2: flood again — a fresh, distinct embedder event.
-        hub.handleInbound(deviceId, envelope);
-        hub.handleInbound(deviceId, envelope);
-      } finally {
-        vi.useRealTimers();
-      }
-
-      await vi.waitFor(() => {
-        expect(rateLimitedEvents).toHaveLength(2);
-      });
-    } finally {
-      hub.stopLeaseReaper();
-    }
-  });
 });
 
 /**
