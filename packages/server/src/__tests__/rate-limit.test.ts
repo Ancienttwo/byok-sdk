@@ -141,23 +141,30 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
     // The bucket persists across reconnect BY DESIGN (see rate-limiter.ts's
     // own doc comment) — a real client's backoff+reconnect delay is what
-    // naturally gives it time to refill; mirror that with a short real wait
-    // (20/sec => 50ms/token, so 200ms comfortably regenerates the full
-    // burst=3 again).
-    await sleep(200);
+    // naturally gives it time to refill; mirror that with a Date-only clock
+    // jump (all network/WebSocket timers remain real).
+    const refillStartedAt = Date.now();
+    try {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      // 20/sec => 50ms/token, so 200ms comfortably regenerates the full
+      // burst=3 again.
+      vi.setSystemTime(refillStartedAt + 200);
 
-    const reconnected = await connectFakeDaemonWs(started.port, {
-      deviceId: daemon.deviceId,
-      accessToken: daemon.accessToken,
-      productId: PRODUCT_ID,
-    });
-    sockets.push(reconnected.ws);
+      const reconnected = await connectFakeDaemonWs(started.port, {
+        deviceId: daemon.deviceId,
+        accessToken: daemon.accessToken,
+        productId: PRODUCT_ID,
+      });
+      sockets.push(reconnected.ws);
 
-    // A fresh envelope on the new connection must be accepted normally, not
-    // immediately re-rate-limited/disconnected.
-    send(reconnected.ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    expect(byok.machines.list().find((m) => m.deviceId === daemon.deviceId)?.connected).toBe(true);
+      // A fresh envelope on the new connection must be accepted normally, not
+      // immediately re-rate-limited/disconnected.
+      send(reconnected.ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
+      await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+      expect(byok.machines.list().find((m) => m.deviceId === daemon.deviceId)?.connected).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('long-poll device gets an HTTP 429 (not a silent 200) once its budget is exhausted, matching the transport\'s existing {error} response shape', async () => {
@@ -288,12 +295,18 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
       // Let the bucket refill (1000/s — a few ms is plenty) so the NEXT
       // call genuinely succeeds, clearing the coalescing suppression.
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      hub.handleInbound(deviceId, envelope); // succeeds — back under budget
+      const refillStartedAt = Date.now();
+      try {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(refillStartedAt + 20);
+        hub.handleInbound(deviceId, envelope); // succeeds — back under budget
 
-      // Episode 2: flood again — a fresh, distinct embedder event.
-      hub.handleInbound(deviceId, envelope);
-      hub.handleInbound(deviceId, envelope);
+        // Episode 2: flood again — a fresh, distinct embedder event.
+        hub.handleInbound(deviceId, envelope);
+        hub.handleInbound(deviceId, envelope);
+      } finally {
+        vi.useRealTimers();
+      }
 
       await vi.waitFor(() => {
         expect(rateLimitedEvents).toHaveLength(2);
