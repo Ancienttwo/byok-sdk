@@ -1,6 +1,6 @@
 # Plan: Local Git Task Workspaces
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260724-0138
 > **Slug**: local-git-task-workspaces
 > **Planning Source**: repo-harness-plan
