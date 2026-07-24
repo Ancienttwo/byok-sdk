@@ -71,12 +71,64 @@ function quotedArgsPath(line, syscall) {
   return match ? decodeStraceString(match[1]) : undefined;
 }
 
-function processReturnPid(line, syscall) {
+function syscallReturn(line, syscall) {
   const marker = `${syscall}(`;
   const start = line.indexOf(marker);
   if (start < 0) return undefined;
-  const result = /\)\s+=\s+(\d+)\s*$/.exec(line.slice(start));
+  const result = /\)\s+=\s+(-?\d+)/.exec(line.slice(start));
   return result ? Number(result[1]) : undefined;
+}
+
+function processReturnPid(line, syscall) {
+  const result = syscallReturn(line, syscall);
+  return result !== undefined && result >= 0 ? result : undefined;
+}
+
+function syscallSucceeded(line, syscall) {
+  return syscallReturn(line, syscall) === 0;
+}
+
+function syscallNumericArg(line, syscall, index = 0) {
+  const marker = `${syscall}(`;
+  const start = line.indexOf(marker);
+  if (start < 0) return undefined;
+  const rest = line.slice(start + marker.length);
+  const end = rest.indexOf(')');
+  const value = (end < 0 ? rest : rest.slice(0, end)).split(',')[index]?.trim();
+  return /^\d+$/.test(value ?? '') ? Number(value) : undefined;
+}
+
+function openatDirfd(line) {
+  const marker = 'openat(';
+  const start = line.indexOf(marker);
+  if (start < 0) return undefined;
+  const rest = line.slice(start + marker.length);
+  const token = /^\s*([^,]+),/.exec(rest)?.[1]?.trim();
+  if (!token) return undefined;
+  if (token === 'AT_FDCWD') return 'AT_FDCWD';
+  return /^\d+$/.test(token) ? Number(token) : undefined;
+}
+
+function openFlagsContainDirectory(line, syscall) {
+  const marker = `${syscall}(`;
+  const start = line.indexOf(marker);
+  return start >= 0 && line.slice(start).includes('O_DIRECTORY');
+}
+
+function isPotentialCanaryPath(rawPath, canonicalPaths) {
+  return Object.values(canonicalPaths).some((canonical) => path.basename(rawPath) === path.basename(canonical));
+}
+
+function isCanaryAncestor(candidate, canonicalPaths) {
+  return Object.values(canonicalPaths).some((canonical) => {
+    const relative = path.relative(candidate, canonical);
+    return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+  });
+}
+
+function resolvePath(rawPath, base) {
+  if (path.isAbsolute(rawPath)) return path.normalize(rawPath);
+  return base === undefined ? undefined : path.resolve(base, rawPath);
 }
 
 function execEvidence(line) {
@@ -84,6 +136,10 @@ function execEvidence(line) {
   const executable = quotedArgsPath(line, 'execve');
   if (!executable) return undefined;
   return { executable, roles: roleHints(line) };
+}
+
+function cloneProcessState(state) {
+  return { cwd: state.cwd, descriptors: new Map(state.descriptors) };
 }
 
 /** Parse one strace -ff output file, retaining exact canonical opens only. */
@@ -94,11 +150,23 @@ export function parseTraceFile(text, fileName, canonicalPaths) {
   const relationships = [];
   const execs = [];
   const opens = [];
+  const unresolvedPaths = [];
+  const unresolvedProcessStates = [];
+  const states = new Map();
+  const stateFor = (pid) => {
+    let state = states.get(pid);
+    if (!state) {
+      state = { cwd: undefined, descriptors: new Map() };
+      states.set(pid, state);
+    }
+    return state;
+  };
 
   for (const line of text.split(/\r?\n/)) {
     if (!line) continue;
     const linePid = pidFromLine(line);
     const processPid = linePid ?? filePid;
+    const state = stateFor(processPid);
     const exec = execEvidence(line);
     const hints = exec?.roles ?? [];
     if (exec) execs.push({ ...exec, pid: processPid });
@@ -111,27 +179,83 @@ export function parseTraceFile(text, fileName, canonicalPaths) {
 
     for (const syscall of ['clone', 'clone3', 'fork', 'vfork']) {
       const childPid = processReturnPid(line, syscall);
-      if (childPid !== undefined) relationships.push({ parentPid: processPid, childPid, syscall });
+      if (childPid !== undefined) {
+        relationships.push({ parentPid: processPid, childPid, syscall });
+        states.set(childPid, cloneProcessState(state));
+      }
+    }
+
+    const chdirPath = quotedArgsPath(line, 'chdir');
+    if (chdirPath !== undefined && syscallSucceeded(line, 'chdir')) {
+      const resolved = resolvePath(chdirPath, state.cwd);
+      if (resolved === undefined) {
+        state.cwd = undefined;
+        unresolvedProcessStates.push({ pid: processPid, traceFile: fileName, syscall: 'chdir', reason: 'relative cwd cannot be resolved', line });
+      } else {
+        state.cwd = resolved;
+      }
+    }
+
+    const fchdirFd = syscallNumericArg(line, 'fchdir');
+    if (fchdirFd !== undefined && syscallSucceeded(line, 'fchdir')) {
+      const descriptor = state.descriptors.get(fchdirFd);
+      if (descriptor?.directory && descriptor.path !== undefined) {
+        state.cwd = descriptor.path;
+      } else {
+        state.cwd = undefined;
+        unresolvedProcessStates.push({ pid: processPid, traceFile: fileName, syscall: 'fchdir', fd: fchdirFd, reason: 'directory fd cannot be resolved', line });
+      }
+    }
+
+    const closeFd = syscallNumericArg(line, 'close');
+    if (closeFd !== undefined && syscallSucceeded(line, 'close')) state.descriptors.delete(closeFd);
+    for (const syscall of ['dup', 'dup2', 'dup3']) {
+      const sourceFd = syscallNumericArg(line, syscall, 0);
+      const resultFd = syscallReturn(line, syscall);
+      const targetFd = syscall === 'dup' ? resultFd : syscallNumericArg(line, syscall, 1);
+      if (sourceFd === undefined || targetFd === undefined || resultFd === undefined || resultFd < 0) continue;
+      const descriptor = state.descriptors.get(sourceFd);
+      if (descriptor) state.descriptors.set(targetFd, { ...descriptor });
+      else state.descriptors.delete(targetFd);
+    }
+    const fcntlSourceFd = syscallNumericArg(line, 'fcntl');
+    if (fcntlSourceFd !== undefined && /F_DUPFD(?:_CLOEXEC)?/.test(line)) {
+      const resultFd = syscallReturn(line, 'fcntl');
+      if (resultFd !== undefined && resultFd >= 0) {
+        const descriptor = state.descriptors.get(fcntlSourceFd);
+        if (descriptor) state.descriptors.set(resultFd, { ...descriptor });
+        else state.descriptors.delete(resultFd);
+      }
     }
 
     const syscallMatch = /\b(openat|open)\(/.exec(line);
     if (!syscallMatch) continue;
     const syscall = syscallMatch[1];
     const openedPath = quotedArgsPath(line, syscall);
-    if (!openedPath) continue;
-    const runtime = Object.entries(canonicalPaths).find(([, canonical]) => openedPath === canonical)?.[0];
-    if (runtime) {
-      opens.push({
-        runtime,
-        path: openedPath,
-        syscall,
-        pid: processPid,
-        role: hints[0],
-        roles: hints,
-        traceFile: fileName,
-        line,
-      });
+    if (openedPath === undefined) continue;
+    const dirfd = syscall === 'openat' ? openatDirfd(line) : 'AT_FDCWD';
+    const relative = !path.isAbsolute(openedPath);
+    let base = state.cwd;
+    let resolutionFailure;
+    if (syscall === 'openat' && dirfd !== 'AT_FDCWD' && relative) {
+      const descriptor = dirfd === undefined ? undefined : state.descriptors.get(dirfd);
+      if (descriptor?.directory && descriptor.path !== undefined) base = descriptor.path;
+      else {
+        base = undefined;
+        resolutionFailure = descriptor ? 'numeric dirfd is not a known directory' : 'numeric dirfd is unresolved';
+      }
     }
+    const resolvedPath = resolvePath(openedPath, base);
+    if (relative && resolvedPath === undefined && isPotentialCanaryPath(openedPath, canonicalPaths)) {
+      unresolvedPaths.push({ path: openedPath, rawPath: openedPath, syscall, dirfd, pid: processPid, role: hints[0], roles: hints, traceFile: fileName, reason: resolutionFailure ?? (syscall === 'openat' && dirfd !== 'AT_FDCWD' ? 'relative path has an unresolved directory fd' : 'relative path has an unresolved cwd'), line });
+    }
+    const runtime = resolvedPath === undefined ? undefined : Object.entries(canonicalPaths).find(([, canonical]) => resolvedPath === canonical)?.[0];
+    const resultFd = syscallReturn(line, syscall);
+    if (resultFd !== undefined && resultFd >= 0) {
+      const directory = openFlagsContainDirectory(line, syscall) || (resolvedPath !== undefined && isCanaryAncestor(resolvedPath, canonicalPaths));
+      state.descriptors.set(resultFd, { path: resolvedPath, directory });
+    }
+    if (runtime) opens.push({ runtime, path: resolvedPath, syscall, pid: processPid, role: hints[0], roles: hints, traceFile: fileName, line });
   }
 
   const sortedRoles = [...processes].sort();
@@ -139,6 +263,10 @@ export function parseTraceFile(text, fileName, canonicalPaths) {
   for (const open of opens) {
     open.role = open.role ?? role;
     open.roles = open.roles.length > 0 ? open.roles : sortedRoles;
+  }
+  for (const unresolved of [...unresolvedPaths, ...unresolvedProcessStates]) {
+    unresolved.role = unresolved.role ?? role;
+    unresolved.roles = unresolved.roles.length > 0 ? unresolved.roles : sortedRoles;
   }
   return {
     traceFile: fileName,
@@ -149,6 +277,8 @@ export function parseTraceFile(text, fileName, canonicalPaths) {
     observations: [...observations.entries()].map(([pid, rolesForPid]) => ({ pid, roles: [...rolesForPid].sort() })),
     relationships,
     opens,
+    unresolvedPaths,
+    unresolvedProcessStates,
   };
 }
 
@@ -211,36 +341,46 @@ export function normalizeTraceEvidence(files, canonicalPaths) {
       return { ...open, traceFile, role: process?.role ?? null, roles: process?.roles ?? [] };
     }))
     .sort((a, b) => `${a.path}\u0000${a.traceFile}\u0000${a.line}`.localeCompare(`${b.path}\u0000${b.traceFile}\u0000${b.line}`));
+  const unresolvedPaths = parsed.flatMap((entry) => [...entry.unresolvedPaths, ...entry.unresolvedProcessStates].map((unresolved) => {
+    const traceFile = unresolved.pid !== undefined ? processByPid.get(unresolved.pid) ?? entry.traceFile : entry.traceFile;
+    const process = processes.find((candidate) => candidate.traceFile === traceFile);
+    return { ...unresolved, traceFile, role: process?.role ?? null, roles: process?.roles ?? [] };
+  }));
   const unresolvedProcesses = processes.filter((process) => process.role === null);
   return {
     traceFiles: parsed.map((entry) => entry.traceFile),
     processes,
     unresolvedProcesses,
+    unresolvedPaths,
     canonicalOpens,
   };
 }
 
 export function positiveControlVerdict(evidence, canonicalPaths) {
+  const unresolvedPaths = evidence.unresolvedPaths ?? [];
   const missing = Object.entries(canonicalPaths)
     .filter(([, canonical]) => !evidence.canonicalOpens.some((open) => open.path === canonical))
     .map(([runtime]) => runtime)
     .sort();
   const positiveControlProcesses = evidence.processes.filter((process) => process.role === 'positive-control' || process.roles.includes('positive-control'));
   return {
-    pass: missing.length === 0 && evidence.unresolvedProcesses.length === 0 && positiveControlProcesses.length > 0,
+    pass: missing.length === 0 && evidence.unresolvedProcesses.length === 0 && unresolvedPaths.length === 0 && positiveControlProcesses.length > 0,
     expectedRuntimes: Object.keys(canonicalPaths).sort(),
     missingRuntimes: missing,
     capturedOpens: evidence.canonicalOpens.length,
     unresolvedProcesses: evidence.unresolvedProcesses,
+    unresolvedPaths,
     positiveControlProcesses,
   };
 }
 
 export function normalSmokeVerdict(evidence) {
+  const unresolvedPaths = evidence.unresolvedPaths ?? [];
   return {
-    pass: evidence.canonicalOpens.length === 0 && evidence.unresolvedProcesses.length === 0,
+    pass: evidence.canonicalOpens.length === 0 && evidence.unresolvedProcesses.length === 0 && unresolvedPaths.length === 0,
     canonicalOpenCount: evidence.canonicalOpens.length,
     canonicalOpens: evidence.canonicalOpens,
     unresolvedProcesses: evidence.unresolvedProcesses,
+    unresolvedPaths,
   };
 }

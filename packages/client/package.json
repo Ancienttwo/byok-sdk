@@ -32,6 +32,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "smoke:adapters": "node scripts/adapter-task-smoke.mjs",
+    "audit:adapter-task-smoke": "node scripts/adapter-task-smoke.mjs",
     "audit:credentials": "node scripts/linux-credential-audit.mjs",
     "clean": "rm -rf dist"
   },

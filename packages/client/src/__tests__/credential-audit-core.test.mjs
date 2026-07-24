@@ -8,6 +8,7 @@ import {
 } from '../../scripts/credential-audit-core.mjs';
 
 const paths = canonicalCanaryPaths('/synthetic-home');
+const pathDir = (file) => file.slice(0, file.lastIndexOf('/'));
 
 describe('credential audit trace parser', () => {
   it('matches canonical opens exactly and attributes fixture roles', () => {
@@ -28,6 +29,44 @@ describe('credential audit trace parser', () => {
     expect(evidence.canonicalOpens).toHaveLength(1);
     expect(evidence.canonicalOpens[0]).toMatchObject({ runtime: 'claude', pid: 321, role: 'fixture:claude' });
     expect(evidence.processes[0].roles).toEqual(['detect:claude', 'fixture:claude']);
+  });
+
+  it('fails closed for unresolved relative canary-relevant paths', () => {
+    const evidence = normalizeTraceEvidence(
+      [{ name: 'trace.30', text: 'execve(\"/usr/bin/node\", [\"node\", \"/repo/adapter-task-smoke.mjs\"], 0) = 0\nopenat(AT_FDCWD, \".claude/byok-sdk-audit-canary\", O_RDONLY) = 3\n' }],
+      paths,
+    );
+    expect(evidence.unresolvedPaths).toHaveLength(1);
+    expect(normalSmokeVerdict(evidence)).toMatchObject({ pass: false });
+  });
+
+  it('resolves relative AT_FDCWD paths after an absolute chdir', () => {
+    const evidence = normalizeTraceEvidence(
+      [{ name: 'trace.31', text: `chdir(\"${pathDir(paths.claude)}\") = 0\nopenat(AT_FDCWD, \"byok-sdk-audit-canary\", O_RDONLY) = 3\n` }],
+      paths,
+    );
+    expect(evidence.canonicalOpens).toHaveLength(1);
+    expect(evidence.unresolvedPaths).toEqual([]);
+  });
+
+  it('tracks numeric directory fds and dup/close operations', () => {
+    const directory = pathDir(paths.codex);
+    const evidence = normalizeTraceEvidence(
+      [{ name: 'trace.32', text: `open(\"${directory}\", O_RDONLY|O_DIRECTORY) = 3\ndup(3) = 4\nclose(3) = 0\nopenat(4, \"byok-sdk-audit-canary\", O_RDONLY) = 5\n` }],
+      paths,
+    );
+    expect(evidence.canonicalOpens).toMatchObject([{ runtime: 'codex', syscall: 'openat' }]);
+    expect(evidence.unresolvedPaths).toEqual([]);
+  });
+
+  it('fails closed for unresolved numeric dirfds', () => {
+    const evidence = normalizeTraceEvidence(
+      [{ name: 'trace.33', text: 'openat(9, \".pi/byok-sdk-audit-canary\", O_RDONLY) = 3\n' }],
+      paths,
+    );
+    expect(evidence.unresolvedPaths).toHaveLength(1);
+    expect(normalSmokeVerdict(evidence).pass).toBe(false);
+    expect(positiveControlVerdict(evidence, paths).pass).toBe(false);
   });
 
   it('requires every runtime canary for a positive control', () => {
@@ -81,6 +120,7 @@ describe('credential audit trace parser', () => {
       canonicalOpenCount: 0,
       canonicalOpens: [],
       unresolvedProcesses: [],
+      unresolvedPaths: [],
     });
     expect(parseTraceFile('', 'trace.8', paths).pid).toBe(8);
   });

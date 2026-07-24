@@ -28,7 +28,7 @@ pnpm install --frozen-lockfile
 pnpm -r build
 pnpm -r typecheck
 pnpm --filter @byok/client run test
-pnpm --filter @byok/client exec vitest run --testNamePattern='credential audit parser'
+pnpm --filter @byok/client exec vitest run src/__tests__/credential-audit-core.test.mjs
 pnpm --filter @byok/client run smoke:adapters
 ```
 
@@ -130,8 +130,8 @@ verifiable evidence for the pilot entry:
 |---|---|---|
 | Build | `pnpm -r build` | **PASS**, exit 0 |
 | Typecheck | `pnpm -r typecheck` | **PASS**, exit 0 |
-| Client tests | `pnpm --filter @byok/client run test` | **PASS**, 83 test files / 824 tests |
-| Credential-trace parser | `pnpm --filter @byok/client exec vitest run --testNamePattern='credential audit parser'` | **PASS**, 5/5 |
+| Client tests | `pnpm --filter @byok/client run test` | **PASS**, 83 test files / 831 tests |
+| Credential-trace parser | `pnpm --filter @byok/client exec vitest run src/__tests__/credential-audit-core.test.mjs` | **PASS**, 12/12 |
 | Concrete adapter smoke | `pnpm --filter @byok/client run smoke:adapters` | **PASS**, all 3 adapters |
 | Credential audit on macOS | `pnpm --filter @byok/client run audit:credentials -- --trace-dir .ci-artifacts/credential-isolation/raw --summary .ci-artifacts/credential-isolation/summary.json` | **UNSUPPORTED**, exit 2 as required for non-Linux |
 
@@ -170,7 +170,7 @@ behavior beyond this pilot:
   `daemon-control-socket.test.ts`, and `shutdown-complete-hardening.test.ts`.
   These tests establish the unified shutdown ordering and its bounded,
   honest-undelivered-outbox reporting.
-- The parser's 5/5 result and the three-adapter smoke above cover the pilot
+- The parser's 12/12 result and the three-adapter smoke above cover the pilot
   harness itself; the Ubuntu job adds the kernel-level evidence unavailable on
   stock macOS.
 
