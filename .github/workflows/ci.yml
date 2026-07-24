@@ -294,3 +294,52 @@ jobs:
 
       - name: Run the IPC control socket smoke
         run: node packages/client/scripts/ipc-smoke.mjs
+
+      # M5 pilot: credential-isolation audit. The client audit command owns the
+      # exact adapter smoke and runs it under Linux strace; this leg supplies the
+      # kernel-level evidence that macOS cannot provide without root/SIP workarounds.
+      # It is intentionally separate from the existing jobs and emits no secrets.
+  credential-isolation-audit:
+    name: credential isolation audit (Ubuntu, strace)
+    runs-on: ubuntu-latest
+    env:
+      AUDIT_ROOT: ${{ github.workspace }}/.ci-artifacts/credential-isolation
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install strace
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends strace
+
+      - name: Build (needed by the adapter smoke)
+        run: pnpm -r build
+
+      - name: Run credential-isolation audit
+        run: |
+          mkdir -p "$AUDIT_ROOT/raw"
+          pnpm --filter @byok/client run audit:credentials -- \
+            --trace-dir "$AUDIT_ROOT/raw" \
+            --summary "$AUDIT_ROOT/summary.json"
+
+      - name: Upload credential-isolation audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: credential-isolation-audit
+          path: ${{ github.workspace }}/.ci-artifacts/credential-isolation
+          if-no-files-found: warn
