@@ -70,6 +70,51 @@ jobs:
       - name: Test
         run: pnpm -r test
 
+  # Windows Git workspace guarantee: runs the real Git executable through the
+  # client workspace manager and exercises the secure recovery ledger/privacy
+  # surfaces without duplicating the full cross-platform suite above. TEMP/TMP
+  # are redirected to a path containing spaces and non-ASCII characters so the
+  # real init/status and ledger file operations cross that boundary on Windows.
+  windows-git-workspace:
+    name: Windows Git workspace, store, and security tests
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build client dependencies
+        run: pnpm -r build
+
+      - name: Verify installed Git
+        run: git --version
+
+      - name: Run Git workspace/store/security tests in special-character paths
+        run: |
+          $specialTemp = Join-Path $env:RUNNER_TEMP "byok git workspace 空間"
+          New-Item -ItemType Directory -Force -Path $specialTemp | Out-Null
+          $env:TEMP = $specialTemp
+          $env:TMP = $specialTemp
+          pnpm --filter @byok/client exec vitest run `
+            src/__tests__/git-workspace.test.ts `
+            src/__tests__/git-workspace-store.test.ts `
+            src/__tests__/bin-workspaces.test.ts `
+            src/__tests__/secure-dir.test.ts
+
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) without
   # pi's optionalDependency resolution (packages/client/src/adapters/pi/

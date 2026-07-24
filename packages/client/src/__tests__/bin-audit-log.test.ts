@@ -191,6 +191,70 @@ describe('bin/audit-log: finding P1 #3 (SECURITY) — redaction, 0600 file, 0700
     expect(serializedReadBack).not.toContain(secretInlineBase64);
   });
 
+  it('persists only coarse Git workspace metadata, rejects sensitive sentinels, and does not anchor task lifecycle rotation', async () => {
+    const storeDir = await tmpDir('byok-audit-git-workspace-');
+    const sentinels = {
+      workspacePath: '/private/repo/SENTINEL-WORKSPACE-PATH',
+      commitId: 'SENTINEL-COMMIT-ID',
+      filename: 'SENTINEL-FILENAME.txt',
+      message: 'SENTINEL-COMMIT-MESSAGE',
+      rawOutput: 'SENTINEL-GIT-STDOUT-STDERR',
+      freeformError: 'SENTINEL-FREEFORM-ERROR',
+    };
+    const event: DaemonEvent = {
+      kind: 'git-workspace',
+      ts: '2026-01-01T00:00:00.000Z',
+      taskId: 'task-git',
+      workspaceId: 'opaque-workspace-1',
+      phase: 'active',
+      headChanged: true,
+      commitsSinceBaseline: 2,
+      dirty: { staged: 1, unstaged: 2, untracked: 3, conflicted: 4 },
+      errorCategory: 'git-command-failed',
+    };
+
+    await appendAuditEvent(storeDir, event);
+
+    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
+    expect(raw).toContain('"workspaceId":"opaque-workspace-1"');
+    expect(raw).toContain('"commitsSinceBaseline":2');
+    expect(raw).toContain('"dirty":{"staged":1,"unstaged":2,"untracked":3,"conflicted":4}');
+    for (const sentinel of Object.values(sentinels)) expect(raw).not.toContain(sentinel);
+    expect(await readAuditEvents(storeDir)).toEqual([event]);
+
+    // A Git event must not become a lifecycle anchor during compaction.
+    const filePath = auditLogPath(storeDir);
+    const fillerCount = AUDIT_LOG_TRIM_TARGET_LINES * 5;
+    const lines = [
+      JSON.stringify(event),
+      ...Array.from({ length: fillerCount }, (_, i) => JSON.stringify({
+        kind: 'completed', ts: '2026-01-01T00:00:01.000Z', taskId: `filler-${i}`, summarySize: 0, sessionRef: 'sess', padding: 'x'.repeat(500),
+      })),
+    ];
+    await fs.writeFile(filePath, `${lines.join('\n')}\n`, { mode: 0o600 });
+    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:02.000Z' });
+    const rotated = await readAuditEvents(storeDir);
+    expect(rotated.some((entry) => entry.kind === 'git-workspace' && entry.taskId === 'task-git')).toBe(false);
+  });
+
+  it('drops unknown Git error categories instead of persisting free-form values', async () => {
+    const storeDir = await tmpDir('byok-audit-git-error-category-');
+    await appendAuditEvent(storeDir, {
+      kind: 'git-workspace',
+      ts: '2026-01-01T00:00:00.000Z',
+      taskId: 't1',
+      workspaceId: 'w1',
+      phase: 'failed',
+      errorCategory: 'SENTINEL-FREEFORM-ERROR',
+    });
+    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
+    expect(raw).not.toContain('SENTINEL-FREEFORM-ERROR');
+    expect(await readAuditEvents(storeDir)).toEqual([{
+      kind: 'git-workspace', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', workspaceId: 'w1', phase: 'failed',
+      headChanged: undefined, commitsSinceBaseline: undefined, dirty: undefined, errorCategory: undefined,
+    }]);
+  });
+
   it('a pre-existing storeDir with a permissive mode gets locked down to 0700 on append', async () => {
     const parent = await tmpDir('byok-audit-storedir-mode-parent-');
     const storeDir = path.join(parent, 'permissive-store');

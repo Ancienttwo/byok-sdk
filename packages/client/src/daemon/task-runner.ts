@@ -21,6 +21,9 @@ import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
 import { ProgressBatcher, type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
+import type { GitWorkspaceManager, GitWorkspaceLease, GitWorkspaceObservation, GitWorkspaceError, GitErrorCategory } from './git-workspace';
+import { prependGitWorkspaceGuidance } from './git-workspace';
+import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './git-workspace-store';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -55,6 +58,9 @@ export const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
  * `DaemonOverrides.shutdown.taskInterruptTimeoutMs` — see `create-daemon.ts`).
  */
 export const DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS = 5_000;
+
+/** Bound best-effort Git observation so terminal protocol outcomes cannot wait forever on repository I/O. */
+const GIT_OBSERVATION_TIMEOUT_MS = 5_000;
 
 /**
  * M4 Phase 4 (fold-in from the P3 gate): bound on how many `requestApproval`
@@ -170,6 +176,15 @@ export interface TaskRunnerDeps {
    * `SessionWorkspaceStore`'s own doc comment.
    */
   sessionWorkspaces: SessionWorkspaceStore;
+  gitWorkspaceManager?: GitWorkspaceManager;
+  gitWorkspaceStore?: GitWorkspaceStore;
+  onGitWorkspaceEvent?: (event: {
+    taskId: string;
+    workspaceId: string;
+    phase: GitWorkspacePhase;
+    observation?: GitWorkspaceObservation;
+    errorCategory?: string;
+  }) => void;
   /**
    * M4 Phase 3: this daemon's control-socket identity + the shared registry
    * backing the control socket's own `approvals.list`/`approvals.resolve`
@@ -240,6 +255,9 @@ interface ActiveTask {
   adapter: RuntimeAdapter;
   session: Session;
   workspaceDir: string;
+  gitWorkspaceId?: string;
+  gitLease?: GitWorkspaceLease;
+  gitBaseline?: string;
   batcher: ProgressBatcher;
   summaryParts: string[];
   /**
@@ -822,6 +840,7 @@ export class TaskRunner {
     // either step below, since either one (not just the hard-kill escalation)
     // can end this task's `session.events` iterable as a side effect.
     active.beingTornDown = true;
+    await this.observeGit(active, 'salvage');
     const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
     const interrupted = await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
     if (!interrupted) {
@@ -1012,7 +1031,59 @@ export class TaskRunner {
         return;
       }
 
+      let known: Awaited<ReturnType<SessionWorkspaceStore['get']>> = undefined;
+      let workspaceDir: string;
+      let gitLease: GitWorkspaceLease | undefined;
+      let gitWorkspaceId: string | undefined;
+      let gitBaseline: string | undefined;
+      let gitExisting = false;
+      let plainWorkspaceNeedsResolve = false;
+      if (this.deps.gitWorkspaceManager && this.deps.gitWorkspaceStore) {
+        known = payload.sessionRef ? await this.deps.sessionWorkspaces.get(payload.sessionRef) : undefined;
+        const gitManager = this.deps.gitWorkspaceManager;
+        const gitStore = this.deps.gitWorkspaceStore;
+        if (payload.sessionRef) {
+          const ledger = await gitStore.findBySessionAnyPhase(payload.sessionRef).catch(() => undefined);
+          const sameProtocolTask = ledger?.taskId === taskId;
+          const interruptedOldTask = ledger?.phase === 'interrupted' && sameProtocolTask;
+          const activeDifferentTask = ledger !== undefined && ledger.taskId !== taskId && (ledger.phase === 'preparing' || ledger.phase === 'active');
+          if (!known || known.workspaceKind !== 'git' || !known.gitWorkspaceId || !ledger ||
+              ledger.workspaceId !== known.gitWorkspaceId || ledger.sessionRef !== payload.sessionRef ||
+              path.resolve(ledger.workspaceDir) !== path.resolve(known.workspaceDir) ||
+              interruptedOldTask || activeDifferentTask) {
+            this.decline(taskId, 'session is incompatible with Git workspace mode', true);
+            return;
+          }
+          workspaceDir = known.workspaceDir;
+          gitWorkspaceId = known.gitWorkspaceId;
+          gitBaseline = ledger.baseline;
+          gitExisting = true;
+          try {
+            await gitManager.validateExisting(workspaceDir);
+          } catch {
+            this.decline(taskId, 'workspace is busy or unavailable', true);
+            return;
+          }
+        } else {
+          workspaceDir = path.join(this.deps.workspaceRoot, taskId);
+        }
+        try {
+          gitLease = await gitManager.acquireLease(workspaceDir, payload.sessionRef);
+        } catch {
+          this.decline(taskId, 'workspace is busy or unavailable', true);
+          return;
+        }
+      } else if (!this.deps.gitWorkspaceManager && !this.deps.gitWorkspaceStore) {
+        known = payload.sessionRef ? await this.deps.sessionWorkspaces.get(payload.sessionRef) : undefined;
+        workspaceDir = known?.workspaceDir ?? path.join(this.deps.workspaceRoot, taskId);
+        plainWorkspaceNeedsResolve = true;
+      } else {
+        this.decline(taskId, 'workspace mode is unavailable', true);
+        return;
+      }
+
       // Every check above is local/config-driven (an adapter's `detect()` is
+
       // the only I/O, and it costs nothing to have run before committing) and
       // needed no commitment from this device. Only now do we actually take
       // the task — `task.decline` above is the alternative path for anything
@@ -1038,35 +1109,79 @@ export class TaskRunner {
         ),
       );
 
+      // Resolve the instruction blob after claim; workspace preparation follows.
       let resolvedInstruction: string;
       try {
         resolvedInstruction = await this.resolveInstruction(payload.instruction);
+        if (plainWorkspaceNeedsResolve) workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
       } catch (err) {
+        gitLease?.release();
         await this.fail(taskId, `failed to resolve instruction blob: ${errorMessage(err)}`, true);
         return;
       }
 
-      // Finding #3 (session/workspace continuity): an offer naming a
-      // sessionRef this device has previously recorded (via a prior task's
-      // `task.complete.sessionRef`) reuses that exact workspace directory —
-      // this is what lets a runtime adapter's own resume mechanism (e.g. pi's
-      // `--session <id>`, scoped to the cwd/project a session was created
-      // under — see pi-adapter.ts) actually find the session again. An
-      // unknown or absent sessionRef is always treated as "start fresh",
-      // exactly as before this feature existed.
-      const known = payload.sessionRef ? await this.deps.sessionWorkspaces.get(payload.sessionRef) : undefined;
-
-      let workspaceDir: string;
-      try {
-        workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
-      } catch (err) {
-        await this.fail(taskId, `failed to create task workspace: ${errorMessage(err)}`, true);
-        return;
+      if (this.deps.gitWorkspaceManager && gitLease) {
+        try {
+          let observation: GitWorkspaceObservation;
+          if (gitExisting) {
+            observation = await this.deps.gitWorkspaceManager.validateExisting(workspaceDir);
+          } else {
+            const workspaceId = randomUUID();
+            const now = new Date().toISOString();
+            gitWorkspaceId = workspaceId;
+            await this.deps.gitWorkspaceStore?.upsert({
+              workspaceId,
+              taskId,
+              workspaceDir,
+              phase: 'preparing',
+              commitsSinceBaseline: 0,
+              staged: 0,
+              unstaged: 0,
+              untracked: 0,
+              conflicted: 0,
+              createdAt: now,
+              updatedAt: now,
+            });
+            this.deps.onGitWorkspaceEvent?.({ taskId, workspaceId, phase: 'preparing' });
+            observation = await this.deps.gitWorkspaceManager.prepareFresh(workspaceDir);
+          }
+          const workspaceId = gitWorkspaceId ?? randomUUID();
+          const phase: GitWorkspacePhase = 'active';
+          const now = new Date().toISOString();
+          const ledgerRecord: GitWorkspaceLedgerRecord = {
+            workspaceId,
+            taskId,
+            workspaceDir,
+            sessionRef: payload.sessionRef,
+            phase,
+            baseline: gitBaseline ?? observation.head,
+            current: observation.head,
+            commitsSinceBaseline: observation.commitsSinceBaseline,
+            staged: observation.staged,
+            unstaged: observation.unstaged,
+            untracked: observation.untracked,
+            conflicted: observation.conflicted,
+            createdAt: now,
+            updatedAt: now,
+          };
+          await this.deps.gitWorkspaceStore?.upsert(ledgerRecord);
+          this.deps.onGitWorkspaceEvent?.({ taskId, workspaceId, phase, observation });
+          gitWorkspaceId = workspaceId;
+          gitBaseline = gitBaseline ?? observation.head;
+        } catch (err) {
+          const category = (err as GitWorkspaceError).category ?? 'repository-invalid';
+          await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', category);
+          gitLease.release();
+          this.deps.onGitWorkspaceEvent?.({ taskId, workspaceId: gitWorkspaceId ?? '', phase: 'failed', errorCategory: category });
+          await this.fail(taskId, 'Git workspace preparation failed', true);
+          return;
+        }
       }
 
       const ctx: TaskContext = {
         workspaceDir,
         policy: decision.policy,
+        ...(gitWorkspaceId ? { gitWorkspace: { workspaceId: gitWorkspaceId, baseline: gitBaseline } } : {}),
         // M5: no longer `process.env` verbatim (see `environment.ts`'s own
         // module doc comment for the credential-leak gap that closed) —
         // built fresh per task from the SPECIFIC adapter `pickAdapter`
@@ -1111,7 +1226,7 @@ export class TaskRunner {
       };
       const effectiveOffer: TaskOfferPayload = {
         ...payload,
-        instruction: resolvedInstruction,
+        instruction: gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction,
         // Never forward a sessionRef this device has no recorded workspace
         // for (stale, from another device, or simply made up) — an adapter
         // that tries to resume an id it never minted fails outright (pi:
@@ -1126,11 +1241,9 @@ export class TaskRunner {
       try {
         session = await pick.adapter.start(effectiveOffer, ctx);
       } catch (err) {
-        // A PolicyUnsupportedError means this exact task can never succeed on
-        // this adapter (fail-closed policy/instruction mismatch) — not
-        // retryable. Anything else (spawn failure, missing credentials, etc)
-        // is treated as environmental and possibly transient.
         const retryable = !(err instanceof PolicyUnsupportedError);
+        await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', 'repository-invalid');
+        gitLease?.release();
         await this.fail(taskId, `adapter failed to start: ${errorMessage(err)}`, retryable);
         return;
       }
@@ -1156,6 +1269,8 @@ export class TaskRunner {
         } catch {
           // best-effort teardown
         }
+        gitLease?.release();
+        await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
         this.deps.send(createEnvelope('task.cancelled', { reason }, { taskId }));
         return;
       }
@@ -1179,6 +1294,9 @@ export class TaskRunner {
         adapter: pick.adapter,
         session,
         workspaceDir,
+        gitWorkspaceId,
+        gitLease,
+        gitBaseline,
         summaryParts: [],
         batcher: new ProgressBatcher(
           (seq, events) => this.deps.send(createEnvelope('task.progress', { seq, events }, { taskId, seq })),
@@ -1204,8 +1322,15 @@ export class TaskRunner {
       // the comment above; losing this mapping only costs a future resume
       // opportunity, never the correctness of the task in progress.
       void this.deps.sessionWorkspaces
-        .record(session.sessionRef, { workspaceDir, runtimeSessionId: session.sessionRef })
+        .record(session.sessionRef, {
+          workspaceDir,
+          runtimeSessionId: session.sessionRef,
+          ...(gitWorkspaceId ? { workspaceKind: 'git' as const, gitWorkspaceId } : {}),
+        })
         .catch(() => {});
+      if (gitWorkspaceId && this.deps.gitWorkspaceStore) {
+        void this.deps.gitWorkspaceStore.attachSession(gitWorkspaceId, session.sessionRef).catch(() => {});
+      }
     } finally {
       this.inFlightOffers.delete(taskId);
     }
@@ -1339,6 +1464,7 @@ export class TaskRunner {
         if (event.type === 'turn_end') {
           active.batcher.push(event);
           active.batcher.flush();
+          await this.observeGit(active, 'completed');
           this.deps.send(
             createEnvelope(
               'task.complete',
@@ -1463,6 +1589,7 @@ export class TaskRunner {
     } catch {
       // best-effort — still report cancellation below
     }
+    await this.observeGit(active, 'salvage');
     // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
     // §4's "server state is authoritative on its own action" rule means the
     // server already moved this task to `Cancelled` — and already closed
@@ -1983,6 +2110,7 @@ export class TaskRunner {
     } catch {
       // best-effort
     }
+    await this.observeGit(active, 'salvage');
     // Same reasoning as handleCancel() above: the server already moved this
     // task to `Failed` and closed its event queue before this notification
     // arrived, so flushing buffered progress here would be unobservable and
@@ -1997,8 +2125,37 @@ export class TaskRunner {
   }
 
   private async fail(taskId: string, reason: string, retryable: boolean): Promise<void> {
+    const active = this.tasks.get(taskId);
+    if (active) await this.observeGit(active, 'salvage');
     this.deps.send(createEnvelope('task.fail', { reason, retryable }, { taskId }));
     await this.finish(taskId);
+  }
+
+  private async observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {
+    if (!active.gitWorkspaceId || !this.deps.gitWorkspaceManager || !this.deps.gitWorkspaceStore) return;
+    try {
+      const observation = await new Promise<GitWorkspaceObservation>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Git workspace observation timed out')), GIT_OBSERVATION_TIMEOUT_MS);
+        timer.unref?.();
+        void this.deps.gitWorkspaceManager!.observe(active.workspaceDir, active.gitBaseline).then(
+          (value) => { clearTimeout(timer); resolve(value); },
+          (error) => { clearTimeout(timer); reject(error); },
+        );
+      });
+      await this.deps.gitWorkspaceStore.updateObservation(active.gitWorkspaceId, observation, phase);
+      this.deps.onGitWorkspaceEvent?.({ taskId: active.taskId, workspaceId: active.gitWorkspaceId, phase, observation });
+    } catch (err) {
+      const category = ((err as GitWorkspaceError).category ?? 'repository-invalid') as GitErrorCategory;
+      await this.updateGitPhaseBestEffort(active.gitWorkspaceId, phase, category);
+      this.deps.onGitWorkspaceEvent?.({ taskId: active.taskId, workspaceId: active.gitWorkspaceId, phase, errorCategory: category });
+    }
+  }
+
+  private async updateGitPhaseBestEffort(workspaceId: string | undefined, phase: GitWorkspacePhase, errorCategory?: GitErrorCategory): Promise<void> {
+    if (!workspaceId || !this.deps.gitWorkspaceStore) return;
+    const current = await this.deps.gitWorkspaceStore.get(workspaceId).catch(() => undefined);
+    if (!current) return;
+    await this.deps.gitWorkspaceStore.upsert({ ...current, phase, ...(errorCategory ? { errorCategory } : {}) }).catch(() => {});
   }
 
   private async finish(taskId: string): Promise<void> {
@@ -2050,6 +2207,8 @@ export class TaskRunner {
         // already documents; nothing left to do.
       }
     }
+
+    if (active.gitLease) active.gitLease.release();
 
     try {
       await active.session.close();

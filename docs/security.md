@@ -36,7 +36,48 @@ evidence.
   [Workspace confinement is a convention, not a sandbox](#workspace-confinement-is-a-convention-not-a-sandbox)
   below — this is the one place this doc most wants to avoid overclaiming.
 
-## Assets
+## Local Git checkpoint workspaces
+
+The daemon has an optional, disabled-by-default local checkpoint mode. An operator enables it in the device's local configuration with:
+
+```json
+{
+  "gitWorkspace": { "mode": "local-checkpoints" }
+}
+```
+
+When this property is omitted, the existing plain-directory behavior remains in force and the daemon does not invoke Git. When enabled, the daemon performs a Git preflight before accepting offers and initializes each fresh task directory under the configured `workspaceRoot` as a local repository. Git is a code-progress and recovery layer only:
+
+- The server protocol remains authoritative for offer, claim, approval, cancellation, completion, and failure. A commit, dirty count, or Git error never changes a protocol task state.
+- The daemon owns workspace preparation, writer ownership, local observations, and the private recovery ledger. Git owns only the local files and human-reviewable checkpoints.
+- The daemon gives the runtime a fixed checkpoint-guidance block. This is guidance, not sandbox enforcement; it does not prevent a runtime from accessing anything its OS identity can access.
+
+The local-checkpoint mode does not attach an existing checkout or search parent directories. It operates only in daemon-owned `workspaceRoot/<taskId>` directories, or in the exact directory already recorded for a compatible `sessionRef`. A canonical workspace-root ownership marker prevents another Git-enabled daemon from claiming the same root under a different owner. Within a daemon, an in-process lease keyed by canonical workspace directory and requested session reference permits one active writer; a busy workspace is declined before `task.claim` and can be retried.
+
+The daemon never makes a checkpoint commit or changes Git identity. It does not run network Git operations (`clone`, `fetch`, `pull`, or `push`) or destructive/history operations (`stash`, `reset`, `clean`, `rebase`, `merge`, branch switching/deletion, or history rewriting). It does not remove or clean up a task directory or its `.git` directory. Agents may make ordinary commits when an identity is already configured, but commits are optional and remain agent-side actions.
+
+### Interruption, redispatch, and local recovery
+
+A preparation failure after claim produces one sanitized protocol failure and leaves the directory intact. On runtime failure, cancellation, approval rejection, resource-limit teardown, shutdown, or other interruption, the daemon takes a bounded best-effort local observation, marks the private record for recovery, releases the writer lease, and preserves all files and `.git`. A daemon restart marks records left in `preparing` or `active` as `interrupted`; it does not revive the old protocol task and emits no synthetic wire continuation. A later valid redispatch may reuse the exact recorded directory only through its matching session/workspace records and the one-writer lease. Disabling the feature does not delete or convert existing directories.
+
+### Private ledger and audit boundary
+
+The Git recovery ledger is local-only at `<storeDir>/git-workspaces.json`. It may contain an absolute workspace directory because recovery is a local operation, and is protected with the existing private-store controls. Version 1 stores only the opaque workspace ID, task ID, workspace directory, optional session reference, phase, baseline/current commit IDs when available, commit count since baseline, coarse staged/unstaged/untracked/conflicted counts, timestamps, and a stable error category. Writes are atomic and serialized; corrupt or unsupported ledger data fails closed rather than being treated as an empty ledger.
+
+Normal audit events and CLI output receive only opaque IDs, phases, booleans, counts, timestamps, and stable categories. They exclude workspace paths, commit IDs, filenames, commit messages, raw Git output, and free-form errors. The read-only operator projection is:
+
+```text
+byok-agent workspaces [--show-paths] [--config <path>]
+```
+
+Paths are hidden unless the operator explicitly supplies `--show-paths`; the command does not refresh or mutate repositories.
+
+On Windows, the private store relies on the existing restrictive DACL hardening in addition to POSIX-style mode requests. If `icacls` hardening cannot be applied, private metadata writes fail closed rather than leaving the ledger unprotected. The ledger is not sent to the server and no Git path or commit metadata is included in protocol envelopes.
+
+### Operational rollback
+
+To roll back operationally, remove `gitWorkspace` from the local configuration and restart the daemon. Existing task repositories, files, and private ledger records remain untouched for manual salvage; the MVP provides no cleanup or deletion command. Re-enabling the same configuration later does not authorize adopting an unrelated checkout.
+
 
 | Asset | Where it lives | Who touches it |
 |---|---|---|

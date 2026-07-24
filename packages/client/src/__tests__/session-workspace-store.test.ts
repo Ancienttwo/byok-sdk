@@ -151,4 +151,13 @@ describe('SessionWorkspaceStore concurrency (atomic write + serialized queue)', 
       expect(value).toEqual(knownValue);
     }
   });
+
+  it('preserves additive Git fields and treats omitted fields as legacy plain records', async () => {
+    storeDir = await tmpDir('byok-session-workspace-store-');
+    const store = new SessionWorkspaceStore(storeDir);
+    await store.record('plain', { workspaceDir: '/plain', runtimeSessionId: 'runtime-plain' });
+    await store.record('git', { workspaceDir: '/git', runtimeSessionId: 'runtime-git', workspaceKind: 'git', gitWorkspaceId: 'opaque-id' });
+    expect(await store.get('plain')).toEqual({ workspaceDir: '/plain', runtimeSessionId: 'runtime-plain' });
+    expect(await store.get('git')).toEqual({ workspaceDir: '/git', runtimeSessionId: 'runtime-git', workspaceKind: 'git', gitWorkspaceId: 'opaque-id' });
+  });
 });

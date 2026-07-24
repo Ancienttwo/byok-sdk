@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,13 @@ const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.m
 
 function fakeCodexAdapter(): CodexAdapter {
   return new CodexAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }) });
+}
+
+function capturingSpawn(captured: string[][]): never {
+  return ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+    captured.push([...args]);
+    return spawn(command, args, options);
+  }) as never;
 }
 
 async function takeEvents(session: Session, count: number): Promise<AgentEvent[]> {
@@ -101,6 +109,70 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     ]);
   });
 
+  it('retains --skip-git-repo-check for a plain workspace without changing argv ordering', async () => {
+    const captured: string[][] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    const ctx = await makeCtx();
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+    await takeEvents(session, 7);
+
+    expect(captured[0]).toEqual([
+      'exec',
+      '--json',
+      '--skip-git-repo-check',
+      '-c',
+      'sandbox_mode=workspace-write',
+      '-c',
+      'approval_policy=never',
+      'say hi',
+    ]);
+  });
+
+  it('omits only --skip-git-repo-check for a prepared Git workspace on fresh and resume turns', async () => {
+    const captured: string[][] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'prepared-thread' });
+    ctx.gitWorkspace = { workspaceId: 'workspace-1', baseline: 'abc123' };
+
+    const fresh = await adapter.start(baseTask, ctx);
+    openSessions.push(fresh);
+    await takeEvents(fresh, 7);
+
+    const resumed = await adapter.start({ ...baseTask, sessionRef: 'prepared-thread' }, ctx);
+    openSessions.push(resumed);
+    await takeEvents(resumed, 7);
+
+    expect(captured).toEqual([
+      [
+        'exec',
+        '--json',
+        '-c',
+        'sandbox_mode=workspace-write',
+        '-c',
+        'approval_policy=never',
+        'say hi',
+      ],
+      [
+        'exec',
+        'resume',
+        'prepared-thread',
+        '--json',
+        '-c',
+        'sandbox_mode=workspace-write',
+        '-c',
+        'approval_policy=never',
+        'say hi',
+      ],
+    ]);
+  });
+
   it('a task.offer carrying a known sessionRef resumes via `codex exec resume`, keeping the same sessionRef', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'resume-me-123' });
@@ -111,7 +183,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     await takeEvents(session, 7); // drain the full turn, including the trailing usage + turn_end
   });
 
-  it('an unresolvable sessionRef surfaces codex\'s real resume rejection as a clean start() failure, not a hang', async () => {
+  it("an unresolvable sessionRef surfaces codex's real resume rejection as a clean start() failure, not a hang", async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx(); // FAKE_CODEX_THREAD_ID defaults to 'fake-thread-1' — this ref never matches it
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };

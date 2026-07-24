@@ -17,6 +17,7 @@ import { runStartCommand } from './commands/start';
 import { runStatusCommand } from './commands/status';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runUnpairCommand } from './commands/unpair';
+import { runWorkspacesCommand } from './commands/workspaces';
 
 /**
  * `byok-agent`: a PLAIN structured CLI (subcommands + line-oriented stdout +
@@ -110,6 +111,7 @@ function usage(): never {
       '  byok-agent status [--config <path>]',
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
+      '  byok-agent workspaces [--show-paths] [--config <path>]',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
       '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
       '  byok-agent approve <approvalId> [--config <path>]',
@@ -178,6 +180,11 @@ async function main(): Promise<void> {
       return runTasksFollowCommand(config, { signal: controller.signal });
     }
     return runTasksListCommand(config);
+  }
+
+  if (command === 'workspaces') {
+    const config = loadConfig(configPathFrom(rest));
+    return runWorkspacesCommand(config, { showPaths: hasFlag(rest, '--show-paths') });
   }
 
   if (command === 'unpair') {

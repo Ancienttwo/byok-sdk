@@ -1,6 +1,63 @@
 import { TASK_STATES, type TaskState } from '@byok/protocol';
 import { type ConnectionState, type DaemonEvent, type DaemonTaskInfo } from '../index';
 
+export interface TaskGitStatus {
+  /** Opaque local correlation ID; never a path or commit ID. */
+  workspaceId: string;
+  phase: string;
+  headChanged?: boolean;
+  commitsSinceBaseline?: number;
+  dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number };
+  errorCategory?: string;
+}
+
+export type DerivedTaskInfo = DaemonTaskInfo & { git?: TaskGitStatus };
+
+const STABLE_GIT_PHASES = new Set(['preparing', 'active', 'completed', 'failed', 'cancelled', 'interrupted', 'salvage']);
+const STABLE_GIT_ERROR_CATEGORIES = new Set([
+  'git-unavailable',
+  'git-timeout',
+  'git-output-limit',
+  'git-command-failed',
+  'workspace-root-invalid',
+  'workspace-root-conflict',
+  'workspace-not-owned',
+  'repository-root-mismatch',
+  'repository-invalid',
+  'lease-busy',
+  'ledger-invalid',
+]);
+
+function nonNegativeSafeInteger(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function deriveGitStatus(event: Extract<DaemonEvent, { kind: 'git-workspace' }>): TaskGitStatus {
+  const dirty = event.dirty
+    ? {
+        staged: nonNegativeSafeInteger(event.dirty.staged),
+        unstaged: nonNegativeSafeInteger(event.dirty.unstaged),
+        untracked: nonNegativeSafeInteger(event.dirty.untracked),
+        conflicted: nonNegativeSafeInteger(event.dirty.conflicted),
+      }
+    : undefined;
+  const sanitizedDirty = dirty && Object.values(dirty).every((count) => count !== undefined)
+    ? (dirty as TaskGitStatus['dirty'])
+    : undefined;
+  return {
+    workspaceId: event.workspaceId,
+    phase: STABLE_GIT_PHASES.has(event.phase) ? event.phase : 'unknown',
+    ...(typeof event.headChanged === 'boolean' ? { headChanged: event.headChanged } : {}),
+    ...(nonNegativeSafeInteger(event.commitsSinceBaseline) !== undefined
+      ? { commitsSinceBaseline: nonNegativeSafeInteger(event.commitsSinceBaseline) }
+      : {}),
+    ...(sanitizedDirty ? { dirty: sanitizedDirty } : {}),
+    ...(event.errorCategory !== undefined && STABLE_GIT_ERROR_CATEGORIES.has(event.errorCategory)
+      ? { errorCategory: event.errorCategory }
+      : {}),
+  };
+}
+
 /**
  * Reconstructs the same shape `DaemonObserver.tasks()` exposes to a LIVE
  * in-process daemon, but from a REPLAYED sequence of already-logged
@@ -14,13 +71,13 @@ import { type ConnectionState, type DaemonEvent, type DaemonTaskInfo } from '../
  * from the audit log — the two shapes don't line up, so this mirrors that
  * reducer's logic operating on `DaemonEvent.kind` directly instead.
  */
-export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DaemonTaskInfo[] {
-  const tasks = new Map<string, DaemonTaskInfo>();
+export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTaskInfo[] {
+  const tasks = new Map<string, DerivedTaskInfo>();
 
   function upsert(
     taskId: string,
     ts: string,
-    patch: Partial<Omit<DaemonTaskInfo, 'taskId' | 'updatedAt'>> & { state: TaskState },
+    patch: Partial<Omit<DerivedTaskInfo, 'taskId' | 'updatedAt'>> & { state: TaskState },
   ): void {
     const existing = tasks.get(taskId);
     tasks.set(taskId, { ...existing, ...patch, taskId, updatedAt: ts });
@@ -59,6 +116,20 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DaemonTas
       case 'cancelled':
         upsert(event.taskId, event.ts, { state: 'Cancelled', summary: event.reason });
         break;
+      case 'git-workspace': {
+        const existing = tasks.get(event.taskId);
+        // Git-only events are observational supplements. They cannot create a
+        // task row or change lifecycle authority, and only update an existing
+        // row created by a lifecycle event.
+        if (existing) {
+          tasks.set(event.taskId, {
+            ...existing,
+            git: deriveGitStatus(event),
+            updatedAt: event.ts,
+          });
+        }
+        break;
+      }
       // 'artifact' carries no task-STATE transition of its own (observer.ts
       // never calls its own upsertTask for it either); 'connection'/
       // 'paired'/'unpaired'/'runtimes-detected' are daemon-level, not

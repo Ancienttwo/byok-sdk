@@ -161,6 +161,40 @@ function placeholderFor(size: number | undefined): string {
   return size === undefined ? '[redacted]' : `[redacted: ${size} bytes]`;
 }
 
+/** Git failures are serialized only as this closed, stable category set — never raw Git errors or command output. */
+const STABLE_GIT_ERROR_CATEGORIES = new Set([
+  'git-unavailable',
+  'git-timeout',
+  'git-output-limit',
+  'git-command-failed',
+  'workspace-root-invalid',
+  'workspace-root-conflict',
+  'workspace-not-owned',
+  'repository-root-mismatch',
+  'repository-invalid',
+  'lease-busy',
+  'ledger-invalid',
+]);
+
+function stableGitErrorCategory(value: unknown): string | undefined {
+  return typeof value === 'string' && STABLE_GIT_ERROR_CATEGORIES.has(value) ? value : undefined;
+}
+
+function gitCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function gitDirty(value: unknown): { staged: number; unstaged: number; untracked: number; conflicted: number } | undefined {
+  const dirty = asRecord(value);
+  const staged = gitCount(dirty.staged);
+  const unstaged = gitCount(dirty.unstaged);
+  const untracked = gitCount(dirty.untracked);
+  const conflicted = gitCount(dirty.conflicted);
+  return staged !== undefined && unstaged !== undefined && untracked !== undefined && conflicted !== undefined
+    ? { staged, unstaged, untracked, conflicted }
+    : undefined;
+}
+
 /**
  * Finding P1 #3: the redacted projection of a `task.progress`-derived
  * `AgentEvent` that's actually written to disk — every free-form field
@@ -277,6 +311,20 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       // redaction rule as `failed`/`cancelled` above) — `decision` is just
       // the fixed 'approve'|'reject' identifier, kept verbatim.
       return { ...base, taskId: event.taskId, decision: event.decision, reasonSize: byteSize(event.reason) };
+    case 'git-workspace':
+      // Git observations are deliberately coarse: paths, commit ids,
+      // filenames, messages, raw Git output, and free-form errors never cross
+      // this boundary. The opaque workspaceId is safe to retain for correlation.
+      return {
+        ...base,
+        taskId: event.taskId,
+        workspaceId: event.workspaceId,
+        phase: event.phase,
+        headChanged: event.headChanged,
+        commitsSinceBaseline: event.commitsSinceBaseline,
+        dirty: event.dirty,
+        errorCategory: stableGitErrorCategory(event.errorCategory),
+      };
   }
 }
 
@@ -421,6 +469,21 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
         reason: reasonSize === undefined ? undefined : placeholderFor(reasonSize),
       };
     }
+    case 'git-workspace': {
+      const commitsSinceBaseline = gitCount(raw.commitsSinceBaseline);
+      const dirty = gitDirty(raw.dirty);
+      return {
+        kind: 'git-workspace',
+        ts,
+        taskId: str(raw.taskId),
+        workspaceId: str(raw.workspaceId),
+        phase: str(raw.phase),
+        headChanged: typeof raw.headChanged === 'boolean' ? raw.headChanged : undefined,
+        commitsSinceBaseline,
+        dirty,
+        errorCategory: stableGitErrorCategory(raw.errorCategory),
+      };
+    }
     default:
       return undefined;
   }
@@ -485,6 +548,10 @@ export async function appendAuditEvent(storeDir: string, event: DaemonEvent): Pr
 const TERMINAL_EVENT_KINDS = new Set(['completed', 'failed', 'cancelled']);
 
 function eventTaskId(event: DaemonEvent): string | undefined {
+  // Git observations are audit metadata, never task lifecycle events. In
+  // particular they must not keep an otherwise-evicted task alive during
+  // rotation or manufacture a task in the replay reducer.
+  if (event.kind === 'git-workspace') return undefined;
   return 'taskId' in event ? event.taskId : undefined;
 }
 

@@ -9,3 +9,10 @@ This is the root routing contract for Claude Code and Codex. Load this before ta
 - Keep current execution in the active plan's `## Task Breakdown`; use contracts, reviews, notes, workstreams, and handoff artifacts for durable progress.
 - Read `.ai/context/capabilities.json` and `.ai/context/context-map.json` before adding scoped agent context.
 - Keep `_ref/` ignored external reference material and `_ops/` ignored local operations state.
+
+## Required Checks
+
+- `pnpm -r run typecheck`
+- `pnpm -r run test`
+- `pnpm -r run build`
+- `repo-harness run check-task-workflow --strict`
