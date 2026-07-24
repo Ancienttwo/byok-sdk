@@ -359,6 +359,50 @@ describe('daemon local observability (DaemonObserver)', () => {
       consoleWarnSpy.mockRestore();
     });
 
+    describe('claimed runtime reporting', () => {
+      it('records the actual task.claim runtime separately from the requested offer runtime', () => {
+        const observer = new DaemonObserver();
+        const events: DaemonEvent[] = [];
+        observer.subscribe((e) => events.push(e));
+
+        observer.handleInboundEnvelope(
+          createEnvelope(
+            'task.offer',
+            { instruction: 'run it', policy: { mode: 'auto' }, runtime: 'claude' },
+            { taskId: 'task-runtime-1', seq: 1 },
+          ),
+        );
+        observer.handleOutboundEnvelope(
+          createEnvelope('task.claim', { deviceId: 'device-1', runtime: 'pi' }, { taskId: 'task-runtime-1' }),
+        );
+
+        expect(events).toEqual([
+          { kind: 'offered', ts: expect.any(String), taskId: 'task-runtime-1', runtime: 'claude' },
+          { kind: 'claimed', ts: expect.any(String), taskId: 'task-runtime-1', claimedRuntime: 'pi' },
+        ]);
+        expect(observer.tasks()[0]).toMatchObject({
+          taskId: 'task-runtime-1',
+          state: 'Claimed',
+          runtime: 'claude',
+          claimedRuntime: 'pi',
+        });
+      });
+
+      it('keeps legacy claims without a runtime free of a claimedRuntime field', () => {
+        const observer = new DaemonObserver();
+        const events: DaemonEvent[] = [];
+        observer.subscribe((e) => events.push(e));
+
+        observer.handleOutboundEnvelope(
+          createEnvelope('task.claim', { deviceId: 'device-1' }, { taskId: 'task-runtime-legacy' }),
+        );
+
+        expect(events[0]).toEqual({ kind: 'claimed', ts: expect.any(String), taskId: 'task-runtime-legacy' });
+        expect(events[0] && 'claimedRuntime' in events[0]).toBe(false);
+        expect(observer.tasks()[0] && 'claimedRuntime' in observer.tasks()[0]!).toBe(false);
+      });
+    });
+
     describe('finding F4: noteApprovalDispatched attaches approvalId to the matching awaiting-approval DaemonEvent', () => {
       it('attaches the stashed approvalId to the awaiting-approval event for the matching taskId', () => {
         const observer = new DaemonObserver();

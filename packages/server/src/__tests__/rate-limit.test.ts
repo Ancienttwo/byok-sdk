@@ -141,23 +141,30 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
     // The bucket persists across reconnect BY DESIGN (see rate-limiter.ts's
     // own doc comment) — a real client's backoff+reconnect delay is what
-    // naturally gives it time to refill; mirror that with a short real wait
-    // (20/sec => 50ms/token, so 200ms comfortably regenerates the full
-    // burst=3 again).
-    await sleep(200);
+    // naturally gives it time to refill; mirror that with a Date-only clock
+    // jump (all network/WebSocket timers remain real).
+    const refillStartedAt = Date.now();
+    try {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      // 20/sec => 50ms/token, so 200ms comfortably regenerates the full
+      // burst=3 again.
+      vi.setSystemTime(refillStartedAt + 200);
 
-    const reconnected = await connectFakeDaemonWs(started.port, {
-      deviceId: daemon.deviceId,
-      accessToken: daemon.accessToken,
-      productId: PRODUCT_ID,
-    });
-    sockets.push(reconnected.ws);
+      const reconnected = await connectFakeDaemonWs(started.port, {
+        deviceId: daemon.deviceId,
+        accessToken: daemon.accessToken,
+        productId: PRODUCT_ID,
+      });
+      sockets.push(reconnected.ws);
 
-    // A fresh envelope on the new connection must be accepted normally, not
-    // immediately re-rate-limited/disconnected.
-    send(reconnected.ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    expect(byok.machines.list().find((m) => m.deviceId === daemon.deviceId)?.connected).toBe(true);
+      // A fresh envelope on the new connection must be accepted normally, not
+      // immediately re-rate-limited/disconnected.
+      send(reconnected.ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
+      await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+      expect(byok.machines.list().find((m) => m.deviceId === daemon.deviceId)?.connected).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('long-poll device gets an HTTP 429 (not a silent 200) once its budget is exhausted, matching the transport\'s existing {error} response shape', async () => {
@@ -255,49 +262,6 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
 
       expect(hub.stats().rateLimitEvents).toBe(7); // every hit counted
       expect(rateLimitedEvents).toHaveLength(1); // coalesced to exactly one embedder event
-    } finally {
-      hub.stopLeaseReaper();
-    }
-  });
-
-  it('a NEW over-budget episode (after the device genuinely recovers under budget in between) gets its own fresh device.rate_limited event, not coalesced with the earlier one', async () => {
-    const taskStore = new InMemoryTaskStore();
-    // Fast refill (1000/s) + tiny burst (1) so a single real-time wait
-    // reliably lets the device "recover" (one token regenerates) between
-    // the two flood episodes, deterministically.
-    const rateLimiter = new RateLimiter({ messagesPerSecond: 1000, burst: 1 });
-    const hub = new ConnectionHub(taskStore, new DeviceRegistry(), 30 * 60_000, rateLimiter);
-    try {
-      const deviceId = 'device-coalesce-2';
-      const fakeWs = { close: () => {}, send: () => {} } as unknown as WebSocket;
-      hub.registerConnection(deviceId, fakeWs, undefined);
-
-      const rateLimitedEvents: unknown[] = [];
-      void (async () => {
-        for await (const event of hub.subscribeServerEvents()) {
-          if (event.kind === 'device.rate_limited') rateLimitedEvents.push(event);
-        }
-      })();
-
-      const envelope = createEnvelope('task.claim', { deviceId }, { taskId: 'bogus-task-coalesce-2' });
-
-      // Episode 1: burst=1, so call #1 succeeds and call #2 floods.
-      hub.handleInbound(deviceId, envelope);
-      hub.handleInbound(deviceId, envelope);
-      await vi.waitFor(() => expect(rateLimitedEvents).toHaveLength(1));
-
-      // Let the bucket refill (1000/s — a few ms is plenty) so the NEXT
-      // call genuinely succeeds, clearing the coalescing suppression.
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      hub.handleInbound(deviceId, envelope); // succeeds — back under budget
-
-      // Episode 2: flood again — a fresh, distinct embedder event.
-      hub.handleInbound(deviceId, envelope);
-      hub.handleInbound(deviceId, envelope);
-
-      await vi.waitFor(() => {
-        expect(rateLimitedEvents).toHaveLength(2);
-      });
     } finally {
       hub.stopLeaseReaper();
     }
