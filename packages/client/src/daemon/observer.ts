@@ -44,7 +44,7 @@ export type DaemonEventKind = DaemonEvent['kind'];
 
 export type DaemonEvent =
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
-  | { kind: 'claimed'; ts: string; taskId: string }
+  | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string }
   | { kind: 'started'; ts: string; taskId: string }
   /** One per normalized `AgentEvent` (not one per `task.progress` batch) — matches "a live task feed" better than re-exposing the wire's own batching. */
   | { kind: 'progress'; ts: string; taskId: string; event: AgentEvent }
@@ -124,6 +124,8 @@ export interface DaemonTaskInfo {
   taskId: string;
   state: TaskState;
   runtime?: string;
+  /** Actual runtime selected for this task, as reported by the outbound `task.claim` payload. Distinct from `runtime`, which remains the requested offer runtime. */
+  claimedRuntime?: string;
   /** Last known human-readable text for this task's current state: an await-approval summary, a complete summary, or a fail/cancel reason — whichever was most recently reported. */
   summary?: string;
   /** Only set once this task has actually reached `task.complete`. */
@@ -236,8 +238,12 @@ export class DaemonObserver {
     switch (envelope.type) {
       case 'task.claim': {
         const taskId = envelope.task_id;
-        this.upsertTask(taskId, { state: 'Claimed' });
-        this.emit({ kind: 'claimed', ts, taskId });
+        const claimedRuntime = envelope.payload.runtime;
+        this.upsertTask(taskId, {
+          state: 'Claimed',
+          ...(claimedRuntime !== undefined ? { claimedRuntime } : {}),
+        });
+        this.emit({ kind: 'claimed', ts, taskId, ...(claimedRuntime !== undefined ? { claimedRuntime } : {}) });
         return;
       }
       case 'task.started': {
@@ -382,7 +388,7 @@ export class DaemonObserver {
 
   private upsertTask(
     taskId: string,
-    patch: Partial<Pick<DaemonTaskInfo, 'runtime' | 'summary' | 'sessionRef' | 'declined'>> & { state: TaskState },
+    patch: Partial<Pick<DaemonTaskInfo, 'runtime' | 'claimedRuntime' | 'summary' | 'sessionRef' | 'declined'>> & { state: TaskState },
   ): void {
     const existing = this.taskInfo.get(taskId);
     const next: DaemonTaskInfo = {

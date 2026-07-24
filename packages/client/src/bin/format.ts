@@ -109,7 +109,7 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
     case 'offered':
       return `${prefix} offered taskId=${event.taskId}${event.runtime ? ` runtime=${event.runtime}` : ''}`;
     case 'claimed':
-      return `${prefix} claimed taskId=${event.taskId}`;
+      return `${prefix} claimed taskId=${event.taskId}${event.claimedRuntime !== undefined ? ` claimedRuntime=${event.claimedRuntime}` : ''}`;
     case 'started':
       return `${prefix} started taskId=${event.taskId}`;
     case 'progress':
@@ -181,6 +181,7 @@ export function formatTaskLine(task: DaemonTaskInfo | DerivedTaskInfo): string {
     task.state,
     task.runtime ? `runtime=${task.runtime}` : undefined,
     gitStatus,
+    task.claimedRuntime !== undefined ? `claimedRuntime=${task.claimedRuntime}` : undefined,
     `updatedAt=${task.updatedAt}`,
     task.sessionRef ? `sessionRef=${task.sessionRef}` : undefined,
     task.declined ? 'declined=true' : undefined,
