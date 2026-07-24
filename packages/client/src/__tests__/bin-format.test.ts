@@ -46,6 +46,7 @@ describe('bin/format: formatDaemonEventLine', () => {
     const cases: DaemonEvent[] = [
       { kind: 'offered', ts: 'T', taskId: 't1', runtime: 'pi' },
       { kind: 'claimed', ts: 'T', taskId: 't1' },
+      { kind: 'claimed', ts: 'T', taskId: 't1', claimedRuntime: 'pi' },
       { kind: 'started', ts: 'T', taskId: 't1' },
       { kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'turn_end' } },
       { kind: 'artifact', ts: 'T', taskId: 't1', name: 'out.txt', contentType: 'text/plain' },
@@ -68,6 +69,7 @@ describe('bin/format: formatDaemonEventLine', () => {
     expect(cases.map((event) => formatDaemonEventLine(event))).toEqual([
       '[T] offered taskId=t1 runtime=pi',
       '[T] claimed taskId=t1',
+      '[T] claimed taskId=t1 claimedRuntime=pi',
       '[T] started taskId=t1',
       '[T] progress taskId=t1 turn_end',
       '[T] artifact taskId=t1 name=out.txt contentType=text/plain',
@@ -136,12 +138,13 @@ describe('bin/format: formatTaskLine / formatTaskListLines', () => {
       taskId: 't1',
       state: 'Complete',
       runtime: 'pi',
+      claimedRuntime: 'claude',
       summary: 'all done',
       sessionRef: 'sess-1',
       declined: true,
       updatedAt: 'T',
     };
-    expect(formatTaskLine(task)).toBe('t1 Complete runtime=pi updatedAt=T sessionRef=sess-1 declined=true summary="all done"');
+    expect(formatTaskLine(task)).toBe('t1 Complete runtime=pi claimedRuntime=claude updatedAt=T sessionRef=sess-1 declined=true summary="all done"');
   });
 
   it('renders a minimal task with no optional fields', () => {

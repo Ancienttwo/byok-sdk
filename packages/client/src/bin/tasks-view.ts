@@ -32,7 +32,10 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DaemonTas
         upsert(event.taskId, event.ts, { state: 'Offered', runtime: event.runtime });
         break;
       case 'claimed':
-        upsert(event.taskId, event.ts, { state: 'Claimed' });
+        upsert(event.taskId, event.ts, {
+          state: 'Claimed',
+          ...(event.claimedRuntime !== undefined ? { claimedRuntime: event.claimedRuntime } : {}),
+        });
         break;
       case 'started':
         upsert(event.taskId, event.ts, { state: 'Running' });

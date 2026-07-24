@@ -207,7 +207,7 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
     case 'offered':
       return { ...base, taskId: event.taskId, runtime: event.runtime };
     case 'claimed':
-      return { ...base, taskId: event.taskId };
+      return { ...base, taskId: event.taskId, claimedRuntime: event.claimedRuntime };
     case 'started':
       return { ...base, taskId: event.taskId };
     case 'progress':
@@ -333,8 +333,12 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
   switch (kind) {
     case 'offered':
       return { kind: 'offered', ts, taskId: str(raw.taskId), runtime: typeof raw.runtime === 'string' ? raw.runtime : undefined };
-    case 'claimed':
-      return { kind: 'claimed', ts, taskId: str(raw.taskId) };
+    case 'claimed': {
+      const claimedRuntime = typeof raw.claimedRuntime === 'string' ? raw.claimedRuntime : undefined;
+      return claimedRuntime === undefined
+        ? { kind: 'claimed', ts, taskId: str(raw.taskId) }
+        : { kind: 'claimed', ts, taskId: str(raw.taskId), claimedRuntime };
+    }
     case 'started':
       return { kind: 'started', ts, taskId: str(raw.taskId) };
     case 'progress':
