@@ -1,12 +1,17 @@
 # Security: Threat Model
 
-Scope: the BYOK SDK as built through M4 (device auth, WSS/long-poll transport,
+Scope: the BYOK SDK as built through M5 (device auth, WSS/long-poll transport,
 local control socket, claude realtime approval, rate limiting, service
-lifecycle). This is a threat model, not a compliance document — it states
-what each surface defends against, what it deliberately does not, and names
-the residual risk explicitly rather than rounding it off. `docs/protocol.md`
-is the normative wire/HTTP contract; this doc explains the security posture
-around it.
+lifecycle, runtime environment allowlists, plaintext transport gating, runtime
+selection, resource limits, and unified graceful shutdown). This is a threat
+model, not a compliance document — it states what each surface defends against,
+what it deliberately does not, and names the residual risk explicitly rather
+than rounding it off. `docs/protocol.md` is the normative wire/HTTP contract;
+this doc explains the security posture around it. The M5 credential-isolation
+pilot's commands and evidence ledger are in
+[`docs/security-review-m5-pilot-entry.md`](security-review-m5-pilot-entry.md);
+[`docs/security-review-m4.md`](security-review-m4.md) remains historical M4
+evidence.
 
 ## Positioning
 
@@ -358,17 +363,25 @@ makes at install time, not something this SDK can constrain from inside.
   residual is bounded to the same class of divergence §4/redelivery already
   accepts elsewhere (a terminal server record vs. a daemon that already
   acted locally), never a crash or a double-apply on either side.
-- **SIGTERM/SIGINT does not `task.fail` an active task before exiting —
-  pre-existing M3 behavior, unchanged in M4.** `bin/commands/start.ts`
-  wires an OS-signal abort straight to `daemon.stop()`
-  (`create-daemon.ts`), which stops the connection/control socket but never
-  calls `TaskRunner.shutdownActiveTasks` — that task-failing teardown path
-  only runs on the control socket's own `shutdown` RPC
-  (`create-daemon.ts`'s `performControlShutdown`), which is what
-  `byok-agent unpair`/a service-stop command uses. A bare `kill <pid>` or
-  an OS supervisor's own stop signal leaves an active task's terminal state
-  unresolved from the server's point of view until it separately times out
-  or reconnects.
+- **Graceful shutdown is bounded and cooperative, not a delivery guarantee.**
+  SIGINT/SIGTERM enters `bin/commands/start.ts`'s abort path, which now calls
+  the public `daemon.stop()` and therefore the same `runShutdownSequence` in
+  `packages/client/src/daemon/create-daemon.ts` used by `unpair()` and the
+  control-socket `shutdown` RPC. That sequence stops accepting offers,
+  best-effort interrupts and reports every active task with a retryable
+  `task.fail` while the connection remains open, waits up to
+  `DaemonConfig.shutdownGraceMs` (default 10 seconds), gives the outbox a
+  bounded drain window (default 5 seconds), and only then closes the
+  connection/control socket. `daemon-stop-shutdown-parity.test.ts` proves the
+  signal-facing `daemon.stop()` path sends the failure before teardown and is
+  idempotent; `daemon-control-socket.test.ts` covers the control-socket path,
+  including honest `shutdown-complete.undeliveredOutboxCount` reporting; and
+  `shutdown-complete-hardening.test.ts` proves the completion event cannot be
+  lost when active-task teardown throws. If a runtime ignores interruption, a
+  task teardown exceeds its grace, the connection cannot drain, or the process
+  is killed before this sequence runs, the task failure can remain
+  undelivered. The bounded completion event records that outcome rather than
+  claiming delivery that did not happen.
 - **Claude `plan` mode writes outside `ctx.workspaceDir` by design.**
   `~/.claude/plans/<slug>.md`, unconditionally, regardless of cwd — a
   confirmed, accepted v1 residual (`docs/protocol.md` §11.2), not something
