@@ -44,15 +44,13 @@ describe('bin/config: loadConfig', () => {
     expect(() => loadConfig(configPath)).toThrow(ConfigError);
   });
 
-  it('works with no configPath at all, given full overrides', () => {
-    const config = loadConfig(undefined, {
-      productName: 'Acme',
-      productId: 'acme',
-      serverUrl: 'http://example',
-      workspaceRoot: '/ws',
-    });
-    expect(config.productId).toBe('acme');
+  it('strictly validates the optional Git workspace config', () => {
+    const base = { productName: 'Acme', productId: 'acme', serverUrl: 'http://example', workspaceRoot: '/ws' };
+    expect(loadConfig(undefined, { ...base, gitWorkspace: { mode: 'local-checkpoints' } }).gitWorkspace).toEqual({ mode: 'local-checkpoints' });
+    expect(() => loadConfig(undefined, { ...base, gitWorkspace: { mode: 'local-checkpoints', extra: true } as never })).toThrow(ConfigError);
+    expect(() => loadConfig(undefined, { ...base, gitWorkspace: { mode: 'invalid' } as never })).toThrow(ConfigError);
   });
+
 });
 
 describe('bin/config: resolveStoreDir', () => {

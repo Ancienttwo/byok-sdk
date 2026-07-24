@@ -56,6 +56,91 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
     expect(task).toMatchObject({ state: 'Cancelled', summary: 'user cancelled' });
   });
 
+  it('adds the latest coarse Git status only to an existing lifecycle task row', () => {
+    const events: DaemonEvent[] = [
+      {
+        kind: 'git-workspace',
+        ts: '2026-01-01T00:00:00.000Z',
+        taskId: 'orphan-git',
+        workspaceId: 'opaque-orphan',
+        phase: 'active',
+        commitsSinceBaseline: 99,
+        dirty: { staged: 9, unstaged: 9, untracked: 9, conflicted: 9 },
+      },
+      { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't-git', runtime: 'pi' },
+      {
+        kind: 'git-workspace',
+        ts: '2026-01-01T00:00:02.000Z',
+        taskId: 't-git',
+        workspaceId: 'opaque-w1',
+        phase: 'active',
+        headChanged: true,
+        commitsSinceBaseline: 2,
+        dirty: { staged: 1, unstaged: 0, untracked: 3, conflicted: 0 },
+        errorCategory: 'git-command-failed',
+      },
+      {
+        kind: 'git-workspace',
+        ts: '2026-01-01T00:00:03.000Z',
+        taskId: 't-git',
+        workspaceId: 'opaque-w1',
+        phase: 'completed',
+        headChanged: false,
+        commitsSinceBaseline: 3,
+        dirty: { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+        errorCategory: 'SENTINEL-FREEFORM-ERROR',
+      },
+    ];
+
+    expect(deriveTasksFromEvents(events)).toEqual([
+      {
+        taskId: 't-git',
+        state: 'Offered',
+        runtime: 'pi',
+        updatedAt: '2026-01-01T00:00:03.000Z',
+        git: {
+          workspaceId: 'opaque-w1',
+          phase: 'completed',
+          headChanged: false,
+          commitsSinceBaseline: 3,
+          dirty: { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+        },
+      },
+    ]);
+  });
+
+  it('keeps Git status coarse and excludes paths, IDs, filenames, messages, and raw diagnostics', () => {
+    const events: DaemonEvent[] = [
+      { kind: 'offered', ts: 'T', taskId: 't-private' },
+      {
+        kind: 'git-workspace',
+        ts: 'T2',
+        taskId: 't-private',
+        workspaceId: 'opaque-workspace',
+        phase: 'active',
+        headChanged: true,
+        commitsSinceBaseline: 1,
+        dirty: { staged: 1, unstaged: 2, untracked: 3, conflicted: 4 },
+        errorCategory: 'git-timeout',
+      },
+    ];
+    const task = deriveTasksFromEvents(events)[0];
+    expect(task).toEqual({
+      taskId: 't-private',
+      state: 'Offered',
+      updatedAt: 'T2',
+      git: {
+        workspaceId: 'opaque-workspace',
+        phase: 'active',
+        headChanged: true,
+        commitsSinceBaseline: 1,
+        dirty: { staged: 1, unstaged: 2, untracked: 3, conflicted: 4 },
+        errorCategory: 'git-timeout',
+      },
+    });
+    expect(JSON.stringify(task)).not.toMatch(/SENTINEL|\/tmp|commit-message|filename|stderr/i);
+  });
+
   it('an awaiting-approval task stays AwaitApproval with the approval summary', () => {
     const events: DaemonEvent[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't5' },

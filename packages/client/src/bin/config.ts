@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { type DaemonConfig } from '../index';
+import type { DaemonConfig } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
+import { GitWorkspaceManager } from '../daemon/git-workspace';
 
 /**
  * Shared CLI plumbing: config-file loading and a tiny hand-rolled arg
@@ -50,6 +51,13 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Da
     }
   }
   const merged: Partial<DaemonConfig> = { ...base, ...overrides };
+  if (merged.gitWorkspace !== undefined) {
+    try {
+      GitWorkspaceManager.validateConfig(merged.gitWorkspace);
+    } catch (error) {
+      throw new ConfigError(error instanceof Error ? error.message : 'invalid gitWorkspace configuration');
+    }
+  }
   for (const field of REQUIRED_FIELDS) {
     if (!merged[field]) {
       throw new ConfigError(`config is missing required field "${field}"`);

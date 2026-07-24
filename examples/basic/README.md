@@ -70,7 +70,33 @@ see `server.ts`); a mismatch is rejected at the WS handshake.
    implements) and click **Dispatch**. The progress feed streams live via
    SSE; approve/cancel buttons call the task's `TaskHandle` directly.
 
-## Persistent storage (M3)
+## Optional local Git checkpoint workspaces
+
+The basic example uses plain task directories unless its daemon config opts in to local Git checkpoints. Add the disabled-by-default setting below to the JSON config from "Run it":
+
+```json
+{
+  "productName": "BYOK Example",
+  "productId": "byok-example-basic",
+  "serverUrl": "http://localhost:8787",
+  "workspaceRoot": "/tmp/byok-example-workspace",
+  "storeDir": "/tmp/byok-example-store",
+  "gitWorkspace": { "mode": "local-checkpoints" }
+}
+```
+
+When enabled, Git is initialized only inside daemon-owned task directories below `workspaceRoot`; an existing checkout is not attached and parent repositories are not searched. The daemon preflights Git before accepting offers, records coarse local recovery state under `storeDir`, and gives the selected runtime checkpoint guidance. The server still owns task lifecycle, while Git represents local code/recovery state only. Guidance is not a sandbox.
+
+Agents may create ordinary commits if their existing Git identity permits it. The daemon does not create commits, run `git add`, change identity, use network Git, rewrite history, clean files, delete branches, or delete workspaces. Task files and `.git` are preserved through interruption and failure. A restart marks unfinished local records as interrupted without reviving the old server task; a valid redispatch may reuse the exact recorded session workspace under the one-writer rule.
+
+The operator's local, read-only recovery listing is:
+
+```sh
+byok-agent workspaces [--show-paths] [--config <path>]
+```
+
+Paths are hidden by default and are shown only with `--show-paths`. The private ledger is not uploaded to the server. To roll back, remove `gitWorkspace` from the config and restart the daemon; existing workspaces and ledger records are preserved for manual salvage.
+
 
 By default this demo's task/blob state is in-memory + local-disk and is lost
 whenever the server process restarts. Set `BYOK_STORE=sqlite` to swap in

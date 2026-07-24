@@ -177,6 +177,7 @@ export class CodexAdapter implements RuntimeAdapter {
       queue,
       recordUnmapped,
       expectedSessionRef: task.sessionRef,
+      preparedGit: ctx.gitWorkspace !== undefined,
     });
 
     return new CodexSession({
@@ -188,6 +189,7 @@ export class CodexAdapter implements RuntimeAdapter {
       queue,
       recordUnmapped,
       initialRunner: runner,
+      preparedGit: ctx.gitWorkspace !== undefined,
     });
   }
 
@@ -256,6 +258,7 @@ interface RunTurnParams {
    * this is a real check, not just a diagnostic log.
    */
   expectedSessionRef?: string | undefined;
+  preparedGit?: boolean;
 }
 
 interface RunTurnResult {
@@ -264,23 +267,22 @@ interface RunTurnResult {
 }
 
 /**
- * `--skip-git-repo-check` is unconditional here, not policy-derived: real
- * `codex exec` (confirmed live, via this adapter's own e2e run against a
+ * `--skip-git-repo-check` is used for plain workspaces, not derived from policy:
+ * real `codex exec` (confirmed live, via this adapter's own e2e run against a
  * plain non-git scratch workspace) refuses to run at all outside a Git
  * repository — "Not inside a trusted directory and --skip-git-repo-check
  * was not specified", exit 1, no JSONL emitted — unless this flag is passed.
- * `task-runner.ts`'s `resolveWorkspaceDir` creates plain directories
- * (`fs.mkdir(dir, {recursive:true})`), never a git repo, so without this
- * every single real task would fail closed on this unrelated precondition
- * before codex ever saw the actual instruction. It carries no sandbox/
- * approval semantics of its own (purely a "do you want the git-repo safety
- * net" gate) — confirmed via `codex exec --help`, which documents it
- * separately from every sandbox/approval flag — so it's safe to always
- * include rather than threading it through `permission-mapping.ts`.
+ * A successfully prepared Git workspace already satisfies that precondition,
+ * so the flag is omitted there. `task-runner.ts`'s `resolveWorkspaceDir`
+ * creates plain directories (`fs.mkdir(dir, {recursive:true})`, never a git
+ * repo), so the plain-workspace path must retain the flag. It carries no
+ * sandbox/approval semantics of its own (purely a "do you want the git-repo
+ * safety net" gate) — confirmed via `codex exec --help`, which documents it
+ * separately from every sandbox/approval flag.
  */
-function buildArgv(resumeRef: string | undefined, policyArgs: string[], instruction: string): string[] {
+function buildArgv(resumeRef: string | undefined, policyArgs: string[], instruction: string, preparedGit = false): string[] {
   const base = resumeRef !== undefined ? ['exec', 'resume', resumeRef] : ['exec'];
-  return [...base, '--json', '--skip-git-repo-check', ...policyArgs, instruction];
+  return [...base, '--json', ...(preparedGit ? [] : ['--skip-git-repo-check']), ...policyArgs, instruction];
 }
 
 /**
@@ -293,7 +295,7 @@ function buildArgv(resumeRef: string | undefined, policyArgs: string[], instruct
  * `CodexSession.followUp()` (always a resume).
  */
 async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
-  const argv = buildArgv(params.resumeRef, params.policyArgs, params.instruction);
+  const argv = buildArgv(params.resumeRef, params.policyArgs, params.instruction, params.preparedGit);
 
   let firstLineSettled = false;
   let resolveFirstLine!: (ref: string) => void;
@@ -437,6 +439,7 @@ interface CodexSessionOptions {
   queue: AsyncQueue<AgentEvent>;
   recordUnmapped: (key: string) => void;
   initialRunner: CodexProcessRunner;
+  preparedGit: boolean;
 }
 
 class CodexSession implements Session {
@@ -460,6 +463,7 @@ class CodexSession implements Session {
   private readonly spawnFn: SpawnFn | undefined;
   private readonly queue: AsyncQueue<AgentEvent>;
   private readonly recordUnmapped: (key: string) => void;
+  private readonly preparedGit: boolean;
   private currentRunner: CodexProcessRunner | undefined;
   private closed = false;
 
@@ -471,6 +475,7 @@ class CodexSession implements Session {
     this.spawnFn = options.spawnFn;
     this.queue = options.queue;
     this.recordUnmapped = options.recordUnmapped;
+    this.preparedGit = options.preparedGit;
     this.currentRunner = options.initialRunner;
     void this.forgetRunnerOnceClosed(options.initialRunner);
   }
@@ -552,6 +557,7 @@ class CodexSession implements Session {
         queue: this.queue,
         recordUnmapped: this.recordUnmapped,
         expectedSessionRef: resumeRef,
+        preparedGit: this.preparedGit,
       }));
     } catch (err) {
       // Fix (queue-leak-on-failure): confirmed empirically with a diagnostic

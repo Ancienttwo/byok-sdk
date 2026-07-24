@@ -5,23 +5,20 @@ import path from 'node:path';
 export interface SessionWorkspaceRecord {
   workspaceDir: string;
   /**
-   * The underlying runtime's own resumable session identifier. For the pi
-   * adapter today this is always identical to the map's own `sessionRef`
-   * key (`PiSession.sessionRef` already *is* pi's real session id — see
-   * pi-adapter.ts's `resolveFreshSessionId`), since pi is the only adapter
-   * that exists. Kept as its own field — rather than assumed identical to
-   * the key — because docs/protocol.md §1.3 itself describes `session_ref`
-   * as "opaque, server-issued... the daemon maps to a runtime session id",
-   * i.e. two conceptually distinct things connected by exactly this map; a
-   * future adapter (M2: claude/codex) is not guaranteed to want its own
-   * internal resume token to be the same string it hands back on the wire.
+   * The underlying runtime's own resumable session identifier.
    */
   runtimeSessionId: string;
+  /** Additive workspace kind; missing legacy values remain plain. */
+  workspaceKind?: 'plain' | 'git';
+  /** Opaque private Git workspace ledger identifier. */
+  gitWorkspaceId?: string;
 }
 
 interface StoredEntry {
   workspaceDir: string;
   runtimeSessionId: string;
+  workspaceKind?: 'plain' | 'git';
+  gitWorkspaceId?: string;
   updatedAt: string;
 }
 
@@ -36,7 +33,9 @@ function isStoredEntry(value: unknown): value is StoredEntry {
     typeof value === 'object' &&
     value !== null &&
     typeof (value as Partial<StoredEntry>).workspaceDir === 'string' &&
-    typeof (value as Partial<StoredEntry>).runtimeSessionId === 'string'
+    typeof (value as Partial<StoredEntry>).runtimeSessionId === 'string' &&
+    ((value as Partial<StoredEntry>).workspaceKind === undefined || (value as Partial<StoredEntry>).workspaceKind === 'plain' || (value as Partial<StoredEntry>).workspaceKind === 'git') &&
+    ((value as Partial<StoredEntry>).gitWorkspaceId === undefined || typeof (value as Partial<StoredEntry>).gitWorkspaceId === 'string')
   );
 }
 
@@ -119,7 +118,12 @@ export class SessionWorkspaceStore {
       const all = await this.load();
       const entry = all[sessionRef];
       if (!entry) return undefined;
-      return { workspaceDir: entry.workspaceDir, runtimeSessionId: entry.runtimeSessionId };
+      return {
+        workspaceDir: entry.workspaceDir,
+        runtimeSessionId: entry.runtimeSessionId,
+        ...(entry.workspaceKind ? { workspaceKind: entry.workspaceKind } : {}),
+        ...(entry.gitWorkspaceId ? { gitWorkspaceId: entry.gitWorkspaceId } : {}),
+      };
     });
   }
 
@@ -129,6 +133,8 @@ export class SessionWorkspaceStore {
       all[sessionRef] = {
         workspaceDir: entry.workspaceDir,
         runtimeSessionId: entry.runtimeSessionId,
+        ...(entry.workspaceKind ? { workspaceKind: entry.workspaceKind } : {}),
+        ...(entry.gitWorkspaceId ? { gitWorkspaceId: entry.gitWorkspaceId } : {}),
         updatedAt: new Date().toISOString(),
       };
       await this.save(all);

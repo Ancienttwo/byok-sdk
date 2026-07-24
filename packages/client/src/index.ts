@@ -4,12 +4,19 @@ export type {
   RuntimeDetectResult,
   Session,
   TaskContext,
+  GitWorkspaceConfig,
 } from './types';
 export { PolicyUnsupportedError } from './types';
 // M5: per-runtime environment allowlist — part of the `RuntimeAdapter`
 // contract's `environmentRequirements()` method (a custom adapter supplied
 // to `createDaemonWithAdapters` implements this too). See `daemon/environment.ts`.
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
+
+export { GitWorkspaceManager, GitWorkspaceError, isGitWorkspaceConfig, prependGitWorkspaceGuidance } from './daemon/git-workspace';
+export type { GitWorkspaceObservation, GitWorkspaceLease, GitWorkspaceOptions, GitErrorCategory } from './daemon/git-workspace';
+export { GitWorkspaceStore } from './daemon/git-workspace-store';
+export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './daemon/git-workspace-store';
+
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding } from './daemon/create-daemon';

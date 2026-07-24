@@ -113,7 +113,8 @@ export type DaemonEvent =
    * `NoPendingApprovalError`'s own doc comment (`task-runner.ts`) for the
    * full race this closes.
    */
-  | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reason?: string };
+  | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reason?: string }
+  | { kind: 'git-workspace'; ts: string; taskId: string; workspaceId: string; phase: string; headChanged?: boolean; commitsSinceBaseline?: number; dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number }; errorCategory?: string };
 
 export type DaemonEventListener = (event: DaemonEvent) => void;
 export type Unsubscribe = () => void;
@@ -354,6 +355,17 @@ export class DaemonObserver {
     this.emit({ kind: 'stale-approval-decision', ts: nowIso(), taskId, decision, reason });
   }
 
+  noteGitWorkspace(event: {
+    taskId: string;
+    workspaceId: string;
+    phase: string;
+    headChanged?: boolean;
+    commitsSinceBaseline?: number;
+    dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number };
+    errorCategory?: string;
+  }): void {
+    this.emit({ kind: 'git-workspace', ts: nowIso(), ...event });
+  }
   /**
    * Finding F4: wired from `TaskRunnerDeps.onApprovalDispatched`, called
    * synchronously by `TaskRunner.dispatchApproval` BEFORE its own
