@@ -1,7 +1,7 @@
 import { createEnvelope, TASK_TRANSITIONS } from '@byok/protocol';
 import type { CapabilityFlag, RuntimeCapabilities as ProtocolRuntimeCapabilities, RuntimeId, RuntimeInfo } from '@byok/protocol';
 import type { PermissionPolicy } from '@byok/protocol';
-import type { RuntimeAdapter, RuntimeCapabilities } from '../types';
+import type { RuntimeAdapter, RuntimeCapabilities, GitWorkspaceConfig } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -25,6 +25,8 @@ import { ConnectionManager } from './connection-manager';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { SessionWorkspaceStore } from './session-workspace-store';
+import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
+import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, TaskRunner, type TaskRunnerDeps } from './task-runner';
 import type { ProgressBatcherOptions } from './progress-batcher';
@@ -75,6 +77,8 @@ export interface DaemonConfig {
   serverUrl: string;
   deviceName?: string;
   workspaceRoot: string;
+  /** Disabled by default. Enables local-only Git checkpoint repositories. */
+  gitWorkspace?: GitWorkspaceConfig;
   /**
    * Restricts which runtimes this daemon will ever use — enforced in two
    * places that must stay consistent: `createDaemon` (this file) builds its
@@ -284,6 +288,15 @@ export interface DaemonOverrides {
     /** Minimum delay before the next long-poll request after an empty (no-events) response — avoids busy-looping against a server that responds instantly. Default 250ms. */
     idleDelayMs?: number;
   };
+  /**
+   * Test/product injection seam for the local Git workspace boundary. The
+   * supplied manager/store are used only when `config.gitWorkspace` is enabled;
+   * an absent Git config therefore cannot accidentally activate either object.
+   */
+  gitWorkspace?: {
+    manager?: GitWorkspaceManager;
+    store?: GitWorkspaceStore;
+  };
 }
 
 function isRuntimeId(id: string): id is RuntimeId {
@@ -448,6 +461,8 @@ export function createDaemonWithAdapters(
   const store = new DeviceStore(storeDir);
   const cursorStore = new CursorStore(storeDir);
   const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
+  const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
+  const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
   // M3-2a: local observability — constructed once per daemon instance (not
   // per `start()`) so `subscribe()`/`tasks()` work immediately after
   // `createDaemonWithAdapters()` returns and keep accumulating across an
@@ -604,6 +619,12 @@ export function createDaemonWithAdapters(
       controlServerHandle = undefined;
     }
 
+    if (gitWorkspaceManager) {
+      await gitWorkspaceManager.preflight();
+      await gitWorkspaceStore?.initialize();
+      await gitWorkspaceStore?.reconcile();
+    }
+
     const [runtimes, blobClient] = await Promise.all([
       detectRuntimes(adapters),
       Promise.resolve(new BlobClient(config.serverUrl, auth)),
@@ -639,6 +660,18 @@ export function createDaemonWithAdapters(
       blobClient,
       batcherOptions: overrides.batch,
       sessionWorkspaces,
+      gitWorkspaceManager,
+      gitWorkspaceStore,
+      onGitWorkspaceEvent: (event) => observer.noteGitWorkspace({
+        taskId: event.taskId,
+        workspaceId: event.workspaceId,
+        phase: event.phase,
+        headChanged: event.observation?.headChanged,
+        commitsSinceBaseline: event.observation?.commitsSinceBaseline,
+        dirty: event.observation ? { staged: event.observation.staged, unstaged: event.observation.unstaged, untracked: event.observation.untracked, conflicted: event.observation.conflicted } : undefined,
+        errorCategory: event.errorCategory,
+      }),
+
       // M4 Phase 3: the SAME `ApprovalRegistry` instance the control
       // socket's own `approvals.list`/`approvals.resolve` methods already
       // share (see that field's own construction above) — `TaskRunner

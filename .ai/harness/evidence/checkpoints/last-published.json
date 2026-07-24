@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "checkpoint_id": "chk-9cdb717438ff104a292594681c198615b964338b2652a8884ba64e611de08138",
+  "checkpoint_dir": ".ai/harness/evidence/checkpoints/chk-9cdb717438ff104a292594681c198615b964338b2652a8884ba64e611de08138",
+  "machine_path": ".ai/harness/evidence/checkpoints/chk-9cdb717438ff104a292594681c198615b964338b2652a8884ba64e611de08138/checkpoint.json",
+  "human_path": ".ai/harness/evidence/checkpoints/chk-9cdb717438ff104a292594681c198615b964338b2652a8884ba64e611de08138/checkpoint.md",
+  "content_hash": "sha256:9cdb717438ff104a292594681c198615b964338b2652a8884ba64e611de08138",
+  "published_at": "2026-07-23T17:27:00.929Z"
+}

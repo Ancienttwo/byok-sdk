@@ -159,12 +159,16 @@ describe('util/secure-dir: ensureSecureDir (finding F7/R4)', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('defaults platform to process.platform (this test host is never win32, so the default path never invokes icacls)', async () => {
+  it('defaults platform to process.platform', async () => {
     const dir = path.join(await tmpDir('byok-secure-dir-default-'), 'store');
     const run = vi.fn<Runner>().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
 
     await ensureSecureDir(dir, { run }); // no platform override
 
-    expect(run).not.toHaveBeenCalled();
+    if (process.platform === 'win32') {
+      expect(run).toHaveBeenCalledOnce();
+    } else {
+      expect(run).not.toHaveBeenCalled();
+    }
   });
 });

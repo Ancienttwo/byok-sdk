@@ -3,6 +3,10 @@ import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 
+export interface GitWorkspaceConfig {
+  mode: 'local-checkpoints';
+}
+
 /**
  * Result of probing whether a runtime is usable on this machine. `authPresent`
  * is computed without ever reading the runtime's own credential storage (see
@@ -68,6 +72,11 @@ export interface TaskContext {
   workspaceDir: string;
   policy: PermissionPolicy;
   env: NodeJS.ProcessEnv;
+  /** Prepared local checkpoint repository metadata; absent for legacy plain workspaces. */
+  gitWorkspace?: {
+    workspaceId: string;
+    baseline?: string;
+  };
   /** M4 Phase 3 — see {@link ApprovalChannel}. Optional/adapter-agnostic: unset for every adapter that never requests an out-of-band approval. */
   approvalChannel?: ApprovalChannel;
 }

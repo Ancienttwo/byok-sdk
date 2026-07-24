@@ -2,7 +2,7 @@ import type { AgentEvent } from '@byok/protocol';
 import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo } from '../index';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ProbedRuntime } from './runtime-probe';
-import type { TaskCounts } from './tasks-view';
+import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
 
 /**
  * Pure line-formatting helpers shared by every subcommand — no I/O, no
@@ -31,6 +31,25 @@ function quote(text: string): string {
  */
 function redactedByteCountPlaceholder(text: string): string {
   return `[redacted: ${Buffer.byteLength(text, 'utf8')} bytes]`;
+}
+
+/** Git failures are rendered only from the closed stable category set. */
+const STABLE_GIT_ERROR_CATEGORIES = new Set([
+  'git-unavailable',
+  'git-timeout',
+  'git-output-limit',
+  'git-command-failed',
+  'workspace-root-invalid',
+  'workspace-root-conflict',
+  'workspace-not-owned',
+  'repository-root-mismatch',
+  'repository-invalid',
+  'lease-busy',
+  'ledger-invalid',
+]);
+
+function stableGitErrorCategory(value: string | undefined): string | undefined {
+  return value !== undefined && STABLE_GIT_ERROR_CATEGORIES.has(value) ? value : undefined;
 }
 
 /** Renders one `task.progress`-derived `AgentEvent` compactly — the inner payload of a `progress`-kind `DaemonEvent`. */
@@ -133,14 +152,35 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       return `${prefix} shutdown-complete reason=${quote(event.reason)}${event.undeliveredOutboxCount !== undefined ? ` undeliveredOutboxCount=${event.undeliveredOutboxCount}` : ''}`;
     case 'stale-approval-decision':
       return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
+    case 'git-workspace': {
+      const parts = [
+        `${prefix} git-workspace taskId=${event.taskId}`,
+        `workspaceId=${event.workspaceId}`,
+        `phase=${event.phase}`,
+        event.headChanged !== undefined ? `headChanged=${event.headChanged}` : undefined,
+        event.commitsSinceBaseline !== undefined ? `commits=${event.commitsSinceBaseline}` : undefined,
+        event.dirty ? `dirty=${event.dirty.staged}/${event.dirty.unstaged}/${event.dirty.untracked}/${event.dirty.conflicted}` : undefined,
+        stableGitErrorCategory(event.errorCategory) ? `errorCategory=${stableGitErrorCategory(event.errorCategory)}` : undefined,
+      ].filter((part): part is string => part !== undefined);
+      return parts.join(' ');
+    }
   }
 }
 
-export function formatTaskLine(task: DaemonTaskInfo): string {
+export function formatTaskLine(task: DaemonTaskInfo | DerivedTaskInfo): string {
+  const git = 'git' in task ? task.git : undefined;
+  const gitStatus = git
+    ? [
+        `git=${git.phase}`,
+        git.commitsSinceBaseline !== undefined ? `commits=${git.commitsSinceBaseline}` : undefined,
+        git.dirty ? `dirty=${git.dirty.staged}/${git.dirty.unstaged}/${git.dirty.untracked}/${git.dirty.conflicted}` : undefined,
+      ].filter((part): part is string => part !== undefined).join(' ')
+    : undefined;
   const parts = [
     task.taskId,
     task.state,
     task.runtime ? `runtime=${task.runtime}` : undefined,
+    gitStatus,
     `updatedAt=${task.updatedAt}`,
     task.sessionRef ? `sessionRef=${task.sessionRef}` : undefined,
     task.declined ? 'declined=true' : undefined,
@@ -149,7 +189,7 @@ export function formatTaskLine(task: DaemonTaskInfo): string {
   return parts.join(' ');
 }
 
-export function formatTaskListLines(tasks: readonly DaemonTaskInfo[]): string[] {
+export function formatTaskListLines(tasks: readonly (DaemonTaskInfo | DerivedTaskInfo)[]): string[] {
   if (tasks.length === 0) return ['(no tasks observed yet)'];
   return tasks.map(formatTaskLine);
 }
