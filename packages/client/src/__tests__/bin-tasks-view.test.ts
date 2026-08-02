@@ -25,6 +25,31 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
     ]);
   });
 
+  it('preserves the requested runtime and replays the actual claimed runtime separately', () => {
+    const events: DaemonEvent[] = [
+      { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't-runtime', runtime: 'claude' },
+      { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't-runtime', claimedRuntime: 'pi' },
+    ];
+
+    expect(deriveTasksFromEvents(events)).toEqual([
+      {
+        taskId: 't-runtime',
+        state: 'Claimed',
+        runtime: 'claude',
+        claimedRuntime: 'pi',
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      },
+    ]);
+  });
+
+  it('keeps a legacy claimed event without runtime free of claimedRuntime', () => {
+    const [task] = deriveTasksFromEvents([
+      { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't-legacy' },
+    ]);
+
+    expect(task).toEqual({ taskId: 't-legacy', state: 'Claimed', updatedAt: '2026-01-01T00:00:01.000Z' });
+  });
+
   it('a pre-claim failed event with preClaim:true marks the task Failed + declined:true', () => {
     const events: DaemonEvent[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't2', runtime: 'claude' },

@@ -40,6 +40,26 @@ describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
     expect(events).toEqual([e1, e2]);
   });
 
+  it('persists and replays claimedRuntime while leaving legacy claim lines without it unchanged', async () => {
+    const storeDir = await tmpDir('byok-audit-claimed-runtime-');
+    const actual: DaemonEvent = {
+      kind: 'claimed',
+      ts: '2026-01-01T00:00:00.000Z',
+      taskId: 't-actual',
+      claimedRuntime: 'pi',
+    };
+    const legacy: DaemonEvent = { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't-legacy' };
+
+    await appendAuditEvent(storeDir, actual);
+    await appendAuditEvent(storeDir, legacy);
+
+    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
+    const lines = raw.split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines[0]?.claimedRuntime).toBe('pi');
+    expect(lines[1] && 'claimedRuntime' in lines[1]).toBe(false);
+    expect(await readAuditEvents(storeDir)).toEqual([actual, legacy]);
+  });
+
   it('returns [] when the log does not exist yet', async () => {
     const storeDir = await tmpDir('byok-audit-missing-');
     expect(await readAuditEvents(storeDir)).toEqual([]);
