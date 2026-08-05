@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: ancienttwo
 > **Capability ID**: root
-> **Last Updated**: 2026-08-05 18:12
+> **Last Updated**: 2026-08-05 18:40
 > **Review File**: `tasks/reviews/20260805-1659-byok-keys-package.review.md`
 > **Notes File**: `tasks/notes/20260805-1659-byok-keys-package.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -17,27 +17,26 @@
 
 ## Goal
 
-Deliver `packages/keys` as a new `@byok/keys` workspace package, ported layer by layer from `aip-main-open@c6a5385` per `docs/researches/HANDOFF-byok-keys.md`. K2-K4 refresh this contract before their own dispatch.
+Deliver `packages/keys` as a new `@byok/keys` workspace package, ported layer by layer from `aip-main-open@c6a5385` per `docs/researches/HANDOFF-byok-keys.md`. K3-K4 refresh this contract before their own dispatch.
 
-This contract covers milestone **K1 — the SecretStore layer**, projected from the plan's `## Task Breakdown` K1 entry (`plans/plan-20260805-1659-byok-keys-package.md:131`), which is the authority for what "done" means here:
+This contract covers milestone **K2 — the Registry layer**, projected from the plan's `## Task Breakdown` K2 entry (`plans/plan-20260805-1659-byok-keys-package.md:132`), which is the authority for what "done" means here:
 
-> K1 SecretStore layer: `SecretStore<TName>` interface with fail-closed name validator, `InMemorySecretStore`, macOS Keychain (fail-closed prefix decoding, explicit `allowUnprefixedRead` defaulting to false), Windows Credential Manager, and the scope envelope with required `scope()` and `EnvelopeScopedSecretStore` as an explicit decorator
+> K2 Registry layer: configure/resolve lifecycle plus pluggable profile persistence (InMemory + SQLite, following the server package's `InMemoryTaskStore`/`SqliteTaskStore` pattern); port the in-package version of the §4.3 golden test
 
-Five acceptance targets follow from that entry:
+Three acceptance targets follow from that entry:
 
-1. A `SecretStore<TName extends string>` interface whose secret names are validated at runtime and fail closed — the generic replaces aip's closed `KeychainSecretName` union, which stays in aip (plan Risk Assessment, "Secret naming coupling between packages").
-2. `InMemorySecretStore`, usable as a test double on any platform with no OS dependency.
-3. A macOS Keychain backend whose storage-prefix decoding is fail-closed by default, with tolerant reads demoted to an explicit `allowUnprefixedRead` defaulting to `false` (plan Risk Assessment, "Wire-format defaults drift when aip swaps in").
-4. A Windows Credential Manager backend.
-5. A tenant scope envelope in which `SecretStore.scope()` is required and `EnvelopeScopedSecretStore` is an explicit decorator rather than an implicit fallback, keyed by `SHA-256(account_id + workspace_id)` (plan Detailed Design, "Data Flow").
+1. **Configure/resolve lifecycle.** A registry that owns the write path (`configure()` persists the non-secret profile and puts the API key in the injected `SecretStore`) and the read path (`resolveDefaultModelProvider()` reads profile plus secret and builds a transport client), ported from `providers.ts:1212` and `providers.ts:1331-1348` (plan Detailed Design, "Data Flow").
+2. **Pluggable profile persistence.** A profile-store contract with two implementations — in-memory and SQLite — following `@byok/server`'s `TaskStore` / `InMemoryTaskStore` / `SqliteTaskStore` shape as a *pattern only*: `keys` must not gain a dependency on `server` (see Security Boundary in the plan). The SQLite schema and its `0o600` file mode come from `providers.ts:109-140,158`.
+3. **The §4.3 golden test, in-package.** `docs/researches/HANDOFF-byok-keys.md` §4.3 names three parity assertions that must hold at the registry boundary rather than through aip's HTTP settings page: the provider actually receives `Authorization: Bearer <canary>` at `https://api.openai.com/v1/chat/completions`, the SQLite file does not contain the plaintext key, and the registry's status output does not contain the plaintext key.
 
-Two constraints bind the whole milestone: byok-branded default values stay constructor-injectable so K4 can pass aip's values and remain byte-compatible; and both OS backends are verified through an injected command runner, never against a real credential store (plan Risk Assessment, "Windows Credential Manager internals not yet read").
+One constraint binds the milestone: the secret never enters the profile store or any status projection — it lives only in the `SecretStore`, which is the property target 3 exists to prove.
 
 ## Scope
 
 - In scope: `packages/keys/**` creation, its workspace registration (including the `pnpm-lock.yaml` entry `pnpm install` produces), the source handoff `docs/researches/HANDOFF-byok-keys.md` that this port's `file:line` references depend on, and the plan/contract/notes/review workflow artifacts.
 - Out of scope: `packages/client/**`, `packages/server/**`, `packages/protocol/**` (must not gain a dependency on `keys`); `~/Projects/aip-main-open` (untouched until K4); AiphaBee narrative-domain symbols listed in `docs/researches/HANDOFF-byok-keys.md` §4.5; legacy secret migration.
-- Out of scope for K1 specifically: the platform-selecting default store factory and its release-channel prefix selection (belongs with K2's configure/resolve lifecycle); the scope data-directory manifest, which is profile persistence and therefore K2; any real-credential-store smoke script, which is not a plan K1 deliverable.
+- Out of scope for K2 specifically: the settings-page HTTP server that the source's §4.3 golden test drives (explicitly K3); the source's `#migrateLegacyModelSecret` legacy-secret migration (already out of scope above); the `market_data` / `mcp_http` profile branch, which stays in aip per §4.5.
+- Correction to the K1 revision of this contract: that revision recorded the platform-selecting default secret-store factory (with its release-channel prefix selection) and the scope data-directory manifest as belonging to K2. The plan's K2 entry names neither, and the plan is the authority, so both stay **unscheduled** rather than being absorbed here. Neither blocks K2: the registry takes its `SecretStore` by constructor injection exactly as the source's registry does (`providers.ts:1168-1178`), so no platform factory is needed to build or verify the lifecycle. Both are recorded in `tasks/todos.md` so they are not lost.
 - Taste constraints: follow the existing package layout in this repo (tsup, vitest, zod schema style from `protocol`); `keys` builds with `platform: 'node'`, not `protocol`'s `'neutral'`.
 
 ## Stop Conditions
@@ -147,28 +146,36 @@ delegation:
 ```yaml
 exit_criteria:
   files_exist:
-    # K1 acceptance target 1: interface plus fail-closed name validator
-    - packages/keys/src/secret-store.ts
-    - packages/keys/src/secret-name.ts
-    # K1 acceptance targets 3 and 4: the two OS backends and their injected command runner
-    - packages/keys/src/command-runner.ts
-    - packages/keys/src/macos-keychain.ts
-    - packages/keys/src/windows-credential-manager.ts
-    # K1 acceptance target 5: the scope envelope
-    - packages/keys/src/secret-scope.ts
+    # K2 acceptance target 1: configure/resolve lifecycle
+    - packages/keys/src/registry.ts
+    # K2 acceptance target 2: pluggable profile persistence, both implementations
+    - packages/keys/src/profile-store.ts
+    - packages/keys/src/sqlite-support.ts
+    - packages/keys/src/sqlite-profile-store.ts
   artifacts_exist:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260805-1659-byok-keys-package.notes.md
   tests_pass:
-    # Target 1 plus target 2 (InMemorySecretStore lives in secret-store.ts)
-    - path: packages/keys/src/secret-name.test.ts
-    - path: packages/keys/src/secret-store.test.ts
-    # Targets 3 and 4, both driven entirely through an injected command runner
-    - path: packages/keys/src/command-runner.test.ts
-    - path: packages/keys/src/macos-keychain.test.ts
-    - path: packages/keys/src/windows-credential-manager.test.ts
-    # Target 5
-    - path: packages/keys/src/secret-scope.test.ts
+    # Target 1. Only the SQLite-free suites are listed here. One root cause,
+    # two faces: `node:sqlite` is absent both from Bun ("No such built-in
+    # module", bun 1.3.14) and from Node below 22.5 — and verify-contract runs
+    # each tests_pass entry as `bun test <path>`
+    # (scripts/verify-contract.sh:940) while CI runs the matrix on Node 20 and
+    # 22. The three suites that open a database therefore cannot run on either,
+    # for a runtime reason rather than a code one.
+    # The code-level response is `isSqliteAvailable()` in
+    # packages/keys/src/sqlite-support.ts (the predicate @byok/server already
+    # uses): those suites gate on it and skip rather than fail, so the CI Node
+    # 20 leg is green — verified locally on Node 20.17.0, 301 passed |
+    # 27 skipped. The contract gate keeps them off tests_pass because the bun
+    # runner is a separate matter; they are not dropped, since `pnpm -r run
+    # test` under commands_succeed runs the whole package on Node 22.22 through
+    # vitest — this repo's actual test runner — and covers all four suites.
+    - path: packages/keys/src/registry.test.ts
+    # Covered via commands_succeed (`pnpm -r run test`), not here:
+    #   packages/keys/src/profile-store.test.ts        (target 2, both stores)
+    #   packages/keys/src/sqlite-profile-store.test.ts (target 2, on disk)
+    #   packages/keys/src/registry.golden.test.ts      (target 3, §4.3 parity)
   commands_succeed:
     - pnpm -r run typecheck
     - pnpm -r run test
