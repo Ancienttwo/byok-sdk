@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-05T19:23:35+0800 -->
+<!-- updated_at: 2026-08-05T20:45:30+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-05T19:23:35+0800
-> **Source Branch**: codex/byok-keys-package
-> **Source Commit**: 1d6dd85
+> **Updated At**: 2026-08-05T20:45:30+0800
+> **Source Branch**: main
+> **Source Commit**: 2c45fc6
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: ensure-task-workflow
@@ -20,7 +20,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Status: ManualClearedWithActiveWork
 - Active Plan: plans/plan-20260805-1659-byok-keys-package.md
 - Plan Status: Executing
-- Next Task: K2 Registry layer: configure/resolve lifecycle plus pluggable profile persistence (InMemory + SQLite, following the server package's `InMemoryTaskStore`/`SqliteTaskStore` pattern); port the in-package version of the §4.3 golden test
+- Next Task: K3 Settings-page server decision: ship as `@byok/keys/settings-server` subpath with branding and invoke-protocol parameterized, or drop it; either way add the two-security-models boundary declaration to `docs/security.md` and the package README
 - Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
@@ -32,7 +32,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Active Work
 
 - .: plans/plan-20260805-1659-byok-keys-package.md
-- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-byok-keys-package
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -45,24 +45,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Checks
 
-- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
+- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 11 changed/untracked path(s)
+- Summary: 6 changed/untracked path(s)
 
 ```
- M packages/keys/src/errors.ts
- M packages/keys/src/index.ts
- M tasks/contracts/20260805-1659-byok-keys-package.contract.md
-?? packages/keys/src/profile-store.test.ts
-?? packages/keys/src/profile-store.ts
-?? packages/keys/src/registry.golden.test.ts
-?? packages/keys/src/registry.test.ts
-?? packages/keys/src/registry.ts
-?? packages/keys/src/sqlite-profile-store.test.ts
-?? packages/keys/src/sqlite-profile-store.ts
-?? packages/keys/src/sqlite-support.ts
+ M .npmrc
+ M ARCHITECTURE-PROPOSAL-byok-platform.md
+?? docs/researches/proposal-byok-platform-v2-codex.md
+?? docs/researches/proposal-byok-platform-v2-opus.md
+?? docs/researches/tenant-isolation-decision.md
+?? packages/client/vitest.config.ts
 ```
 
 ## Source Artifacts
