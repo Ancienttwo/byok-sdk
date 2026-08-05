@@ -11,5 +11,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- (none)
+- [ ] 2026-08-05T17:38:39+0800 [medium] `packages/keys/tsconfig.json` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
