@@ -574,3 +574,43 @@ failed. Treat these as cooperative resource governance for well-behaved
 runtimes, not a sandbox boundary — the same caveat this document's
 "Workspace confinement is a convention, not a sandbox" section already
 applies to filesystem confinement.
+
+## Key management (`@byok/keys`) is a separate package with a separate security model
+
+Everything above describes the **agent-dispatch** side of the SDK
+(`@byok/protocol` / `@byok/server` / `@byok/client`). That side's defining
+security property is *credential-isolation*: the daemon dispatches tasks to
+runtime CLIs the device owner already authenticated, and it never reads,
+proxies, or forwards any credential — the M5 pilot audit
+([`docs/security-review-m5-pilot-entry.md`](security-review-m5-pilot-entry.md),
+rule at `packages/client/src/types.ts:120-124`) is the evidence ledger for
+exactly that claim.
+
+`@byok/keys` sits on the **other** side of that line. Its whole job *is* to
+hold a provider API key: it stores the user's own key in the OS credential
+store and calls the LLM provider directly on the user's behalf (key-based
+BYOK, ported from the AiphaBee local-agent implementation). It is therefore a
+distinct package with a distinct threat model — a key custodian, not a task
+dispatcher — and the two are deliberately not merged.
+
+Two enforceable consequences, so the credential-isolation claim above is not
+diluted by the mere presence of a key-management package in the same repo:
+
+- **`protocol`, `server`, and `client` must not depend on `keys`.** The
+  dependency graph is the enforcement: the audited claim that the dispatch
+  path never touches a credential holds only while that path cannot import a
+  package whose purpose is to hold one. `@byok/keys` may depend on nothing in
+  the dispatch packages either; the two product lines share the monorepo's
+  toolchain and nothing else.
+- **The isolation claim is scoped to the dispatch packages, never to
+  `@byok/keys`.** A consumer that installs `@byok/keys` is opting into a
+  key-custody component with its own posture (OS-credential-store backing,
+  fail-closed provider transports, no plaintext-key persistence); it is not
+  weakening, and does not fall under, the M5 credential-isolation guarantee,
+  which speaks only for `client`/`server`/`protocol`.
+
+`@byok/keys`'s own security surface (OS credential store backing, tenant
+scope envelope, fail-closed provider transports) is documented in that
+package's `README.md` and will be expanded as its `SecretStore` (K1) and
+registry (K2) layers land; this section exists to fix the boundary between the
+two security models, not to restate that package's internals.
