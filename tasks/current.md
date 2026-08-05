@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-05T17:34:59+0800 -->
+<!-- updated_at: 2026-08-05T18:06:04+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Active
-> **Updated At**: 2026-08-05T17:34:59+0800
-> **Source Branch**: main
-> **Source Commit**: 6037c3b
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-05T18:06:04+0800
+> **Source Branch**: codex/byok-keys-package
+> **Source Commit**: a3ab9a9
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: k0-complete
+> **Reason**: ensure-task-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Active
+- Status: ManualClearedWithActiveWork
 - Active Plan: plans/plan-20260805-1659-byok-keys-package.md
 - Plan Status: Executing
-- Next Task: K1 SecretStore layer: `SecretStore<TName>` interface with fail-closed name validator, `InMemorySecretStore`, macOS Keychain (fail-closed prefix decoding, explicit `allowUnprefixedRead` defaulting to false), Windows Credential Manager, and the scope envelope with required `scope()` and `EnvelopeScopedSecretStore` as an explicit decorator
-- Clear Note: (none)
+- Next Task: K2 Registry layer: configure/resolve lifecycle plus pluggable profile persistence (InMemory + SQLite, following the server package's `InMemoryTaskStore`/`SqliteTaskStore` pattern); port the in-package version of the §4.3 golden test
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -32,7 +32,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Active Work
 
 - .: plans/plan-20260805-1659-byok-keys-package.md
-- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-byok-keys-package
 ## Active Sprint
 
 - Sprint: (none)
@@ -41,7 +41,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: K1 SecretStore layer: `SecretStore<TName>` interface with fail-closed name validator, `InMemorySecretStore`, macOS Keychain (fail-closed prefix decoding, explicit `allowUnprefixedRead` defaulting to false), Windows Credential Manager, and the scope envelope with required `scope()` and `EnvelopeScopedSecretStore` as an explicit decorator
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -49,22 +49,25 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 13 changed/untracked path(s)
+- Summary: 16 changed/untracked path(s)
 
 ```
- M docs/architecture/index.md
- M docs/security.md
- M pnpm-lock.yaml
- M tasks/current.md
- M tasks/todos.md
-?? ARCHITECTURE-PROPOSAL-byok-platform.md
-?? docs/architecture/requests/root.md
-?? docs/researches/HANDOFF-byok-keys.md
-?? packages/keys/
-?? plans/plan-20260805-1659-byok-keys-package.md
-?? tasks/contracts/
-?? tasks/notes/
-?? tasks/reviews/
+ M packages/keys/src/errors.ts
+ M packages/keys/src/index.ts
+ M plans/plan-20260805-1659-byok-keys-package.md
+ M tasks/notes/20260805-1659-byok-keys-package.notes.md
+?? packages/keys/src/command-runner.test.ts
+?? packages/keys/src/command-runner.ts
+?? packages/keys/src/macos-keychain.test.ts
+?? packages/keys/src/macos-keychain.ts
+?? packages/keys/src/secret-name.test.ts
+?? packages/keys/src/secret-name.ts
+?? packages/keys/src/secret-scope.test.ts
+?? packages/keys/src/secret-scope.ts
+?? packages/keys/src/secret-store.test.ts
+?? packages/keys/src/secret-store.ts
+?? packages/keys/src/windows-credential-manager.test.ts
+?? packages/keys/src/windows-credential-manager.ts
 ```
 
 ## Source Artifacts

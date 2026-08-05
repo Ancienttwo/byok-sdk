@@ -47,3 +47,40 @@ export type {
   AnthropicMessage,
   AnthropicMessageRequest,
 } from './anthropic-client';
+
+export { runCommand } from './command-runner';
+export type { CommandResult, CommandRunner } from './command-runner';
+
+export {
+  SECRET_NAME_PATTERN,
+  SECRET_NAMESPACE_PATTERN,
+  assertSecretName,
+  assertSecretNamespace,
+} from './secret-name';
+
+export {
+  DEFAULT_SECRET_SERVICE_PREFIX,
+  InMemorySecretStore,
+  MODEL_PROVIDER_SECRET_NAMES,
+  assertSharedSecretValue,
+  decodeStrictBase64Utf8,
+  modelProviderSecretName,
+} from './secret-store';
+export type { ModelProviderSecretName, SecretStore } from './secret-store';
+
+export {
+  DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX,
+  MacOsKeychainSecretStore,
+} from './macos-keychain';
+export type { MacOsKeychainSecretStoreOptions } from './macos-keychain';
+
+export { WindowsCredentialManagerSecretStore } from './windows-credential-manager';
+export type { WindowsCredentialManagerSecretStoreOptions } from './windows-credential-manager';
+
+export {
+  DEFAULT_SECRET_ENVELOPE_PREFIX,
+  EnvelopeScopedSecretStore,
+  scopeSecretStore,
+  secretScopeId,
+} from './secret-scope';
+export type { SecretScope } from './secret-scope';
