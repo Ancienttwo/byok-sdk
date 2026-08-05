@@ -19,6 +19,16 @@ import {
  * server's actual behavior, which the client-side `TestServer` stub
  * deliberately does not reproduce — see its own doc comment).
  */
+/**
+ * The one address these fixtures both bind and dial. Passing it as `hostname`
+ * matters: without it Node binds the IPv6 wildcard `::`, which coexists with a
+ * foreign process already holding the more specific `127.0.0.1:<port>`, so the
+ * drawn ephemeral port can be answered by that stranger instead of by byok.
+ * Binding the address we dial turns a collision into a loud `EADDRINUSE`. See
+ * `packages/server/src/__tests__/port-shadowing.test.ts`.
+ */
+const LOOPBACK = '127.0.0.1';
+
 export interface RealServerHandle {
   byok: ByokServer;
   httpServer: HttpServer;
@@ -47,12 +57,12 @@ function closeServer(httpServer: HttpServer): Promise<void> {
 export async function startRealServer(opts: CreateByokServerOptions): Promise<RealServerHandle> {
   const byok = createByokServer(opts);
   return new Promise((resolve) => {
-    const httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+    const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
       byok.attachWebSocket(httpServer as HttpServer);
       resolve({
         byok,
         httpServer: httpServer as HttpServer,
-        url: `http://127.0.0.1:${info.port}`,
+        url: `http://${LOOPBACK}:${info.port}`,
         close: () => closeServer(httpServer as HttpServer),
       });
     });
@@ -71,11 +81,11 @@ export async function startRealServer(opts: CreateByokServerOptions): Promise<Re
 export async function startRealServerWithoutWebSocket(opts: CreateByokServerOptions): Promise<RealServerHandle> {
   const byok = createByokServer(opts);
   return new Promise((resolve) => {
-    const httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+    const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
       resolve({
         byok,
         httpServer: httpServer as HttpServer,
-        url: `http://127.0.0.1:${info.port}`,
+        url: `http://${LOOPBACK}:${info.port}`,
         close: () => closeServer(httpServer as HttpServer),
       });
     });
@@ -112,11 +122,11 @@ export async function startRealServerWithDeferredWebSocket(
 ): Promise<DeferredWebSocketServerHandle> {
   const byok = createByokServer(opts);
   return new Promise((resolve) => {
-    const httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+    const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
       resolve({
         byok,
         httpServer: httpServer as HttpServer,
-        url: `http://127.0.0.1:${info.port}`,
+        url: `http://${LOOPBACK}:${info.port}`,
         close: () => closeServer(httpServer as HttpServer),
         enableWebSocket: () => byok.attachWebSocket(httpServer as HttpServer),
       });

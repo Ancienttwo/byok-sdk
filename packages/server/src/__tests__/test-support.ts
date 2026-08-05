@@ -13,12 +13,22 @@ import {
 import { WebSocket, type RawData } from 'ws';
 import type { ByokServer, ByokServerEvent, ServerTaskEvent, TaskHandle } from '../index';
 
-/** Start `byok.hono` on an ephemeral port and wire up its WS upgrade. */
+/**
+ * Start `byok.hono` on an ephemeral port and wire up its WS upgrade.
+ *
+ * `hostname` is pinned to the same `127.0.0.1` the returned `baseUrl` (and
+ * every WS url below) dials. Without it Node binds the IPv6 wildcard `::`,
+ * which coexists with a foreign process already holding the more specific
+ * `127.0.0.1:<port>` — so the drawn port can be answered by that stranger and
+ * tests fail with whatever it replies (an intermittent
+ * `pairing failed: 401 Unauthorized`). Binding the address we dial turns a
+ * collision into a loud `EADDRINUSE`. See `port-shadowing.test.ts`.
+ */
 export async function startServer(
   byok: ByokServer,
 ): Promise<{ server: HttpServer; port: number; baseUrl: string }> {
   return new Promise((resolve) => {
-    const server = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+    const server = serve({ fetch: byok.hono.fetch, port: 0, hostname: '127.0.0.1' }, (info) => {
       byok.attachWebSocket(server as HttpServer);
       resolve({ server: server as HttpServer, port: info.port, baseUrl: `http://127.0.0.1:${info.port}` });
     });
