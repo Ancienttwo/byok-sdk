@@ -48,6 +48,29 @@ export function loadSqliteModule(): SqliteModule {
 }
 
 /**
+ * Whether `node:sqlite` can ACTUALLY be loaded right now.
+ *
+ * Same predicate as `@byok/server`'s `sqlite-support.ts`, and it exists for the
+ * same reason: this package's `engines.node` is `>=20` and CI runs the matrix
+ * on 20 and 22, but `node:sqlite` shipped in 22.5 and stayed behind
+ * `--experimental-sqlite` for part of the 22.x line. A version-number
+ * comparison would therefore be wrong in both directions, so this attempts the
+ * real require via {@link loadSqliteModule} and reports whether it succeeded.
+ *
+ * Callers use it to skip a SQLite-backed path rather than fail it — the
+ * package's own SQLite-backed suites gate on it — and anything else should call
+ * it before assuming a {@link SqliteProviderProfileStore} can be constructed.
+ */
+export function isSqliteAvailable(): boolean {
+  try {
+    loadSqliteModule();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Open a database, creating its parent directory owner-only first. `:memory:`
  * skips every filesystem step, which is how the shared contract suite exercises
  * the SQLite code path without leaving anything on disk.

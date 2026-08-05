@@ -9,6 +9,16 @@ import { ProviderRegistry, type ProviderConfiguration } from './registry';
 import { InMemorySecretStore } from './secret-store';
 import type { ModelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
+import { isSqliteAvailable } from './sqlite-support';
+
+// node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
+// until later in the 22.x line — so "Node >= 22.5" alone doesn't mean the
+// module actually loads. Gate on ACTUAL availability (attempts the real
+// require — see sqlite-support.ts's isSqliteAvailable), not a version-number
+// heuristic, so this correctly skips on any runtime where node:sqlite isn't
+// really usable (the CI Node 20 leg, or an intermediate flagged 22.x) and
+// still runs on one where it is.
+const sqliteReady = isSqliteAvailable();
 
 /**
  * The in-package port of the §4.3 golden test
@@ -85,7 +95,7 @@ const registry = () =>
     secretStore: secrets,
   });
 
-describe('BYOK registry golden parity (HANDOFF §4.3)', () => {
+describe.skipIf(!sqliteReady)('BYOK registry golden parity (HANDOFF §4.3)', () => {
   it('saves parameters and credentials without contacting the provider', async () => {
     const status = await registry().configure(OPENAI, CANARY);
     expect(status).toMatchObject({

@@ -156,14 +156,21 @@ exit_criteria:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260805-1659-byok-keys-package.notes.md
   tests_pass:
-    # Target 1. Only the SQLite-free suites are listed here: verify-contract
-    # runs each tests_pass entry as `bun test <path>`
-    # (scripts/verify-contract.sh:940), and Bun has no `node:sqlite`
-    # ("No such built-in module", bun 1.3.14) — so the three suites that open a
-    # database fail under that runner for a runtime reason, not a code one.
-    # They are not dropped from the gate: `pnpm -r run test` under
-    # commands_succeed runs the whole package on Node 22.22 through vitest,
-    # which is this repo's actual test runner, and covers all four suites.
+    # Target 1. Only the SQLite-free suites are listed here. One root cause,
+    # two faces: `node:sqlite` is absent both from Bun ("No such built-in
+    # module", bun 1.3.14) and from Node below 22.5 — and verify-contract runs
+    # each tests_pass entry as `bun test <path>`
+    # (scripts/verify-contract.sh:940) while CI runs the matrix on Node 20 and
+    # 22. The three suites that open a database therefore cannot run on either,
+    # for a runtime reason rather than a code one.
+    # The code-level response is `isSqliteAvailable()` in
+    # packages/keys/src/sqlite-support.ts (the predicate @byok/server already
+    # uses): those suites gate on it and skip rather than fail, so the CI Node
+    # 20 leg is green — verified locally on Node 20.17.0, 301 passed |
+    # 27 skipped. The contract gate keeps them off tests_pass because the bun
+    # runner is a separate matter; they are not dropped, since `pnpm -r run
+    # test` under commands_succeed runs the whole package on Node 22.22 through
+    # vitest — this repo's actual test runner — and covers all four suites.
     - path: packages/keys/src/registry.test.ts
     # Covered via commands_succeed (`pnpm -r run test`), not here:
     #   packages/keys/src/profile-store.test.ts        (target 2, both stores)

@@ -89,6 +89,7 @@ export { InMemoryProviderProfileStore } from './profile-store';
 export type { ProviderProfileStore } from './profile-store';
 
 export {
+  isSqliteAvailable,
   loadSqliteModule,
   openSqliteDatabase,
   secureSqliteFilePermissions,

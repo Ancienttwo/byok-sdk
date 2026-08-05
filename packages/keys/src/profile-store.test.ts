@@ -3,7 +3,18 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { InMemoryProviderProfileStore } from './profile-store';
 import type { ProviderProfileStore } from './profile-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
+import { isSqliteAvailable } from './sqlite-support';
 import type { ModelProviderId, ModelProviderProfile } from './provider-profile';
+
+// node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
+// until later in the 22.x line — so "Node >= 22.5" alone doesn't mean the
+// module actually loads. Gate on ACTUAL availability (attempts the real
+// require — see sqlite-support.ts's isSqliteAvailable), not a version-number
+// heuristic, so this correctly skips on any runtime where node:sqlite isn't
+// really usable (the CI Node 20 leg, or an intermediate flagged 22.x) and
+// still runs on one where it is. Only the Sqlite pass is gated — the InMemory
+// pass of this shared contract suite must run on every supported runtime.
+const sqliteReady = isSqliteAvailable();
 
 const BASE = {
   adapter: 'openai_compatible',
@@ -33,16 +44,22 @@ const profile = (
 const implementations: ReadonlyArray<{
   factory: () => ProviderProfileStore;
   label: string;
+  ready: boolean;
 }> = [
-  { factory: () => new InMemoryProviderProfileStore(), label: 'InMemory' },
+  {
+    factory: () => new InMemoryProviderProfileStore(),
+    label: 'InMemory',
+    ready: true,
+  },
   {
     factory: () => new SqliteProviderProfileStore({ path: ':memory:' }),
     label: 'Sqlite',
+    ready: sqliteReady,
   },
 ];
 
-for (const { factory, label } of implementations) {
-  describe(`${label}ProviderProfileStore`, () => {
+for (const { factory, label, ready } of implementations) {
+  describe.skipIf(!ready)(`${label}ProviderProfileStore`, () => {
     let store: ProviderProfileStore;
 
     const open = () => {
