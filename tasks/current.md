@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-05T18:06:04+0800 -->
+<!-- updated_at: 2026-08-05T18:52:03+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-05T18:06:04+0800
-> **Source Branch**: codex/byok-keys-package
-> **Source Commit**: a3ab9a9
+> **Updated At**: 2026-08-05T18:52:03+0800
+> **Source Branch**: main
+> **Source Commit**: fc4fc10
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: ensure-task-workflow
@@ -32,7 +32,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Active Work
 
 - .: plans/plan-20260805-1659-byok-keys-package.md
-- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-byok-keys-package
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -49,25 +49,10 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 16 changed/untracked path(s)
+- Summary: clean
 
 ```
- M packages/keys/src/errors.ts
- M packages/keys/src/index.ts
- M plans/plan-20260805-1659-byok-keys-package.md
- M tasks/notes/20260805-1659-byok-keys-package.notes.md
-?? packages/keys/src/command-runner.test.ts
-?? packages/keys/src/command-runner.ts
-?? packages/keys/src/macos-keychain.test.ts
-?? packages/keys/src/macos-keychain.ts
-?? packages/keys/src/secret-name.test.ts
-?? packages/keys/src/secret-name.ts
-?? packages/keys/src/secret-scope.test.ts
-?? packages/keys/src/secret-scope.ts
-?? packages/keys/src/secret-store.test.ts
-?? packages/keys/src/secret-store.ts
-?? packages/keys/src/windows-credential-manager.test.ts
-?? packages/keys/src/windows-credential-manager.ts
+(none)
 ```
 
 ## Source Artifacts
