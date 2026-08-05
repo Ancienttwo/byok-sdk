@@ -84,3 +84,23 @@ export {
   secretScopeId,
 } from './secret-scope';
 export type { SecretScope } from './secret-scope';
+
+export { InMemoryProviderProfileStore } from './profile-store';
+export type { ProviderProfileStore } from './profile-store';
+
+export {
+  loadSqliteModule,
+  openSqliteDatabase,
+  secureSqliteFilePermissions,
+} from './sqlite-support';
+
+export { SqliteProviderProfileStore } from './sqlite-profile-store';
+export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
+
+export { ProviderRegistry } from './registry';
+export type {
+  ModelProviderClient,
+  ProviderConfiguration,
+  ProviderRegistryOptions,
+  ProviderStatus,
+} from './registry';
