@@ -1,26 +1,26 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-07-24T11:24:55+0800 -->
+<!-- updated_at: 2026-08-05T17:34:59+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Idle
-> **Updated At**: 2026-07-24T11:24:55+0800
-> **Source Branch**: codex/local-git-task-workspaces
-> **Source Commit**: c9acd53
+> **Status**: Active
+> **Updated At**: 2026-08-05T17:34:59+0800
+> **Source Branch**: main
+> **Source Commit**: 6037c3b
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: k0-complete
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Idle
-- Active Plan: (none)
-- Plan Status: (none)
-- Next Task: (none)
+- Status: Active
+- Active Plan: plans/plan-20260805-1659-byok-keys-package.md
+- Plan Status: Executing
+- Next Task: K1 SecretStore layer: `SecretStore<TName>` interface with fail-closed name validator, `InMemorySecretStore`, macOS Keychain (fail-closed prefix decoding, explicit `allowUnprefixedRead` defaulting to false), Windows Credential Manager, and the scope envelope with required `scope()` and `EnvelopeScopedSecretStore` as an explicit decorator
 - Clear Note: (none)
 
 ## Mainline Snapshot Reading
@@ -31,7 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- (none)
+- .: plans/plan-20260805-1659-byok-keys-package.md
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -40,24 +41,30 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Execute captured plan: Local Git Task Workspaces
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: K1 SecretStore layer: `SecretStore<TName>` interface with fail-closed name validator, `InMemorySecretStore`, macOS Keychain (fail-closed prefix decoding, explicit `allowUnprefixedRead` defaulting to false), Windows Credential Manager, and the scope envelope with required `scope()` and `EnvelopeScopedSecretStore` as an explicit decorator
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 7 changed/untracked path(s)
+- Summary: 13 changed/untracked path(s)
 
 ```
- D plans/plan-20260724-0138-local-git-task-workspaces.md
- D tasks/contracts/20260724-0138-local-git-task-workspaces.contract.md
- D tasks/notes/20260724-0138-local-git-task-workspaces.notes.md
- D tasks/reviews/20260724-0138-local-git-task-workspaces.review.md
+ M docs/architecture/index.md
+ M docs/security.md
+ M pnpm-lock.yaml
+ M tasks/current.md
  M tasks/todos.md
-?? plans/archive/plan-20260724-0138-local-git-task-workspaces.md
-?? tasks/archive/
+?? ARCHITECTURE-PROPOSAL-byok-platform.md
+?? docs/architecture/requests/root.md
+?? docs/researches/HANDOFF-byok-keys.md
+?? packages/keys/
+?? plans/plan-20260805-1659-byok-keys-package.md
+?? tasks/contracts/
+?? tasks/notes/
+?? tasks/reviews/
 ```
 
 ## Source Artifacts
