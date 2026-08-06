@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 02:01
+> **Related Plan**: plans/archive/plan-20260807-0145-sdk-architecture-consolidation.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260807-0201
+
 # Task Contract: sdk-architecture-consolidation
 
 > **Status**: Fulfilled

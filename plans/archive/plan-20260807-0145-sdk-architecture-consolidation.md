@@ -1,6 +1,6 @@
 # Plan: SDK Architecture Doc Consolidation
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260807-0145
 > **Slug**: sdk-architecture-consolidation
 > **Artifact Level**: work-package

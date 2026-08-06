@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 02:01
+> **Related Plan**: plans/archive/plan-20260807-0145-sdk-architecture-consolidation.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260807-0201
+
 # Task Review: sdk-architecture-consolidation
 
 > **Status**: Pending
@@ -49,17 +55,17 @@ AcceptanceReceipt under the contract's frozen policy.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 188dca90a3bcef5e5874fcc19ecef2129e9d538c
+> **Verification Evidence SHA256**: sha256:983018a0243640193ddf48632269f5ac557763c6ba5176c198c958af64b3f95d
+> **Issued At**: 2026-08-06T18:00:54.744Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: SDK 架構文檔收口為單一 canonical 檔。§1.2 兩行 test 規模數字經活樹重算修正（server 24/5,494、client 90/20,070），統計口徑與複算命令併入正文後刪除 readback；兩處失效連結重指 raft-architecture-reference.md 後刪除樁檔。contract 26 項全綠，含對舊數字、舊標題與三個已刪檔案的反向斷言。packages/ 零改動（git diff a8c2732..HEAD -- packages/ 為空），19 張 mermaid 全部渲染通過。
 - Findings: none
 
 ## Behavior Diff Notes
