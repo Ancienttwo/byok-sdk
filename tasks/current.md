@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-06T23:42:18+0800 -->
+<!-- updated_at: 2026-08-07T01:16:22+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-06T23:42:18+0800
-> **Source Branch**: codex/byok-keys-package
-> **Source Commit**: 4bfd956
+> **Updated At**: 2026-08-07T01:16:22+0800
+> **Source Branch**: main
+> **Source Commit**: 505063e
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: ensure-task-workflow
@@ -32,7 +32,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Active Work
 
 - .: plans/plan-20260805-1659-byok-keys-package.md
-- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-byok-keys-package
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -45,19 +45,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Checks
 
-- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
+- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 6 changed/untracked path(s)
+- Summary: 3 changed/untracked path(s)
 
 ```
- M docs/security.md
- M packages/keys/README.md
- M plans/plan-20260805-1659-byok-keys-package.md
- M tasks/contracts/20260805-1659-byok-keys-package.contract.md
- M tasks/notes/20260805-1659-byok-keys-package.notes.md
- M tasks/todos.md
+?? docs/architecture/sdk-architecture-codex.md
+?? docs/architecture/sdk-architecture.md
+?? docs/researches/raft-architecture-reference.md
 ```
 
 ## Source Artifacts
