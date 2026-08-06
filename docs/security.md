@@ -593,7 +593,7 @@ BYOK, ported from the AiphaBee local-agent implementation). It is therefore a
 distinct package with a distinct threat model — a key custodian, not a task
 dispatcher — and the two are deliberately not merged.
 
-Two enforceable consequences, so the credential-isolation claim above is not
+Three enforceable consequences, so the credential-isolation claim above is not
 diluted by the mere presence of a key-management package in the same repo:
 
 - **`protocol`, `server`, and `client` must not depend on `keys`.** The
@@ -608,6 +608,20 @@ diluted by the mere presence of a key-management package in the same repo:
   fail-closed provider transports, no plaintext-key persistence); it is not
   weakening, and does not fall under, the M5 credential-isolation guarantee,
   which speaks only for `client`/`server`/`protocol`.
+- **The key custodian opens no listening port.** `@byok/keys` binds no socket
+  and serves no HTTP: it is a library the host calls, so its only outbound
+  network use is the provider request itself. The upstream implementation
+  shipped a local settings-page HTTP server alongside the key store; that
+  server was deliberately not ported (milestone K3, recorded in
+  [`packages/keys/README.md`](../packages/keys/README.md) under *Not in this
+  package*), because every listener is an entry point into the process holding
+  the API key. A host that wants a settings UI renders its own and calls
+  `ProviderRegistry` directly — which also means the guarantee that the key
+  never leaves the machine is underwritten by that host page, not by this
+  package. Local control-plane traffic in this repo is not HTTP at all: it runs
+  over `@byok/client`'s Unix domain control socket
+  (`packages/client/src/daemon/control-server.ts`), whose threat model is
+  section [*2. Control socket (local IPC)*](#2-control-socket-local-ipc) above.
 
 `@byok/keys`'s own security surface (OS credential store backing, tenant
 scope envelope, fail-closed provider transports) is documented in that

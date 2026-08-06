@@ -3,8 +3,11 @@
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
 
-Status: **K0** — package skeleton plus the pure-function layer. No OS credential
-store yet (K1), no configure/resolve registry yet (K2).
+Status: **K3 done** — the pure-function layer (K0), the `SecretStore` layer
+backed by the macOS Keychain and the Windows Credential Manager (K1), and the
+configure/resolve registry with pluggable profile persistence (K2) have all
+landed. K3 settled the settings-page question, recorded under
+[Not in this package](#not-in-this-package). Next is K4, the aip-main-open swap.
 
 ## Security boundary
 
@@ -24,8 +27,81 @@ Two consequences hold today and are the package's standing constraints:
    Installing it is opting into a package that holds a provider API key, and
    that choice is yours, not something the dispatch SDK does on your behalf.
 
-The full declaration of the boundary between the two security models lands in
-`docs/security.md` at milestone K3.
+The full declaration of the boundary between the two security models is
+[`docs/security.md`](../../docs/security.md), section *Key management
+(`@byok/keys`) is a separate package with a separate security model*.
+
+## Not in this package
+
+**There is no settings-page HTTP server here, and there will not be one.** The
+source this package was ported from ships one — a localhost listener on a random
+port, guarded by a token plus `Host`/`Origin`/CSP checks, serving
+`/api/model/configure` and `/api/model/test`. It was evaluated for this package
+at milestone K3 and deliberately excluded. Three reasons:
+
+- **The host owns its own UI.** A settings page is product surface: its
+  branding, its routing, its invoke protocol, and its idea of what "configured"
+  should look like to a user. Shipping one from a library means every consumer
+  either accepts our product decisions or works around them.
+- **This is a library, not a local web server.** A package you `npm install` to
+  hold a key should not decide to bind a socket. Anything that listens has a
+  lifecycle, a port, and an availability story that belongs to the application,
+  not to a dependency of it.
+- **A key custodian does not open a listening port.** Every listener is an
+  entry point into the process that holds the API key. The narrowest defensible
+  posture for a component whose whole job is key custody is to expose no
+  network surface at all, so there is nothing to authenticate, rate-limit, or
+  CSRF-guard in the first place.
+
+**The alternative: call `ProviderRegistry` directly.** Everything the settings
+page did is available as a normal API. A host renders its own page and, in its
+own request handler, calls `configure()`, `list()`, `get()`,
+`setDefaultModelProvider()`, or `delete()`; to verify a key before committing to
+it, resolve a client and call `testConnection()` on it. The registry never
+returns the secret — `ProviderStatus` reports `secret_configured: boolean` and
+nothing more — so a host can serve that object to its own UI without a
+redaction step.
+
+### What this transfers to you
+
+This exclusion moves a security property, and the move is the point of this
+section. In the source, the settings page was part of the same local process
+and never sent the API key anywhere; **the package itself underwrote the
+guarantee that the key does not leave the machine.**
+
+With the page gone, `@byok/keys` guarantees only its own half: the key goes
+into the OS credential store, it is never written to the profile store, it is
+never present in any `ProviderStatus`, and it leaves the process only in the
+`authorization` / `x-api-key` header of a request to the provider base URL the
+profile declares. **Everything between the user's keystroke and
+`configure(configuration, secret)` is now yours.** If your settings page posts
+the key to your own backend before handing it to this package, or renders it
+back into a response, or logs the request body, the key has left the machine —
+and no property of this package prevents that. You are the custodian of that
+path now.
+
+## Node version and storage backends
+
+`engines.node` is `>=20`, and that floor is deliberate: the package is fully
+usable on Node 20.
+
+| Backend | Requirement | Behaviour below it |
+| --- | --- | --- |
+| `InMemoryProviderProfileStore` | Node 20+ | — the whole configure/resolve lifecycle works |
+| `SqliteProviderProfileStore` | Node 22.5+ (`node:sqlite`) | fails closed with `PROVIDER_STORE_UNAVAILABLE` |
+
+Only on-disk profile persistence needs the newer runtime. `node:sqlite` shipped
+in Node 22.5 and spent part of the 22.x line behind `--experimental-sqlite`, so
+a version-number comparison would be wrong in both directions; call
+`isSqliteAvailable()` to branch, and constructing a `SqliteProviderProfileStore`
+without it throws `ByokKeysError` with code `PROVIDER_STORE_UNAVAILABLE` rather
+than degrading to a plaintext file.
+
+The floor rises only when a consumer needs on-disk persistence as an
+install-time guarantee rather than a runtime capability — that is, when
+"`@byok/keys` installed successfully" must by itself imply
+`SqliteProviderProfileStore` will construct. Until then, raising it would drop
+Node 20 hosts that are served perfectly well by the in-memory store.
 
 ## What is in K0
 
