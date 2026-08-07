@@ -214,7 +214,7 @@ flowchart TB
 | daemon → server lifecycle | `task.claim`、`task.started`、`task.decline`、`task.await_approval`、`task.complete`、`task.fail`、`task.cancelled` |
 | daemon → server data | `task.progress`、`task.artifact`、`task.approval_resolved` |
 
-`task.offer.workspaceHint` 是保留字段：protocol schema 已有，但 public `DispatchInput`、TaskRunner 与 adapters 都没有消费它，不能把它描述成工作区选择能力。
+`task.offer.workspaceHint` 是**已实现、保留字段**：protocol schema 已有，但 public `DispatchInput`、TaskRunner 与 adapters 都没有消费它，不能把它描述成工作区选择能力。S0 已就此做出决策——维持 reserved，wire 上保留（删除是 breaking 的 v1 变更，留着的成本只是一个被忽略的 optional key），并禁止任何文档、SDK surface 或 UI 声称它能选工作区。接线需要另立 ADR 先定 resolver 设计：与 `sessionRef` 派生映射的优先级、路径校验与 confinement、设备无法满足 hint 时的行为（附录 A 的 ADR-023）。
 
 ### 2.3 执行状态机
 
@@ -326,7 +326,7 @@ flowchart TB
 
 - M0/M5 embedded 模式不支持 queue-until-connect；设备从未连上时 `dispatch` 直接失败。
 - task lease 只在设备已 dark 且 `Claimed/Running/AwaitApproval` 自最后活动满 `taskLeaseMs` 后触发，结果是 retryable failure。
-- `steer` 目前有 task-level capability gap：server 能对任何 Running task 排队 `task.steer`，但只有 Pi adapter 真正支持；Claude/Codex 收到后会 throw，使 client cursor 暂停推进并触发重放。connection-level `steer` 只是“设备至少有一个 adapter 支持”，不能安全代表本任务所选 runtime。`hub.ts:1493-1503` 的 `steerTask()` 只校验 `state === 'Running'` 与设备在线，连 connection-level capability 都不查；而做 gate 所需的事实其实已经在 task record 里——`claimedRuntime` 是 `TaskPatch` 的合法字段（`hub.ts:145`），并在 `onClaim` 时随 `Offered → Claimed` 一起写入（`hub.ts:766`）。缺的是 gate 本身，不是数据。
+- `steer` 已是 **task-level gate（已实现、已接线）**：claim 时 hub 把该连接 `runtimes[]` 中所选 runtime 的 `capabilities` 快照写入 task record（`TaskSnapshot.claimedRuntimeCapabilities`，SQLite 以 `claimed_runtime_capabilities_json` 列持久化），`steerTask()` 按 unknown task → 终态 `task_terminal` → 非 Running `task_not_running` → 快照 `steer !== true` 的顺序判定，最后一档抛 typed `SteerRejectedError`（code `steer_unsupported_runtime`），在构造 envelope 之前就拒绝，unsupported 时零 envelope 上 wire。快照缺失（S0 之前 claim 的旧 record）一律 fail-closed，不造默认值。connection-level `steer` flag 退回纯 discovery 语义，不参与本判定。client 侧对仍然收到的 unsupported steer（伪造或 pre-gate 消息）记为非重试性 protocol/authority 错误并正常 ack，cursor 照常推进，不再冻结重放。
 
 ## 4. `@byok/client`：本机 daemon、CLI 与 runtime boundary
 
@@ -461,19 +461,19 @@ Library exports 分成六组：
 
 Runtime policy 不做跨 runtime 的语义翻译：tool name 是 runtime-local vocabulary。adapter 无法精确表达 policy 时必须 decline，不能选择“接近的”参数继续执行。
 
-已确认的 capability honesty gap：Claude `confirm` 已真实可用，但 `RuntimeInfo.capabilities.approvalInteractive` 仍对所有 adapter 硬编码 `false`，connection flag `interactive-approval` 仍 reserved。当前可靠信号是该 runtime 的 `permissionModes` 是否包含 `confirm`。
+原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 改为 required 字段，由各 adapter 自己声明（Claude `true`——confirm 路径真实已接线；Pi、Codex `false`），wire `RuntimeInfo.capabilities` 由 adapter 实例生成、纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 与 `permissionModes` 出自同一次 `capabilities()` 调用，因而结构上一致；connection flag `interactive-approval` 仍是 reserved，无人 advertise、无人消费，不作为路由信号。
 
-#### 三层 capability 模型（目标设计）
+#### 三层 capability 模型
 
-capability 至少要分三层才能表达准确。当前只有前两层，且第二层还在对外撒谎（见上）：
+capability 至少要分三层才能表达准确。三层现在都已接线：
 
-| 层 | 语义 | 消费者 |
-| --- | --- | --- |
-| device capabilities | 这台设备装了哪些 adapter | 连接握手、派工前的设备筛选 |
-| runtime capabilities | 某个 adapter 能精确表达哪些 policy | 派工时的 runtime 选择 |
-| task capabilities | 本 task 的 claimed runtime 与 effective policy 落定后，还剩哪些操作可执行 | `task.steer` 等 task 级控制面 |
+| 层 | 语义 | 消费者 | 状态 |
+| --- | --- | --- | --- |
+| device capabilities | 这台设备装了哪些 adapter | 连接握手、派工前的设备筛选 | 已实现、已接线 |
+| runtime capabilities | 某个 adapter 能精确表达哪些 policy | 派工时的 runtime 选择 | 已实现、已接线（S0 起为 adapter 实际能力，不再硬编码） |
+| task capabilities | 本 task 的 claimed runtime 与 effective policy 落定后，还剩哪些操作可执行 | `task.steer` 等 task 级控制面 | 已实现、已接线（claim 时快照 + steer gate） |
 
-connection-level 的“至少一个 adapter 支持 steer”不能代表任意 running task 支持 steer。第三层是 §3.3 那条 steer gap 的正确修法：gate 应当读 task record 里已有的 `claimedRuntime`，而不是读连接级 flag。
+connection-level 的“至少一个 adapter 支持 steer”不能代表任意 running task 支持 steer，所以第三层不读连接级 flag，而读 claim 时落在 task record 上的 `claimedRuntimeCapabilities` 快照（§3.3）。快照而非实时查询是刻意的：设备重连换了一套 adapter，也不能追溯改变一个 running task 的可 steer 性。
 
 ### 4.5 启动与关闭
 
@@ -874,13 +874,15 @@ CI 验证层次：
 
 | ID | 缺口 | 架构影响 | 证据 | 当前正确表述 / 修复原则 | 优先级 | 落点 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GAP-001 | `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | §4.4 | 使用 `permissionModes.includes('confirm')` 判断，不使用 reserved flag；修法是从 adapter 实际能力生成 runtime info | Pri-0 | S0 |
-| GAP-002 | task-level steer 未按 claimed runtime gate | Claude/Codex 收到 steer 会 throw，并可能 stall cursor | `hub.ts:1493-1503` 只查 `state === 'Running'` 与在线；`claimedRuntime` 已在 `hub.ts:145,766` | `steer` 不是所有 Running task 的安全通用操作；server/client 双端按 claimed runtime gate，unsupported 返回稳定 typed error | Pri-0 | S0 |
-| GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | 标为 reserved，禁止声称已实现；要么接入明确 resolver，要么维持 reserved 且 UI 不暴露 | Pri-1 | S0 决策 |
+| GAP-001 | `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | §4.4 | **已修复（S0）**：修复形状是 adapter-generated `RuntimeInfo`——`approvalInteractive` 成为 client `RuntimeCapabilities` 的 required 字段并由各 adapter 声明（Claude `true`），`create-daemon.ts` 的硬编码表删除；connection flag `interactive-approval` 仍 reserved | 已收口 | S0（已交付） |
+| GAP-002 | task-level steer 未按 claimed runtime gate | Claude/Codex 收到 steer 会 throw，并可能 stall cursor | §3.3 | **已修复（S0）**：修复形状是 claimed-runtime snapshot gate——claim 时把所选 runtime 的 capabilities 快照写入 task record，`steerTask()` 在构造 envelope 前按快照拒绝并抛 typed `SteerRejectedError` / `steer_unsupported_runtime`（快照缺失 fail-closed）；client 侧把 unsupported inbound steer 记为非重试性错误并 ack，cursor 不冻结 | 已收口 | S0（已交付） |
+| GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | **已决策（S0）**：维持 reserved 并已文档化（§2.2、`docs/protocol.md` §2、ADR-023）；wire 保留、禁止声称工作区选择能力，接线需另立 ADR 先定 resolver 设计 | 已收口 | S0（已交付） |
 | GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | `packages/server/src/auth.ts:155` 发的是裸 `randomBytes(24)`；`http.ts:125` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | 今日实际风险低（nonce 是随机 bytes，形状撞不到多行带前缀格式），但 device proof 上线前必须补 `byok-nonce-v1\n` 前缀；这是 breaking 的 pair/token 变更，两端同 PR 落地 | Pri-0（先于 proof） | S1/S6 |
 | GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | `packages/server/src/auth.ts:76-82` 只有 `deviceId/deviceName/devicePublicKey/revoked` | 任何 hosted durable data 落库前先做 tenant cut；device record 不允许"无 tenant" | Pri-0 | S1 |
 | GAP-007 | `deploy/` 只有 skeleton | 平台设计没有部署实证 | §1.3 | 不把 SQL/Workers/runbook 画成当前模块 | Pri-1 | S4 |
 | GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | `ws-transport.ts:248-254` 已有 `delay * (0.8 + Math.random() * 0.4)`，即 ±20% random jitter | 已有 random jitter，缺的是 device-id 派生的确定性种子；不要描述成"无 jitter" | Pri-1 | S7 |
+
+GAP-001/002/003 三行保留在表内是为了留下修复轨迹，它们在 S0 已收口，不再是待办；其余行仍未修。
 
 以下两条列在缺口表里是历史记法，实为**已公开的设计约束**，不是待关闭的缺陷：
 
@@ -1497,7 +1499,7 @@ flowchart LR
 - mailbox/journal 在 board 之前；
 - Postgres + R2 与 quota/reservation 在 board CAS 之前；
 - device proof 在 truth/memory 的生产写入之前；
-- 已知的 capability honesty 缺口（GAP-001/002）不拖到平台完成之后才修；
+- 已知的 capability honesty 缺口（GAP-001/002）不拖到平台完成之后才修——S0 已先于任何平台线工作收口；
 - 每个 sprint 都要有独立的 rollback 与 evidence。
 
 ## 13. RAFT 受限参考
@@ -1543,7 +1545,7 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 | high-frequency UI hints | presence/activity SQL write amplification | bounded batch + TTL + dropped；必要时可单独换 KV/DO adapter |
 | board concurrency | per-tenant `board_seq` 与 claim hot rows | SQL CAS、索引、contract suite；P2 后再做 P3 board |
 | large memory | snapshot >1MiB 与 rev CAS conflict | 当前 key-granular snapshot；阈值触发 delta-chain deferred |
-| many runtime kinds | closed `RuntimeIdSchema` 与 adapter-specific capability truth | 新 runtime id 是 protocol change；先修 per-task capability honesty |
+| many runtime kinds | closed `RuntimeIdSchema` 与 adapter-specific capability truth | 新 runtime id 是 protocol change；per-task capability honesty 已在 S0 修完（§3.3、§4.4），新 adapter 接入时按同一形状声明能力 |
 | 本机磁盘增长 | journal / WAL / workspace / cache 填满磁盘 | **目标设计**：SQLite compaction、分类 GC、watermark、hard-pressure admission gate（§12.7.2.1） |
 | tenant storage 增长 | 并发上传超卖、降级后超限、R2 orphan | **目标设计**：Postgres 作 reservation/usage authority、grace/只读、tombstone reconciler（§12.7.7、§12.7.8） |
 
@@ -1740,3 +1742,4 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-020 | 主生产云端 storage composition 为 Postgres + R2；D1 降为可选 adapter | Accepted |
 | ADR-021 | 套餐与计费归宿主所有；SDK 只执行版本化数值 entitlement、reservation 与 usage | Accepted |
 | ADR-022 | quota 满不自动删除 durable user truth；先拒绝新写，并保留删除/导出/扩容路径 | Accepted |
+| ADR-023 | `workspaceHint` 维持 reserved，接线需另立 ADR 与明确 resolver 设计 | Accepted |

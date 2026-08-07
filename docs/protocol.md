@@ -233,6 +233,17 @@ implementation (what it should override or merely suggest, relative to the
 existing `sessionRef`-keyed workspace mapping) is an undesigned follow-on
 task, not something already wired up behind this field.
 
+**Decision (S0): `workspaceHint` stays reserved.** Leaving the field on the
+wire costs nothing (an ignored optional payload key) and removing it would be
+a breaking wire-v1 change, so it is kept as declared-but-unconsumed rather
+than either wired up opportunistically or deleted. The rule that follows from
+that: no public documentation, SDK surface, or UI may present this field as a
+workspace-selection capability, and no code may start reading it as a
+side effect of unrelated work. Wiring it later requires its own ADR that
+first settles the resolver design — precedence against the `sessionRef`-keyed
+mapping, path validation and confinement, and what a device does with a hint
+it cannot honor. See `docs/architecture/sdk-architecture.md` ADR-023.
+
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
 ```mermaid
@@ -427,22 +438,18 @@ without a wire change — and a server MUST NOT assume pi or codex will ever
 pause a task in `AwaitApproval` on their own initiative; claude now can, under
 `policy.mode: 'confirm'` specifically.
 
-**The `interactive-approval` capability flag stays RESERVED — it is NOT the
-routing signal to use.** `CAPABILITY_FLAGS` (`version.ts`) includes
-`interactive-approval`; every bundled adapter, including claude, still
-reports `approvalInteractive: false` (§11.2's footnote) — this flag was never
-wired to a per-adapter signal and M4 Phase 3 deliberately does not repurpose
-it as a side effect of adding real `confirm` support. **The actual, accurate,
-per-runtime signal for whether a device can honor `confirm` is
-`RuntimeInfo.capabilities.permissionModes.includes('confirm')`** (already
-current: `true` for a claude-capable device, `false` for pi/codex-only). A
-server dispatching `policy.mode: 'confirm'` should check THAT field, not
-`approvalInteractive` — this is a known, intentional gap between two
-capability signals that should eventually converge (a future wave giving
-`interactive-approval`/`approvalInteractive` real per-adapter meaning), not
-an oversight; until then, `permissionModes` is authoritative and
-`interactive-approval` remains exactly as unreliable a signal as it always
-was.
+**The connection-level `interactive-approval` capability flag stays RESERVED
+— it is NOT the routing signal to use.** `CAPABILITY_FLAGS` (`version.ts`)
+includes `interactive-approval`, but no daemon advertises it and no server
+behavior keys off it; it was never wired to a per-adapter signal and nothing
+since has repurposed it. **The accurate per-runtime signals live on
+`RuntimeInfo.capabilities` (§11.4): `permissionModes.includes('confirm')` for
+whether a runtime can honor `policy.mode: 'confirm'`, and
+`approvalInteractive` for whether it pauses on a real interactive approval.**
+Both are generated from the adapter's own `capabilities()` and agree by
+construction (claude: `confirm` present and `approvalInteractive: true`; pi
+and codex: neither). A server dispatching `policy.mode: 'confirm'` checks
+those fields, never the connection-level flag.
 
 ### 5.2 `task.approval_resolved` — explicit local-resolution report (additive minor)
 
@@ -1176,15 +1183,14 @@ answers within its own configured ceiling. Unlike `plan` mode's residual
 above, this has no known workspace-confinement gap: the whole mechanism is
 daemon-mediated, not a claude-internal side effect.
 
-¹ `RuntimeInfo.capabilities.approvalInteractive` (§11.4) stays hardcoded
-`false` for every adapter, including claude, even after this — it was never
-wired to a per-adapter signal (`create-daemon.ts`'s `toRuntimeInfoCapabilities`
-predates any adapter actually supporting interactive approval) and this v1
-deliberately doesn't change that wire-visible flag's meaning as a side effect
-of adding `confirm` to claude's `permissionModes`. `permissionModes` already
-carries the precise, up-to-date signal (`'confirm'` present/absent);
-`approvalInteractive` remains reserved for a future wave that gives it real
-per-adapter meaning.
+¹ This row is the CONNECTION-level `interactive-approval` capability flag
+(§5.1), which stays reserved — no daemon advertises it and no server behavior
+keys off it. The per-runtime `RuntimeInfo.capabilities.approvalInteractive`
+field (§11.4) is a different thing and is no longer hardcoded: each adapter
+declares it itself, and claude declares `true` because the confirm path above
+is genuinely wired end to end (pi and codex declare `false`). `permissionModes`
+still carries the finer signal (`'confirm'` present/absent); the two agree by
+construction, since both come from the same adapter `capabilities()` call.
 
 **Connection-level `steer` capability = logical OR across every configured
 adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
@@ -1195,6 +1201,18 @@ pi is one of the daemon's configured adapters (pi: `steer: true`; claude and
 codex: `steer: false`) — a daemon running only claude and/or codex, with no
 pi adapter configured, does not advertise the connection-level `steer` flag
 at all.
+
+**The connection-level `steer` flag is discovery-only; steer authority is
+decided per task.** At claim time the server snapshots the claimed runtime's
+own `RuntimeInfo.capabilities` onto the task record, and `steerTask()`
+rejects with a typed `steer_unsupported_runtime` error before any envelope is
+built whenever that snapshot does not say `steer: true` — including when
+there is no snapshot at all (a task claimed before this gate existed), which
+fails closed. A `task.steer` envelope therefore never reaches the wire for a
+runtime that cannot honor it. On the receiving side a daemon that is still
+handed an unsupported steer (a forged or pre-gate message) records it as a
+non-retryable protocol error and acks it: the envelope is consumed, the
+cursor advances, and redelivery does not loop.
 
 ### 11.3 `usage` AgentEvent — token accounting (additive)
 
@@ -1252,10 +1270,15 @@ fields round-trip.
 This is populated from the exact same adapter `capabilities()` call §11.2's
 matrix and the connection-level `steer` OR (§11.2, last paragraph) are both
 derived from — see `create-daemon.ts`'s `detectRuntimes`/
-`toRuntimeInfoCapabilities`. `approvalInteractive` is hardcoded `false` for
-all three bundled adapters (§5.1) — there is no signal on `RuntimeAdapter`
-this could be derived from instead, since none of the three has any notion of
-pausing for interactive approval to report in the first place.
+`toRuntimeInfoCapabilities`, which is now a pure passthrough of the adapter's
+own declaration and synthesizes no value of its own. `approvalInteractive` is
+therefore per-adapter truth: `true` for claude (the `--permission-prompt-tool`
+confirm path, §11.2), `false` for pi and codex. It is unrelated to the
+reserved connection-level `interactive-approval` flag (§5.1).
+
+`RuntimeInfo.capabilities` is also what the server snapshots onto a task
+record at claim time, making it the authority for per-task steer gating
+(§11.2) rather than pure observability data.
 
 ## 12. Task lease (M2)
 
