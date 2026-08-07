@@ -1,8 +1,17 @@
 # @byok/cloud-postgres
 
 The durable data plane for the BYOK SDK's hosted device surface: Postgres
-implementations of the cloud-local store ports, plus the forward-only migration
-runner that creates the tables they read.
+implementations of the cloud-local store ports **and of all seven `@byok/core`
+ports**, plus the forward-only migration runner that creates the tables they
+read.
+
+Two compositions ship from here. `createPostgresCloudStores` supplies the
+cloud-local ports (`devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
+`receipts`, `sequence`, plus the allow-all rate limiter); `createPostgresCoreStores`
+supplies the full `CoreStores` bundle (`mailbox`, `board`, `truth`, `presence`,
+`activity`, `objects`, `quota`). The core one returns every port rather than a
+subset because `runCoreConformance` certifies a composition as a whole — there
+is no partial `CoreStores` for the suite to run.
 
 `@byok/cloud` is a stateless handler package — it serves the frozen v1 device
 wire contract over ports and owns no storage. This package is one composition of
@@ -25,7 +34,7 @@ import { createByokPool, migrate } from '@byok/cloud-postgres';
 
 const pool = createByokPool({ connectionString: process.env.DATABASE_URL! });
 const result = await migrate(pool, '/path/to/deploy/sql');
-console.log(result.applied); // e.g. ['0001_cloud_local.sql']
+console.log(result.applied); // e.g. ['0001_cloud_local.sql', '0002_core_domain.sql']
 ```
 
 The runner:
@@ -69,6 +78,22 @@ pnpm --filter @byok/cloud-postgres test
 Without `BYOK_TEST_POSTGRES_URL` the database-backed suites skip and say so.
 CI's `dataplane` job sets `BYOK_REQUIRE_DATAPLANE=1`, which turns that absence
 into a hard failure — the skip path cannot be how CI stays green.
+
+Every case migrates a fresh schema from empty through the real runner over the
+real `deploy/sql/` files, so "fresh install + migrate-up" is a property of each
+test rather than a step someone remembers. What runs:
+
+- `runCloudConformance('postgres', ...)` and `runCoreConformance('postgres', ...)`
+  — the same assertion source `@byok/conformance` runs against the in-memory
+  compositions, with that package zero-diff. An assertion that needed a
+  composition-specific branch would be a port-contract bug to escalate, not a
+  test to adjust.
+- `tests/sql/control_plane_invariants.sql`, executed post-migration. It asserts
+  that every unique index on a tenant-owned table leads with `tenant_id`, with a
+  two-entry whitelist. Operators run the identical file against a live database
+  with `psql -f`; the TypeScript side only runs it and checks it did not raise.
+- The migrate runner's fault suite, and the reservation-admission concurrency
+  test that pins `reserve`'s no-oversell property against real contention.
 
 ## License
 
