@@ -60,7 +60,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
 
     const storeDir = await tmpDir('byok-outbox-chunk-store-');
     const auth = new AuthManager({ serverUrl: real.url, store: new DeviceStore(storeDir) });
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await auth.pair(pairing.code);
     const cursorStore = new CursorStore(storeDir);
 

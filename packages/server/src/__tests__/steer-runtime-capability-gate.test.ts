@@ -17,6 +17,7 @@ import {
   send,
   startServer,
   stopServer,
+  testPairingClaims,
   waitForTaskEvent,
 } from './test-support';
 
@@ -64,7 +65,7 @@ interface Harness {
 async function startHarness(runtimes: RuntimeInfo[] | undefined): Promise<Harness> {
   const byok = createByokServer({ productId: PRODUCT_ID });
   const started = await startServer(byok);
-  const { code } = byok.pairing.createPairingCode();
+  const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
   const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID, runtimes });
   return {
     byok,
@@ -425,7 +426,7 @@ describe.skipIf(!sqliteReady)('S0 (GAP-002): the capability snapshot survives a 
     const store = new SqliteTaskStore({ path: dbPath });
     const byok = createByokServer({ productId: PRODUCT_ID, taskStore: store });
     const started = await startServer(byok);
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
       productId: PRODUCT_ID,
       runtimes: [PI_RUNTIME_INFO],

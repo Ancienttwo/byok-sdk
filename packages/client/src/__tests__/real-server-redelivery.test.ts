@@ -61,7 +61,7 @@ describe('redelivery across a real reconnect (finding F2, real @byok/server + re
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     await daemon.pair(pairing.code);
     await daemon.start();
     expect(daemon.status().connected).toBe(true);

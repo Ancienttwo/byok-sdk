@@ -2,7 +2,14 @@ import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createByokServer } from '../index';
-import { generateFakeDeviceIdentity, pairFakeDaemon, startServer, stopServer } from './test-support';
+import {
+  generateFakeDeviceIdentity,
+  pairFakeDaemon,
+  startServer,
+  stopServer,
+  TEST_TENANT_ID,
+  testPairingClaims,
+} from './test-support';
 
 const PRODUCT_ID = 'acme';
 
@@ -49,7 +56,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
@@ -68,7 +75,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const impostor = generateFakeDeviceIdentity();
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
@@ -83,7 +90,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
@@ -104,7 +111,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
@@ -121,7 +128,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const identity = generateFakeDeviceIdentity();
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
@@ -130,7 +137,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const { nonce } = await requestChallenge(started.baseUrl, deviceId);
     const signature = identity.sign(nonce!);
 
-    byok.devices.revoke(deviceId);
+    byok.devices.revoke(TEST_TENANT_ID, deviceId);
 
     // Surface 1: /byok/challenge
     const challengeAfterRevoke = await requestChallenge(started.baseUrl, deviceId);

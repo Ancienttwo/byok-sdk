@@ -11,6 +11,7 @@ import {
   send,
   startServer,
   stopServer,
+  testPairingClaims,
   waitForTaskEvent,
 } from './test-support';
 
@@ -70,7 +71,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const byok = createByokServer({ productId: PRODUCT_ID });
       const started = await startServer(byok);
       server = started.server;
-      const { code } = byok.pairing.createPairingCode();
+      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
       ws = daemon.ws;
 
@@ -141,7 +142,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const byok = createByokServer({ productId: PRODUCT_ID });
       const started = await startServer(byok);
       server = started.server;
-      const { code } = byok.pairing.createPairingCode();
+      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
       ws = daemon.ws;
 
@@ -172,14 +173,14 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const started = await startServer(byok);
       server = started.server;
 
-      const codeA = byok.pairing.createPairingCode().code;
+      const codeA = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID)).code;
       const deviceA = await connectFakeDaemon(started.baseUrl, started.port, codeA, {
         productId: PRODUCT_ID,
         deviceName: 'device-a',
       });
       ws = deviceA.ws;
 
-      const codeB = byok.pairing.createPairingCode().code;
+      const codeB = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID)).code;
       // Device B never needs a live connection for this test — POST
       // /byok/messages only requires a valid bearer token, independent of
       // WS/long-poll transport state.
@@ -232,7 +233,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const byok = createByokServer({ productId: PRODUCT_ID });
       const started = await startServer(byok);
       server = started.server;
-      const { code } = byok.pairing.createPairingCode();
+      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
       const connAck = createEnvelope(
@@ -261,7 +262,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const byok = createByokServer({ productId: PRODUCT_ID });
       const started = await startServer(byok);
       server = started.server;
-      const { code } = byok.pairing.createPairingCode();
+      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
       ws = daemon.ws;
 
@@ -291,7 +292,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
       const started = await startServer(byok);
       server = started.server;
-      const { code } = byok.pairing.createPairingCode();
+      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       // S0: task1 gets steered below, so this device must advertise pi (the
       // one steerable runtime) and claim task1 as pi — the server's steer
       // gate reads the claim-time capability snapshot.

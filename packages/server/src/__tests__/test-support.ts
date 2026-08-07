@@ -13,7 +13,7 @@ import {
   type RuntimeInfo,
 } from '@byok/protocol';
 import { WebSocket, type RawData } from 'ws';
-import type { ByokServer, ByokServerEvent, ServerTaskEvent, TaskHandle } from '../index';
+import type { ByokServer, ByokServerEvent, PairingCodeClaims, ServerTaskEvent, TaskHandle } from '../index';
 
 /**
  * Start `byok.hono` on an ephemeral port and wire up its WS upgrade.
@@ -154,6 +154,26 @@ export const CODEX_RUNTIME_INFO: RuntimeInfo = {
   id: 'codex',
   capabilities: { steer: false, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
 };
+
+/**
+ * S1: the tenant every fixture-paired device lands in unless a test names its
+ * own. Tests that care about isolation (`tenant-pairing-isolation.test.ts`)
+ * mint their own claims for a SECOND tenant; everything else just needs a
+ * device to exist somewhere, and this is that somewhere.
+ */
+export const TEST_TENANT_ID = 'tenant-test';
+
+/**
+ * The claims a fixture-minted pairing code carries. `productId` is a
+ * parameter rather than a constant because it must agree with the server
+ * instance under test (`createByokServer({ productId })`) AND with the
+ * `conn.hello.productId` the fake daemon announces — the S1 hello gate
+ * compares the announced product against the DEVICE ROW, so a fixture that
+ * quietly defaulted it would make every hello a coin flip.
+ */
+export function testPairingClaims(productId: string): PairingCodeClaims {
+  return { tenantId: TEST_TENANT_ID, productId };
+}
 
 /** A fake device's Ed25519 identity (Auth v2, §6) — the private key never leaves this helper, mirroring the real daemon. */
 export interface FakeDeviceIdentity {

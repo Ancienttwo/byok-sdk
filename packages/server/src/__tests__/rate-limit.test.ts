@@ -15,6 +15,7 @@ import {
   send,
   startServer,
   stopServer,
+  testPairingClaims,
   waitForServerEvent,
   waitForTaskEvent,
 } from './test-support';
@@ -71,7 +72,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 1000, burst: 10 } });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     sockets.push(daemon.ws);
 
@@ -100,7 +101,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 5, burst: 3 } });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     sockets.push(daemon.ws);
 
@@ -127,7 +128,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 20, burst: 3 } });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     sockets.push(daemon.ws);
 
@@ -171,7 +172,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, rateLimit: { messagesPerSecond: 5, burst: 3 } });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     // No WS/long-poll connection needed at all — handleInbound's rate-limit
     // gate runs before any taskStore lookup, so a bogus taskId is enough to
     // exercise it purely over POST /byok/messages.
@@ -198,10 +199,10 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const started = await startServer(byok);
     server = started.server;
 
-    const codeA = byok.pairing.createPairingCode().code;
+    const codeA = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID)).code;
     const deviceA = await connectFakeDaemon(started.baseUrl, started.port, codeA, { productId: PRODUCT_ID, deviceName: 'device-a' });
     sockets.push(deviceA.ws);
-    const codeB = byok.pairing.createPairingCode().code;
+    const codeB = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID)).code;
     const deviceB = await connectFakeDaemon(started.baseUrl, started.port, codeB, { productId: PRODUCT_ID, deviceName: 'device-b' });
     sockets.push(deviceB.ws);
 

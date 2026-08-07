@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer } from '../index';
-import { connectFakeDaemon, send, startServer, stopServer, waitForTaskEvent } from './test-support';
+import { connectFakeDaemon, send, startServer, stopServer, testPairingClaims, waitForTaskEvent } from './test-support';
 
 const PRODUCT_ID = 'acme';
 
@@ -46,7 +46,7 @@ describe('M4 Phase 4: ConnectionHub.stats() (part B.1)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 

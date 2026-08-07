@@ -24,8 +24,26 @@ const NONCE_TTL_MS = 5 * 60 * 1000;
 // for a single-process reference server, not meant to survive a restart.
 // ---------------------------------------------------------------------------
 
+/**
+ * S1: server-local tenant identifier. A plain string alias for now — S2 moves
+ * the branded/shared form into `@byok/core`, which does not exist yet, and
+ * depending on an unbuilt package would be worse than naming the concept
+ * here. What matters at this stage is that every identity-carrying shape in
+ * this package names the tenant explicitly and required, never optional.
+ */
+export type TenantId = string;
+
+/**
+ * S1: an access token binds a device to the tenant AND product its row was
+ * paired into. All three are required — there is no tenant-less token shape.
+ * These are LOOKUP KEYS, not authority: `authenticateBearer` resolves them
+ * against the device registry and answers with the ROW's identity (see
+ * {@link AuthenticatedDevice}).
+ */
 export interface AccessTokenClaims {
   deviceId: string;
+  tenantId: TenantId;
+  productId: string;
 }
 
 export interface TokenSigner {
@@ -38,7 +56,7 @@ export interface TokenSigner {
 export function createHmacTokenSigner(secret: Uint8Array = randomBytes(32)): TokenSigner {
   return {
     async sign(claims, expiresInSeconds) {
-      return new SignJWT({ deviceId: claims.deviceId })
+      return new SignJWT({ deviceId: claims.deviceId, tenantId: claims.tenantId, productId: claims.productId })
         .setProtectedHeader({ alg: 'HS256' })
         .setIssuedAt()
         .setExpirationTime(Math.floor(Date.now() / 1000) + expiresInSeconds)
@@ -47,8 +65,12 @@ export function createHmacTokenSigner(secret: Uint8Array = randomBytes(32)): Tok
     async verify(token) {
       try {
         const { payload } = await jwtVerify(token, secret);
+        // A token missing any leg of the identity triple is not a
+        // partially-usable token — it is not a token this server minted.
         if (typeof payload.deviceId !== 'string') return undefined;
-        return { deviceId: payload.deviceId };
+        if (typeof payload.tenantId !== 'string') return undefined;
+        if (typeof payload.productId !== 'string') return undefined;
+        return { deviceId: payload.deviceId, tenantId: payload.tenantId, productId: payload.productId };
       } catch {
         return undefined;
       }
@@ -59,21 +81,31 @@ export function createHmacTokenSigner(secret: Uint8Array = randomBytes(32)): Tok
 /** Mint a fresh access token + its ISO-8601 expiry, per {@link ACCESS_TOKEN_TTL_SECONDS}. */
 export async function mintAccessToken(
   signer: TokenSigner,
-  deviceId: string,
+  claims: AccessTokenClaims,
 ): Promise<{ accessToken: string; expiresAt: string }> {
-  const accessToken = await signer.sign({ deviceId }, ACCESS_TOKEN_TTL_SECONDS);
+  const accessToken = await signer.sign(claims, ACCESS_TOKEN_TTL_SECONDS);
   const expiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_SECONDS * 1000).toISOString();
   return { accessToken, expiresAt };
 }
 
 // ---------------------------------------------------------------------------
-// DeviceRegistry — device identity directory: deviceId -> {deviceName,
-// devicePublicKey, revoked}. Registered at `/byok/pair` time; consulted by
-// every authed surface so a revoked device's JWT (even if not yet expired)
-// stops working immediately (§6.3).
+// DeviceRegistry — device identity directory, keyed by (tenantId, deviceId).
+// Registered at `/byok/pair` time from the redeemed pairing-code claims;
+// consulted by every authed surface so a revoked device's JWT (even if not
+// yet expired) stops working immediately (§6.3).
+//
+// S1: every lookup that has a tenant in scope MUST pass it — the composite
+// key is the lookup, not a post-hoc comparison, so a token whose tenant does
+// not own the device simply finds nothing. The one exception is
+// `resolveByDeviceId`, kept off this package's public entry point on purpose;
+// see its own doc comment.
 // ---------------------------------------------------------------------------
 
 export interface DeviceRecord {
+  /** S1: the tenant this device was paired into. Comes from the pairing-code claims and is never client-supplied. */
+  tenantId: TenantId;
+  /** S1: the product this device was paired into — checked against `conn.hello.productId` and against every token's claims. */
+  productId: string;
   deviceId: string;
   deviceName: string;
   /** Ed25519 public key, base64url-encoded (JWK `x` form — see {@link verifyEd25519Signature}). */
@@ -81,40 +113,76 @@ export interface DeviceRecord {
   revoked: boolean;
 }
 
+/** Everything `POST /byok/pair` knows at registration time; `revoked` is the registry's own to set. */
+export type DeviceRegistration = Omit<DeviceRecord, 'revoked'>;
+
 export class DeviceRegistry {
+  /** Keyed by {@link DeviceRegistry.key} — `(tenantId, deviceId)`. */
   private readonly devices = new Map<string, DeviceRecord>();
+  /**
+   * Secondary index over the SAME record objects, for the two pre-tenant
+   * endpoints only (see {@link resolveByDeviceId}). Holding the same object
+   * reference means a revocation applied through the composite key is
+   * immediately visible here too — there is no second copy to keep in sync.
+   */
+  private readonly byDeviceId = new Map<string, DeviceRecord>();
 
-  register(deviceId: string, deviceName: string, devicePublicKey: string): void {
-    this.devices.set(deviceId, { deviceId, deviceName, devicePublicKey, revoked: false });
+  private static key(tenantId: TenantId, deviceId: string): string {
+    // NUL separator: neither a tenantId nor a deviceId can contain one, so no
+    // pair of distinct identities can collide onto the same key.
+    return `${tenantId}\u0000${deviceId}`;
   }
 
-  get(deviceId: string): DeviceRecord | undefined {
-    return this.devices.get(deviceId);
+  /**
+   * Write a device row. Every identity field is required by
+   * {@link DeviceRegistration}, so a row with no tenant cannot be constructed
+   * — which is the whole point of S1.
+   */
+  register(device: DeviceRegistration): void {
+    const record: DeviceRecord = { ...device, revoked: false };
+    this.devices.set(DeviceRegistry.key(record.tenantId, record.deviceId), record);
+    this.byDeviceId.set(record.deviceId, record);
   }
 
-  /** `true` for both an unknown deviceId and one that's been revoked — either way, not authorized. */
-  isRevokedOrUnknown(deviceId: string): boolean {
-    const record = this.devices.get(deviceId);
-    return !record || record.revoked;
+  /** The row `tenantId` owns under `deviceId`, or `undefined` — including when the device exists under a DIFFERENT tenant. */
+  get(tenantId: TenantId, deviceId: string): DeviceRecord | undefined {
+    return this.devices.get(DeviceRegistry.key(tenantId, deviceId));
   }
 
   /**
    * Revoke a device (public API via `createByokServer(...).devices.revoke`).
    * Its next `/byok/challenge`, `/byok/token`, WSS connect, or authed HTTP
    * call gets a 401; the daemon's only recourse is to re-run `/byok/pair`
-   * (docs/protocol.md §6.3).
+   * (docs/protocol.md §6.3). A tenant can only revoke its own devices: a
+   * (tenantId, deviceId) pair it does not own resolves to nothing and this is
+   * a no-op.
    */
-  revoke(deviceId: string): void {
-    const record = this.devices.get(deviceId);
+  revoke(tenantId: TenantId, deviceId: string): void {
+    const record = this.get(tenantId, deviceId);
     if (record) record.revoked = true;
   }
 
-  getName(deviceId: string): string | undefined {
-    return this.devices.get(deviceId)?.deviceName;
+  /** Every known device row, across tenants — the in-process read model behind `ByokServer.machines.list()`. */
+  list(): DeviceRecord[] {
+    return [...this.devices.values()];
   }
 
-  listIds(): string[] {
-    return [...this.devices.keys()];
+  /**
+   * Resolve a device by its globally-unique id alone, WITHOUT a tenant in
+   * scope. Exists for exactly two callers — `POST /byok/challenge` and
+   * `POST /byok/token` — because those two carry no tenant at all: their
+   * request DTOs are the pinned wire contract (docs/protocol.md §6.2), the
+   * device authenticates by key possession, and the row itself is what tells
+   * the server which tenant to mint the next token for. Everything with a
+   * token (and therefore a tenant) in scope goes through {@link get}.
+   *
+   * Deliberately NOT re-exported from this package's entry point (`index.ts`
+   * exports no naked-lookup surface at all), so no embedder can turn it into
+   * a cross-tenant device oracle: the only reachable public device surface is
+   * tenant-first.
+   */
+  resolveByDeviceId(deviceId: string): DeviceRecord | undefined {
+    return this.byDeviceId.get(deviceId);
   }
 }
 
@@ -212,16 +280,40 @@ export interface AuthDeps {
 }
 
 /**
- * Resolve an `Authorization: Bearer <jwt>` header to an authenticated
- * deviceId, or `undefined` if the header is missing, the token doesn't
- * verify, or the device has since been revoked (§6.3) — the single check
- * every authed HTTP route and the WSS upgrade share.
+ * S1: the authenticated principal every authed surface works with. Built from
+ * the DEVICE ROW, never from the token payload — the token's claims are only
+ * the keys used to find that row (see {@link authenticateBearer}). A caller
+ * holding one of these is holding identity the registry vouched for.
  */
-export async function authenticateBearer(header: string | undefined, deps: AuthDeps): Promise<string | undefined> {
+export interface AuthenticatedDevice {
+  deviceId: string;
+  tenantId: TenantId;
+  productId: string;
+}
+
+/**
+ * Resolve an `Authorization: Bearer <jwt>` header to an {@link AuthenticatedDevice},
+ * or `undefined` — the single check every authed HTTP route and the WSS
+ * upgrade share.
+ *
+ * S1 shape: the token's `(tenantId, deviceId)` are LOOKUP KEYS into the
+ * registry, and the row that comes back is the authority. A token for a
+ * device that no longer exists, one whose tenant does not own that device,
+ * one whose product disagrees with the row, and one for a revoked device all
+ * fail identically here and are indistinguishable to the caller — there is
+ * deliberately no "which of those was it" signal to hand back, so no route
+ * can turn a 401 into a cross-tenant existence oracle.
+ */
+export async function authenticateBearer(
+  header: string | undefined,
+  deps: AuthDeps,
+): Promise<AuthenticatedDevice | undefined> {
   const token = extractBearerToken(header);
   if (!token) return undefined;
   const claims = await deps.tokenSigner.verify(token);
   if (!claims) return undefined;
-  if (deps.devices.isRevokedOrUnknown(claims.deviceId)) return undefined;
-  return claims.deviceId;
+  const device = deps.devices.get(claims.tenantId, claims.deviceId);
+  if (!device || device.revoked) return undefined;
+  if (device.productId !== claims.productId) return undefined;
+  return { deviceId: device.deviceId, tenantId: device.tenantId, productId: device.productId };
 }

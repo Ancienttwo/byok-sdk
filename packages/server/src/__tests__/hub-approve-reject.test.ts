@@ -10,7 +10,15 @@ import { DeviceRegistry } from '../auth';
 import { createByokServer, StaleApprovalError as PublicStaleApprovalError } from '../index';
 import { ConnectionHub, StaleApprovalError, TaskNotAwaitingApprovalError, UnknownTaskError } from '../hub';
 import { InMemoryTaskStore, type CreateTaskInput, type TaskRecord, type TaskStore } from '../task-store';
-import { claimAndStart, connectFakeDaemon, moveToAwaitApproval, send, startServer, stopServer } from './test-support';
+import {
+  claimAndStart,
+  connectFakeDaemon,
+  moveToAwaitApproval,
+  send,
+  startServer,
+  stopServer,
+  testPairingClaims,
+} from './test-support';
 
 const PRODUCT_ID = 'acme';
 
@@ -40,7 +48,7 @@ describe('M4 Phase 3: ConnectionHub.approveTask/rejectTask (public API + typed e
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -56,7 +64,7 @@ describe('M4 Phase 3: ConnectionHub.approveTask/rejectTask (public API + typed e
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -85,7 +93,7 @@ describe('M4 Phase 3: ConnectionHub.approveTask/rejectTask (public API + typed e
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -101,7 +109,7 @@ describe('M4 Phase 3: ConnectionHub.approveTask/rejectTask (public API + typed e
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -351,7 +359,7 @@ describe('M4 Phase 3: ConnectionHub.approveTask/rejectTask (public API + typed e
       const byok = createByokServer({ productId: PRODUCT_ID });
       const started = await startServer(byok);
       server = started.server;
-      const { code } = byok.pairing.createPairingCode();
+      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
       ws = daemon.ws;
 
@@ -374,7 +382,7 @@ describe('M4 Phase 3: ConnectionHub.approveTask/rejectTask (public API + typed e
       const byok = createByokServer({ productId: PRODUCT_ID });
       const started = await startServer(byok);
       server = started.server;
-      const { code } = byok.pairing.createPairingCode();
+      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
       ws = daemon.ws;
 
@@ -392,7 +400,7 @@ describe('M4 Phase 3: ConnectionHub.approveTask/rejectTask (public API + typed e
       const byok = createByokServer({ productId: PRODUCT_ID });
       const started = await startServer(byok);
       server = started.server;
-      const { code } = byok.pairing.createPairingCode();
+      const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
       ws = daemon.ws;
 

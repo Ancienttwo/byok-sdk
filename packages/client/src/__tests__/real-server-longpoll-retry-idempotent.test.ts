@@ -62,7 +62,7 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     expect(daemon.status().degraded).toBe(true);
