@@ -10,7 +10,6 @@ import {
   type Envelope,
   type MessageType,
   type PermissionPolicy,
-  type RuntimeCapabilities,
   type RuntimeId,
   type RuntimeInfo,
   type TaskApprovalResolvedPayload,
@@ -297,9 +296,10 @@ export class StaleApprovalError extends Error {
  *   `Claimed`/`AwaitApproval`; there is no running turn to steer yet.
  * - `steer_unsupported_runtime` — the runtime that CLAIMED this task cannot
  *   be steered, per the claim-time capability snapshot
- *   (`TaskSnapshot.claimedRuntimeCapabilities`). Fail-closed: a MISSING
- *   snapshot rejects under this same code, because "unknown" is not
- *   "supported" (see {@link SteerRejectedError}'s own doc comment).
+ *   (`TaskSnapshot.claimedRuntimeCapabilities`, sourced from the claiming
+ *   adapter's own `task.claim.capabilities`). Fail-closed: a MISSING snapshot
+ *   rejects under this same code, because "unknown" is not "supported" (see
+ *   {@link SteerRejectedError}'s own doc comment).
  */
 export type SteerRejectionCode = 'steer_unsupported_runtime' | 'task_not_running' | 'task_terminal';
 
@@ -336,18 +336,31 @@ function steerRejectionMessage(
  * envelope exists.
  *
  * Fail-closed on unknown, deliberately: `steer_unsupported_runtime` covers
- * both "the claimed runtime advertised `steer: false`" and "this server has
- * no capability snapshot for the claimed runtime at all" (a legacy daemon, a
- * claim with no runtime, a task record predating S0). Refusing an unknown is
- * a recoverable operator-visible error; guessing "supported" reintroduces the
- * exact permanent cursor stall this gate exists to prevent.
+ * both "the claiming adapter reported `steer: false`" and "this server has no
+ * capability snapshot for this task at all" (a pre-D-4 daemon whose claim
+ * carried no `capabilities`, a task record predating S0). Refusing an unknown
+ * is a recoverable operator-visible error; guessing "supported" reintroduces
+ * the exact permanent cursor stall this gate exists to prevent.
  *
  * Thrown before any state change and before any wire message is built — a
  * rejected steer has zero side effects, same as every other validation
- * failure in this file. Deliberately NOT derived from
- * {@link getDeviceCapabilities} (the CONNECTION-level `conn.hello` flag
- * list): those are discovery/observability flags describing a daemon build,
- * not the per-runtime, per-task, claim-time truth this gate needs.
+ * failure in this file.
+ *
+ * SINGLE SOURCE, deliberately: the gate reads the claim payload and NOTHING
+ * from the connection layer — not {@link getDeviceCapabilities} (the
+ * CONNECTION-level `conn.hello` flag list) and not `ConnectionState.runtimes`.
+ * Two reasons, either sufficient. First, scope: connection-level data is
+ * discovery describing a daemon BUILD, not the per-runtime, per-task,
+ * claim-time truth this gate needs — conflating the two is the original bug.
+ * Second, reach: `conn.hello` is transport-shaped. A long-poll-only daemon
+ * never sends one (sole sender: `ws-transport.ts:192`, `packages/client`), so
+ * a connection-sourced snapshot is permanently `undefined` for an entire
+ * transport and a fail-closed gate reading it disables steer across that whole
+ * deployment surface — a regression, not a safety property. The claim, by
+ * contrast, is the message that establishes the task↔runtime binding on every
+ * transport, so the gate's input now shares a lifecycle with the thing it
+ * judges. Adding a connection-level fallback here would restore both defects
+ * at once and is what this design exists to forbid.
  */
 export class SteerRejectedError extends Error {
   constructor(
@@ -841,13 +854,19 @@ export class ConnectionHub {
    * already-recorded `claimedRuntime` — including with a stale or absent
    * value from an out-of-order retry.
    *
-   * S0 (GAP-002, claim-time capability snapshot): the claiming connection's
-   * OWN `conn.hello` entry for `payload.runtime` supplies
+   * S0/D-4 (claim-time capability snapshot): `payload.capabilities` — the
+   * claiming adapter's OWN self-report, carried on this same `task.claim`
+   * (docs/protocol.md §2.4) — supplies
    * `TaskSnapshot.claimedRuntimeCapabilities`, written in the same patch and
    * therefore under the same write-exactly-once property as `claimedRuntime`.
-   * See {@link runtimeCapabilitySnapshot} for the lookup, and that field's own
-   * doc comment (`types.ts`) for why this is snapshotted rather than read live
-   * at steer time.
+   *
+   * Taken from the payload and from nowhere else. This hub deliberately does
+   * NOT consult connection state (`conn.hello.runtimes[]`) for it — see
+   * {@link SteerRejectedError} for why that source is structurally wrong for a
+   * control decision, and that field's own doc comment (`types.ts`) for why
+   * this is snapshotted rather than read live at steer time. A claim that
+   * carries no `capabilities` (a pre-D-4 daemon) records `undefined`, which
+   * the gate reads as "unknown" and refuses.
    */
   private onClaim(deviceId: string, taskId: string, payload: TaskClaimPayload): void {
     const record = this.taskStore.get(taskId);
@@ -860,31 +879,11 @@ export class ConnectionHub {
     this.applyOrFail(taskId, 'Claimed', {
       deviceId,
       claimedRuntime: payload.runtime,
-      claimedRuntimeCapabilities: this.runtimeCapabilitySnapshot(deviceId, payload.runtime),
+      claimedRuntimeCapabilities: payload.capabilities,
     });
     // NOTE (M1 gap #2): claiming no longer implies Running — the daemon
     // reports that explicitly via task.started (see onStarted) once its
     // runtime session actually starts.
-  }
-
-  /**
-   * S0 (GAP-002): the capability block `deviceId`'s CURRENT connection
-   * advertised for `runtime` in its `conn.hello` ({@link registerConnection}
-   * retains `runtimes`). Called exactly once per task, from {@link onClaim},
-   * to freeze that value onto the task record.
-   *
-   * `undefined` — meaning "this server does not know", never "unsupported as
-   * a fact" — for each of: a claim with no runtime (a legacy daemon), a
-   * connection this hub holds no state for, a connection that advertised no
-   * `runtimes` or none matching `runtime`, and a matching entry that carried
-   * no `capabilities` at all (a pre-S0 daemon; the wire field is optional).
-   * Nothing is defaulted or inferred here: the consumer
-   * ({@link steerTask}) fails closed on `undefined`, which is only correct
-   * if this stays honest about not knowing.
-   */
-  private runtimeCapabilitySnapshot(deviceId: string, runtime: RuntimeId | undefined): RuntimeCapabilities | undefined {
-    if (!runtime) return undefined;
-    return this.connections.get(deviceId)?.runtimes?.find((info) => info.id === runtime)?.capabilities;
   }
 
   /**
@@ -1627,10 +1626,13 @@ export class ConnectionHub {
    *   5. only then, the pre-existing device-liveness check and the send.
    *
    * Step 4 reads `TaskSnapshot.claimedRuntimeCapabilities` — the per-runtime,
-   * per-task value frozen at claim time — and NOT
-   * {@link getDeviceCapabilities}, whose connection-level `conn.hello` flags
-   * describe a daemon build rather than the runtime actually executing this
-   * task. Conflating the two is precisely the bug this replaces.
+   * per-task value frozen at claim time from the claiming adapter's own
+   * `task.claim.capabilities` — and reads NO connection state whatsoever:
+   * not {@link getDeviceCapabilities}, not `ConnectionState.runtimes`, and
+   * with no fallback to either when the snapshot is absent. See
+   * {@link SteerRejectedError} for why a connection-sourced input is wrong
+   * both in scope (describes a daemon build, not this task's runtime) and in
+   * reach (absent entirely on long-poll-only daemons).
    */
   private async steerTask(taskId: string, text: string): Promise<void> {
     const record = this.taskStore.get(taskId);
