@@ -139,13 +139,13 @@ Poll → envelope → journal tx (envelope+receipt+eligibility, FULL) → schedu
 ## Annotations
 
 ## Task Breakdown
-- [ ] Ride-alongs (first commit): P2-1 receipt-seam comment, P2-3 unwrapped-fetch guard, P2-4 GAP-015 label
-- [ ] L-001 `LocalTaskJournal` port (S3.3 API verbatim) + typed errors + record types
-- [ ] L-001 `SqliteLocalTaskJournal`: eight tables, PRAGMAs (WAL/foreign_keys/FULL), single-writer queue, transactions, idempotency, corrupt-DB quarantine
-- [ ] L-002 Hosted-journal config section: validation, fail-closed construction without `node:sqlite`, envelope-chain wrap (ack structurally after commit), default path byte-equivalent
-- [ ] L-002 Admission guard seam in TaskRunner (hard-pressure decline, retryable)
-- [ ] L-003 `LocalStoragePolicy` + per-category usage measurement + watermark state machine + classified GC (type-level never-delete) + bounded WAL checkpoint/compaction
-- [ ] P-007 Crash matrix: S3.4 points 1-6 (kill-and-reopen + fault hooks; no lost task, no duplicate side effect, stable recovery)
-- [ ] P-007 Pressure matrix: S3.4 points 7-12 (fake providers; soft cleans only rebuildable; hard declines admission but allows terminal flush/delete/export; emergency preserves evidence; cleanup-crash both orders)
-- [ ] Docs: GAP-006/GAP-015 closure, §12.7.2/§12.7.2.1 CURRENT marks, sprint S3.5 boxes 3-9, alpha-gate note
-- [ ] Full gates green incl. zero-diff machine check and existing client suite unchanged
+- [x] Ride-alongs (first commit): P2-1 receipt-seam comment, P2-3 unwrapped-fetch guard, P2-4 GAP-015 label
+- [x] L-001 `LocalTaskJournal` port (S3.3 API verbatim) + typed errors + record types
+- [x] L-001 `SqliteLocalTaskJournal`: eight tables, PRAGMAs (WAL/foreign_keys/FULL), single-writer queue, transactions, idempotency, corrupt-DB quarantine
+- [x] L-002 Hosted-journal config section: validation, fail-closed construction without `node:sqlite`, envelope-chain wrap (ack structurally after commit), default path byte-equivalent
+- [x] L-002 Admission guard seam in TaskRunner (hard-pressure decline, retryable)
+- [x] L-003 `LocalStoragePolicy` + per-category usage measurement + watermark state machine + classified GC (type-level never-delete) + bounded WAL checkpoint/compaction
+- [x] P-007 Crash matrix: S3.4 points 1-6 (kill-and-reopen + fault hooks; no lost task, no duplicate side effect, stable recovery)
+- [x] P-007 Pressure matrix: S3.4 points 7-12 (fake providers; soft cleans only rebuildable; hard declines admission but allows terminal flush/delete/export; emergency preserves evidence; cleanup-crash both orders)
+- [x] Docs: GAP-006/GAP-015 closure, §12.7.2/§12.7.2.1 CURRENT marks, sprint S3.5 boxes 3-9, alpha-gate note
+- [x] Full gates green incl. zero-diff machine check and existing client suite unchanged
