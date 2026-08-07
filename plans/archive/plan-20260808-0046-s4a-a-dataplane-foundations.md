@@ -1,6 +1,6 @@
 # Plan: Sprint S4A-a: Dataplane Foundations - Conformance Package, Postgres Cloud Ports, Migrate Runner
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260808-0046
 > **Slug**: s4a-a-dataplane-foundations
 > **Artifact Level**: work-package

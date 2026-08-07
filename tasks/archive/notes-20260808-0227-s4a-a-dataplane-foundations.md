@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 02:27
+> **Related Plan**: plans/archive/plan-20260808-0046-s4a-a-dataplane-foundations.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260808-0227
+
 # Implementation Notes: s4a-a-dataplane-foundations
 
 > **Status**: Active
