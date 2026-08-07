@@ -37,6 +37,7 @@ import {
   createStatfsFreeBytesProvider,
   LocalStoragePressureEngine,
   resolveLocalStoragePolicy,
+  type LocalStoragePolicy,
   type LocalStoragePolicyInput,
 } from './journal/storage-policy';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, TaskRunner, type TaskRunnerDeps } from './task-runner';
@@ -398,10 +399,9 @@ export interface DaemonOverrides {
  * the cloud records a terminal receipt for (`cloud/src/inbound.ts`'s
  * `applyLifecycle`). `task.decline` is deliberately NOT here: declining is
  * refusing to take a task, not producing a result for one.
+ *
+ * `task.complete`/`task.fail`/`task.cancelled` -> the terminal kind recorded locally.
  */
-const JOURNALED_TERMINAL_TYPES: readonly string[] = ['task.complete', 'task.fail', 'task.cancelled'];
-
-/** `task.complete`/`task.fail`/`task.cancelled` -> the terminal kind recorded locally. */
 function terminalKindOf(type: string): 'complete' | 'failed' | 'cancelled' | undefined {
   if (type === 'task.complete') return 'complete';
   if (type === 'task.fail') return 'failed';
@@ -573,6 +573,7 @@ export function createDaemonWithAdapters(
   // Fail-closed on a runtime without `node:sqlite` needs no check here: this
   // is the constructor that refuses (`JournalUnavailableError`), before any
   // filesystem work, and it propagates straight out of `createDaemon`.
+  let resolvedStoragePolicy: LocalStoragePolicy | undefined;
   if (config.hostedJournal) {
     // Validated synchronously and up front, the same way `maxTaskOutputBytes`
     // is above — a misconfigured durability section must fail at
@@ -584,6 +585,15 @@ export function createDaemonWithAdapters(
       throw new Error(
         'DaemonConfig.hostedJournal.tenantId must be a non-empty tenant id — a hosted journal row with no tenant is durable evidence nobody can act on',
       );
+    }
+    // Resolved HERE, in the same pure-config block, and deliberately BEFORE
+    // any journal is constructed: rejecting a malformed storage policy must
+    // not depend on this runtime having `node:sqlite`, or the same bad config
+    // would surface as `JournalUnavailableError` on Node 20 and
+    // `LocalStoragePolicyError` on Node 22. Config errors are config errors on
+    // every runtime.
+    if (config.hostedJournal.storagePolicy) {
+      resolvedStoragePolicy = resolveLocalStoragePolicy(config.hostedJournal.storagePolicy);
     }
   }
   // Split from `journal` below only so the storage engine can reach the
@@ -609,14 +619,14 @@ export function createDaemonWithAdapters(
    * storage policy was supplied: pressure gating without a durable journal
    * would be declining tasks to protect a database that does not exist.
    *
-   * The policy is resolved (and rejected, loudly) HERE, at construction, for
-   * the same reason `maxTaskOutputBytes` and `hostedJournal.tenantId` are —
-   * see `LocalStoragePolicyError`.
+   * The policy itself was already resolved (and rejected, loudly) above, in
+   * the same pure-config block as `hostedJournal.tenantId`, for the same
+   * reason `maxTaskOutputBytes` is — see `LocalStoragePolicyError`.
    */
   const ownedPressureEngine =
-    config.hostedJournal?.storagePolicy && journal && overrides.hostedJournal?.pressureEngine === undefined
+    resolvedStoragePolicy && journal && overrides.hostedJournal?.pressureEngine === undefined
       ? new LocalStoragePressureEngine({
-          policy: resolveLocalStoragePolicy(config.hostedJournal.storagePolicy),
+          policy: resolvedStoragePolicy,
           journal,
           freeBytesProvider: createStatfsFreeBytesProvider(storeDir),
           executor: createFilesystemCleanupExecutor(
@@ -1136,6 +1146,14 @@ export function createDaemonWithAdapters(
     // idle — is what keeps that fail from being written into an outbox nobody
     // is draining any more. Exactly a no-op when no journal is configured.
     if (journal) await journalTerminalTail;
+    // S3b: and only THEN release the handle — after the last terminal write
+    // has actually landed, or the write it was still holding would fail
+    // against a closed database. Only the journal THIS daemon constructed,
+    // the same ownership rule as `ownedPressureEngine` above: an injected
+    // journal's lifetime belongs to whoever injected it. Idempotent by
+    // `SqliteLocalTaskJournal.close`'s own contract, so the documented
+    // double-teardown path does not throw.
+    await ownedJournal?.close();
     // Finding F5(b): bounded wait for the outbox (e.g. the task.fail(s)
     // shutdownActiveTasks just enqueued) to actually drain before closing
     // the connection out from under it — see ConnectionManager.stop's own

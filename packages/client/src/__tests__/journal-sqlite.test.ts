@@ -247,6 +247,18 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
       expect(recoverable[0]?.identity).toEqual(IDENTITY);
     });
 
+    it('tolerates a second close — the daemon shutdown sequence is documented idempotent', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir);
+      await journal.appendEnvelope(envelopeRecord());
+
+      await journal.close();
+      // Not `JournalClosedError`: closing an already-closed journal is the one
+      // operation whose postcondition already holds, and `runShutdownSequence`
+      // is allowed to run twice.
+      await expect(journal.close()).resolves.toBeUndefined();
+    });
+
     it('recovers everything it committed when the instance is DROPPED with no close at all', async () => {
       const storeDir = await tmpStore();
       // Deliberately not registered for teardown-close: the point is a process

@@ -332,6 +332,14 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    */
   #tail: Promise<unknown> = Promise.resolve();
   #closed = false;
+  /**
+   * The one in-flight or settled `close()`, so closing twice is a no-op that
+   * resolves rather than a `JournalClosedError`. `close` is the one operation
+   * whose postcondition is already satisfied on an already-closed journal, and
+   * the daemon's shutdown sequence is documented idempotent — every other step
+   * in it tolerates a second call, so this one has to as well.
+   */
+  #closing: Promise<void> | undefined;
 
   constructor(options: SqliteLocalTaskJournalOptions) {
     // Checked BEFORE anything touches the filesystem: §12.7.2's
@@ -925,9 +933,21 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
   }
 
   close(): Promise<void> {
-    return this.#enqueue('close', () => {
+    // Deliberately NOT via `#enqueue`: that path rejects with
+    // `JournalClosedError` once `#closed` is set, which is right for every
+    // operation that still needs an open database and wrong for the one that
+    // wanted it closed. Still chained onto `#tail` the same way, so an
+    // operation queued before this one still runs against an open handle.
+    if (this.#closing) return this.#closing;
+    const run = this.#tail.then(() => {
       this.#closed = true;
       this.#db.close();
     });
+    this.#tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#closing = run;
+    return run;
   }
 }
