@@ -1,8 +1,8 @@
 # Architecture Queue Card: root
 
-> **Status**: Pending
+> **Status**: Resolved
 > **Detected**: 2026-08-05T17:31:51+0800
-> **Updated**: 2026-08-05T17:38:39+0800
+> **Updated**: 2026-08-07T12:00:00+0800
 > **Severity**: medium
 > **Change Type**: boundary-or-config
 > **File**: `packages/keys/tsconfig.json`
@@ -17,6 +17,28 @@
 > **Contract Sync Required**: false
 > **Spawn Recommended**: false
 > **Open Edits**: 2
+
+## Adjudication (2026-08-07)
+
+- **Drift**: both events are the K0 creation of `packages/keys/package.json` and `packages/keys/tsconfig.json` (commit `a3ab9a9`, 2026-08-05) — a real boundary change that added the `@byok/keys` provider credential plane.
+- **Ruling**: the boundary is already recorded. Canonical `docs/architecture/sdk-architecture.md` §7 documents `@byok/keys` as an independent provider credential plane with file:line evidence, and the 2026-08-07 v1/v2 architecture slices re-verified that record. No further architecture documentation is owed; the card is closed by adjudication rather than by re-documentation.
+- **Status value**: `Resolved` is the canonical closed status emitted by `canonical_status()` in the installed `repo-harness` helper `scripts/archive-architecture-request.sh:137-155`; the queue treats any status other than `Pending` as drained (`scripts/architecture-queue.sh:370`).
+- **Ruling snapshot**: `docs/architecture/snapshots/20260807-1200-root-card-ruling.md`.
+- **Slice**: plan `plans/plan-20260807-1144-architecture-root-card-closeout.md`, contract `tasks/contracts/20260807-1144-architecture-root-card-closeout.contract.md`.
+
+### Required Follow-up Disposition
+
+| Follow-up item | Disposition |
+| --- | --- |
+| Read root `AGENTS.md` / `CLAUDE.md` | done — root context read during this slice |
+| Read local block context if not `root` | not applicable — functional block is `root` |
+| Decide whether the change affects boundaries/entrypoints/dependency rules/runtime paths/verification | done — it does; the new `@byok/keys` credential plane boundary is recorded in canonical §7 |
+| Write a snapshot under `docs/architecture/snapshots/` | done — thin ruling snapshot linked above |
+| Add or update a Mermaid fenced block | not applicable — canonical §7 already carries the architecture diagram; no new visual is drawn |
+| Generate a matching human diagram under `docs/architecture/diagrams/` | not applicable — no new Mermaid source was produced |
+| Treat `mermaid` as an external installed skill dependency | not applicable — no diagram work in this slice |
+| Run `workstream-sync ensure` | not applicable — this closure is an adjudication, not durable execution |
+| Run `context-contract-sync sync-latest` | done — run after the snapshot landed; root scope, so no local block contract file was rewritten |
 
 ## Required Follow-up
 
