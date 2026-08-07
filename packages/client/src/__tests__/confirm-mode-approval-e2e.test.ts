@@ -85,7 +85,7 @@ class ApprovalAwareAdapter implements RuntimeAdapter {
     return { present: true, version: '0.0.0' };
   }
   capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, permissionModes: ['confirm'] };
+    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] };
   }
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
     const session = new ApprovalAwareSession(task.sessionRef ?? `session-${this.sessions.length + 1}`, ctx.approvalChannel);

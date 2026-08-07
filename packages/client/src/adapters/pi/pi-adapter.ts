@@ -75,7 +75,9 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   capabilities(): RuntimeCapabilities {
-    return { steer: true, resume: true, permissionModes: ['auto', 'readonly'] };
+    // `approvalInteractive: false` — `PiSession.resolveApproval` throws
+    // unconditionally: pi has no `needs_approval` notion to resume from.
+    return { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] };
   }
 
   /**

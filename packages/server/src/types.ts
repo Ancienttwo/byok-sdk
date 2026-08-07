@@ -2,6 +2,7 @@ import type {
   AgentEventOrUnknown,
   BlobRef,
   PermissionPolicy,
+  RuntimeCapabilities,
   RuntimeId,
   RuntimeInfo,
   TaskApprovalResolvedPayload,
@@ -215,6 +216,38 @@ export interface TaskSnapshot {
    * this can never be silently overwritten by a redelivered claim.
    */
   claimedRuntime?: RuntimeId;
+  /**
+   * S0/D-4 (runtime-honest control surface): the capability block the
+   * CLAIMING adapter reported for itself on its own `task.claim`
+   * (`TaskClaimPayload.capabilities`, `@byok/protocol`), snapshotted at the
+   * exact moment of the `Offered -> Claimed` transition
+   * (`ConnectionHub.onClaim`, `hub.ts`).
+   *
+   * Sourced from the claim and from nothing else. The connection-level
+   * `conn.hello.runtimes[].capabilities` is discovery data — it describes a
+   * device rather than a task, and a long-poll-only daemon never sends
+   * `conn.hello` at all — so it is never read here or by the gate; see
+   * `SteerRejectedError` (`hub.ts`) for the full argument.
+   *
+   * A SNAPSHOT, deliberately — not a live read of anything: the same device
+   * can reconnect later with a different adapter set (a runtime upgraded,
+   * removed, or newly installed mid-task), and a task that is already running
+   * must keep being judged against what was true when it was claimed.
+   * `ConnectionHub.steerTask` is the consumer: it fails closed with a
+   * `SteerRejectedError` (`hub.ts`) unless this snapshot says `steer === true`,
+   * BEFORE any `task.steer` envelope exists.
+   *
+   * `undefined` means "this server does not know" — never "supported" and
+   * never "unsupported as a fact". It stays `undefined` when the claim carried
+   * no `capabilities` (a pre-D-4 daemon; the wire field is optional) and for
+   * every task record written before S0 existed. Both are treated as a refusal
+   * by the steer gate rather than filled in with a guessed default.
+   *
+   * Written exactly once, alongside {@link claimedRuntime}, on the first
+   * real claim — a retried/idempotent claim returns from `onClaim` before
+   * the patch, so this can never be silently rewritten later.
+   */
+  claimedRuntimeCapabilities?: RuntimeCapabilities;
 }
 
 /**

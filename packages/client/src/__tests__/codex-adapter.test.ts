@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
-import type { Session, TaskContext } from '../types';
+import { SteerUnsupportedError, type Session, type TaskContext } from '../types';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 
@@ -74,7 +74,14 @@ describe('CodexAdapter against the fake-codex fixture', () => {
 
   it('capabilities() advertises exactly what the adapter can express (no steer, resume yes, auto+readonly only)', () => {
     const adapter = fakeCodexAdapter();
-    expect(adapter.capabilities()).toEqual({ steer: false, resume: true, permissionModes: ['auto', 'readonly'] });
+    expect(adapter.capabilities()).toEqual({
+      steer: false,
+      resume: true,
+      // S0/H-002: codex exec never emits a needs_approval-equivalent event,
+      // so resolveApproval() throws and this is honestly false.
+      approvalInteractive: false,
+      permissionModes: ['auto', 'readonly'],
+    });
   });
 
   it('environmentRequirements() declares no credential env vars (M5 — same deliberate ToS posture as claude: codex authenticates via its own OAuth session, not an env var)', () => {
@@ -473,12 +480,14 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     await expect(session.close()).resolves.toBeUndefined();
   });
 
-  it('steer() throws honestly rather than silently no-op-ing (codex exec has no in-band mid-turn channel)', async () => {
+  it('steer() throws a typed SteerUnsupportedError rather than silently no-op-ing (codex exec has no in-band mid-turn channel)', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
+    await expect(session.steer('inject this')).rejects.toBeInstanceOf(SteerUnsupportedError);
     await expect(session.steer('inject this')).rejects.toThrow(/does not support steer/);
+    await expect(session.steer('inject this')).rejects.toMatchObject({ runtimeId: 'codex' });
   });
 
   it('resolveApproval() throws honestly rather than silently no-op-ing (codex exec never emits needs_approval)', async () => {

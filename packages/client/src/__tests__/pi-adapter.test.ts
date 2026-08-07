@@ -196,7 +196,14 @@ describe('PiAdapter against the fake-pi fixture', () => {
 
   it('capabilities() advertises exactly what the adapter can express', () => {
     const adapter = fakePiAdapter();
-    expect(adapter.capabilities()).toEqual({ steer: true, resume: true, permissionModes: ['auto', 'readonly'] });
+    expect(adapter.capabilities()).toEqual({
+      steer: true,
+      resume: true,
+      // S0/H-002: pi has no needs_approval notion at all
+      // (`PiSession.resolveApproval` throws unconditionally).
+      approvalInteractive: false,
+      permissionModes: ['auto', 'readonly'],
+    });
   });
 
   it('environmentRequirements() declares the known provider credential env vars (M5) — the same single source of truth detect()\'s own authPresent probe uses', () => {

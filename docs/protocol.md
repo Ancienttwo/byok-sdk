@@ -210,7 +210,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
 | `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
-| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `runtime?` (M5, additive — §3.1) | Daemon accepts an offer (idempotent CAS) |
+| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
 | `task.started` | D→S | **required** | optional | `{}` | Daemon actually starts the runtime session — `Claimed → Running` |
 | `task.decline` | D→S | **required** | optional | `reason`, `retryable?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
@@ -232,6 +232,17 @@ first place. Do not rely on it to influence workspace selection — a real
 implementation (what it should override or merely suggest, relative to the
 existing `sessionRef`-keyed workspace mapping) is an undesigned follow-on
 task, not something already wired up behind this field.
+
+**Decision (S0): `workspaceHint` stays reserved.** Leaving the field on the
+wire costs nothing (an ignored optional payload key) and removing it would be
+a breaking wire-v1 change, so it is kept as declared-but-unconsumed rather
+than either wired up opportunistically or deleted. The rule that follows from
+that: no public documentation, SDK surface, or UI may present this field as a
+workspace-selection capability, and no code may start reading it as a
+side effect of unrelated work. Wiring it later requires its own ADR that
+first settles the resolver design — precedence against the `sessionRef`-keyed
+mapping, path validation and confinement, and what a device does with a hint
+it cannot honor. See `docs/architecture/sdk-architecture.md` ADR-023.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
@@ -427,22 +438,18 @@ without a wire change — and a server MUST NOT assume pi or codex will ever
 pause a task in `AwaitApproval` on their own initiative; claude now can, under
 `policy.mode: 'confirm'` specifically.
 
-**The `interactive-approval` capability flag stays RESERVED — it is NOT the
-routing signal to use.** `CAPABILITY_FLAGS` (`version.ts`) includes
-`interactive-approval`; every bundled adapter, including claude, still
-reports `approvalInteractive: false` (§11.2's footnote) — this flag was never
-wired to a per-adapter signal and M4 Phase 3 deliberately does not repurpose
-it as a side effect of adding real `confirm` support. **The actual, accurate,
-per-runtime signal for whether a device can honor `confirm` is
-`RuntimeInfo.capabilities.permissionModes.includes('confirm')`** (already
-current: `true` for a claude-capable device, `false` for pi/codex-only). A
-server dispatching `policy.mode: 'confirm'` should check THAT field, not
-`approvalInteractive` — this is a known, intentional gap between two
-capability signals that should eventually converge (a future wave giving
-`interactive-approval`/`approvalInteractive` real per-adapter meaning), not
-an oversight; until then, `permissionModes` is authoritative and
-`interactive-approval` remains exactly as unreliable a signal as it always
-was.
+**The connection-level `interactive-approval` capability flag stays RESERVED
+— it is NOT the routing signal to use.** `CAPABILITY_FLAGS` (`version.ts`)
+includes `interactive-approval`, but no daemon advertises it and no server
+behavior keys off it; it was never wired to a per-adapter signal and nothing
+since has repurposed it. **The accurate per-runtime signals live on
+`RuntimeInfo.capabilities` (§11.4): `permissionModes.includes('confirm')` for
+whether a runtime can honor `policy.mode: 'confirm'`, and
+`approvalInteractive` for whether it pauses on a real interactive approval.**
+Both are generated from the adapter's own `capabilities()` and agree by
+construction (claude: `confirm` present and `approvalInteractive: true`; pi
+and codex: neither). A server dispatching `policy.mode: 'confirm'` checks
+those fields, never the connection-level flag.
 
 ### 5.2 `task.approval_resolved` — explicit local-resolution report (additive minor)
 
@@ -759,9 +766,14 @@ Authed (bearer access token); holds the request open for ~50 seconds waiting
 for new events before returning an empty `events` array. Same cursor
 semantics as the WSS path (§9) — `cursor` in the query is "last seq I've
 seen," `cursor` in the response is "resume from here next time." A client
-using long-poll instead of WSS still sends `conn.hello` semantics implicitly
-by however the reference server's HTTP layer establishes the equivalent
-per-device session; the event *shapes* returned are identical `Envelope`
+using long-poll instead of WSS establishes its per-device session through the
+HTTP layer's own auth rather than through a `conn.hello` frame: it sends NO
+`conn.hello` at all (`conn.hello` is a WSS-only frame — see
+`DAEMON_TO_SERVER_TYPES`, which deliberately excludes it from the inbound
+message gate). Anything a server needs for a per-task decision must therefore
+travel on a `task.*` message, not be inferred from connection state — this is
+exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
+`conn.hello.runtimes[]`. The event *shapes* returned are identical `Envelope`
 values regardless of transport.
 
 ### 8.2 Send — `POST /byok/messages`
@@ -1176,15 +1188,14 @@ answers within its own configured ceiling. Unlike `plan` mode's residual
 above, this has no known workspace-confinement gap: the whole mechanism is
 daemon-mediated, not a claude-internal side effect.
 
-¹ `RuntimeInfo.capabilities.approvalInteractive` (§11.4) stays hardcoded
-`false` for every adapter, including claude, even after this — it was never
-wired to a per-adapter signal (`create-daemon.ts`'s `toRuntimeInfoCapabilities`
-predates any adapter actually supporting interactive approval) and this v1
-deliberately doesn't change that wire-visible flag's meaning as a side effect
-of adding `confirm` to claude's `permissionModes`. `permissionModes` already
-carries the precise, up-to-date signal (`'confirm'` present/absent);
-`approvalInteractive` remains reserved for a future wave that gives it real
-per-adapter meaning.
+¹ This row is the CONNECTION-level `interactive-approval` capability flag
+(§5.1), which stays reserved — no daemon advertises it and no server behavior
+keys off it. The per-runtime `RuntimeInfo.capabilities.approvalInteractive`
+field (§11.4) is a different thing and is no longer hardcoded: each adapter
+declares it itself, and claude declares `true` because the confirm path above
+is genuinely wired end to end (pi and codex declare `false`). `permissionModes`
+still carries the finer signal (`'confirm'` present/absent); the two agree by
+construction, since both come from the same adapter `capabilities()` call.
 
 **Connection-level `steer` capability = logical OR across every configured
 adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
@@ -1195,6 +1206,29 @@ pi is one of the daemon's configured adapters (pi: `steer: true`; claude and
 codex: `steer: false`) — a daemon running only claude and/or codex, with no
 pi adapter configured, does not advertise the connection-level `steer` flag
 at all.
+
+**The connection-level `steer` flag is discovery-only; steer authority is
+decided per task, from the claim.** At claim time the server snapshots
+`task.claim.capabilities` (§11.5) — the claiming adapter's own self-report —
+onto the task record, and `steerTask()` rejects with a typed
+`steer_unsupported_runtime` error before any envelope is built whenever that
+snapshot does not say `steer: true`. A `task.steer` envelope therefore never
+reaches the wire for a runtime that cannot honor it. On the receiving side a
+daemon that is still handed an unsupported steer (a forged or pre-gate
+message) records it as a non-retryable protocol error and acks it: the
+envelope is consumed, the cursor advances, and redelivery does not loop.
+
+**That snapshot has exactly one source, and no fallback.** The server reads
+the claim payload and nothing else: not the connection-level flag list, not
+`conn.hello.runtimes[].capabilities`, and not either of them as a backstop for
+a claim that carried no `capabilities`. Connection-level data is discovery —
+it describes a DEVICE rather than a task, and `conn.hello` is transport-shaped
+(a long-poll-only daemon never sends one at all), so a gate reading it is
+structurally blind across an entire transport. A claim without `capabilities`
+(a daemon predating that field) records nothing and is refused. That is
+fail-closed, not a compatibility path: `undefined` means "this server does not
+know", never "supported", and the server never infers a capability from a
+runtime id.
 
 ### 11.3 `usage` AgentEvent — token accounting (additive)
 
@@ -1252,10 +1286,44 @@ fields round-trip.
 This is populated from the exact same adapter `capabilities()` call §11.2's
 matrix and the connection-level `steer` OR (§11.2, last paragraph) are both
 derived from — see `create-daemon.ts`'s `detectRuntimes`/
-`toRuntimeInfoCapabilities`. `approvalInteractive` is hardcoded `false` for
-all three bundled adapters (§5.1) — there is no signal on `RuntimeAdapter`
-this could be derived from instead, since none of the three has any notion of
-pausing for interactive approval to report in the first place.
+`toRuntimeInfoCapabilities`, which is now a pure passthrough of the adapter's
+own declaration and synthesizes no value of its own. `approvalInteractive` is
+therefore per-adapter truth: `true` for claude (the `--permission-prompt-tool`
+confirm path, §11.2), `false` for pi and codex. It is unrelated to the
+reserved connection-level `interactive-approval` flag (§5.1).
+
+`RuntimeInfo.capabilities` here is CONNECTION-level discovery data: it
+answers "what could this device run", for a client picking where to dispatch.
+It is deliberately NOT what any server-side control decision reads — per-task
+steer gating (§11.2) reads `task.claim.capabilities` (§11.5) instead.
+
+### 11.5 Claim-carried capabilities (`task.claim.capabilities`, additive)
+
+`TaskClaimPayload` optionally carries a `capabilities` object — the same
+`RuntimeCapabilitiesSchema` shape as §11.4, reusing it rather than defining a
+second capability vocabulary, and populated from the same adapter
+`capabilities()` call (`task-runner.ts`'s claim path, via the shared
+`toRuntimeInfoCapabilities`).
+
+Same source of truth as §11.4, different SCOPE. §11.4 is connection-level:
+what a device could run, discovered once per connection. This field is
+task-level: what the adapter that actually took THIS task reported about
+itself at the moment it took it. That distinction is what makes it usable as a
+control-gate input — it shares a lifecycle with the task↔runtime binding the
+claim itself establishes, so it stays correct across reconnects, adapter-set
+changes, and transports, whereas connection-level data is re-derived on every
+connection and absent entirely on a transport that sends no `conn.hello`.
+
+Additive-minor, exactly like `runtime` (§3.1): a plain optional field on an
+already-tolerant payload schema, no `PROTOCOL_VERSION` bump, no emission
+gating — a new daemon sends it unconditionally regardless of the connected
+server's age, and an old server simply never reads it. A new server reading an
+old daemon's claim finds nothing and fails closed (§11.2), which is a refusal,
+not a fallback. Unlike `runtime`, it is sent even by an adapter whose id is
+outside the `RuntimeId` enum: `runtime` is a closed enum a custom adapter has
+no member of, but capabilities are a self-report any adapter can make
+honestly, and gating them would leave a custom steer-capable adapter
+permanently un-steerable.
 
 ## 12. Task lease (M2)
 

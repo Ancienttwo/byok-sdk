@@ -1,6 +1,6 @@
 # Plan: Sprint S0: Runtime Capability Honesty and Task-Level Steer Hardening
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260807-1508
 > **Slug**: s0-runtime-hardening
 > **Artifact Level**: work-package
@@ -68,8 +68,10 @@ Four vertical moves, in dependency order:
 | `packages/server/src/__tests__/**`, `packages/client/src/__tests__/**` (+ colocated `*.test.ts`) | Add | H-008 capability honesty contract tests; steer gate positive/negative; cursor non-freeze; redelivery idempotency |
 | `docs/architecture/sdk-architecture.md` | Edit | Close GAP-001/002/003 in §11.1; update §3.3/§4.4 from gap-description to implemented behavior; task-capability layer marked CURRENT |
 | `docs/protocol.md` | Edit | `workspaceHint` documented as reserved (no consumer); steer capability semantics note — no schema change |
-| `plans/sprints/20260807-byok-platform-raft-aligned.sprint.md` | Edit | S0 progress/acceptance marks only |
-| `packages/protocol/**` | Do not touch | Wire v1 frozen; golden must be byte-identical; any need to touch protocol non-golden files is a contract amendment, not a quiet widening |
+| `plans/sprints/20260807-byok-platform-raft-aligned.sprint.md` | Edit | S0 progress/acceptance marks; D-4 explicit amendment record |
+| `packages/protocol/src/messages.ts` | Edit (bounded, per D-4) | `TaskClaimPayloadSchema` gains optional `capabilities` (reuses `RuntimeCapabilitiesSchema`); nothing else in the protocol package changes |
+| `packages/protocol/src/__tests__/golden/v1.frozen.json` | Regenerate (bounded, per D-4) | Additive regeneration; diff limited to `task.claim` keys, reviewed line-by-line. `v1.envelopes.ndjson` stays byte-identical (machine-checked against base) |
+| `packages/protocol/**` (everything else) | Do not touch | Wire v1 frozen; any further protocol need is a new contract amendment, not a quiet widening |
 | `packages/keys/**` | Do not touch | K-line active plan owns it |
 
 ### Code Snippets
@@ -133,7 +135,7 @@ Steer: SaaS → `steerTask(taskId)` → task-record gate → (reject with typed 
 - **State/progress path**: `## Task Breakdown` below; sprint S0 acceptance boxes in `plans/sprints/20260807-byok-platform-raft-aligned.sprint.md` §S0.3.
 - **Verification evidence**: `.ai/harness/checks/latest.json` via `repo-harness run verify-sprint --prepare-acceptance --contract tasks/contracts/20260807-1508-s0-runtime-hardening.contract.md`.
 - **Evaluator rubric**: All S0.3 boxes checkable with named test evidence; protocol golden byte-identical; review confirms no credential-isolation change.
-- **Stop condition**: Any need to modify `packages/protocol/**` or `packages/keys/**`, or any design that keeps sending steer to unsupported runtimes — stop, amend contract or escalate.
+- **Stop condition**: Any protocol need beyond the D-4 bounded authorization (`TaskClaimPayloadSchema` additive field + `v1.frozen.json` regeneration), any `packages/keys/**` touch, or any design that keeps sending steer to unsupported runtimes — stop, amend contract or escalate. (The original blanket protocol stop fired on 2026-08-07: the WS-hello capability source was falsified for long-poll-only daemons; resolved via sprint D-4.)
 - **Rollback surface**: Revert the PR; no persisted-state or wire compatibility residue.
 
 ## Annotations
@@ -141,7 +143,9 @@ Steer: SaaS → `steerTask(taskId)` → task-record gate → (reject with typed 
 ## Task Breakdown
 - [ ] H-002 Adapter capability truth: accurate per-adapter `capabilities` declarations (Pi/Claude/Codex), unknown-capability fail-closed
 - [ ] H-003 Wire `RuntimeInfo` generated from adapter instances; hardcoded `approvalInteractive:false` table deleted; Claude reports interactive approval consistent with real confirm path
-- [ ] H-004 Claim-time capability snapshot on the server task record (additive; `claimedRuntime` already at `hub.ts:145,766`)
+- [ ] H-004 Claim-time capability snapshot on the server task record (additive; source per D-4: `task.claim.capabilities`, not connection state)
+- [ ] H-009 Protocol additive (D-4): `TaskClaimPayloadSchema.capabilities` optional field; `v1.frozen.json` regenerated with line-reviewed diff; `v1.envelopes.ndjson` byte-identical vs base (machine-checked)
+- [ ] H-010 Long-poll positive steer E2E: pure long-poll daemon claims a steer-capable runtime and steer succeeds (direct guard for the D-4 regression)
 - [ ] H-005 `steerTask()` task-level gate with stable typed errors (unsupported runtime / not running / terminal-first race); no envelope past a failed gate
 - [ ] H-006 Client inbound unsupported-steer handling: protocol/authority error recorded, envelope acked, cursor never freezes, redelivery idempotent
 - [ ] H-008 Capability honesty + steer contract tests (client adapter truth ↔ wire output; server gate positive/negative; cursor non-freeze)

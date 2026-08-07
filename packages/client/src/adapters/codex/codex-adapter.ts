@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
 import {
   PolicyUnsupportedError,
+  SteerUnsupportedError,
   type RuntimeAdapter,
   type RuntimeCapabilities,
   type RuntimeDetectResult,
@@ -124,7 +125,10 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 
   capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, permissionModes: ['auto', 'readonly'] };
+    // `approvalInteractive: false` — `codex exec` never emits a
+    // `needs_approval`-equivalent event, so there is nothing to resume and
+    // `CodexSession.resolveApproval` throws unconditionally.
+    return { steer: false, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] };
   }
 
   /**
@@ -619,7 +623,8 @@ class CodexSession implements Session {
    * task's explicit instruction and `capabilities().steer === false` above.
    */
   async steer(): Promise<void> {
-    throw new Error(
+    throw new SteerUnsupportedError(
+      'codex',
       'codex adapter does not support steer: codex exec has no in-band channel to inject text into a running turn (no stdin protocol, SIGINT is ignored, and resume only starts a new turn after the current one finishes)',
     );
   }

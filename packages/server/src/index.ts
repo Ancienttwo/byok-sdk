@@ -40,6 +40,15 @@ export { IllegalTaskTransitionError, InMemoryTaskStore } from './task-store';
  * staleness semantics.
  */
 export { StaleApprovalError } from './hub';
+/**
+ * S0 (GAP-002): `TaskHandle.steer` (`types.ts`) throws this when the runtime
+ * that claimed the task cannot be steered, when the task isn't running, or
+ * when it's already terminal — a caller needs the class to `instanceof`-check
+ * it and the code union to switch on. See `hub.ts`'s own doc comments for the
+ * full gate order and the fail-closed-on-unknown rationale.
+ */
+export { SteerRejectedError } from './hub';
+export type { SteerRejectionCode } from './hub';
 export { PairingCodeInvalidError } from './pairing';
 export type {
   AccessTokenClaims,

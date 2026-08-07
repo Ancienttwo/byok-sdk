@@ -28,12 +28,14 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at          TEXT NOT NULL,
   result_json         TEXT,
   pending_approval_id TEXT,
-  claimed_runtime     TEXT
+  claimed_runtime     TEXT,
+  claimed_runtime_capabilities_json TEXT
 );
 `;
 
 /**
- * M5 (approval targeting; claimed runtime): this repo has NO migration
+ * M5 (approval targeting; claimed runtime) / S0 (claim-time capability
+ * snapshot): this repo has NO migration
  * machinery — every table is `CREATE TABLE IF NOT EXISTS` only (no `PRAGMA
  * user_version`, no prior `ALTER TABLE` precedent), which is a no-op against
  * a database file created by an OLDER version of this store that's missing a
@@ -51,6 +53,15 @@ CREATE TABLE IF NOT EXISTS tasks (
 const ADDITIVE_COLUMNS: ReadonlyArray<{ name: string; ddl: string }> = [
   { name: 'pending_approval_id', ddl: 'ALTER TABLE tasks ADD COLUMN pending_approval_id TEXT' },
   { name: 'claimed_runtime', ddl: 'ALTER TABLE tasks ADD COLUMN claimed_runtime TEXT' },
+  // S0 (GAP-002): the claim-time `RuntimeCapabilities` snapshot, stored as
+  // the JSON text of that closed, protocol-validated object (same idiom as
+  // `policy_json`/`result_json` above — no column-per-flag, so a future
+  // capability flag needs no further schema move). NULL means "no snapshot",
+  // which the steer gate (`hub.ts`) treats as a refusal, never as a default.
+  {
+    name: 'claimed_runtime_capabilities_json',
+    ddl: 'ALTER TABLE tasks ADD COLUMN claimed_runtime_capabilities_json TEXT',
+  },
 ];
 
 function currentTaskColumns(db: DatabaseSync): Set<string> {
@@ -101,6 +112,7 @@ export function ensureAdditiveColumns(db: DatabaseSync): void {
 
 function rowToRecord(row: Record<string, unknown>): TaskRecord {
   const resultJson = row.result_json as string | null;
+  const claimedRuntimeCapabilitiesJson = row.claimed_runtime_capabilities_json as string | null;
   return {
     taskId: row.task_id as string,
     state: row.state as TaskState,
@@ -114,6 +126,9 @@ function rowToRecord(row: Record<string, unknown>): TaskRecord {
     result: resultJson ? (JSON.parse(resultJson) as TaskResult) : undefined,
     pendingApprovalId: (row.pending_approval_id as string | null) ?? undefined,
     claimedRuntime: ((row.claimed_runtime as string | null) ?? undefined) as TaskRecord['claimedRuntime'],
+    claimedRuntimeCapabilities: claimedRuntimeCapabilitiesJson
+      ? (JSON.parse(claimedRuntimeCapabilitiesJson) as TaskRecord['claimedRuntimeCapabilities'])
+      : undefined,
   };
 }
 
@@ -191,7 +206,7 @@ export class SqliteTaskStore implements TaskStore {
       `UPDATE tasks SET
          state = ?, instruction = ?, runtime = ?, policy_json = ?, device_id = ?,
          session_ref = ?, created_at = ?, updated_at = ?, result_json = ?, pending_approval_id = ?,
-         claimed_runtime = ?
+         claimed_runtime = ?, claimed_runtime_capabilities_json = ?
        WHERE task_id = ? AND state = ?`,
     );
     this.selectStmt = this.db.prepare('SELECT * FROM tasks WHERE task_id = ?');
@@ -306,6 +321,7 @@ export class SqliteTaskStore implements TaskStore {
         updated.result ? JSON.stringify(updated.result) : null,
         updated.pendingApprovalId ?? null,
         updated.claimedRuntime ?? null,
+        updated.claimedRuntimeCapabilities ? JSON.stringify(updated.claimedRuntimeCapabilities) : null,
         updated.taskId,
         record.state,
       );

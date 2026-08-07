@@ -13,12 +13,13 @@ import {
   type RuntimeId,
   type TaskOfferPayload,
 } from '@byok/protocol';
-import { PolicyUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
+import { PolicyUnsupportedError, SteerUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
+import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { ProgressBatcher, type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
 import type { GitWorkspaceManager, GitWorkspaceLease, GitWorkspaceObservation, GitWorkspaceError, GitErrorCategory } from './git-workspace';
@@ -1104,6 +1105,23 @@ export class TaskRunner {
             // where an auto-selected task left the server never learning
             // which runtime actually ran.
             runtime: isKnownRuntimeId(pick.adapter.id) ? pick.adapter.id : undefined,
+            // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
+            // selected adapter's own capability self-report, carried on the
+            // same message that establishes the task↔runtime binding. The
+            // server gates control messages (`task.steer`) on this and only
+            // this — connection-level `conn.hello.runtimes[].capabilities`
+            // stays discovery, because it is transport-shaped (a long-poll-only
+            // daemon never sends `conn.hello`) and describes a device rather
+            // than a task.
+            //
+            // Sent UNCONDITIONALLY, deliberately NOT gated on
+            // `isKnownRuntimeId` the way `runtime` above is: `runtime` is a
+            // closed protocol enum a custom adapter has no member of, but
+            // capabilities are a self-report every adapter can make honestly.
+            // Gating them would silently strip a custom steer-capable
+            // adapter's own truth and leave the server fail-closing on it
+            // forever.
+            capabilities: toRuntimeInfoCapabilities(pick.adapter.capabilities()),
           },
           { taskId },
         ),
@@ -1654,10 +1672,41 @@ export class TaskRunner {
     );
   }
 
+  /**
+   * S0/H-006: an inbound `task.steer` is normally impossible for a runtime
+   * that cannot steer — the hub gates it at claim-time capability
+   * (`steer_unsupported_runtime`) and never sends the envelope. If one
+   * arrives anyway (a forged sender, a pre-gate server, a device whose
+   * adapter set changed), the session throws {@link SteerUnsupportedError},
+   * which is a PERMANENT property of that runtime, not a transient failure.
+   *
+   * Rethrowing it would hand it to `ConnectionManager.process()`
+   * (`connection-manager.ts` `stalledAtSeq`), which freezes the cursor at
+   * that seq and redelivers the same envelope forever — every retry
+   * guaranteed to fail identically, and every later envelope for every
+   * other task blocked behind it. So this is classified as a
+   * non-retryable protocol/authority error: record it and return normally,
+   * which acks the envelope and lets the cursor advance. Nothing is
+   * swallowed — the steer simply has no reachable success state, and the
+   * honest terminal action is to log it and move on.
+   *
+   * Every OTHER error stays transient and is rethrown untouched, preserving
+   * the existing stall/redelivery semantics exactly.
+   */
   private async handleSteer(taskId: string, text: string): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
-    await active.session.steer(text);
+    try {
+      await active.session.steer(text);
+    } catch (err) {
+      if (err instanceof SteerUnsupportedError) {
+        console.error(
+          `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`,
+        );
+        return;
+      }
+      throw err;
+    }
   }
 
   /**
