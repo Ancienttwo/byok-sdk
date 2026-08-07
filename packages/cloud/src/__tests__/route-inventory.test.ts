@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { CloudRouteRegistry, ROUTE_CLASSES, routeKey, type RouteClass } from '../router/registry';
-import { createHarness, offerPayload, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
+import { CLOUD_ORIGIN, createHarness, offerPayload, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
 
 /** The inventory as of S3a. Kept here so a route ADDED without a decision fails a review, not just a diff. */
 const EXPECTED_INVENTORY: Record<string, RouteClass> = {
@@ -63,6 +63,39 @@ describe('route inventory (I1)', () => {
     // mount one; so does this.
     expect(harness.cloud.routes.some((route) => route.path.includes('approve'))).toBe(false);
     expect(harness.cloud.routes.some((route) => route.path.includes('reject'))).toBe(false);
+  });
+
+  /**
+   * S3a gate, P2-3. `cloud.fetch` is documented as "the router" — mount it on
+   * `@hono/node-server`, a Worker, or Deno and every route reachable is a
+   * route the registry holds. That claim dies quietly the day someone wraps
+   * it (a tenant resolver, an error mapper, a CORS shim, a "just for the
+   * demo" auth bypass): the inventory tests above would still pass, because
+   * they compare the registry against itself and never look at what the
+   * exported handler actually does.
+   *
+   * The registry is module-private, so this is a BEHAVIOR guard rather than a
+   * reference comparison — nothing is exported to make it possible. A bare
+   * `CloudRouteRegistry` with no routes at all is the reference object: for a
+   * path neither router holds, the mounted cloud must answer EXACTLY what the
+   * bare router answers, headers included. Any wrapper worth adding changes
+   * at least one of those bytes on the miss path.
+   */
+  it('exposes the registry router itself as `fetch`, not a wrapper around it', async () => {
+    const bare = new CloudRouteRegistry();
+    const miss = new Request(`${CLOUD_ORIGIN}/byok/not-a-route`);
+
+    const throughCloud = await harness.cloud.fetch(miss.clone());
+    const throughBareRouter = await bare.fetch(miss.clone());
+
+    expect(throughCloud.status).toBe(throughBareRouter.status);
+    expect(await throughCloud.text()).toBe(await throughBareRouter.text());
+    expect([...throughCloud.headers].sort()).toEqual([...throughBareRouter.headers].sort());
+
+    // The other direction: a path the registry DOES hold is answered by its
+    // handler, so "everything 404s identically" is not how this passes.
+    const hit = await harness.cloud.fetch(new Request(`${CLOUD_ORIGIN}/byok/capabilities`));
+    expect(hit.status).toBe(200);
   });
 
   it('refuses to register an unclassified route, an unsupported method, or a duplicate', () => {

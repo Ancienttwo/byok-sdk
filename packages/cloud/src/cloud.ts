@@ -102,7 +102,7 @@ export interface ByokCloud {
   /** Host control plane: hand a device a frozen-v1 `task.offer`. The hosted replacement for `dispatch()` — a function, not a handle. */
   enqueueOffer(tenant: TenantId, deviceId: string, input: EnqueueOfferInput): Promise<EnqueuedOffer>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
-  /** The recorded terminal for a task — the first one, verbatim, as the device sent it. */
+  /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
   revokeDevice(tenant: TenantId, deviceId: string): Promise<void>;

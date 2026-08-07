@@ -1,6 +1,6 @@
 # Plan: Sprint S3b: SQLite Durable Local Journal with Crash and Disk-Pressure Matrices
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260807-2242
 > **Slug**: s3b-local-journal
 > **Artifact Level**: work-package

@@ -249,7 +249,35 @@ export interface TaskRunnerDeps {
    * about this gate isn't forced to supply one — see `sendApprovalResolved`.
    */
   getServerCapabilities?: () => readonly string[];
+  /**
+   * S3b (L-002): a pre-claim veto on new offers, consulted once per offer
+   * immediately after the redelivery-dedup check and ahead of every other
+   * admission check in `handleOffer`.
+   *
+   * It exists for local storage pressure (architecture §12.7.2.1's hard
+   * watermark: "停止接收新的普通 task；仍允许 terminal/truth flush、删除、导出、
+   * doctor 与恢复操作"). Placing it here rather than deeper in `handleOffer`
+   * is what makes that split real: an offer never reaches adapter selection,
+   * workspace creation, or `task.claim`, so declining costs nothing on disk —
+   * while every path that FINISHES existing work runs through code this seam
+   * is not on, and keeps working.
+   *
+   * Synchronous, matching every other single-purpose callback on this
+   * interface. A decline is `retryable` by the guard's own decision — pressure
+   * is a property of THIS device at THIS moment, so a dispatcher re-routing
+   * the task elsewhere genuinely helps; a guard declining for a reason that
+   * will not change says so.
+   *
+   * Optional and absent by default: with no guard supplied, `handleOffer`
+   * behaves exactly as it did before this seam existed.
+   */
+  admissionGuard?: (offer: { readonly taskId: string; readonly payload: TaskOfferPayload }) => AdmissionGuardDecision;
 }
+
+/** See {@link TaskRunnerDeps.admissionGuard}. */
+export type AdmissionGuardDecision =
+  | { readonly admit: true }
+  | { readonly admit: false; readonly reason: string; readonly retryable: boolean };
 
 interface ActiveTask {
   taskId: string;
@@ -935,6 +963,19 @@ export class TaskRunner {
     // well after it already succeeded) would start a SECOND adapter session
     // for the same task, orphaning the first.
     if (this.tasks.has(taskId) || this.finishedTaskIds.has(taskId)) {
+      return;
+    }
+
+    // S3b (L-002): the pre-claim admission veto — see
+    // `TaskRunnerDeps.admissionGuard`'s own doc comment. Consulted here,
+    // AFTER the dedup check above (a redelivery of an offer this device
+    // already accepted is not a new admission, and must stay a silent no-op
+    // rather than becoming a decline) and BEFORE everything below, so a
+    // declined offer never touches an adapter, a workspace, or the wire
+    // beyond its own `task.decline`.
+    const guarded = this.deps.admissionGuard?.({ taskId, payload });
+    if (guarded !== undefined && !guarded.admit) {
+      this.decline(taskId, guarded.reason, guarded.retryable);
       return;
     }
 

@@ -73,7 +73,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **原决策**：S3 作为单个 Sprint 同时交付 hosted cloud mailbox 与本机 SQLite durable journal，S3.5 的十六格一次性验收。**该范围保留**，本条只改交付与验收的切分方式。
 - **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」把 S3 拆成两刀。**S3a（本 slice，已交付 2026-08-07）**：`@byok/cloud` 无状态 device surface——九条 frozen-v1 device 路由 + hosted-only `GET /byok/capabilities`、七个 cloud-local tenant-first auth/task port 与 `TenantStores` facade 的 InMemory 组合、I1 route registry 双向闭合与跨租户矩阵，证明点是既有 daemon 生产代码零改动跑通 long-poll 全生命周期。**S3b**：本机 SQLite journal、cursor-ack-after-commit 顺序、crash 与磁盘压力矩阵。
 - **理由**：两半的失败模式不同，需要的审查深度也不同。handler parity 在 E2E 里失败得响——daemon 一旦分辨得出 cloud 与 server，测试当场红。journal durability 在 crash 窗口里失败得静——ack 早于 commit 的实现照样跑绿全部 happy path，只有在特定断电时序下丢任务，必须靠专门的 crash/磁盘矩阵逼出来。把它压在同一个 PR 里，等于让骨架 parity 的绿色替 durability 背书。
-- **影响**：S3.5 的十六格分两批验收——S3a 收 box 1/2/10/11/12/13/14/15/16（box 12 的 daemon 端消费另刀），S3b 收 box 3–9 的 journal/crash/pressure 七格；`docs/architecture/sdk-architecture.md` 的 GAP-006 落点改记为 S3b；alpha 闸要等 S3b 收口后才闭合，S3a 单独合入不构成 hosted alpha 就绪。
+- **影响**：S3.5 的十六格分两批验收——S3a 收 box 1/2/10/11/12/13/14/15/16（box 12 的 daemon 端消费另刀），S3b 收 box 3–9 的 journal/crash/pressure 七格；`docs/architecture/sdk-architecture.md` 的 GAP-006 落点改记为 S3b；alpha 闸要等 S3b 收口后才闭合，S3a 单独合入不构成 hosted alpha 就绪。**S3b 已交付 2026-08-08，S3.5 十六格全闭，alpha 闸条件齐备（见 §12）。**
 
 ---
 
@@ -596,13 +596,13 @@ For each point assert no lost task, no duplicate side effect, stable recovery st
 
 - [x] existing daemon runs against in-memory cloud using long-poll（S3a）；
 - [x] frozen v1 bytes round-trip unchanged（S3a）；
-- [ ] ack watermark cannot advance before SQLite commit（S3b）；
-- [ ] crash matrix and disk-pressure matrix pass（S3b）；
-- [ ] local usage reports journal/cache/log/workspace/quarantine separately（S3b）；
-- [ ] soft pressure cleans only rebuildable/expired categories（S3b）；
-- [ ] hard pressure rejects new task admission but allows terminal flush、delete、export、doctor（S3b）；
-- [ ] unacked/running/recovery/quarantine records are never auto-deleted（S3b）；
-- [ ] WAL checkpoint/compaction behavior is bounded and observable（S3b）；
+- [x] ack watermark cannot advance before SQLite commit（S3b）；
+- [x] crash matrix and disk-pressure matrix pass（S3b）；
+- [x] local usage reports journal/cache/log/workspace/quarantine separately（S3b）；
+- [x] soft pressure cleans only rebuildable/expired categories（S3b）；
+- [x] hard pressure rejects new task admission but allows terminal flush、delete、export、doctor（S3b）；
+- [x] unacked/running/recovery/quarantine records are never auto-deleted（S3b）；
+- [x] WAL checkpoint/compaction behavior is bounded and observable（S3b）；
 - [x] I1 route inventory contains every registered route，未分类路由使测试自身失败（S3a：结构闭合，board/records/presence 类资源随各自 slice 并入同一矩阵）；
 - [x] tenant B cannot read/write tenant A fixture（S3a：租户 fixture 隔离矩阵）；
 - [x] `/capabilities` drives transport/feature selection（S3a：cloud 侧 capabilities 宣告驱动路由挂载与测试特性选择；daemon 端消费另刀）；
@@ -1313,6 +1313,8 @@ exit_criteria:
 ## 12. Program Release Gates
 
 ### Alpha（S3 完成）
+
+**S3 已完成（S3a 2026-08-07 + S3b 2026-08-08），下列五项条件均已齐备。**
 
 - hosted in-memory E2E；
 - SQLite local journal crash + disk-pressure matrix；

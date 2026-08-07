@@ -52,7 +52,7 @@ export interface RealCloudHandle {
   /** The hosted control-plane input: hand a device a frozen-v1 `task.offer`. No `TaskHandle` exists on this surface. */
   enqueueOffer(deviceId: string, instruction: string): Promise<EnqueuedOffer>;
   readTaskAttempt(taskId: string): Promise<TaskAttempt | undefined>;
-  /** The recorded terminal envelope for a task, verbatim as the device sent it. */
+  /** The recorded terminal envelope for a task, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `cloud/src/inbound.ts`). */
   readTerminalBody(taskId: string): Promise<string | undefined>;
   close(): Promise<void>;
 }

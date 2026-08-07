@@ -105,6 +105,15 @@ async function applyLifecycle(
  * First terminal wins (§12.6.4: 不覆写第一份事实). A retried terminal — same
  * task, new envelope id, so dedup does not catch it — records nothing new and
  * leaves the attempt status where the first one put it.
+ *
+ * What gets stored is `encodeEnvelope(envelope)`: the canonical v1 encoding of
+ * the envelope this gate already zod-parsed, NOT the device's original byte
+ * sequence. The two are semantically identical by the frozen codec's own
+ * round-trip guarantee, but they are not necessarily byte-identical (key
+ * order, whitespace, and any field the schema drops are the parser's call, not
+ * the device's) — so this receipt is evidence of the first terminal FACT, not
+ * a byte-faithful capture of the first terminal REQUEST. S3b's local journal
+ * is where the device's own bytes are kept.
  */
 async function recordTerminal(
   stores: TenantStores,
