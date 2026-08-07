@@ -182,3 +182,19 @@ export type {
   JsonPrimitive,
   JsonValue,
 } from './attestation';
+
+// In-memory reference implementation
+export {
+  IN_MEMORY_CLOCK_EPOCH,
+  InMemoryActivityStore,
+  InMemoryBoardStore,
+  InMemoryMailboxStore,
+  InMemoryObjectStore,
+  InMemoryPresenceStore,
+  InMemoryQuotaStore,
+  InMemoryTruthStore,
+  createInMemoryCoreStores,
+  createInMemoryCoreCompositionWithClock,
+  createMutableClock,
+} from './in-memory/index';
+export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';
