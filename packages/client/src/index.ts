@@ -19,7 +19,46 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding } from './daemon/create-daemon';
+export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig } from './daemon/create-daemon';
+
+// S3b (L-001/L-002): the durable local journal (architecture §12.7.2). The
+// PORT is exported, not just the SQLite implementation, because §12.7.2 lets a
+// host inject its own backend — provided it meets the same durability contract
+// (a resolved `appendEnvelope` means fsynced). The typed errors are exported
+// for the same reason a host needs them: `JournalUnavailableError` is what a
+// deployment on the wrong Node version actually sees, and it must be
+// distinguishable from a generic startup failure.
+export {
+  journalHash,
+  JournalUnavailableError,
+  JournalCorruptError,
+  JournalRecordTooLargeError,
+  JournalUnknownTaskError,
+  JournalClosedError,
+} from './daemon/journal/journal';
+export type {
+  LocalTaskJournal,
+  JournalIdentity,
+  JournalReceipt,
+  ReceivedEnvelopeRecord,
+  AdmissionRecord,
+  LocalTransitionRecord,
+  LocalTerminalRecord,
+  TerminalTruthState,
+  RecoverableTask,
+  RecoveryOutcome,
+  RecoveryDisposition,
+  LocalStorageUsage,
+  StorageCategory,
+  CategoryUsage,
+  CleanableCategory,
+  CleanupCandidate,
+  CleanupResult,
+  CompactOptions,
+  CompactResult,
+} from './daemon/journal/journal';
+export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
+export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
 export type { DeviceRecord } from './daemon/store';
 export { AuthManager, DeviceRevokedError } from './daemon/auth-manager';
 export type { ConnectionState } from './daemon/ws-transport';

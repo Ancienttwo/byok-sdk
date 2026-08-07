@@ -1,5 +1,5 @@
-import { createEnvelope, TASK_TRANSITIONS } from '@byok/protocol';
-import type { CapabilityFlag, RuntimeId, RuntimeInfo } from '@byok/protocol';
+import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS } from '@byok/protocol';
+import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok/protocol';
 import type { PermissionPolicy } from '@byok/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -29,6 +29,8 @@ import { SessionWorkspaceStore } from './session-workspace-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
+import { journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
+import { SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, TaskRunner, type TaskRunnerDeps } from './task-runner';
 import type { ProgressBatcherOptions } from './progress-batcher';
 
@@ -72,6 +74,45 @@ export interface DaemonBranding {
   accent?: string;
 }
 
+/**
+ * S3b (L-002): opt-in durable local journal for hosted deployments
+ * (architecture §12.7.2).
+ *
+ * Explicit and off by default, because it changes what an ack MEANS. With no
+ * journal configured (the self-hosted default this SDK has always shipped),
+ * the daemon's redelivery cursor advances on handler success exactly as
+ * before. With one configured, every inbound envelope is committed and fsynced
+ * to `<storeDir>/daemon.db` BEFORE the handler resolves — and since
+ * `ConnectionManager` only advances the cursor once the handler resolves
+ * (`connection-manager.ts`), acking before committing stops being something
+ * this daemon can express, rather than something it is careful not to do.
+ *
+ * Turning this on when the runtime has no working `node:sqlite` is a typed
+ * construction failure, not a downgrade to a file journal — see
+ * `JournalUnavailableError`. That refusal is the point (§12.7.2): a journal
+ * that does not fsync loses tasks only under power-cut timings, so it passes
+ * every test anyone will ever run against it.
+ */
+export interface HostedJournalConfig {
+  /**
+   * The backend. Only `sqlite` today, and spelled out rather than implied by
+   * the section's presence so adding a second one later is an additive change
+   * to a closed set instead of a re-interpretation of an existing config.
+   */
+  mode: 'sqlite';
+  /**
+   * The tenant every journal row on this device is scoped to (§12.7.2's
+   * minimum fact set opens with tenant/product/device). Required: a hosted
+   * daemon that cannot say which tenant its durable evidence belongs to has
+   * evidence nobody can act on.
+   */
+  tenantId: string;
+  /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
+  busyTimeoutMs?: number;
+  /** Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated. */
+  maxRecordBytes?: number;
+}
+
 export interface DaemonConfig {
   productName: string;
   productId: string;
@@ -80,6 +121,8 @@ export interface DaemonConfig {
   workspaceRoot: string;
   /** Disabled by default. Enables local-only Git checkpoint repositories. */
   gitWorkspace?: GitWorkspaceConfig;
+  /** Disabled by default. Enables the durable local task journal — see {@link HostedJournalConfig}. */
+  hostedJournal?: HostedJournalConfig;
   /**
    * Restricts which runtimes this daemon will ever use — enforced in two
    * places that must stay consistent: `createDaemon` (this file) builds its
@@ -298,6 +341,64 @@ export interface DaemonOverrides {
     manager?: GitWorkspaceManager;
     store?: GitWorkspaceStore;
   };
+  /**
+   * S3b: injection seam for the durable local journal, mirroring
+   * `gitWorkspace` above — used only when `config.hostedJournal` is set, so an
+   * absent journal config cannot accidentally activate a supplied object. Also
+   * the host-injected-implementation path §12.7.2 allows: a backend other than
+   * `SqliteLocalTaskJournal` is acceptable if it meets the same durability
+   * contract (a resolved `appendEnvelope` means fsynced), and unacceptable
+   * otherwise — this seam does not verify that, the host asserting it does.
+   *
+   * A journal supplied here is NOT closed by `stop()`; whoever injected it
+   * owns its lifetime.
+   */
+  hostedJournal?: {
+    journal?: LocalTaskJournal;
+  };
+}
+
+/**
+ * The outbound envelope types that carry a task's terminal, matching the set
+ * the cloud records a terminal receipt for (`cloud/src/inbound.ts`'s
+ * `applyLifecycle`). `task.decline` is deliberately NOT here: declining is
+ * refusing to take a task, not producing a result for one.
+ */
+const JOURNALED_TERMINAL_TYPES: readonly string[] = ['task.complete', 'task.fail', 'task.cancelled'];
+
+/** `task.complete`/`task.fail`/`task.cancelled` -> the terminal kind recorded locally. */
+function terminalKindOf(type: string): 'complete' | 'failed' | 'cancelled' | undefined {
+  if (type === 'task.complete') return 'complete';
+  if (type === 'task.fail') return 'failed';
+  if (type === 'task.cancelled') return 'cancelled';
+  return undefined;
+}
+
+/**
+ * One inbound envelope, as the journal wants it.
+ *
+ * `bytes` is the CANONICAL v1 encoding of the envelope this daemon parsed, not
+ * the socket's original byte sequence — the frozen codec's round-trip
+ * guarantee is what makes that a faithful record, and it is the same choice
+ * the cloud's own terminal receipt makes.
+ *
+ * `opensTask` is decided here, from the envelope's own type, rather than
+ * inside the journal: `task.offer` is the one inbound type that brings a task
+ * into existence on this device, and that is protocol knowledge this file
+ * already has and the journal should not acquire a second copy of.
+ */
+function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity): ReceivedEnvelopeRecord {
+  const bytes = encodeEnvelope(envelope);
+  return {
+    identity,
+    envelopeId: envelope.id,
+    ...(envelope.task_id === undefined ? {} : { taskId: envelope.task_id }),
+    seq: envelope.seq ?? 0,
+    bytes,
+    bytesHash: journalHash(bytes),
+    receivedAt: new Date().toISOString(),
+    opensTask: envelope.type === 'task.offer',
+  };
 }
 
 function isRuntimeId(id: string): id is RuntimeId {
@@ -428,6 +529,48 @@ export function createDaemonWithAdapters(
   const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
+  // S3b (L-002), same three-part shape as `gitWorkspace` above: optional
+  // config field, conditional construction, override seam. An absent
+  // `hostedJournal` constructs NOTHING — no database file, no directory, no
+  // reference — which is what keeps the default self-hosted path identical to
+  // what it was before this slice.
+  //
+  // Fail-closed on a runtime without `node:sqlite` needs no check here: this
+  // is the constructor that refuses (`JournalUnavailableError`), before any
+  // filesystem work, and it propagates straight out of `createDaemon`.
+  if (config.hostedJournal) {
+    // Validated synchronously and up front, the same way `maxTaskOutputBytes`
+    // is above — a misconfigured durability section must fail at
+    // construction, not at the first envelope that needed it.
+    if (config.hostedJournal.mode !== 'sqlite') {
+      throw new Error(`DaemonConfig.hostedJournal.mode must be "sqlite" — got ${JSON.stringify(config.hostedJournal.mode)}`);
+    }
+    if (typeof config.hostedJournal.tenantId !== 'string' || config.hostedJournal.tenantId.trim() === '') {
+      throw new Error(
+        'DaemonConfig.hostedJournal.tenantId must be a non-empty tenant id — a hosted journal row with no tenant is durable evidence nobody can act on',
+      );
+    }
+  }
+  const journal: LocalTaskJournal | undefined = config.hostedJournal
+    ? overrides.hostedJournal?.journal ??
+      new SqliteLocalTaskJournal({
+        storeDir,
+        ...(config.hostedJournal.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: config.hostedJournal.busyTimeoutMs }),
+        ...(config.hostedJournal.maxRecordBytes === undefined ? {} : { maxRecordBytes: config.hostedJournal.maxRecordBytes }),
+      })
+    : undefined;
+  /**
+   * S3b: serializes terminal journal writes against the outbound send that
+   * follows each one, and gives `runShutdownSequence` something to await.
+   *
+   * `TaskRunnerDeps.send` is synchronous by contract, so the journal write
+   * cannot simply be awaited inline. Chaining instead keeps the ordering
+   * (journal committed, THEN the terminal goes on the wire) without changing
+   * that contract — and the shutdown sequence awaits this tail before the
+   * outbox drain, so a `task.fail` produced during teardown can never be left
+   * mid-chain while the connection closes out from under it.
+   */
+  let journalTerminalTail: Promise<void> = Promise.resolve();
   // M3-2a: local observability — constructed once per daemon instance (not
   // per `start()`) so `subscribe()`/`tasks()` work immediately after
   // `createDaemonWithAdapters()` returns and keep accumulating across an
@@ -556,6 +699,38 @@ export function createDaemonWithAdapters(
       );
     }
 
+    // S3b (L-002): the recovery scan, before anything can accept new work.
+    //
+    // Every task the journal still has open is one this daemon was in the
+    // middle of when it last stopped. Local runtime sessions do not survive
+    // the process, so each is marked `interrupted` rather than pretended back
+    // into life — the same honest semantics `GitWorkspaceStore.reconcile()`
+    // already applies to a lease whose owner is gone, and the same one
+    // `SqliteTaskStore` documents on the server side ("record persistence, not
+    // live task reconnection"). Marking never deletes: a recovery-marked row
+    // is on §12.7.2.1's never-auto-delete list precisely so the evidence
+    // outlives the restart.
+    //
+    // Not wrapped in a try/catch: a journal that cannot be read is not a
+    // degraded mode to carry on in. Hosted mode was configured explicitly, so
+    // failing `start()` is the fail-closed behaviour §12.7.2 asks for.
+    if (journal) {
+      const recoverable = await journal.listRecoverable();
+      for (const task of recoverable) {
+        await journal.markRecovered(task.taskId, {
+          disposition: 'interrupted',
+          reason: `daemon restarted while this task was in local state "${task.localState}"; local runtime sessions do not survive the process`,
+        });
+      }
+      if (recoverable.length > 0) {
+        console.warn(
+          `[byok/client] local journal recovery: ${recoverable.length} task(s) were interrupted by the previous shutdown and have been marked (not resumed, not deleted): ${recoverable
+            .map((task) => task.taskId)
+            .join(', ')}`,
+        );
+      }
+    }
+
     startedAt = Date.now();
     // M4 Phase 2: a second start() on THIS SAME Daemon instance (e.g. the
     // revoke -> re-pair -> start() again recovery flow) restarts its own
@@ -600,6 +775,63 @@ export function createDaemonWithAdapters(
     observer.noteRuntimesDetected(runtimes);
     const capabilities = computeCapabilities(adapters);
 
+    // S3b: this daemon's journal identity — only knowable here, after
+    // `auth.loadExisting()` has resolved the deviceId.
+    const journalIdentity: JournalIdentity | undefined = config.hostedJournal
+      ? { tenantId: config.hostedJournal.tenantId, productId: config.productId, deviceId: record.deviceId }
+      : undefined;
+
+    /**
+     * S3b: outbound send.
+     *
+     * The no-journal branch is the ORIGINAL closure, character for character —
+     * the default path must not gain so much as an extra `await`, or the
+     * "opt-in, byte-equivalent by default" claim is only approximately true.
+     *
+     * The journal branch records a terminal BEFORE it goes on the wire, so a
+     * crash in that window leaves the terminal hash locally (to be retried)
+     * rather than only in the cloud (§12.7.3's "terminal 生成后、truth 写入前"
+     * row). A journal write that FAILS still sends: §12.7.2.1 keeps terminal
+     * flush running even under hard pressure, and stranding a finished task on
+     * the cloud side because the local bookkeeping hiccupped would be a worse
+     * outcome than a missing local row.
+     */
+    const sendEnvelope: TaskRunnerDeps['send'] =
+      journal && journalIdentity
+        ? (envelope) => {
+            observer.handleOutboundEnvelope(envelope);
+            const terminalKind = terminalKindOf(envelope.type);
+            const taskId = envelope.task_id;
+            if (terminalKind === undefined || taskId === undefined) {
+              connection?.send(envelope);
+              return;
+            }
+            const payloadHash = journalHash(encodeEnvelope(envelope));
+            journalTerminalTail = journalTerminalTail
+              .then(() =>
+                journal.recordTerminal({
+                  taskId,
+                  terminalType: terminalKind,
+                  payloadHash,
+                  truthState: 'pending',
+                  attempt: 1,
+                  recordedAt: new Date().toISOString(),
+                }),
+              )
+              .catch((err: unknown) => {
+                console.warn(
+                  `[byok/client] could not record task ${taskId}'s terminal in the local journal (sending it anyway): ${err instanceof Error ? err.message : String(err)}`,
+                );
+              })
+              .then(() => {
+                connection?.send(envelope);
+              });
+          }
+        : (envelope) => {
+            observer.handleOutboundEnvelope(envelope);
+            connection?.send(envelope);
+          };
+
     const deps: TaskRunnerDeps = {
       adapters,
       runtimeAllowlist: config.runtimeAllowlist,
@@ -618,10 +850,7 @@ export function createDaemonWithAdapters(
       // first (never throws — see `observer.ts`) and then sending exactly as
       // before is the entire integration; `task-runner.ts` itself is
       // untouched. See `observer.ts`'s module doc comment.
-      send: (envelope) => {
-        observer.handleOutboundEnvelope(envelope);
-        connection?.send(envelope);
-      },
+      send: sendEnvelope,
       blobClient,
       batcherOptions: overrides.batch,
       sessionWorkspaces,
@@ -693,10 +922,37 @@ export function createDaemonWithAdapters(
       // semantics above — `handleInboundEnvelope` only ever looks at
       // `task.offer` (the one event with no corresponding outbound envelope
       // of its own) and never throws, so it can't affect cursor advancement.
-      onEnvelope: (envelope) => {
-        observer.handleInboundEnvelope(envelope);
-        return runner?.handleEnvelope(envelope) ?? Promise.resolve();
-      },
+      // S3b (L-002): where "ack after durable commit" stops being a
+      // discipline and becomes the only expressible behaviour.
+      //
+      // `ConnectionManager.process` advances (and persists) the redelivery
+      // cursor ONLY when this handler resolves, and merely records a stall
+      // when it throws (`connection-manager.ts`) — that was already true, and
+      // is not changed by this slice. Putting the journal transaction INSIDE
+      // this handler therefore makes the ordering structural: the cursor
+      // cannot move past a seq whose envelope is not yet committed, because
+      // the only thing that moves the cursor is this function resolving, and
+      // this function does not resolve until the commit does. There is no
+      // second path to the cursor to keep in step, and the transport is
+      // untouched.
+      //
+      // Placed after the observer (which never throws and owns no durable
+      // state) and before the runner, so the bytes are on disk before any
+      // work is scheduled off them. A redelivered envelope is absorbed by the
+      // journal's own receipt and costs one no-op transaction.
+      //
+      // The no-journal branch is the ORIGINAL closure, unchanged.
+      onEnvelope:
+        journal && journalIdentity
+          ? async (envelope) => {
+              observer.handleInboundEnvelope(envelope);
+              await journal.appendEnvelope(toJournalEnvelopeRecord(envelope, journalIdentity));
+              return runner?.handleEnvelope(envelope) ?? Promise.resolve();
+            }
+          : (envelope) => {
+              observer.handleInboundEnvelope(envelope);
+              return runner?.handleEnvelope(envelope) ?? Promise.resolve();
+            },
       onStateChange: (state) => {
         connectionState = state;
         observer.noteConnectionState(state);
@@ -760,6 +1016,13 @@ export function createDaemonWithAdapters(
     const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
     await Promise.race([activeTeardown, delay(graceMs)]);
+    // S3b: in hosted mode, a terminal is journaled before it is handed to the
+    // outbox (see `sendEnvelope`), so a `task.fail` that `shutdownActiveTasks`
+    // just produced may still be mid-chain right now. Awaiting the chain here
+    // — before the drain wait below, which is what decides the connection is
+    // idle — is what keeps that fail from being written into an outbox nobody
+    // is draining any more. Exactly a no-op when no journal is configured.
+    if (journal) await journalTerminalTail;
     // Finding F5(b): bounded wait for the outbox (e.g. the task.fail(s)
     // shutdownActiveTasks just enqueued) to actually drain before closing
     // the connection out from under it — see ConnectionManager.stop's own
