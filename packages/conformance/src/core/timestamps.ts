@@ -14,7 +14,7 @@
  * boundary, and none may normalize one into a guess about what the caller meant.
  */
 import { describe, expect, it } from 'vitest';
-import { isCoreError } from '../../errors';
+import { isCoreError } from '@byok/core';
 import { ENTITLEMENT, TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 

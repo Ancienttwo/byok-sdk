@@ -100,6 +100,15 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
+  packages/conformance:
+    dependencies:
+      '@byok/cloud':
+        specifier: workspace:*
+        version: link:../cloud
+      '@byok/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/core:
     dependencies:
       zod:

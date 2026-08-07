@@ -17,7 +17,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as publicApi from '../index';
-import { CORE_PORT_INTERFACES, CORE_PORT_METHODS } from './conformance/port-inventory';
+import { CORE_PORT_INTERFACES, CORE_PORT_METHODS } from '../ports-contract';
 
 const SRC_URL = new URL('../', import.meta.url);
 
@@ -118,6 +118,7 @@ describe('public API surface', () => {
     './attestation',
     './capabilities',
     './stores',
+    './ports-contract',
     './in-memory/index',
   ];
 
@@ -126,7 +127,10 @@ describe('public API surface', () => {
     expect([...new Set(sources)].sort()).toEqual([...ALLOWED_INDEX_MODULES].sort());
   });
 
-  it('exports no conformance harness (S4A story O-005 owns that decision)', () => {
+  // S4A story O-005 answered this: the suite is the private `@byok/conformance`
+  // workspace package, so core ships the port CONTRACT DATA the suite reads and
+  // none of the harness that reads it.
+  it('exports no conformance harness', () => {
     expect(stripComments(read('index.ts'))).not.toContain('__tests__');
     expect(Object.keys(publicApi)).not.toContain('runCoreConformance');
   });
@@ -141,6 +145,8 @@ describe('public API surface', () => {
       'CAPABILITY_NAME_PATTERN',
       'CONTENT_HASH_PATTERN',
       'CORE_ERROR_CODES',
+      'CORE_PORT_INTERFACES',
+      'CORE_PORT_METHODS',
       'CORE_STORE_NAMES',
       'CapabilityDeclarationSchema',
       'CoreConflictError',

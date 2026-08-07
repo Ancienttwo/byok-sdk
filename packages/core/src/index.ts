@@ -164,6 +164,12 @@ export type { CapabilityDeclaration } from './capabilities';
 export { CORE_STORE_NAMES } from './stores';
 export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
 
+// The port method inventory (I7). Contract data, shipped rather than test-only,
+// so `@byok/conformance` can assert compositions against the same table
+// `__tests__/constraints.test.ts` asserts the source interfaces against —
+// without a `core → conformance` cycle.
+export { CORE_PORT_INTERFACES, CORE_PORT_METHODS } from './ports-contract';
+
 // Device proof (§12.6.3, sprint §S6.2)
 export {
   DEVICE_PROOF_ALGORITHMS,

@@ -14,7 +14,7 @@
  * behavior, and asserting it against a wall clock is either slow or flaky.
  */
 import { describe } from 'vitest';
-import type { CoreStores } from '../../stores';
+import type { CoreStores } from '@byok/core';
 import { runMailboxConformance } from './mailbox';
 import { runBoardConformance } from './board';
 import { runTruthConformance } from './truth';
