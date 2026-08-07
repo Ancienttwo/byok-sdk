@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-07T18:11:20+0800 -->
+<!-- updated_at: 2026-08-07T19:40:59+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-07T18:11:20+0800
+> **Updated At**: 2026-08-07T19:40:59+0800
 > **Source Branch**: main
-> **Source Commit**: ff621c1
+> **Source Commit**: 8a3a14d
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -51,17 +51,17 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 11 changed/untracked path(s)
 
 ```
- D plans/plan-20260807-1720-s1-tenant-identity-cut.md
- D tasks/contracts/20260807-1720-s1-tenant-identity-cut.contract.md
+ D plans/plan-20260807-1829-s2-byok-core-contracts.md
+ D tasks/contracts/20260807-1829-s2-byok-core-contracts.contract.md
  M tasks/current.md
- D tasks/notes/20260807-1720-s1-tenant-identity-cut.notes.md
- D tasks/reviews/20260807-1720-s1-tenant-identity-cut.review.md
+ D tasks/notes/20260807-1829-s2-byok-core-contracts.notes.md
+ D tasks/reviews/20260807-1829-s2-byok-core-contracts.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260807-1720-s1-tenant-identity-cut.md
-?? tasks/archive/contract-20260807-1811-s1-tenant-identity-cut.md
-?? tasks/archive/notes-20260807-1811-s1-tenant-identity-cut.md
-?? tasks/archive/review-20260807-1811-s1-tenant-identity-cut.md
-?? tasks/archive/todo-20260807-1811-s1-tenant-identity-cut.md
+?? plans/archive/plan-20260807-1829-s2-byok-core-contracts.md
+?? tasks/archive/contract-20260807-1940-s2-byok-core-contracts.md
+?? tasks/archive/notes-20260807-1940-s2-byok-core-contracts.md
+?? tasks/archive/review-20260807-1940-s2-byok-core-contracts.md
+?? tasks/archive/todo-20260807-1940-s2-byok-core-contracts.md
 ```
 
 ## Source Artifacts

@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-07 19:40
+> **Related Plan**: plans/archive/plan-20260807-1829-s2-byok-core-contracts.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260807-1940
+
 # Task Contract: s2-byok-core-contracts
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260807-1829-s2-byok-core-contracts.md
 > **Task Profile**: code-change
 > **Owner**: ancienttwo

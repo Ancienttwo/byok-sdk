@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 19:40
+> **Related Plan**: plans/archive/plan-20260807-1829-s2-byok-core-contracts.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260807-1940
+
 # Task Review: s2-byok-core-contracts
 
 > **Status**: Reviewed
@@ -47,17 +53,17 @@
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 8a3a14d6fe9e0c0c0601e6d688fd464b24688549
+> **Verification Evidence SHA256**: sha256:ad8e6958c0e876d3aa554e48541fc43df8c99cc3d574181ebf599f0ad40a5980
+> **Issued At**: 2026-08-07T11:40:57.211Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Sprint S2 delivered and merged as PR #20 (2b8e13e): @byok/core contracts plus InMemory reference plus composition-parameterized conformance harness, purely additive with existing packages byte-identical to main; canonical-timestamp contract gap (gatekeeper P1) fixed with revert-guard-proven negatives; core 167 tests, repo 1773 green, CI 28/28 incl. Node 20 leg
 - Findings: none
 
 ## Behavior Diff Notes

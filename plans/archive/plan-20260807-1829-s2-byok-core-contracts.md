@@ -1,6 +1,6 @@
 # Plan: Sprint S2: @byok/core Contracts and Conformance Foundation
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260807-1829
 > **Slug**: s2-byok-core-contracts
 > **Artifact Level**: work-package
