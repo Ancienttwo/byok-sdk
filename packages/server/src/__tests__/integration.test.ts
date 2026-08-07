@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
-import { createEnvelope, PROTOCOL_VERSION } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type RuntimeId } from '@byok/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createByokServer } from '../index';
@@ -9,6 +9,7 @@ import {
   connectFakeDaemonWs,
   nextEnvelope,
   pairFakeDaemon,
+  PI_RUNTIME_INFO,
   send,
   startServer,
   stopServer,
@@ -17,9 +18,14 @@ import {
 
 const PRODUCT_ID = 'acme';
 
-/** Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running) and wait for the Running event. */
-async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId }, { taskId: handle.taskId }));
+/**
+ * Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running)
+ * and wait for the Running event. `runtime` (S0) is the actual adapter this
+ * claim reports; omitted matches a legacy runtime-less `task.claim`, which is
+ * what every call site here but the steer test wants.
+ */
+async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle, runtime?: RuntimeId): Promise<void> {
+  send(ws, createEnvelope('task.claim', { deviceId, runtime }, { taskId: handle.taskId }));
   send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -424,7 +430,14 @@ describe('redelivery after reconnect (§9)', () => {
     server = started.server;
 
     const { code } = byok.pairing.createPairingCode();
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
+    // S0: this device must advertise a runtime that can actually be steered
+    // (pi) and claim task1 as that runtime — the server's steer gate reads
+    // the claim-time capability snapshot, so a runtime-less claim here would
+    // (correctly) be refused before any envelope existed to redeliver.
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      runtimes: [PI_RUNTIME_INFO],
+    });
     ws = daemon.ws;
 
     // task1 stays Running — steer() below produces an envelope the daemon
@@ -434,7 +447,7 @@ describe('redelivery after reconnect (§9)', () => {
     if (offer1.type !== 'task.offer') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
 
-    await claimAndStart(ws, daemon.deviceId, handle1);
+    await claimAndStart(ws, daemon.deviceId, handle1, 'pi');
     await handle1.steer('keep going'); // assigns the next seq; deliberately never read off `ws`
 
     // task2 is cancelled before reconnect — terminal by the time redelivery

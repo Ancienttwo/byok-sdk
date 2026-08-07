@@ -2,6 +2,7 @@ import type {
   AgentEventOrUnknown,
   BlobRef,
   PermissionPolicy,
+  RuntimeCapabilities,
   RuntimeId,
   RuntimeInfo,
   TaskApprovalResolvedPayload,
@@ -215,6 +216,34 @@ export interface TaskSnapshot {
    * this can never be silently overwritten by a redelivered claim.
    */
   claimedRuntime?: RuntimeId;
+  /**
+   * S0 (GAP-002, runtime-honest control surface): the capability block the
+   * CLAIMING device advertised for {@link claimedRuntime} in its `conn.hello`
+   * (`RuntimeInfo.capabilities`), snapshotted at the exact moment of the
+   * `Offered -> Claimed` transition (`ConnectionHub.onClaim`, `hub.ts`).
+   *
+   * A SNAPSHOT, deliberately — not a live read of the device's current
+   * connection: the same device can reconnect later with a different adapter
+   * set (a runtime upgraded, removed, or newly installed mid-task), and a
+   * task that is already running must keep being judged against what was
+   * true when it was claimed, not against whatever the device happens to
+   * advertise now. `ConnectionHub.steerTask` is the consumer: it fails
+   * closed with a `SteerRejectedError` (`hub.ts`) unless this snapshot says
+   * `steer === true`, BEFORE any `task.steer` envelope exists.
+   *
+   * `undefined` means "this server does not know" — never "supported" and
+   * never "unsupported as a fact". It stays `undefined` when the claim
+   * carried no runtime (a legacy daemon), when the claiming connection
+   * advertised no matching `RuntimeInfo`, when that entry carried no
+   * `capabilities` (a pre-S0 daemon), and for every task record written
+   * before S0 existed. Every one of those is treated as a refusal by the
+   * steer gate rather than filled in with a guessed default.
+   *
+   * Written exactly once, alongside {@link claimedRuntime}, on the first
+   * real claim — a retried/idempotent claim returns from `onClaim` before
+   * the patch, so this can never be silently rewritten later.
+   */
+  claimedRuntimeCapabilities?: RuntimeCapabilities;
 }
 
 /**

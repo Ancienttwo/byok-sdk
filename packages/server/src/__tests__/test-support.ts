@@ -8,6 +8,7 @@ import {
   PROTOCOL_VERSION,
   type ConnAckPayload,
   type Envelope,
+  type RuntimeId,
   type RuntimeInfo,
 } from '@byok/protocol';
 import { WebSocket, type RawData } from 'ws';
@@ -120,6 +121,38 @@ export function nextEnvelope(ws: WebSocket): Promise<Envelope> {
 export function send(ws: WebSocket, envelope: Envelope): void {
   ws.send(encodeEnvelope(envelope));
 }
+
+/**
+ * S0 (GAP-002): honest `conn.hello` runtime fixtures — each block is exactly
+ * what the corresponding real adapter's `capabilities()` returns
+ * (`packages/client/src/adapters/{pi,claude,codex}`), so a server test
+ * describes a device that could actually exist rather than a convenient one.
+ *
+ * The asymmetry these encode is the whole reason the server's steer gate
+ * exists: only pi implements steering. Claude's and Codex's adapters throw on
+ * an inbound `task.steer`, so a server that sends them one stalls the client's
+ * redelivery cursor forever. Any test needing a steerable task must claim
+ * `pi`; anything else is expected to be refused server-side.
+ */
+export const PI_RUNTIME_INFO: RuntimeInfo = {
+  id: 'pi',
+  capabilities: { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
+};
+
+export const CLAUDE_RUNTIME_INFO: RuntimeInfo = {
+  id: 'claude',
+  capabilities: {
+    steer: false,
+    resume: true,
+    approvalInteractive: true,
+    permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+  },
+};
+
+export const CODEX_RUNTIME_INFO: RuntimeInfo = {
+  id: 'codex',
+  capabilities: { steer: false, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
+};
 
 /** A fake device's Ed25519 identity (Auth v2, §6) — the private key never leaves this helper, mirroring the real daemon. */
 export interface FakeDeviceIdentity {
@@ -274,9 +307,21 @@ export async function waitForServerEvent(
   throw new Error('server event stream ended before a matching event was seen');
 }
 
-/** Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running) and wait for the Running event. Shared by every hub-level test that needs a task actually running before driving it further (approve/reject, implicit-approval-resume, etc). */
-export async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId }, { taskId: handle.taskId }));
+/**
+ * Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running)
+ * and wait for the Running event. Shared by every hub-level test that needs a
+ * task actually running before driving it further (approve/reject,
+ * implicit-approval-resume, etc).
+ *
+ * `runtime` (S0, GAP-002): the ACTUAL adapter this claim reports. Omitted
+ * matches a legacy daemon's runtime-less `task.claim` — which is exactly what
+ * every pre-S0 call site here already did, so their behavior is unchanged.
+ * Pass one (with a matching `RuntimeInfo` in the connection's `conn.hello`
+ * runtimes — see {@link PI_RUNTIME_INFO}) when the test needs the server to
+ * have a claim-time capability snapshot to gate on.
+ */
+export async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle, runtime?: RuntimeId): Promise<void> {
+  send(ws, createEnvelope('task.claim', { deviceId, runtime }, { taskId: handle.taskId }));
   send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
