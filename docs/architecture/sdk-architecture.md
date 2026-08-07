@@ -1,7 +1,9 @@
 # BYOK SDK 架构文档
 
 > 状态：基于 `main` 工作树的架构复核稿。
-> 事实快照：2026-08-07（`a8c2732`）。
+> Verified against: main@880e69f（2026-08-08）
+> Verification scope: CURRENT sections + package graph + completed-slice status
+> Volatile workflow status: see tasks/current.md; not duplicated here
 > 面向对象：嵌入 BYOK 能力的 SaaS 开发者、SDK 维护者、安全审计与部署人员。
 > 事实优先级：实际源码与 package public surface > `docs/protocol.md` / `docs/security.md` > `docs/spec.md` > 最终平台提案。RAFT 只作为受限参考，不是产品真相源。
 
@@ -22,7 +24,7 @@
 - Agent dispatch plane：`@byok/protocol` + `@byok/server` + `@byok/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
 
-目标平台会新增 `@byok/core` 与 `@byok/cloud`，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 已于 2026-08-07（S2）落地为 workspace package，状态是**已实现、隔离**：zod-only、protocol-free、Node-free，仓库内没有任何 import site；`@byok/cloud` 已于 2026-08-07（S3a）落地为**骨架已实现**：无状态 device surface + InMemory 组合，durable journal、board 与 truth 面仍是**目标设计**。本文在第 12 节单独描述这两者。
+目标平台会新增 `@byok/core` 与 `@byok/cloud`，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 已于 2026-08-07（S2）落地为 workspace package：zod-only、protocol-free、Node-free，且已被 `@byok/cloud` 接线消费（`packages/cloud/src/**` 真实 import `@byok/core` 与 `@byok/protocol`）；仍未接线到 `client`/`server`/`keys`。`@byok/cloud` 已于 2026-08-07（S3a）落地为**骨架已实现**：无状态 device surface + InMemory 组合；本机 durable journal 已于 2026-08-08（S3b）落地在 client 侧，cloud 的 board 与 truth 面仍是**目标设计**。本文在第 12 节单独描述这两者。
 
 ## 1. P1：全局架构地图
 
@@ -96,7 +98,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库是 Node `>=20`、pnpm workspace。五个 package 都可独立 build/package，但仓库本身不能证明它们已经发布到 npm。下图只画 dispatch 与 key 两条现有运行时线；S2 落地的 `@byok/core` 目前零入边零出边（除 `zod`），故不出现在此图，其目标边见 §12.1。
+仓库是 Node `>=20`、pnpm workspace。六个 package（`client`/`cloud`/`core`/`keys`/`protocol`/`server`）都可独立 build/package，但仓库本身不能证明它们已经发布到 npm。下图画 dispatch、key 与 hosted cloud 三条线；`@byok/core` 当前只有 `cloud` 一个 consumer，指向 `client`/`server`/`keys` 的目标边见 §12.1。
 
 ```mermaid
 flowchart LR
@@ -110,11 +112,15 @@ flowchart LR
   Server(["@byok/server<br/>embedded coordinator"]):::runtime
   Client(["@byok/client<br/>local daemon + CLI"]):::runtime
   Keys(["@byok/keys<br/>provider credential plane"]):::key
+  Core(["@byok/core<br/>zod-only composable contracts"]):::contract
+  Cloud(["@byok/cloud<br/>stateless hosted surface"]):::runtime
   Basic(["examples/basic<br/>E2E SaaS demo"]):::example
   Packaging(["examples/packaging<br/>single-file probe"]):::example
 
   Server --> Protocol
   Client --> Protocol
+  Cloud --> Core
+  Cloud --> Protocol
   Client -.->|"devDependency<br/>integration tests only"| Server
   Basic --> Server
   Packaging --> Client
@@ -130,9 +136,10 @@ flowchart LR
 | server | 16 / 4,409 | 24 / 5,494 | `ConnectionHub` 集中持有 embedded authority |
 | client | 68 / 17,535 | 90 / 20,070 | 最大模块；runtime、IPC、service、Git、transport 都在此包 |
 | keys | 18 / 2,697 | 15 / 2,934 | 独立 key-custody 安全模型 |
-| core | 21 / 3,145 | 17 / 2,360 | S2 落地的契约层；InMemory 参考实现 + composition 参数化 conformance 套件，尚无 consumer |
+| core | 21 / 3,145 | 17 / 2,360 | S2 落地的契约层；InMemory 参考实现 + composition 参数化 conformance 套件，当前唯一 consumer 是 `cloud` |
+| cloud | 31 / 2,609 | 7 / 1,519 | S3a 落地的无状态 hosted surface；device handlers + InMemory 组合，消费 `core` 与 `protocol` |
 
-统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。五个 package 的复算命令：
+统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。六个 package 的复算命令：
 
 ```bash
 SDK_SRC=packages/server/src
@@ -140,9 +147,14 @@ find "$SDK_SRC" -type f -name '*.ts' ! -name '*.test.ts' ! -name '*.spec.ts' ! -
 find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__tests__/*.ts' \) -print | sort -u
 ```
 
-对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余四个 package。
+对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余五个 package。
 
-强依赖是 `server/client → protocol`；弱依赖是 `client -dev→ server`。`keys` 与 dispatch 三包之间的零边是安全 invariant，不是尚未整理的偶然状态。`core` 的零边是隔离落地的当前事实：S2 只交付契约与 InMemory 参考，仓库内没有任何 import site，`cloud → core`、`client → core` 等边仍是 §12.1 的目标设计。
+强依赖是 `server/client → protocol` 与 `cloud → core/protocol`；弱依赖是 `client -dev→ server`。当前的依赖 invariant 清单：
+
+- `core !→ protocol`、`core !→ node`：core 必须保持 protocol-free、Node-free，由包内 constraint test 执行（ADR-003）。
+- `client/server/keys !→ core`（当前事实）：这三包尚未接线到 core，不是永久禁令，其目标边见 §12.1。
+- `cloud → core`、`cloud → protocol`（当前事实）：`packages/cloud/src/**` 真实 import 这两个包。
+- `keys` 与 dispatch 三包之间的零边是安全 invariant，不是尚未整理的偶然状态。
 
 ### 1.3 交付与非运行时表面
 
@@ -244,7 +256,10 @@ stateDiagram-v2
 
 ### 2.4 Freeze 与兼容边界
 
-- wire `v1` 已冻结；breaking shape change 必须升 major，并刻意更新 golden fixtures。
+- wire `v1` 已冻结，freeze 由两道门禁分别执行，不是一句"golden 不漂移"：
+  - **wire corpus**（`packages/protocol/src/__tests__/golden/v1.envelopes.ndjson`）byte-for-byte 冻结，任何 diff 都是回归。
+  - **schema fingerprint**（`packages/protocol/src/__tests__/golden/v1.frozen.json`）只能经显式批准的 additive amendment 更新；历史上已发生一次：`ac92acb` 加入 additive 的 `task.claim.capabilities`。
+- breaking shape change 必须升 major，不允许靠改 fingerprint 就地放行。
 - 普通 optional field、新 message type、新 `AgentEvent`、新 capability flag 可 additive 增加。
 - 例外：`PermissionPolicySchema` 与 instruction blob-ref 是 `.strict()` control/security shape；增加字段本身就是 breaking。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
@@ -909,9 +924,9 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 | GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
 | GAP-016 | Postgres + R2 的 entitlement/usage/reservation/quota/GC 尚未实现 | Pri-0（hosted storage） | S4A/S4B |
 
-## 12. 目标平台架构（`@byok/core` 已落地并隔离，`@byok/cloud` 骨架已实现，其余尚未实现）
+## 12. 目标平台架构（`@byok/core` 已落地并由 cloud 消费，`@byok/cloud` 骨架已实现，其余尚未实现）
 
-本节只复述 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定。`@byok/core`（2026-08-07 / S2 落地）状态为**已实现、隔离**；`@byok/cloud`（2026-08-07 / S3a 落地）状态为**骨架已实现**——无状态 device surface 与 InMemory 组合在，durable 归属与 board/truth 面不在。其余节点与组合均为**目标设计**。它解决当前 embedded coordinator 无法成为多租户、水平扩展、可组合 cloud service 的问题，同时保留 wire v1。
+本节只复述 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定。`@byok/core`（2026-08-07 / S2 落地）状态为**已实现、已被 cloud 接线消费**，仍未接线到 client/server/keys；`@byok/cloud`（2026-08-07 / S3a 落地）状态为**骨架已实现**——无状态 device surface 与 InMemory 组合在，durable 归属与 board/truth 面不在。其余节点与组合均为**目标设计**。它解决当前 embedded coordinator 无法成为多租户、水平扩展、可组合 cloud service 的问题，同时保留 wire v1。
 
 ### 12.1 目标 package graph
 
@@ -923,7 +938,7 @@ flowchart TB
   classDef deploy fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
   Protocol(["@byok/protocol<br/>existing, frozen v1"]):::existing
-  Core(["@byok/core<br/>implemented, isolated<br/>zod-only, protocol-free, Node-free"]):::existing
+  Core(["@byok/core<br/>implemented, consumed by cloud<br/>zod-only, protocol-free, Node-free"]):::existing
   Cloud(["@byok/cloud<br/>skeleton implemented S3a<br/>stateless device surface + in-memory composition<br/>durable journal/board/truth 仍目标设计"]):::planned
   Client(["@byok/client<br/>existing local authority"]):::existing
   Server(["@byok/server<br/>existing self-hosted option"]):::existing
@@ -942,7 +957,7 @@ flowchart TB
   Workers -.-> Cloud
 ```
 
-`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点在 S3a 后也画成实线，但它只覆盖 stateless device surface 与 InMemory 组合，durable journal/board/truth 仍是目标设计。`Cloud → Core` 与 `Cloud → Protocol` 两条边是实线：`@byok/cloud` 真实 import 这两个包。其余指向 `core` 的三条边（`client/server/keys → core`）仍是虚线——当前仓库内零 consumer，即 §0 的**已实现、隔离**；节点实线、入边虚线，正是「package 在、consumer 不在」这个状态。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点在 S3a 后也画成实线，但它只覆盖 stateless device surface 与 InMemory 组合，durable journal/board/truth 仍是目标设计。`Cloud → Core` 与 `Cloud → Protocol` 两条边是实线：`@byok/cloud` 真实 import 这两个包。其余指向 `core` 的三条边（`client/server/keys → core`）仍是虚线——这三包内当前零 import site；core 本身已由 cloud 消费，不再是零 consumer 的隔离状态。
 
 关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
@@ -965,9 +980,9 @@ core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 
 | cloud hints | device presence TTL、task activity tail + explicit dropped count | 目标设计 |
 | compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | core 侧 InMemory composition 与参数化 conformance 套件**已实现（S2）**；cloud 侧 InMemory composition（七个 tenant-first auth/task port + `TenantStores` facade）**已实现（S3a）**；其余仍是目标设计 |
 
-### 12.3 四套状态与一致性模型
+### 12.3 三套状态词汇 + 一套 truth concurrency model
 
-Wire execution state、board coordination state、presence level 与 truth record 不得复用命名：
+Wire execution state、board coordination state、presence level 是三套独立状态词汇，不得复用命名；truth record 不是第四个状态机，而是一致性/版本模型（immutable hash + rev CAS）。四者的命名与权威面都必须分开：
 
 ```mermaid
 stateDiagram-v2
@@ -993,7 +1008,7 @@ stateDiagram-v2
 
 `AwaitApproval` 是执行中暂停；`in_review` 是执行结束后人工验收。二者不能互相触发。`Running` 不得由 presence 推断；`done` 不代表某个 runtime process 仍存活。`closed` 在 final proposal 中暂取“终止未验收”，RAFT 原义仍需标为 unverified。
 
-四套词汇的 core 侧契约（board 5 态与合法转移、presence level、truth record 形状、以及三者与 wire execution 的隔离）连同 InMemory 参考实现已于 S2 落地（`@byok/core`），并由包内的 vocabulary-isolation 约束测试守住；下面各小节的 cloud SQL 组合、SSE/轮询与端点行为仍是目标设计。
+三套状态词汇与 truth record 形状的 core 侧契约（board 5 态与合法转移、presence level、truth record 的 rev/hash 形状、以及它们与 wire execution 的隔离）连同 InMemory 参考实现已于 S2 落地（`@byok/core`），并由包内的 vocabulary-isolation 约束测试守住；下面各小节的 cloud SQL 组合、SSE/轮询与端点行为仍是目标设计。
 
 #### wire execution 规则（当前已实现，此处只重申跨层约束）
 
@@ -1472,7 +1487,7 @@ R2 GC 使用 tombstone 加 reconcile：
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示 |
 | P4 | client 侧 device proof 上行 + memory manifest/selector seam（`signNonce` 的 domain separation 修复 / GAP-004 已提前随 S1 交付，不再是 P4 的待办项） |
-| P5 | `@byok/keys` 的 profile 持久化接上 core 的 `TruthStore`；挂在 K4 之后 |
+| P5 | `@byok/keys` 的 profile 持久化接上 core 的 `TruthStore`。**Deferred standalone plan，不在本 sprint program（S0-S7）内**；触发条件是 K4/K4.1 完成且 TruthStore 的 production composition 可用，两者都满足后单独立计划，不占 S 线任何 slot |
 
 K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 
@@ -1487,13 +1502,15 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll | P3 |
 | S6 | Device proof + memory | P4 |
-| S7 | Truth/keys + operations/release | P5 |
+| S7 | operations/release RC + keys dependency boundary（K4 parity 只对 Umbrella BYOK RC 生效） | 不对应 P5；P5 是独立 deferred plan |
 | 并行 | K4/K4.1 aip swap | K 线，不阻塞 P0/P1 |
+| — | P5：keys profile → `TruthStore` | Deferred standalone plan，触发条件见上表 |
 
 ```mermaid
 flowchart LR
   classDef stage fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
   classDef parallel fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
+  classDef deferred fill:#4b5563,stroke:#d1d5db,stroke-width:2px,color:#fff,stroke-dasharray:5 5
 
   S0(["S0 缺口收口"]):::stage
   S1(["S1 Tenant cut / T0"]):::stage
@@ -1502,12 +1519,22 @@ flowchart LR
   S4(["S4 Postgres + R2 + quota / P2"]):::stage
   S5(["S5 board + presence / P3"]):::stage
   S6(["S6 device proof + memory / P4"]):::stage
-  S7(["S7 truth/keys + release / P5"]):::stage
+  S7(["S7 operations / release"]):::stage
   K4(["K4/K4.1 aip swap"]):::parallel
+  P5(["P5 keys profile → TruthStore<br/>deferred standalone plan"]):::deferred
 
   S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
-  K4 -.-> S7
+  K4 -.->|"umbrella RC parity only"| S7
+  K4 -.->|"trigger"| P5
+  S4 -.->|"TruthStore production composition"| P5
 ```
+
+两个 RC profile 分开定义，避免用一条 release gate 绑死两条互不相干的线：
+
+| RC profile | 范围 | 门禁 |
+| --- | --- | --- |
+| Dispatch Platform RC | `protocol` + `server` + `client` + `cloud` + `core` 的 hosted/self-hosted dispatch 面 | S7 的 operations/release 项；**不被 K4 阻塞**，keys 线的状态不进入这条 RC 的准出 |
+| Umbrella BYOK RC | 上面全部 + `@byok/keys` 一起以单一 BYOK 套件发布 | 追加要求 K4 golden parity 通过；K4/K4.1 未闭环时只能发 Dispatch Platform RC |
 
 排序原则：
 
@@ -1618,7 +1645,7 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 
 ### 14.4 必须保持的不变量
 
-1. protocol golden fixtures 不漂移；breaking change 必须显式升版。
+1. protocol freeze 走双门禁：wire corpus（`v1.envelopes.ndjson`）byte-for-byte 冻结；schema fingerprint（`v1.frozen.json`）只能经显式批准的 additive amendment 更新（历史上一次：`ac92acb`，additive `task.claim.capabilities`）。breaking shape 必须升 major。
 2. `keys` 与 dispatch/platform dependency graph 保持所规定的零边。
 3. unknown observability 可忽略；unknown control/security fail-closed。
 4. device/server/task ownership 每次 crossing 都验证，不靠调用者自律。

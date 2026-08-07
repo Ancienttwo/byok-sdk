@@ -1,15 +1,40 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
-> **Status**: Draft
-> **状态**：Draft（提案状态，尚未 Approved、未进入 Executing）/ Ready for contract projection
+> **Status**: Executing
+> **状态**：Executing。S0–S3b 已交付并合入 `main`，S4A 起为剩余 backlog（见 `## Backlog`）
 > **创建日期**：2026-08-07
-> **仓库基线**：`Ancienttwo/byok-sdk@ff2a5d4`
+> **最后修订**：2026-08-08（见 D-8）
+> **仓库基线**：`Ancienttwo/byok-sdk@880e69f`（2026-08-08）
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）
+> **下一可执行 slice**：**S4A**。正式投影前置：R2 hash authority 为待做决策，须先形成 ADR（`docs/researches/s4a-dataplane-design.md` 尚未覆盖该决策），未定稿前不得开 S4A contract
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
-> **当前 workflow**：**非 Idle**。active plan 是 `plans/plan-20260805-1659-byok-keys-package.md`（Status: Executing），K0–K3 已完成，K4/K4.1 未完成。本 sprint 方案进入 Executing 前，必须先与该 active plan 的 worktree/allowed_paths 协调，不得在其收口前抢占同一 active contract 槽位
+> **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
 > **既有 K 线**：K0–K3 已完成；K4/K4.1 仍待执行，并作为独立跨仓库轨道继续
 > **计划跨度**：S0–S7，共 8 个 delivery Sprint（S4 拆为 S4A/S4B）；不含跨团队等待时间
 > **执行原则**：验收条件固定，日历可压缩或延长；不得通过减少安全/恢复测试来“按期完成”。本文件不含工期、人力或 story point 估算——排序只表达相对复杂度与依赖，不表达容量承诺
+
+---
+
+## PRD
+
+把 BYOK SDK 从「单机 keys 工具 + 原型 dispatch runtime」推进为 RAFT 对齐的多租户平台：结构化 tenant identity、`@byok/core` 契约与 conformance 套件、hosted mailbox 与本地 durable journal、Postgres + R2 数据面与配额、board/presence/SSE、device proof 与 truth write，最后收口 keys 边界与 release candidate。产品真相以 `docs/spec.md` 与 `ARCHITECTURE-PROPOSAL-byok-platform.md` 为准，本 sprint 只负责把它切成可投影、可验收的 delivery slice。
+
+范围内：S0–S7 八个 delivery Sprint（S3 拆 S3a/S3b，S4 拆 S4A/S4B）。范围外：K4/K4.1 的跨仓库回接（独立轨道，见 `## Parallel Track K4/K4.1`）、post-RC 的 credential proxy 与 D1 optional adapter。
+
+---
+
+## Backlog
+
+| # | Status | Task | Mode | Acceptance | Plan |
+| --- | --- | --- | --- | --- | --- |
+| 1 | [ ] | S4A — Postgres + R2 数据面与共用 conformance 套件 | contract | §S4A 全部验收项通过，且 `pnpm -r run typecheck/test/build` 全绿 | `plans/plan-20260808-0046-s4a-a-dataplane-foundations.md` |
+| 2 | [ ] | S4B — Quota、Reservation 与 cloud cleanup | contract | §S4B 全部验收项通过，配额拒写与 GC/tombstone 有回归测试 | 待投影 |
+| 3 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | 待投影 |
+| 4 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
+| 5 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
+
+已交付并合入 `main` 的 S0、S1、S2、S3a、S3b 不再列入 backlog，其 merge SHA 见文首交付清单。
 
 ---
 
@@ -21,7 +46,7 @@
 | --- | --- | --- | --- |
 | S0 | 不在 P 线 | — | 当前 runtime 已知缺口收口（capability honesty、task-level steer、`workspaceHint`）。P0–P5 是平台演进阶段，不覆盖既有 runtime 诚实性修复，故 S0 是 P 线之外的前置收口 |
 | S1 | 提前吸收 P4（`:697`）的 `signNonce` domain separation，见下节 | **T0**（`:251`） | 租户 breaking cut。§9.2 的 T0 行（`:690`）标注“即刻可做，先于 P 线任何资料落库” |
-| S2 | **P0**（`:692`） | **T1**（`:252`） | `@byok/core` 契约包：零实现、不改既有包、tenant-first port 签名 |
+| S2 | **P0**（`:692`） | **T1**（`:252`） | `@byok/core` 契约包：零 production adapter；包含 reference-only InMemory implementation 与 conformance harness、不改既有包、tenant-first port 签名 |
 | S3 | **P1**（`:694`） | **T2**（`:253`） | `@byok/cloud` 无状态 handler + mailbox + durable local journal 端到端 |
 | S4A / S4B | **P2**（`:695`） | **T3**（`:254`） | Postgres + R2 composition 与 `deploy/sql/` migration。S4A 落数据面 + conformance 套件，S4B 落 quota/reservation/GC（见 D-3） |
 | S5 | **P3**（`:696`） | **T4**（`:255`） | board 5 态 + claim/`expectedStatus` CAS + `board_seq` + SSE/轮询 + 两级提示 |
@@ -79,7 +104,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 
 - **原决策**：S4A.2 末段「storage/quota 相关 schema 属 S4B（见 S4B.2）」；`docs/architecture/sdk-architecture.md` §12.7.6 把 `storage_entitlement`/`storage_usage`/`storage_reservation` 等表列为 S4B 范畴。**该记录保留**；本条是它的后继裁定。
 - **触发事实**：core conformance 套件的 port-inventory 断言（`packages/core/src/__tests__/conformance/port-inventory.ts`）要求 composition 一次供齐全部七个 core port——含 `QuotaStore`，缺一个则整套一条断言都跑不了；而 S4A.5 同时要求「InMemory 与 Postgres + R2 两个 composition 跑同一份 domain/object contract suite」。两条同时成立时，Postgres composition 必须携带真实的 `QuotaStore` 实现。「S4A 只跑套件子集」被否决：那是给 conformance 开子集豁免口子，作废 no-silent-downgrade。
-- **改动**：`storage_entitlement`/`storage_usage`/`storage_reservation` 三表与 `QuotaStore` 的 Postgres 实现落 S4A（随 S4A-b 刀，见 D-7）；S4B 保留 enforcement 语义、control-plane 同步、reservation-bound presign、GC/tombstone、dead-letter 的**增量** schema 与行为。另记一笔：S4A.2 的十二表是「Schema minimum」，实作按 O-003 与 `core.objects` 的落地需要补 `board_item`、`object_manifest`、`object_reference`——字面允许的补充，在此显式记账。
+- **改动**：`storage_entitlement`/`storage_usage`/`storage_reservation` 三表与 `QuotaStore` 的 Postgres 实现落 S4A（随 S4A-b 刀，见 D-7）；S4B 保留 enforcement 语义、control-plane 同步、reservation-bound presign、GC/tombstone、dead-letter 的**增量** schema 与行为。另记一笔：S4A.2 的十二表是「Schema minimum」，实作按 O-003 与 `core.objects` 的落地需要补 `board_item`、`object_manifest`、`object_reference`——字面允许的补充，在此显式记账。**`object_manifest` 与 `object_reference` 已按 D-8 正式落入 S4A.2 表列，并从 S4B.2 移除；本脚注保留为来源记录。**
 - **理由**：套件的全有全无是机检事实，不是排期偏好；把 quota 表拖到 S4B 的唯一途径是削弱套件本身。
 - **影响**：S4B.2 的对应表列改读为对 S4A schema 的增量；S4A 的验收含 quota conformance 维度在两个 composition 上全绿（reserve/finalize/abort/expire 的存储语义，不含 S4B 的 enforcement 面）。
 
@@ -89,6 +114,14 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」切三刀。**S4A-a**：`docker-compose.test.yml`（postgres + minio）测试基建、`@byok/conformance` 私有包定型（core 维度平移 + `runCloudConformance` 新增、`CORE_PORT_*`/`CLOUD_PORT_*` 上移进 shipped source）、`@byok/cloud-postgres` 包骨架（`pg` Pool + int8 parser + 手写 ordered migrate runner）、`deploy/sql/0001` 与 cloud-local ports 的 Postgres 实现（`rateLimiter` 留 in-memory 不建表）、CI dataplane job（`BYOK_REQUIRE_DATAPLANE=1`）与钉住该 job 的 constraint 测试。**S4A-b**：`deploy/sql/0002`（core domain 表，含 D-6 的 quota 三表）、core 七 port 的 Postgres 实现、`runCoreConformance` 跑 Postgres composition、I4 SQL 侧 = 行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言（UNIQUE 首列必须 `tenant_id`，白名单仅 `device.device_id` 与 `pairing_code.code`）、mailbox retention runbook。**S4A-c**：capability 由 `blobs.presigned` 裂出 `blobs.contentProxy`、`CloudStores.blobs` 收窄为 `{createUpload, getDownloadUrl}`（content-proxy 三方法移出为可选 composition 输入）、`aws4fetch` R2 adapter（presign PUT/GET + HEAD 复核 + tenant-scoped key）、S4A.4 九项 object tests（MinIO 为独立 SigV4 验证方）、`deploy/env`/`runbooks`/`scripts` 实装。
 - **理由**：core 七 port 无法再分——port-inventory 全有全无，分刀没有中间绿态，这决定了 b 刀的边界；机制刀（测试基建 + 套件形态 + 包骨架）与实现刀合并会得到审查者无法分辨「机制错了」还是「实现错了」的单个巨型 PR；c 刀的 capability 拆分与 R2 adapter 是同一个设计决策的两面，再拆会留下「capability 已裂但无实现使用」的中间态。
 - **影响**：S4A.5 分三批验收——a 收 migrations order check、fresh install + migrate-up、cloud conformance 两 composition 绿；b 收 core conformance 两 composition 绿、I4 SQL 侧、catalog 断言、retention documented；c 收九项 object tests、`deploy/` 非 `.gitkeep`、`check:deploy-sql` 实质化、secrets sample 无真实凭据。三刀各自可独立回滚（compose 文件与新包纯附加；migrations forward-only；capability 拆分回退 = 恢复五方法端口）。
+
+### D-8：按外部 review 验收裁定修订本文件（2026-08-08）
+
+- **触发事实**：外部 review `tasks/reviews/byok-document-review-20260807.md` 验收通过，其裁定项要求本文件与已交付状态对齐。
+- **改动**：状态收口（Draft → Partially Executed，补 S0–S3b 的 merge SHA、基线改 `880e69f`、workflow 状态改由 `tasks/current.md` 唯一维护）、protocol golden 改为 wire corpus / schema fingerprint 双门禁表述（消除与 `ac92acb` 那次已批准 additive amendment 的字面矛盾）、critical path 与 alpha 闸反映 D-5 的 S3a/S3b 拆刀与实际 artifact slug、`object_manifest`/`object_reference` 由 S4B 前移入 S4A.2、S6 依赖补 S4B 并声明无 reservation 时 production truth write 默认关闭、RC 拆为 Dispatch Platform RC 与 Umbrella BYOK RC 两个 profile、§10 的 S0 contract outline 替换为 S4A outline。
+- **理由**：已完成 Sprint 的验收字面与历史事实矛盾会让后续 Sprint 的 gate 失去可执行含义；文件里的 S3 单节点与 S0 outline 是已被执行事实作废的残留。
+- **影响**：已勾选的历史验收条目不改勾选状态，只改与事实矛盾的措辞；S4A 投影前置为 R2 hash authority 决策形成 ADR。
+- **后续修订（同日）**：harness 的 sprint Status 词表只接受 Draft/Approved/Executing/Done/Archived，故状态由 `Partially Executed` 改为 `Executing`，并补 `## PRD` 与 `## Backlog` 两段；「部分执行」的语义由文首的已完成 Sprint + merge SHA 交付清单承载，剩余切片由 `## Backlog` 表承载。同时把三处手工 active plan 状态快照改为引用 `tasks/current.md`，并把 R2 hash authority 的措辞更正为「待做决策，须先形成 ADR」——`docs/researches/s4a-dataplane-design.md` 并未包含该裁定。
 
 ---
 
@@ -145,7 +178,8 @@ flowchart LR
   S0["S0 Current hardening"]
   S1["S1 Tenant cut"]
   S2["S2 Core contracts"]
-  S3["S3 Cloud mailbox + journal"]
+  S3a["S3a Cloud mailbox skeleton (done)"]
+  S3b["S3b SQLite local journal (done)"]
   S4A["S4A Postgres + R2 data plane"]
   S4B["S4B Quota / reservation / GC"]
   S5["S5 Board + hints"]
@@ -155,10 +189,12 @@ flowchart LR
 
   S0 --> S1
   S1 --> S2
-  S2 --> S3
-  S3 --> S4A
+  S2 --> S3a
+  S3a --> S3b
+  S3b --> S4A
   S4A --> S4B
   S4A --> S5
+  S4B --> S6
   S5 --> S6
   S6 --> S7
   S4B --> S7
@@ -186,13 +222,13 @@ S4B 不在 S5 的实现关键路径上：S5 只依赖 S4A 建立的 Postgres 语
 
 - [ ] 架构章节和 ADR 已存在；
 - [ ] active plan、contract、review、notes 已建立；
-- [ ] `allowed_paths` 明确，不与其他 active worktree 冲突（当前 K 线 active plan 未收口，尤其适用）；
+- [ ] `allowed_paths` 明确，不与其他 active worktree 冲突（K 线 plan 状态以 `tasks/current.md` 为准，未收口时尤其适用）；
 - [ ] public API / schema / migration impact 已列出；
 - [ ] rollback surface 已列出；
 - [ ] dependency owner 已确认；
 - [ ] security boundary 已标注；
 - [ ] happy path、negative path、crash path测试清单已写；
-- [ ] protocol golden 是否允许变化有明确答案；本 program 默认“不允许”；
+- [ ] protocol golden 的**双门禁**答案明确：wire corpus（`v1.envelopes.ndjson`）永远 byte-for-byte 冻结，任何 diff 都是失败；schema fingerprint（`v1.frozen.json`）默认不动，只能经显式批准的 additive amendment 更新，更新后新内容成为 baseline；`PROTOCOL_VERSION` 仍为 1，breaking shape 必须升 major；
 - [ ] store/conformance fixture 可运行；
 - [ ] external service 可由 fake/in-memory composition 替代；
 - [ ] 未决产品问题不会在实现中临时猜答案。
@@ -211,6 +247,12 @@ repo-harness run check-task-workflow --strict
 git diff --check
 git diff --exit-code packages/protocol/src/__tests__/golden/
 ```
+
+> **golden 双门禁**：上面这条 `git diff --exit-code` 是默认态，它覆盖的两个文件强度不同——
+>
+> - **Wire corpus gate**：`v1.envelopes.ndjson` 永远 byte-for-byte 冻结，任何 diff 都是失败，没有批准路径；
+> - **Schema fingerprint gate**：`v1.frozen.json` 只能经显式批准的 additive amendment 更新，更新后的新内容成为后续 baseline。历史上已发生一次：`ac92acb`（additive `task.claim.capabilities`，见 D-4）；
+> - `PROTOCOL_VERSION` 仍为 1；任何 breaking shape 必须升 major，不走 amendment 路径。
 
 按改动追加：
 
@@ -301,7 +343,7 @@ repo-harness run verify-contract --contract <contract> --strict
 - [x] 伪造 unsupported steer 到 client 不会卡住 cursor；
 - [x] reconnect 后同一 envelope 不重复造成第二次 side effect；
 - [x] `workspaceHint` 文档与 public API 不再声称未实现功能；
-- [x] protocol golden 零变化；
+- [x] protocol golden 双门禁通过：wire corpus 零变化；schema fingerprint 无未批准变更（本 Sprint 的一次 additive amendment 已按 D-4 显式批准，commit `ac92acb`）；
 - [x] 全仓 build/typecheck/test 通过；
 - [x] architecture Mermaid 全部可渲染；
 - [x] review 明确无 credential-isolation 变化。
@@ -390,7 +432,7 @@ interface AuthenticatedDevice {
 - revoked device -> challenge/token/connect reject；
 - raw nonce signature no longer accepted；
 - domain-prefixed signature accepted；
-- golden unchanged；
+- wire corpus 零变化，schema fingerprint 无未批准变更；
 - error response不区分 unknown/wrong tenant/revoked。
 
 ### S1.4 Acceptance criteria
@@ -670,7 +712,14 @@ Domain / reliability：
 - `device_presence`
 - `activity_tail`
 
-所有 domain table 使用 tenant-prefixed composite keys；nonce/presigned capability 即使随机，也在 row 内保存 tenant。R2 key 使用 `tenants/<tenantId>/objects/sha256/<hash>`，不做跨租户 dedupe。storage/quota 相关 schema 属 S4B（见 S4B.2）——**该行按 D-6 后继裁定解读：quota 三表与 `QuotaStore` 实现已提前入 S4A，S4B 只拥有增量**。
+Object 基本真相（按 D-8 从 S4B 前移）：
+
+- `object_manifest`
+- `object_reference`
+
+`object_manifest` 是「对象是否真实存在并已提交」的唯一事务性真相源（`state` 至少含 `reserved` / `committed` / `tombstoned`），`object_reference` 记录 truth/memory 侧对某个 committed object 的引用。二者属于数据面基本真相，不是容量控制——数据面能写 truth 的那一刻就必须有它们，否则 truth 可以引用一个不存在的对象。
+
+所有 domain table 使用 tenant-prefixed composite keys；nonce/presigned capability 即使随机，也在 row 内保存 tenant。R2 key 使用 `tenants/<tenantId>/objects/sha256/<hash>`，不做跨租户 dedupe。storage/quota 相关 schema 属 S4B（见 S4B.2）——**该行按 D-6 与 D-8 后继裁定解读：quota 三表与 `QuotaStore` 实现、以及 `object_manifest`/`object_reference` 均已提前入 S4A，S4B 只拥有增量**。
 
 ### S4A.3 Conformance dimensions（套件定义）
 
@@ -694,7 +743,7 @@ Domain / reliability：
 - size/hash/content type mismatch reject；
 - tenant/resource-bound presign；
 - expired presign；
-- object exists before truth reference；
+- object exists before truth reference——由 `object_manifest.state = committed` 的事务性检查支撑，与 truth 写入同一事务判定，不靠 R2 HEAD 探测；
 - range/large response limits；
 - no key/path traversal；
 - cross-tenant hash 不产生 existence oracle；
@@ -749,10 +798,10 @@ Storage / quota：
 - `storage_entitlement`
 - `storage_usage`
 - `storage_reservation`
-- `object_manifest`
-- `object_reference`
 - `tenant_retention_policy`
 - `cleanup_job` / `gc_cursor`
+
+`object_manifest` 与 `object_reference` 已按 D-8 前移到 S4A.2；S4B 只在其上增列 tombstone/GC 所需的增量字段与索引。**S4B 是容量控制增强，不补数据面基本真相表**——真相表在 S4A 就必须齐备，S4B 负责的是配额、预留、保留期与清理。
 
 ### S4B.3 Entitlement 与计量契约
 
@@ -898,9 +947,10 @@ Board routes can be disabled via capability/config while preserving rows. Do not
 
 > **目标**：为上行事实建立 body-bound device provenance，并提供云端不做语义推导的 memory 读写。
 > **风险等级**：很高；签名格式一旦发布即难改
-> **依赖**：S5 + S1 nonce domain separation（D-1 提前项）+ S2 canonicalizer
+> **依赖**：S5 + **S4B**（production truth/object write 必须走 reservation）+ S1 nonce domain separation（D-1 提前项）+ S2 canonicalizer
 > **对应**：P4（`ARCHITECTURE-PROPOSAL:697`），扣除已在 S1 完成的 `signNonce` domain separation
 > **入口闸**：独立 security review；I3 在本 Sprint 补齐（S3 延后项，见 D-2）
+> **生产约束**：production proof/truth write capability 在没有 reservation 的 composition 上**默认关闭**——签名过的 truth 写入会持久占用 object bytes，缺 reservation 就等于绕过配额，只允许在测试 composition 上打开
 
 ### S6.1 Stories
 
@@ -1024,7 +1074,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | O-015 | load/reconnect/retention tests | 中 |
 | O-016 | RC security/audit review | 低 |
 
-> `@byok/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于已封口的 K 线 active plan，不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok/core` TruthStore 落地。
+> `@byok/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于 K 线 plan（状态以 `tasks/current.md` 为准），不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok/core` TruthStore 落地。
 
 ### S7.2 Keys integration boundary
 
@@ -1091,7 +1141,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 - [ ] production migration/runbook pass；
 - [ ] support bundle redaction review；
 - [ ] packageability/service smoke on macOS/Linux/Windows；
-- [ ] protocol golden unchanged；
+- [ ] protocol golden 双门禁通过：wire corpus 零变化；schema fingerprint 自 `ac92acb` 之后无未批准变更；
 - [ ] changelog explains self-hosted/hosted semantic differences；
 - [ ] architecture status updated to CURRENT/TARGET accurately。
 
@@ -1108,7 +1158,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 
 ## Parallel Track K4/K4.1 — `@byok/keys` 回接 aip-main-open
 
-> **不纳入 S0–S6 critical path。** 它属于当前 active plan `plans/plan-20260805-1659-byok-keys-package.md`（Executing）的未完成任务，本 sprint 不重新定义其范围，只记录依赖：S7 的 keys 边界验收依赖其结果；`tasks/todos.md` 中移出的 P5 项也以其收口为触发条件。
+> **不纳入 S0–S6 critical path。** 它属于 K 线 plan `plans/plan-20260805-1659-byok-keys-package.md` 的未完成任务（该 plan 的状态以 `tasks/current.md` 为准），本 sprint 不重新定义其范围，只记录依赖：S7 的 keys 边界验收依赖其结果；`tasks/todos.md` 中移出的 P5 项也以其收口为触发条件。
 
 ### K4.1 Tasks
 
@@ -1246,18 +1296,23 @@ tasks/notes/20260807-<time>-s0-runtime-hardening.notes.md
 
 - `s1-tenant-identity-cut`
 - `s2-byok-core-contracts`
-- `s3-cloud-mailbox-local-journal`
+- `s3a-cloud-mailbox`
+- `s3b-local-journal`
 - `s4a-postgres-r2-data-plane`
 - `s4b-storage-quota-cleanup`
 - `s5-board-presence-stream`
 - `s6-device-proof-memory`
 - `s7-keys-boundary-operations`
 
-一个 worktree 同时只执行一个 active contract。当前 active plan 是 K 线（Executing），本 sprint 的任一 Sprint 投影前必须先确认不与其争抢 active contract 槽位；K4 使用独立 repo/worktree，不把跨仓库 allowed paths 塞进本仓库 contract。
+一个 worktree 同时只执行一个 active contract。workflow 状态以 `tasks/current.md` 为准，本文件不维护 active plan 快照；本 sprint 的任一 Sprint 投影前必须先按 `tasks/current.md` 确认不与在执行的 plan 争抢 active contract 槽位。K4 使用独立 repo/worktree，不把跨仓库 allowed paths 塞进本仓库 contract。
 
 ---
 
-## 10. Sprint S0 可立即投影的 Contract Outline
+## 10. Sprint S4A 可投影的 Contract Outline
+
+> **投影前置**：**R2 hash authority 为待做决策，须先形成 ADR**（`docs/researches/s4a-dataplane-design.md` 尚未覆盖该决策）。该决策决定 object 的 hash/size 由谁认定为权威（daemon 声明 vs. R2 HEAD 复核 vs. 二者交叉校验），它同时决定 `object_manifest` 的状态机与 S4A.4 九项 object tests 的断言形状。ADR 未定稿前不得开 S4A contract——否则 schema 一旦发布即难改。
+>
+> S4A 按 D-7 切三刀（S4A-a 机制与 cloud ports / S4A-b core 七 port + I4 SQL 侧 / S4A-c R2 adapter + deploy）。下列 outline 是整个 S4A 的合并面，投影时按刀次收窄 `allowed_paths`。
 
 ### Allowed paths
 
@@ -1265,12 +1320,20 @@ tasks/notes/20260807-<time>-s0-runtime-hardening.notes.md
 
 ```yaml
 allowed_paths:
+  - packages/core/src/**
+  - packages/cloud/src/**
+  - packages/cloud-postgres/**
+  - packages/conformance/**
+  - deploy/sql/**
+  - deploy/env/**
+  - docker-compose.test.yml
+  - tests/sql/**
+  - scripts/**
+  - runbooks/**
+  - .github/workflows/**
   - docs/architecture/sdk-architecture.md
+  - docs/researches/s4a-dataplane-design.md
   - plans/sprints/20260807-byok-platform-raft-aligned.sprint.md
-  - packages/client/src/**
-  - packages/server/src/**
-  - docs/protocol.md
-  - docs/security.md
   - tasks/**
   - plans/**
 ```
@@ -1281,27 +1344,31 @@ allowed_paths:
 forbidden_paths:
   - packages/keys/**
   - packages/protocol/src/__tests__/golden/**
-  - deploy/**
+  - packages/client/src/**
+  - packages/server/src/**
 ```
 
-`packages/keys/**` 的禁止在当前尤其重要：K 线 active plan 仍在 Executing，S0 contract 不得触及其 allowed paths。
+`packages/client/**` 与 `packages/server/**` 的禁止是 S4A 的证明点：数据面换成 Postgres + R2 后，既有 daemon 与 self-hosted server 的生产代码必须零改动仍然跑通；一旦需要改它们，说明 composition 边界漏了。
 
 若实现需要改 `packages/protocol` 非 golden 文件，先在 plan 中明确 additive capability 方案；不能用临时 widening 绕过 review。
 
-### S0 exit criteria skeleton
+### S4A exit criteria skeleton
 
 ```yaml
 exit_criteria:
   - command: pnpm -r run typecheck
   - command: pnpm -r run test
   - command: pnpm -r run build
+  - command: pnpm run check:deploy-sql
   - command: git diff --exit-code packages/protocol/src/__tests__/golden/
   - command: repo-harness run check-task-workflow --strict
-  - behavior: Claude confirm is reported as interactive
-  - behavior: Pi steer succeeds
-  - behavior: Claude/Codex steer is rejected before envelope delivery
-  - behavior: unsupported inbound steer cannot stall cursor
-  - documentation: workspaceHint status is unambiguous
+  - behavior: migrations pass the ordered-file check and a fresh install migrates up clean
+  - behavior: InMemory and Postgres + R2 compositions run the same core/cloud conformance suite with zero assertion changes
+  - behavior: object_manifest and object_reference migrations land in S4A and carry tenant-prefixed composite keys
+  - behavior: truth reference to an object is rejected unless object_manifest.state = committed in the same transaction
+  - behavior: I4 SQL side passes, including the catalog assertion that every UNIQUE index leads with tenant_id
+  - behavior: wire corpus v1.envelopes.ndjson stays byte-for-byte frozen and v1.frozen.json carries no unapproved change
+  - documentation: mailbox retention behavior and Postgres rollback strategy are written down
 ```
 
 ---
@@ -1327,7 +1394,7 @@ exit_criteria:
 
 ## 12. Program Release Gates
 
-### Alpha（S3 完成）
+### Alpha（S3a + S3b 完成）
 
 **S3 已完成（S3a 2026-08-07 + S3b 2026-08-08），下列五项条件均已齐备。**
 
@@ -1335,7 +1402,7 @@ exit_criteria:
 - SQLite local journal crash + disk-pressure matrix；
 - structural tenant identity；
 - capability honesty；
-- protocol golden unchanged。
+- protocol golden 双门禁通过：wire corpus 零变化，schema fingerprint 无未批准变更。
 
 ### Beta（S5 完成）
 
@@ -1347,19 +1414,33 @@ exit_criteria:
 - presence/activity；
 - multi-tenant route matrix。
 
-### Release Candidate（S7 完成）
+### Release Candidate（两个 profile）
+
+RC 拆成两个互相独立的 profile。拆分的理由是阻塞源不同：dispatch platform 的阻塞源全在本仓库的 S3b–S6 与 operations 面，而 K4/K4.1 是跨仓库轨道（`aip-main-open`），把它压进同一个 RC 会让本仓库的发布被一个自己控制不了的依赖卡住。
+
+#### Dispatch Platform RC（S3b–S6 + operations gates）
+
+**不被 K4 阻塞。** 要求：
 
 - device proof；
 - immutable truth/memory CAS；
 - quota/usage reconciler 与 no-destructive-cleanup audit；
-- keys 边界不变式；
 - deterministic jitter；
 - doctor/quarantine；
 - cross-platform packaging/service；
 - security/audit review；
 - production runbooks；
-- K4 golden parity；
 - no Pri-0/Pri-1 unresolved defects。
+
+#### Umbrella BYOK RC
+
+在 Dispatch Platform RC 全部条件之上，额外要求：
+
+- K4/K4.1 完成；
+- keys golden parity（`aip` 侧 golden test 不改期望值即通过）；
+- keys 边界不变式（依赖图检查，见 S7.2）。
+
+S7.4 的 RC gate 清单同时服务两个 profile：其中 `K4 golden test in aip passes unchanged` 只属于 Umbrella BYOK RC，其余条目属于 Dispatch Platform RC。
 
 ---
 
@@ -1384,7 +1465,7 @@ Program 完成时，必须可以演示：
 15. fleet reconnect 不形成同步峰值；
 16. corrupt local state 被 quarantine；
 17. release binary 的来源真实性不依赖同源 hash；
-18. protocol v1 golden byte-for-byte 未变；
+18. protocol v1 wire corpus（`v1.envelopes.ndjson`）byte-for-byte 未变，schema fingerprint（`v1.frozen.json`）只有显式批准的 additive amendment；
 19. 架构文档对 CURRENT/TARGET/DEFERRED 的描述与代码一致；
 20. 每个高风险行为都有独立 review、evidence 和 rollback；
 21. 本地积压在配置的 storage policy 下保持有界，且不删除 protected/recovery data；
