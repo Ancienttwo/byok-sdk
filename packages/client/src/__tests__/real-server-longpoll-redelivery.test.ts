@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { SteerUnsupportedError } from '../types';
 import { startRealServerWithoutWebSocket, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -123,5 +124,86 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
     session.emit({ type: 'turn_end' });
     const result = await handle.result();
     expect(result.state).toBe('Complete');
+  }, 15000);
+
+  /**
+   * S0/H-006, the other half of the same classification: a `SteerUnsupportedError`
+   * is NOT a transient handler failure — the runtime has no steering channel at
+   * all, so every redelivery of that envelope is guaranteed to fail identically
+   * and would freeze the cursor (and every later envelope behind it) forever.
+   * `TaskRunner.handleSteer` therefore records it and returns normally, which
+   * acks the envelope: the cursor advances past the steer's seq and the daemon
+   * never calls `session.steer` for it a second time.
+   */
+  it('a polled task.steer whose handler throws SteerUnsupportedError is recorded and acked: the cursor advances and it is never redelivered', async () => {
+    real = await startRealServerWithoutWebSocket({ productId: 'test-product', longPollHoldMs: 200 });
+
+    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
+    const storeDir = await tmpDir('byok-e2e-store-');
+    const adapter = new StubRuntimeAdapter();
+
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      [adapter],
+      {
+        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
+        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+      },
+    );
+
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const pairing = real.byok.pairing.createPairingCode();
+      const record = await daemon.pair(pairing.code);
+      await daemon.start();
+
+      await vi.waitFor(() => {
+        expect(real.byok.machines.list().find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+      });
+
+      const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
+      await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      const session = adapter.sessions[0]!;
+
+      const cursorStore = new CursorStore(storeDir);
+      let baseline: number | undefined;
+      await vi.waitFor(async () => {
+        baseline = await cursorStore.load(real.url, record.deviceId);
+        expect(baseline).toBeTypeOf('number');
+      });
+
+      // Persistent (never auto-clearing) so a redelivery would fail again —
+      // exactly the infinite loop the classification exists to prevent.
+      session.steerErrorPersistent = new SteerUnsupportedError('stub', 'stub runtime cannot steer');
+
+      await handle.steer('impossible steer');
+
+      // The envelope is acked despite the throw: the cursor moves past its seq.
+      await vi.waitFor(async () => {
+        const persisted = await cursorStore.load(real.url, record.deviceId);
+        expect(persisted).toBeGreaterThan(baseline ?? 0);
+      });
+
+      expect(session.steerAttempts).toBe(1);
+      expect(session.steerCalls).toEqual([]); // it threw before recording the call
+
+      // Give the long-poll loop several more cycles: a redelivery would show up
+      // as a second attempt (and a second side effect) — it must not.
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(session.steerAttempts).toBe(1);
+
+      expect(
+        errors.mock.calls.some(
+          (call) => typeof call[0] === 'string' && call[0].includes('no steering channel') && call[0].includes('stub'),
+        ),
+      ).toBe(true);
+
+      session.emit({ type: 'turn_end' });
+      const result = await handle.result();
+      expect(result.state).toBe('Complete');
+    } finally {
+      errors.mockRestore();
+    }
   }, 15000);
 });

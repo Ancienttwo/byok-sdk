@@ -13,7 +13,7 @@ import {
   type RuntimeId,
   type TaskOfferPayload,
 } from '@byok/protocol';
-import { PolicyUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
+import { PolicyUnsupportedError, SteerUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
@@ -1654,10 +1654,41 @@ export class TaskRunner {
     );
   }
 
+  /**
+   * S0/H-006: an inbound `task.steer` is normally impossible for a runtime
+   * that cannot steer — the hub gates it at claim-time capability
+   * (`steer_unsupported_runtime`) and never sends the envelope. If one
+   * arrives anyway (a forged sender, a pre-gate server, a device whose
+   * adapter set changed), the session throws {@link SteerUnsupportedError},
+   * which is a PERMANENT property of that runtime, not a transient failure.
+   *
+   * Rethrowing it would hand it to `ConnectionManager.process()`
+   * (`connection-manager.ts` `stalledAtSeq`), which freezes the cursor at
+   * that seq and redelivers the same envelope forever — every retry
+   * guaranteed to fail identically, and every later envelope for every
+   * other task blocked behind it. So this is classified as a
+   * non-retryable protocol/authority error: record it and return normally,
+   * which acks the envelope and lets the cursor advance. Nothing is
+   * swallowed — the steer simply has no reachable success state, and the
+   * honest terminal action is to log it and move on.
+   *
+   * Every OTHER error stays transient and is rethrown untouched, preserving
+   * the existing stall/redelivery semantics exactly.
+   */
   private async handleSteer(taskId: string, text: string): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
-    await active.session.steer(text);
+    try {
+      await active.session.steer(text);
+    } catch (err) {
+      if (err instanceof SteerUnsupportedError) {
+        console.error(
+          `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`,
+        );
+        return;
+      }
+      throw err;
+    }
   }
 
   /**
