@@ -1,6 +1,6 @@
 # Plan: Close out the root architecture queue card
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260807-1144
 > **Slug**: architecture-root-card-closeout
 > **Artifact Level**: work-package

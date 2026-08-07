@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 13:14
+> **Related Plan**: plans/archive/plan-20260807-1144-architecture-root-card-closeout.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260807-1314
+
 # Implementation Notes: architecture-root-card-closeout
 
 > **Status**: Active
