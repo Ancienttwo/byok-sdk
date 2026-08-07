@@ -1,6 +1,6 @@
 # Plan: Merge GPT Pro Architecture Increments
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260807-0931
 > **Slug**: architecture-merge-gpt-pro
 > **Artifact Level**: work-package

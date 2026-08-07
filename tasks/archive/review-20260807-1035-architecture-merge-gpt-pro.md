@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 10:35
+> **Related Plan**: plans/archive/plan-20260807-0931-architecture-merge-gpt-pro.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260807-1035
+
 # Task Review: architecture-merge-gpt-pro
 
 > **Status**: Fulfilled
@@ -63,18 +69,18 @@ Every merged §12-§15 block carries an explicit 目标设计 marker in its head
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: pending
+> **Disposition**: external_pass
 > **Reviewer**: Claude
 > **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 86c2f220682ea9cb64782844832200443c325b40
+> **Verification Evidence SHA256**: sha256:c9da5a89e38f2a4344f9cbe03bb2b549c1aca2c2cba9ee7066e8b466e94ee4fb
+> **Issued At**: 2026-08-07T02:34:37.814Z
 
-- Summary: this section stays machine-projected. The receipt is recorded after merge via `repo-harness run verify-sprint --prepare-acceptance --contract tasks/contracts/20260807-0931-architecture-merge-gpt-pro.contract.md` followed by `acceptance-receipt record --disposition external_pass --reviewer Claude --source claude-review`.
-- Findings: unlike the K0 slice, the tree here contains only this contract's goal, so the `allowed_paths` guard has no foreign path to trip on.
+- Summary: GPT Pro rewrite partial adoption merged
+- Findings: none
 
 ## Behavior Diff Notes
 

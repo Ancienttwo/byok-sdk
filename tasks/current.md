@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-07T02:01:04+0800 -->
+<!-- updated_at: 2026-08-07T10:35:08+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-07T02:01:04+0800
+> **Updated At**: 2026-08-07T10:35:08+0800
 > **Source Branch**: main
-> **Source Commit**: 188dca9
+> **Source Commit**: 86c2f22
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -48,19 +48,18 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 9 changed/untracked path(s)
 
 ```
- D plans/plan-20260807-0145-sdk-architecture-consolidation.md
- D tasks/contracts/20260807-0145-sdk-architecture-consolidation.contract.md
- D tasks/notes/20260807-0145-sdk-architecture-consolidation.notes.md
- D tasks/reviews/20260807-0145-sdk-architecture-consolidation.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260807-0145-sdk-architecture-consolidation.md
-?? tasks/archive/contract-20260807-0201-sdk-architecture-consolidation.md
-?? tasks/archive/notes-20260807-0201-sdk-architecture-consolidation.md
-?? tasks/archive/review-20260807-0201-sdk-architecture-consolidation.md
-?? tasks/archive/todo-20260807-0201-sdk-architecture-consolidation.md
+ D plans/plan-20260807-0931-architecture-merge-gpt-pro.md
+ D tasks/contracts/20260807-0931-architecture-merge-gpt-pro.contract.md
+ D tasks/notes/20260807-0931-architecture-merge-gpt-pro.notes.md
+ D tasks/reviews/20260807-0931-architecture-merge-gpt-pro.review.md
+?? plans/archive/plan-20260807-0931-architecture-merge-gpt-pro.md
+?? tasks/archive/contract-20260807-1035-architecture-merge-gpt-pro.md
+?? tasks/archive/notes-20260807-1035-architecture-merge-gpt-pro.md
+?? tasks/archive/review-20260807-1035-architecture-merge-gpt-pro.md
+?? tasks/archive/todo-20260807-1035-architecture-merge-gpt-pro.md
 ```
 
 ## Source Artifacts

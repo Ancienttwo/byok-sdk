@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 10:35
+> **Related Plan**: plans/archive/plan-20260807-0931-architecture-merge-gpt-pro.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260807-1035
+
 # Implementation Notes: architecture-merge-gpt-pro
 
 > Plan: `plans/plan-20260807-0931-architecture-merge-gpt-pro.md`
