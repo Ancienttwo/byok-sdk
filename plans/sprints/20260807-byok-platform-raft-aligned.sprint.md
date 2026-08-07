@@ -273,16 +273,16 @@ repo-harness run verify-contract --contract <contract> --strict
 
 ### S0.3 Acceptance criteria
 
-- [ ] Claude runtime info 的 interactive approval 与真实 confirm path 一致；
-- [ ] Pi running task steer 成功；
-- [ ] Claude/Codex running task steer 在 server 侧被拒，不发送 envelope；
-- [ ] 伪造 unsupported steer 到 client 不会卡住 cursor；
-- [ ] reconnect 后同一 envelope 不重复造成第二次 side effect；
-- [ ] `workspaceHint` 文档与 public API 不再声称未实现功能；
-- [ ] protocol golden 零变化；
-- [ ] 全仓 build/typecheck/test 通过；
-- [ ] architecture Mermaid 全部可渲染；
-- [ ] review 明确无 credential-isolation 变化。
+- [x] Claude runtime info 的 interactive approval 与真实 confirm path 一致；
+- [x] Pi running task steer 成功；
+- [x] Claude/Codex running task steer 在 server 侧被拒，不发送 envelope；
+- [x] 伪造 unsupported steer 到 client 不会卡住 cursor；
+- [x] reconnect 后同一 envelope 不重复造成第二次 side effect；
+- [x] `workspaceHint` 文档与 public API 不再声称未实现功能；
+- [x] protocol golden 零变化；
+- [x] 全仓 build/typecheck/test 通过；
+- [x] architecture Mermaid 全部可渲染；
+- [x] review 明确无 credential-isolation 变化。
 
 ### S0.4 Rollback
 

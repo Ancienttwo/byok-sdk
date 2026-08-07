@@ -141,14 +141,14 @@ Steer: SaaS → `steerTask(taskId)` → task-record gate → (reject with typed 
 ## Annotations
 
 ## Task Breakdown
-- [ ] H-002 Adapter capability truth: accurate per-adapter `capabilities` declarations (Pi/Claude/Codex), unknown-capability fail-closed
-- [ ] H-003 Wire `RuntimeInfo` generated from adapter instances; hardcoded `approvalInteractive:false` table deleted; Claude reports interactive approval consistent with real confirm path
-- [ ] H-004 Claim-time capability snapshot on the server task record (additive; source per D-4: `task.claim.capabilities`, not connection state)
-- [ ] H-009 Protocol additive (D-4): `TaskClaimPayloadSchema.capabilities` optional field; `v1.frozen.json` regenerated with line-reviewed diff; `v1.envelopes.ndjson` byte-identical vs base (machine-checked)
-- [ ] H-010 Long-poll positive steer E2E: pure long-poll daemon claims a steer-capable runtime and steer succeeds (direct guard for the D-4 regression)
-- [ ] H-005 `steerTask()` task-level gate with stable typed errors (unsupported runtime / not running / terminal-first race); no envelope past a failed gate
-- [ ] H-006 Client inbound unsupported-steer handling: protocol/authority error recorded, envelope acked, cursor never freezes, redelivery idempotent
-- [ ] H-008 Capability honesty + steer contract tests (client adapter truth ↔ wire output; server gate positive/negative; cursor non-freeze)
-- [ ] H-007 `workspaceHint` decision recorded: reserved, documented in `docs/protocol.md` + architecture, no code claims it works
-- [ ] H-001 Architecture ledger closure: GAP-001/002/003 closed in `docs/architecture/sdk-architecture.md` §11.1, §3.3/§4.4 updated to implemented behavior
-- [ ] Full gates green: typecheck / test / build / golden zero-diff / check-task-workflow --strict; review confirms no credential-isolation change
+- [x] H-002 Adapter capability truth: accurate per-adapter `capabilities` declarations (Pi/Claude/Codex), unknown-capability fail-closed
+- [x] H-003 Wire `RuntimeInfo` generated from adapter instances; hardcoded `approvalInteractive:false` table deleted; Claude reports interactive approval consistent with real confirm path
+- [x] H-004 Claim-time capability snapshot on the server task record (additive; source per D-4: `task.claim.capabilities`, not connection state)
+- [x] H-009 Protocol additive (D-4): `TaskClaimPayloadSchema.capabilities` optional field; `v1.frozen.json` regenerated with line-reviewed diff; `v1.envelopes.ndjson` byte-identical vs base (machine-checked)
+- [x] H-010 Long-poll positive steer E2E: pure long-poll daemon claims a steer-capable runtime and steer succeeds (direct guard for the D-4 regression)
+- [x] H-005 `steerTask()` task-level gate with stable typed errors (unsupported runtime / not running / terminal-first race); no envelope past a failed gate
+- [x] H-006 Client inbound unsupported-steer handling: protocol/authority error recorded, envelope acked, cursor never freezes, redelivery idempotent
+- [x] H-008 Capability honesty + steer contract tests (client adapter truth ↔ wire output; server gate positive/negative; cursor non-freeze)
+- [x] H-007 `workspaceHint` decision recorded: reserved, documented in `docs/protocol.md` + architecture, no code claims it works
+- [x] H-001 Architecture ledger closure: GAP-001/002/003 closed in `docs/architecture/sdk-architecture.md` §11.1, §3.3/§4.4 updated to implemented behavior
+- [x] Full gates green: typecheck / test / build / golden zero-diff / check-task-workflow --strict; review confirms no credential-isolation change
