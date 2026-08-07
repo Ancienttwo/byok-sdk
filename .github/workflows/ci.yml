@@ -142,8 +142,18 @@ jobs:
       - name: Conformance suites (in-memory compositions)
         run: pnpm --filter @byok/conformance test
 
+      # repo-harness is a bun-only tool (`engines.bun`, a bare-`.ts` bin, an
+      # `exec bun` shim) — Node cannot run it, and declaring it as a workspace
+      # dependency drags in transitive packages that require Node >= 22.12 and
+      # so break the Node 20 leg at install time. It therefore stays OUT of the
+      # dependency tree entirely and is fetched by `bunx` at a pinned version
+      # only for this one step. The root `check:deploy-sql` script remains the
+      # local-workflow entrypoint for the same check.
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Migration ordering check
-        run: pnpm run check:deploy-sql
+        run: bunx repo-harness@0.13.2 run check-deploy-sql-order
 
       - name: Tear down the dataplane substrate
         if: always()
