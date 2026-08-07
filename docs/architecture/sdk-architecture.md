@@ -906,7 +906,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 | GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
 | GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
 | GAP-014 | hosted release/signing/update owner 尚未形成 production runbook | Pri-1 | S7 |
-| GAP-015 | durable local journal 尚未实现 SQLite canonical、磁盘 watermark 与安全 cleanup | Pri-0（平台可靠性） | S3 |
+| GAP-015 | durable local journal 尚未实现 SQLite canonical、磁盘 watermark 与安全 cleanup | Pri-0（平台可靠性） | S3b |
 | GAP-016 | Postgres + R2 的 entitlement/usage/reservation/quota/GC 尚未实现 | Pri-0（hosted storage） | S4A/S4B |
 
 ## 12. 目标平台架构（`@byok/core` 已落地并隔离，`@byok/cloud` 骨架已实现，其余尚未实现）
