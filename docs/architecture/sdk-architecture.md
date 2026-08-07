@@ -899,14 +899,14 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 
 | ID | 缺口 | 优先级 | 落点 |
 | --- | --- | --- | --- |
-| GAP-006 | 部分收口：hosted mailbox 的无状态 device 面与 InMemory 组合已于 S3a 落地（既有 daemon long-poll 零改动跑通）；本机 durable journal（SQLite）仍缺，属 S3b | Pri-0（平台线） | S3b |
+| GAP-006 | **已收口（S3b，2026-08-08）**：hosted mailbox 的无状态 device 面与 InMemory 组合（S3a，既有 daemon long-poll 零改动跑通）＋本机 durable journal（S3b，`SqliteLocalTaskJournal` 与 append-then-ack 顺序）合并闭环 | Pri-0（平台线） | S3a + S3b |
 | GAP-008 | board / presence / activity 未实现 | Pri-1 | S5 |
 | GAP-009 | device proof / truth / memory 未实现 | Pri-1 | S6 |
 | GAP-011 | doctor / quarantine / crash budget 不完整 | Pri-1 | S7 |
 | GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
 | GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
 | GAP-014 | hosted release/signing/update owner 尚未形成 production runbook | Pri-1 | S7 |
-| GAP-015 | durable local journal 尚未实现 SQLite canonical、磁盘 watermark 与安全 cleanup | Pri-0（平台可靠性） | S3b |
+| GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
 | GAP-016 | Postgres + R2 的 entitlement/usage/reservation/quota/GC 尚未实现 | Pri-0（hosted storage） | S4A/S4B |
 
 ## 12. 目标平台架构（`@byok/core` 已落地并隔离，`@byok/cloud` 骨架已实现，其余尚未实现）
@@ -1093,7 +1093,7 @@ sequenceDiagram
 
 load-bearing 顺序是 durable local append 后才 ack mailbox。append 前 crash 由 redelivery 恢复；append 后 crash 由 local journal 恢复。cloud 不需要持有 Running record 才能保证任务不丢。
 
-状态：S3a 已证明这条路径的 in-memory 半程——host → cloud → mailbox → daemon → terminal receipt 在既有 daemon 零改动下跑通。图中的 durable local append 与「append 后才 ack」的顺序（上一段那句 load-bearing）仍待 S3b 的 SQLite journal 落地。
+状态：S3 已全部闭环。S3a 证明这条路径的 in-memory 半程——host → cloud → mailbox → daemon → terminal receipt 在既有 daemon 零改动下跑通；S3b（2026-08-08）落地图中的 durable local append 与「append 后才 ack」的顺序（上一段那句 load-bearing），ack 挂在 journal commit 的 promise gate 上是结构性的而非流程约定，由十二点 crash + 磁盘压力矩阵证明。
 
 ### 12.6 身份、多租户与设备证明
 
@@ -1213,7 +1213,7 @@ canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规�
 - 同一 store contract suite 跑 InMemory、Postgres + R2（主生产）与 self-hosted server 三种 composition；可选 D1 adapter 若启用，用同一份套件另跑一次，断言零改动。
 - `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传 R2 的 durable write 先经 reservation（§12.7.7）。
 
-### 12.7 数据与存储架构（目标设计）
+### 12.7 数据与存储架构（云端面为目标设计；本机 journal 面已实现）
 
 主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 只持有经过 hash/size 验证的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
 
@@ -1230,11 +1230,13 @@ canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规�
 
 前五类可以上云，最后一类不上云——这是 §14.3 第 3 条不变量的存储侧表述。
 
-#### 12.7.2 Durable local journal：SQLite 为生产 canonical
+#### 12.7.2 Durable local journal：SQLite 为生产 canonical（已实现 S3b）
+
+**已实现（S3b，2026-08-08）**：`LocalTaskJournal` port 与 `SqliteLocalTaskJournal` 落在 `packages/client/src/daemon/journal/`（`journal.ts` / `sqlite-journal.ts` / `sqlite-support.ts` / `storage-policy.ts`），单库 `<storeDir>/daemon.db` 与下述八表、PRAGMA 一致；no-silent-downgrade 由构造期 typed error 执行——当前 runtime 没有合格 `node:sqlite` 时 hosted journal 构造抛 `JournalUnavailableError`（Node 20 实测），不存在退回文件实现的路径。该 journal 是 opt-in 的 hosted 配置项（`DaemonConfig.hostedJournal`）：未配置时 daemon 不构造 journal，默认自托管路径零改动。
 
 hosted production daemon **必须使用 SQLite，或使用满足同一 durability contract 的注入式实现**。默认实现命名为 `SqliteLocalTaskJournal`；普通 JSON/JSONL file store 只可用于迁移、开发或兼容模式，在未证明 fsync/transaction 语义前不能作为 hosted mailbox ack 的 authority。
 
-建议单库 `<storeDir>/daemon.db`，至少包含：
+单库 `<storeDir>/daemon.db`，八表：
 
 - `journal_envelope`：tenant/product/device、seq、envelope id、task id、原始 bytes 与 hash、commit/ack 时间；
 - `journal_task`：admission、claimed runtime、effective policy hash、workspace ref、当前本机状态、recovery marker；
@@ -1245,13 +1247,14 @@ hosted production daemon **必须使用 SQLite，或使用满足同一 durabilit
 - `local_cleanup_candidate`：`eligible_at`、reason、class、attempt/error，供安全 GC 使用；
 - `local_storage_usage`：journal、cache、logs、workspace、quarantine 各自的近似或实测 bytes。
 
-SQLite durability 设置：
+SQLite durability 设置（实现见 `sqlite-support.ts` 的 `openJournalDatabase`，PRAGMA 顺序是 load-bearing）：
 
+- `PRAGMA auto_vacuum=INCREMENTAL`，且**必须先于建表**执行——schema 已存在后再设会被静默忽略，`compact()` 的 `PRAGMA incremental_vacuum` 就变成报告成功的 no-op；
 - `PRAGMA journal_mode=WAL`；
 - `PRAGMA foreign_keys=ON`；
-- ack-critical transaction 使用 `PRAGMA synchronous=FULL`；
-- 明确 `busy_timeout` 与单 writer queue；
-- envelope append、idempotency receipt 与「可推进 cursor」的 receipt 必须落在同一个 transaction；
+- `PRAGMA synchronous=FULL`：语义上是 ack-critical transaction 的要求，实现上按 database-wide 施加——journal 存在的理由就是 ack-critical 写入，不需要 FULL 的维护路径（checkpoint、incremental vacuum）本来就不在热路径；
+- 明确 `busy_timeout`（有界，锁竞争以 error 浮出而不是无界阻塞 envelope 路径）与单 writer queue；
+- envelope append、idempotency receipt 与「可推进 cursor」的 receipt 必须落在同一个 transaction；多表事务统一用 `BEGIN IMMEDIATE`（开头就取写锁）＋ 任何抛出即 `ROLLBACK`；
 - WAL checkpoint、batch delete 与 incremental vacuum 在后台维护，不在 active task 热路径执行。
 
 SQLite driver 是 composition 细节，但不得静默降级：当前 Node/runtime 无法提供合格 SQLite backend 时，宿主必须注入一个通过 conformance 的实现，否则 hosted production mode 拒绝启动。为兼容 Node 20 而退回的普通文件实现不能冒充 production durability。
@@ -1275,18 +1278,20 @@ SQLite 只存可靠性 metadata 与小型 bounded bytes。以下继续留在文�
 
 journal 不是 debug log，它是 mailbox ack 的正确性前置条件。
 
-#### 12.7.2.1 本地积压、磁盘水位与清理顺序
+#### 12.7.2.1 本地积压、磁盘水位与清理顺序（已实现 S3b）
 
-`LocalStoragePolicy` 由 host/daemon config 注入，至少包含 `maxStoreBytes`、`minFreeBytes`、soft/hard watermark、各数据类别的 retention、workspace policy 与 log rotation。推荐默认：
+**已实现（S3b，2026-08-08）**：`LocalStoragePolicy`、水位状态机与分类 GC 落在 `packages/client/src/daemon/journal/storage-policy.ts`；usage 按 journal/cache/log/workspace/quarantine 五类分别上报，hard pressure 由 TaskRunner 的 admission guard 变成对新 offer 的 retryable decline，状态与用量出现在 control-socket status 的 `storage*` 字段（与 `queueWatermarks` 是两个概念，命名不复用）。
+
+`LocalStoragePolicy` 由 host/daemon config 注入，至少包含 `maxStoreBytes`、`minFreeBytes`、soft/hard watermark、各数据类别的 retention、workspace policy 与 log rotation。水位状态按**最坏优先**求值（emergency 不是「压力很大」，是另一个类别的失败）：
 
 | 状态 | 触发 | 行为 |
 | --- | --- | --- |
 | normal | 低于 soft watermark | 常规低频 GC/compaction |
-| pressure | 达到约 80% budget，或剩余空间低于 soft minimum | 发出告警；优先清 cache、expired temp、rotated logs；加快 journal compaction |
-| hard pressure | 达到约 90% budget，或剩余空间低于 hard minimum | 停止接收新的普通 task；仍允许 terminal/truth flush、删除、导出、doctor 与恢复操作 |
-| emergency | 无法保证一次 ack-critical SQLite transaction | fail-closed，不 ack 新 mailbox row；保留现有 recovery evidence |
+| pressure | 达到约 80% budget，或剩余空间低于 soft minimum | 发出告警；只清 expired temp 与 rotated logs 这类可重建物；加快 journal compaction |
+| hard pressure | 达到约 90% budget，或剩余空间低于 hard minimum | 停止接收新的普通 task（retryable decline）；仍允许 terminal/truth flush、删除、导出、doctor 与恢复操作 |
+| emergency | 一次 ack-critical 写入已经失败（latch，不自愈），或剩余空间低于 ack-critical reserve | fail-closed，不 ack 新 mailbox row；保留现有 recovery evidence |
 
-自动清理只能按以下顺序进行：
+自动清理的完整顺序是：
 
 1. expired upload/download temp 与可重建 cache；
 2. 已轮转且超过 retention 的日志；
@@ -1294,7 +1299,9 @@ journal 不是 debug log，它是 mailbox ack 的正确性前置条件。
 4. host 明确标记为 ephemeral、且 task 已终态的生成式 workspace；
 5. orphan local artifacts，须经过 reference scan 加 grace period。
 
-**永不自动删除**：未 ack envelope、`Running`/`AwaitApproval` task、truth 尚未确认的 terminal、带 recovery marker 的记录、用户指定的 workspace、provider secret、quarantine evidence。quarantine 只由明确的 `doctor --fix` 或 operator policy 清理（§14.3.3）。
+只有 `normal` 态跑完整五步。`pressure` 及以上把顺序**截断**到第 1–2 步而不是延长它：3–5 步要 reference scan、compact 与 grace period，磁盘快满时最贵、回收最慢，而 1–2 步是纯可重建垃圾、立刻还空间。这是实现的刻意选择（`cleanupOrderFor`），不是简化。
+
+**永不自动删除**：未 ack envelope、`Running`/`AwaitApproval` task、truth 尚未确认的 terminal、带 recovery marker 的记录、用户指定的 workspace、provider secret、quarantine evidence。这一条由 `CleanableCategory` 型别构造性强制——保护类别在该型别里没有名字，清理执行器无法表达删除它们，不是运行期过滤。quarantine 只由明确的 `doctor --fix` 或 operator policy 清理（§14.3.3）。
 
 #### 12.7.3 Mailbox read/ack 与 crash matrix
 
@@ -1476,7 +1483,7 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | S0 | 架构与当前缺口收口（GAP-001/002/003） | 先于 P0，不属任何 P 阶段 |
 | S1 | Tenant identity cut | T0 |
 | S2 | `@byok/core` contracts（已完成 2026-08-07） | P0 |
-| S3 | Cloud mailbox + 本机 SQLite journal（含磁盘水位与安全 cleanup） | P1 |
+| S3 | Cloud mailbox + 本机 SQLite journal（含磁盘水位与安全 cleanup）（已完成 2026-08-08：S3a + S3b） | P1 |
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll | P3 |
 | S6 | Device proof + memory | P4 |
@@ -1557,7 +1564,7 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 | board concurrency | per-tenant `board_seq` 与 claim hot rows | SQL CAS、索引、contract suite；P2 后再做 P3 board |
 | large memory | snapshot >1MiB 与 rev CAS conflict | 当前 key-granular snapshot；阈值触发 delta-chain deferred |
 | many runtime kinds | closed `RuntimeIdSchema` 与 adapter-specific capability truth | 新 runtime id 是 protocol change；per-task capability honesty 已在 S0 修完（§3.3、§4.4），新 adapter 接入时按同一形状声明能力 |
-| 本机磁盘增长 | journal / WAL / workspace / cache 填满磁盘 | **目标设计**：SQLite compaction、分类 GC、watermark、hard-pressure admission gate（§12.7.2.1） |
+| 本机磁盘增长 | journal / WAL / workspace / cache 填满磁盘 | **已实现（S3b）**：有界 WAL checkpoint/incremental vacuum、型别级 never-delete 的分类 GC、水位状态机、hard-pressure admission decline（§12.7.2.1） |
 | tenant storage 增长 | 并发上传超卖、降级后超限、R2 orphan | **目标设计**：Postgres 作 reservation/usage authority、grace/只读、tombstone reconciler（§12.7.7、§12.7.8） |
 
 ### 14.3 可靠性、恢复与并发（目标设计）
@@ -1615,18 +1622,18 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 2. `keys` 与 dispatch/platform dependency graph 保持所规定的零边。
 3. unknown observability 可忽略；unknown control/security fail-closed。
 4. device/server/task ownership 每次 crossing 都验证，不靠调用者自律。
-5. mailbox read 不等于 ack；local durable append 后才推进 cursor。
+5. mailbox read 不等于 ack；local durable append 后才推进 cursor。（已实现 S3b）
 6. terminal truth immutable；TTL hint 不能覆盖 truth。
 7. memory conflict 不由 cloud 语义 merge。
 8. board claim/status 使用 CAS；不做 silent last-write-wins。
 9. workspace/Git state 不驱动 protocol task transition。
 10. runtime adapter 不把不支持的 policy 翻译成近似语义。
-11. hosted production 的 mailbox ack authority 使用 SQLite（或同等 contract），不能退回未证明 durable 的普通文件。
+11. hosted production 的 mailbox ack authority 使用 SQLite（或同等 contract），不能退回未证明 durable 的普通文件。（已实现 S3b：`node:sqlite` 缺席时构造抛 `JournalUnavailableError`，不降级）
 12. `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传先做 reservation。
 13. quota 满只拒绝新的 durable write，不自动删除用户 durable truth。
 14. R2 删除必须经过 Postgres tombstone / grace / reconcile，不能先删 bytes 再猜引用。
 
-第 11–14 条是**目标设计**不变量：它们约束的是 §12.7 尚未落地的 hosted storage 面，不是当前 embedded runtime 的既有承诺。
+第 12–14 条仍是**目标设计**不变量：它们约束的是 §12.7 尚未落地的 hosted storage 面（Postgres + R2），不是当前 embedded runtime 的既有承诺。第 5 与第 11 条已随 S3b 从目标设计转为已实现，由 crash/压力矩阵与构造期 typed error 执行。
 
 ## 15. 可观测性与审计（目标设计）
 
