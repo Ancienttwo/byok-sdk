@@ -4,6 +4,15 @@
   "description": "BYOK SDK server: in-memory M0 reference implementation of the SaaS-side coordinator",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ancienttwo/byok-sdk.git",
+    "directory": "packages/server"
+  },
+  "bugs": {
+    "url": "https://github.com/Ancienttwo/byok-sdk/issues"
+  },
+  "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
     "node": ">=20"
   },
@@ -21,6 +30,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "dev": "tsup --watch",

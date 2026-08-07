@@ -25,17 +25,23 @@ export class ByokKeysError extends Error {
  * a named record so consumers (and K4's aip-main-open swap) can branch on
  * `error.code` without retyping string literals.
  *
- * Five codes have no source counterpart. Four of them guard checks the source
- * did not make: `KEYCHAIN_SECRET_DECODE_FAILED` (the source returned an
- * undecodable stored value as-is), `SECRET_ENVELOPE_INVALID` (it reported a
- * malformed envelope as an absent secret), and `SECRET_NAME_INVALID` /
+ * Four codes have no source counterpart, and each guards a check the source did
+ * not make: `KEYCHAIN_SECRET_DECODE_FAILED` (the source returned an undecodable
+ * stored value as-is), `SECRET_ENVELOPE_INVALID` (it reported a malformed
+ * envelope as an absent secret), and `SECRET_NAME_INVALID` /
  * `SECRET_VALUE_INVALID` (the runtime replacements for the closed
- * `KeychainSecretName` union). The fifth, `SECRET_NAMESPACE_INVALID`, guards a
- * check the source did make: `normalizeSecretNamespace` (`index.ts:748-757`),
- * whose pattern this package ports verbatim. Only the check is ported — no
- * source code string is recorded for its rejection path — so treat the code
- * itself as this package's, not as a compatibility surface K4 must match.
- * Everything else matches the source string for string.
+ * `KeychainSecretName` union). Everything else matches the source string for
+ * string.
+ *
+ * `SECRET_NAMESPACE_INVALID` is a separate case. The source does record it:
+ * `normalizeSecretNamespace` (`index.ts:748-757`) throws the verbatim string
+ * `'SECRET_NAMESPACE_INVALID'` at `index.ts:752`, and this package ports both
+ * that string and its pattern unchanged. It is still not a compatibility
+ * surface K4 must match, but for a different reason than the string: neither
+ * side has a branch consumer. In the source the only callers are the two OS
+ * stores' `scope()` methods, which just compose a service prefix; here the code
+ * is only ever asserted in tests. Matching it costs nothing and constrains
+ * nothing.
  */
 export const BYOK_KEYS_ERROR_CODES = {
   CREDENTIAL_MANAGER_DELETE_FAILED: 'CREDENTIAL_MANAGER_DELETE_FAILED',
