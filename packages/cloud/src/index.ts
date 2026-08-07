@@ -83,6 +83,9 @@ export type {
 
 // Cloud-local ports
 export { CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES } from './stores/ports';
+// The port method inventory. Contract data, shipped so `@byok/conformance` and
+// durable adapters read the same table; `ports.ts` itself is untouched.
+export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
 export type {
   BlobContent,
   BlobDeclaration,

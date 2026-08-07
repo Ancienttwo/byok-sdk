@@ -7,8 +7,7 @@
  * about bytes — there are no bytes at this layer.
  */
 import { describe, expect, it } from 'vitest';
-import { contentHash, isContentHash } from '../../blob';
-import { isCoreError } from '../../errors';
+import { contentHash, isContentHash, isCoreError } from '@byok/core';
 import { hashOf, TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 

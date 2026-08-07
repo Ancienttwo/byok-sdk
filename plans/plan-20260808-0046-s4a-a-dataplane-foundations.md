@@ -1,6 +1,6 @@
 # Plan: Sprint S4A-a: Dataplane Foundations - Conformance Package, Postgres Cloud Ports, Migrate Runner
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260808-0046
 > **Slug**: s4a-a-dataplane-foundations
 > **Artifact Level**: work-package
@@ -153,11 +153,11 @@ CI dataplane job → compose up (pg healthy) → migrate runner from empty DB (=
 ## Annotations
 
 ## Task Breakdown
-- [ ] Commit `docs/researches/s4a-dataplane-design.md` + `docker-compose.test.yml` (pg + minio, healthchecks, test-only credentials)
-- [ ] `@byok/conformance` package: move core harness + nine dimensions verbatim; lift `CORE_PORT_*` into `@byok/core` shipped source; move in-memory core composition entry; repo green
-- [ ] `CLOUD_PORT_*` exports in `@byok/cloud` (export-only); `runCloudConformance` + cloud-local dimensions; in-memory cloud composition entry green
-- [ ] `@byok/cloud-postgres` skeleton: package files (README/LICENSE day one), Pool + int8 parser, `migrate.ts` runner + unit suite (out-of-order, checksum drift, concurrent, partial failure)
-- [ ] `deploy/sql/0001_cloud_local.sql`: seven tables per §5 mapping, tenant-first keys, `device_stream` with `next_seq` + `acked_seq`; `check:deploy-sql` green
-- [ ] Seven Postgres cloud-local port implementations (single-statement CAS); postgres cloud composition entry green against compose substrate
-- [ ] CI `dataplane` job (compose up --wait, `BYOK_REQUIRE_DATAPLANE=1`, Node [20, 22]) + constraint test pinning the job
-- [ ] Full gates green incl. zero-diff machine check and cloud handler surface frozen
+- [x] Commit `docs/researches/s4a-dataplane-design.md` + `docker-compose.test.yml` (pg + minio, healthchecks, test-only credentials)
+- [x] `@byok/conformance` package: move core harness + nine dimensions verbatim; lift `CORE_PORT_*` into `@byok/core` shipped source; move in-memory core composition entry; repo green
+- [x] `CLOUD_PORT_*` exports in `@byok/cloud` (export-only); `runCloudConformance` + cloud-local dimensions; in-memory cloud composition entry green
+- [x] `@byok/cloud-postgres` skeleton: package files (README/LICENSE day one), Pool + int8 parser, `migrate.ts` runner + unit suite (out-of-order, checksum drift, concurrent, partial failure)
+- [x] `deploy/sql/0001_cloud_local.sql`: seven tables per §5 mapping, tenant-first keys, `device_stream` with `next_seq` + `acked_seq`; `check:deploy-sql` green
+- [x] Seven Postgres cloud-local port implementations (single-statement CAS); postgres cloud composition entry green against compose substrate
+- [x] CI `dataplane` job (compose up --wait, `BYOK_REQUIRE_DATAPLANE=1`, Node [20, 22]) + constraint test pinning the job
+- [x] Full gates green incl. zero-diff machine check and cloud handler surface frozen

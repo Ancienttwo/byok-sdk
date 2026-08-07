@@ -70,6 +70,95 @@ jobs:
       - name: Test
         run: pnpm -r test
 
+  # S4A dataplane guarantee: runs the suites that need a REAL Postgres, against
+  # the same `docker-compose.test.yml` a developer starts locally. This job is
+  # the only authority for the dataplane assertions -- `build-test` above also
+  # runs these packages' tests, but without BYOK_TEST_POSTGRES_URL they skip
+  # themselves, which is correct there and would be a silent hole here.
+  #
+  # BYOK_REQUIRE_DATAPLANE=1 is what closes that hole: with it set, a missing
+  # BYOK_TEST_POSTGRES_URL is a hard failure instead of a skip
+  # (packages/cloud-postgres/src/__tests__/support/dataplane.ts throws at import
+  # time). `process.env.CI` deliberately is NOT the gate -- `pnpm -r test` in
+  # build-test already runs with CI=true where these services do not exist, so
+  # keying off it would turn that job red.
+  #
+  # This job's existence is itself pinned by a source-scan constraint test
+  # (packages/cloud-postgres/src/__tests__/constraints.test.ts), the same idiom
+  # the core/cloud packages already use: deleting or renaming the job below
+  # turns that test red rather than silently dropping dataplane coverage.
+  #
+  # A compose file rather than GitHub `services:` containers because a service
+  # container cannot override CMD, and MinIO (needed from S4A-c) does not start
+  # without `server`. One file therefore defines the substrate for CI and for a
+  # laptop, which is the point.
+  #
+  # Deliberately independent of build-test (no `needs:`): its own install +
+  # build, so a docker flake here cannot mask unit coverage there.
+  dataplane:
+    name: dataplane suites against real Postgres (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    env:
+      BYOK_REQUIRE_DATAPLANE: '1'
+      BYOK_TEST_POSTGRES_URL: postgres://byok:byok@127.0.0.1:5433/byok_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `--wait` blocks until every service reports healthy, so the suites below
+      # never race startup. The database starts EMPTY on every run, which makes
+      # "fresh install + migrate-up" (sprint S4A.5) a property of the job rather
+      # than a step someone remembers.
+      - name: Start the dataplane substrate
+        run: docker compose -f docker-compose.test.yml up -d --wait
+
+      - name: Build (required before typecheck/test — see note above)
+        run: pnpm -r build
+
+      # The migrate runner's fault suite plus the Postgres composition running
+      # the cloud conformance suite.
+      - name: Dataplane suites (Postgres composition + migrate runner)
+        run: pnpm --filter @byok/cloud-postgres test
+
+      # The same assertion source against the in-memory composition. Running
+      # both in one job is what makes a divergence a failure here rather than a
+      # discrepancy someone notices later.
+      - name: Conformance suites (in-memory compositions)
+        run: pnpm --filter @byok/conformance test
+
+      # repo-harness is a bun-only tool (`engines.bun`, a bare-`.ts` bin, an
+      # `exec bun` shim) — Node cannot run it, and declaring it as a workspace
+      # dependency drags in transitive packages that require Node >= 22.12 and
+      # so break the Node 20 leg at install time. It therefore stays OUT of the
+      # dependency tree entirely and is fetched by `bunx` at a pinned version
+      # only for this one step. The root `check:deploy-sql` script remains the
+      # local-workflow entrypoint for the same check.
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Migration ordering check
+        run: bunx repo-harness@0.13.2 run check-deploy-sql-order
+
+      - name: Tear down the dataplane substrate
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+
   # Windows Git workspace guarantee: runs the real Git executable through the
   # client workspace manager and exercises the secure recovery ledger/privacy
   # surfaces without duplicating the full cross-platform suite above. TEMP/TMP

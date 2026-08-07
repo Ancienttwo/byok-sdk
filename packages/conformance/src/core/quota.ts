@@ -14,8 +14,12 @@
  * commercial model.
  */
 import { describe, expect, it } from 'vitest';
-import { isCoreConflictError, isCoreError, type CoreConflictError } from '../../errors';
-import type { TenantStorageEntitlement } from '../../quota';
+import {
+  isCoreConflictError,
+  isCoreError,
+  type CoreConflictError,
+  type TenantStorageEntitlement,
+} from '@byok/core';
 import { ENTITLEMENT, hashOf, TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 

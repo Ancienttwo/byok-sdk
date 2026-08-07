@@ -8,8 +8,7 @@
  * overwrites the winner.
  */
 import { describe, expect, it } from 'vitest';
-import type { BoardItem } from '../../board';
-import { isCoreConflictError, type CoreConflictError } from '../../errors';
+import { isCoreConflictError, type BoardItem, type CoreConflictError } from '@byok/core';
 import { TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 
