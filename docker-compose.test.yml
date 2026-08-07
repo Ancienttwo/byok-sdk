@@ -1,0 +1,76 @@
+# The dataplane test substrate — one file, identical in CI and on a laptop.
+#
+# `docker compose -f docker-compose.test.yml up -d --wait` is the whole
+# command: `--wait` blocks until every service reports healthy, so a suite that
+# starts after it never races the server's own startup. Both services are
+# defined here even though S4A-a only exercises Postgres — MinIO is the S3
+# authority S4A-c's R2 adapter signs against, and defining the substrate twice
+# (once per slice) is exactly the second source of truth this file exists to
+# avoid.
+#
+# How suites reach it (docs/researches/s4a-dataplane-design.md §1):
+#
+#   BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test
+#   BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100
+#
+# Absent, the dataplane suites `describe.skipIf` themselves and print the
+# command above. `BYOK_REQUIRE_DATAPLANE=1` — set ONLY by CI's `dataplane` job —
+# turns that absence into a hard failure, so the skip path can never be how CI
+# stays green. `process.env.CI` is deliberately not the gate: `pnpm -r test`
+# already runs with `CI=true` inside the ordinary build-test job, where these
+# services do not exist.
+#
+# Credentials are fixed, weak, and public on purpose: this file describes a
+# throwaway local substrate and must never be reachable from anything that
+# holds real data. Nothing here is a secret, so nothing here belongs in a
+# secret store.
+#
+# Ports are offset from the defaults (5433 not 5432, 9100/9101 not 9000/9001)
+# so a developer's own Postgres or MinIO keeps working while this stack is up.
+
+name: byok-dataplane-test
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: byok
+      POSTGRES_PASSWORD: byok
+      POSTGRES_DB: byok_test
+    ports:
+      - '5433:5432'
+    # `-U byok -d byok_test` matters: bare `pg_isready` probes the `root`
+    # user and reports healthy while the init script is still creating the
+    # database, which is precisely the race `--wait` is supposed to remove.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U byok -d byok_test']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    # No volume: every `up` starts from an empty database, which is what makes
+    # "fresh install + migrate-up" (sprint S4A.5) a property of every run
+    # rather than a step someone has to remember.
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # GitHub Actions `services:` containers cannot override CMD, which is the
+    # concrete reason this substrate is a compose file rather than a service
+    # block: MinIO does not start without `server`.
+    command: server /data --console-address ':9101'
+    environment:
+      MINIO_ROOT_USER: byokminio
+      MINIO_ROOT_PASSWORD: byokminio
+    ports:
+      - '9100:9000'
+      - '9101:9101'
+    healthcheck:
+      test: ['CMD-SHELL', 'mc ready local || exit 1']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    tmpfs:
+      - /data
