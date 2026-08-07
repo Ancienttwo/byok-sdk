@@ -235,11 +235,28 @@ export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
  * `task.await_approval`/`task.approve`/`task.reject`, §5.3) — a new daemon
  * sends it unconditionally, regardless of whether the connected server is
  * new enough to store it.
+ *
+ * `capabilities` (S0/D-4, additive-minor — docs/protocol.md §2.4): the
+ * TASK-level capability authority — what the claiming adapter reported about
+ * itself at the moment it took this task, reusing `RuntimeCapabilitiesSchema`
+ * (above) rather than introducing a second capability shape. Same source of
+ * truth as `conn.hello.runtimes[].capabilities`, different scope: `conn.hello`
+ * is CONNECTION-level discovery ("what could this device run"), which no
+ * server-side control decision may read, because it is transport-shaped — a
+ * long-poll-only daemon never sends `conn.hello` at all — and it describes a
+ * device, not a task. This field is task-shaped: it shares a lifecycle with
+ * the task↔runtime binding the claim itself establishes, so a control gate
+ * (`steerTask()`, `packages/server`'s `hub.ts`) can key off it and stay
+ * correct across reconnects, adapter-set changes, and transports. Plain
+ * optional property on this already-tolerant `z.object()`, exactly like
+ * `runtime` above: an old daemon simply omits it, and a consumer that gates on
+ * it must fail closed on absence rather than assume a default.
  */
 export const TaskClaimPayloadSchema = z.object({
   deviceId: z.string(),
   agentId: z.string().optional(),
   runtime: RuntimeIdSchema.optional(),
+  capabilities: RuntimeCapabilitiesSchema.optional(),
 });
 export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
 
