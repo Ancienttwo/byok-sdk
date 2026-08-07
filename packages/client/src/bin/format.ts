@@ -294,6 +294,27 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
       );
     }
   }
+  // S3b (L-003): local storage usage and pressure (§12.7.2.1). Rendered ONLY
+  // when the daemon actually measures it — a daemon with no storage policy
+  // configured emits nothing here rather than a row of zeros, so this section
+  // appearing at all means the numbers in it are real. Deliberately printed
+  // after the queue watermarks, and named `live-storage-*`: these two sections
+  // are unrelated, and the adjacency is the whole reason the names must not
+  // both say "watermark".
+  const storage = live.storage;
+  if (storage !== undefined) {
+    lines.push(
+      `live-storage: state=${storage.pressureState} used=${storage.usedBytes} budget=${storage.budgetBytes} free=${storage.freeBytes} measuredAt=${storage.measuredAt}`,
+    );
+    for (const category of storage.categories) {
+      lines.push(`live-storage-category: ${category.category} bytes=${category.bytes}${category.approximate ? ' (approximate)' : ''}`);
+    }
+    if (storage.lastCompaction) {
+      lines.push(
+        `live-storage-compaction: checkpointed=${storage.lastCompaction.checkpointed} walFramesRemaining=${storage.lastCompaction.walFramesRemaining} pagesVacuumed=${storage.lastCompaction.pagesVacuumed} durationMs=${storage.lastCompaction.durationMs} at=${storage.lastCompaction.at}`,
+      );
+    }
+  }
   return lines;
 }
 

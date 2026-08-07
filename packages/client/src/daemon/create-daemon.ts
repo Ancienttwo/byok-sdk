@@ -19,6 +19,7 @@ import {
   parseShutdownParams,
   type ControlActiveTask,
   type ControlStatusResult,
+  type ControlStorageStatus,
   type ShutdownReason,
 } from './control-protocol';
 import { ConnectionManager } from './connection-manager';
@@ -29,8 +30,15 @@ import { SessionWorkspaceStore } from './session-workspace-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
-import { journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
+import { journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
 import { SqliteLocalTaskJournal } from './journal/sqlite-journal';
+import {
+  createFilesystemCleanupExecutor,
+  createStatfsFreeBytesProvider,
+  LocalStoragePressureEngine,
+  resolveLocalStoragePolicy,
+  type LocalStoragePolicyInput,
+} from './journal/storage-policy';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, TaskRunner, type TaskRunnerDeps } from './task-runner';
 import type { ProgressBatcherOptions } from './progress-batcher';
 
@@ -111,6 +119,21 @@ export interface HostedJournalConfig {
   busyTimeoutMs?: number;
   /** Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated. */
   maxRecordBytes?: number;
+  /**
+   * S3b (L-003): opt-in local storage policy — §12.7.2.1's watermarks,
+   * classified GC, and bounded WAL compaction. See `LocalStoragePolicyInput`
+   * (`journal/storage-policy.ts`); `maxStoreBytes` and `minFreeBytes` are the
+   * only two a host must supply.
+   *
+   * Optional WITHIN hosted journal mode, and off by default there too: a
+   * journal without a policy is a daemon that records durably and never
+   * declines, which is exactly the right behaviour on a host that manages its
+   * own disk. Setting it is what turns local storage into an admission-control
+   * input — hard pressure declines new offers (retryably) while terminal
+   * flush, delete, export and recovery keep running, and `emergency` refuses
+   * to ack at all rather than acking a row it cannot durably record.
+   */
+  storagePolicy?: LocalStoragePolicyInput;
 }
 
 export interface DaemonConfig {
@@ -355,6 +378,18 @@ export interface DaemonOverrides {
    */
   hostedJournal?: {
     journal?: LocalTaskJournal;
+    /**
+     * S3b (L-003): injection seam for the storage pressure engine, same rule
+     * as `journal` above — used only when `config.hostedJournal` is set, and
+     * NOT started or stopped by this daemon. Whoever injects one owns its
+     * cadence, which is what lets the disk-pressure matrix drive `tick()` by
+     * hand with fake usage/free providers and no timer at all.
+     *
+     * An injected engine still answers both questions the daemon asks it
+     * (admission under hard pressure, ack-critical refusal under emergency)
+     * and still backs the `storage` section of the control-socket status.
+     */
+    pressureEngine?: LocalStoragePressureEngine;
   };
 }
 
@@ -551,13 +586,57 @@ export function createDaemonWithAdapters(
       );
     }
   }
+  // Split from `journal` below only so the storage engine can reach the
+  // CONCRETE journal's `pruneConfirmedJournalTask` (§12.7.2.1 cleanup step 3),
+  // which is not on the port — a host injecting its own backend supplies its
+  // own cleanup executor along with it. `undefined` whenever a journal was
+  // injected, so exactly one journal is still ever constructed.
+  const ownedJournal =
+    config.hostedJournal && overrides.hostedJournal?.journal === undefined
+      ? new SqliteLocalTaskJournal({
+          storeDir,
+          ...(config.hostedJournal.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: config.hostedJournal.busyTimeoutMs }),
+          ...(config.hostedJournal.maxRecordBytes === undefined ? {} : { maxRecordBytes: config.hostedJournal.maxRecordBytes }),
+        })
+      : undefined;
   const journal: LocalTaskJournal | undefined = config.hostedJournal
-    ? overrides.hostedJournal?.journal ??
-      new SqliteLocalTaskJournal({
-        storeDir,
-        ...(config.hostedJournal.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: config.hostedJournal.busyTimeoutMs }),
-        ...(config.hostedJournal.maxRecordBytes === undefined ? {} : { maxRecordBytes: config.hostedJournal.maxRecordBytes }),
-      })
+    ? overrides.hostedJournal?.journal ?? ownedJournal
+    : undefined;
+  /**
+   * S3b (L-003): the watermark/GC engine, third instance of the same
+   * three-part idiom — optional config field, conditional construction,
+   * override seam. Constructed only when hosted journal mode is on AND a
+   * storage policy was supplied: pressure gating without a durable journal
+   * would be declining tasks to protect a database that does not exist.
+   *
+   * The policy is resolved (and rejected, loudly) HERE, at construction, for
+   * the same reason `maxTaskOutputBytes` and `hostedJournal.tenantId` are —
+   * see `LocalStoragePolicyError`.
+   */
+  const ownedPressureEngine =
+    config.hostedJournal?.storagePolicy && journal && overrides.hostedJournal?.pressureEngine === undefined
+      ? new LocalStoragePressureEngine({
+          policy: resolveLocalStoragePolicy(config.hostedJournal.storagePolicy),
+          journal,
+          freeBytesProvider: createStatfsFreeBytesProvider(storeDir),
+          executor: createFilesystemCleanupExecutor(
+            ownedJournal ? { pruneJournalTask: (taskId) => ownedJournal.pruneConfirmedJournalTask(taskId) } : {},
+          ),
+          onEvent: (event) => {
+            if (event.kind !== 'state-changed') return;
+            // §12.7.2.1's "发出告警", on the operator-facing channel this file
+            // already uses for its other non-fatal warnings. Every transition
+            // is reported, including recovery back down to `normal` — an alert
+            // that only ever fires upward leaves an operator guessing whether
+            // the thing they fixed actually took.
+            console.warn(
+              `[byok/client] local storage pressure: ${event.from} -> ${event.to} (used ${event.snapshot.usedBytes} of ${event.snapshot.budgetBytes} budget bytes, ${event.snapshot.freeBytes} free)`,
+            );
+          },
+        })
+      : undefined;
+  const pressureEngine = config.hostedJournal
+    ? overrides.hostedJournal?.pressureEngine ?? ownedPressureEngine
     : undefined;
   /**
    * S3b: serializes terminal journal writes against the outbound send that
@@ -729,6 +808,19 @@ export function createDaemonWithAdapters(
             .join(', ')}`,
         );
       }
+    }
+
+    // S3b (L-003): one measurement before this daemon can accept anything, so
+    // the admission guard's first answer comes from a real reading rather than
+    // the optimistic `normal` a fresh engine starts in — a device that booted
+    // already over its hard watermark must decline the first offer, not the
+    // second. Awaited, and deliberately not caught: hosted mode plus a storage
+    // policy is an explicit request to gate on local storage, and a daemon that
+    // cannot measure it cannot honour that (§12.7.2's fail-closed posture).
+    // An INJECTED engine is left alone — its owner drives its cadence.
+    if (ownedPressureEngine) {
+      await ownedPressureEngine.tick();
+      ownedPressureEngine.start();
     }
 
     startedAt = Date.now();
@@ -904,6 +996,12 @@ export function createDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
+      // S3b (L-003): the production admission guard — §12.7.2.1's hard-pressure
+      // row. Reads the state the last maintenance tick computed (no disk work
+      // on the offer path), and is absent entirely when no storage policy is
+      // configured, which is what keeps `handleOffer` byte-identical for every
+      // daemon that does not opt in.
+      ...(pressureEngine ? { admissionGuard: () => pressureEngine.admissionGuard() } : {}),
     };
     runner = new TaskRunner(deps);
 
@@ -946,6 +1044,14 @@ export function createDaemonWithAdapters(
         journal && journalIdentity
           ? async (envelope) => {
               observer.handleInboundEnvelope(envelope);
+              // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
+              // 新 mailbox row；保留现有 recovery evidence". Throwing HERE, ahead
+              // of the append, reuses the ordering the journal branch already
+              // established: the handler rejects, so the cursor does not move,
+              // so the mailbox keeps the row and redelivers it later. The task
+              // is not lost; it is left in the one place that still has room
+              // for it. Nothing is deleted to make space.
+              pressureEngine?.assertAckCriticalAllowed();
               await journal.appendEnvelope(toJournalEnvelopeRecord(envelope, journalIdentity));
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();
             }
@@ -1012,6 +1118,13 @@ export function createDaemonWithAdapters(
    * `daemon.stop()`), which must neither double-fail a task nor throw.
    */
   async function runShutdownSequence(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+    // S3b (L-003): stop the maintenance cadence first — a compaction pass
+    // starting while the journal is being drained would hold the single writer
+    // against the terminal writes below for no benefit. Only the engine THIS
+    // daemon constructed; an injected one belongs to its injector, exactly like
+    // an injected journal is not closed here. Idempotent, like every other step
+    // in this sequence.
+    ownedPressureEngine?.stop();
     runner?.stopAcceptingOffers();
     const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
@@ -1115,6 +1228,35 @@ export function createDaemonWithAdapters(
   // -------------------------------------------------------------------------
 
   function buildControlStatus(): ControlStatusResult {
+    const snapshot = pressureEngine?.snapshot();
+    const storageStatus: ControlStorageStatus | undefined =
+      snapshot === undefined
+        ? undefined
+        : {
+            pressureState: snapshot.state,
+            budgetBytes: snapshot.budgetBytes,
+            usedBytes: snapshot.usedBytes,
+            freeBytes: snapshot.freeBytes,
+            measuredAt: snapshot.measuredAt,
+            categories: (Object.keys(snapshot.categories) as StorageCategory[])
+              .sort()
+              .map((category) => ({
+                category,
+                bytes: snapshot.categories[category].bytes,
+                approximate: snapshot.categories[category].approximate,
+              })),
+            ...(snapshot.lastCompaction
+              ? {
+                  lastCompaction: {
+                    checkpointed: snapshot.lastCompaction.checkpointed,
+                    walFramesRemaining: snapshot.lastCompaction.walFramesRemaining,
+                    pagesVacuumed: snapshot.lastCompaction.pagesVacuumed,
+                    durationMs: snapshot.lastCompaction.durationMs,
+                    at: snapshot.lastCompaction.at,
+                  },
+                }
+              : {}),
+          };
     const activeTasks: ControlActiveTask[] = observer
       .tasks()
       .filter((task) => TASK_TRANSITIONS[task.state].length > 0) // non-terminal only — see the `status` method's own doc comment (control-protocol.ts)
@@ -1141,6 +1283,13 @@ export function createDaemonWithAdapters(
       queueWatermarks: runner?.getQueueWatermarks() ?? [],
       approvals: pendingApprovals,
       approvalsPending: pendingApprovals.length,
+      // S3b (L-003): the storage section, present only when a policy is
+      // configured AND a measurement has actually happened. An engine that has
+      // never ticked reports nothing rather than a zeroed snapshot — "not
+      // measured" and "measured, and empty" are different facts, and a status
+      // surface that conflates them is how an operator concludes a full disk is
+      // fine.
+      ...(storageStatus === undefined ? {} : { storage: storageStatus }),
     };
   }
 

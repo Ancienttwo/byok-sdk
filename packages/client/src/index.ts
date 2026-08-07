@@ -59,6 +59,50 @@ export type {
 } from './daemon/journal/journal';
 export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
 export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
+
+// S3b (L-003): local storage policy, watermarks and classified GC
+// (architecture §12.7.2.1). Exported for the same reason the journal port is:
+// the policy is host-injected, the free-space provider and the cleanup worker
+// are both seams a host may need to supply (a host that owns its own log
+// rotation or workspace lifecycle already knows things this SDK does not), and
+// `LocalStorageEmergencyError` is what a fail-closed hosted daemon actually
+// surfaces when it refuses to ack.
+export {
+  LocalStoragePressureEngine,
+  LocalStoragePolicyError,
+  LocalStorageEmergencyError,
+  resolveLocalStoragePolicy,
+  computePressureState,
+  cleanupOrderFor,
+  cleanupEligibleAt,
+  createFilesystemCleanupExecutor,
+  createStatfsFreeBytesProvider,
+  JOURNAL_TASK_REF_PREFIX,
+  DEFAULT_SOFT_BUDGET_RATIO,
+  DEFAULT_HARD_BUDGET_RATIO,
+  DEFAULT_ACK_CRITICAL_RESERVE_BYTES,
+  DEFAULT_CLEANUP_BATCH_LIMIT,
+  DEFAULT_INCREMENTAL_VACUUM_PAGES,
+  DEFAULT_NORMAL_COMPACTION_INTERVAL_MS,
+  DEFAULT_PRESSURE_COMPACTION_INTERVAL_MS,
+  DEFAULT_RETENTION_MS,
+  DEFAULT_LOG_ROTATION,
+} from './daemon/journal/storage-policy';
+export type {
+  LocalStoragePolicy,
+  LocalStoragePolicyInput,
+  LocalStoragePressureEngineOptions,
+  LogRotationPolicy,
+  CompactionPolicy,
+  StoragePressureState,
+  StoragePressureEvent,
+  StorageMeasurement,
+  StorageStatusSnapshot,
+  StorageTickResult,
+  CleanupExecutor,
+  CleanupExecution,
+  TimerLike,
+} from './daemon/journal/storage-policy';
 export type { DeviceRecord } from './daemon/store';
 export { AuthManager, DeviceRevokedError } from './daemon/auth-manager';
 export type { ConnectionState } from './daemon/ws-transport';
