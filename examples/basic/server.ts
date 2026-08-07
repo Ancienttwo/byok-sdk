@@ -32,6 +32,13 @@ const PORT = Number(process.env.PORT ?? 8787);
 // config uses.
 const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 
+// S1: every pairing code — and therefore every device row it creates — is
+// minted for an explicit tenant. A real product resolves this from whoever is
+// logged into the page that clicked "pair"; this demo has no accounts, so it
+// pins one demo tenant and revokes within it (see `/api/machines/:deviceId/revoke`
+// below). There is deliberately no "no tenant" path to fall back to.
+const DEMO_TENANT_ID = process.env.BYOK_EXAMPLE_TENANT_ID ?? 'tenant-demo';
+
 // `RuntimeId` from @byok/protocol is 'pi' | 'claude' | 'codex'; M0 only ships
 // the pi adapter (see plan: 里程碑 M0), but the wire/select still names all
 // three so the demo is representative of the full protocol shape. Mirrors
@@ -92,7 +99,9 @@ app.route('/', byok.hono);
 
 app.get('/', (c) => c.html(indexHtml));
 
-app.post('/api/pair', (c) => c.json(byok.pairing.createPairingCode()));
+app.post('/api/pair', (c) =>
+  c.json(byok.pairing.createPairingCode({ tenantId: DEMO_TENANT_ID, productId: PRODUCT_ID })),
+);
 
 app.get('/api/machines', (c) => c.json(byok.machines.list()));
 
@@ -101,7 +110,7 @@ app.get('/api/machines', (c) => c.json(byok.machines.list()));
 // re-pair. Nothing else to await here; the effect shows up next time the
 // device tries to renew or reconnect (see public/index.html's revoke button).
 app.post('/api/machines/:deviceId/revoke', (c) => {
-  byok.devices.revoke(c.req.param('deviceId'));
+  byok.devices.revoke(DEMO_TENANT_ID, c.req.param('deviceId'));
   return c.json({ ok: true });
 });
 
