@@ -37,3 +37,122 @@ export type {
 // Errors (single taxonomy)
 export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors';
 export type { CoreErrorCode } from './errors';
+
+// Mailbox (§12.7.3)
+export { MAILBOX_MESSAGE_STATES } from './mailbox';
+export type {
+  MailboxAdvanceCursorInput,
+  MailboxAppendInput,
+  MailboxCursorState,
+  MailboxMessage,
+  MailboxMessageState,
+  MailboxPage,
+  MailboxReadQuery,
+  MailboxRetentionInput,
+  MailboxRetentionResult,
+  MailboxStore,
+} from './mailbox';
+
+// Board coordination (§12.3)
+export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board';
+export type {
+  BoardAssignee,
+  BoardClaimInput,
+  BoardItem,
+  BoardItemInput,
+  BoardListQuery,
+  BoardPage,
+  BoardStatus,
+  BoardStatusUpdateInput,
+  BoardStore,
+  BoardUnclaimInput,
+} from './board';
+
+// Truth records (§12.3, §12.6.4)
+export { TRUTH_RECORD_KINDS } from './truth';
+export type {
+  SnapshotWriteInput,
+  TerminalWriteInput,
+  TruthBodyRef,
+  TruthManifestEntry,
+  TruthManifestQuery,
+  TruthRecord,
+  TruthRecordKind,
+  TruthRecordSelector,
+  TruthStore,
+} from './truth';
+
+// Presence + activity (§12.3)
+export { PRESENCE_LEVELS, DEFAULT_ACTIVITY_CAPACITY } from './presence';
+export type {
+  ActivityAppendInput,
+  ActivityEntry,
+  ActivityStore,
+  ActivityTail,
+  PresenceHint,
+  PresenceHintInput,
+  PresenceLevel,
+  PresenceStore,
+} from './presence';
+
+// Content addressing + object manifest (§12.7.4, §12.7.8)
+export {
+  CONTENT_HASH_PATTERN,
+  OBJECT_STATES,
+  OBJECT_STATE_TRANSITIONS,
+  contentHash,
+  isContentHash,
+  isLegalObjectTransition,
+  tenantObjectKey,
+} from './blob';
+export type {
+  ContentHash,
+  ObjectCommitInput,
+  ObjectListQuery,
+  ObjectManifestEntry,
+  ObjectManifestInput,
+  ObjectReference,
+  ObjectReferenceInput,
+  ObjectState,
+  ObjectStore,
+} from './blob';
+
+// Storage entitlement / usage / reservation (§12.7.6-12.7.7)
+export {
+  STORAGE_ERROR_CODES,
+  STORAGE_ERROR_HTTP_STATUS,
+  STORAGE_RESERVATION_STATES,
+  STORAGE_WRITE_KINDS,
+  STORAGE_WRITE_POSTURES,
+} from './quota';
+export type {
+  MailboxUsageDeltaInput,
+  QuotaStore,
+  StorageErrorCode,
+  StorageFinalizeInput,
+  StorageFinalizeResult,
+  StorageReservation,
+  StorageReservationInput,
+  StorageReservationState,
+  StorageStatus,
+  StorageWriteKind,
+  StorageWritePosture,
+  TenantStorageEntitlement,
+  TenantStorageEntitlementInput,
+  TenantStorageUsage,
+} from './quota';
+
+// Capability declaration (ADR-010)
+export {
+  CAPABILITY_DECLARATION_SCHEMA_ID,
+  CAPABILITY_NAME_PATTERN,
+  CapabilityDeclarationSchema,
+  assertCapability,
+  hasCapability,
+  parseCapabilityDeclaration,
+} from './capabilities';
+export type { CapabilityDeclaration } from './capabilities';
+
+// Composition contract
+export { CORE_STORE_NAMES } from './stores';
+export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
