@@ -16,7 +16,7 @@ Sprint S0 of `plans/sprints/20260807-byok-platform-raft-aligned.sprint.md` close
 
 ## Goal
 
-Deliver Sprint S0 exactly as scoped in the sprint file: (1) `RuntimeAdapter.capabilities` becomes the only runtime-capability truth and wire `RuntimeInfo` is generated from adapter instances — the hardcoded `approvalInteractive: false` table is gone and Claude honestly reports interactive approval; (2) the server records a claim-time capability snapshot on the task record and `steerTask()` fail-closes with stable typed errors for runtimes that cannot steer, before any envelope is sent; (3) the client treats an inbound unsupported steer as a recorded protocol/authority error that acks and never freezes the cursor; (4) `workspaceHint` is documented as reserved and GAP-001/002/003 are closed in the architecture ledger. Protocol wire v1 stays byte-frozen (golden zero-diff).
+Deliver Sprint S0 exactly as scoped in the sprint file: (1) `RuntimeAdapter.capabilities` becomes the only runtime-capability truth and wire `RuntimeInfo` is generated from adapter instances — the hardcoded `approvalInteractive: false` table is gone and Claude honestly reports interactive approval; (2) the server records a claim-time capability snapshot on the task record and `steerTask()` fail-closes with stable typed errors for runtimes that cannot steer, before any envelope is sent; (3) the client treats an inbound unsupported steer as a recorded protocol/authority error that acks and never freezes the cursor; (4) `workspaceHint` is documented as reserved and GAP-001/002/003 are closed in the architecture ledger. Protocol wire v1 stays frozen in the sense that matters: `v1.envelopes.ndjson` (the real v1 byte corpus) is byte-identical to base, machine-checked; `v1.frozen.json` (the schema fingerprint) is regenerated exactly once for the D-4 additive optional `task.claim.capabilities` field, with the diff limited to `task.claim` keys and reviewed line-by-line (sprint D-4; §2.4 additive-field allowance; `PROTOCOL_VERSION` stays 1).
 
 ## Scope
 
@@ -24,13 +24,16 @@ Deliver Sprint S0 exactly as scoped in the sprint file: (1) `RuntimeAdapter.capa
   - `packages/client/src/types.ts` — add `approvalInteractive` to the client `RuntimeCapabilities` interface (`:23-28`)
   - `packages/client/src/adapters/pi/pi-adapter.ts:77-79`, `claude/claude-adapter.ts:170-175`, `codex/codex-adapter.ts:126-128` — accurate per-adapter capability declarations
   - `packages/client/src/daemon/create-daemon.ts:333-360` — generate `RuntimeInfo.capabilities` from adapter truth; delete the hardcoded value
-  - `packages/server/src/hub.ts` — claim-time capability snapshot (source: the registered connection's `runtimes[]` entry for the claimed runtime) + `steerTask()` task-level gate with typed errors; unknown/missing capability fails closed
+  - `packages/server/src/hub.ts` — claim-time capability snapshot (source per D-4: `task.claim.capabilities`, the claiming adapter's own self-report; connection-level `runtimes[]` stays discovery-only and `runtimeCapabilitySnapshot` is deleted) + `steerTask()` task-level gate with typed errors; unknown/missing capability fails closed
+  - `packages/protocol/src/messages.ts` — bounded per D-4: `TaskClaimPayloadSchema` gains `capabilities: RuntimeCapabilitiesSchema.optional()`; nothing else
+  - `packages/protocol/src/__tests__/golden/v1.frozen.json` — bounded per D-4: one additive regeneration, diff reviewed line-by-line
+  - `packages/client/src/daemon/task-runner.ts` claim path — claim payload carries `capabilities` from the picked adapter (shared mapper extracted to avoid a create-daemon import cycle)
   - `packages/server/src/types.ts`, `task-store.ts`, `sqlite-task-store.ts` — additive task-record snapshot field persistence
   - `packages/client/src/daemon/task-runner.ts` (`handleSteer` `:1657-1661`) — classify unsupported-steer as non-retryable: record, ack, cursor advances; transient errors keep existing stall semantics
   - Tests: new `packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`; update `packages/client/src/__tests__/daemon-conn-hello-capabilities.test.ts` and `real-server-longpoll-redelivery.test.ts`; adapter capability unit tests
   - Docs: `docs/protocol.md` (workspaceHint reserved note), `docs/architecture/sdk-architecture.md` (GAP-001/002/003 closure, §3.3/§4.4 updated)
 - Out of scope:
-  - `packages/protocol/**` — wire v1 frozen; any need to touch it is a contract amendment, not a quiet widening
+  - `packages/protocol/**` beyond the two D-4-bounded items above — `v1.envelopes.ndjson` must stay byte-identical to base; any further protocol need is a new contract amendment, not a quiet widening
   - `packages/keys/**` — owned by the executing K-line plan
   - `docs/security.md` — shared with the K-line contract; S0 makes no credential-isolation change
   - New protocol message types, connection-level capability semantics changes, workspaceHint implementation
@@ -41,11 +44,13 @@ Deliver Sprint S0 exactly as scoped in the sprint file: (1) `RuntimeAdapter.capa
 - Stop and hand back to the parent if the change would require editing a path outside Allowed Paths.
 - Stop if an Exit Criteria command cannot be run in this environment.
 - Stop if Goal, Scope, or Exit Criteria are internally contradictory.
-- Stop if honest capability reporting would require a protocol schema change (the optional `approvalInteractive` field already exists in `RuntimeCapabilitiesSchema`; if that turns out to be insufficient, stop).
+- Stop if any protocol need arises beyond the D-4 bounded authorization (`TaskClaimPayloadSchema` additive optional `capabilities` + one `v1.frozen.json` regeneration).
 
 ## Falsifier
 
-Direction is wrong if the server cannot know per-runtime steer capability at claim time. Cheapest proof point: `conn.hello.runtimes[].capabilities` must carry per-runtime `steer` values generated by the daemon (`create-daemon.ts:343-360`) and `registerConnection` must retain `runtimes` (`hub.ts:374-376`). Verified true on 2026-08-07 before projection — the data source exists; only the gate is missing.
+**Original falsifier FIRED on 2026-08-07**: the original cheapest proof point claimed `conn.hello.runtimes[].capabilities` reaches the server for every device; on long-poll-only daemons `conn.hello` never exists (sole sender: `ws-transport.ts:192`), so the connection-sourced snapshot was structurally undefined for an entire transport and the fail-closed gate regressed working long-poll steer (5 pre-existing E2E tests red). Resolution: sprint D-4 — capability travels on `task.claim` itself.
+
+Current falsifier: direction is wrong if the capability gating a steer does not travel on the same message that establishes the task↔runtime binding. Cheapest proof point: a pure long-poll daemon claiming a steer-capable runtime must steer successfully (H-010 E2E), while a hello-advertised but claim-silent capability must NOT open the gate (structural regression guard).
 
 ## Root Cause Evidence
 
@@ -89,6 +94,7 @@ allowed_paths:
   - docs/protocol.md
   - packages/client/src/
   - packages/server/src/
+  - packages/protocol/src/
 ```
 
 ## Evidence Requirements
@@ -166,6 +172,7 @@ exit_criteria:
     - pnpm -r run test
     - pnpm -r run build
     - git diff --exit-code packages/protocol/src/__tests__/golden/
+    - git diff --exit-code main -- packages/protocol/src/__tests__/golden/v1.envelopes.ndjson
     - repo-harness run check-task-workflow --strict
 ```
 
@@ -177,5 +184,5 @@ exit_criteria:
 
 ## Rollback Point
 
-- Commit / checkpoint: branch `codex/s0-runtime-hardening` off `main@2038b82`; capability generation, server gate, client handling, and docs land as separately revertible commits.
-- Revert strategy: revert the PR (or individual commits); wire shape unchanged and the task-record snapshot field is additive/inert without the gate, so no persisted-state or compatibility residue.
+- Commit / checkpoint: branch `codex/s0-runtime-hardening` off `main@2038b82`; capability generation, server gate, client handling, docs, and the D-4 group (protocol additive → client claim capabilities → server source swap → test redirect) land as separately revertible commits.
+- Revert strategy: revert the PR (or individual commits; the D-4 group reverts as one unit — the protocol commit alone reverting would break client compile); wire is additive-only (`v1.envelopes.ndjson` byte-identical) and the task-record snapshot field is additive/inert without the gate, so no persisted-state or compatibility residue.

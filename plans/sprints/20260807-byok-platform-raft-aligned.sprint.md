@@ -34,7 +34,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 
 ## 对已决事项的显式改动
 
-本 sprint 相对两份权威文件有三处实质改动，均为显式声明，不是静默重排。
+本 sprint 相对两份权威文件有三处实质改动（D-1/D-2/D-3），均为显式声明，不是静默重排；D-4 是 S0 执行期对本文件自身验收字面的显式修订。
 
 ### D-1：`signNonce` domain separation 由 P4 提前到 S1
 
@@ -59,6 +59,14 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **改动**：`docs/architecture/sdk-architecture.md` §12.7 与 ADR-020 已裁定主生产组合为 **Postgres + R2**——Postgres 持 domain metadata、quota、usage、reservation 与 object manifest，R2 只持验证过 hash/size 的对象 bytes。选型闸随之取消：S4A 重切为 Postgres + R2 数据面，S4B 重切为 quota/reservation/GC，D1 降为可选 compatibility adapter，不进 Beta/RC 闸（见 S4B.8）。
 - **理由**：跨后端 parity 的成本换来的是可移植性声明，而真正阻塞 hosted 上线的是容量安全——并发上传超卖、降级后超限、R2 orphan 累积。把 S4B 的预算从「证明第二后端能跑」换成「证明满额与清理不吃掉用户数据」，才是这一刀的实际收益。
 - **影响**：Beta 闸新增 quota/reservation/GC 要求；RC 闸不再要求第二后端 parity；R-018 改述为 quota/GC 迟做的风险；§8 的 backend 选型行改记为已裁定。
+
+### D-4：S0 的 golden 验收从「零变化」修订为「NDJSON 字节冻结 + frozen.json 一次 additive 重生成」
+
+- **原决策**：S0.3 与 §10 exit criteria 要求「protocol golden 零变化」，S0 contract 全禁 `packages/protocol/**`。
+- **触发事实**：S0 的 claim 时 capability 快照最初取自 WS `conn.hello.runtimes[]`，实测发现 long-poll-only daemon 从不发送 hello（唯一发送点 `ws-transport.ts:192`；`hub.ts` 纯 long-poll 分支不带 runtimes），快照恒 undefined，fail-closed gate 把整个 long-poll 部署面的 steer 永久禁用——这是行为回归（S0 前 Pi over long-poll steer 可用，5 条既有 E2E 为证），且 contract 的 Falsifier 字面触发。
+- **改动**：capability 快照来源改为 `task.claim.capabilities`（additive optional 字段，`RuntimeCapabilitiesSchema` 复用），connection 层退回纯 discovery。据此修订 S0 的 golden 验收：`v1.envelopes.ndjson`（真实 v1 字节语料）保持字节冻结；`v1.frozen.json`（schema 指纹）按 freeze-guard 自身文档化的 additive 路径重生成一次，diff 限定在 `task.claim` 相关键并逐行 review。此为 §2.4「普通 optional field 可 additive 增加」许可条款的正常行使，不是 breaking 变更，`PROTOCOL_VERSION` 保持 1。
+- **理由**：三条替代路线均被否决——long-poll 补 hello 注册（无连接生命周期可承载注册状态，server 重启后无重驱动触发器；且需放行 `DAEMON_TO_SERVER_TYPES` 刻意排除的 conn.hello，削弱 WS inbound gate；S3 stateless handler 下 connection-scoped 注册必废）；server 端静态 capability 表（GAP-001 在 server 侧原地复活，对自定义 adapter 按错误方向猜）；gate 拆出 S0（同样要改 contract，交付更少且留下 server 发送 runtime 接不住的 envelope）。gate 的输入必须与它裁决的对象（task）同生命周期。
+- **影响**：S0 plan/contract 按此 amendment 扩权（仅 `TaskClaimPayloadSchema` additive + `v1.frozen.json` 重生成；`v1.envelopes.ndjson` 字节不变列入机检）；S0.3 的「protocol golden 零变化」按本条解读；long-poll 与 WS 的 protocol/product 验证不对称是本次的独立发现，记入 `tasks/todos.md` 另刀处理，不并入 S0。
 
 ---
 
