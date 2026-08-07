@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
-import { createEnvelope, PROTOCOL_VERSION, type RuntimeId } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type RuntimeCapabilities, type RuntimeId } from '@byok/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createByokServer } from '../index';
@@ -21,11 +21,19 @@ const PRODUCT_ID = 'acme';
 /**
  * Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running)
  * and wait for the Running event. `runtime` (S0) is the actual adapter this
- * claim reports; omitted matches a legacy runtime-less `task.claim`, which is
- * what every call site here but the steer test wants.
+ * claim reports and `capabilities` (S0/D-4) is that adapter's own self-report,
+ * which is the ONLY thing the server's steer gate reads; both omitted matches
+ * a legacy `task.claim`, which is what every call site here but the steer test
+ * wants.
  */
-async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle, runtime?: RuntimeId): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId, runtime }, { taskId: handle.taskId }));
+async function claimAndStart(
+  ws: WebSocket,
+  deviceId: string,
+  handle: TaskHandle,
+  runtime?: RuntimeId,
+  capabilities?: RuntimeCapabilities,
+): Promise<void> {
+  send(ws, createEnvelope('task.claim', { deviceId, runtime, capabilities }, { taskId: handle.taskId }));
   send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -447,7 +455,7 @@ describe('redelivery after reconnect (§9)', () => {
     if (offer1.type !== 'task.offer') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
 
-    await claimAndStart(ws, daemon.deviceId, handle1, 'pi');
+    await claimAndStart(ws, daemon.deviceId, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
     await handle1.steer('keep going'); // assigns the next seq; deliberately never read off `ws`
 
     // task2 is cancelled before reconnect — terminal by the time redelivery

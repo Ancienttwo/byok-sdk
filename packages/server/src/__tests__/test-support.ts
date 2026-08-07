@@ -8,6 +8,7 @@ import {
   PROTOCOL_VERSION,
   type ConnAckPayload,
   type Envelope,
+  type RuntimeCapabilities,
   type RuntimeId,
   type RuntimeInfo,
 } from '@byok/protocol';
@@ -313,15 +314,23 @@ export async function waitForServerEvent(
  * task actually running before driving it further (approve/reject,
  * implicit-approval-resume, etc).
  *
- * `runtime` (S0, GAP-002): the ACTUAL adapter this claim reports. Omitted
- * matches a legacy daemon's runtime-less `task.claim` — which is exactly what
- * every pre-S0 call site here already did, so their behavior is unchanged.
- * Pass one (with a matching `RuntimeInfo` in the connection's `conn.hello`
- * runtimes — see {@link PI_RUNTIME_INFO}) when the test needs the server to
+ * `runtime` (S0, GAP-002): the ACTUAL adapter this claim reports.
+ * `capabilities` (S0/D-4): that adapter's own capability self-report, which is
+ * the ONLY input the server's steer gate reads — the connection's `conn.hello`
+ * runtimes are discovery and feed nothing here. Both omitted matches a legacy
+ * daemon's `task.claim` — which is exactly what every pre-S0 call site here
+ * already did, so their behavior is unchanged. Pass them (see
+ * {@link PI_RUNTIME_INFO}'s `capabilities`) when the test needs the server to
  * have a claim-time capability snapshot to gate on.
  */
-export async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle, runtime?: RuntimeId): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId, runtime }, { taskId: handle.taskId }));
+export async function claimAndStart(
+  ws: WebSocket,
+  deviceId: string,
+  handle: TaskHandle,
+  runtime?: RuntimeId,
+  capabilities?: RuntimeCapabilities,
+): Promise<void> {
+  send(ws, createEnvelope('task.claim', { deviceId, runtime, capabilities }, { taskId: handle.taskId }));
   send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }

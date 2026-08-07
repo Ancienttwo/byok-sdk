@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, PROTOCOL_VERSION, type Envelope, type RuntimeId } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type Envelope, type RuntimeCapabilities, type RuntimeId } from '@byok/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer } from '../index';
 import type { ServerTaskEvent, TaskHandle } from '../types';
@@ -21,11 +21,19 @@ const SHORT_HOLD_MS = 150;
 /**
  * Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running)
  * and wait for the Running event. `runtime` (S0) is the actual adapter this
- * claim reports; omitted matches a legacy runtime-less `task.claim`, which is
- * what every call site here but the steer test wants.
+ * claim reports and `capabilities` (S0/D-4) is that adapter's own self-report,
+ * which is the ONLY thing the server's steer gate reads; both omitted matches
+ * a legacy `task.claim`, which is what every call site here but the steer test
+ * wants.
  */
-async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle, runtime?: RuntimeId): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId, runtime }, { taskId: handle.taskId }));
+async function claimAndStart(
+  ws: WebSocket,
+  deviceId: string,
+  handle: TaskHandle,
+  runtime?: RuntimeId,
+  capabilities?: RuntimeCapabilities,
+): Promise<void> {
+  send(ws, createEnvelope('task.claim', { deviceId, runtime, capabilities }, { taskId: handle.taskId }));
   send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -295,7 +303,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
 
       // task1: Running -> steer (non-exempt, non-terminal at send time) -> cancel (exempt, terminal at send time).
       const handle1 = await byok.dispatch({ instruction: 'task one' });
-      await claimAndStart(ws, daemon.deviceId, handle1, 'pi');
+      await claimAndStart(ws, daemon.deviceId, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
       await handle1.result();

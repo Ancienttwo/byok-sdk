@@ -3,7 +3,7 @@ import type { Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, type RuntimeId, type RuntimeInfo } from '@byok/protocol';
+import { createEnvelope, type RuntimeCapabilities, type RuntimeId, type RuntimeInfo } from '@byok/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer, SqliteTaskStore, SteerRejectedError, type ByokServer, type TaskHandle } from '../index';
 import { isSqliteAvailable } from '../sqlite-support';
@@ -31,11 +31,19 @@ const PRODUCT_ID = 'acme';
  * (`TaskSnapshot.claimedRuntimeCapabilities`, written by `onClaim`) that
  * refuses with a typed {@link SteerRejectedError} BEFORE any envelope exists.
  *
+ * S0/D-4 — WHERE that snapshot comes from: `task.claim.capabilities`, the
+ * claiming adapter's own self-report on the very message that establishes the
+ * task↔runtime binding. NOT `conn.hello.runtimes[].capabilities`, which is
+ * connection-level discovery: it describes a device rather than a task, and a
+ * long-poll-only daemon never sends `conn.hello` at all, so a gate reading it
+ * was structurally blind across an entire transport. The
+ * "connection-advertised capabilities cannot feed the gate" describe block
+ * below is the machine-checkable guard on that separation, in both directions.
+ *
  * These tests drive the real WS/HTTP harness (same conventions as
  * `task-claim-runtime.test.ts` / `hub-approve-reject.test.ts`) rather than
- * poking the hub directly, so the whole path — `conn.hello.runtimes[]
- * .capabilities` -> `registerConnection` -> `onClaim` snapshot -> task record
- * -> gate — is exercised end to end.
+ * poking the hub directly, so the whole path — `task.claim.capabilities` ->
+ * `onClaim` snapshot -> task record -> gate — is exercised end to end.
  */
 
 interface Harness {
@@ -47,7 +55,12 @@ interface Harness {
   port: number;
 }
 
-/** Boot a server + one paired/connected fake daemon advertising `runtimes` in its `conn.hello`. */
+/**
+ * Boot a server + one paired/connected fake daemon. `runtimes` is what the
+ * daemon advertises in its `conn.hello` — discovery only, deliberately
+ * independent of what any claim below reports; most tests here pass the
+ * realistic set purely so the fixture resembles a real device.
+ */
 async function startHarness(runtimes: RuntimeInfo[] | undefined): Promise<Harness> {
   const byok = createByokServer({ productId: PRODUCT_ID });
   const started = await startServer(byok);
@@ -65,19 +78,25 @@ async function startHarness(runtimes: RuntimeInfo[] | undefined): Promise<Harnes
 
 /**
  * Dispatch a task, consume its `task.offer` off the wire, then drive it to
- * `Running` claiming `runtime`. Consuming the offer matters: every assertion
- * below about "what the device receives next" would otherwise be answered by
- * the still-queued offer rather than by the envelope under test.
+ * `Running` claiming `runtime` and self-reporting `capabilities`. Consuming
+ * the offer matters: every assertion below about "what the device receives
+ * next" would otherwise be answered by the still-queued offer rather than by
+ * the envelope under test.
+ *
+ * `capabilities` is passed explicitly at every call site rather than derived
+ * from `runtime`: the whole point of the gate is that the server never infers
+ * a capability from a runtime id, so the fixture must not either.
  */
 async function dispatchClaimedRunning(
   h: Harness,
   runtime: RuntimeId | undefined,
+  capabilities: RuntimeCapabilities | undefined,
   instruction = 'long running task',
 ): Promise<TaskHandle> {
   const handle = await h.byok.dispatch({ instruction });
   const offer = await nextEnvelope(h.ws);
   expect(offer.type).toBe('task.offer');
-  send(h.ws, createEnvelope('task.claim', { deviceId: h.deviceId, runtime }, { taskId: handle.taskId }));
+  send(h.ws, createEnvelope('task.claim', { deviceId: h.deviceId, runtime, capabilities }, { taskId: handle.taskId }));
   send(h.ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
   return handle;
@@ -117,9 +136,9 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     harness = undefined;
   });
 
-  it('pi (capabilities.steer = true) claimed and Running: steer succeeds and the task.steer envelope reaches the device', async () => {
+  it('pi (claim reports steer = true) claimed and Running: steer succeeds and the task.steer envelope reaches the device', async () => {
     harness = await startHarness([PI_RUNTIME_INFO]);
-    const handle = await dispatchClaimedRunning(harness, 'pi');
+    const handle = await dispatchClaimedRunning(harness, 'pi', PI_RUNTIME_INFO.capabilities);
 
     await handle.steer('keep going');
 
@@ -130,9 +149,9 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     expect(envelope.payload.text).toBe('keep going');
   });
 
-  it('claude (capabilities.steer = false) claimed and Running: rejected with steer_unsupported_runtime, and the device receives no task.steer at all', async () => {
+  it('claude (claim reports steer = false) claimed and Running: rejected with steer_unsupported_runtime, and the device receives no task.steer at all', async () => {
     harness = await startHarness([CLAUDE_RUNTIME_INFO]);
-    const handle = await dispatchClaimedRunning(harness, 'claude');
+    const handle = await dispatchClaimedRunning(harness, 'claude', CLAUDE_RUNTIME_INFO.capabilities);
 
     const err = asSteerRejection(await handle.steer('please stop').catch((e: unknown) => e));
     expect(err.code).toBe('steer_unsupported_runtime');
@@ -142,9 +161,9 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     await expectNoSteerSent(harness, handle);
   });
 
-  it('codex (capabilities.steer = false) claimed and Running: same fail-closed rejection as claude', async () => {
+  it('codex (claim reports steer = false) claimed and Running: same fail-closed rejection as claude', async () => {
     harness = await startHarness([CODEX_RUNTIME_INFO]);
-    const handle = await dispatchClaimedRunning(harness, 'codex');
+    const handle = await dispatchClaimedRunning(harness, 'codex', CODEX_RUNTIME_INFO.capabilities);
 
     const err = asSteerRejection(await handle.steer('please stop').catch((e: unknown) => e));
     expect(err.code).toBe('steer_unsupported_runtime');
@@ -153,14 +172,14 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     await expectNoSteerSent(harness, handle);
   });
 
-  it('fail-closed on unknown: a conn.hello whose RuntimeInfo carries NO capabilities leaves the snapshot undefined, and a steer for it is refused rather than sent', async () => {
-    // A pre-S0 daemon: `RuntimeInfo.capabilities` is optional on the wire, so
-    // it reports pi with no capability block at all. "This server does not
-    // know" must refuse — assuming "steerable, because it says pi" is exactly
-    // what produces a permanent cursor stall against a build where that
-    // isn't true.
-    harness = await startHarness([{ id: 'pi' }]);
-    const handle = await dispatchClaimedRunning(harness, 'pi');
+  it('fail-closed on unknown: a task.claim carrying NO capabilities leaves the snapshot undefined, and a steer for it is refused rather than sent', async () => {
+    // A pre-D-4 daemon: `task.claim.capabilities` is optional on the wire, so
+    // it claims pi and reports nothing about what pi can do. "This server does
+    // not know" must refuse — assuming "steerable, because it says pi" is
+    // exactly what produces a permanent cursor stall against a build where
+    // that isn't true.
+    harness = await startHarness([PI_RUNTIME_INFO]);
+    const handle = await dispatchClaimedRunning(harness, 'pi', undefined);
 
     expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntime).toBe('pi');
     expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntimeCapabilities).toBeUndefined();
@@ -171,9 +190,28 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     await expectNoSteerSent(harness, handle);
   });
 
-  it('fail-closed on unknown: a legacy runtime-less task.claim (no runtime reported at all) is refused the same way', async () => {
+  it('fail-closed on unknown: a capabilities block that simply omits `steer` is refused — absent is not true', async () => {
+    // Every field of `RuntimeCapabilities` is individually optional, so a
+    // partial self-report is well-formed on the wire. The gate requires a
+    // POSITIVE `steer === true`; anything else, including a block that reports
+    // other flags but says nothing about steering, refuses.
     harness = await startHarness([PI_RUNTIME_INFO]);
-    const handle = await dispatchClaimedRunning(harness, undefined);
+    const handle = await dispatchClaimedRunning(harness, 'pi', { resume: true, approvalInteractive: false });
+
+    expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntimeCapabilities).toEqual({
+      resume: true,
+      approvalInteractive: false,
+    });
+
+    const err = asSteerRejection(await handle.steer('keep going').catch((e: unknown) => e));
+    expect(err.code).toBe('steer_unsupported_runtime');
+
+    await expectNoSteerSent(harness, handle);
+  });
+
+  it('fail-closed on unknown: a legacy runtime-less task.claim (nothing reported at all) is refused the same way', async () => {
+    harness = await startHarness([PI_RUNTIME_INFO]);
+    const handle = await dispatchClaimedRunning(harness, undefined, undefined);
 
     expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntimeCapabilities).toBeUndefined();
 
@@ -187,7 +225,14 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
   it('a Claimed (not yet started) task is task_not_running — the state gate fires before the capability gate even for a steerable runtime', async () => {
     harness = await startHarness([PI_RUNTIME_INFO]);
     const handle = await harness.byok.dispatch({ instruction: 'claimed but not started' });
-    send(harness.ws, createEnvelope('task.claim', { deviceId: harness.deviceId, runtime: 'pi' }, { taskId: handle.taskId }));
+    send(
+      harness.ws,
+      createEnvelope(
+        'task.claim',
+        { deviceId: harness.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
+        { taskId: handle.taskId },
+      ),
+    );
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
 
     const err = asSteerRejection(await handle.steer('too early').catch((e: unknown) => e));
@@ -197,7 +242,7 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
 
   it('a terminal task is task_terminal, NOT task_not_running — terminal wins over both later gates even for a steerable runtime', async () => {
     harness = await startHarness([PI_RUNTIME_INFO]);
-    const handle = await dispatchClaimedRunning(harness, 'pi');
+    const handle = await dispatchClaimedRunning(harness, 'pi', PI_RUNTIME_INFO.capabilities);
     await handle.cancel('changed my mind');
     await handle.result();
     expect(harness.byok.tasks.get(handle.taskId)?.state).toBe('Cancelled');
@@ -207,21 +252,114 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     expect(err.state).toBe('Cancelled');
   });
 
-  it('the gate is per-runtime, not per-device: a device advertising BOTH pi and claude gets a steerable task only for the runtime it actually claimed', async () => {
+  it('the gate is per-task, not per-device: one device running two tasks gets a steerable one only where the claim said so', async () => {
     harness = await startHarness([PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO]);
 
-    const claudeTask = await dispatchClaimedRunning(harness, 'claude', 'runs on claude');
+    const claudeTask = await dispatchClaimedRunning(harness, 'claude', CLAUDE_RUNTIME_INFO.capabilities, 'runs on claude');
     expect(harness.byok.tasks.get(claudeTask.taskId)?.claimedRuntimeCapabilities?.steer).toBe(false);
     const err = asSteerRejection(await claudeTask.steer('nope').catch((e: unknown) => e));
     expect(err.code).toBe('steer_unsupported_runtime');
     await expectNoSteerSent(harness, claudeTask);
 
-    const piTask = await dispatchClaimedRunning(harness, 'pi', 'runs on pi');
+    const piTask = await dispatchClaimedRunning(harness, 'pi', PI_RUNTIME_INFO.capabilities, 'runs on pi');
     expect(harness.byok.tasks.get(piTask.taskId)?.claimedRuntimeCapabilities?.steer).toBe(true);
     await piTask.steer('keep going');
     const envelope = await nextEnvelope(harness.ws);
     expect(envelope.type).toBe('task.steer');
     expect(envelope.task_id).toBe(piTask.taskId);
+  });
+
+  it('a custom (non-enum) runtime that reports steer = true on its claim is steerable, even though `runtime` itself cannot name it', async () => {
+    // `RuntimeId` is a closed enum, so a custom adapter's claim carries no
+    // `runtime` at all — but capabilities are a self-report any adapter can
+    // make honestly, and the client sends them ungated for exactly this
+    // reason. The gate reads capabilities, never the runtime id, so this must
+    // steer despite `claimedRuntime` being undefined.
+    harness = await startHarness([]);
+    const handle = await dispatchClaimedRunning(harness, undefined, { steer: true, resume: false });
+
+    expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntime).toBeUndefined();
+    await handle.steer('keep going');
+
+    const envelope = await nextEnvelope(harness.ws);
+    expect(envelope.type).toBe('task.steer');
+    expect(envelope.task_id).toBe(handle.taskId);
+  });
+});
+
+/**
+ * S0/D-4 structural guard. The gate has exactly ONE input, and this block is
+ * what makes "exactly one" machine-checkable rather than a comment: it drives
+ * the connection layer and the claim layer to DISAGREE, in both directions,
+ * and asserts the claim wins every time.
+ *
+ * The negative direction is the important one. Before D-4 the snapshot was
+ * looked up in `ConnectionState.runtimes` (from `conn.hello`), so
+ * "hello says pi can steer" was sufficient to open the gate. If anyone
+ * reintroduces that lookup — as a source, or as a fallback for when the claim
+ * carries nothing — that test goes green-to-red immediately, at the exact
+ * behavior that matters, instead of surfacing later as a long-poll-only
+ * deployment that mysteriously cannot steer.
+ */
+describe('S0/D-4: connection-advertised capabilities cannot feed the steer gate', () => {
+  let harness: Harness | undefined;
+
+  afterEach(async () => {
+    harness?.ws.terminate();
+    harness?.byok.stop();
+    if (harness) await stopServer(harness.server);
+    harness = undefined;
+  });
+
+  it('conn.hello advertises pi with steer = true, but the claim carries no capabilities: STILL refused, and the snapshot stays undefined', async () => {
+    harness = await startHarness([PI_RUNTIME_INFO]);
+    expect(PI_RUNTIME_INFO.capabilities?.steer).toBe(true); // the connection layer really is offering a `true` to fall back to
+
+    const handle = await dispatchClaimedRunning(harness, 'pi', undefined);
+
+    // Nothing was harvested from the connection: not at claim time...
+    expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntime).toBe('pi');
+    expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntimeCapabilities).toBeUndefined();
+
+    // ...and not at steer time either.
+    const err = asSteerRejection(await handle.steer('keep going').catch((e: unknown) => e));
+    expect(err.code).toBe('steer_unsupported_runtime');
+    expect(err.runtime).toBe('pi');
+
+    await expectNoSteerSent(harness, handle);
+  });
+
+  it('conn.hello advertises pi with steer = false, but the claim reports steer = true: ALLOWED — the claim is the authority, not a second opinion', async () => {
+    harness = await startHarness([{ id: 'pi', capabilities: { ...PI_RUNTIME_INFO.capabilities, steer: false } }]);
+
+    const handle = await dispatchClaimedRunning(harness, 'pi', { steer: true, resume: true });
+
+    expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntimeCapabilities?.steer).toBe(true);
+    await handle.steer('keep going');
+
+    const envelope = await nextEnvelope(harness.ws);
+    expect(envelope.type).toBe('task.steer');
+    expect(envelope.task_id).toBe(handle.taskId);
+  });
+
+  it('a device that advertised NO runtimes at all still steers when its claim says so — the transport shape of conn.hello is irrelevant to the gate', async () => {
+    // The long-poll case in miniature: a daemon that never populated
+    // `conn.hello.runtimes` (or, on a real long-poll-only daemon, never sent a
+    // `conn.hello` at all) has no connection-level capability data anywhere,
+    // and must still be steerable on the strength of its own claim. This is
+    // the regression the D-4 amendment exists for — the WS-shaped version of
+    // it, kept here next to the hub; the real pure-long-poll path is covered
+    // end to end by the client suite's `real-server-longpoll-steer` E2E.
+    harness = await startHarness(undefined);
+
+    const handle = await dispatchClaimedRunning(harness, 'pi', PI_RUNTIME_INFO.capabilities);
+
+    expect(harness.byok.tasks.get(handle.taskId)?.claimedRuntimeCapabilities?.steer).toBe(true);
+    await handle.steer('keep going');
+
+    const envelope = await nextEnvelope(harness.ws);
+    expect(envelope.type).toBe('task.steer');
+    expect(envelope.task_id).toBe(handle.taskId);
   });
 });
 
@@ -235,10 +373,17 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
     harness = undefined;
   });
 
-  it("the Offered -> Claimed transition records the claiming connection's advertised capabilities verbatim, alongside claimedRuntime", async () => {
+  it("the Offered -> Claimed transition records the claim's own reported capabilities verbatim, alongside claimedRuntime", async () => {
     harness = await startHarness([PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO]);
     const handle = await harness.byok.dispatch({ instruction: 'snapshot me' });
-    send(harness.ws, createEnvelope('task.claim', { deviceId: harness.deviceId, runtime: 'pi' }, { taskId: handle.taskId }));
+    send(
+      harness.ws,
+      createEnvelope(
+        'task.claim',
+        { deviceId: harness.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
+        { taskId: handle.taskId },
+      ),
+    );
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
 
     const snapshot = harness.byok.tasks.get(handle.taskId);
@@ -248,7 +393,7 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
 
   it('a reconnect advertising a DIFFERENT capability set does not retroactively change an already-running task: the snapshot is frozen at claim time', async () => {
     harness = await startHarness([PI_RUNTIME_INFO]);
-    const handle = await dispatchClaimedRunning(harness, 'pi');
+    const handle = await dispatchClaimedRunning(harness, 'pi', PI_RUNTIME_INFO.capabilities);
 
     // Same device, brand-new connection, now honestly reporting a pi build
     // that cannot steer (downgrade/reinstall). A live capability read would
@@ -287,7 +432,14 @@ describe.skipIf(!sqliteReady)('S0 (GAP-002): the capability snapshot survives a 
     });
 
     const handle = await byok.dispatch({ instruction: 'persist my capabilities' });
-    send(daemon.ws, createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'pi' }, { taskId: handle.taskId }));
+    send(
+      daemon.ws,
+      createEnvelope(
+        'task.claim',
+        { deviceId: daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
+        { taskId: handle.taskId },
+      ),
+    );
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
 
     daemon.ws.terminate();
