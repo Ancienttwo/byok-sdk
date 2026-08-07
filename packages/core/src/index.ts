@@ -1,0 +1,207 @@
+/**
+ * `@byok/core` — platform contracts.
+ *
+ * What this package exports is deliberately narrow: contracts, schemas, errors,
+ * and one in-memory reference implementation. No HTTP, no crypto, no SQL, no
+ * `@byok/protocol` (that edge would make a future `keys → core` dependency drag
+ * the wire protocol along with it, §12.1), and no `node:` import (a Workers
+ * composition has to be able to load this).
+ *
+ * `src/__tests__/constraints.test.ts` asserts every one of those properties
+ * against the source, including this export list.
+ */
+
+// Identity (§12.6.2)
+export {
+  tenantId,
+  isTenantId,
+  tenantKey,
+  TENANT_ID_MAX_LENGTH,
+  TENANT_KEY_SEPARATOR,
+} from './tenant';
+export type { TenantId } from './tenant';
+
+export {
+  PRINCIPAL_KINDS,
+  isDevicePrincipal,
+  isControlPlanePrincipal,
+  principalTenant,
+} from './principals';
+export type {
+  ControlPlanePrincipal,
+  DevicePrincipal,
+  Principal,
+  PrincipalKind,
+} from './principals';
+
+// Errors (single taxonomy)
+export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors';
+export type { CoreErrorCode } from './errors';
+
+// Canonical instants (the format every caller-supplied timestamp must be in)
+export {
+  CANONICAL_TIMESTAMP_PATTERN,
+  assertCanonicalTimestamp,
+  isCanonicalTimestamp,
+} from './time';
+
+// Mailbox (§12.7.3)
+export { MAILBOX_MESSAGE_STATES } from './mailbox';
+export type {
+  MailboxAdvanceCursorInput,
+  MailboxAppendInput,
+  MailboxCursorState,
+  MailboxMessage,
+  MailboxMessageState,
+  MailboxPage,
+  MailboxReadQuery,
+  MailboxRetentionInput,
+  MailboxRetentionResult,
+  MailboxStore,
+} from './mailbox';
+
+// Board coordination (§12.3)
+export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board';
+export type {
+  BoardAssignee,
+  BoardClaimInput,
+  BoardItem,
+  BoardItemInput,
+  BoardListQuery,
+  BoardPage,
+  BoardStatus,
+  BoardStatusUpdateInput,
+  BoardStore,
+  BoardUnclaimInput,
+} from './board';
+
+// Truth records (§12.3, §12.6.4)
+export { TRUTH_RECORD_KINDS } from './truth';
+export type {
+  SnapshotWriteInput,
+  TerminalWriteInput,
+  TruthBodyRef,
+  TruthManifestEntry,
+  TruthManifestQuery,
+  TruthRecord,
+  TruthRecordKind,
+  TruthRecordSelector,
+  TruthStore,
+} from './truth';
+
+// Presence + activity (§12.3)
+export { PRESENCE_LEVELS, DEFAULT_ACTIVITY_CAPACITY } from './presence';
+export type {
+  ActivityAppendInput,
+  ActivityEntry,
+  ActivityStore,
+  ActivityTail,
+  PresenceHint,
+  PresenceHintInput,
+  PresenceLevel,
+  PresenceStore,
+} from './presence';
+
+// Content addressing + object manifest (§12.7.4, §12.7.8)
+export {
+  CONTENT_HASH_PATTERN,
+  OBJECT_STATES,
+  OBJECT_STATE_TRANSITIONS,
+  contentHash,
+  isContentHash,
+  isLegalObjectTransition,
+  tenantObjectKey,
+} from './blob';
+export type {
+  ContentHash,
+  ObjectCommitInput,
+  ObjectListQuery,
+  ObjectManifestEntry,
+  ObjectManifestInput,
+  ObjectReference,
+  ObjectReferenceInput,
+  ObjectState,
+  ObjectStore,
+} from './blob';
+
+// Storage entitlement / usage / reservation (§12.7.6-12.7.7)
+export {
+  STORAGE_ERROR_CODES,
+  STORAGE_ERROR_HTTP_STATUS,
+  STORAGE_RESERVATION_STATES,
+  STORAGE_WRITE_KINDS,
+  STORAGE_WRITE_POSTURES,
+} from './quota';
+export type {
+  MailboxUsageDeltaInput,
+  QuotaStore,
+  StorageErrorCode,
+  StorageFinalizeInput,
+  StorageFinalizeResult,
+  StorageReservation,
+  StorageReservationInput,
+  StorageReservationState,
+  StorageStatus,
+  StorageWriteKind,
+  StorageWritePosture,
+  TenantStorageEntitlement,
+  TenantStorageEntitlementInput,
+  TenantStorageUsage,
+} from './quota';
+
+// Capability declaration (ADR-010)
+export {
+  CAPABILITY_DECLARATION_SCHEMA_ID,
+  CAPABILITY_NAME_PATTERN,
+  CapabilityDeclarationSchema,
+  assertCapability,
+  hasCapability,
+  parseCapabilityDeclaration,
+} from './capabilities';
+export type { CapabilityDeclaration } from './capabilities';
+
+// Composition contract
+export { CORE_STORE_NAMES } from './stores';
+export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
+
+// Device proof (§12.6.3, sprint §S6.2)
+export {
+  DEVICE_PROOF_ALGORITHMS,
+  DEVICE_PROOF_DOMAIN_PREFIX,
+  DEVICE_PROOF_SCHEMA_ID,
+  DEVICE_PROOF_VERSION,
+  DeviceProofEnvelopeV1Schema,
+  DeviceProofProtectedClaimsSchema,
+  canonicalizeJson,
+  canonicalizeJsonBytes,
+  deviceProofCanonicalClaims,
+  deviceProofCanonicalJson,
+  deviceProofSigningInput,
+  parseDeviceProofEnvelope,
+} from './attestation';
+export type {
+  DeviceProofAlgorithm,
+  DeviceProofEnvelopeV1,
+  DeviceProofProtectedClaims,
+  DeviceProofVerifier,
+  DeviceProofVerifyInput,
+  JsonObject,
+  JsonPrimitive,
+  JsonValue,
+} from './attestation';
+
+// In-memory reference implementation
+export {
+  IN_MEMORY_CLOCK_EPOCH,
+  InMemoryActivityStore,
+  InMemoryBoardStore,
+  InMemoryMailboxStore,
+  InMemoryObjectStore,
+  InMemoryPresenceStore,
+  InMemoryQuotaStore,
+  InMemoryTruthStore,
+  createInMemoryCoreStores,
+  createInMemoryCoreCompositionWithClock,
+  createMutableClock,
+} from './in-memory/index';
+export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';

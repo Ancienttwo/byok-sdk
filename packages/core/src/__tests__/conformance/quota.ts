@@ -1,0 +1,273 @@
+/**
+ * Storage entitlement / usage / reservation conformance (§12.7.6-12.7.7).
+ *
+ * The invariant under test is `committed + reserved + expected <= hardLimit`,
+ * and the reason it needs a conformance suite rather than a unit test is that
+ * it is exactly the property a SQL implementation gets wrong: check outside the
+ * transaction, or increment after the upload, and concurrent writers oversell
+ * the tenant. The assertions below are written so a composition passes only if
+ * the check and the increment are one step.
+ *
+ * Entitlements are numeric and versioned. Nothing here mentions a plan, a tier,
+ * or a price — the constraint test asserts the same about `quota.ts`, because
+ * the moment the SDK knows what "pro" means, every host inherits the SDK's
+ * commercial model.
+ */
+import { describe, expect, it } from 'vitest';
+import { isCoreConflictError, isCoreError, type CoreConflictError } from '../../errors';
+import type { TenantStorageEntitlement } from '../../quota';
+import { ENTITLEMENT, hashOf, TENANT_A } from './fixtures';
+import { withComposition, type CoreCompositionFactory } from './harness';
+
+async function captureError(promise: Promise<unknown>): Promise<unknown> {
+  return promise.then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+}
+
+function reservation(id: string, bytes: bigint, seed: number) {
+  return {
+    reservationId: id,
+    kind: 'object' as const,
+    expectedBytes: bytes,
+    contentHash: hashOf(seed),
+    contentType: 'application/octet-stream',
+    ttlMs: 60_000,
+  };
+}
+
+export function runQuotaConformance(factory: CoreCompositionFactory): void {
+  describe('quota', () => {
+    it('applies entitlement version CAS and returns the current row on a stale write', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, { ...ENTITLEMENT, version: 2n });
+
+        const stale = await captureError(
+          stores.quota.writeEntitlement(TENANT_A, {
+            ...ENTITLEMENT,
+            version: 1n,
+            hardLimitBytes: 10n,
+          }),
+        );
+        expect(isCoreConflictError(stale, 'storage_entitlement_version_conflict')).toBe(true);
+        const current = (stale as CoreConflictError<TenantStorageEntitlement>).current;
+        expect(current.version).toBe(2n);
+        expect(current.hardLimitBytes).toBe(ENTITLEMENT.hardLimitBytes);
+
+        // Same version is also stale: version is monotonic, not merely different.
+        const same = await captureError(
+          stores.quota.writeEntitlement(TENANT_A, { ...ENTITLEMENT, version: 2n }),
+        );
+        expect(isCoreConflictError(same, 'storage_entitlement_version_conflict')).toBe(true);
+
+        const applied = await stores.quota.writeEntitlement(TENANT_A, {
+          ...ENTITLEMENT,
+          version: 3n,
+          hardLimitBytes: 2_000n,
+        });
+        expect(applied.hardLimitBytes).toBe(2_000n);
+      });
+    });
+
+    it('moves bytes from reserved to committed on finalize', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+
+        await stores.quota.reserve(TENANT_A, reservation('res-1', 300n, 1));
+        const reserved = await stores.quota.readUsage(TENANT_A);
+        expect(reserved.reservedBytes).toBe(300n);
+        expect(reserved.committedObjectBytes).toBe(0n);
+
+        const result = await stores.quota.finalizeReservation(TENANT_A, {
+          reservationId: 'res-1',
+          observedByteSize: 300n,
+          observedContentHash: hashOf(1),
+          observedContentType: 'application/octet-stream',
+        });
+        expect(result.deduplicated).toBe(false);
+        expect(result.usage.reservedBytes).toBe(0n);
+        expect(result.usage.committedObjectBytes).toBe(300n);
+        expect(result.usage.objectCount).toBe(1n);
+      });
+    });
+
+    it('never lets committed + reserved + expected exceed the hard limit', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+
+        await stores.quota.reserve(TENANT_A, reservation('res-1', 400n, 1));
+        await stores.quota.finalizeReservation(TENANT_A, {
+          reservationId: 'res-1',
+          observedByteSize: 400n,
+          observedContentHash: hashOf(1),
+          observedContentType: 'application/octet-stream',
+        });
+        await stores.quota.reserve(TENANT_A, reservation('res-2', 400n, 2));
+
+        // 400 committed + 400 reserved + 400 expected > 1000.
+        const overcommit = await captureError(
+          stores.quota.reserve(TENANT_A, reservation('res-3', 400n, 3)),
+        );
+        expect(isCoreError(overcommit, 'storage_quota_exceeded')).toBe(true);
+
+        const usage = await stores.quota.readUsage(TENANT_A);
+        expect(usage.committedObjectBytes + usage.reservedBytes).toBeLessThanOrEqual(
+          ENTITLEMENT.hardLimitBytes,
+        );
+      });
+    });
+
+    it('rejects a single write over the per-object and per-inline limits', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+
+        const tooBig = await captureError(
+          stores.quota.reserve(TENANT_A, reservation('res-1', 401n, 1)),
+        );
+        expect(isCoreError(tooBig, 'storage_object_too_large')).toBe(true);
+
+        const inlineTooBig = await captureError(
+          stores.quota.reserve(TENANT_A, {
+            ...reservation('res-2', 101n, 2),
+            kind: 'inline',
+          }),
+        );
+        expect(isCoreError(inlineTooBig, 'storage_object_too_large')).toBe(true);
+      });
+    });
+
+    it('expires a reservation, releases its bytes, and refuses to finalize it', async () => {
+      await withComposition(factory, async (handle) => {
+        const { stores } = handle;
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        await stores.quota.reserve(TENANT_A, reservation('res-1', 300n, 1));
+
+        await handle.advanceTime(60_000);
+
+        const expired = await stores.quota.expireReservations(TENANT_A);
+        expect(expired.map((entry) => entry.reservationId)).toEqual(['res-1']);
+        expect((await stores.quota.readUsage(TENANT_A)).reservedBytes).toBe(0n);
+
+        const late = await captureError(
+          stores.quota.finalizeReservation(TENANT_A, {
+            reservationId: 'res-1',
+            observedByteSize: 300n,
+            observedContentHash: hashOf(1),
+            observedContentType: 'application/octet-stream',
+          }),
+        );
+        expect(isCoreError(late, 'storage_reservation_expired')).toBe(true);
+      });
+    });
+
+    it('releases the reservation when the observed object disagrees', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        await stores.quota.reserve(TENANT_A, reservation('res-1', 300n, 1));
+
+        const mismatch = await captureError(
+          stores.quota.finalizeReservation(TENANT_A, {
+            reservationId: 'res-1',
+            observedByteSize: 299n,
+            observedContentHash: hashOf(1),
+            observedContentType: 'application/octet-stream',
+          }),
+        );
+        expect(isCoreError(mismatch, 'storage_integrity_mismatch')).toBe(true);
+
+        const usage = await stores.quota.readUsage(TENANT_A);
+        expect(usage.reservedBytes).toBe(0n);
+        expect(usage.committedObjectBytes).toBe(0n);
+      });
+    });
+
+    it('counts the same hash once per tenant', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+
+        for (const id of ['res-1', 'res-2']) {
+          await stores.quota.reserve(TENANT_A, reservation(id, 300n, 7));
+          const result = await stores.quota.finalizeReservation(TENANT_A, {
+            reservationId: id,
+            observedByteSize: 300n,
+            observedContentHash: hashOf(7),
+            observedContentType: 'application/octet-stream',
+          });
+          expect(result.deduplicated).toBe(id === 'res-2');
+        }
+
+        const usage = await stores.quota.readUsage(TENANT_A);
+        expect(usage.committedObjectBytes).toBe(300n);
+        expect(usage.objectCount).toBe(1n);
+        expect(usage.reservedBytes).toBe(0n);
+      });
+    });
+
+    it('aborts idempotently', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        await stores.quota.reserve(TENANT_A, reservation('res-1', 300n, 1));
+
+        const aborted = await stores.quota.abortReservation(TENANT_A, 'res-1');
+        expect(aborted.state).toBe('aborted');
+        const again = await stores.quota.abortReservation(TENANT_A, 'res-1');
+        expect(again.state).toBe('aborted');
+        expect((await stores.quota.readUsage(TENANT_A)).reservedBytes).toBe(0n);
+      });
+    });
+
+    it('suspends durable writes once a downgrade grace has ended over the limit', async () => {
+      await withComposition(factory, async (handle) => {
+        const { stores } = handle;
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        await stores.quota.reserve(TENANT_A, reservation('res-1', 400n, 1));
+        await stores.quota.finalizeReservation(TENANT_A, {
+          reservationId: 'res-1',
+          observedByteSize: 400n,
+          observedContentHash: hashOf(1),
+          observedContentType: 'application/octet-stream',
+        });
+
+        // The host downgrades the tenant below its current usage and grants grace.
+        const graceUntil = new Date(Date.parse(handle.now()) + 10 * 60_000).toISOString();
+        await stores.quota.writeEntitlement(TENANT_A, {
+          ...ENTITLEMENT,
+          version: 2n,
+          hardLimitBytes: 200n,
+          downgradeGraceUntil: graceUntil,
+        });
+        expect((await stores.quota.readStatus(TENANT_A)).posture).toBe('blocked');
+
+        await handle.advanceTime(10 * 60_000);
+
+        const status = await stores.quota.readStatus(TENANT_A);
+        expect(status.posture).toBe('suspended');
+        expect(status.graceActive).toBe(false);
+        expect(status.availableBytes).toBe(0n);
+
+        const suspended = await captureError(
+          stores.quota.reserve(TENANT_A, reservation('res-2', 10n, 2)),
+        );
+        expect(isCoreError(suspended, 'storage_write_suspended')).toBe(true);
+      });
+    });
+
+    it('bounds mailbox bytes by the entitlement', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+
+        const usage = await stores.quota.applyMailboxDelta(TENANT_A, { deltaBytes: 500n });
+        expect(usage.mailboxBytes).toBe(500n);
+
+        const over = await captureError(
+          stores.quota.applyMailboxDelta(TENANT_A, { deltaBytes: 1n }),
+        );
+        expect(isCoreError(over, 'storage_quota_exceeded')).toBe(true);
+
+        const released = await stores.quota.applyMailboxDelta(TENANT_A, { deltaBytes: -500n });
+        expect(released.mailboxBytes).toBe(0n);
+      });
+    });
+  });
+}
