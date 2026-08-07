@@ -1,0 +1,175 @@
+/**
+ * Cross-tenant isolation for the cloud-local ports, plus targeted assertions on
+ * the two pre-tenant entry points.
+ *
+ * Most cases have the same shape as core's: tenant A writes, tenant B reads,
+ * and tenant B must see nothing. Not "an error" — *nothing*. Returning a
+ * permission error would confirm the row exists, which §12.6.2 layer 6 names as
+ * the existence oracle to avoid; a tenant-first store simply addresses a
+ * different key space.
+ *
+ * The interesting half is the two methods `ports.ts` documents as pre-tenant by
+ * construction, because they are where a leak would actually happen:
+ *
+ * - `DeviceDirectory.resolveByDeviceId` — `POST /byok/challenge` and
+ *   `POST /byok/token` carry only a deviceId. The safety argument is that the
+ *   row it returns CARRIES its tenant, so the caller never compares a tenant it
+ *   was handed against one it guessed. That is asserted directly below: the
+ *   resolved record's `tenantId` is the owning tenant, and every subsequent
+ *   lookup is tenant-first from there.
+ * - `PairingCodeStore.redeem` — the code IS the tenant lookup. Asserted the
+ *   same way: redemption yields the minting tenant's claims, and a code minted
+ *   for one tenant never yields another's.
+ *
+ * There is deliberately no "move a device to another tenant" test, because
+ * there is deliberately no such method. If one is ever added, every assertion
+ * in this file becomes conditional on it not having been called.
+ */
+import { describe, expect, it } from 'vitest';
+import { registration, TENANT_A, TENANT_B } from './fixtures';
+import { withCloudComposition, type CloudCompositionFactory } from './harness';
+
+export function runCloudTenantIsolationConformance(factory: CloudCompositionFactory): void {
+  describe('tenant isolation', () => {
+    it('does not leak device rows or listings', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.devices.register(TENANT_A, registration('device-1'));
+
+        expect(await stores.devices.get(TENANT_B, 'device-1')).toBeUndefined();
+        expect(await stores.devices.list(TENANT_B)).toHaveLength(0);
+        expect(await stores.devices.list(TENANT_A)).toHaveLength(1);
+      });
+    });
+
+    it('does not let another tenant revoke a device it cannot see', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.devices.register(TENANT_A, registration('device-1'));
+
+        // A no-op, not an error: revoking what you cannot address changes nothing.
+        await stores.devices.revoke(TENANT_B, 'device-1');
+
+        expect((await stores.devices.get(TENANT_A, 'device-1'))?.revoked).toBe(false);
+        await stores.devices.revoke(TENANT_A, 'device-1');
+        expect((await stores.devices.get(TENANT_A, 'device-1'))?.revoked).toBe(true);
+      });
+    });
+
+    it('resolves a device id to a record that carries its own tenant', async () => {
+      // The pre-tenant exception, asserted rather than trusted: a single-step
+      // resolve whose result names the tenant is safe; a two-step "look up by
+      // naked id, then compare tenants" is the pattern §12.6.2 forbids, and it
+      // is unavailable here because the record already answers the question.
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.devices.register(TENANT_A, registration('device-1'));
+        await stores.devices.register(TENANT_B, registration('device-2'));
+
+        const resolved = await stores.devices.resolveByDeviceId('device-1');
+        expect(resolved?.tenantId).toBe(TENANT_A);
+        expect((await stores.devices.resolveByDeviceId('device-2'))?.tenantId).toBe(TENANT_B);
+        expect(await stores.devices.resolveByDeviceId('never-registered')).toBeUndefined();
+      });
+    });
+
+    it('keeps a revocation visible to the pre-tenant resolve immediately', async () => {
+      // One row, two access paths — never two copies to keep in sync. A stale
+      // pre-tenant index is a revoked device that can still get a token.
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.devices.register(TENANT_A, registration('device-1'));
+        await stores.devices.revoke(TENANT_A, 'device-1');
+
+        expect((await stores.devices.resolveByDeviceId('device-1'))?.revoked).toBe(true);
+      });
+    });
+
+    it('redeems a pairing code into the tenant that minted it, never another', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        const expiresAt = new Date(Date.parse(handle.now()) + 600_000).toISOString();
+        await stores.pairingCodes.issue(TENANT_A, {
+          code: 'code-a',
+          productId: 'product-a',
+          expiresAt,
+        });
+        await stores.pairingCodes.issue(TENANT_B, {
+          code: 'code-b',
+          productId: 'product-b',
+          expiresAt,
+        });
+
+        expect(await stores.pairingCodes.redeem('code-a')).toEqual({
+          tenantId: TENANT_A,
+          productId: 'product-a',
+        });
+        expect(await stores.pairingCodes.redeem('code-b')).toEqual({
+          tenantId: TENANT_B,
+          productId: 'product-b',
+        });
+      });
+    });
+
+    it('does not let one tenant validate or consume another tenant nonce', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const nonce = await stores.nonces.issue(TENANT_A, 'device-1');
+
+        expect(await stores.nonces.validate(TENANT_B, 'device-1', nonce)).toBe(false);
+        // Consuming from the wrong tenant must not burn the real owner's nonce.
+        await stores.nonces.markUsed(TENANT_B, nonce);
+        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(true);
+      });
+    });
+
+    it('keeps dedup rings separate per tenant', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        expect(await stores.dedup.checkAndRecord(TENANT_A, 'device-1', 'env-1')).toBe(false);
+        expect(await stores.dedup.checkAndRecord(TENANT_B, 'device-1', 'env-1')).toBe(false);
+        expect(await stores.dedup.checkAndRecord(TENANT_A, 'device-1', 'env-1')).toBe(true);
+      });
+    });
+
+    it('does not leak task attempts or let a guess touch another tenant row', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.tasks.open(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });
+
+        expect(await stores.tasks.get(TENANT_B, 'task-1')).toBeUndefined();
+        expect(
+          await stores.tasks.claim(TENANT_B, { taskId: 'task-1', deviceId: 'device-9' }),
+        ).toBeUndefined();
+        expect(
+          await stores.tasks.recordStatus(TENANT_B, { taskId: 'task-1', status: 'failed' }),
+        ).toBeUndefined();
+
+        // Tenant A's row is untouched, and tenant B conjured nothing.
+        expect(await stores.tasks.get(TENANT_A, 'task-1')).toMatchObject({
+          status: 'offered',
+          deviceId: 'device-1',
+        });
+        expect(await stores.tasks.get(TENANT_B, 'task-1')).toBeUndefined();
+      });
+    });
+
+    it('does not share receipts across tenants', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.receipts.record(TENANT_A, { key: 'terminal:task-1', body: 'a' });
+
+        expect(await stores.receipts.get(TENANT_B, 'terminal:task-1')).toBeUndefined();
+        // The same key in another tenant is a different fact, not a replay.
+        const foreign = await stores.receipts.record(TENANT_B, {
+          key: 'terminal:task-1',
+          body: 'b',
+        });
+        expect(foreign.created).toBe(true);
+        expect(foreign.receipt.body).toBe('b');
+        expect((await stores.receipts.get(TENANT_A, 'terminal:task-1'))?.body).toBe('a');
+      });
+    });
+
+    it('counts delivery sequence separately per tenant', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        expect(await stores.sequence.next(TENANT_A, 'device-1')).toBe(1);
+        expect(await stores.sequence.next(TENANT_A, 'device-1')).toBe(2);
+        // Tenant B starts at 1 even though tenant A is at 2.
+        expect(await stores.sequence.next(TENANT_B, 'device-1')).toBe(1);
+      });
+    });
+  });
+}
