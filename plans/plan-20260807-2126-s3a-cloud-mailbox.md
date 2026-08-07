@@ -131,13 +131,13 @@ Host control plane → `composition.enqueueOffer(tenant, device, offerInput)` �
 ## Annotations
 
 ## Task Breakdown
-- [ ] P-001 Scaffold `packages/cloud` (deps: core/protocol/zod; platform-neutral; sibling idiom)
-- [ ] P-002 Cloud-local tenant-first auth ports + in-memory impls + `TenantStores` facade (S1-parity semantics, injectable crypto verify)
-- [ ] P-004 pair/challenge/token handlers (claims flow, domain-prefixed nonce, token triple, uniform 401, no oracle)
-- [ ] P-005 events long-poll GET + messages POST (batch ≤256, ownership/dedup/type gate) + blob routes, frozen-v1 byte parity
-- [ ] P-006 `/byok/capabilities` declaration (ADR-010; no status-code sniffing)
-- [ ] P-003 I1 route-inventory matrix: registry-mounted routes only; unclassified fails; tenant B × every tenant A resource → 401/404 + zero rows
-- [ ] Statelessness constraint test (no module-level mutable task/session state; no Running map)
-- [ ] E2E: unchanged daemon pairs/polls/completes against the in-memory cloud composition over long-poll (client fixture + test)
-- [ ] Docs: architecture §12.1/§12.2 cloud skeleton status; sprint S3a/S3b split record + S3a-subset box marks
-- [ ] Full gates green incl. server/keys/protocol zero-diff machine check
+- [x] P-001 Scaffold `packages/cloud` (deps: core/protocol/zod; platform-neutral; sibling idiom)
+- [x] P-002 Cloud-local tenant-first auth ports + in-memory impls + `TenantStores` facade (S1-parity semantics, injectable crypto verify)
+- [x] P-004 pair/challenge/token handlers (claims flow, domain-prefixed nonce, token triple, uniform 401, no oracle)
+- [x] P-005 events long-poll GET + messages POST (batch ≤256, ownership/dedup/type gate) + blob routes, frozen-v1 byte parity
+- [x] P-006 `/byok/capabilities` declaration (ADR-010; no status-code sniffing)
+- [x] P-003 I1 route-inventory matrix: registry-mounted routes only; unclassified fails; tenant B × every tenant A resource → 401/404 + zero rows
+- [x] Statelessness constraint test (no module-level mutable task/session state; no Running map)
+- [x] E2E: unchanged daemon pairs/polls/completes against the in-memory cloud composition over long-poll (client fixture + test)
+- [x] Docs: architecture §12.1/§12.2 cloud skeleton status; sprint S3a/S3b split record + S3a-subset box marks
+- [x] Full gates green incl. server/keys/protocol zero-diff machine check
