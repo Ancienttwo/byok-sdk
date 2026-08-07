@@ -373,16 +373,16 @@ interface AuthenticatedDevice {
 
 ### S1.4 Acceptance criteria
 
-- [ ] TypeScript 无 optional/default tenant；
-- [ ] DeviceRegistry 无裸全局 device lookup public path；
-- [ ] pair code claims 在 redeem 时返回并进入 device record；
-- [ ] token 绑定 tenant/product/device；
-- [ ] product mismatch 在 connection registration 前拒绝；
-- [ ] nonce domain separation 双端同步；
-- [ ] examples 明确提供 tenant/product；
-- [ ] I2/I5/I8/I9 通过；
-- [ ] 无存量 migration 被伪造；release note 明确 breaking；
-- [ ] keys plane 零改动/零依赖。
+- [x] TypeScript 无 optional/default tenant；
+- [x] DeviceRegistry 无裸全局 device lookup public path；
+- [x] pair code claims 在 redeem 时返回并进入 device record；
+- [x] token 绑定 tenant/product/device；
+- [x] product mismatch 在 connection registration 前拒绝；
+- [x] nonce domain separation 双端同步；
+- [x] examples 明确提供 tenant/product；
+- [x] I2/I5/I8/I9 通过；
+- [x] 无存量 migration 被伪造；release note 明确 breaking；
+- [x] keys plane 零改动/零依赖。
 
 ### S1.5 Rollback
 

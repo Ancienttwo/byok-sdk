@@ -144,13 +144,13 @@ Use: bearer → `authenticateBearer` → tenant-scoped row lookup (claims as key
 ## Annotations
 
 ## Task Breakdown
-- [ ] T-001 `PairingCodeClaims {tenantId, productId}` required at mint; claimless mint impossible (type + runtime)
-- [ ] T-002 Redeem returns claims and registers the device row in one atomic step
-- [ ] T-003 `DeviceRecord` required `tenantId/productId`; no naked global device lookup on public paths
-- [ ] T-004 Token claims carry tenant/product/device; `authenticateBearer` reconstructs `AuthenticatedDevice` with registry-row authority; mismatch → uniform 401
-- [ ] T-005 `conn.hello.productId` equality against the device row before `registerConnection`
-- [ ] T-006 Nonce signing domain separation `byok-nonce-v1\n`, both ends, no dual mode; raw signature rejected
-- [ ] T-007 `examples/basic` passes explicit tenant/product
-- [ ] T-008 I2/I5/I9 suites + S1.3 negative matrix green; I8 golden zero-drift machine-checked
-- [ ] T-009 `docs/security.md` identity model + breaking/migration note; `docs/protocol.md` nonce format note; architecture ledger closes GAP-004/GAP-005
-- [ ] Full gates green: typecheck / test / build / golden zero-diff / check-task-workflow --strict; keys plane zero change confirmed on the diff
+- [x] T-001 `PairingCodeClaims {tenantId, productId}` required at mint; claimless mint impossible (type + runtime)
+- [x] T-002 Redeem returns claims and registers the device row in one atomic step
+- [x] T-003 `DeviceRecord` required `tenantId/productId`; no naked global device lookup on public paths
+- [x] T-004 Token claims carry tenant/product/device; `authenticateBearer` reconstructs `AuthenticatedDevice` with registry-row authority; mismatch → uniform 401
+- [x] T-005 `conn.hello.productId` equality against the device row before `registerConnection`
+- [x] T-006 Nonce signing domain separation `byok-nonce-v1\n`, both ends, no dual mode; raw signature rejected
+- [x] T-007 `examples/basic` passes explicit tenant/product
+- [x] T-008 I2/I5/I9 suites + S1.3 negative matrix green; I8 golden zero-drift machine-checked
+- [x] T-009 `docs/security.md` identity model + breaking/migration note; `docs/protocol.md` nonce format note; architecture ledger closes GAP-004/GAP-005
+- [x] Full gates green: typecheck / test / build / golden zero-diff / check-task-workflow --strict; keys plane zero change confirmed on the diff
