@@ -210,7 +210,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
 | `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
-| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `runtime?` (M5, additive — §3.1) | Daemon accepts an offer (idempotent CAS) |
+| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
 | `task.started` | D→S | **required** | optional | `{}` | Daemon actually starts the runtime session — `Claimed → Running` |
 | `task.decline` | D→S | **required** | optional | `reason`, `retryable?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
@@ -766,9 +766,14 @@ Authed (bearer access token); holds the request open for ~50 seconds waiting
 for new events before returning an empty `events` array. Same cursor
 semantics as the WSS path (§9) — `cursor` in the query is "last seq I've
 seen," `cursor` in the response is "resume from here next time." A client
-using long-poll instead of WSS still sends `conn.hello` semantics implicitly
-by however the reference server's HTTP layer establishes the equivalent
-per-device session; the event *shapes* returned are identical `Envelope`
+using long-poll instead of WSS establishes its per-device session through the
+HTTP layer's own auth rather than through a `conn.hello` frame: it sends NO
+`conn.hello` at all (`conn.hello` is a WSS-only frame — see
+`DAEMON_TO_SERVER_TYPES`, which deliberately excludes it from the inbound
+message gate). Anything a server needs for a per-task decision must therefore
+travel on a `task.*` message, not be inferred from connection state — this is
+exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
+`conn.hello.runtimes[]`. The event *shapes* returned are identical `Envelope`
 values regardless of transport.
 
 ### 8.2 Send — `POST /byok/messages`
@@ -1203,16 +1208,27 @@ pi adapter configured, does not advertise the connection-level `steer` flag
 at all.
 
 **The connection-level `steer` flag is discovery-only; steer authority is
-decided per task.** At claim time the server snapshots the claimed runtime's
-own `RuntimeInfo.capabilities` onto the task record, and `steerTask()`
-rejects with a typed `steer_unsupported_runtime` error before any envelope is
-built whenever that snapshot does not say `steer: true` — including when
-there is no snapshot at all (a task claimed before this gate existed), which
-fails closed. A `task.steer` envelope therefore never reaches the wire for a
-runtime that cannot honor it. On the receiving side a daemon that is still
-handed an unsupported steer (a forged or pre-gate message) records it as a
-non-retryable protocol error and acks it: the envelope is consumed, the
-cursor advances, and redelivery does not loop.
+decided per task, from the claim.** At claim time the server snapshots
+`task.claim.capabilities` (§11.5) — the claiming adapter's own self-report —
+onto the task record, and `steerTask()` rejects with a typed
+`steer_unsupported_runtime` error before any envelope is built whenever that
+snapshot does not say `steer: true`. A `task.steer` envelope therefore never
+reaches the wire for a runtime that cannot honor it. On the receiving side a
+daemon that is still handed an unsupported steer (a forged or pre-gate
+message) records it as a non-retryable protocol error and acks it: the
+envelope is consumed, the cursor advances, and redelivery does not loop.
+
+**That snapshot has exactly one source, and no fallback.** The server reads
+the claim payload and nothing else: not the connection-level flag list, not
+`conn.hello.runtimes[].capabilities`, and not either of them as a backstop for
+a claim that carried no `capabilities`. Connection-level data is discovery —
+it describes a DEVICE rather than a task, and `conn.hello` is transport-shaped
+(a long-poll-only daemon never sends one at all), so a gate reading it is
+structurally blind across an entire transport. A claim without `capabilities`
+(a daemon predating that field) records nothing and is refused. That is
+fail-closed, not a compatibility path: `undefined` means "this server does not
+know", never "supported", and the server never infers a capability from a
+runtime id.
 
 ### 11.3 `usage` AgentEvent — token accounting (additive)
 
@@ -1276,9 +1292,38 @@ therefore per-adapter truth: `true` for claude (the `--permission-prompt-tool`
 confirm path, §11.2), `false` for pi and codex. It is unrelated to the
 reserved connection-level `interactive-approval` flag (§5.1).
 
-`RuntimeInfo.capabilities` is also what the server snapshots onto a task
-record at claim time, making it the authority for per-task steer gating
-(§11.2) rather than pure observability data.
+`RuntimeInfo.capabilities` here is CONNECTION-level discovery data: it
+answers "what could this device run", for a client picking where to dispatch.
+It is deliberately NOT what any server-side control decision reads — per-task
+steer gating (§11.2) reads `task.claim.capabilities` (§11.5) instead.
+
+### 11.5 Claim-carried capabilities (`task.claim.capabilities`, additive)
+
+`TaskClaimPayload` optionally carries a `capabilities` object — the same
+`RuntimeCapabilitiesSchema` shape as §11.4, reusing it rather than defining a
+second capability vocabulary, and populated from the same adapter
+`capabilities()` call (`task-runner.ts`'s claim path, via the shared
+`toRuntimeInfoCapabilities`).
+
+Same source of truth as §11.4, different SCOPE. §11.4 is connection-level:
+what a device could run, discovered once per connection. This field is
+task-level: what the adapter that actually took THIS task reported about
+itself at the moment it took it. That distinction is what makes it usable as a
+control-gate input — it shares a lifecycle with the task↔runtime binding the
+claim itself establishes, so it stays correct across reconnects, adapter-set
+changes, and transports, whereas connection-level data is re-derived on every
+connection and absent entirely on a transport that sends no `conn.hello`.
+
+Additive-minor, exactly like `runtime` (§3.1): a plain optional field on an
+already-tolerant payload schema, no `PROTOCOL_VERSION` bump, no emission
+gating — a new daemon sends it unconditionally regardless of the connected
+server's age, and an old server simply never reads it. A new server reading an
+old daemon's claim finds nothing and fails closed (§11.2), which is a refusal,
+not a fallback. Unlike `runtime`, it is sent even by an adapter whose id is
+outside the `RuntimeId` enum: `runtime` is a closed enum a custom adapter has
+no member of, but capabilities are a self-report any adapter can make
+honestly, and gating them would leave a custom steer-capable adapter
+permanently un-steerable.
 
 ## 12. Task lease (M2)
 

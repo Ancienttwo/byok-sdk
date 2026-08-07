@@ -326,7 +326,10 @@ flowchart TB
 
 - M0/M5 embedded 模式不支持 queue-until-connect；设备从未连上时 `dispatch` 直接失败。
 - task lease 只在设备已 dark 且 `Claimed/Running/AwaitApproval` 自最后活动满 `taskLeaseMs` 后触发，结果是 retryable failure。
-- `steer` 已是 **task-level gate（已实现、已接线）**：claim 时 hub 把该连接 `runtimes[]` 中所选 runtime 的 `capabilities` 快照写入 task record（`TaskSnapshot.claimedRuntimeCapabilities`，SQLite 以 `claimed_runtime_capabilities_json` 列持久化），`steerTask()` 按 unknown task → 终态 `task_terminal` → 非 Running `task_not_running` → 快照 `steer !== true` 的顺序判定，最后一档抛 typed `SteerRejectedError`（code `steer_unsupported_runtime`），在构造 envelope 之前就拒绝，unsupported 时零 envelope 上 wire。快照缺失（S0 之前 claim 的旧 record）一律 fail-closed，不造默认值。connection-level `steer` flag 退回纯 discovery 语义，不参与本判定。client 侧对仍然收到的 unsupported steer（伪造或 pre-gate 消息）记为非重试性 protocol/authority 错误并正常 ack，cursor 照常推进，不再冻结重放。
+- `steer` 已是 **task-level gate（已实现、已接线）**：claim 时 hub 把 `task.claim.capabilities`——claiming adapter 在拿下这个 task 那一刻的自报——快照写入 task record（`TaskSnapshot.claimedRuntimeCapabilities`，SQLite 以 `claimed_runtime_capabilities_json` 列持久化），`steerTask()` 按 unknown task → 终态 `task_terminal` → 非 Running `task_not_running` → 快照 `steer !== true` 的顺序判定，最后一档抛 typed `SteerRejectedError`（code `steer_unsupported_runtime`），在构造 envelope 之前就拒绝，unsupported 时零 envelope 上 wire。
+- 快照**只有这一个来源**。hub 在 claim 和 steer 两处都不读任何 connection 状态：不读 `getDeviceCapabilities()` 的 connection-level flag，不读 `ConnectionState.runtimes`，claim 没带 capabilities 时也不回头去查。`conn.hello.runtimes[].capabilities` 退回纯 discovery——它描述的是设备而不是 task，而且是 transport-shaped：`conn.hello` 只有 WS transport 发（`ws-transport.ts`），long-poll-only daemon 从不发送，拿它当 gate 输入等于对整条 long-poll 部署面结构性失明（sprint D-4 的成因，机检守卫见 `steer-runtime-capability-gate.test.ts` 的「connection-advertised capabilities cannot feed the steer gate」块与 client 侧 `real-server-longpoll-steer.test.ts`）。
+- 快照缺失一律 fail-closed，不造默认值：pre-D-4 daemon 的 claim 不带 `capabilities`（wire 上是 additive optional 字段），S0 之前 claim 的旧 record 同样没有，两者都判为 unknown 而拒绝 steer。这是 fail-closed，不是 fallback——undefined 意为「本 server 不知道」，绝不等价于 true，也不按 runtime id 猜。
+- client 侧对仍然收到的 unsupported steer（伪造或 pre-gate 消息）记为非重试性 protocol/authority 错误并正常 ack，cursor 照常推进，不再冻结重放。
 
 ## 4. `@byok/client`：本机 daemon、CLI 与 runtime boundary
 
@@ -473,7 +476,7 @@ capability 至少要分三层才能表达准确。三层现在都已接线：
 | runtime capabilities | 某个 adapter 能精确表达哪些 policy | 派工时的 runtime 选择 | 已实现、已接线（S0 起为 adapter 实际能力，不再硬编码） |
 | task capabilities | 本 task 的 claimed runtime 与 effective policy 落定后，还剩哪些操作可执行 | `task.steer` 等 task 级控制面 | 已实现、已接线（claim 时快照 + steer gate） |
 
-connection-level 的“至少一个 adapter 支持 steer”不能代表任意 running task 支持 steer，所以第三层不读连接级 flag，而读 claim 时落在 task record 上的 `claimedRuntimeCapabilities` 快照（§3.3）。快照而非实时查询是刻意的：设备重连换了一套 adapter，也不能追溯改变一个 running task 的可 steer 性。
+connection-level 的“至少一个 adapter 支持 steer”不能代表任意 running task 支持 steer，所以第三层不读任何连接级数据，而读 claim 时落在 task record 上的 `claimedRuntimeCapabilities` 快照（§3.3），其唯一来源是 `task.claim.capabilities`。gate 的输入必须与它裁决的对象同生命周期：claim 正是建立 task↔runtime 绑定的那条消息，每种 transport 都会发，所以快照对 WS 与 long-poll 一视同仁；connection 层则既错 scope（描述设备不描述 task）又缺 reach（long-poll 无 `conn.hello`）。快照而非实时查询同样是刻意的：设备重连换了一套 adapter，也不能追溯改变一个 running task 的可 steer 性。
 
 ### 4.5 启动与关闭
 
