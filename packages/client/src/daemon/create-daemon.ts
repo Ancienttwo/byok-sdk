@@ -310,31 +310,29 @@ function isRuntimeId(id: string): id is RuntimeId {
  * `RuntimeInfo.capabilities` shape (`@byok/protocol`'s `RuntimeCapabilities`
  * — the same field names, but all-optional, plus `approvalInteractive`).
  *
- * `approvalInteractive` is hardcoded `false` regardless of adapter — this is
- * now stale as a "no adapter supports it" claim: as of M4 Phase 3, claude
- * genuinely does support interactive approval, via `--permission-prompt-tool`
- * routing `ClaudeSession.resolveApproval` into the local out-of-process MCP
- * approval channel (`bin/byok-approval-mcp.ts`) under `policy.mode:
- * 'confirm'` — see docs/protocol.md §5.1/§11.2 for the full mechanism. pi and
- * codex are unchanged: neither has any notion of pausing for approval
+ * Every field, `approvalInteractive` included, is a pure passthrough of the
+ * adapter's own self-report: the adapter is the single source of truth for
+ * what its runtime can do, and this function does no interpretation of its
+ * own. Previously `approvalInteractive` was hardcoded `false` here, which
+ * had gone stale — as of M4 Phase 3 claude genuinely does support
+ * interactive approval, via `--permission-prompt-tool` routing
+ * `ClaudeSession.resolveApproval` into the local out-of-process MCP approval
+ * channel (`bin/byok-approval-mcp.ts`) under `policy.mode: 'confirm'` (see
+ * docs/protocol.md §5.1/§11.2) — so the wire advertised a capability claim
+ * no adapter owned. pi and codex report `false` for the same honest reason
+ * they always did: neither has any notion of pausing for approval
  * (`resolveApproval()` throws unconditionally for both — see `../types.ts`'s
- * `Session.resolveApproval` doc comment for why that's the correct contract
- * for an adapter with no `needs_approval` notion).
+ * `Session.resolveApproval` doc comment).
  *
- * This flag is still reported `false` here regardless, pending a later
- * capability-honesty pass that gives `approvalInteractive`/
- * `interactive-approval` (`CAPABILITY_FLAGS`, `@byok/protocol`) real
- * per-adapter meaning — docs/protocol.md §5.1 tracks this as a known,
- * intentional gap between two capability signals, not an oversight. Until
- * that pass lands, `RuntimeInfo.capabilities.permissionModes` is the only
- * accurate signal for whether a device can honor `confirm`: a server should
- * check `permissionModes.includes('confirm')`, not this field.
+ * The connection-level `interactive-approval` flag (`CAPABILITY_FLAGS`,
+ * `@byok/protocol`) is a separate, connection-scoped signal and is NOT
+ * changed by this: `computeCapabilities` below keeps its own semantics.
  */
 function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRuntimeCapabilities {
   return {
     steer: caps.steer,
     resume: caps.resume,
-    approvalInteractive: false,
+    approvalInteractive: caps.approvalInteractive,
     permissionModes: caps.permissionModes,
   };
 }

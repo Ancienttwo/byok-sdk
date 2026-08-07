@@ -6,7 +6,7 @@ export type {
   TaskContext,
   GitWorkspaceConfig,
 } from './types';
-export { PolicyUnsupportedError } from './types';
+export { PolicyUnsupportedError, SteerUnsupportedError } from './types';
 // M5: per-runtime environment allowlist — part of the `RuntimeAdapter`
 // contract's `environmentRequirements()` method (a custom adapter supplied
 // to `createDaemonWithAdapters` implements this too). See `daemon/environment.ts`.

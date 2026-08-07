@@ -142,6 +142,7 @@ export class StubSession implements Session {
 const DEFAULT_STUB_CAPABILITIES: RuntimeCapabilities = {
   steer: true,
   resume: true,
+  approvalInteractive: true,
   permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
 };
 

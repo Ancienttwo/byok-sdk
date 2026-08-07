@@ -131,7 +131,7 @@ class RelayingAdapter implements RuntimeAdapter {
     return { present: true, version: '0.0.0' };
   }
   capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, permissionModes: ['confirm'] };
+    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] };
   }
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
     const session = new RelayingSession(task.sessionRef ?? `relay-session-${this.sessions.length + 1}`, ctx.approvalChannel);
