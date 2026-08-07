@@ -141,7 +141,7 @@ try {
     new client.PiAdapter({ resolveBin: () => ({ command: fake('pi'), source: 'path' }) }),
   ];
 
-  const pairingCode = byok.pairing.createPairingCode().code;
+  const pairingCode = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId }).code;
   daemon = client.createDaemonWithAdapters(
     {
       productName: 'Adapter Task Smoke',

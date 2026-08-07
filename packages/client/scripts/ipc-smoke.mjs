@@ -141,7 +141,7 @@ try {
   const serverUrl = `http://127.0.0.1:${port}`;
   log(`==> real @byok/server reference implementation listening at ${serverUrl}`);
 
-  const { code: pairingCode } = byok.pairing.createPairingCode();
+  const { code: pairingCode } = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId });
 
   await fs.writeFile(
     configPath,
