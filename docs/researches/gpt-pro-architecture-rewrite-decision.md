@@ -54,3 +54,28 @@
 ## 記功
 
 重寫版規避了 canonical 既有的 secret-scope 錯誤,且 GAP-004/GAP-005 經源碼核實成立;sprint 的 rollback 節與崩潰注入清單(S3.4 六個注入點、S6.3 十四條對抗測試)顆粒度可直接投 contract。
+
+---
+
+## v2 supersede 記錄(2026-08-07)
+
+> 對象:`_ref/byok-architecture-rewrite-v2/`,取代 `_ref/byok-architecture-rewrite/`。
+> ZIP SHA-256:`5ee566272d3f4baa23705f78fb5c2530ce54143ff9a301d580af0aeb65148d95`。
+> 權威 delta:`diff -u` 兩份 bundle 的 `docs/architecture/sdk-architecture.md` 與 `plans/sprints/20260807-byok-platform-raft-aligned.sprint.md`。
+
+### delta 主題
+
+v2 只動儲存層。本機側把 durable local journal 從 file implementation 改為 SQLite canonical(`SqliteLocalTaskJournal`、WAL/`foreign_keys`/ack-critical `synchronous=FULL`、envelope 與 receipt 同 transaction 才能推 cursor),並新增 `LocalStoragePolicy` 的磁盤水位、分類清理順序與永不自動刪除清單。雲端側把主生產組合定案為 **Postgres + R2**(取代 Postgres/S3 primary + D1/R2 parity;D1 降為 optional post-Beta adapter),新增 tenant storage entitlement/usage/reservation 契約、`quota.ts` core module、reservation/finalize 兩階段防超賣、5 個穩定錯誤碼、滿額行為表與 R2 tombstone/reconcile GC。帳本側新增 ADR-019~022、GAP-015/016、不變量 21~24、storage metrics 與兩條 risk。sprint 側 S2 插入 quota 契約 story、S3 改寫為 SQLite journal + disk-pressure drills、S4 改寫為 Postgres + R2 + quota/GC。
+
+### 裁定
+
+- v1 的併入 rubric 延續適用:仍是方案 B(不整份替換、不執行 `apply.sh`),目標設計增量掛「目標設計」標記併入 repo 現有段落,E1-E9 的拒收清單繼續有效。
+- v2 delta 經逐 hunk 篩查**全部為目標設計增量**,沒有新的 current-runtime 事實宣稱,因此不需要新增拒收條目;canonical 的 P1/P2/P3 + `file:line` current-state 骨架一字未動。
+- 併入面按 repo 現狀適配而非按 bundle 結構複製:repo 的 sprint 已刪 story points(本文件第 48 行的裁決),v2 的 55 points 規模改以 story 分配到 S4A/S4B 表達,不把 points 加回來;repo 的 S4A/S4B 結構保留但語義重切為「數據面 / quota+GC」,原「第二後端 parity」降為 S4B.8 的 optional adapter 記錄。
+- 主生產 backend 選型從待決閘變成已裁定,以 sprint 的 D-3 條目追記,不刪除原 D-1/D-2 與原決策行。
+
+### 本 slice 的工作面
+
+- plan:`plans/plan-20260807-1058-architecture-v2-storage-merge.md`
+- contract:`tasks/contracts/20260807-1058-architecture-v2-storage-merge.contract.md`
+- notes:`tasks/notes/20260807-1058-architecture-v2-storage-merge.notes.md`
