@@ -82,6 +82,8 @@ allowed_paths:
   - .ai/context/
   - plans/
   - tasks/todos.md
+  # user WIP present in the worktree during acceptance; not part of this slice, never committed by it
+  - docs/researches/k4-aip-swap-dryrun.md
   - tasks/contracts/20260807-1144-architecture-root-card-closeout.contract.md
   - tasks/notes/20260807-1144-architecture-root-card-closeout.notes.md
   - tasks/reviews/20260807-1144-architecture-root-card-closeout.review.md
