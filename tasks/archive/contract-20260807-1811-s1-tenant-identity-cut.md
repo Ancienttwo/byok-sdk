@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-07 18:11
+> **Related Plan**: plans/archive/plan-20260807-1720-s1-tenant-identity-cut.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260807-1811
+
 # Task Contract: s1-tenant-identity-cut
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260807-1720-s1-tenant-identity-cut.md
 > **Task Profile**: code-change
 > **Owner**: ancienttwo

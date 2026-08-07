@@ -1,6 +1,6 @@
 # Plan: Sprint S1: Structural Tenant Identity Cut with Nonce Domain Separation
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260807-1720
 > **Slug**: s1-tenant-identity-cut
 > **Artifact Level**: work-package

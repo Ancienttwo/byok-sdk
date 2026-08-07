@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-07T17:08:17+0800 -->
+<!-- updated_at: 2026-08-07T18:11:20+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-07T17:08:17+0800
+> **Updated At**: 2026-08-07T18:11:20+0800
 > **Source Branch**: main
-> **Source Commit**: febc33c
+> **Source Commit**: ff621c1
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -51,17 +51,17 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 11 changed/untracked path(s)
 
 ```
- D plans/plan-20260807-1508-s0-runtime-hardening.md
- D tasks/contracts/20260807-1508-s0-runtime-hardening.contract.md
+ D plans/plan-20260807-1720-s1-tenant-identity-cut.md
+ D tasks/contracts/20260807-1720-s1-tenant-identity-cut.contract.md
  M tasks/current.md
- D tasks/notes/20260807-1508-s0-runtime-hardening.notes.md
- D tasks/reviews/20260807-1508-s0-runtime-hardening.review.md
+ D tasks/notes/20260807-1720-s1-tenant-identity-cut.notes.md
+ D tasks/reviews/20260807-1720-s1-tenant-identity-cut.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260807-1508-s0-runtime-hardening.md
-?? tasks/archive/contract-20260807-1708-s0-runtime-hardening.md
-?? tasks/archive/notes-20260807-1708-s0-runtime-hardening.md
-?? tasks/archive/review-20260807-1708-s0-runtime-hardening.md
-?? tasks/archive/todo-20260807-1708-s0-runtime-hardening.md
+?? plans/archive/plan-20260807-1720-s1-tenant-identity-cut.md
+?? tasks/archive/contract-20260807-1811-s1-tenant-identity-cut.md
+?? tasks/archive/notes-20260807-1811-s1-tenant-identity-cut.md
+?? tasks/archive/review-20260807-1811-s1-tenant-identity-cut.md
+?? tasks/archive/todo-20260807-1811-s1-tenant-identity-cut.md
 ```
 
 ## Source Artifacts

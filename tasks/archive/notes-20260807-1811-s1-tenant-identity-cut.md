@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 18:11
+> **Related Plan**: plans/archive/plan-20260807-1720-s1-tenant-identity-cut.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260807-1811
+
 # Implementation Notes: s1-tenant-identity-cut
 
 > **Status**: Active

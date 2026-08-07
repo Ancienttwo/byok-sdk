@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 18:11
+> **Related Plan**: plans/archive/plan-20260807-1720-s1-tenant-identity-cut.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260807-1811
+
 # Task Review: s1-tenant-identity-cut
 
 > **Status**: Reviewed
@@ -47,17 +53,17 @@
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: ff621c1c628b08fae4f58f71344ee60bd8071b70
+> **Verification Evidence SHA256**: sha256:6aa767149a148345f96110d57a97fa1ce7e4b3d026d3734693afc04c86f7f5fb
+> **Issued At**: 2026-08-07T10:11:17.843Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Sprint S1 delivered and merged as PR #19 (50819a3): structural tenant identity cut (T0) plus nonce domain separation (D-1) as one breaking wire-silent batch; claims are lookup keys with the device row as authority; no dual-mode nonce path; no tenant-existence oracle; protocol and keys packages zero diff; 1606 tests green, CI 28/28, gatekeeper PASS with no blocking findings
 - Findings: none
 
 ## Behavior Diff Notes
