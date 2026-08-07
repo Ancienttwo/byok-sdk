@@ -1,6 +1,6 @@
 # Plan: Sprint S3a: Stateless @byok/cloud Mailbox Skeleton with Tenant Auth
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260807-2126
 > **Slug**: s3a-cloud-mailbox
 > **Artifact Level**: work-package

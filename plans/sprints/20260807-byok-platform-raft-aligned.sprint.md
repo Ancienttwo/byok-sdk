@@ -68,6 +68,13 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **理由**：三条替代路线均被否决——long-poll 补 hello 注册（无连接生命周期可承载注册状态，server 重启后无重驱动触发器；且需放行 `DAEMON_TO_SERVER_TYPES` 刻意排除的 conn.hello，削弱 WS inbound gate；S3 stateless handler 下 connection-scoped 注册必废）；server 端静态 capability 表（GAP-001 在 server 侧原地复活，对自定义 adapter 按错误方向猜）；gate 拆出 S0（同样要改 contract，交付更少且留下 server 发送 runtime 接不住的 envelope）。gate 的输入必须与它裁决的对象（task）同生命周期。
 - **影响**：S0 plan/contract 按此 amendment 扩权（仅 `TaskClaimPayloadSchema` additive + `v1.frozen.json` 重生成；`v1.envelopes.ndjson` 字节不变列入机检）；S0.3 的「protocol golden 零变化」按本条解读；long-poll 与 WS 的 protocol/product 验证不对称是本次的独立发现，记入 `tasks/todos.md` 另刀处理，不并入 S0。
 
+### D-5：S3 按 §1.3 拆为 S3a（cloud 无状态骨架）与 S3b（SQLite durable journal）
+
+- **原决策**：S3 作为单个 Sprint 同时交付 hosted cloud mailbox 与本机 SQLite durable journal，S3.5 的十六格一次性验收。**该范围保留**，本条只改交付与验收的切分方式。
+- **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」把 S3 拆成两刀。**S3a（本 slice，已交付 2026-08-07）**：`@byok/cloud` 无状态 device surface——九条 frozen-v1 device 路由 + hosted-only `GET /byok/capabilities`、七个 cloud-local tenant-first auth/task port 与 `TenantStores` facade 的 InMemory 组合、I1 route registry 双向闭合与跨租户矩阵，证明点是既有 daemon 生产代码零改动跑通 long-poll 全生命周期。**S3b**：本机 SQLite journal、cursor-ack-after-commit 顺序、crash 与磁盘压力矩阵。
+- **理由**：两半的失败模式不同，需要的审查深度也不同。handler parity 在 E2E 里失败得响——daemon 一旦分辨得出 cloud 与 server，测试当场红。journal durability 在 crash 窗口里失败得静——ack 早于 commit 的实现照样跑绿全部 happy path，只有在特定断电时序下丢任务，必须靠专门的 crash/磁盘矩阵逼出来。把它压在同一个 PR 里，等于让骨架 parity 的绿色替 durability 背书。
+- **影响**：S3.5 的十六格分两批验收——S3a 收 box 1/2/10/11/12/13/14/15/16（box 12 的 daemon 端消费另刀），S3b 收 box 3–9 的 journal/crash/pressure 七格；`docs/architecture/sdk-architecture.md` 的 GAP-006 落点改记为 S3b；alpha 闸要等 S3b 收口后才闭合，S3a 单独合入不构成 hosted alpha 就绪。
+
 ---
 
 ## 0. 计划目标
@@ -585,22 +592,24 @@ For each point assert no lost task, no duplicate side effect, stable recovery st
 
 ### S3.5 Acceptance criteria
 
-- [ ] existing daemon runs against in-memory cloud using long-poll；
-- [ ] frozen v1 bytes round-trip unchanged；
-- [ ] ack watermark cannot advance before SQLite commit；
-- [ ] crash matrix and disk-pressure matrix pass；
-- [ ] local usage reports journal/cache/log/workspace/quarantine separately；
-- [ ] soft pressure cleans only rebuildable/expired categories；
-- [ ] hard pressure rejects new task admission but allows terminal flush、delete、export、doctor；
-- [ ] unacked/running/recovery/quarantine records are never auto-deleted；
-- [ ] WAL checkpoint/compaction behavior is bounded and observable；
-- [ ] I1 route inventory contains every registered route，未分类路由使测试自身失败；
-- [ ] tenant B cannot read/write tenant A fixture；
-- [ ] `/capabilities` drives transport/feature selection；
-- [ ] 404/405/501 sniffing absent；
-- [ ] `@byok/cloud` handlers remain stateless；
-- [ ] no cloud Running/session map；
-- [ ] client still passes self-hosted server tests。
+按 D-5 分两批验收：S3a 收下列打勾各格，S3b 收标注 `S3b` 的七格。
+
+- [x] existing daemon runs against in-memory cloud using long-poll（S3a）；
+- [x] frozen v1 bytes round-trip unchanged（S3a）；
+- [ ] ack watermark cannot advance before SQLite commit（S3b）；
+- [ ] crash matrix and disk-pressure matrix pass（S3b）；
+- [ ] local usage reports journal/cache/log/workspace/quarantine separately（S3b）；
+- [ ] soft pressure cleans only rebuildable/expired categories（S3b）；
+- [ ] hard pressure rejects new task admission but allows terminal flush、delete、export、doctor（S3b）；
+- [ ] unacked/running/recovery/quarantine records are never auto-deleted（S3b）；
+- [ ] WAL checkpoint/compaction behavior is bounded and observable（S3b）；
+- [x] I1 route inventory contains every registered route，未分类路由使测试自身失败（S3a：结构闭合，board/records/presence 类资源随各自 slice 并入同一矩阵）；
+- [x] tenant B cannot read/write tenant A fixture（S3a：租户 fixture 隔离矩阵）；
+- [x] `/capabilities` drives transport/feature selection（S3a：cloud 侧 capabilities 宣告驱动路由挂载与测试特性选择；daemon 端消费另刀）；
+- [x] 404/405/501 sniffing absent（S3a）；
+- [x] `@byok/cloud` handlers remain stateless（S3a）；
+- [x] no cloud Running/session map（S3a）；
+- [x] client still passes self-hosted server tests（S3a）。
 
 ### S3.6 Rollback
 
