@@ -22,7 +22,7 @@
 - Agent dispatch plane：`@byok/protocol` + `@byok/server` + `@byok/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
 
-目标平台会新增 `@byok/core` 与 `@byok/cloud`，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 已于 2026-08-07（S2）落地为 workspace package，状态是**已实现、隔离**：zod-only、protocol-free、Node-free，仓库内没有任何 import site；`@byok/cloud` 仍是**目标设计**。本文在第 12 节单独描述这两者。
+目标平台会新增 `@byok/core` 与 `@byok/cloud`，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 已于 2026-08-07（S2）落地为 workspace package，状态是**已实现、隔离**：zod-only、protocol-free、Node-free，仓库内没有任何 import site；`@byok/cloud` 已于 2026-08-07（S3a）落地为**骨架已实现**：无状态 device surface + InMemory 组合，durable journal、board 与 truth 面仍是**目标设计**。本文在第 12 节单独描述这两者。
 
 ## 1. P1：全局架构地图
 
@@ -899,7 +899,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 
 | ID | 缺口 | 优先级 | 落点 |
 | --- | --- | --- | --- |
-| GAP-006 | hosted mailbox 与本机 durable journal 未实现（mailbox port 契约与 InMemory 参考已随 S2 落在 `@byok/core`；hosted 执行面与 SQLite journal 仍缺） | Pri-0（平台线） | S3 |
+| GAP-006 | 部分收口：hosted mailbox 的无状态 device 面与 InMemory 组合已于 S3a 落地（既有 daemon long-poll 零改动跑通）；本机 durable journal（SQLite）仍缺，属 S3b | Pri-0（平台线） | S3b |
 | GAP-008 | board / presence / activity 未实现 | Pri-1 | S5 |
 | GAP-009 | device proof / truth / memory 未实现 | Pri-1 | S6 |
 | GAP-011 | doctor / quarantine / crash budget 不完整 | Pri-1 | S7 |
@@ -909,9 +909,9 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 | GAP-015 | durable local journal 尚未实现 SQLite canonical、磁盘 watermark 与安全 cleanup | Pri-0（平台可靠性） | S3 |
 | GAP-016 | Postgres + R2 的 entitlement/usage/reservation/quota/GC 尚未实现 | Pri-0（hosted storage） | S4A/S4B |
 
-## 12. 目标平台架构（`@byok/core` 已落地并隔离，其余尚未实现）
+## 12. 目标平台架构（`@byok/core` 已落地并隔离，`@byok/cloud` 骨架已实现，其余尚未实现）
 
-本节只复述 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定。除 `@byok/core`（2026-08-07 / S2 落地，状态为**已实现、隔离**）外，其余节点与组合均为**目标设计**。它解决当前 embedded coordinator 无法成为多租户、水平扩展、可组合 cloud service 的问题，同时保留 wire v1。
+本节只复述 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定。`@byok/core`（2026-08-07 / S2 落地）状态为**已实现、隔离**；`@byok/cloud`（2026-08-07 / S3a 落地）状态为**骨架已实现**——无状态 device surface 与 InMemory 组合在，durable 归属与 board/truth 面不在。其余节点与组合均为**目标设计**。它解决当前 embedded coordinator 无法成为多租户、水平扩展、可组合 cloud service 的问题，同时保留 wire v1。
 
 ### 12.1 目标 package graph
 
@@ -924,14 +924,14 @@ flowchart TB
 
   Protocol(["@byok/protocol<br/>existing, frozen v1"]):::existing
   Core(["@byok/core<br/>implemented, isolated<br/>zod-only, protocol-free, Node-free"]):::existing
-  Cloud(["@byok/cloud<br/>planned stateless handlers"]):::planned
+  Cloud(["@byok/cloud<br/>skeleton implemented S3a<br/>stateless device surface + in-memory composition<br/>durable journal/board/truth 仍目标设计"]):::planned
   Client(["@byok/client<br/>existing local authority"]):::existing
   Server(["@byok/server<br/>existing self-hosted option"]):::existing
   Keys(["@byok/keys<br/>existing isolated key plane"]):::isolated
   Node(["Node composition<br/>Postgres + R2（主生产）"]):::deploy
   Workers(["Workers composition<br/>可选 D1 compatibility adapter"]):::deploy
 
-  Cloud -.-> Core
+  Cloud --> Core
   Cloud --> Protocol
   Client -.-> Core
   Client --> Protocol
@@ -940,17 +940,15 @@ flowchart TB
   Keys -.->|"P5: contracts only"| Core
   Node --> Cloud
   Workers -.-> Cloud
-
-  style Cloud stroke-dasharray:5 5
 ```
 
-`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。指向它的四条边（`cloud/client/server/keys → core`）画成虚线，因为它们仍是目标设计——当前仓库内零 consumer，即 §0 的**已实现、隔离**。节点实线、入边虚线，正是「package 在、consumer 不在」这个状态。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点在 S3a 后也画成实线，但它只覆盖 stateless device surface 与 InMemory 组合，durable journal/board/truth 仍是目标设计。`Cloud → Core` 与 `Cloud → Protocol` 两条边是实线：`@byok/cloud` 真实 import 这两个包。其余指向 `core` 的三条边（`client/server/keys → core`）仍是虚线——当前仓库内零 consumer，即 §0 的**已实现、隔离**；节点实线、入边虚线，正是「package 在、consumer 不在」这个状态。
 
 关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
-### 12.2 `@byok/core` 与 `@byok/cloud` 目标职责
+### 12.2 `@byok/core` 与 `@byok/cloud` 职责与状态
 
-core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 参考实现；cloud 各行与 composition 组合仍是目标设计。
+core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 参考实现；cloud device handlers 与 InMemory composition 已于 S3a（2026-08-07）落地，cloud 其余各行仍是目标设计。
 
 | 目标模块 | 责任 | 状态 |
 | --- | --- | --- |
@@ -959,13 +957,13 @@ core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 
 | core `board.ts` | 5-state board、合法转移、claim conflict snapshot | **已实现（S2）** |
 | core `quota.ts` | tenant storage entitlement、usage、reservation、retention policy 与稳定 quota 错误码 | **已实现（S2）** |
 | core store ports | Truth/Mailbox/Board/Presence/Blob/Quota/StorageUsage async contracts；首参数永远是 tenant | **已实现（S2）**；tenant-scoped store 组装留给 S3 |
-| cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface | 目标设计 |
+| cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface，外加 hosted-only `GET /byok/capabilities` | **已实现（S3a）**：九条 device 路由无状态重现，既有 daemon 零改动跑通 long-poll |
 | cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | 目标设计 |
 | cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs | 目标设计 |
 | cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | 目标设计 |
 | cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 目标设计 |
 | cloud hints | device presence TTL、task activity tail + explicit dropped count | 目标设计 |
-| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | InMemory composition 与参数化 conformance 套件**已实现（S2）**；其余仍是目标设计 |
+| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | core 侧 InMemory composition 与参数化 conformance 套件**已实现（S2）**；cloud 侧 InMemory composition（七个 tenant-first auth/task port + `TenantStores` facade）**已实现（S3a）**；其余仍是目标设计 |
 
 ### 12.3 四套状态与一致性模型
 
@@ -1094,6 +1092,8 @@ sequenceDiagram
 ```
 
 load-bearing 顺序是 durable local append 后才 ack mailbox。append 前 crash 由 redelivery 恢复；append 后 crash 由 local journal 恢复。cloud 不需要持有 Running record 才能保证任务不丢。
+
+状态：S3a 已证明这条路径的 in-memory 半程——host → cloud → mailbox → daemon → terminal receipt 在既有 daemon 零改动下跑通。图中的 durable local append 与「append 后才 ack」的顺序（上一段那句 load-bearing）仍待 S3b 的 SQLite journal 落地。
 
 ### 12.6 身份、多租户与设备证明
 
@@ -1709,7 +1709,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 
 | # | 测试 | 断言 | 落点 |
 | --- | --- | --- | --- |
-| I1 | 跨租户路由穷举矩阵 | 迭代 router 全部已注册路由；tenant B 的 device principal 打 tenant A 的每种资源（board list/claim/status、mailbox pull/ack、records get/put、presence、activity、blob url 签发）→ 一律 401/404、零行；存在未分类路由 → 测试自身失败 | `@byok/cloud` isolation-matrix 测试 |
+| I1 | 跨租户路由穷举矩阵 | 迭代 router 全部已注册路由；tenant B 的 device principal 打 tenant A 的每种资源（board list/claim/status、mailbox pull/ack、records get/put、presence、activity、blob url 签发）→ 一律 401/404、零行；存在未分类路由 → 测试自身失败 | `@byok/cloud` isolation-matrix 测试；**已于 S3a 落地**：cloud route registry 双向闭合（注册表是唯一挂载路径）+ 跨租户矩阵，board/records/presence/activity 类资源随各自 slice 并入同一矩阵 |
 | I2 | pairing 跨租户 | A 的 code 兑换 → 设备落 A 且仅 A；code 二次兑换 401；过期 401；无 claims 无法 mint（类型层拒 + runtime zod 拒） | `@byok/server` pairing 测试 |
 | I3 | proof 租户不符 | 合法签名 + `claims.tenantId = B`（设备属 A）→ 401；签后篡改 tenantId → 签名败；requestId 重放 → 幂等原结果或 409；skew > 60s → 拒 | core/cloud proof 测试 |
 | I4 | store conformance 跨租户不变式 | 每个 store port 方法：T1 写入、以 T2 读 → empty/undefined；port 不存在可变更 `tenant_id` 的方法；InMemory 与 SQL 后端跑同一份套件 | store conformance suite |
