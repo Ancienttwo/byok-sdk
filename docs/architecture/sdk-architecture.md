@@ -900,6 +900,8 @@ CI 验证层次：
 | GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
 | GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
 | GAP-014 | hosted release/signing/update owner 尚未形成 production runbook | Pri-1 | S7 |
+| GAP-015 | durable local journal 尚未实现 SQLite canonical、磁盘 watermark 与安全 cleanup | Pri-0（平台可靠性） | S3 |
+| GAP-016 | Postgres + R2 的 entitlement/usage/reservation/quota/GC 尚未实现 | Pri-0（hosted storage） | S4A/S4B |
 
 ## 12. 目标平台架构（尚未实现）
 
@@ -920,8 +922,8 @@ flowchart TB
   Client(["@byok/client<br/>existing local authority"]):::existing
   Server(["@byok/server<br/>existing self-hosted option"]):::existing
   Keys(["@byok/keys<br/>existing isolated key plane"]):::isolated
-  Node(["Node composition<br/>Postgres + S3"]):::deploy
-  Workers(["Workers composition<br/>D1 + R2"]):::deploy
+  Node(["Node composition<br/>Postgres + R2（主生产）"]):::deploy
+  Workers(["Workers composition<br/>可选 D1 compatibility adapter"]):::deploy
 
   Cloud --> Core
   Cloud --> Protocol
@@ -931,13 +933,13 @@ flowchart TB
   Server --> Protocol
   Keys -->|"P5: contracts only"| Core
   Node --> Cloud
-  Workers --> Cloud
+  Workers -.-> Cloud
 
   style Core stroke-dasharray:5 5
   style Cloud stroke-dasharray:5 5
 ```
 
-关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。
+关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
 ### 12.2 `@byok/core` 与 `@byok/cloud` 目标职责
 
@@ -946,12 +948,15 @@ flowchart TB
 | core `attestation.ts` | `DeviceProofEnvelopeV1`、canonical bytes、注入式 verify |
 | core `tenant.ts` | `TenantId`、device/control-plane principal |
 | core `board.ts` | 5-state board、合法转移、claim conflict snapshot |
-| core store ports | Truth/Mailbox/Board/Presence/Blob async contracts；首参数永远是 tenant |
+| core `quota.ts` | tenant storage entitlement、usage、reservation、retention policy 与稳定 quota 错误码 |
+| core store ports | Truth/Mailbox/Board/Presence/Blob/Quota/StorageUsage async contracts；首参数永远是 tenant |
 | cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface |
 | cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS |
 | cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs |
+| cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort |
+| cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation |
 | cloud hints | device presence TTL、task activity tail + explicit dropped count |
-| compositions | InMemory、Postgres+S3、D1+R2、self-hosted server contract suites |
+| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 |
 
 ### 12.3 四套状态与一致性模型
 
@@ -1031,19 +1036,24 @@ flowchart LR
   Board[("SQL task board<br/>durable discrete state")]:::durable
   Mailbox[("SQL outbox<br/>cursor-acked disposable")]:::durable
   Truth[("SQL attested metadata<br/>immutable terminal + rev CAS")]:::durable
-  Object[("S3 / R2 objects<br/>content by hash")]:::object
+  Quota[("SQL quota / control<br/>entitlement + usage + reservation + manifest")]:::durable
+  Object[("R2 tenant-scoped objects<br/>content by hash")]:::object
   Presence[("presence + activity TTL<br/>lossy, dropped explicit")]:::ephemeral
 
   Board -->|"claim creates offer"| Mailbox
   Mailbox -->|"poll v1 envelope"| Daemon
   Daemon -->|"ack only after durable local append"| Mailbox
+  Daemon -->|"reserve bytes before durable write"| Quota
   Daemon -->|"signed terminal / profile / memory"| Truth
+  Quota -->|"finalize committed manifest"| Object
   Truth --> Object
   Daemon -->|"bounded hints"| Presence
   Daemon -->|"discrete status POST"| Board
 ```
 
 cloud 可以按 producer 给定的 tenant/channel/status/seq/hash 做精确匹配与排序，但不能做摘要、相关性、分类、memory merge 等语义推导。连续变化的 workspace、context、runtime session 与逐轮产物留在 local daemon。
+
+quota/control 是第五类云端数据：它是 operational metadata，不是用户 truth，但它与 object bytes 之间没有跨系统 transaction，因此 durable write 必须走 §12.7.7 的 reservation/finalize，而不是假设 Postgres 与 R2 会一起成功。
 
 ### 12.5 目标 end-to-end path
 
@@ -1189,25 +1199,55 @@ canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规�
 - board claim 用 SQL CAS；N 个并发 claim 只允许 1 个成功，其余返回 holder snapshot。
 - status transition 带 `expectedStatus`；不允许 last-write-wins。
 - per-tenant `board_seq` 单调，不能跨 tenant 推进。
-- 同一 store contract suite 跑 InMemory、Postgres+S3、D1+R2、self-hosted server 四种 composition。
+- 同一 store contract suite 跑 InMemory、Postgres + R2（主生产）与 self-hosted server 三种 composition；可选 D1 adapter 若启用，用同一份套件另跑一次，断言零改动。
+- `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传 R2 的 durable write 先经 reservation（§12.7.7）。
 
 ### 12.7 数据与存储架构（目标设计）
 
-#### 12.7.1 四类持久数据与一类本地连续态
+主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 只持有经过 hash/size 验证的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
+
+#### 12.7.1 五类云端数据与一类本地连续态
 
 | 类别 | 典型内容 | 存储 | 生命周期 |
 | --- | --- | --- | --- |
-| mailbox | server→daemon 的 frozen-v1 envelope | SQL | ack 且过 retention 后删除 |
-| board | title/channel/status/assignee/`board_seq` | SQL | 长期 |
-| truth | terminal/profile/memory 的 metadata、hash、rev、proof | SQL + object store | 长期 |
-| hints | presence/activity/dropped | TTL SQL 或 KV | 分钟级 |
-| 本地连续态 | journal / workspace / session / context | daemon 本机磁盘 | 由本机生命周期管理 |
+| mailbox | server→daemon 的 frozen-v1 envelope | Postgres | ack 且过 retention 后删除 |
+| board | title/channel/status/assignee/`board_seq` | Postgres | 长期，或宿主配置的 archive policy |
+| truth | terminal/profile/memory 的 metadata、hash、rev、proof | Postgres + R2 | durable；只按显式删除或 retention policy 回收 |
+| hints | presence/activity/dropped | TTL Postgres 或 KV | 分钟级 |
+| quota/control | entitlement、usage、reservation、object manifest、GC tombstone | Postgres | durable operational metadata |
+| 本地连续态 | journal / workspace / session / context | daemon 本机 SQLite + 文件系统 | 由本机生命周期管理 |
 
-前四类可以上云，第五类不上云——这是 §14.3 第 3 条不变量的存储侧表述。
+前五类可以上云，最后一类不上云——这是 §14.3 第 3 条不变量的存储侧表述。
 
-#### 12.7.2 Durable local journal
+#### 12.7.2 Durable local journal：SQLite 为生产 canonical
 
-hosted path 必须新增本机 journal seam。最小记录集：
+hosted production daemon **必须使用 SQLite，或使用满足同一 durability contract 的注入式实现**。默认实现命名为 `SqliteLocalTaskJournal`；普通 JSON/JSONL file store 只可用于迁移、开发或兼容模式，在未证明 fsync/transaction 语义前不能作为 hosted mailbox ack 的 authority。
+
+建议单库 `<storeDir>/daemon.db`，至少包含：
+
+- `journal_envelope`：tenant/product/device、seq、envelope id、task id、原始 bytes 与 hash、commit/ack 时间；
+- `journal_task`：admission、claimed runtime、effective policy hash、workspace ref、当前本机状态、recovery marker；
+- `journal_transition`：transition id、from/to、`occurred_at`，按 transition id 幂等；
+- `journal_terminal`：terminal payload hash、truth 写入状态、最后一次 retry/error；
+- `journal_idempotency`：outbound request / envelope / receipt ids；
+- `local_artifact_ref`：文件系统对象的 path/hash/size/ref state，不保存大 payload；
+- `local_cleanup_candidate`：`eligible_at`、reason、class、attempt/error，供安全 GC 使用；
+- `local_storage_usage`：journal、cache、logs、workspace、quarantine 各自的近似或实测 bytes。
+
+SQLite durability 设置：
+
+- `PRAGMA journal_mode=WAL`；
+- `PRAGMA foreign_keys=ON`；
+- ack-critical transaction 使用 `PRAGMA synchronous=FULL`；
+- 明确 `busy_timeout` 与单 writer queue；
+- envelope append、idempotency receipt 与「可推进 cursor」的 receipt 必须落在同一个 transaction；
+- WAL checkpoint、batch delete 与 incremental vacuum 在后台维护，不在 active task 热路径执行。
+
+SQLite driver 是 composition 细节，但不得静默降级：当前 Node/runtime 无法提供合格 SQLite backend 时，宿主必须注入一个通过 conformance 的实现，否则 hosted production mode 拒绝启动。为兼容 Node 20 而退回的普通文件实现不能冒充 production durability。
+
+SQLite 只存可靠性 metadata 与小型 bounded bytes。以下继续留在文件系统：workspace、Git repository、artifact/blob cache、runtime session files、轮转日志与 quarantine。Provider secret 仍然只进 OS credential store，绝不进 SQLite。
+
+最小 journal 事实集：
 
 - tenant / product / device
 - task id
@@ -1223,6 +1263,27 @@ hosted path 必须新增本机 journal seam。最小记录集：
 - recovery marker
 
 journal 不是 debug log，它是 mailbox ack 的正确性前置条件。
+
+#### 12.7.2.1 本地积压、磁盘水位与清理顺序
+
+`LocalStoragePolicy` 由 host/daemon config 注入，至少包含 `maxStoreBytes`、`minFreeBytes`、soft/hard watermark、各数据类别的 retention、workspace policy 与 log rotation。推荐默认：
+
+| 状态 | 触发 | 行为 |
+| --- | --- | --- |
+| normal | 低于 soft watermark | 常规低频 GC/compaction |
+| pressure | 达到约 80% budget，或剩余空间低于 soft minimum | 发出告警；优先清 cache、expired temp、rotated logs；加快 journal compaction |
+| hard pressure | 达到约 90% budget，或剩余空间低于 hard minimum | 停止接收新的普通 task；仍允许 terminal/truth flush、删除、导出、doctor 与恢复操作 |
+| emergency | 无法保证一次 ack-critical SQLite transaction | fail-closed，不 ack 新 mailbox row；保留现有 recovery evidence |
+
+自动清理只能按以下顺序进行：
+
+1. expired upload/download temp 与可重建 cache；
+2. 已轮转且超过 retention 的日志；
+3. 云端已确认 terminal/truth、且无 recovery marker 的旧 journal transitions/envelopes——先 compact 再 batch delete；
+4. host 明确标记为 ephemeral、且 task 已终态的生成式 workspace；
+5. orphan local artifacts，须经过 reference scan 加 grace period。
+
+**永不自动删除**：未 ack envelope、`Running`/`AwaitApproval` task、truth 尚未确认的 terminal、带 recovery marker 的记录、用户指定的 workspace、provider secret、quarantine evidence。quarantine 只由明确的 `doctor --fix` 或 operator policy 清理（§14.3.3）。
 
 #### 12.7.3 Mailbox read/ack 与 crash matrix
 
@@ -1258,29 +1319,124 @@ sequenceDiagram
 | terminal 生成后、truth 写入前 | journal 保存 terminal hash，重试写入 |
 | truth 写入后、本地标记前 | immutable/幂等写入返回原结果 |
 
-#### 12.7.4 Object storage
+#### 12.7.4 Postgres + R2 object storage
 
-- key 用内容地址 `sha256/<hex>`；
-- 上传前校验 size、hash、content type；
-- truth transaction 只引用已存在的 object；
-- presigned capability 自带 tenant/resource binding；
+对象 key 必须 tenant-scoped，例如 `tenants/<tenant_id>/objects/sha256/<hex>`。同一 tenant 内的同 hash 可以去重并只计一次 committed bytes；禁止用全局跨租户 key，那会把 object existence 变成跨租户 oracle。
+
+- 上传前校验声明的 size、hash、content type 与 per-object 上限；
+- truth transaction 只引用 `object_manifest.state = committed` 的对象；
+- presigned capability 绑定 tenant、reservation、resource、最大 size 与 expiry；
 - object key 不承载 secret，也不承载可读的 instruction 标题；
-- orphan 清理依据 reference scan 加 grace period；
-- inline payload 只用于小对象，并设硬上限。
+- inline payload 只用于小对象，并计入 tenant logical usage；
+- R2 与 Postgres 之间没有跨系统 transaction，因此必须用 reservation/finalize/reconcile，不能假设原子写入。
 
 #### 12.7.5 Retention
 
-| 数据 | 建议默认 |
-| --- | --- |
-| mailbox | time-bounded window，按 tenant/device 配置 |
-| inbound dedup | 至少覆盖 mailbox 最大重投窗口 |
-| request receipts | 至少覆盖 proof clock skew 加 client retry horizon |
-| presence | 60–120 秒 |
-| activity tail | 5–15 分钟 |
-| 本机 journal terminal | 可配置长期；默认不自动删除带 recovery 标记的记录 |
-| object orphan | grace period 后清理 |
+| 数据 | 建议默认 | 自动删除条件 |
+| --- | --- | --- |
+| mailbox | time-bounded window，按 tenant/device 配置 | 已 ack；未 ack 的过期项先进入 expired/dead-letter 状态，不静默丢失 |
+| inbound dedup | 至少覆盖 mailbox 最大重投窗口 | expiry 到期 |
+| request receipts | 至少覆盖 proof clock skew 加 client retry horizon | expiry 到期 |
+| pairing/auth nonce | 10 分钟量级 | used 或 expired |
+| presence | 60–120 秒 | TTL |
+| activity tail | 5–15 分钟 | TTL |
+| 本机 journal terminal | 可配置长期 | truth 已确认、无 recovery marker、且超过 retention |
+| R2 orphan | 24 小时以上 grace period | 无 reference、无 active reservation、且走完 tombstone flow |
+| board/truth 用户数据 | 宿主套餐或用户 policy | 只按显式 retention、用户删除或合规流程；不因为「满了」直接删 |
 
 容量有界的 ring 与时间有界的 SQL retention 行为不同——前者按条数丢最旧，后者按时间过期。这个差异必须在 self-hosted 与 hosted 的 runbook 中明示，不能让运维以为两者可以互换。
+
+#### 12.7.6 套餐 entitlement、quota 与计量边界
+
+免费/付费、价格、购买流程与套餐名称属于宿主 SaaS。SDK **不硬编码 `free`/`pro`**，只消费宿主签发的数值 entitlement：
+
+```ts
+interface TenantStorageEntitlement {
+  tenantId: TenantId;
+  version: bigint;
+  hardLimitBytes: bigint;
+  maxObjectBytes: bigint;
+  maxInlineBytes: bigint;
+  mailboxLimitBytes: bigint;
+  retentionPolicyId: string;
+  downgradeGraceUntil?: string;
+}
+
+interface TenantStorageUsage {
+  committedObjectBytes: bigint;
+  committedInlineBytes: bigint;
+  reservedBytes: bigint;
+  mailboxBytes: bigint;
+  objectCount: bigint;
+  updatedAt: string;
+}
+```
+
+计量与展示的边界：
+
+- 用户容量 = tenant-scoped R2 committed object bytes 加 Postgres inline payload bytes；
+- 同 tenant 同 hash 多 reference 只计一次；跨 tenant 不共享计费对象；
+- Postgres 的普通 metadata 不伪装成精确 byte billing，改用 record count、row size、mailbox bytes 与 rate limit 做平台保护；
+- `storage_entitlement.version` 单调，套餐升级/降级由 control plane 更新；
+- SDK 返回 usage、limit、reserved 与 grace 状态，宿主 UI 决定如何显示与售卖。
+
+Postgres 至少新增：`storage_entitlement`、`storage_usage`、`storage_reservation`、`object_manifest`、`object_reference`、`tenant_retention_policy`、`gc_cursor` / `cleanup_job`。
+
+#### 12.7.7 Reservation/finalize：防止并发超卖
+
+所有直接上传 R2 的 durable write 走两阶段流程：
+
+1. client/daemon 带 `expectedBytes`、kind、hash、content type 请求 reservation；
+2. Postgres transaction 锁定 tenant usage，检查 `committed + reserved + expected <= hardLimit`，成功则增加 `reservedBytes`；
+3. cloud 签发绑定该 reservation 的 R2 presigned PUT；
+4. upload 完成后，finalize 对 R2 做 `HEAD`/metadata 的 size/hash/type 验证；
+5. Postgres transaction 把 reservation 从 reserved 转为 committed，并建立 manifest/reference；
+6. reservation 过期或 finalize 失败时释放 reserved bytes，并把已上传但未被引用的对象列为 orphan candidate；
+7. 所有步骤按 reservation/request id 幂等。
+
+task admission 必须按 `limits.maxOutputBytes` 或产品给定预算预留 terminal/artifact 空间。无法预留时应在 runtime 启动前 decline，而不是任务跑完才发现结果存不下。少量 terminal failure metadata 使用独立且严格有界的 system reserve，保证「quota 已满」仍能留下可诊断终态。
+
+稳定错误码：
+
+| code | HTTP | 含义 |
+| --- | ---: | --- |
+| `storage_object_too_large` | 413 | 单对象超过限制 |
+| `storage_quota_exceeded` | 507 | tenant 的 committed + reserved 将超过硬限额 |
+| `storage_reservation_expired` | 409 | reservation 已过期或已终结 |
+| `storage_integrity_mismatch` | 422 | R2 实际 size/hash/type 与声明不符 |
+| `storage_write_suspended` | 423 | 降级 grace 结束后仍超限，进入只读保护 |
+
+#### 12.7.8 云端满额行为与清理逻辑
+
+| 状态 | 行为 |
+| --- | --- |
+| <80% | 正常；后台 TTL/GC |
+| 80–100% | 发出 tenant warning metric/event；继续写入，但 task admission 必须有 reservation |
+| 达 hard limit | 拒绝新的 durable object/inline write；允许读、删、导出、usage 查询、套餐更新与已预留的提交 |
+| 套餐降级后超限 | 进入配置的 grace；不删现有数据；grace 结束后阻止新写，直到用户删除或扩容 |
+
+自动 cleanup 只回收：expired hints/nonces/receipts、已 ack mailbox、expired reservation、R2 orphan，以及明确过期的 cache/temporary object。用户的 durable truth、board、memory、profile 与 terminal 不因为 quota 满而被自动删除。
+
+R2 GC 使用 tombstone 加 reconcile：
+
+1. Postgres 把 `ref_count = 0` 且超过 grace 的 manifest 标记为 `delete_pending`；
+2. worker 删除 R2 object；
+3. 成功后标记 `deleted` 并扣减 usage；
+4. 任一步失败都可重试；reconciler 定期检查 Postgres manifest 与 R2 object 是否漂移；
+5. 只靠 refcount 不够，周期性 reference scan 是第二道保护。
+
+#### 12.7.9 储存控制面端点（目标设计）
+
+| 端点 | 主体 | 用途 |
+| --- | --- | --- |
+| `GET /byok/storage/usage` | tenant principal | committed / reserved / limit / grace 状态 |
+| `PUT /byok/admin/storage-entitlements/:tenantId` | control plane | 写入版本化数值 entitlement；不含套餐价格逻辑 |
+| `POST /byok/storage/reservations` | device proof / control | 原子预留预计 bytes 并签发 upload intent |
+| `POST /byok/storage/reservations/:id/complete` | device proof / control | R2 `HEAD`/hash 验证后转为 committed |
+| `POST /byok/storage/reservations/:id/abort` | device proof / control | 幂等释放 reservation；已上传对象进入 orphan grace |
+| object presign 端点 | device proof / control | reservation-bound 的 upload/download capability |
+
+能力降级同样由 `/capabilities` 声明，不用 404/405/501 嗅探推断（附录 A 的 ADR-010）。
 
 ### 12.8 交付路线与 S↔P crosswalk（目标设计）
 
@@ -1293,7 +1449,7 @@ sequenceDiagram
 | T0 | 租户 breaking cut；先于 P 线任何数据落库 |
 | P0 | 建 `@byok/core` 契约层，零实现，不改既有包 |
 | P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
-| P2 | SQL（Postgres/D1）与 R2/S3 实现；`deploy/sql/` migration |
+| P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示 |
 | P4 | client 侧 device proof 上行 + memory manifest/selector seam + `signNonce` domain separation 修复（GAP-004） |
 | P5 | `@byok/keys` 的 profile 持久化接上 core 的 `TruthStore`；挂在 K4 之后 |
@@ -1307,8 +1463,8 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | S0 | 架构与当前缺口收口（GAP-001/002/003） | 先于 P0，不属任何 P 阶段 |
 | S1 | Tenant identity cut | T0 |
 | S2 | `@byok/core` contracts | P0 |
-| S3 | Cloud mailbox + 本机 journal | P1 |
-| S4 | SQL / Object compositions | P2 |
+| S3 | Cloud mailbox + 本机 SQLite journal（含磁盘水位与安全 cleanup） | P1 |
+| S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll | P3 |
 | S6 | Device proof + memory | P4 |
 | S7 | Truth/keys + operations/release | P5 |
@@ -1322,8 +1478,8 @@ flowchart LR
   S0(["S0 缺口收口"]):::stage
   S1(["S1 Tenant cut / T0"]):::stage
   S2(["S2 core / P0"]):::stage
-  S3(["S3 mailbox + journal / P1"]):::stage
-  S4(["S4 SQL + object / P2"]):::stage
+  S3(["S3 mailbox + SQLite journal / P1"]):::stage
+  S4(["S4 Postgres + R2 + quota / P2"]):::stage
   S5(["S5 board + presence / P3"]):::stage
   S6(["S6 device proof + memory / P4"]):::stage
   S7(["S7 truth/keys + release / P5"]):::stage
@@ -1339,7 +1495,7 @@ flowchart LR
 - tenant cut 必须在任何 hosted durable data 落库前完成；
 - core 在 cloud 之前；
 - mailbox/journal 在 board 之前；
-- SQL/object 在 board CAS 之前；
+- Postgres + R2 与 quota/reservation 在 board CAS 之前；
 - device proof 在 truth/memory 的生产写入之前；
 - 已知的 capability honesty 缺口（GAP-001/002）不拖到平台完成之后才修；
 - 每个 sprint 都要有独立的 rollback 与 evidence。
@@ -1388,6 +1544,8 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 | board concurrency | per-tenant `board_seq` 与 claim hot rows | SQL CAS、索引、contract suite；P2 后再做 P3 board |
 | large memory | snapshot >1MiB 与 rev CAS conflict | 当前 key-granular snapshot；阈值触发 delta-chain deferred |
 | many runtime kinds | closed `RuntimeIdSchema` 与 adapter-specific capability truth | 新 runtime id 是 protocol change；先修 per-task capability honesty |
+| 本机磁盘增长 | journal / WAL / workspace / cache 填满磁盘 | **目标设计**：SQLite compaction、分类 GC、watermark、hard-pressure admission gate（§12.7.2.1） |
+| tenant storage 增长 | 并发上传超卖、降级后超限、R2 orphan | **目标设计**：Postgres 作 reservation/usage authority、grace/只读、tombstone reconciler（§12.7.7、§12.7.8） |
 
 ### 14.3 可靠性、恢复与并发（目标设计）
 
@@ -1450,6 +1608,12 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 8. board claim/status 使用 CAS；不做 silent last-write-wins。
 9. workspace/Git state 不驱动 protocol task transition。
 10. runtime adapter 不把不支持的 policy 翻译成近似语义。
+11. hosted production 的 mailbox ack authority 使用 SQLite（或同等 contract），不能退回未证明 durable 的普通文件。
+12. `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传先做 reservation。
+13. quota 满只拒绝新的 durable write，不自动删除用户 durable truth。
+14. R2 删除必须经过 Postgres tombstone / grace / reconcile，不能先删 bytes 再猜引用。
+
+第 11–14 条是**目标设计**不变量：它们约束的是 §12.7 尚未落地的 hosted storage 面，不是当前 embedded runtime 的既有承诺。
 
 ## 15. 可观测性与审计（目标设计）
 
@@ -1479,6 +1643,10 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 - runtime spawn / exit
 - outbox drain duration
 - 本机 journal fsync latency
+- 本机 store bytes、free bytes、SQLite WAL bytes、compaction/GC duration
+- tenant storage 的 committed / reserved / limit bytes
+- storage reservation 的 success / expiry / quota rejection
+- R2 orphan、`delete_pending` 与 reconcile drift 计数
 - truth conflict rate
 - board CAS conflict rate
 - presence/activity writes 与 dropped
@@ -1568,3 +1736,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-016 | memory delta chain | Deferred，snapshot > 1 MiB 或 CAS 冲突率偏高时触发 |
 | ADR-017 | `TaskStore` 改 async | Deferred，self-hosted 需要远端 async SQL 时触发 |
 | ADR-018 | live / cold migration | Deferred，出现跨设备 workspace 迁移需求时触发 |
+| ADR-019 | hosted production 的本机 journal 以 SQLite 为 canonical；大对象留文件系统 | Accepted |
+| ADR-020 | 主生产云端 storage composition 为 Postgres + R2；D1 降为可选 adapter | Accepted |
+| ADR-021 | 套餐与计费归宿主所有；SDK 只执行版本化数值 entitlement、reservation 与 usage | Accepted |
+| ADR-022 | quota 满不自动删除 durable user truth；先拒绝新写，并保留删除/导出/扩容路径 | Accepted |

@@ -23,7 +23,7 @@
 | S1 | 提前吸收 P4（`:697`）的 `signNonce` domain separation，见下节 | **T0**（`:251`） | 租户 breaking cut。§9.2 的 T0 行（`:690`）标注“即刻可做，先于 P 线任何资料落库” |
 | S2 | **P0**（`:692`） | **T1**（`:252`） | `@byok/core` 契约包：零实现、不改既有包、tenant-first port 签名 |
 | S3 | **P1**（`:694`） | **T2**（`:253`） | `@byok/cloud` 无状态 handler + mailbox + durable local journal 端到端 |
-| S4A / S4B | **P2**（`:695`） | **T3**（`:254`） | SQL/object composition 与 `deploy/sql/` migration。S4A 落主后端 + conformance 套件，S4B 做第二后端 parity |
+| S4A / S4B | **P2**（`:695`） | **T3**（`:254`） | Postgres + R2 composition 与 `deploy/sql/` migration。S4A 落数据面 + conformance 套件，S4B 落 quota/reservation/GC（见 D-3） |
 | S5 | **P3**（`:696`） | **T4**（`:255`） | board 5 态 + claim/`expectedStatus` CAS + `board_seq` + SSE/轮询 + 两级提示 |
 | S6 | **P4**（`:697`），扣除已提前到 S1 的 `signNonce` 修复 | — | device proof 上行 + memory manifest/selector/CAS |
 | S7 | **P5**（`:698`）**已移出本 sprint**；承接 §9.2 储备行 C1–C3（`:699`）与 K4（`:693`） | — | ops/release RC。P5（`@byok/keys` profile 持久化接 `TruthStore`）见 `tasks/todos.md` deferred 项 |
@@ -34,7 +34,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 
 ## 对已决事项的显式改动
 
-本 sprint 相对两份权威文件有两处实质改动，均为显式声明，不是静默重排。
+本 sprint 相对两份权威文件有三处实质改动，均为显式声明，不是静默重排。
 
 ### D-1：`signNonce` domain separation 由 P4 提前到 S1
 
@@ -53,6 +53,13 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
   - **I6**（`board_seq` 隔离）断言的对象是 board 的 SSE/轮询流与 per-tenant 序列，board 到 S5（P3）才存在。`tenant-isolation-decision.md:240` 自身也标注 “cloud board 测试（P3 併入矩陣）”，与「P1 全绿」互相矛盾。
 - **补偿**：三条延后项各自写进承接 Sprint 的 acceptance criteria（S4A 的 I4 SQL 侧、S5 的 I6、S6 的 I3），且 S3 的 I1 路由矩阵必须自动扩展——新增路由未分类时测试自身失败，防止延后期内新增路由绕过矩阵。
 
+### D-3：主生产 storage composition 已裁定为 Postgres + R2，D1 降为 optional post-Beta adapter
+
+- **原决策**：本文件此前把 primary hosted SQL backend 列为 S4A 进入 Executing 前的待决项，默认 Postgres/S3 primary、D1/R2 由 S4B 做 parity，且 parity 是 RC 闸的硬依赖（原 §8 决策行、原 S4B、原 R-018）。**该记录保留**；本条是它的后继裁定，不是把它删掉。
+- **改动**：`docs/architecture/sdk-architecture.md` §12.7 与 ADR-020 已裁定主生产组合为 **Postgres + R2**——Postgres 持 domain metadata、quota、usage、reservation 与 object manifest，R2 只持验证过 hash/size 的对象 bytes。选型闸随之取消：S4A 重切为 Postgres + R2 数据面，S4B 重切为 quota/reservation/GC，D1 降为可选 compatibility adapter，不进 Beta/RC 闸（见 S4B.8）。
+- **理由**：跨后端 parity 的成本换来的是可移植性声明，而真正阻塞 hosted 上线的是容量安全——并发上传超卖、降级后超限、R2 orphan 累积。把 S4B 的预算从「证明第二后端能跑」换成「证明满额与清理不吃掉用户数据」，才是这一刀的实际收益。
+- **影响**：Beta 闸新增 quota/reservation/GC 要求；RC 闸不再要求第二后端 parity；R-018 改述为 quota/GC 迟做的风险；§8 的 backend 选型行改记为已裁定。
+
 ---
 
 ## 0. 计划目标
@@ -64,7 +71,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 3. 新建 protocol-free `@byok/core`；
 4. 新建 stateless `@byok/cloud`；
 5. 建立 mailbox → durable local journal → runtime → immutable truth 的可靠路径；
-6. 建立 SQL/object storage compositions；
+6. 建立 Postgres + R2、storage entitlement/usage/reservation、quota 与 cleanup compositions；
 7. 建立 board/presence/activity；
 8. 建立 device proof、memory manifest/CAS；
 9. 保持 `@byok/keys` 独立，并完成 K4/K4.1；
@@ -99,7 +106,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 | P | Hosted platform | cloud handlers、mailbox、board、truth | C |
 | L | Local reliability | journal、recovery、jitter、doctor | H/C |
 | K | Key plane | K4/K4.1 aip swap、publish、host adapter | 独立；S7 integration 前完成 |
-| O | Operations/release | SQL migrations、compositions、runbook、release | P/L |
+| O | Operations/release | Postgres migrations、R2 composition、quota/GC、runbook、release | P/L |
 
 ## 1.2 Critical path
 
@@ -109,8 +116,8 @@ flowchart LR
   S1["S1 Tenant cut"]
   S2["S2 Core contracts"]
   S3["S3 Cloud mailbox + journal"]
-  S4A["S4A Primary store composition"]
-  S4B["S4B Second backend parity"]
+  S4A["S4A Postgres + R2 data plane"]
+  S4B["S4B Quota / reservation / GC"]
   S5["S5 Board + hints"]
   S6["S6 Proof + memory"]
   S7["S7 Keys/ops RC"]
@@ -128,7 +135,7 @@ flowchart LR
   K4 -.-> S7
 ```
 
-S4B 不在 S5 的关键路径上：S5 只依赖 S4A 建立的 SQL 语义与 conformance 套件；第二后端 parity 可与 S5 并行，但必须在 S7 的 RC 闸前完成。
+S4B 不在 S5 的实现关键路径上：S5 只依赖 S4A 建立的 Postgres 语义与 conformance 套件，quota/reservation/GC 可与 S5 并行。但 S4B 是 **Beta 闸的硬依赖**——数据面能写不等于容量安全，没有 reservation 与 orphan GC 就不能对外声称 durable hosted storage（见 §12 Beta 闸）。
 
 ## 1.3 Merge 单元
 
@@ -207,9 +214,9 @@ repo-harness run verify-contract --contract <contract> --strict
 | S0 | 当前 capability 与 steer 诚实；架构/计划 canonical | Embedded hardening baseline |
 | S1 | structural tenant identity；pair/auth cut（含 nonce domain separation） | Multi-tenant identity foundation |
 | S2 | `@byok/core` contracts + conformance skeleton | Platform contract alpha |
-| S3 | in-memory hosted mailbox + local journal E2E | Hosted transport alpha |
-| S4A | 主后端 store composition + 共用 conformance 套件 | Durable hosted beta |
-| S4B | 第二后端 parity（同一 conformance 套件） | Portability proven |
+| S3 | in-memory hosted mailbox + SQLite local journal E2E | Hosted transport alpha |
+| S4A | Postgres + R2 数据面 + 共用 conformance 套件 | Durable hosted data plane beta |
+| S4B | quota/reservation 与 cloud cleanup/GC | Durable hosted storage beta |
 | S5 | board + SSE/poll + presence/activity | Coordination beta |
 | S6 | device proof + memory manifest/CAS | Signed truth candidate |
 | S7 | keys 边界 + ops/release hardening | Platform release candidate |
@@ -394,9 +401,10 @@ interface AuthenticatedDevice {
 | C-005 | TruthStore + revision/immutability contracts | 中 |
 | C-006 | Presence/Activity contracts | 低 |
 | C-007 | Blob/Object metadata contracts | 低 |
-| C-008 | DeviceProof schema/canonicalizer ports | 中 |
-| C-009 | Capability declaration schema | 低 |
-| C-010 | InMemory reference + conformance harness | 低 |
+| C-008 | StorageEntitlement/Usage/Reservation/Retention contracts | 中 |
+| C-009 | DeviceProof schema/canonicalizer ports | 中 |
+| C-010 | Capability declaration schema | 低 |
+| C-011 | InMemory reference + conformance harness | 低 |
 
 ### S2.2 Core constraints tests
 
@@ -410,6 +418,8 @@ interface AuthenticatedDevice {
 - terminal immutable behavior；
 - revision conflict behavior；
 - mailbox read does not ack；
+- quota contract only accepts numeric entitlements, never plan names/prices；
+- `committed + reserved <= hardLimit` and entitlement version CAS are deterministic；
 - content hash format stable；
 - canonical proof bytes deterministic across key insertion order。
 
@@ -426,6 +436,7 @@ packages/core/
 │   ├── truth.ts
 │   ├── presence.ts
 │   ├── blob.ts
+│   ├── quota.ts
 │   ├── attestation.ts
 │   ├── capabilities.ts
 │   ├── errors.ts
@@ -447,6 +458,7 @@ packages/core/
 - [ ] board transitions and conflicts are deterministic；
 - [ ] terminal conflict returns existing snapshot；
 - [ ] memory/profile `expectedRev` semantics fixed；
+- [ ] quota/usage/reservation contract includes version CAS、no-overcommit invariant and stable errors；
 - [ ] proof canonicalization golden created outside protocol golden；
 - [ ] InMemory composition passes complete conformance；
 - [ ] no existing package runtime behavior changes；
@@ -458,14 +470,14 @@ Delete `packages/core` and workspace entry. No existing package may depend on co
 
 ---
 
-## Sprint S3 — Hosted Mailbox + Durable Local Journal E2E
+## Sprint S3 — Hosted Mailbox + SQLite Durable Local Journal E2E
 
-> **目标**：建立第一条 hosted vertical slice：stateless cloud handler → mailbox → existing daemon → durable local journal → runtime → terminal receipt。
-> **风险等级**：很高；可靠性核心
+> **目标**：建立第一条 hosted vertical slice：stateless cloud handler → mailbox → existing daemon → SQLite durable local journal → runtime → terminal receipt，并证明本地积压不会无界增长，也不会在磁盘压力下静默丢任务。
+> **风险等级**：很高；可靠性与本机磁盘安全核心
 > **依赖**：S2
 > **对应**：P1（`ARCHITECTURE-PROPOSAL:694`）+ T2（`tenant-isolation-decision.md:253`）
 > **入口闸**：I1/I2/I5/I7/I8/I9 全绿 + I4 的 InMemory 半套。I3 顺延 S6、I6 顺延 S5——本闸门 supersede `ARCHITECTURE-PROPOSAL:694` 的「I1–I9 全绿」字面表述，理由见「对已决事项的显式改动」D-2
-> **可并行**：K4；SQL composition 不在本 Sprint
+> **可并行**：K4；Postgres/R2 composition 不在本 Sprint
 
 ### S3.1 Stories
 
@@ -476,10 +488,13 @@ Delete `packages/core` and workspace entry. No existing package may depend on co
 | P-003 | route inventory + I1 matrix skeleton | 中 |
 | P-004 | in-memory pair/challenge/token handlers | 中 |
 | P-005 | frozen-v1 events/messages/blob handlers | 高 |
-| L-001 | durable local journal port + file implementation | 高 |
-| L-002 | cursor ack only after journal commit | 中 |
+| L-001 | `LocalTaskJournal` port + production `SqliteLocalTaskJournal` | 高 |
+| L-002 | cursor ack only after SQLite transaction commit | 中 |
+| L-003 | local storage usage、watermarks、分类 GC、WAL checkpoint/compaction | 高 |
 | P-006 | `/byok/capabilities` | 低 |
-| P-007 | E2E/crash injection suite | 低 |
+| P-007 | E2E/crash/disk-pressure injection suite | 中 |
+
+> L 轨编号顺移：本 Sprint 新增 L-003 后，S7 的 reliability hardening 四项由 L-003–L-006 顺移为 L-004–L-007。
 
 ### S3.2 Vertical slice
 
@@ -489,18 +504,19 @@ sequenceDiagram
   participant C as Cloud
   participant M as InMemory Mailbox
   participant D as Daemon
-  participant J as Local Journal
+  participant J as SQLite Journal
   participant R as Runtime Fake
 
   H->>C: enqueue offer
   C->>M: append frozen v1 bytes
   D->>C: poll after cursor
   C-->>D: offer
-  D->>J: durable append
+  D->>J: transaction append envelope plus receipt
+  J-->>D: commit durable
   D->>C: advance cursor
   D->>R: execute
   R-->>D: terminal
-  D->>J: persist terminal hash
+  D->>J: persist terminal hash and truth retry state
   D->>C: idempotent terminal receipt
 ```
 
@@ -516,40 +532,60 @@ interface LocalTaskJournal {
   recordTerminal(record: LocalTerminalRecord): Promise<void>;
   listRecoverable(): Promise<RecoverableTask[]>;
   markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void>;
+  measureUsage(): Promise<LocalStorageUsage>;
+  listCleanupCandidates(now: Date, limit: number): Promise<CleanupCandidate[]>;
+  markCleanupResult(result: CleanupResult): Promise<void>;
+  compact(options: CompactOptions): Promise<CompactResult>;
 }
 ```
 
 Properties：
 
-- atomic append；
-- bounded record size；
+- SQLite `WAL`、`foreign_keys=ON`、ack-critical `synchronous=FULL`；
+- envelope、idempotency receipt 与 cursor-advance eligibility 同一 transaction；
+- single writer queue + bounded busy timeout；
+- bounded record size；大 artifact/workspace 不进 SQLite；
 - secure directory；
-- crash-safe fsync/commit semantics documented；
 - idempotency by envelope/task transition id；
-- corrupt file quarantine；
+- corrupt DB/state quarantine；
 - no full prompt/tool output by default；
 - Windows path/security test；
-- compaction deferred unless size trigger reached。
+- batch cleanup、WAL checkpoint、incremental vacuum 不阻塞 active task；
+- file/JSONL compatibility adapter 不能在 hosted production 默认启用。
 
-### S3.4 Crash drills
+### S3.4 Crash and disk-pressure drills
 
 Inject crash at：
 
 1. before local append；
-2. after append, before ack；
+2. after SQLite commit, before ack；
 3. after ack, before admission；
 4. after claim, before runtime start；
 5. after terminal local record, before cloud receipt；
 6. after cloud receipt, before local completion mark。
 
-For each point assert no lost task, no duplicate side effect, stable recovery status.
+Inject storage pressure at：
+
+7. soft watermark；
+8. hard watermark while idle；
+9. hard watermark while a task is Running；
+10. SQLite disk-full/IO error before commit；
+11. large WAL requiring checkpoint；
+12. cleanup worker crash after file delete but before metadata mark, and vice versa。
+
+For each point assert no lost task, no duplicate side effect, stable recovery status, and no automatic deletion of protected/recovery data.
 
 ### S3.5 Acceptance criteria
 
 - [ ] existing daemon runs against in-memory cloud using long-poll；
 - [ ] frozen v1 bytes round-trip unchanged；
-- [ ] ack watermark cannot advance before journal commit；
-- [ ] crash matrix passes；
+- [ ] ack watermark cannot advance before SQLite commit；
+- [ ] crash matrix and disk-pressure matrix pass；
+- [ ] local usage reports journal/cache/log/workspace/quarantine separately；
+- [ ] soft pressure cleans only rebuildable/expired categories；
+- [ ] hard pressure rejects new task admission but allows terminal flush、delete、export、doctor；
+- [ ] unacked/running/recovery/quarantine records are never auto-deleted；
+- [ ] WAL checkpoint/compaction behavior is bounded and observable；
 - [ ] I1 route inventory contains every registered route，未分类路由使测试自身失败；
 - [ ] tenant B cannot read/write tenant A fixture；
 - [ ] `/capabilities` drives transport/feature selection；
@@ -560,31 +596,34 @@ For each point assert no lost task, no duplicate side effect, stable recovery st
 
 ### S3.6 Rollback
 
-Cloud package is additive. Client journal integration ships behind hosted composition/config until crash suite passes. Rollback disables hosted mode but preserves journal files; never delete recovery evidence automatically.
+Cloud package is additive. Client SQLite journal integration ships behind hosted composition/config until crash suite passes. Rollback disables hosted mode but preserves `daemon.db`、WAL、workspaces and recovery evidence; no rollback path converts back to a lossy file journal or deletes the database automatically.
 
 ---
 
-## Sprint S4A — 主后端 Durable Composition 与共用 Conformance 套件
+## Sprint S4A — Postgres + R2 数据面与共用 Conformance 套件
 
-> **目标**：确定并落地主生产后端（SQL + object），把 S3 的 in-memory 行为搬到 durable store 上，并建立此后所有 composition 共用的 conformance 套件。
+> **目标**：把 S3 的 in-memory 行为搬到已裁定的主生产组合 **Postgres + R2** 上，并建立此后所有 composition 共用的 conformance 套件。
 > **风险等级**：高；schema 与迁移一旦发布即难改
 > **依赖**：S3
-> **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）+ T3（`tenant-isolation-decision.md:254`）的主后端部分
-> **决策闸**：进入 S4A 前必须确认 primary production backend（默认 Postgres/S3，见 §8）。该决策同时是 S4B 的输入
+> **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）+ T3（`tenant-isolation-decision.md:254`）的数据面部分
+> **已裁定**：主生产 backend 为 Postgres + R2（见 §8 与 D-3）。本 Sprint 不再有 backend 选型闸；D1 只作为 optional post-Beta adapter，不阻塞任何闸门
 
 ### S4A.1 Stories
 
 | ID | Story | 相对复杂度 |
 | --- | --- | --- |
-| O-001 | ordered SQL migrations + schema ownership | 中 |
-| O-002 | 主后端 Mailbox/Device/Receipt stores | 高 |
-| O-003 | 主后端 Board/Truth/Presence stores | 高 |
-| O-004 | 主 object adapter + presign/hash | 中 |
-| O-007 | retention/cleanup jobs | 低 |
-| O-008 | migration/conformance CI（套件本身在此定型） | 中 |
-| O-009 | deployment env/runbook skeleton 实装 | 低 |
+| O-001 | ordered Postgres migrations + schema ownership | 中 |
+| O-002 | Postgres Mailbox/Device/Receipt stores | 高 |
+| O-003 | Postgres Board/Truth/Presence stores | 高 |
+| O-004 | R2 tenant-scoped object adapter + presign/hash/HEAD | 中 |
+| O-005 | migration/domain conformance CI（套件本身在此定型） | 中 |
+| O-006 | deployment env/runbook skeleton 实装 | 低 |
+
+> O 轨编号顺移：S4 重切为数据面（S4A）与 quota/GC（S4B）后，O 轨按 S4A → S4B → S7 顺序重排；S7 的 operations 四项由 O-010–O-013 顺移为 O-013–O-016。
 
 ### S4A.2 Schema minimum
+
+Domain / reliability：
 
 - `device`
 - `pairing_code`
@@ -599,11 +638,11 @@ Cloud package is additive. Client journal integration ships behind hosted compos
 - `device_presence`
 - `activity_tail`
 
-所有 domain table 使用 tenant-prefixed composite keys；nonce/presigned capability 即使随机，也在 row 内保存 tenant。
+所有 domain table 使用 tenant-prefixed composite keys；nonce/presigned capability 即使随机，也在 row 内保存 tenant。R2 key 使用 `tenants/<tenantId>/objects/sha256/<hash>`，不做跨租户 dedupe。storage/quota 相关 schema 属 S4B（见 S4B.2）。
 
 ### S4A.3 Conformance dimensions（套件定义）
 
-| Dimension | InMemory | 主后端 |
+| Dimension | InMemory | Postgres + R2 |
 | --- | --- | --- |
 | tenant isolation | required | required |
 | claim/status CAS | required | required |
@@ -615,82 +654,129 @@ Cloud package is additive. Client journal integration ships behind hosted compos
 | TTL cleanup | deterministic clock | SQL clock |
 | transaction atomicity | simulated | native |
 
-套件必须以 composition 为参数，新增后端只提供 factory，不改断言——这是 S4B 能不改测试就跑通的前提。
+套件必须以 composition 为参数，新增 composition 只提供 factory，不改断言——这是 S4B 的 quota composition 与将来的 optional D1 adapter 都能不改测试就跑通的前提。
 
 ### S4A.4 Object tests
 
 - same hash duplicate upload idempotent；
-- size/hash mismatch reject；
-- content type bounds；
+- size/hash/content type mismatch reject；
 - tenant/resource-bound presign；
 - expired presign；
 - object exists before truth reference；
-- orphan grace cleanup；
 - range/large response limits；
-- no key/path traversal。
+- no key/path traversal；
+- cross-tenant hash 不产生 existence oracle；
+- R2 transient error/backoff/idempotency。
+
+> reservation-bound presign、finalize crash 矩阵与 orphan tombstone 测试属 S4B（见 S4B.4）。
 
 ### S4A.5 Acceptance criteria
 
 - [ ] migrations pass order check；
 - [ ] fresh install + migrate-up；
 - [ ] rollback strategy documented；destructive down migration not required；
-- [ ] InMemory 与主后端两个 composition 跑同一份 contract suite；
+- [ ] InMemory 与 Postgres + R2 两个 composition 跑同一份 domain/object contract suite；
 - [ ] **I4 的 SQL 侧补齐**（S3 延后项，见 D-2）；
-- [ ] no naked task/device index；
+- [ ] no naked task/device/object index，也没有跨租户 object key；
 - [ ] mailbox retention behavior documented；
 - [ ] cross-tenant query plan cannot use a naked key path；
-- [ ] Postgres optional RLS hardening documented but not relied upon（若主后端为 Postgres）；
+- [ ] Postgres optional RLS hardening documented but not relied upon；
 - [ ] deploy/ no longer only `.gitkeep`；
 - [ ] `pnpm run check:deploy-sql` 通过；
 - [ ] secrets/environment sample excludes real keys。
 
 ### S4A.6 Rollback
 
-Migrations are forward-only additive in this Sprint. Rollback application code can leave unused tables. No column/drop operation. Object prefixes versioned so old/new readers do not collide.
+Migrations are forward-only additive in this Sprint. Rollback application code can leave unused tables. No column/drop operation. No rollback path deletes R2 objects. Object prefixes versioned so old/new readers do not collide.
 
 ---
 
-## Sprint S4B — 第二后端 Parity
+## Sprint S4B — Quota、Reservation 与 Cloud Cleanup
 
-> **目标**：让第二后端（默认 D1/R2）以零断言改动的方式跑通 S4A 定型的同一份 conformance 套件，证明契约层可移植。
-> **风险等级**：高；跨数据库语义漂移
-> **依赖**：S4A（套件与主后端语义）+ §8 的 backend 选型决策
-> **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）+ T3 的第二后端部分
-> **关键路径**：不阻塞 S5；必须在 S7 的 RC 闸前完成
+> **目标**：在 S4A 的数据面之上，建立免费/付费套餐可复用的数值 entitlement、原子 usage/reservation、超限保护、retention/dead-letter 与 R2 GC/reconciliation。
+> **风险等级**：极高；Postgres/R2 跨系统一致性、并发超卖与用户数据删除风险
+> **依赖**：S4A（数据面与 conformance 套件）
+> **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）的容量与清理部分
+> **关键路径**：不阻塞 S5 的实现，但**是 Beta 闸的硬依赖**（见 §12）
 
 ### S4B.1 Stories
 
 | ID | Story | 相对复杂度 |
 | --- | --- | --- |
-| O-005 | 第二后端 store composition | 高 |
-| O-006 | 第二 object adapter | 中 |
-| O-008b | parity CI job（复用 S4A 套件，仅换 factory） | 中 |
+| O-007 | `StorageEntitlement` / `StorageUsage` contracts + control-plane sync | 中 |
+| O-008 | transactional reservation/finalize/abort + 并发 quota enforcement | 高 |
+| O-009 | retention/TTL jobs + mailbox expired/dead-letter 语义 | 中 |
+| O-010 | R2 orphan tombstone/delete/reconcile worker | 高 |
+| O-011 | quota/GC conformance + load/crash CI job（复用 S4A 套件，仅加维度） | 中 |
+| O-012 | quota/cleanup metrics 与 support runbook | 中 |
 
-### S4B.2 Parity dimensions
+### S4B.2 Schema minimum
 
-| Dimension | 第二后端 |
-| --- | --- |
-| tenant isolation | required |
-| claim/status CAS | required |
-| per-tenant seq | required |
-| mailbox read/ack | required |
-| terminal immutable | required |
-| revision CAS | required |
-| idempotency receipt | required |
-| TTL cleanup | 后端 clock adapter |
-| transaction atomicity | explicit transaction/batch |
+Storage / quota：
 
-### S4B.3 Acceptance criteria
+- `storage_entitlement`
+- `storage_usage`
+- `storage_reservation`
+- `object_manifest`
+- `object_reference`
+- `tenant_retention_policy`
+- `cleanup_job` / `gc_cursor`
 
-- [ ] 第二后端 composition 通过 S4A 的同一份 contract suite，且套件断言零改动；
-- [ ] object parity（主/第二 object adapter 同一份 object test 套件）；
-- [ ] 后端语义差异（事务、时钟、批处理）写入 runbook，不藏在实现里；
-- [ ] parity CI job 常驻；
-- [ ] migration 顺序在两后端一致。
+### S4B.3 Entitlement 与计量契约
 
-### S4B.4 Rollback
+SDK 只接受版本化数值 entitlement，代码里不出现 `free`、`pro`、价格或支付状态。至少验证：
 
-第二 composition 是纯加性配置项。回滚只是不发布该 composition；主后端与套件不受影响。若 parity 暴露出契约本身的歧义，修契约与套件，而不是给第二后端加特例分支。
+- `hardLimitBytes`、`maxObjectBytes`、`maxInlineBytes`；
+- `committedObjectBytes + committedInlineBytes + reservedBytes <= hardLimitBytes`；
+- 同 tenant 同 hash 多 reference 只计一次；
+- mailbox bytes、record count、rate limit 是独立的 operational limits；
+- upgrade 即时扩容；downgrade 可进入 grace，但不自动删除 durable data；
+- entitlement version CAS，旧版本更新不能覆盖新版本。
+
+### S4B.4 Reservation 与 object 测试
+
+- 100 个并发 reservation 在 limit 边界只有可容纳者成功，绝不超卖；
+- same request/reservation id 幂等；
+- size/hash/content type mismatch reject，且 reserved bytes 释放；
+- tenant/resource/reservation-bound presign；
+- expired/aborted reservation；
+- upload succeeded but finalize crashed；
+- finalize committed but response lost；
+- truth reference removed 后进入 grace，不立即删除；
+- orphan tombstone/delete/reconcile 的每个 crash point。
+
+### S4B.5 Cleanup 与满额行为
+
+自动清理仅允许：TTL hints/nonces/receipts、已 ack mailbox、expired reservation、R2 orphan。未 ack mailbox 过 retention 时进入显式 expired/dead-letter，不静默删除。durable truth/board/memory/profile/terminal 不因 quota 满而被自动删除。
+
+Hard-limit behavior：
+
+- reject new durable writes with stable `storage_quota_exceeded`；
+- allow read/delete/export/usage/entitlement update；
+- allow previously reserved upload/finalize；
+- task admission must reserve `maxOutputBytes` before runtime start；
+- downgrade over-limit uses grace then write suspension；
+- small bounded failure metadata uses system reserve。
+
+### S4B.6 Acceptance criteria
+
+- [ ] quota concurrent reservation test proves no overcommit；
+- [ ] usage cannot become negative or drift after retry/crash；
+- [ ] entitlement version/downgrade grace behavior passes；
+- [ ] hard limit rejects new durable writes while read/delete/export continue；
+- [ ] durable user data is never auto-deleted to make room；
+- [ ] mailbox retention/dead-letter behavior documented and tested；
+- [ ] R2 orphan GC uses tombstone + grace + reconciliation；
+- [ ] quota/usage/GC metrics 与 support runbook 存在；
+- [ ] quota composition 复用 S4A 套件，domain 断言零改动。
+
+### S4B.7 Rollback
+
+Migrations are forward-only additive. Rollback application code may leave unused quota/object tables and R2 objects. No rollback automatically deletes objects or rewrites usage. A reconciliation command must be able to rebuild `storage_usage` from Postgres manifests before re-enabling writes.
+
+### S4B.8 D1：optional post-Beta adapter
+
+原 S4B 的「第二后端 D1/R2 parity」不再是必过闸门。主生产组合已裁定为 Postgres + R2（D-3），D1 降为**可选 compatibility adapter**：若将来要发布，它复用 S4A 定型的同一份 conformance 套件（断言零改动，只换 factory），并各自记录事务、时钟、批处理的语义差异到 runbook。它不进入 Beta 或 RC 闸，也不影响主线的容量、计费与 GC 语义；不做它不构成交付缺口。
 
 ---
 
@@ -698,7 +784,7 @@ Migrations are forward-only additive in this Sprint. Rollback application code c
 
 > **目标**：建立共享协调面，并严格与 wire execution/truth 分离。
 > **风险等级**：高；并发与 UI 语义
-> **依赖**：S4A SQL semantics（不依赖 S4B）
+> **依赖**：S4A 的 Postgres semantics（不依赖 S4B）
 > **对应**：P3（`ARCHITECTURE-PROPOSAL:696`）+ T4（`tenant-isolation-decision.md:255`）
 > **入口闸**：I6 在本 Sprint 补齐（S3 延后项，见 D-2）
 > **产品决策**：`closed` 继续采用“终止未验收”；admin override 单独 capability
@@ -897,14 +983,14 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | K-402 | K4.1 aip-side settings adapter | 独立 track |
 | K-502 | default secret-store factory/data scope decisions | 中 |
 | K-503 | generic testConnection 或 host adapter定案 | 低 |
-| L-003 | deterministic reconnect jitter | 中 |
-| L-004 | health window + crash budget | 中 |
-| L-005 | local corrupt-state quarantine | 中 |
-| L-006 | doctor/status/support bundle | 中 |
-| O-010 | hosted/self-hosted runbooks | 中 |
-| O-011 | release signing/updater responsibility contract | 低 |
-| O-012 | load/reconnect/retention tests | 中 |
-| O-013 | RC security/audit review | 低 |
+| L-004 | deterministic reconnect jitter | 中 |
+| L-005 | health window + crash budget | 中 |
+| L-006 | local corrupt-state quarantine | 中 |
+| L-007 | doctor/status/support bundle | 中 |
+| O-013 | hosted/self-hosted runbooks | 中 |
+| O-014 | release signing/updater responsibility contract | 低 |
+| O-015 | load/reconnect/retention tests | 中 |
+| O-016 | RC security/audit review | 低 |
 
 > `@byok/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于已封口的 K 线 active plan，不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok/core` TruthStore 落地。
 
@@ -964,7 +1050,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 
 - [ ] K4 golden test in aip passes unchanged；
 - [ ] 包依赖图 obeys dependency rules；
-- [ ] all compositions pass conformance（含 S4B parity）；
+- [ ] all shipped compositions pass conformance（InMemory、Postgres + R2、self-hosted；optional D1 adapter 若已发布也在内）；
 - [ ] **I1–I9 全部通过**——D-2 的分期到此闭合，RC 闸不接受任何延后项；
 - [ ] crash drills pass；
 - [ ] reconnect fleet simulation has bounded peak；
@@ -1028,6 +1114,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | credential isolation | regression | regression | graph | child env | deploy | hints | proof | audit |
 | mailbox reliability | design | — | contract | implement | durable | regression | regression | load |
 | truth immutability | design | — | contract | receipt stub | durable | terminal hook | implement | audit |
+| storage quota / deletion safety | design | — | contract | 本机磁盘压力 | reservation + GC | regression | truth refs | audit |
 | policy fail-closed | implement | regression | — | E2E | regression | regression | proof op | RC |
 | updater trust | doc | — | — | — | deploy owner | — | — | runbook |
 
@@ -1045,9 +1132,10 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | core store conformance | S2 | every composition PR |
 | route inventory/I1 | S3 | every cloud route PR |
 | journal crash matrix | S3 | every client/cloud PR |
-| 主后端 conformance（含 I4 SQL 侧） | S4A | CI |
-| 第二后端 parity | S4B | CI |
-| object adapter parity | S4B | CI |
+| 本机 SQLite journal cleanup/disk pressure | S3 | every client storage PR |
+| Postgres domain store conformance（含 I4 SQL 侧） | S4A | CI |
+| R2 object adapter contract | S4A | CI |
+| Postgres + R2 reservation/quota/GC | S4B | CI/load/crash |
 | board CAS concurrency | S5 | CI/load |
 | SSE/poll parity | S5 | CI |
 | board_seq 隔离/I6 | S5 | CI |
@@ -1070,8 +1158,8 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | R-005 | core import protocol/Node | 低 | 高 | S2 | source/package invariant tests |
 | R-006 | journal ack ordering错误 | 中 | 极高 | S3 | crash injection + durable receipt |
 | R-007 | handler漏 tenant | 中 | 极高 | S3+ | route inventory exhaustive matrix |
-| R-008 | 主/第二后端 semantics漂移 | 高 | 高 | S4B | shared conformance，断言零改动 |
-| R-009 | SQL outbox retention与ring语义混淆 | 高 | 中 | S4A | runbook/metrics/explicit config |
+| R-008 | SQLite journal/WAL/cleanup 在磁盘压力下损坏，或删错 protected data | 中 | 极高 | S3 | crash+disk-full 矩阵、分类 allowlist、quarantine |
+| R-009 | Postgres/R2 reservation finalize 漂移导致超卖、usage 泄漏或 orphan 累积 | 高 | 极高 | S4B | transactional reservation、幂等、reconciler |
 | R-010 | board status与wire state混用 | 中 | 高 | S5 | vocabulary tests + separate modules |
 | R-011 | SSE temporary error误判能力缺失 | 中 | 中 | S5 | explicit capabilities |
 | R-012 | proof canonical bytes发布后变更 | 中 | 极高 | S6 | golden + independent review |
@@ -1080,10 +1168,12 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | R-015 | reconnect herd | 高 | 中 | S7 | deterministic jitter simulation |
 | R-016 | updater只有同源hash | 中 | 极高 | S7/host | signed manifest trust root |
 | R-017 | K4跨仓库协作延误 | 高 | 中 | Parallel | independent critical path |
-| R-018 | S4B 迟迟不做，契约层的可移植性只停在声明 | 中 | 高 | S4B | parity CI 常驻；S7 RC 闸把 S4B 列为硬依赖 |
+| R-018 | S4B 迟迟不做，Beta 只有数据面没有容量保护 | 中 | 极高 | S4B | quota/GC CI 常驻；Beta 闸把 S4B 列为硬依赖 |
 | R-019 | feature flags掩盖未测试path | 中 | 中 | all | both on/off behavior tests |
 | R-020 | support bundle泄露secret/prompt | 中 | 高 | S7 | allowlist + redaction audit |
 | R-021 | D-2 的 I3/I4/I6 延后被遗忘，RC 闸才发现 | 中 | 高 | S4A/S5/S6 | 三条各自写入承接 Sprint 的 acceptance；S7.4 显式复核 |
+| R-022 | 套餐降级后系统为腾空间自动删除 durable user data | 中 | 极高 | S4B | grace + write suspension；destructive cleanup 禁止 |
+| R-023 | SQL outbox retention与ring语义混淆 | 高 | 中 | S4B | expired/dead-letter、runbook、metrics、explicit config |
 
 ---
 
@@ -1091,7 +1181,10 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 
 | 决策 | Deadline | 默认选择 |
 | --- | --- | --- |
-| primary hosted SQL backend | S4A 进入 Executing 前 | Postgres/S3 primary；D1/R2 由 S4B 做 parity |
+| primary hosted storage composition | 已裁定（见 D-3） | Postgres + R2；D1 为 Beta 之后的 optional adapter |
+| quota accounting unit | S4B planning day 1 | tenant R2 committed bytes + inline payload bytes；metadata 用 count/size limits |
+| quota downgrade policy | S4B planning day 1 | 可配置 grace；之后 suspend new writes；never auto-delete durable truth |
+| local storage watermarks | S3 planning day 1 | host 配置的 max bytes + min free bytes；soft/hard pressure |
 | board admin force-unclaim | S5 planning | disabled unless explicit control capability |
 | `closed` semantics | S5 planning | terminated/unaccepted |
 | proof clock skew | S6 planning | 60 seconds, configurable within bounded range |
@@ -1122,8 +1215,8 @@ tasks/notes/20260807-<time>-s0-runtime-hardening.notes.md
 - `s1-tenant-identity-cut`
 - `s2-byok-core-contracts`
 - `s3-cloud-mailbox-local-journal`
-- `s4a-primary-store-composition`
-- `s4b-second-backend-parity`
+- `s4a-postgres-r2-data-plane`
+- `s4b-storage-quota-cleanup`
 - `s5-board-presence-stream`
 - `s6-device-proof-memory`
 - `s7-keys-boundary-operations`
@@ -1205,14 +1298,16 @@ exit_criteria:
 ### Alpha（S3 完成）
 
 - hosted in-memory E2E；
-- local journal crash matrix；
+- SQLite local journal crash + disk-pressure matrix；
 - structural tenant identity；
 - capability honesty；
 - protocol golden unchanged。
 
 ### Beta（S5 完成）
 
-- durable SQL/object composition（S4A）；
+- Postgres + R2 durable composition（S4A）；
+- tenant entitlement/usage/reservation、quota enforcement 与 orphan GC（S4B）；
+- 本机 SQLite storage pressure/cleanup；
 - board claim/status CAS；
 - SSE/poll parity；
 - presence/activity；
@@ -1222,8 +1317,8 @@ exit_criteria:
 
 - device proof；
 - immutable truth/memory CAS；
+- quota/usage reconciler 与 no-destructive-cleanup audit；
 - keys 边界不变式；
-- 第二后端 parity（S4B）；
 - deterministic jitter；
 - doctor/quarantine；
 - cross-platform packaging/service；
@@ -1257,4 +1352,6 @@ Program 完成时，必须可以演示：
 17. release binary 的来源真实性不依赖同源 hash；
 18. protocol v1 golden byte-for-byte 未变；
 19. 架构文档对 CURRENT/TARGET/DEFERRED 的描述与代码一致；
-20. 每个高风险行为都有独立 review、evidence 和 rollback。
+20. 每个高风险行为都有独立 review、evidence 和 rollback；
+21. 本地积压在配置的 storage policy 下保持有界，且不删除 protected/recovery data；
+22. Postgres + R2 quota 在并发上传下不能超卖，满额也不会静默删除 durable user data。
