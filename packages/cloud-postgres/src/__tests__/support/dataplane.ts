@@ -59,6 +59,14 @@ export const SKIP_DATAPLANE = POSTGRES_URL === undefined;
 export interface DataplaneScope {
   readonly pool: Pool;
   readonly schema: string;
+  /**
+   * `application_name` on every connection this pool opens, equal to the
+   * schema. Server-wide catalogs (`pg_locks`, `pg_stat_activity`) are NOT
+   * schema-isolated, so an assertion about them has to filter to this scope's
+   * own backends or it will read another concurrently running test file's
+   * state.
+   */
+  readonly applicationName: string;
   dispose(): Promise<void>;
 }
 
@@ -90,11 +98,13 @@ export async function createDataplaneScope(poolSize = 8): Promise<DataplaneScope
     connectionString: url,
     max: poolSize,
     options: `-c search_path=${schema}`,
+    application_name: schema,
   });
 
   return {
     pool,
     schema,
+    applicationName: schema,
     async dispose() {
       await pool.end();
       const cleanup = createByokPool({ connectionString: url, max: 1 });

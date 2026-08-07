@@ -274,8 +274,16 @@ describe.skipIf(SKIP_DATAPLANE)('migrate runner against Postgres', () => {
 
     // A leaked advisory lock would make every later deploy hang forever, which
     // is a far worse failure than the migration error that caused it.
+    //
+    // Filtered to this scope's own backends by application_name: pg_locks is
+    // server-wide, and another test file legitimately holding the same lock at
+    // this instant would otherwise fail an assertion about THIS runner.
     const held = await scope.pool.query<{ count: string }>(
-      "SELECT count(*)::text AS count FROM pg_locks WHERE locktype = 'advisory' AND objid = 4021960801",
+      `SELECT count(*)::text AS count
+         FROM pg_locks l
+         JOIN pg_stat_activity a ON a.pid = l.pid
+        WHERE l.locktype = 'advisory' AND a.application_name = $1`,
+      [scope.applicationName],
     );
     expect(held.rows[0]?.count).toBe('0');
 
