@@ -145,16 +145,16 @@ No runtime data flow this slice — the package has no consumers by design. The 
 ## Annotations
 
 ## Task Breakdown
-- [ ] C-001 Scaffold `packages/core` (zod-only deps, sibling build idiom, workspace auto-covered)
-- [ ] C-002 Branded `TenantId` + single mint point + `DevicePrincipal`/`ControlPlanePrincipal`
-- [ ] C-003 MailboxStore contract (read does not ack; cursor-ack; retention hooks)
-- [ ] C-004 BoardStore contract (5-state vocabulary, claim/`expectedStatus` CAS, per-tenant `board_seq`, conflict snapshots)
-- [ ] C-005 TruthStore contract (terminal first-hash-wins immutable; `profile`/`memory` `expectedRev` CAS; manifest)
-- [ ] C-006 Presence/Activity contracts (TTL hints; explicit `dropped`)
-- [ ] C-007 Blob/Object metadata contracts (sha256 address; manifest/reference states)
-- [ ] C-008 StorageEntitlement/Usage/Reservation/Retention contracts (§12.7.6-12.7.7 verbatim; stable error codes; version CAS; no-overcommit)
-- [ ] C-009 DeviceProof schema + JCS canonicalizer + domain prefix + injectable verify port + canonical-bytes golden (outside protocol golden)
-- [ ] C-010 Capability declaration schema (ADR-010)
-- [ ] C-011 InMemory reference + composition-parameterized conformance harness; S2.2 constraint tests (import scan, tenant-first inventory I7, mint-point grep, vocabulary isolation)
-- [ ] Docs: architecture package graph TARGET → partial CURRENT; hook card closed via snapshot + reindex; `machines.list()` todos row ruled
-- [ ] Full gates green incl. existing-packages zero-diff machine check
+- [x] C-001 Scaffold `packages/core` (zod-only deps, sibling build idiom, workspace auto-covered)
+- [x] C-002 Branded `TenantId` + single mint point + `DevicePrincipal`/`ControlPlanePrincipal`
+- [x] C-003 MailboxStore contract (read does not ack; cursor-ack; retention hooks)
+- [x] C-004 BoardStore contract (5-state vocabulary, claim/`expectedStatus` CAS, per-tenant `board_seq`, conflict snapshots)
+- [x] C-005 TruthStore contract (terminal first-hash-wins immutable; `profile`/`memory` `expectedRev` CAS; manifest)
+- [x] C-006 Presence/Activity contracts (TTL hints; explicit `dropped`)
+- [x] C-007 Blob/Object metadata contracts (sha256 address; manifest/reference states)
+- [x] C-008 StorageEntitlement/Usage/Reservation/Retention contracts (§12.7.6-12.7.7 verbatim; stable error codes; version CAS; no-overcommit)
+- [x] C-009 DeviceProof schema + JCS canonicalizer + domain prefix + injectable verify port + canonical-bytes golden (outside protocol golden)
+- [x] C-010 Capability declaration schema (ADR-010)
+- [x] C-011 InMemory reference + composition-parameterized conformance harness; S2.2 constraint tests (import scan, tenant-first inventory I7, mint-point grep, vocabulary isolation)
+- [x] Docs: architecture package graph TARGET → partial CURRENT; hook card closed via snapshot + reindex; `machines.list()` todos row ruled
+- [x] Full gates green incl. existing-packages zero-diff machine check
