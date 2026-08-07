@@ -55,7 +55,8 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Worker-run evidence (after `1374bed`): typecheck clean; tests protocol 189 / core 328 / keys 167→(worker A read: 167; B read: 189/328 order varies) / cloud 78 / server 216 / client 933 all green; build 6×; golden clean; zero-diff machine check clean. Crash matrix six points + pressure matrix six points listed green with verbose reporter lines in the worker reports; Node 20.17.0 real run: 884 passed / 27 skipped / fail-closed construction test green.
+- Worker-run evidence (after `1374bed`): typecheck clean; tests protocol 189 / core 328 / keys 167→(worker A read: 167; B read: 189/328 order varies) / cloud 78 / server 216 / client 933 all green; build 6×; golden clean; zero-diff machine check clean. Crash matrix six points + pressure matrix six points listed green with verbose reporter lines in the worker reports.
+- Dual-Node evidence (after `9b1bb9a`, the storage-policy ordering fix): Node 22.22.0 `pnpm -r run test` — core 167 / keys 328 / protocol 189 / cloud 78 / server 216 / client 934, zero failures; Node 20.17.0 `npx vitest run` in `packages/client` — 896 passed / 38 skipped / 0 failed (93 files passed, 3 skipped). The storage-policy rejection test is in the passing set on BOTH legs now, which is the point of the fix: it never depended on `node:sqlite` being available. Supersedes the earlier pre-fix Node 20 reading (884 passed / 27 skipped).
 - Full-repo gates re-run by the acceptance chain (see checks file), not hand-claimed here.
 
 ## Promotion Filter
