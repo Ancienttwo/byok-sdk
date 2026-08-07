@@ -97,7 +97,8 @@ export type JournalFaultStep =
   | 'transition:before-commit'
   | 'terminal:before-commit'
   | 'recovery:before-commit'
-  | 'cleanup:before-commit';
+  | 'cleanup:before-commit'
+  | 'prune:before-commit';
 
 export interface JournalFaultSeam {
   /** Throw to simulate a crash or IO error at exactly this step. Return normally to proceed. */
@@ -833,6 +834,58 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         this.#fault('cleanup:before-commit');
       });
     });
+  }
+
+  /**
+   * §12.7.2.1's cleanup step 3: drop one task's journal rows, but ONLY when
+   * the cloud has confirmed its terminal and it carries no recovery marker.
+   *
+   * Beyond S3.3's minimum API, and the ONLY deletion path this journal has.
+   * The eligibility test is the first statement INSIDE the transaction that
+   * would delete, so "is this row protected?" and "delete it" cannot be
+   * separated by another writer marking it recovered in between — a check
+   * performed outside the write lock is a check that can go stale, and the row
+   * it goes stale on is recovery evidence.
+   *
+   * The idempotency receipt goes with the rows. That is deliberate and it is
+   * what `retentionMs['confirmed-journal']` exists to protect: once the receipt
+   * is gone, a redelivery of that envelope would be appended as new, so the
+   * candidate's retention MUST outlast the mailbox redelivery window
+   * (`storage-policy.ts`'s `DEFAULT_RETENTION_MS` carries the longest default
+   * of the five for exactly this reason). Keeping the receipt forever would
+   * trade that risk for an unbounded table, which is the growth this step is
+   * here to stop.
+   *
+   * Returns `false` — having deleted nothing — when the guard refuses.
+   */
+  pruneConfirmedJournalTask(taskId: string): Promise<boolean> {
+    return this.#enqueue('pruneConfirmedJournalTask', () =>
+      this.#transaction(() => {
+        const eligible = this.#db
+          .prepare(
+            `SELECT t.task_id
+               FROM journal_task t
+               JOIN journal_terminal term ON term.task_id = t.task_id
+              WHERE t.task_id = ?
+                AND t.recovery_marker IS NULL
+                AND term.truth_state = 'confirmed'`,
+          )
+          .get(taskId);
+        if (!eligible) return false;
+
+        // Child-first, so `foreign_keys=ON` is satisfied at every statement
+        // rather than deferred to the commit — a deletion order the database
+        // itself rejects is a deletion order that was never reviewed.
+        this.#db.prepare('DELETE FROM journal_transition WHERE task_id = ?').run(taskId);
+        this.#db.prepare('DELETE FROM journal_terminal WHERE task_id = ?').run(taskId);
+        this.#db.prepare('DELETE FROM local_artifact_ref WHERE task_id = ?').run(taskId);
+        this.#db.prepare('DELETE FROM journal_task WHERE task_id = ?').run(taskId);
+        this.#db.prepare('DELETE FROM journal_idempotency WHERE task_id = ?').run(taskId);
+        this.#db.prepare('DELETE FROM journal_envelope WHERE task_id = ?').run(taskId);
+        this.#fault('prune:before-commit');
+        return true;
+      }),
+    );
   }
 
   /**
