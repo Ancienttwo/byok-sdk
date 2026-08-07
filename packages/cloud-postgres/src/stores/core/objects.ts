@@ -8,7 +8,7 @@
  * delete and either a leaked object or a deleted one a truth record still points
  * at.
  *
- * Two properties the SQL is shaped around:
+ * Three properties the SQL is shaped around:
  *
  * - **`ref_count` is recomputed, never incremented.** Every reference mutation
  *   sets it to `count(*)` over `object_reference`. An increment drifts the
@@ -16,6 +16,16 @@
  *   the object forever because `markDeletePending` refuses at `refCount != 0`.
  *   The reference table's primary key already makes the write idempotent; the
  *   count just reads it.
+ * - **Reference mutations hold the manifest row under `FOR UPDATE`.** The
+ *   recomputation above is only authoritative because of this lock, not on its
+ *   own: under READ COMMITTED the `count(*)` subquery is evaluated on the
+ *   snapshot its statement started with, so an unlocked `addReference` reads a
+ *   `committed` state, and `markDeletePending`'s `ref_count = 0` guard can pass
+ *   in the window before the reference row lands — leaving `delete_pending`
+ *   with a live reference, which is a truth record pointing at bytes S4B's GC
+ *   is entitled to delete. Taking the manifest row exclusively first makes the
+ *   tombstone and the reference write queue against each other, exactly as
+ *   `PostgresQuotaStore.reserve` serializes reservers on the entitlement row.
  * - **Every state move is a guarded `UPDATE`.** The legal transitions are the
  *   guard, so an illegal one writes nothing and the row is re-read to say which
  *   typed rejection applies. `commit` additionally guards on the DECLARED size
@@ -37,7 +47,7 @@ import {
   type ObjectStore,
   type TenantId,
 } from '@byok/core';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 const DEFAULT_LIST_LIMIT = 100;
 
@@ -182,37 +192,42 @@ export class PostgresObjectStore implements ObjectStore {
     tenant: TenantId,
     input: ObjectReferenceInput,
   ): Promise<ObjectManifestEntry> {
-    const current = await this.#require(tenant, input.hash);
-    if (current.state !== 'committed') {
-      throw new ByokCoreError(
-        'object_state_invalid',
-        `Only committed objects can be referenced; ${input.hash} is ${current.state}.`,
+    // The state read, the reference write, and the recount are one transaction
+    // holding the manifest row, so `markDeletePending` cannot slip its guard
+    // between the read and the write.
+    return this.#withManifestLocked(tenant, input.hash, async (client, current) => {
+      if (current.state !== 'committed') {
+        return new ByokCoreError(
+          'object_state_invalid',
+          `Only committed objects can be referenced; ${input.hash} is ${current.state}.`,
+        );
+      }
+      await client.query(
+        `INSERT INTO object_reference (tenant_id, hash, ref_kind, ref_id, created_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (tenant_id, hash, ref_kind, ref_id) DO NOTHING`,
+        [tenant, input.hash, input.refKind, input.refId, this.#now()],
       );
-    }
-    await this.#pool.query(
-      `INSERT INTO object_reference (tenant_id, hash, ref_kind, ref_id, created_at)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (tenant_id, hash, ref_kind, ref_id) DO NOTHING`,
-      [tenant, input.hash, input.refKind, input.refId, this.#now()],
-    );
-    return this.#recount(tenant, input.hash);
+      return this.#recount(client, tenant, input.hash);
+    });
   }
 
   async removeReference(
     tenant: TenantId,
     input: ObjectReferenceInput,
   ): Promise<ObjectManifestEntry> {
-    // The `EXISTS` keeps the delete from running against an object this tenant
-    // has no manifest row for, so the `object_not_found` the recount raises is
-    // reported without having already removed something on the way to it.
-    await this.#pool.query(
-      `DELETE FROM object_reference
-        WHERE tenant_id = $1 AND hash = $2 AND ref_kind = $3 AND ref_id = $4
-          AND EXISTS (SELECT 1 FROM object_manifest m
-                       WHERE m.tenant_id = $1 AND m.hash = $2)`,
-      [tenant, input.hash, input.refKind, input.refId],
-    );
-    return this.#recount(tenant, input.hash);
+    // The mirror of `addReference`, on the same lock. Holding the manifest row
+    // is also what replaces the delete's old `EXISTS` guard: the lock already
+    // established that this tenant has the row, so `object_not_found` is
+    // reported before anything is removed rather than after.
+    return this.#withManifestLocked(tenant, input.hash, async (client) => {
+      await client.query(
+        `DELETE FROM object_reference
+          WHERE tenant_id = $1 AND hash = $2 AND ref_kind = $3 AND ref_id = $4`,
+        [tenant, input.hash, input.refKind, input.refId],
+      );
+      return this.#recount(client, tenant, input.hash);
+    });
   }
 
   async markDeletePending(
@@ -221,7 +236,11 @@ export class PostgresObjectStore implements ObjectStore {
   ): Promise<ObjectManifestEntry> {
     // `ref_count = 0` is in the guard, not checked beforehand: a reference
     // added between a check and a write would otherwise tombstone an object a
-    // truth record still points at.
+    // truth record still points at. Nothing else is needed here — this `UPDATE`
+    // takes the same manifest row exclusively that `addReference` locks, so a
+    // concurrent reference write either lands entirely before this statement
+    // (and the guard sees its count) or queues behind it (and re-reads the
+    // tombstone it must refuse against).
     const marked = await this.#pool.query<ManifestRow>(
       `UPDATE object_manifest
           SET state = 'delete_pending', delete_pending_at = $3, updated_at = $3
@@ -259,9 +278,57 @@ export class PostgresObjectStore implements ObjectStore {
     throw this.#stateInvalid(current.state, 'deleted');
   }
 
+  /**
+   * Runs a reference mutation with the manifest row held under `FOR UPDATE`.
+   *
+   * The lock is taken before anything is read, so the state the callback judges
+   * is the state no concurrent `markDeletePending` can move underneath it. A
+   * typed refusal is RETURNED rather than thrown, the way
+   * `PostgresQuotaStore.reserve` defers its rejection past `COMMIT`: it keeps
+   * the `catch` reserved for genuine faults, so a rollback that itself fails
+   * cannot replace this store's own answer.
+   */
+  async #withManifestLocked(
+    tenant: TenantId,
+    hash: ContentHash,
+    mutate: (
+      client: PoolClient,
+      current: ObjectManifestEntry,
+    ) => Promise<ObjectManifestEntry | ByokCoreError>,
+  ): Promise<ObjectManifestEntry> {
+    const client = await this.#pool.connect();
+    let settled: ObjectManifestEntry | ByokCoreError;
+    try {
+      await client.query('BEGIN');
+      const locked = await client.query<ManifestRow>(
+        `SELECT ${MANIFEST_COLUMNS} FROM object_manifest
+          WHERE tenant_id = $1 AND hash = $2
+          FOR UPDATE`,
+        [tenant, hash],
+      );
+      const row = locked.rows[0];
+      settled = row === undefined ? this.#notFound(hash) : await mutate(client, toEntry(row));
+      await client.query('COMMIT');
+    } catch (error) {
+      // Best-effort, for the same reason the migration runner's is: a rollback
+      // that throws must not replace the failure the caller needs to see.
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    if (settled instanceof ByokCoreError) throw settled;
+    return settled;
+  }
+
   /** Sets `ref_count` to what the reference rows actually say. */
-  async #recount(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry> {
-    const result = await this.#pool.query<ManifestRow>(
+  async #recount(
+    client: PoolClient,
+    tenant: TenantId,
+    hash: ContentHash,
+  ): Promise<ObjectManifestEntry> {
+    const result = await client.query<ManifestRow>(
       `UPDATE object_manifest
           SET ref_count = (SELECT count(*) FROM object_reference r
                             WHERE r.tenant_id = $1 AND r.hash = $2),

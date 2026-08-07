@@ -41,6 +41,14 @@ const RACERS = 8;
 const BYTES_EACH = 200n;
 /** Eight racers at 200 bytes against a 1000-byte limit: exactly five may win. */
 const ADMISSIBLE = 5;
+/**
+ * One race is not enough evidence. Measured while writing this: with the
+ * `FOR UPDATE` removed, a single round oversells on roughly five sixths of its
+ * runs — so a one-round assertion lets the lock be deleted on a green suite
+ * about one time in six. Three independent rounds inside one test drive that
+ * escape rate to a few tenths of a percent, at the cost of two more races.
+ */
+const ROUNDS = 3;
 
 describe.skipIf(SKIP_DATAPLANE)('quota reservation under real concurrency', () => {
   it('admits exactly as many concurrent reservations as the hard limit allows', async () => {
@@ -59,33 +67,39 @@ describe.skipIf(SKIP_DATAPLANE)('quota reservation under real concurrency', () =
         retentionPolicyId: 'default',
       });
 
-      const attempts = await Promise.allSettled(
-        Array.from({ length: RACERS }, (_unused, index) =>
-          quota.reserve(TENANT, {
-            reservationId: `res-${index}`,
-            kind: 'object',
-            expectedBytes: BYTES_EACH,
-            contentHash: contentHash(`sha256:${index.toString(16).padStart(64, '0')}`),
-            contentType: 'application/octet-stream',
-            ttlMs: 60_000,
-          }),
-        ),
-      );
+      for (let round = 0; round < ROUNDS; round += 1) {
+        const attempts = await Promise.allSettled(
+          Array.from({ length: RACERS }, (_unused, index) =>
+            quota.reserve(TENANT, {
+              reservationId: `res-${round}-${index}`,
+              kind: 'object',
+              expectedBytes: BYTES_EACH,
+              contentHash: contentHash(`sha256:${index.toString(16).padStart(64, '0')}`),
+              contentType: 'application/octet-stream',
+              ttlMs: 60_000,
+            }),
+          ),
+        );
 
-      const winners = attempts.filter((attempt) => attempt.status === 'fulfilled');
-      const losers = attempts.filter((attempt) => attempt.status === 'rejected');
-      expect(winners).toHaveLength(ADMISSIBLE);
-      for (const loser of losers) {
-        const reason = (loser as PromiseRejectedResult).reason as unknown;
-        // A loser learns it was over quota, not that the database was busy.
-        expect(isCoreError(reason, 'storage_quota_exceeded')).toBe(true);
+        const winners = attempts.filter((attempt) => attempt.status === 'fulfilled');
+        const losers = attempts.filter((attempt) => attempt.status === 'rejected');
+        expect(winners).toHaveLength(ADMISSIBLE);
+        for (const loser of losers) {
+          const reason = (loser as PromiseRejectedResult).reason as unknown;
+          // A loser learns it was over quota, not that the database was busy.
+          expect(isCoreError(reason, 'storage_quota_exceeded')).toBe(true);
+        }
+
+        // The ledger agrees with the winners: no admitted reservation is
+        // missing its bytes, and no refused one left bytes behind.
+        const usage = await quota.readUsage(TENANT);
+        expect(usage.reservedBytes).toBe(BigInt(ADMISSIBLE) * BYTES_EACH);
+        expect(usage.reservedBytes).toBeLessThanOrEqual(HARD_LIMIT);
+
+        // Reset to an empty ledger so the next round races from the same
+        // starting world rather than against the previous round's winners.
+        await scope.pool.query('DELETE FROM storage_reservation');
       }
-
-      // The ledger agrees with the winners: no admitted reservation is missing
-      // its bytes, and no refused one left bytes behind.
-      const usage = await quota.readUsage(TENANT);
-      expect(usage.reservedBytes).toBe(BigInt(ADMISSIBLE) * BYTES_EACH);
-      expect(usage.reservedBytes).toBeLessThanOrEqual(HARD_LIMIT);
     } finally {
       await scope.dispose();
     }
