@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 17:08
+> **Related Plan**: plans/archive/plan-20260807-1508-s0-runtime-hardening.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260807-1708
+
 # Implementation Notes: s0-runtime-hardening
 
 > **Status**: Active

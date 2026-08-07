@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-07 17:08
+> **Related Plan**: plans/archive/plan-20260807-1508-s0-runtime-hardening.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260807-1708
+
 # Task Contract: s0-runtime-hardening
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260807-1508-s0-runtime-hardening.md
 > **Task Profile**: code-change
 > **Owner**: ancienttwo

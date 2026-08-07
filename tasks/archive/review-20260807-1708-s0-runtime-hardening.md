@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 17:08
+> **Related Plan**: plans/archive/plan-20260807-1508-s0-runtime-hardening.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260807-1708
+
 # Task Review: s0-runtime-hardening
 
 > **Status**: Reviewed
@@ -47,17 +53,17 @@
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: febc33cb813dcf0a5fed329aa806bc6b555605c8
+> **Verification Evidence SHA256**: sha256:c8deed48f4bc61538a3f2699ca9b2491ceb6e3d83be92af517c513a0caead268
+> **Issued At**: 2026-08-07T09:07:47.966Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Sprint S0 delivered and merged as PR #18 (d2395d6): GAP-001/002/003 closed; capability truth generated from adapters; task-level steer gate fail-closed on claim-carried capabilities per sprint amendment D-4; long-poll regression caught in review round 1 and resolved without weakening the gate; 1586 tests green, CI 28/28, credential-isolation audit pass, v1 NDJSON byte-frozen
 - Findings: none
 
 ## Behavior Diff Notes

@@ -1,6 +1,6 @@
 # Plan: Sprint S0: Runtime Capability Honesty and Task-Level Steer Hardening
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260807-1508
 > **Slug**: s0-runtime-hardening
 > **Artifact Level**: work-package
