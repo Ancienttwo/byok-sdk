@@ -64,7 +64,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     expect(challenge.status).toBe(200);
     const nonce = challenge.nonce!;
 
-    const signature = identity.sign(nonce);
+    const signature = identity.signNonce(nonce);
     const token = await requestToken(started.baseUrl, deviceId, nonce, signature);
     expect(token.status).toBe(200);
     expect(token.accessToken).toBeTruthy();
@@ -95,7 +95,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     const { deviceId } = await pairFakeDaemon(started.baseUrl, code, { identity });
 
     const { nonce } = await requestChallenge(started.baseUrl, deviceId);
-    const signature = identity.sign(nonce!);
+    const signature = identity.signNonce(nonce!);
 
     const first = await requestToken(started.baseUrl, deviceId, nonce!, signature);
     expect(first.status).toBe(200);
@@ -119,7 +119,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
 
     vi.setSystemTime(new Date('2026-01-01T00:06:00.000Z')); // +6min, past the ~5min TTL
 
-    const signature = identity.sign(nonce!);
+    const signature = identity.signNonce(nonce!);
     const token = await requestToken(started.baseUrl, deviceId, nonce!, signature);
     expect(token.status).toBe(401);
   });
@@ -135,7 +135,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
     // Get a valid nonce+signature BEFORE revoking, so the token-surface
     // check below exercises revocation specifically, not "missing nonce".
     const { nonce } = await requestChallenge(started.baseUrl, deviceId);
-    const signature = identity.sign(nonce!);
+    const signature = identity.signNonce(nonce!);
 
     byok.devices.revoke(TEST_TENANT_ID, deviceId);
 

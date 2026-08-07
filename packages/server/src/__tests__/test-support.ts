@@ -13,6 +13,7 @@ import {
   type RuntimeInfo,
 } from '@byok/protocol';
 import { WebSocket, type RawData } from 'ws';
+import { NONCE_SIGNING_DOMAIN } from '../auth';
 import type { ByokServer, ByokServerEvent, PairingCodeClaims, ServerTaskEvent, TaskHandle } from '../index';
 
 /**
@@ -178,15 +179,24 @@ export function testPairingClaims(productId: string): PairingCodeClaims {
 /** A fake device's Ed25519 identity (Auth v2, §6) — the private key never leaves this helper, mirroring the real daemon. */
 export interface FakeDeviceIdentity {
   publicKeyBase64Url: string;
+  /**
+   * Sign arbitrary bytes with no domain tag. Real daemons never do this — it
+   * exists so a test can produce the pre-S1 raw-nonce signature the server
+   * must now reject (`tenant-pairing-isolation.test.ts`).
+   */
   sign(message: string): string;
+  /** What a real daemon does (S1): sign `byok-nonce-v1\n` + nonce — see `packages/client/src/daemon/device-keys.ts`. */
+  signNonce(nonce: string): string;
 }
 
 export function generateFakeDeviceIdentity(): FakeDeviceIdentity {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const jwk = publicKey.export({ format: 'jwk' }) as { x: string };
+  const sign = (message: string) => signEd25519(null, Buffer.from(message, 'utf8'), privateKey).toString('base64url');
   return {
     publicKeyBase64Url: jwk.x,
-    sign: (message: string) => signEd25519(null, Buffer.from(message, 'utf8'), privateKey).toString('base64url'),
+    sign,
+    signNonce: (nonce: string) => sign(NONCE_SIGNING_DOMAIN + nonce),
   };
 }
 

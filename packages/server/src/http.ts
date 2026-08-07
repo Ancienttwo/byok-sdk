@@ -13,7 +13,7 @@ import {
   type PairResponse,
   type TokenResponse,
 } from '@byok/protocol';
-import { authenticateBearer, mintAccessToken, verifyEd25519Signature, type AuthDeps, type NonceStore } from './auth';
+import { authenticateBearer, mintAccessToken, verifyNonceSignature, type AuthDeps, type NonceStore } from './auth';
 import type { BlobStore } from './blob-store';
 import type { ConnectionHub } from './hub';
 import { generateDeviceId } from './ids';
@@ -148,7 +148,10 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     if (!deps.nonces.validate(deviceId, nonce)) {
       return c.json({ error: 'invalid, expired, or already-used nonce' }, 401);
     }
-    if (!verifyEd25519Signature(device.devicePublicKey, nonce, signature)) {
+    // S1 (GAP-004): domain-separated — the device signs `byok-nonce-v1\n` +
+    // nonce (`auth.ts`'s `NONCE_SIGNING_DOMAIN`). A raw, unprefixed signature
+    // over the bare nonce is invalid here; there is no second accepted form.
+    if (!verifyNonceSignature(device.devicePublicKey, nonce, signature)) {
       return c.json({ error: 'invalid signature' }, 401);
     }
     // Only burn the nonce on a fully-verified success (§6.2) — an invalid

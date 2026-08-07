@@ -16,6 +16,23 @@ export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 /** A challenge nonce is single-use and expires after ~5min (docs/protocol.md §6.2). */
 const NONCE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * S1 (GAP-004): the domain-separation prefix a device signs along with a
+ * challenge nonce. The device key is a long-lived identity key that later
+ * planes (S6 device proof) will also sign structured messages with; without a
+ * domain tag, a signature produced for one purpose is a valid signature for
+ * another, and an attacker who can get a device to sign anything shaped like
+ * a nonce holds a token-renewal credential.
+ *
+ * The client signs the same literal (`packages/client/src/daemon/device-keys.ts`).
+ * There is deliberately no dual mode: a raw, unprefixed nonce signature is
+ * simply invalid here, with no flag, fallback, or grace window that would
+ * make the old encoding acceptable again. Because the four packages have no
+ * published compatibility contract yet, the recovery path for a device on
+ * the old encoding is a re-pair, not a server-side shim.
+ */
+export const NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n';
+
 // ---------------------------------------------------------------------------
 // TokenSigner — interface-shaped so a SaaS can supply its own signer later
 // (e.g. an asymmetric org-wide signer, or one backed by a KMS) without this
@@ -252,7 +269,7 @@ export class NonceStore {
  * 32-byte Ed25519 public key — the same encoding as a JWK's `x` field, which
  * is how we hand it to `node:crypto` without needing DER/SPKI conversion).
  */
-export function verifyEd25519Signature(devicePublicKey: string, message: string, signature: string): boolean {
+function verifyEd25519Signature(devicePublicKey: string, message: string, signature: string): boolean {
   try {
     const keyObject = createPublicKey({
       key: { kty: 'OKP', crv: 'Ed25519', x: devicePublicKey },
@@ -262,6 +279,17 @@ export function verifyEd25519Signature(devicePublicKey: string, message: string,
   } catch {
     return false;
   }
+}
+
+/**
+ * The ONLY nonce-signature check on this server (§6.2): the signed message is
+ * {@link NONCE_SIGNING_DOMAIN} followed by the nonce. Applying the domain here
+ * rather than at the call site is the point — there is one place that decides
+ * what a device signature over a nonce means, so no route can be written that
+ * accepts the undomained form.
+ */
+export function verifyNonceSignature(devicePublicKey: string, nonce: string, signature: string): boolean {
+  return verifyEd25519Signature(devicePublicKey, NONCE_SIGNING_DOMAIN + nonce, signature);
 }
 
 // ---------------------------------------------------------------------------
