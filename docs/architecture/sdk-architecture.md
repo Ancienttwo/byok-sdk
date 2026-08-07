@@ -326,7 +326,7 @@ flowchart TB
 
 - M0/M5 embedded 模式不支持 queue-until-connect；设备从未连上时 `dispatch` 直接失败。
 - task lease 只在设备已 dark 且 `Claimed/Running/AwaitApproval` 自最后活动满 `taskLeaseMs` 后触发，结果是 retryable failure。
-- `steer` 目前有 task-level capability gap：server 能对任何 Running task 排队 `task.steer`，但只有 Pi adapter 真正支持；Claude/Codex 收到后会 throw，使 client cursor 暂停推进并触发重放。connection-level `steer` 只是“设备至少有一个 adapter 支持”，不能安全代表本任务所选 runtime。
+- `steer` 目前有 task-level capability gap：server 能对任何 Running task 排队 `task.steer`，但只有 Pi adapter 真正支持；Claude/Codex 收到后会 throw，使 client cursor 暂停推进并触发重放。connection-level `steer` 只是“设备至少有一个 adapter 支持”，不能安全代表本任务所选 runtime。`hub.ts:1493-1503` 的 `steerTask()` 只校验 `state === 'Running'` 与设备在线，连 connection-level capability 都不查；而做 gate 所需的事实其实已经在 task record 里——`claimedRuntime` 是 `TaskPatch` 的合法字段（`hub.ts:145`），并在 `onClaim` 时随 `Offered → Claimed` 一起写入（`hub.ts:766`）。缺的是 gate 本身，不是数据。
 
 ## 4. `@byok/client`：本机 daemon、CLI 与 runtime boundary
 
@@ -463,6 +463,18 @@ Runtime policy 不做跨 runtime 的语义翻译：tool name 是 runtime-local v
 
 已确认的 capability honesty gap：Claude `confirm` 已真实可用，但 `RuntimeInfo.capabilities.approvalInteractive` 仍对所有 adapter 硬编码 `false`，connection flag `interactive-approval` 仍 reserved。当前可靠信号是该 runtime 的 `permissionModes` 是否包含 `confirm`。
 
+#### 三层 capability 模型（目标设计）
+
+capability 至少要分三层才能表达准确。当前只有前两层，且第二层还在对外撒谎（见上）：
+
+| 层 | 语义 | 消费者 |
+| --- | --- | --- |
+| device capabilities | 这台设备装了哪些 adapter | 连接握手、派工前的设备筛选 |
+| runtime capabilities | 某个 adapter 能精确表达哪些 policy | 派工时的 runtime 选择 |
+| task capabilities | 本 task 的 claimed runtime 与 effective policy 落定后，还剩哪些操作可执行 | `task.steer` 等 task 级控制面 |
+
+connection-level 的“至少一个 adapter 支持 steer”不能代表任意 running task 支持 steer。第三层是 §3.3 那条 steer gap 的正确修法：gate 应当读 task record 里已有的 `claimedRuntime`，而不是读连接级 flag。
+
 ### 4.5 启动与关闭
 
 ```mermaid
@@ -491,7 +503,14 @@ flowchart LR
 
 Unix 使用 domain socket，Windows 使用 named pipe。client/server 各自对对方 nonce 做带 domain label 的 HMAC，shared token 只存在 `<storeDir>/control.token`，不在 socket 上明文传输。RPC 在 mutual auth 完成前结构上不可达。
 
-主要 RPC 面覆盖 status、task list/follow、approval request/resolve、unpair/shutdown 等 operator 能力。POSIX 依赖 0700/0600；Windows 通过 `icacls` 设置 restrictive DACL，失败抛 `SecureDirHardeningError`，不会继续写入未保护的 device/control secrets。
+RPC 面据实是 6 个方法（`packages/client/src/daemon/create-daemon.ts:979-1038`）：
+
+| 类型 | 方法 |
+| --- | --- |
+| unary | `status`、`approvals.list`、`approvals.resolve`、`approvals.request`、`shutdown` |
+| stream | `tasks.subscribe` |
+
+没有 `workspaces` 方法——`bin/commands/workspaces.ts` 直接读本机 ledger，不经 control client；也没有独立的 `unpair` 方法，`bin/commands/unpair.ts` 复用 `shutdown` RPC 再清理本地身份。POSIX 依赖 0700/0600；Windows 通过 `icacls` 设置 restrictive DACL，失败抛 `SecureDirHardeningError`，不会继续写入未保护的 device/control secrets。
 
 ### 5.2 Claude confirm 真实路径
 
@@ -579,7 +598,7 @@ flowchart LR
   SecretMem[("InMemory secret")]:::secret
   Keychain[("macOS Keychain")]:::secret
   WinCred[("Windows Credential Manager")]:::secret
-  Scoped(["EnvelopeScopedSecretStore<br/>tenant/product/account scope"]):::secret
+  Scoped(["EnvelopeScopedSecretStore<br/>account_id + workspace_id scope"]):::secret
   Headers(["providerHeaders<br/>requiredProviderSecret"]):::transport
   OpenAI(["OpenAiCompatibleChatClient"]):::transport
   Anthropic(["AnthropicMessagesClient"]):::transport
@@ -609,7 +628,7 @@ flowchart LR
 | `registry.ts` | configure/remove/status/resolve；profile 与 secret 的唯一汇合点 |
 | `secret-store.ts` | generic async port、memory store、secret name/value validation |
 | `macos-keychain.ts` / `windows-credential-manager.ts` | OS-native secret persistence |
-| `secret-scope.ts` | tenant/product/account envelope scope |
+| `secret-scope.ts` | `SecretScope = { account_id, workspace_id }`（`packages/keys/src/secret-scope.ts:12-15`）；`secretScopeId()` 把两者 sha256 成不泄露租户标识的 namespace，`EnvelopeScopedSecretStore` 按该 id 分区。scope 里没有 tenant/product 维度 |
 | `profile-store.ts` / `sqlite-profile-store.ts` | non-secret profile memory/SQLite persistence |
 | `headers.ts` | bearer / x-api-key / none；缺 secret fail-closed |
 | `openai-client.ts` / `anthropic-client.ts` | direct provider transports |
@@ -773,6 +792,39 @@ flowchart TB
 
 `limits.maxTokens` 当前不能由任一 bundled adapter 精确执行，因此必须在 pre-claim fail-closed，而不是估算。`workspaceRoot` 是 convention，不应被 UI 描述成 sandbox。
 
+### 9.1 Credential isolation 的具体承诺
+
+dispatch daemon 当前的 credential 边界由六条构成，前五条是已实现行为，第六条是 CI 层的实证（§10 第 6 层的 `strace` audit）：
+
+- 不读取 model provider key；
+- 不读取 runtime 自己的 login store；
+- 不把 host/server token 注入 runtime 子进程；
+- 不 import `@byok/keys`（package graph 的零边，§1.2）；
+- task environment 走 per-runtime allowlist，`BYOK_*` hard deny；
+- credential-isolation audit 是 release gate，不是可选检查。
+
+**目标设计**：若未来真的出现 managed agent credential 需求，它必须独立立 ADR，并同时满足——per-launch scoped token；真 credential 不进 child env；loopback proxy 的 token file 0600；scope 最小化；mint 失败即 fail-closed。它不得改变现有 dispatch 默认的安全承诺，即默认形状仍是"daemon 不持有任何 runtime credential"。
+
+### 9.2 Permission bypass：REJECTED
+
+外部产品常见的 runtime bypass / yolo flag 在本项目属**明确拒绝**。BYOK 的安全边界同时保护本机与 SaaS 两侧权限，而 API scope 不能替代 filesystem/tool permission——前者管"能调哪个接口"，后者管"能碰哪个文件"。任何"为了迁就某个 runtime 而自动附加跳过核准参数"的改动一律 REJECTED，除非另立新产品模式，并配套独立的安全模型、包边界与用户明示同意。这条是 §4.4 "adapter 无法表达 policy 时必须 decline"的同一条约束在发布面的投影。
+
+### 9.3 更新链的信任根（目标设计，宿主产品责任）
+
+SDK 不自带 updater（§10）。宿主产品自建 updater 时，最低要求是：
+
+- manifest 由离线或独立的 signing key 签名；
+- binary hash 被该签名 manifest 覆盖；
+- channel 与 pinned version policy；
+- atomic swap 加 rollback；
+- 平台 codesign / notarization 验证；
+- anti-downgrade policy；
+- audit log；
+- staging quarantine；
+- updater base URL 本身不能成为唯一信任根。
+
+最后一条是拒绝 hash-only updater trust 的理由（§13）：upgrade manifest 与 binary 同源时，manifest 里的 sha256 只能证明"下载完整"，不能证明"来源可信"，二者必须来自不同的信任根。
+
 ## 10. 打包、服务与验证面
 
 ```mermaid
@@ -814,16 +866,40 @@ CI 验证层次：
 5. macOS/Linux/Windows control socket smoke。
 6. Ubuntu `strace` credential-isolation audit。
 
-## 11. 当前源码已知缺口
+## 11. 缺口帐本
 
-| 缺口 | 架构影响 | 当前正确表述 |
+优先级记号用 `Pri-0`/`Pri-1`，**刻意不复用 `P0-P5`**——后者在本文中专指 §12.8 定义的交付阶段编号，两套记号撞名会制造歧义。`Pri-0` = 阻塞其所在阶段的入口闸；`Pri-1` = 该阶段内必须收口但不阻塞进入。交付落点列的 `S0-S7` 见 §12.8 的 S↔P crosswalk。
+
+### 11.1 当前源码缺口（已实证）
+
+| ID | 缺口 | 架构影响 | 证据 | 当前正确表述 / 修复原则 | 优先级 | 落点 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GAP-001 | `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | §4.4 | 使用 `permissionModes.includes('confirm')` 判断，不使用 reserved flag；修法是从 adapter 实际能力生成 runtime info | Pri-0 | S0 |
+| GAP-002 | task-level steer 未按 claimed runtime gate | Claude/Codex 收到 steer 会 throw，并可能 stall cursor | `hub.ts:1493-1503` 只查 `state === 'Running'` 与在线；`claimedRuntime` 已在 `hub.ts:145,766` | `steer` 不是所有 Running task 的安全通用操作；server/client 双端按 claimed runtime gate，unsupported 返回稳定 typed error | Pri-0 | S0 |
+| GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | 标为 reserved，禁止声称已实现；要么接入明确 resolver，要么维持 reserved 且 UI 不暴露 | Pri-1 | S0 决策 |
+| GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | `packages/server/src/auth.ts:155` 发的是裸 `randomBytes(24)`；`http.ts:125` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | 今日实际风险低（nonce 是随机 bytes，形状撞不到多行带前缀格式），但 device proof 上线前必须补 `byok-nonce-v1\n` 前缀；这是 breaking 的 pair/token 变更，两端同 PR 落地 | Pri-0（先于 proof） | S1/S6 |
+| GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | `packages/server/src/auth.ts:76-82` 只有 `deviceId/deviceName/devicePublicKey/revoked` | 任何 hosted durable data 落库前先做 tenant cut；device record 不允许"无 tenant" | Pri-0 | S1 |
+| GAP-007 | `deploy/` 只有 skeleton | 平台设计没有部署实证 | §1.3 | 不把 SQL/Workers/runbook 画成当前模块 | Pri-1 | S4 |
+| GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | `ws-transport.ts:248-254` 已有 `delay * (0.8 + Math.random() * 0.4)`，即 ±20% random jitter | 已有 random jitter，缺的是 device-id 派生的确定性种子；不要描述成"无 jitter" | Pri-1 | S7 |
+
+以下两条列在缺口表里是历史记法，实为**已公开的设计约束**，不是待关闭的缺陷：
+
+| 条目 | 架构影响 | 当前正确表述 |
 | --- | --- | --- |
-| `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | 使用 `permissionModes.includes('confirm')` 判断，不使用 reserved flag |
-| task-level steer 未按 claimed runtime gate | Claude/Codex 收到 steer 会 throw，并可能 stall cursor | `steer` 不是所有 Running task 的安全通用操作 |
-| `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | 标为 reserved，禁止声称已实现 |
-| `@byok/keys` 零主链 import | key custody 与 dispatch 尚未组合 | 标为“已实现、隔离”，不是 placeholder，也不是 daemon secret source |
-| embedded SQLite 不恢复 in-flight | record persistence 不等于 runtime recovery | 只承诺 task/blob record 跨重启，不承诺 live handle/session |
-| `deploy/` 只有 skeleton | 平台设计没有部署实证 | 不把 SQL/Workers/runbook 画成当前模块 |
+| `@byok/keys` 零主链 import | key custody 与 dispatch 尚未组合 | 标为“已实现、隔离”，不是 placeholder，也不是 daemon secret source；这条零边是安全 invariant（§1.2、§14.3） |
+| embedded SQLite 不恢复 in-flight | record persistence 不等于 runtime recovery | 只承诺 task/blob record 跨重启，不承诺 live handle/session；应作为 self-hosted 的公开契约而非隐藏实现细节 |
+
+### 11.2 目标平台缺口（尚未实现，非当前缺陷）
+
+| ID | 缺口 | 优先级 | 落点 |
+| --- | --- | --- | --- |
+| GAP-006 | hosted mailbox 与本机 durable journal 未实现 | Pri-0（平台线） | S3 |
+| GAP-008 | board / presence / activity 未实现 | Pri-1 | S5 |
+| GAP-009 | device proof / truth / memory 未实现 | Pri-1 | S6 |
+| GAP-011 | doctor / quarantine / crash budget 不完整 | Pri-1 | S7 |
+| GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
+| GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
+| GAP-014 | hosted release/signing/update owner 尚未形成 production runbook | Pri-1 | S7 |
 
 ## 12. 目标平台架构（尚未实现）
 
@@ -877,9 +953,9 @@ flowchart TB
 | cloud hints | device presence TTL、task activity tail + explicit dropped count |
 | compositions | InMemory、Postgres+S3、D1+R2、self-hosted server contract suites |
 
-### 12.3 两个状态机与 presence vocabulary
+### 12.3 四套状态与一致性模型
 
-Wire execution state、board coordination state 与 presence level 不得复用命名：
+Wire execution state、board coordination state、presence level 与 truth record 不得复用命名：
 
 ```mermaid
 stateDiagram-v2
@@ -901,8 +977,46 @@ stateDiagram-v2
 | wire execution | `Offered/Claimed/Running/AwaitApproval/Complete/Failed/Cancelled` | local execution path；frozen protocol | 一次运行尝试 |
 | board coordination | `todo/in_progress/in_review/done/closed` | cloud SQL | 人与多 device 的离散协作生命周期 |
 | presence | `online/thinking/working/error/offline` | TTL hint，无持久权威 | device 当前在线/活动提示 |
+| truth record | `kind + record_key + rev + immutable hash` | cloud truth store，内容由 device 签名或 revision CAS 保护 | terminal / profile / memory 事实 |
 
-`AwaitApproval` 是执行中暂停；`in_review` 是执行结束后人工验收。二者不能互相触发。`closed` 在 final proposal 中暂取“终止未验收”，RAFT 原义仍需标为 unverified。
+`AwaitApproval` 是执行中暂停；`in_review` 是执行结束后人工验收。二者不能互相触发。`Running` 不得由 presence 推断；`done` 不代表某个 runtime process 仍存活。`closed` 在 final proposal 中暂取“终止未验收”，RAFT 原义仍需标为 unverified。
+
+#### wire execution 规则（当前已实现，此处只重申跨层约束）
+
+- claim 与 start 分离；`decline` 保留 retryable 语义；terminal 不可逆。
+- workspace / Git 状态不得触发 wire transition。
+- server 与 cloud 都不得依据 presence 合成 execution state。
+- hosted mailbox 只运输 envelope，**不是** execution-state authority。
+
+#### board coordination 规则（目标设计）
+
+- assignee 与 status 分离，是两个字段而非一个枚举。
+- claim 用 CAS；status update 必须带 `expectedStatus`。
+- 冲突返回 holder / current snapshot，不做 silent last-write-wins。
+- `closed` 暂定义为“终止、未验收”；未来若改为归档语义，用 `archived_at` 字段表达，**不新增第六个状态**。
+- `task.complete` 可以把工作项推到 `in_review`，但不能自动变成 `done`——`done` 需要人工验收。
+
+#### presence 与 activity 规则（目标设计）
+
+presence 是设备级最近提示，activity 是 task 级有损尾部。两者共同的约束：
+
+- 都带 TTL，过期即等于不存在；
+- activity 必须显式携带 `dropped` 计数，把"有损"写进数据而不是假装流完整；
+- 不签名、不进入 truth；
+- 不用于授权、billing、终态判断或恢复；
+- 写入频率必须 bounded；
+- 可以独立从 SQL 迁往 KV/DO，不影响 truth 与 mailbox。
+
+#### truth record 写入与冲突模型（目标设计）
+
+| kind | 写入模型 | 冲突模型 |
+| --- | --- | --- |
+| `task.terminal` | 同一 task 第一份 immutable | 不同 hash → `409 terminal_conflict`，不覆写第一份事实 |
+| `profile` | key 粒度 snapshot | `expectedRev` CAS |
+| `memory` | key 粒度 snapshot | `expectedRev` CAS |
+| future audit | append-only | `requestId` 幂等 |
+
+cloud 可以按 tenant/kind/key/rev/hash 精确查找、排序与返回，但不能理解内容后做摘要、合并或相关性排序。
 
 ### 12.4 Cloud data categories
 
@@ -960,7 +1074,114 @@ sequenceDiagram
 
 load-bearing 顺序是 durable local append 后才 ack mailbox。append 前 crash 由 redelivery 恢复；append 后 crash 由 local journal 恢复。cloud 不需要持有 Running record 才能保证任务不丢。
 
-### 12.6 Tenant isolation 与 composition contracts
+### 12.6 身份、多租户与设备证明
+
+#### 12.6.1 正规身份模型
+
+| ID | 语义 | 权威来源 |
+| --- | --- | --- |
+| `tenant_id` | 宿主账户/组织，**唯一**安全隔离边界 | control plane 铸造 pairing code 时绑定 |
+| `product_id` | 宿主产品 audience | pairing claims + device record |
+| `device_id` | tenant/product 下的设备成员 | pair handler |
+| `scope_id` | tenant 内的业务键空间 | 宿主语义；**不是**安全边界 |
+| `task_id` | board 与 wire attempt 的关联 id | host / board |
+| `key_id` / `key_epoch` | device signing key 的身份与轮换代次 | device registry |
+
+设备不能在 `PairRequest` 里自报 tenant。pairing code 在服务端绑定 `{tenantId, productId}`，redeem 与 device insert 必须在同一个 transaction 内完成。当前 `DeviceRecord` 还没有这些字段（GAP-005），这是 tenant cut 要补的第一刀。
+
+#### 12.6.2 结构性 tenant isolation：六层同时成立
+
+```mermaid
+flowchart LR
+  classDef gate fill:#1e40af,stroke:#bfdbfe,stroke-width:2px,color:#fff
+  classDef type fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
+  classDef store fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
+
+  Request(["Incoming request"]):::gate
+  Auth(["Auth / proof middleware"]):::gate
+  Principal(["DevicePrincipal 或 ControlPlanePrincipal"]):::type
+  TenantId(["branded TenantId"]):::type
+  Facade(["TenantStores facade"]):::type
+  Store(["tenant-first store port"]):::store
+  Data[("tenant-prefixed rows")]:::store
+
+  Request --> Auth
+  Auth --> Principal
+  Principal --> TenantId
+  TenantId --> Facade
+  Facade --> Store
+  Store --> Data
+```
+
+隔离不是一层措施，是六层必须同时成立：
+
+1. **类型层**：`TenantId` 是 branded type，且只有唯一铸造点。
+2. **API 层**：handler 只拿得到 tenant-closed facade，够不到裸 store。
+3. **schema 层**：tenant-prefixed 复合键；**不存在**裸 device/task unique index。
+4. **测试层**：路由库存量穷举，每条 route 都跑跨 tenant 矩阵。
+5. **proof 层**：claims 只用于构造带 tenant 的 DB lookup，DB 里的 device row 才是权威。
+6. **错误层**：unknown / wrong-tenant / revoked 统一返回 401 或 404，避免制造存在性 oracle。
+
+第 5 层的关键在于把等值检查做成查找的构造性结果，而不是可漏写的第二步：`claims.tenantId` 是查找键而非可信输入，设备声称不属于它的租户就查无此行、直接 401。禁止"先按裸 `deviceId` 反查、再比对租户"——那条路既需要一个 schema 里已被封掉的裸索引，又把单步裁决拆成两步纪律。
+
+#### 12.6.3 Device proof
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant D as Daemon
+  participant C as Cloud
+  participant R as ReceiptStore
+  participant T as TruthStore
+
+  D->>D: hash body 并构造 protected claims
+  D->>C: request + proof + requestId
+  C->>C: 按 tenant 前缀载入 device / key row
+  C->>C: 校验 product、epoch、clock skew、body hash、签名
+  C->>R: 写入 idempotency receipt
+  alt 首次受理
+    C->>T: immutable 写入或 expectedRev CAS
+    T-->>C: committed record
+  else 完全相同的重放
+    R-->>C: 返回原结果
+  else requestId 复用但 body 不同
+    R-->>C: 409 conflict
+  end
+  C-->>D: 稳定结果
+```
+
+canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。
+
+三个 domain 前缀（**目标设计，位元组形状待冻结**——下列前缀取一致小写形式与 `schema: 'byok-device-proof-v1'` 自洽，最终字节序列以 golden fixture 冻结为准）：
+
+| 用途 | 前缀 | 状态 |
+| --- | --- | --- |
+| token renewal | `byok-nonce-v1\n` + nonce | 目标设计；当前是裸 nonce（GAP-004） |
+| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | 目标设计 |
+| record 级 attest | `byok-attest-v1\n` | 保留，若最终启用 |
+
+旧的 raw nonce signing 必须在 device proof 上线前、或在同一个 breaking release 内两端同步修复。
+
+#### 12.6.4 真相层端点（目标设计）
+
+| 端点 | 用途 |
+| --- | --- |
+| `GET /byok/records?kind=&prefix=` | 回 manifest（key/rev/hash/size/label），**不回 body** |
+| `GET /byok/records/:kind/:key` | 回 presigned object GET URL，或小 payload 直接 inline |
+| `PUT /byok/records/:kind/:key` | body 是确权封套；`expectedRev` CAS，不符回 409 |
+
+`terminal` 写入只接受 `task.complete`、`task.fail`、`task.cancelled` 三种 frozen v1 envelope，外加 opaque 的 context/memory object ref。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
+
+#### 12.6.5 Key rotation
+
+- 用现行有效 key 签名注册新 key；
+- `keyEpoch + 1`；
+- tenant / product / device 三者不变；
+- 旧 epoch 立即失效，或进入一条明确写下的 grace policy；
+- **不提供**更新 tenant 的 API；
+- 重新 pair 产生的 membership 由新 code 的 claims 决定，不继承旧值。
+
+#### 12.6.6 Composition contracts
 
 - 所有 store port 第一参数是 required `TenantId`；没有裸 `deviceId/taskId` lookup。
 - pairing code 由 server-side claim 绑定 tenant/product；device record 不允许“无 tenant”。
@@ -969,6 +1190,159 @@ load-bearing 顺序是 durable local append 后才 ack mailbox。append 前 cras
 - status transition 带 `expectedStatus`；不允许 last-write-wins。
 - per-tenant `board_seq` 单调，不能跨 tenant 推进。
 - 同一 store contract suite 跑 InMemory、Postgres+S3、D1+R2、self-hosted server 四种 composition。
+
+### 12.7 数据与存储架构（目标设计）
+
+#### 12.7.1 四类持久数据与一类本地连续态
+
+| 类别 | 典型内容 | 存储 | 生命周期 |
+| --- | --- | --- | --- |
+| mailbox | server→daemon 的 frozen-v1 envelope | SQL | ack 且过 retention 后删除 |
+| board | title/channel/status/assignee/`board_seq` | SQL | 长期 |
+| truth | terminal/profile/memory 的 metadata、hash、rev、proof | SQL + object store | 长期 |
+| hints | presence/activity/dropped | TTL SQL 或 KV | 分钟级 |
+| 本地连续态 | journal / workspace / session / context | daemon 本机磁盘 | 由本机生命周期管理 |
+
+前四类可以上云，第五类不上云——这是 §14.3 第 3 条不变量的存储侧表述。
+
+#### 12.7.2 Durable local journal
+
+hosted path 必须新增本机 journal seam。最小记录集：
+
+- tenant / product / device
+- task id
+- 原始 envelope bytes 与 hash
+- received cursor
+- admission result
+- claimed runtime
+- effective policy hash
+- workspace reference
+- execution state transitions
+- terminal payload hash
+- outbound idempotency ids
+- recovery marker
+
+journal 不是 debug log，它是 mailbox ack 的正确性前置条件。
+
+#### 12.7.3 Mailbox read/ack 与 crash matrix
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Cloud
+  participant M as MailboxStore
+  participant D as Daemon
+  participant J as 本机 journal
+  participant R as Runtime
+
+  C->>M: append task.offer，带 tenant/device/seq
+  D->>C: GET events after cursor
+  C->>M: 只读取，不删除
+  M-->>D: envelope batch
+  D->>J: durable append 原始 envelope
+  J-->>D: fsync/commit 成功
+  D->>C: 下次 poll 的 cursor 即为 ack
+  C->>M: 推进 ack，删除已过期行
+  D->>R: admit 并执行
+```
+
+“领走即弃”是**游标推过即删**，不是**读到即删**。读到即删会直接打断已冻结的 at-least-once 语义：client 的整套 stall 机制建立在“未 ack 的 seq 会被反复重投”之上（§8.3）。删除的触发器是 client 下次带上来的 cursor，那才是它的持久化 ack。
+
+对 `task.offer` 而言，“成功处理到可 ack”= v1 bytes 与本机 task record 已在同一个**本机** transaction durable append，且工作已交给本机 scheduler；**不是**等 agent 跑到终态。cursor 不承担 running-state recovery。
+
+| Crash 位置 | 结果 |
+| --- | --- |
+| local append 前 | mailbox 未 ack，重投 |
+| append 后、ack 前 | 重投；journal 与 idempotency 去重 |
+| ack 后、runtime 前 | journal 恢复并继续，或给出明确失败 |
+| terminal 生成后、truth 写入前 | journal 保存 terminal hash，重试写入 |
+| truth 写入后、本地标记前 | immutable/幂等写入返回原结果 |
+
+#### 12.7.4 Object storage
+
+- key 用内容地址 `sha256/<hex>`；
+- 上传前校验 size、hash、content type；
+- truth transaction 只引用已存在的 object；
+- presigned capability 自带 tenant/resource binding；
+- object key 不承载 secret，也不承载可读的 instruction 标题；
+- orphan 清理依据 reference scan 加 grace period；
+- inline payload 只用于小对象，并设硬上限。
+
+#### 12.7.5 Retention
+
+| 数据 | 建议默认 |
+| --- | --- |
+| mailbox | time-bounded window，按 tenant/device 配置 |
+| inbound dedup | 至少覆盖 mailbox 最大重投窗口 |
+| request receipts | 至少覆盖 proof clock skew 加 client retry horizon |
+| presence | 60–120 秒 |
+| activity tail | 5–15 分钟 |
+| 本机 journal terminal | 可配置长期；默认不自动删除带 recovery 标记的记录 |
+| object orphan | grace period 后清理 |
+
+容量有界的 ring 与时间有界的 SQL retention 行为不同——前者按条数丢最旧，后者按时间过期。这个差异必须在 self-hosted 与 hosted 的 runbook 中明示，不能让运维以为两者可以互换。
+
+### 12.8 交付路线与 S↔P crosswalk（目标设计）
+
+完整执行切片见 `plans/sprints/20260807-byok-platform-raft-aligned.sprint.md`。
+
+**P 线编号锚点。** 本文有两套互不相干的 P 记号，按出现位置区分：**章节标题**里的 `P1/P2/P3`（仅 §1、§8、§14 三处）是尽职调查框架的三层——P1 架构地图、P2 数据流追踪、P3 设计裁定，与交付无关；**正文**里的 `P0-P5` 一律取 `ARCHITECTURE-PROPOSAL-byok-platform.md:33-34,690-698` 的交付阶段语义，下表是这套记号的唯一定义处（§14.2 那格"P2 后再做 P3 board"属正文，按下表读）：
+
+| 编号 | 语义 |
+| --- | --- |
+| T0 | 租户 breaking cut；先于 P 线任何数据落库 |
+| P0 | 建 `@byok/core` 契约层，零实现，不改既有包 |
+| P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
+| P2 | SQL（Postgres/D1）与 R2/S3 实现；`deploy/sql/` migration |
+| P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示 |
+| P4 | client 侧 device proof 上行 + memory manifest/selector seam + `signNonce` domain separation 修复（GAP-004） |
+| P5 | `@byok/keys` 的 profile 持久化接上 core 的 `TruthStore`；挂在 K4 之后 |
+
+K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
+
+**S↔P crosswalk。** sprint 档用 `S0-S7` 切分执行，与上述 P 阶段的对应关系：
+
+| Sprint | 内容 | 对应 P 线 |
+| --- | --- | --- |
+| S0 | 架构与当前缺口收口（GAP-001/002/003） | 先于 P0，不属任何 P 阶段 |
+| S1 | Tenant identity cut | T0 |
+| S2 | `@byok/core` contracts | P0 |
+| S3 | Cloud mailbox + 本机 journal | P1 |
+| S4 | SQL / Object compositions | P2 |
+| S5 | Board + presence + SSE/poll | P3 |
+| S6 | Device proof + memory | P4 |
+| S7 | Truth/keys + operations/release | P5 |
+| 并行 | K4/K4.1 aip swap | K 线，不阻塞 P0/P1 |
+
+```mermaid
+flowchart LR
+  classDef stage fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
+  classDef parallel fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
+
+  S0(["S0 缺口收口"]):::stage
+  S1(["S1 Tenant cut / T0"]):::stage
+  S2(["S2 core / P0"]):::stage
+  S3(["S3 mailbox + journal / P1"]):::stage
+  S4(["S4 SQL + object / P2"]):::stage
+  S5(["S5 board + presence / P3"]):::stage
+  S6(["S6 device proof + memory / P4"]):::stage
+  S7(["S7 truth/keys + release / P5"]):::stage
+  K4(["K4/K4.1 aip swap"]):::parallel
+
+  S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
+  K4 -.-> S7
+```
+
+排序原则：
+
+- K4 是独立跨仓库闭环，不阻塞 P0/P1；
+- tenant cut 必须在任何 hosted durable data 落库前完成；
+- core 在 cloud 之前；
+- mailbox/journal 在 board 之前；
+- SQL/object 在 board CAS 之前；
+- device proof 在 truth/memory 的生产写入之前；
+- 已知的 capability honesty 缺口（GAP-001/002）不拖到平台完成之后才修；
+- 每个 sprint 都要有独立的 rollback 与 evidence。
 
 ## 13. RAFT 受限参考
 
@@ -987,6 +1361,11 @@ load-bearing 顺序是 durable local append 后才 ack mailbox。append 前 cras
 | hash-only updater trust | **拒绝照抄** | upgrade manifest 与 binary 同源不能形成独立签名信任根 |
 | runtime bypass/yolo flags | **拒绝** | 会推翻 BYOK fail-closed PermissionPolicy 约束 |
 
+两处归因必须写清，否则这张表会把外部证据的强度说高：
+
+- **presence 五级词汇不是 RAFT 的。** `online/thinking/working/error/offline` 的来源是 `docs/researches/proposal-byok-platform-v2-opus.md:205`；`docs/researches/raft-architecture-reference.md` 全文 `presence` 零命中。上表"presence/activity + dropped"一行采纳的是 RAFT 的**有损提示带 dropped 计数**这个机制，五级词汇本身是本仓库提案的产物。
+- **board 转移在 RAFT 侧是 `[unverified]`。** `raft-architecture-reference.md:1064` 原文明确：状态转移的约束在 server 侧 `[unverified]`，其转移图是依 status 语义绘制的合理路径，不是从实作提取的转移表。因此 §12.3 采纳的是 5 态**词汇与分权威**，不是一份已验证的转移表；`closed` 的原义同样仍标 unverified。
+
 RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组合的 SDK。可参考其填满的 operational semantics，不能把产品所有权边界一起搬进 SDK。
 
 ## 14. P3：设计理由、10x 与不变量
@@ -1004,13 +1383,62 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 | 压力 | 最先失败处 | 已有/目标缓解 |
 | --- | --- | --- |
 | 单节点更多 devices/tasks | Hub in-memory maps、outbox ring、poll waiter、event queues | embedded 模式承认单 owner；hosted 目标转 mailbox/store ports |
-| fleet reconnect | current backoff cohort 可能同时重试 | 后续需要 deterministic jitter；不能只靠纯 exponential delay |
+| fleet reconnect | backoff cohort 仍可能聚簇重试 | `ws-transport.ts:248-254` 已有 ±20% random jitter（`delay * (0.8 + Math.random() * 0.4)`）；缺的是 device-id 派生的**确定性**种子，因此退避不可复现、也无法按设备稳定错峰（GAP-010） |
 | high-frequency UI hints | presence/activity SQL write amplification | bounded batch + TTL + dropped；必要时可单独换 KV/DO adapter |
 | board concurrency | per-tenant `board_seq` 与 claim hot rows | SQL CAS、索引、contract suite；P2 后再做 P3 board |
 | large memory | snapshot >1MiB 与 rev CAS conflict | 当前 key-granular snapshot；阈值触发 delta-chain deferred |
 | many runtime kinds | closed `RuntimeIdSchema` 与 adapter-specific capability truth | 新 runtime id 是 protocol change；先修 per-task capability honesty |
 
-### 14.3 必须保持的不变量
+### 14.3 可靠性、恢复与并发（目标设计）
+
+#### 14.3.1 At-least-once 的完整链条
+
+- server/cloud 可以重投；
+- client cursor 只在 handler 成功、且 hosted 模式下本机 journal 已 durable 之后才推进；
+- envelope id dedup 与语义幂等两者同时存在，不能只留一个；
+- terminal 与 truth 写入必须幂等；
+- long-poll 与 WS 共用同一个 inbound gate；
+- transport 切换不得产生两个并行 owner。
+
+#### 14.3.2 Reconnect：确定性 jitter
+
+当前已有 random jitter（见 §14.2），目标是把它换成可复现的确定性 jitter：
+
+- seed 取 device id 或稳定 machine lock id 的 hash；
+- exponential backoff 加 bounded deterministic offset；
+- server 重启时 fleet 不齐步重连；
+- jitter 可复现，因此可被测试断言——这是 random jitter 给不了的性质；
+- auth / revoked 类错误不进入无限 reconnect；
+- 明确声明为 capability unavailable 的不重试；
+- 只有 5xx 与 network timeout 才重试。
+
+#### 14.3.3 Health 与 quarantine
+
+借鉴外部产品的运维语义，但守住 SDK 边界：
+
+- daemon health snapshot 覆盖 connection、runtime detection、control socket、journal、workspace；
+- rolling failure window 与 degraded 状态；
+- crash history；
+- malformed 或 corrupt 的本地状态**不自动删除**，搬进 quarantine；
+- doctor 可以报告，并在明确的 `--fix` 下才修复；
+- security-sensitive 的修复不静默降级；
+- 进程重启仍归 OS supervisor，daemon 不再造第二层 supervisor（§10）。
+
+#### 14.3.4 并发控制一览
+
+| 场景 | 机制 |
+| --- | --- |
+| board claim | SQL CAS，失败返回 holder snapshot |
+| board status | `expectedStatus` CAS |
+| memory / profile | `expectedRev` CAS |
+| terminal | 第一份 immutable hash 胜出 |
+| request replay | `(tenant, device, requestId)` receipt |
+| inbound envelope | `(tenant, device, envelopeId)` unique |
+| 本机 workspace | one-writer lease |
+| lifecycle 命令 | mutation lock |
+| key rotation | epoch CAS |
+
+### 14.4 必须保持的不变量
 
 1. protocol golden fixtures 不漂移；breaking change 必须显式升版。
 2. `keys` 与 dispatch/platform dependency graph 保持所规定的零边。
@@ -1023,7 +1451,54 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 9. workspace/Git state 不驱动 protocol task transition。
 10. runtime adapter 不把不支持的 policy 翻译成近似语义。
 
-## 15. 事实来源与验证面
+## 15. 可观测性与审计（目标设计）
+
+当前 observer 只做本机 task/connection/runtime 投影（§4.3），下面是平台面成型后的目标形状。
+
+### 15.1 三种数据，边界不可混
+
+| 类型 | 目的 | 允许内容 |
+| --- | --- | --- |
+| operational metrics | 容量与健康 | counts、latency、queue depth、reconnect、drop |
+| structured audit | 安全与操作事实 | actor、tenant、device、operation、resource、result、hash |
+| debug trace | 本机诊断 | bounded events；默认不含 prompt、tool body 或 secret |
+
+三者的保留期、访问权限与脱敏要求都不同，合并成一条日志流会让最宽松的那条策略拉平其余两条。
+
+### 15.2 必备指标
+
+- connected devices
+- mailbox oldest age / depth
+- poll latency / batch size
+- cursor lag
+- redelivery count
+- dedup hits
+- task admission decline reasons
+- task terminal outcomes
+- approval wait time
+- runtime spawn / exit
+- outbox drain duration
+- 本机 journal fsync latency
+- truth conflict rate
+- board CAS conflict rate
+- presence/activity writes 与 dropped
+- provider key resolve errors
+- quarantine events
+- updater verification outcome（宿主产品侧）
+
+### 15.3 隐私约束
+
+- 不记录 provider secret；
+- 不记录 bearer 或 control token；
+- 默认不记录完整 prompt / tool input / output；
+- path 默认脱敏；
+- object 与 payload 只记录 hash、size、content type；
+- tenant 维度的 metrics 避免高基数、形似 secret 的 label；
+- support bundle 生成前先做 redaction，并列出所含内容。
+
+这组约束与 §9 审计控制表的“只记录 task id、event type、tool/runtime name、counts/sizes”是同一条线：审计要能证明发生过什么，但不以保存 tool input/output 原文为代价。
+
+## 16. 事实来源与验证面
 
 主要 authoritative surfaces：
 
@@ -1046,3 +1521,50 @@ pnpm -r run test
 pnpm -r run build
 repo-harness run check-task-workflow --strict
 ```
+
+### 16.1 Tenant isolation 入口闸 I1-I9（目标设计）
+
+hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落地；其中 I2/I5/I8/I9 随 T0 先行。这份清单与 `docs/researches/tenant-isolation-decision.md:235-243` 逐条对应，不作改写：
+
+| # | 测试 | 断言 | 落点 |
+| --- | --- | --- | --- |
+| I1 | 跨租户路由穷举矩阵 | 迭代 router 全部已注册路由；tenant B 的 device principal 打 tenant A 的每种资源（board list/claim/status、mailbox pull/ack、records get/put、presence、activity、blob url 签发）→ 一律 401/404、零行；存在未分类路由 → 测试自身失败 | `@byok/cloud` isolation-matrix 测试 |
+| I2 | pairing 跨租户 | A 的 code 兑换 → 设备落 A 且仅 A；code 二次兑换 401；过期 401；无 claims 无法 mint（类型层拒 + runtime zod 拒） | `@byok/server` pairing 测试 |
+| I3 | proof 租户不符 | 合法签名 + `claims.tenantId = B`（设备属 A）→ 401；签后篡改 tenantId → 签名败；requestId 重放 → 幂等原结果或 409；skew > 60s → 拒 | core/cloud proof 测试 |
+| I4 | store conformance 跨租户不变式 | 每个 store port 方法：T1 写入、以 T2 读 → empty/undefined；port 不存在可变更 `tenant_id` 的方法；InMemory 与 SQL 后端跑同一份套件 | store conformance suite |
+| I5 | bearer 交叉验证 | token `claims.tenantId` 与 registry 行不符 → 401；registry 为权威 | `@byok/server` auth 测试 |
+| I6 | `board_seq` 隔离 | 并发双租户写入下，A 的 SSE/轮询流永不出现 B 的行；per-tenant 序列互不推进 | cloud board 测试（P3 并入矩阵） |
+| I7 | 铸造点唯一 | `as TenantId` 只出现在 auth 模块与测试 fixture（grep/lint 测试）；store port 签名全部 tenant-first（类型测试） | repo 级 guard |
+| I8 | golden 零漂 | `git diff --exit-code packages/protocol/src/__tests__/golden/` 加 freeze-guard 全绿——机检证明 pairing 绑定未碰 DTO | 既有机检 |
+| I9 | `productId` 等值 | `conn.hello.productId` 与 device 行不符 → 拒连 | `@byok/server` hub 测试 |
+
+### 16.2 平台线附加验证面（目标设计）
+
+涉及 SQL 时追加 `pnpm run check:deploy-sql`；涉及协议时追加 `git diff --exit-code packages/protocol/src/__tests__/golden/`。涉及本架构文档时另需检查：canonical 文档唯一、无 dangling file reference、状态标记（已实现/目标设计/RAFT 参考）前后一致。
+
+---
+
+## 附录 A：ADR 帐本（目标设计）
+
+下表是平台线已作出的架构裁定。状态列的 `Accepted` 指裁定已定，不指实现已落地——落地进度看 §11 缺口帐本与 §12.8 路线；`Deferred` 的触发条件写在同一行，没有触发条件的不列为 Deferred。表中不出现阶段编号，避免与 §12.8 的 P0-P5 锚点产生第二套语义。
+
+| ADR | 决定 | 状态 |
+| --- | --- | --- |
+| ADR-001 | 双产品面、双安全模型（dispatch plane 与 key plane） | Accepted |
+| ADR-002 | protocol v1 冻结，新能力一律走 wire 外的 HTTP 面 | Accepted |
+| ADR-003 | `@byok/core` 保持 protocol-free 且 Node-free | Accepted |
+| ADR-004 | `@byok/server` 留作 self-hosted，不演化为 hosted Hub | Accepted |
+| ADR-005 | mailbox ack 之前必须先完成本机 durable append | Accepted |
+| ADR-006 | board / wire / presence 分词并分权威 | Accepted |
+| ADR-007 | tenant-first 结构性隔离（§12.6.2 六层） | Accepted |
+| ADR-008 | terminal immutable；memory/profile 用 revision CAS | Accepted |
+| ADR-009 | cloud 不做语义推导（摘要、合并、相关性排序） | Accepted |
+| ADR-010 | 能力用 `/capabilities` 声明，不做 status code 嗅探 | Accepted |
+| ADR-011 | runtime policy 必须精确表达，否则 fail-closed | Accepted |
+| ADR-012 | key plane 与 dispatch/platform 之间保持零依赖边 | Accepted |
+| ADR-013 | credential proxy | Deferred，仅在出现 managed agent credential 需求时触发（§9.1） |
+| ADR-014 | updater 与 supervisor 归宿主产品所有 | Accepted |
+| ADR-015 | runtime permission bypass / yolo flag | Rejected（§9.2） |
+| ADR-016 | memory delta chain | Deferred，snapshot > 1 MiB 或 CAS 冲突率偏高时触发 |
+| ADR-017 | `TaskStore` 改 async | Deferred，self-hosted 需要远端 async SQL 时触发 |
+| ADR-018 | live / cold migration | Deferred，出现跨设备 workspace 迁移需求时触发 |
