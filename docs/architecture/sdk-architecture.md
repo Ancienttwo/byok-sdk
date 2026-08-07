@@ -931,20 +931,20 @@ flowchart TB
   Node(["Node composition<br/>Postgres + R2（主生产）"]):::deploy
   Workers(["Workers composition<br/>可选 D1 compatibility adapter"]):::deploy
 
-  Cloud --> Core
+  Cloud -.-> Core
   Cloud --> Protocol
-  Client --> Core
+  Client -.-> Core
   Client --> Protocol
-  Server --> Core
+  Server -.-> Core
   Server --> Protocol
-  Keys -->|"P5: contracts only"| Core
+  Keys -.->|"P5: contracts only"| Core
   Node --> Cloud
   Workers -.-> Cloud
 
   style Cloud stroke-dasharray:5 5
 ```
 
-`Core` 是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。指向它的所有边（`cloud/client/server/keys → core`）仍是目标设计——当前仓库内零 consumer，即 §0 的**已实现、隔离**。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。指向它的四条边（`cloud/client/server/keys → core`）画成虚线，因为它们仍是目标设计——当前仓库内零 consumer，即 §0 的**已实现、隔离**。节点实线、入边虚线，正是「package 在、consumer 不在」这个状态。
 
 关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 

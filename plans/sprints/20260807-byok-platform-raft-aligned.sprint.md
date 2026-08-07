@@ -460,17 +460,17 @@ packages/core/
 
 ### S2.4 Acceptance criteria
 
-- [ ] core build/package succeeds on Node 20/22；
-- [ ] source import scan proves protocol-free/Node-free；
-- [ ] tenant-first method inventory test（I7）；
-- [ ] board transitions and conflicts are deterministic；
-- [ ] terminal conflict returns existing snapshot；
-- [ ] memory/profile `expectedRev` semantics fixed；
-- [ ] quota/usage/reservation contract includes version CAS、no-overcommit invariant and stable errors；
-- [ ] proof canonicalization golden created outside protocol golden；
-- [ ] InMemory composition passes complete conformance；
-- [ ] no existing package runtime behavior changes；
-- [ ] architecture package graph updated from TARGET to partial CURRENT.
+- [x] core build/package succeeds on Node 20/22（Node 20 leg via PR CI）；
+- [x] source import scan proves protocol-free/Node-free；
+- [x] tenant-first method inventory test（I7）；
+- [x] board transitions and conflicts are deterministic；
+- [x] terminal conflict returns existing snapshot；
+- [x] memory/profile `expectedRev` semantics fixed；
+- [x] quota/usage/reservation contract includes version CAS、no-overcommit invariant and stable errors；
+- [x] proof canonicalization golden created outside protocol golden；
+- [x] InMemory composition passes complete conformance；
+- [x] no existing package runtime behavior changes；
+- [x] architecture package graph updated from TARGET to partial CURRENT.
 
 ### S2.5 Rollback
 
