@@ -19,6 +19,7 @@ import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
+import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { ProgressBatcher, type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
 import type { GitWorkspaceManager, GitWorkspaceLease, GitWorkspaceObservation, GitWorkspaceError, GitErrorCategory } from './git-workspace';
@@ -1104,6 +1105,23 @@ export class TaskRunner {
             // where an auto-selected task left the server never learning
             // which runtime actually ran.
             runtime: isKnownRuntimeId(pick.adapter.id) ? pick.adapter.id : undefined,
+            // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
+            // selected adapter's own capability self-report, carried on the
+            // same message that establishes the task↔runtime binding. The
+            // server gates control messages (`task.steer`) on this and only
+            // this — connection-level `conn.hello.runtimes[].capabilities`
+            // stays discovery, because it is transport-shaped (a long-poll-only
+            // daemon never sends `conn.hello`) and describes a device rather
+            // than a task.
+            //
+            // Sent UNCONDITIONALLY, deliberately NOT gated on
+            // `isKnownRuntimeId` the way `runtime` above is: `runtime` is a
+            // closed protocol enum a custom adapter has no member of, but
+            // capabilities are a self-report every adapter can make honestly.
+            // Gating them would silently strip a custom steer-capable
+            // adapter's own truth and leave the server fail-closing on it
+            // forever.
+            capabilities: toRuntimeInfoCapabilities(pick.adapter.capabilities()),
           },
           { taskId },
         ),

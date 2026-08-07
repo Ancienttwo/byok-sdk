@@ -1,7 +1,7 @@
 import { createEnvelope, TASK_TRANSITIONS } from '@byok/protocol';
-import type { CapabilityFlag, RuntimeCapabilities as ProtocolRuntimeCapabilities, RuntimeId, RuntimeInfo } from '@byok/protocol';
+import type { CapabilityFlag, RuntimeId, RuntimeInfo } from '@byok/protocol';
 import type { PermissionPolicy } from '@byok/protocol';
-import type { RuntimeAdapter, RuntimeCapabilities, GitWorkspaceConfig } from '../types';
+import type { RuntimeAdapter, GitWorkspaceConfig } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -22,6 +22,7 @@ import {
   type ShutdownReason,
 } from './control-protocol';
 import { ConnectionManager } from './connection-manager';
+import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { SessionWorkspaceStore } from './session-workspace-store';
@@ -301,40 +302,6 @@ export interface DaemonOverrides {
 
 function isRuntimeId(id: string): id is RuntimeId {
   return id === 'pi' || id === 'claude' || id === 'codex';
-}
-
-/**
- * Maps a `RuntimeAdapter`'s own internal `capabilities()` result
- * (`../types.ts`'s `RuntimeCapabilities` — `{steer, resume,
- * permissionModes}`, always-required fields) onto the wire's
- * `RuntimeInfo.capabilities` shape (`@byok/protocol`'s `RuntimeCapabilities`
- * — the same field names, but all-optional, plus `approvalInteractive`).
- *
- * Every field, `approvalInteractive` included, is a pure passthrough of the
- * adapter's own self-report: the adapter is the single source of truth for
- * what its runtime can do, and this function does no interpretation of its
- * own. Previously `approvalInteractive` was hardcoded `false` here, which
- * had gone stale — as of M4 Phase 3 claude genuinely does support
- * interactive approval, via `--permission-prompt-tool` routing
- * `ClaudeSession.resolveApproval` into the local out-of-process MCP approval
- * channel (`bin/byok-approval-mcp.ts`) under `policy.mode: 'confirm'` (see
- * docs/protocol.md §5.1/§11.2) — so the wire advertised a capability claim
- * no adapter owned. pi and codex report `false` for the same honest reason
- * they always did: neither has any notion of pausing for approval
- * (`resolveApproval()` throws unconditionally for both — see `../types.ts`'s
- * `Session.resolveApproval` doc comment).
- *
- * The connection-level `interactive-approval` flag (`CAPABILITY_FLAGS`,
- * `@byok/protocol`) is a separate, connection-scoped signal and is NOT
- * changed by this: `computeCapabilities` below keeps its own semantics.
- */
-function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRuntimeCapabilities {
-  return {
-    steer: caps.steer,
-    resume: caps.resume,
-    approvalInteractive: caps.approvalInteractive,
-    permissionModes: caps.permissionModes,
-  };
 }
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
