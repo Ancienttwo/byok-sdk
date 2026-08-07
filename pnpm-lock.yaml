@@ -85,6 +85,21 @@ importers:
         specifier: ^0.74.2
         version: 0.74.2(ws@8.21.1)(zod@4.4.3)
 
+  packages/cloud:
+    dependencies:
+      '@byok/core':
+        specifier: workspace:*
+        version: link:../core
+      '@byok/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      hono:
+        specifier: ^4.12.30
+        version: 4.12.30
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
   packages/core:
     dependencies:
       zod:
