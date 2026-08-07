@@ -148,7 +148,7 @@ Same substrate as S4A-a: compose up → migrate runner applies `0001` (checksumm
 
 ## Task Breakdown
 - [x] Ride-alongs (first commit): migrate.ts ROLLBACK shadowing fix + todos noteSkippedSeq trigger narrowed to protocol-bump-only
-- [ ] `deploy/sql/0002_core_domain.sql`: eleven tables per §5 (TEXT instants, BIGINT sizes, tenant-first keys); 0001 untouched; `check:deploy-sql` green
+- [x] `deploy/sql/0002_core_domain.sql`: eleven tables per §5 (TEXT instants, BIGINT sizes, tenant-first keys); 0001 untouched; `check:deploy-sql` green
 - [ ] Seven core port Postgres implementations (single-statement CAS; quota aggregate-guarded reserve; mailbox monotonic ack + mark-not-delete retirement)
 - [ ] Postgres core composition entry green: `runCoreConformance('postgres', factory)` 56/56, conformance package zero-diff
 - [ ] `tests/sql/control_plane_invariants.sql` (catalog DO-blocks + migration reference header) + executing test; `check:deploy-sql` still green in reference mode
