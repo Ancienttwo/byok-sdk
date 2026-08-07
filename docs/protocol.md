@@ -653,6 +653,20 @@ Response (PairResponseSchema): { deviceId, accessToken, refreshHint? }
   a schema change: `refreshHint` was always allowed to contain this value,
   and always will be.
 
+**Claims flow (S1, 2026-08-07).** A pairing code is not an anonymous ticket:
+the server mints it already bound to a `{tenantId, productId}` pair
+(`createPairingCode({tenantId, productId})` in the reference server's
+`pairing.ts`), and redeeming it returns exactly those claims. `PairRequest` is
+unchanged and deliberately carries neither field — a device cannot name, hint
+at, or influence the tenant it lands in; the only way tenant identity enters
+the system is the code the SaaS minted out of band. On redemption the claims
+are written into the device row (`DeviceRecord.tenantId` / `.productId`, both
+required), and the first access token is minted from that same pair. Redeem
+and row-write happen in one step, and the code's single-use semantics are what
+make it exclusive: a second redeem is rejected before any row is written.
+From that point the device row — not any token payload — is the authority on
+which tenant and product a device belongs to.
+
 ### 6.2 Token renewal — `POST /byok/challenge` + `POST /byok/token`
 
 The access token from pairing expires in ~1h. Renewing it does not require
@@ -671,16 +685,42 @@ POST /byok/token
   Response (TokenResponseSchema): { accessToken, expiresAt }
 ```
 
-`signature` is the Ed25519 signature over `nonce`, base64url-encoded. **Pinned
-encoding (resolves a carried-forward pin): `nonce` is signed/verified as its
-raw UTF-8 bytes** — both the reference client
-(`signNonce`: `crypto.sign(null, Buffer.from(nonce, 'utf8'), privateKey)`) and
-the reference server (`verifyEd25519Signature`:
-`verify(null, Buffer.from(message, 'utf8'), ...)`) encode the nonce string
-this way before signing/verifying; a client using any other encoding (e.g.
-base64url-decoding the nonce string before signing its bytes) will produce a
-signature the reference server rejects. A nonce is single-use; the server
-must reject a replayed nonce.
+`signature` is the Ed25519 signature over the **domain-separated** nonce,
+base64url-encoded. **Pinned encoding (changed 2026-08-07, S1 — this replaces
+the previous raw-nonce pin and is a breaking change): the signed message is
+the UTF-8 bytes of the domain prefix `byok-nonce-v1\n` followed by the UTF-8
+bytes of the `nonce` string**, i.e. `sign("byok-nonce-v1\n" + nonce)`. Both
+ends apply the same literal: the reference client (`signNonce`:
+`crypto.sign(null, Buffer.from(NONCE_SIGNING_DOMAIN + nonce, 'utf8'), privateKey)`)
+and the reference server (`verifyNonceSignature`, which applies the prefix
+internally so no route can be written that checks an undomained message).
+
+A signature over the bare nonce — the pre-S1 encoding — is rejected with
+`401`. There is no dual mode: no flag, fallback, negotiated version, or grace
+window makes the old encoding acceptable, and the server holds exactly one
+nonce-signature check. Any other encoding (e.g. base64url-decoding the nonce
+before signing its bytes, or omitting the trailing newline of the prefix) is
+likewise rejected.
+
+Why the break: the device key is a long-lived identity key that later planes
+(S6 device proof) will also use to sign structured messages. Without a domain
+tag, a signature produced for one purpose is a valid signature for another —
+an attacker who can induce a device to sign anything nonce-shaped would hold
+a token-renewal credential. Domain-separating now, before any second signing
+purpose exists, is what keeps that cross-protocol reuse door closed. Since
+the packages carry no published compatibility contract yet, the recovery path
+for a device on the old encoding is a re-pair, not a server-side shim.
+
+A nonce is single-use; the server must reject a replayed nonce. The nonce is
+consumed only on a fully-verified success, so a bad signature does not burn
+the legitimate device's outstanding nonce.
+
+The renewed token, like the one from pairing, carries the identity triple
+`{tenantId, productId, deviceId}`. Those claims are lookup keys, not
+assertions: the server resolves the device row by them and the row is the
+authority. `/byok/challenge` and `/byok/token` are pre-tenant by construction
+— their pinned request shapes carry only a `deviceId` — so the row is what
+tells the server which tenant and product the renewed token gets bound to.
 
 ### 6.3 Revocation
 
@@ -690,6 +730,13 @@ device's next `/byok/challenge`, `/byok/token`, or WSS connect attempt gets a
 `401`; the daemon's only recourse is to re-run `/byok/pair` from scratch (a
 fresh device keypair is not required, but re-registering the existing public
 key is the simplest implementation and is an acceptable choice for M1).
+
+The revocation surface is tenant-first (S1): the reference server's public
+action is `devices.revoke(tenantId, deviceId)`, and the tenant is part of the
+lookup rather than a check applied afterward — a caller holding one tenant's
+credentials cannot revoke, or even confirm the existence of, another tenant's
+device. Revoking a device that the named tenant does not own is silently
+indistinguishable from revoking one that does not exist at all.
 
 ## 7. Blob flows
 

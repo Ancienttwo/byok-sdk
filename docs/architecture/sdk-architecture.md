@@ -880,12 +880,12 @@ CI 验证层次：
 | GAP-001 | `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | §4.4 | **已修复（S0）**：修复形状是 adapter-generated `RuntimeInfo`——`approvalInteractive` 成为 client `RuntimeCapabilities` 的 required 字段并由各 adapter 声明（Claude `true`），`create-daemon.ts` 的硬编码表删除；connection flag `interactive-approval` 仍 reserved | 已收口 | S0（已交付） |
 | GAP-002 | task-level steer 未按 claimed runtime gate | Claude/Codex 收到 steer 会 throw，并可能 stall cursor | §3.3 | **已修复（S0）**：修复形状是 claimed-runtime snapshot gate——claim 时把所选 runtime 的 capabilities 快照写入 task record，`steerTask()` 在构造 envelope 前按快照拒绝并抛 typed `SteerRejectedError` / `steer_unsupported_runtime`（快照缺失 fail-closed）；client 侧把 unsupported inbound steer 记为非重试性错误并 ack，cursor 不冻结 | 已收口 | S0（已交付） |
 | GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | **已决策（S0）**：维持 reserved 并已文档化（§2.2、`docs/protocol.md` §2、ADR-023）；wire 保留、禁止声称工作区选择能力，接线需另立 ADR 先定 resolver 设计 | 已收口 | S0（已交付） |
-| GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | `packages/server/src/auth.ts:155` 发的是裸 `randomBytes(24)`；`http.ts:125` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | 今日实际风险低（nonce 是随机 bytes，形状撞不到多行带前缀格式），但 device proof 上线前必须补 `byok-nonce-v1\n` 前缀；这是 breaking 的 pair/token 变更，两端同 PR 落地 | Pri-0（先于 proof） | S1/S6 |
-| GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | `packages/server/src/auth.ts:76-82` 只有 `deviceId/deviceName/devicePublicKey/revoked` | 任何 hosted durable data 落库前先做 tenant cut；device record 不允许"无 tenant" | Pri-0 | S1 |
+| GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | 原证据：`auth.ts` 发裸 `randomBytes(24)`，`http.ts` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | **已修复（S1）**：修复形状是单一域常数 `NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n'`（`auth.ts`），server 侧只有 `verifyNonceSignature` 一个 nonce 签名检查点、前缀在函数内部施加，client `device-keys.ts` 的 `signNonce` 签同一字面量；裸签名 401，无双模、无 flag、无过渡窗口，两端同批交付 | 已收口 | S1（已交付） |
+| GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | 原证据：`auth.ts` 的 `DeviceRecord` 只有 `deviceId/deviceName/devicePublicKey/revoked` | **已修复（S1）**：修复形状是 required tenant——`DeviceRecord` 增加 required `tenantId`/`productId`（无 optional、无默认值），值只来自 server 铸造的 pairing claims；`DeviceRegistry` 按 `(tenantId, deviceId)` 复合键查找且公开面 tenant-first（`get`/`revoke` 均带 tenantId），naked deviceId 查找不从包入口导出 | 已收口 | S1（已交付） |
 | GAP-007 | `deploy/` 只有 skeleton | 平台设计没有部署实证 | §1.3 | 不把 SQL/Workers/runbook 画成当前模块 | Pri-1 | S4 |
 | GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | `ws-transport.ts:248-254` 已有 `delay * (0.8 + Math.random() * 0.4)`，即 ±20% random jitter | 已有 random jitter，缺的是 device-id 派生的确定性种子；不要描述成"无 jitter" | Pri-1 | S7 |
 
-GAP-001/002/003 三行保留在表内是为了留下修复轨迹，它们在 S0 已收口，不再是待办；其余行仍未修。
+GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留在表内是为了留下修复轨迹，不再是待办。GAP-007/010 仍未修。
 
 以下两条列在缺口表里是历史记法，实为**已公开的设计约束**，不是待关闭的缺陷：
 
@@ -1093,16 +1093,16 @@ load-bearing 顺序是 durable local append 后才 ack mailbox。append 前 cras
 
 #### 12.6.1 正规身份模型
 
-| ID | 语义 | 权威来源 |
-| --- | --- | --- |
-| `tenant_id` | 宿主账户/组织，**唯一**安全隔离边界 | control plane 铸造 pairing code 时绑定 |
-| `product_id` | 宿主产品 audience | pairing claims + device record |
-| `device_id` | tenant/product 下的设备成员 | pair handler |
-| `scope_id` | tenant 内的业务键空间 | 宿主语义；**不是**安全边界 |
-| `task_id` | board 与 wire attempt 的关联 id | host / board |
-| `key_id` / `key_epoch` | device signing key 的身份与轮换代次 | device registry |
+| ID | 语义 | 权威来源 | 状态 |
+| --- | --- | --- | --- |
+| `tenant_id` | 宿主账户/组织，**唯一**安全隔离边界 | control plane 铸造 pairing code 时绑定 | 已实现（S1）：`PairingCodeClaims` / `DeviceRecord.tenantId` / token claims 三处均 required |
+| `product_id` | 宿主产品 audience | pairing claims + device record | 已实现（S1）：required；`conn.hello.productId` 另按 device row 校验 |
+| `device_id` | tenant/product 下的设备成员 | pair handler | 已实现（S1）：与 tenant 组成 registry 复合键 |
+| `scope_id` | tenant 内的业务键空间 | 宿主语义；**不是**安全边界 | 目标设计 |
+| `task_id` | board 与 wire attempt 的关联 id | host / board | 目标设计 |
+| `key_id` / `key_epoch` | device signing key 的身份与轮换代次 | device registry | 目标设计（S6） |
 
-设备不能在 `PairRequest` 里自报 tenant。pairing code 在服务端绑定 `{tenantId, productId}`，redeem 与 device insert 必须在同一个 transaction 内完成。当前 `DeviceRecord` 还没有这些字段（GAP-005），这是 tenant cut 要补的第一刀。
+设备不能在 `PairRequest` 里自报 tenant。pairing code 在服务端绑定 `{tenantId, productId}`，redeem 与 device insert 必须在同一个 transaction 内完成。S1 已把这些字段补进 `DeviceRecord`（required，无 optional 形态），参考实现的 in-memory registry 里 redeem 与 row write 是同一个同步步骤、由 pairing code 的单次使用语义保证排他；落库形态的事务边界随 P2 的 Postgres 实现一起兑现。
 
 #### 12.6.2 结构性 tenant isolation：六层同时成立
 
@@ -1167,15 +1167,15 @@ sequenceDiagram
 
 canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。
 
-三个 domain 前缀（**目标设计，位元组形状待冻结**——下列前缀取一致小写形式与 `schema: 'byok-device-proof-v1'` 自洽，最终字节序列以 golden fixture 冻结为准）：
+三个 domain 前缀（取一致小写形式，与 `schema: 'byok-device-proof-v1'` 自洽；第一个已在 S1 落地并冻结，后两个仍是目标设计、位元组形状待冻结）：
 
 | 用途 | 前缀 | 状态 |
 | --- | --- | --- |
-| token renewal | `byok-nonce-v1\n` + nonce | 目标设计；当前是裸 nonce（GAP-004） |
+| token renewal | `byok-nonce-v1\n` + nonce | **已实现（S1）**：两端同字面量（server `auth.ts` 的 `NONCE_SIGNING_DOMAIN`、client `device-keys.ts` 的 `signNonce`），无前缀签名 401 |
 | HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | 目标设计 |
 | record 级 attest | `byok-attest-v1\n` | 保留，若最终启用 |
 
-旧的 raw nonce signing 必须在 device proof 上线前、或在同一个 breaking release 内两端同步修复。
+上表首行的字节形状已在 S1 冻结并两端同批切换（breaking，恢复路径是 forced re-pair，见 `docs/protocol.md` §6.2 与 `docs/security.md`）；另两个前缀仍是目标设计，最终字节序列以 golden fixture 冻结为准。
 
 #### 12.6.4 真相层端点（目标设计）
 
@@ -1456,7 +1456,7 @@ R2 GC 使用 tombstone 加 reconcile：
 | P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示 |
-| P4 | client 侧 device proof 上行 + memory manifest/selector seam + `signNonce` domain separation 修复（GAP-004） |
+| P4 | client 侧 device proof 上行 + memory manifest/selector seam（`signNonce` 的 domain separation 修复 / GAP-004 已提前随 S1 交付，不再是 P4 的待办项） |
 | P5 | `@byok/keys` 的 profile 持久化接上 core 的 `TruthStore`；挂在 K4 之后 |
 
 K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
