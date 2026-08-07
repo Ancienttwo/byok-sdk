@@ -1,0 +1,74 @@
+{
+  "schema": "byok-device-proof-v1",
+  "domainPrefix": "byok-device-proof-v1\n",
+  "note": "Canonical signing bytes for byok-device-proof-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok/core test, and treat any diff as a breaking change to the signature format.",
+  "cases": [
+    {
+      "name": "method and path binding, no optional claims",
+      "claims": {
+        "version": 1,
+        "tenantId": "tenant-a",
+        "productId": "product-a",
+        "deviceId": "device-1",
+        "keyId": "key-1",
+        "keyEpoch": 0,
+        "requestId": "req-1",
+        "operation": "truth.write",
+        "resource": "task/task-1",
+        "method": "PUT",
+        "path": "/byok/records/task.terminal/task-1",
+        "bodySha256": "sha256:abababababababababababababababababababababababababababababababab",
+        "bodySize": 1024,
+        "issuedAt": "2026-08-07T10:00:00.000Z"
+      },
+      "canonicalJson": "{\"bodySha256\":\"sha256:abababababababababababababababababababababababababababababababab\",\"bodySize\":1024,\"deviceId\":\"device-1\",\"issuedAt\":\"2026-08-07T10:00:00.000Z\",\"keyEpoch\":0,\"keyId\":\"key-1\",\"method\":\"PUT\",\"operation\":\"truth.write\",\"path\":\"/byok/records/task.terminal/task-1\",\"productId\":\"product-a\",\"requestId\":\"req-1\",\"resource\":\"task/task-1\",\"tenantId\":\"tenant-a\",\"version\":1}",
+      "signingInputUtf8": "byok-device-proof-v1\n{\"bodySha256\":\"sha256:abababababababababababababababababababababababababababababababab\",\"bodySize\":1024,\"deviceId\":\"device-1\",\"issuedAt\":\"2026-08-07T10:00:00.000Z\",\"keyEpoch\":0,\"keyId\":\"key-1\",\"method\":\"PUT\",\"operation\":\"truth.write\",\"path\":\"/byok/records/task.terminal/task-1\",\"productId\":\"product-a\",\"requestId\":\"req-1\",\"resource\":\"task/task-1\",\"tenantId\":\"tenant-a\",\"version\":1}",
+      "signingInputHex": "62796f6b2d6465766963652d70726f6f662d76310a7b22626f6479536861323536223a227368613235363a61626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162222c22626f647953697a65223a313032342c226465766963654964223a226465766963652d31222c226973737565644174223a22323032362d30382d30375431303a30303a30302e3030305a222c226b657945706f6368223a302c226b65794964223a226b65792d31222c226d6574686f64223a22505554222c226f7065726174696f6e223a2274727574682e7772697465222c2270617468223a222f62796f6b2f7265636f7264732f7461736b2e7465726d696e616c2f7461736b2d31222c2270726f647563744964223a2270726f647563742d61222c22726571756573744964223a227265712d31222c227265736f75726365223a227461736b2f7461736b2d31222c2274656e616e744964223a2274656e616e742d61222c2276657273696f6e223a317d"
+    },
+    {
+      "name": "operation id binding with expiry and nonce",
+      "claims": {
+        "version": 1,
+        "tenantId": "tenant-b",
+        "productId": "product-b",
+        "deviceId": "device-2",
+        "keyId": "key-2",
+        "keyEpoch": 7,
+        "requestId": "req-2",
+        "operation": "storage.reserve",
+        "resource": "reservation/res-1",
+        "operationId": "storage.createReservation",
+        "bodySha256": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "bodySize": 0,
+        "issuedAt": "2026-08-07T10:00:00.000Z",
+        "expiresAt": "2026-08-07T10:05:00.000Z",
+        "nonce": "n-abc"
+      },
+      "canonicalJson": "{\"bodySha256\":\"sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"bodySize\":0,\"deviceId\":\"device-2\",\"expiresAt\":\"2026-08-07T10:05:00.000Z\",\"issuedAt\":\"2026-08-07T10:00:00.000Z\",\"keyEpoch\":7,\"keyId\":\"key-2\",\"nonce\":\"n-abc\",\"operation\":\"storage.reserve\",\"operationId\":\"storage.createReservation\",\"productId\":\"product-b\",\"requestId\":\"req-2\",\"resource\":\"reservation/res-1\",\"tenantId\":\"tenant-b\",\"version\":1}",
+      "signingInputUtf8": "byok-device-proof-v1\n{\"bodySha256\":\"sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"bodySize\":0,\"deviceId\":\"device-2\",\"expiresAt\":\"2026-08-07T10:05:00.000Z\",\"issuedAt\":\"2026-08-07T10:00:00.000Z\",\"keyEpoch\":7,\"keyId\":\"key-2\",\"nonce\":\"n-abc\",\"operation\":\"storage.reserve\",\"operationId\":\"storage.createReservation\",\"productId\":\"product-b\",\"requestId\":\"req-2\",\"resource\":\"reservation/res-1\",\"tenantId\":\"tenant-b\",\"version\":1}",
+      "signingInputHex": "62796f6b2d6465766963652d70726f6f662d76310a7b22626f6479536861323536223a227368613235363a63646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364222c22626f647953697a65223a302c226465766963654964223a226465766963652d32222c22657870697265734174223a22323032362d30382d30375431303a30353a30302e3030305a222c226973737565644174223a22323032362d30382d30375431303a30303a30302e3030305a222c226b657945706f6368223a372c226b65794964223a226b65792d32222c226e6f6e6365223a226e2d616263222c226f7065726174696f6e223a2273746f726167652e72657365727665222c226f7065726174696f6e4964223a2273746f726167652e6372656174655265736572766174696f6e222c2270726f647563744964223a2270726f647563742d62222c22726571756573744964223a227265712d32222c227265736f75726365223a227265736572766174696f6e2f7265732d31222c2274656e616e744964223a2274656e616e742d62222c2276657273696f6e223a317d"
+    },
+    {
+      "name": "non-ascii resource and operation",
+      "claims": {
+        "version": 1,
+        "tenantId": "tenant-c",
+        "productId": "产品-c",
+        "deviceId": "device-3",
+        "keyId": "key-3",
+        "keyEpoch": 1,
+        "requestId": "req-3",
+        "operation": "memory.write",
+        "resource": "memory/笔记\u0000/\"quoted\"",
+        "method": "POST",
+        "path": "/byok/records/memory/notes",
+        "bodySha256": "sha256:abababababababababababababababababababababababababababababababab",
+        "bodySize": 9007199254740991,
+        "issuedAt": "2026-08-07T10:00:00.000Z"
+      },
+      "canonicalJson": "{\"bodySha256\":\"sha256:abababababababababababababababababababababababababababababababab\",\"bodySize\":9007199254740991,\"deviceId\":\"device-3\",\"issuedAt\":\"2026-08-07T10:00:00.000Z\",\"keyEpoch\":1,\"keyId\":\"key-3\",\"method\":\"POST\",\"operation\":\"memory.write\",\"path\":\"/byok/records/memory/notes\",\"productId\":\"产品-c\",\"requestId\":\"req-3\",\"resource\":\"memory/笔记\\u0000/\\\"quoted\\\"\",\"tenantId\":\"tenant-c\",\"version\":1}",
+      "signingInputUtf8": "byok-device-proof-v1\n{\"bodySha256\":\"sha256:abababababababababababababababababababababababababababababababab\",\"bodySize\":9007199254740991,\"deviceId\":\"device-3\",\"issuedAt\":\"2026-08-07T10:00:00.000Z\",\"keyEpoch\":1,\"keyId\":\"key-3\",\"method\":\"POST\",\"operation\":\"memory.write\",\"path\":\"/byok/records/memory/notes\",\"productId\":\"产品-c\",\"requestId\":\"req-3\",\"resource\":\"memory/笔记\\u0000/\\\"quoted\\\"\",\"tenantId\":\"tenant-c\",\"version\":1}",
+      "signingInputHex": "62796f6b2d6465766963652d70726f6f662d76310a7b22626f6479536861323536223a227368613235363a61626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162222c22626f647953697a65223a393030373139393235343734303939312c226465766963654964223a226465766963652d33222c226973737565644174223a22323032362d30382d30375431303a30303a30302e3030305a222c226b657945706f6368223a312c226b65794964223a226b65792d33222c226d6574686f64223a22504f5354222c226f7065726174696f6e223a226d656d6f72792e7772697465222c2270617468223a222f62796f6b2f7265636f7264732f6d656d6f72792f6e6f746573222c2270726f647563744964223a22e4baa7e593812d63222c22726571756573744964223a227265712d33222c227265736f75726365223a226d656d6f72792fe7ac94e8aeb05c75303030302f5c2271756f7465645c22222c2274656e616e744964223a2274656e616e742d63222c2276657273696f6e223a317d"
+    }
+  ]
+}

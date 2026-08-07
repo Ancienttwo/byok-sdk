@@ -156,3 +156,29 @@ export type { CapabilityDeclaration } from './capabilities';
 // Composition contract
 export { CORE_STORE_NAMES } from './stores';
 export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
+
+// Device proof (§12.6.3, sprint §S6.2)
+export {
+  DEVICE_PROOF_ALGORITHMS,
+  DEVICE_PROOF_DOMAIN_PREFIX,
+  DEVICE_PROOF_SCHEMA_ID,
+  DEVICE_PROOF_VERSION,
+  DeviceProofEnvelopeV1Schema,
+  DeviceProofProtectedClaimsSchema,
+  canonicalizeJson,
+  canonicalizeJsonBytes,
+  deviceProofCanonicalClaims,
+  deviceProofCanonicalJson,
+  deviceProofSigningInput,
+  parseDeviceProofEnvelope,
+} from './attestation';
+export type {
+  DeviceProofAlgorithm,
+  DeviceProofEnvelopeV1,
+  DeviceProofProtectedClaims,
+  DeviceProofVerifier,
+  DeviceProofVerifyInput,
+  JsonObject,
+  JsonPrimitive,
+  JsonValue,
+} from './attestation';
