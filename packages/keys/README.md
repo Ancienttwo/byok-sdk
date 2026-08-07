@@ -103,17 +103,31 @@ install-time guarantee rather than a runtime capability — that is, when
 `SqliteProviderProfileStore` will construct. Until then, raising it would drop
 Node 20 hosts that are served perfectly well by the in-memory store.
 
-## What is in K0
+## Module inventory
+
+Every module under `src/`, one line of responsibility each. The public surface is
+whatever `index.ts` re-exports; nothing here is reachable by deep import.
 
 | Module | Contents |
 | --- | --- |
-| `errors.ts` | `ByokKeysError` (`code` + message), and the code strings the source used |
+| `index.ts` | The package barrel — the single public entry point, and the only supported import path |
+| `errors.ts` | `ByokKeysError` (`code` + message) and `BYOK_KEYS_ERROR_CODES`, the code strings consumers branch on |
 | `provider-profile.ts` | zod schema for the model provider profile, including the adapter/auth-mode legality rules |
 | `headers.ts` | `providerHeaders()` and fail-closed `requiredProviderSecret()` |
 | `url.ts` | `normalizeProviderUrl()` with the HTTPS / loopback / private-network guard |
-| `http.ts` | Shared transport guards: timeout, bounded JSON, HTTP error classification |
+| `http.ts` | Shared transport guards: injectable `fetch`, timeout, bounded JSON, HTTP error classification |
 | `openai-client.ts` | `OpenAiCompatibleChatClient` — chat/completions, injected `fetchImpl` |
 | `anthropic-client.ts` | `AnthropicMessagesClient` — Messages API, injected `fetchImpl` |
+| `secret-store.ts` | The `SecretStore` contract one credential entry is read and written through, plus the shared value/encoding guards |
+| `secret-name.ts` | Runtime validation of secret entry names and namespaces, including the dot exclusion that stops one scope from spelling out another's storage key |
+| `secret-scope.ts` | `SecretScope` and the envelope-scoped store that partitions a credential store by account and workspace |
+| `macos-keychain.ts` | `SecretStore` backed by the macOS Keychain via the `security` CLI |
+| `windows-credential-manager.ts` | `SecretStore` backed by the Win32 credential API via a PowerShell bridge |
+| `command-runner.ts` | The `CommandRunner` injection seam both OS backends are written against, so no unit test touches a real credential store |
+| `profile-store.ts` | The `ProviderProfileStore` persistence contract, plus the in-memory implementation |
+| `sqlite-profile-store.ts` | `SqliteProviderProfileStore` — on-disk profile persistence on `node:sqlite` |
+| `sqlite-support.ts` | Runtime `node:sqlite` capability detection and owner-only database file/directory creation |
+| `registry.ts` | `ProviderRegistry` — the configure / list / resolve / delete lifecycle that binds a profile store to a secret store and hands back a ready client |
 
 Auth modes map to headers as follows, and this mapping is the package's wire
 contract:
