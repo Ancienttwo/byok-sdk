@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 22:28
+> **Related Plan**: plans/archive/plan-20260807-2126-s3a-cloud-mailbox.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260807-2228
+
 # Implementation Notes: s3a-cloud-mailbox
 
 > **Status**: Active

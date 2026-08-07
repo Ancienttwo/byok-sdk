@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 22:28
+> **Related Plan**: plans/archive/plan-20260807-2126-s3a-cloud-mailbox.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260807-2228
+
 # Task Review: s3a-cloud-mailbox
 
 > **Status**: Reviewed
@@ -47,17 +53,17 @@
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 998d74854c8324602b18c72c6f7b85e924cd0899
+> **Verification Evidence SHA256**: sha256:c34d7207acb14a3f03d2e6ae32ab474bec25825430c2d7c4eeae6cc306630481
+> **Issued At**: 2026-08-07T14:28:11.312Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Sprint S3a delivered and merged as PR #21 (714f61d): stateless @byok/cloud with seven tenant-first ports, TenantStores facade, I1 bidirectional route closure, S1-parity auth, and the unchanged daemon completing a full long-poll lifecycle against the in-memory composition; repo 1851 tests green, CI 28/28 incl. Node 20, gatekeeper PASS with zero P0/P1
 - Findings: none
 
 ## Behavior Diff Notes

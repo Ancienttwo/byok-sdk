@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-07T19:40:59+0800 -->
+<!-- updated_at: 2026-08-07T22:28:12+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-07T19:40:59+0800
+> **Updated At**: 2026-08-07T22:28:12+0800
 > **Source Branch**: main
-> **Source Commit**: 8a3a14d
+> **Source Commit**: 998d748
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -51,17 +51,17 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 11 changed/untracked path(s)
 
 ```
- D plans/plan-20260807-1829-s2-byok-core-contracts.md
- D tasks/contracts/20260807-1829-s2-byok-core-contracts.contract.md
+ D plans/plan-20260807-2126-s3a-cloud-mailbox.md
+ D tasks/contracts/20260807-2126-s3a-cloud-mailbox.contract.md
  M tasks/current.md
- D tasks/notes/20260807-1829-s2-byok-core-contracts.notes.md
- D tasks/reviews/20260807-1829-s2-byok-core-contracts.review.md
+ D tasks/notes/20260807-2126-s3a-cloud-mailbox.notes.md
+ D tasks/reviews/20260807-2126-s3a-cloud-mailbox.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260807-1829-s2-byok-core-contracts.md
-?? tasks/archive/contract-20260807-1940-s2-byok-core-contracts.md
-?? tasks/archive/notes-20260807-1940-s2-byok-core-contracts.md
-?? tasks/archive/review-20260807-1940-s2-byok-core-contracts.md
-?? tasks/archive/todo-20260807-1940-s2-byok-core-contracts.md
+?? plans/archive/plan-20260807-2126-s3a-cloud-mailbox.md
+?? tasks/archive/contract-20260807-2228-s3a-cloud-mailbox.md
+?? tasks/archive/notes-20260807-2228-s3a-cloud-mailbox.md
+?? tasks/archive/review-20260807-2228-s3a-cloud-mailbox.md
+?? tasks/archive/todo-20260807-2228-s3a-cloud-mailbox.md
 ```
 
 ## Source Artifacts

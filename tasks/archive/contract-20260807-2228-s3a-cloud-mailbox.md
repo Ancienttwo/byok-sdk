@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-07 22:28
+> **Related Plan**: plans/archive/plan-20260807-2126-s3a-cloud-mailbox.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260807-2228
+
 # Task Contract: s3a-cloud-mailbox
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260807-2126-s3a-cloud-mailbox.md
 > **Task Profile**: code-change
 > **Owner**: ancienttwo
