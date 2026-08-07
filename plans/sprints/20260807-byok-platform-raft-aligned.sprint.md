@@ -75,6 +75,21 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **理由**：两半的失败模式不同，需要的审查深度也不同。handler parity 在 E2E 里失败得响——daemon 一旦分辨得出 cloud 与 server，测试当场红。journal durability 在 crash 窗口里失败得静——ack 早于 commit 的实现照样跑绿全部 happy path，只有在特定断电时序下丢任务，必须靠专门的 crash/磁盘矩阵逼出来。把它压在同一个 PR 里，等于让骨架 parity 的绿色替 durability 背书。
 - **影响**：S3.5 的十六格分两批验收——S3a 收 box 1/2/10/11/12/13/14/15/16（box 12 的 daemon 端消费另刀），S3b 收 box 3–9 的 journal/crash/pressure 七格；`docs/architecture/sdk-architecture.md` 的 GAP-006 落点改记为 S3b；alpha 闸要等 S3b 收口后才闭合，S3a 单独合入不构成 hosted alpha 就绪。**S3b 已交付 2026-08-08，S3.5 十六格全闭，alpha 闸条件齐备（见 §12）。**
 
+### D-6：quota 三表与 `QuotaStore` 的 Postgres 实现由 S4B 提前入 S4A
+
+- **原决策**：S4A.2 末段「storage/quota 相关 schema 属 S4B（见 S4B.2）」；`docs/architecture/sdk-architecture.md` §12.7.6 把 `storage_entitlement`/`storage_usage`/`storage_reservation` 等表列为 S4B 范畴。**该记录保留**；本条是它的后继裁定。
+- **触发事实**：core conformance 套件的 port-inventory 断言（`packages/core/src/__tests__/conformance/port-inventory.ts`）要求 composition 一次供齐全部七个 core port——含 `QuotaStore`，缺一个则整套一条断言都跑不了；而 S4A.5 同时要求「InMemory 与 Postgres + R2 两个 composition 跑同一份 domain/object contract suite」。两条同时成立时，Postgres composition 必须携带真实的 `QuotaStore` 实现。「S4A 只跑套件子集」被否决：那是给 conformance 开子集豁免口子，作废 no-silent-downgrade。
+- **改动**：`storage_entitlement`/`storage_usage`/`storage_reservation` 三表与 `QuotaStore` 的 Postgres 实现落 S4A（随 S4A-b 刀，见 D-7）；S4B 保留 enforcement 语义、control-plane 同步、reservation-bound presign、GC/tombstone、dead-letter 的**增量** schema 与行为。另记一笔：S4A.2 的十二表是「Schema minimum」，实作按 O-003 与 `core.objects` 的落地需要补 `board_item`、`object_manifest`、`object_reference`——字面允许的补充，在此显式记账。
+- **理由**：套件的全有全无是机检事实，不是排期偏好；把 quota 表拖到 S4B 的唯一途径是削弱套件本身。
+- **影响**：S4B.2 的对应表列改读为对 S4A schema 的增量；S4A 的验收含 quota conformance 维度在两个 composition 上全绿（reserve/finalize/abort/expire 的存储语义，不含 S4B 的 enforcement 面）。
+
+### D-7：S4A 按 §1.3 拆为 S4A-a（机制与 cloud ports）、S4A-b（core 七 port + I4 SQL 侧）、S4A-c（R2 adapter + deploy）
+
+- **原决策**：S4A 作为单个 Sprint 单批交付 O-001~O-006。**该范围保留**，本条只改交付与验收的切分方式。实施设计依据 `docs/researches/s4a-dataplane-design.md`（2026-08-08）。
+- **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」切三刀。**S4A-a**：`docker-compose.test.yml`（postgres + minio）测试基建、`@byok/conformance` 私有包定型（core 维度平移 + `runCloudConformance` 新增、`CORE_PORT_*`/`CLOUD_PORT_*` 上移进 shipped source）、`@byok/cloud-postgres` 包骨架（`pg` Pool + int8 parser + 手写 ordered migrate runner）、`deploy/sql/0001` 与 cloud-local ports 的 Postgres 实现（`rateLimiter` 留 in-memory 不建表）、CI dataplane job（`BYOK_REQUIRE_DATAPLANE=1`）与钉住该 job 的 constraint 测试。**S4A-b**：`deploy/sql/0002`（core domain 表，含 D-6 的 quota 三表）、core 七 port 的 Postgres 实现、`runCoreConformance` 跑 Postgres composition、I4 SQL 侧 = 行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言（UNIQUE 首列必须 `tenant_id`，白名单仅 `device.device_id` 与 `pairing_code.code`）、mailbox retention runbook。**S4A-c**：capability 由 `blobs.presigned` 裂出 `blobs.contentProxy`、`CloudStores.blobs` 收窄为 `{createUpload, getDownloadUrl}`（content-proxy 三方法移出为可选 composition 输入）、`aws4fetch` R2 adapter（presign PUT/GET + HEAD 复核 + tenant-scoped key）、S4A.4 九项 object tests（MinIO 为独立 SigV4 验证方）、`deploy/env`/`runbooks`/`scripts` 实装。
+- **理由**：core 七 port 无法再分——port-inventory 全有全无，分刀没有中间绿态，这决定了 b 刀的边界；机制刀（测试基建 + 套件形态 + 包骨架）与实现刀合并会得到审查者无法分辨「机制错了」还是「实现错了」的单个巨型 PR；c 刀的 capability 拆分与 R2 adapter 是同一个设计决策的两面，再拆会留下「capability 已裂但无实现使用」的中间态。
+- **影响**：S4A.5 分三批验收——a 收 migrations order check、fresh install + migrate-up、cloud conformance 两 composition 绿；b 收 core conformance 两 composition 绿、I4 SQL 侧、catalog 断言、retention documented；c 收九项 object tests、`deploy/` 非 `.gitkeep`、`check:deploy-sql` 实质化、secrets sample 无真实凭据。三刀各自可独立回滚（compose 文件与新包纯附加；migrations forward-only；capability 拆分回退 = 恢复五方法端口）。
+
 ---
 
 ## 0. 计划目标
@@ -655,7 +670,7 @@ Domain / reliability：
 - `device_presence`
 - `activity_tail`
 
-所有 domain table 使用 tenant-prefixed composite keys；nonce/presigned capability 即使随机，也在 row 内保存 tenant。R2 key 使用 `tenants/<tenantId>/objects/sha256/<hash>`，不做跨租户 dedupe。storage/quota 相关 schema 属 S4B（见 S4B.2）。
+所有 domain table 使用 tenant-prefixed composite keys；nonce/presigned capability 即使随机，也在 row 内保存 tenant。R2 key 使用 `tenants/<tenantId>/objects/sha256/<hash>`，不做跨租户 dedupe。storage/quota 相关 schema 属 S4B（见 S4B.2）——**该行按 D-6 后继裁定解读：quota 三表与 `QuotaStore` 实现已提前入 S4A，S4B 只拥有增量**。
 
 ### S4A.3 Conformance dimensions（套件定义）
 
