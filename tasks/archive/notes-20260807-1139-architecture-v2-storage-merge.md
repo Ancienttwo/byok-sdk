@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 11:39
+> **Related Plan**: plans/archive/plan-20260807-1058-architecture-v2-storage-merge.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260807-1139
+
 # Implementation Notes: architecture-v2-storage-merge
 
 > **Status**: Active

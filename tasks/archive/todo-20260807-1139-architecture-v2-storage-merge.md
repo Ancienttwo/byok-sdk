@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-07 11:39
+> **Related Plan**: plans/archive/plan-20260807-1058-architecture-v2-storage-merge.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260807-1139
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-07 10:59
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

@@ -1,6 +1,6 @@
 # Plan: Merge GPT Pro v2 storage/quota increments
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260807-1058
 > **Slug**: architecture-v2-storage-merge
 > **Artifact Level**: work-package

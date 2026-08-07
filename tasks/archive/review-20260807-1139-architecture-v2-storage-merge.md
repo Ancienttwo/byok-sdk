@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 11:39
+> **Related Plan**: plans/archive/plan-20260807-1058-architecture-v2-storage-merge.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260807-1139
+
 # Task Review: architecture-v2-storage-merge
 
 > **Status**: Pending
@@ -49,17 +55,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:f93090c0ba5fea5a91eeaf2474e28ce5e458d33e550a93b67db7b9ca95a2e484
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: cdb8799460255591485e752aa2049001c649e6d6
+> **Verification Evidence SHA256**: sha256:03e0ee14e2bd14cc43cbd652d5e5d4268e726049cbf5468e765bfb826ac7e1c2
+> **Issued At**: 2026-08-07T03:39:00.454Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: v2 storage/quota delta folded into canonical, sprint, and decision record; strict workflow check pass; gatekeeper five-dimension review PASS
 - Findings: none
 
 ## Behavior Diff Notes
