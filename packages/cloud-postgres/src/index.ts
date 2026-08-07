@@ -17,3 +17,16 @@ export type { ByokPoolOptions } from './pool';
 // The forward-only migration runner
 export { MigrationChecksumMismatchError, MigrationFilenameError, migrate, readMigrationFiles } from './migrate';
 export type { MigrationFile, MigrationResult } from './migrate';
+
+// The cloud-local port implementations, and the composition that bundles them
+export {
+  PostgresDeviceDirectory,
+  PostgresDeviceSequenceStore,
+  PostgresInboundDedupStore,
+  PostgresNonceStore,
+  PostgresPairingCodeStore,
+  PostgresRequestReceiptStore,
+  PostgresTaskAttemptStore,
+  createPostgresCloudStores,
+} from './stores/index';
+export type { PostgresCloudStoreOptions, PostgresCloudStores } from './stores/index';

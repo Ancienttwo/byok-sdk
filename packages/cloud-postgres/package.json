@@ -49,6 +49,7 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
+    "@byok/conformance": "workspace:*",
     "@types/pg": "^8.20.4"
   }
 }

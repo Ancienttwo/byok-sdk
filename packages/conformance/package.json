@@ -5,6 +5,12 @@
   "description": "The composition conformance suites: one assertion source every BYOK composition must pass, never published",
   "type": "module",
   "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
   "engines": {
     "node": ">=20"
   },
