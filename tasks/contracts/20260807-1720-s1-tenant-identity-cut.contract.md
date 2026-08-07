@@ -28,6 +28,7 @@ Make a no-tenant device inexpressible, and cut nonce signing to a domain-separat
   - `packages/server/src/types.ts` / `index.ts` — `PairingCodeClaims`, `AuthenticatedDevice`, server-local `TenantId`; public surface update
   - `packages/client/src/daemon/device-keys.ts` — `signNonce` signs `byok-nonce-v1\n` + nonce (same literal as server)
   - `examples/basic/**` — explicit tenant/product at `server.ts:95`
+  - `packages/client/scripts/*.mjs` — amendment 2026-08-07: the three smoke scripts (`ipc-smoke`, `adapter-task-smoke`, `control-socket-check`) call `createPairingCode()` and break under the authorized API cut; one-line claims fix each (`ipc-smoke` is a standalone CI job)
   - Tests: `test-support.ts` fixture reshape (claims threading; `pairFakeDaemon`/`connectFakeDaemon`/`connectFakeDaemonWs`); `pairing.test.ts` rewrite; new I2 suite `packages/server/src/__tests__/tenant-pairing-isolation.test.ts`; I5/I9 + S1.3 negative matrix; mechanical claims sweep across affected server/client test files (~28 files, fixture-converged)
   - Docs: `docs/protocol.md` §6.1-6.3 (claims flow; rewrite the pinned raw-nonce encoding at `:674-682` to the domain-prefixed pin); `docs/security.md` (tenant identity model, nonce domain separation, breaking/forced-re-pair note); `docs/architecture/sdk-architecture.md` (close GAP-004/GAP-005 in §11.1; §12.6.1 tenant/product rows to CURRENT)
 - Out of scope:
@@ -89,6 +90,7 @@ allowed_paths:
   - docs/protocol.md
   - docs/security.md
   - packages/client/src/
+  - packages/client/scripts/
   - packages/server/src/
   - examples/basic/
 ```
