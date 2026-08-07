@@ -84,6 +84,7 @@ allowed_paths:
   - packages/cloud-postgres/
   - deploy/sql/
   - .github/workflows/ci.yml
+  - package.json # scope widened post-gate: declare repo-harness as an explicit devDependency (gate finding P0 — undeclared external CLI broke the CI dataplane legs)
   - pnpm-lock.yaml
   - pnpm-workspace.yaml
   - docs/architecture/
