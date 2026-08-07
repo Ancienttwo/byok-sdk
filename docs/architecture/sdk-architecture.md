@@ -22,7 +22,7 @@
 - Agent dispatch plane：`@byok/protocol` + `@byok/server` + `@byok/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
 
-目标平台会新增 `@byok/core` 与 `@byok/cloud`，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。它们尚未落地，本文在第 12 节单独描述。
+目标平台会新增 `@byok/core` 与 `@byok/cloud`，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 已于 2026-08-07（S2）落地为 workspace package，状态是**已实现、隔离**：zod-only、protocol-free、Node-free，仓库内没有任何 import site；`@byok/cloud` 仍是**目标设计**。本文在第 12 节单独描述这两者。
 
 ## 1. P1：全局架构地图
 
@@ -96,7 +96,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库是 Node `>=20`、pnpm workspace。四个 package 都可独立 build/package，但仓库本身不能证明它们已经发布到 npm。
+仓库是 Node `>=20`、pnpm workspace。五个 package 都可独立 build/package，但仓库本身不能证明它们已经发布到 npm。下图只画 dispatch 与 key 两条现有运行时线；S2 落地的 `@byok/core` 目前零入边零出边（除 `zod`），故不出现在此图，其目标边见 §12.1。
 
 ```mermaid
 flowchart LR
@@ -130,8 +130,9 @@ flowchart LR
 | server | 16 / 4,409 | 24 / 5,494 | `ConnectionHub` 集中持有 embedded authority |
 | client | 68 / 17,535 | 90 / 20,070 | 最大模块；runtime、IPC、service、Git、transport 都在此包 |
 | keys | 18 / 2,697 | 15 / 2,934 | 独立 key-custody 安全模型 |
+| core | 21 / 3,145 | 17 / 2,360 | S2 落地的契约层；InMemory 参考实现 + composition 参数化 conformance 套件，尚无 consumer |
 
-统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。四个 package 的复算命令：
+统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。五个 package 的复算命令：
 
 ```bash
 SDK_SRC=packages/server/src
@@ -139,9 +140,9 @@ find "$SDK_SRC" -type f -name '*.ts' ! -name '*.test.ts' ! -name '*.spec.ts' ! -
 find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__tests__/*.ts' \) -print | sort -u
 ```
 
-对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余三个 package。
+对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余四个 package。
 
-强依赖是 `server/client → protocol`；弱依赖是 `client -dev→ server`。`keys` 与 dispatch 三包之间的零边是安全 invariant，不是尚未整理的偶然状态。
+强依赖是 `server/client → protocol`；弱依赖是 `client -dev→ server`。`keys` 与 dispatch 三包之间的零边是安全 invariant，不是尚未整理的偶然状态。`core` 的零边是隔离落地的当前事实：S2 只交付契约与 InMemory 参考，仓库内没有任何 import site，`cloud → core`、`client → core` 等边仍是 §12.1 的目标设计。
 
 ### 1.3 交付与非运行时表面
 
@@ -898,7 +899,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 
 | ID | 缺口 | 优先级 | 落点 |
 | --- | --- | --- | --- |
-| GAP-006 | hosted mailbox 与本机 durable journal 未实现 | Pri-0（平台线） | S3 |
+| GAP-006 | hosted mailbox 与本机 durable journal 未实现（mailbox port 契约与 InMemory 参考已随 S2 落在 `@byok/core`；hosted 执行面与 SQLite journal 仍缺） | Pri-0（平台线） | S3 |
 | GAP-008 | board / presence / activity 未实现 | Pri-1 | S5 |
 | GAP-009 | device proof / truth / memory 未实现 | Pri-1 | S6 |
 | GAP-011 | doctor / quarantine / crash budget 不完整 | Pri-1 | S7 |
@@ -908,9 +909,9 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 | GAP-015 | durable local journal 尚未实现 SQLite canonical、磁盘 watermark 与安全 cleanup | Pri-0（平台可靠性） | S3 |
 | GAP-016 | Postgres + R2 的 entitlement/usage/reservation/quota/GC 尚未实现 | Pri-0（hosted storage） | S4A/S4B |
 
-## 12. 目标平台架构（尚未实现）
+## 12. 目标平台架构（`@byok/core` 已落地并隔离，其余尚未实现）
 
-本节只复述 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定，所有节点均为**目标设计**。它解决当前 embedded coordinator 无法成为多租户、水平扩展、可组合 cloud service 的问题，同时保留 wire v1。
+本节只复述 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定。除 `@byok/core`（2026-08-07 / S2 落地，状态为**已实现、隔离**）外，其余节点与组合均为**目标设计**。它解决当前 embedded coordinator 无法成为多租户、水平扩展、可组合 cloud service 的问题，同时保留 wire v1。
 
 ### 12.1 目标 package graph
 
@@ -922,7 +923,7 @@ flowchart TB
   classDef deploy fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
   Protocol(["@byok/protocol<br/>existing, frozen v1"]):::existing
-  Core(["@byok/core<br/>planned, zod-only, protocol-free"]):::planned
+  Core(["@byok/core<br/>implemented, isolated<br/>zod-only, protocol-free, Node-free"]):::existing
   Cloud(["@byok/cloud<br/>planned stateless handlers"]):::planned
   Client(["@byok/client<br/>existing local authority"]):::existing
   Server(["@byok/server<br/>existing self-hosted option"]):::existing
@@ -940,28 +941,31 @@ flowchart TB
   Node --> Cloud
   Workers -.-> Cloud
 
-  style Core stroke-dasharray:5 5
   style Cloud stroke-dasharray:5 5
 ```
 
-关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
+`Core` 是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。指向它的所有边（`cloud/client/server/keys → core`）仍是目标设计——当前仓库内零 consumer，即 §0 的**已实现、隔离**。
+
+关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
 ### 12.2 `@byok/core` 与 `@byok/cloud` 目标职责
 
-| 目标模块 | 责任 |
-| --- | --- |
-| core `attestation.ts` | `DeviceProofEnvelopeV1`、canonical bytes、注入式 verify |
-| core `tenant.ts` | `TenantId`、device/control-plane principal |
-| core `board.ts` | 5-state board、合法转移、claim conflict snapshot |
-| core `quota.ts` | tenant storage entitlement、usage、reservation、retention policy 与稳定 quota 错误码 |
-| core store ports | Truth/Mailbox/Board/Presence/Blob/Quota/StorageUsage async contracts；首参数永远是 tenant |
-| cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface |
-| cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS |
-| cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs |
-| cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort |
-| cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation |
-| cloud hints | device presence TTL、task activity tail + explicit dropped count |
-| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 |
+core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 参考实现；cloud 各行与 composition 组合仍是目标设计。
+
+| 目标模块 | 责任 | 状态 |
+| --- | --- | --- |
+| core `attestation.ts` | `DeviceProofEnvelopeV1`、canonical bytes、注入式 verify | **已实现（S2）** |
+| core `tenant.ts` | `TenantId`、device/control-plane principal | **已实现（S2）** |
+| core `board.ts` | 5-state board、合法转移、claim conflict snapshot | **已实现（S2）** |
+| core `quota.ts` | tenant storage entitlement、usage、reservation、retention policy 与稳定 quota 错误码 | **已实现（S2）** |
+| core store ports | Truth/Mailbox/Board/Presence/Blob/Quota/StorageUsage async contracts；首参数永远是 tenant | **已实现（S2）**；tenant-scoped store 组装留给 S3 |
+| cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface | 目标设计 |
+| cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | 目标设计 |
+| cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs | 目标设计 |
+| cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | 目标设计 |
+| cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 目标设计 |
+| cloud hints | device presence TTL、task activity tail + explicit dropped count | 目标设计 |
+| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | InMemory composition 与参数化 conformance 套件**已实现（S2）**；其余仍是目标设计 |
 
 ### 12.3 四套状态与一致性模型
 
@@ -990,6 +994,8 @@ stateDiagram-v2
 | truth record | `kind + record_key + rev + immutable hash` | cloud truth store，内容由 device 签名或 revision CAS 保护 | terminal / profile / memory 事实 |
 
 `AwaitApproval` 是执行中暂停；`in_review` 是执行结束后人工验收。二者不能互相触发。`Running` 不得由 presence 推断；`done` 不代表某个 runtime process 仍存活。`closed` 在 final proposal 中暂取“终止未验收”，RAFT 原义仍需标为 unverified。
+
+四套词汇的 core 侧契约（board 5 态与合法转移、presence level、truth record 形状、以及三者与 wire execution 的隔离）连同 InMemory 参考实现已于 S2 落地（`@byok/core`），并由包内的 vocabulary-isolation 约束测试守住；下面各小节的 cloud SQL 组合、SSE/轮询与端点行为仍是目标设计。
 
 #### wire execution 规则（当前已实现，此处只重申跨层约束）
 
@@ -1165,17 +1171,17 @@ sequenceDiagram
   C-->>D: 稳定结果
 ```
 
-canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。
+canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约与 InMemory 参考已于 S2 落地（`@byok/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）；签名/验证仍是注入式 port，与 cloud 的组合仍为目标设计。
 
-三个 domain 前缀（取一致小写形式，与 `schema: 'byok-device-proof-v1'` 自洽；第一个已在 S1 落地并冻结，后两个仍是目标设计、位元组形状待冻结）：
+三个 domain 前缀（取一致小写形式，与 `schema: 'byok-device-proof-v1'` 自洽；第一个已在 S1 落地并冻结，第二个的 canonical bytes 已在 S2 由 core 的 golden 冻结、签名/验证组合仍待落地，第三个仍是目标设计、位元组形状待冻结）：
 
 | 用途 | 前缀 | 状态 |
 | --- | --- | --- |
 | token renewal | `byok-nonce-v1\n` + nonce | **已实现（S1）**：两端同字面量（server `auth.ts` 的 `NONCE_SIGNING_DOMAIN`、client `device-keys.ts` 的 `signNonce`），无前缀签名 401 |
-| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | 目标设计 |
+| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | **契约已实现（S2）**：`@byok/core` 的 envelope + canonicalizer + golden fixture；签名/验证组合仍目标设计 |
 | record 级 attest | `byok-attest-v1\n` | 保留，若最终启用 |
 
-上表首行的字节形状已在 S1 冻结并两端同批切换（breaking，恢复路径是 forced re-pair，见 `docs/protocol.md` §6.2 与 `docs/security.md`）；另两个前缀仍是目标设计，最终字节序列以 golden fixture 冻结为准。
+上表首行的字节形状已在 S1 冻结并两端同批切换（breaking，恢复路径是 forced re-pair，见 `docs/protocol.md` §6.2 与 `docs/security.md`）；第二行的 canonical bytes 已由 S2 的 core golden 冻结；`byok-attest-v1\n` 仍是目标设计，最终字节序列以 golden fixture 冻结为准。
 
 #### 12.6.4 真相层端点（目标设计）
 
@@ -1353,7 +1359,7 @@ sequenceDiagram
 
 #### 12.7.6 套餐 entitlement、quota 与计量边界
 
-免费/付费、价格、购买流程与套餐名称属于宿主 SaaS。SDK **不硬编码 `free`/`pro`**，只消费宿主签发的数值 entitlement：
+免费/付费、价格、购买流程与套餐名称属于宿主 SaaS。SDK **不硬编码 `free`/`pro`**，只消费宿主签发的数值 entitlement。下面两个 interface 的契约（含 `bigint` 与 entitlement version CAS）与 InMemory 参考已于 S2 落地（`@byok/core` 的 `quota.ts`）；Postgres/R2 的执行面仍是目标设计：
 
 ```ts
 interface TenantStorageEntitlement {
@@ -1388,6 +1394,8 @@ interface TenantStorageUsage {
 Postgres 至少新增：`storage_entitlement`、`storage_usage`、`storage_reservation`、`object_manifest`、`object_reference`、`tenant_retention_policy`、`gc_cursor` / `cleanup_job`。
 
 #### 12.7.7 Reservation/finalize：防止并发超卖
+
+reservation/finalize 的 port 契约、无超卖语义与下表五个稳定错误码已于 S2 落地（`@byok/core` 的 `QuotaStore`，含 per-tenant hash dedup 落在 `finalizeReservation`），并由 InMemory 参考跑通 conformance 套件；R2 presign、Postgres transaction 与 orphan GC 的组合仍是目标设计。
 
 所有直接上传 R2 的 durable write 走两阶段流程：
 
@@ -1452,7 +1460,7 @@ R2 GC 使用 tombstone 加 reconcile：
 | 编号 | 语义 |
 | --- | --- |
 | T0 | 租户 breaking cut；先于 P 线任何数据落库 |
-| P0 | 建 `@byok/core` 契约层，零实现，不改既有包 |
+| P0 | 建 `@byok/core` 契约层，不改既有包；**已完成（S2，2026-08-07）**，交付含 InMemory 参考实现与 composition 参数化 conformance 套件 |
 | P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示 |
@@ -1467,7 +1475,7 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | --- | --- | --- |
 | S0 | 架构与当前缺口收口（GAP-001/002/003） | 先于 P0，不属任何 P 阶段 |
 | S1 | Tenant identity cut | T0 |
-| S2 | `@byok/core` contracts | P0 |
+| S2 | `@byok/core` contracts（已完成 2026-08-07） | P0 |
 | S3 | Cloud mailbox + 本机 SQLite journal（含磁盘水位与安全 cleanup） | P1 |
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll | P3 |
