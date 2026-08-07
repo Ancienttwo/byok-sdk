@@ -67,7 +67,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     await vi.waitFor(() => {
@@ -120,7 +120,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     await vi.waitFor(() => {
@@ -194,7 +194,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     await vi.waitFor(() => {

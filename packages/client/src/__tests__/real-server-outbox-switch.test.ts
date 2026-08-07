@@ -65,7 +65,7 @@ describe('outbound envelopes queued while long-polling are not stranded when WS 
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 

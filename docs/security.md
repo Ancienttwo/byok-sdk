@@ -81,8 +81,9 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 
 | Asset | Where it lives | Who touches it |
 |---|---|---|
-| Device Ed25519 private key | `<storeDir>/device.json` (PKCS8 PEM, 0600) | Daemon only — signs nonces at renewal time; never leaves the device (`packages/client/src/daemon/device-keys.ts`) |
-| JWT access token | `<storeDir>/device.json` | Daemon (wire auth); server verifies, never issues without a valid pairing code or signed nonce (`packages/server/src/auth.ts`) |
+| Device Ed25519 private key | `<storeDir>/device.json` (PKCS8 PEM, 0600) | Daemon only — signs **domain-separated** nonces at renewal time (`byok-nonce-v1\n` + nonce, S1); never leaves the device (`packages/client/src/daemon/device-keys.ts`) |
+| JWT access token | `<storeDir>/device.json` | Daemon (wire auth); carries the identity triple `{tenantId, productId, deviceId}` (S1). Server verifies, never issues without a valid pairing code or signed nonce, and treats the claims as **lookup keys only** — the device row is the authority (`packages/server/src/auth.ts`) |
+| Pairing code | Server-side only, minted out of band by the SaaS's own auth/device-flow UI | Server mints it already bound to `{tenantId, productId}` (S1); single-use, ~10min TTL. `PairRequest` carries neither field, so a device can never choose or influence the tenant it lands in (`packages/server/src/pairing.ts`, `docs/protocol.md` §6.1) |
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
@@ -148,6 +149,54 @@ embedded credential already authenticates, every request the runtime makes
 regardless of whether this SDK forwards the variable or the operator
 configures it some other way.
 
+## Tenant identity (S1)
+
+A device has no expressible existence outside a tenant. The chain is short and
+has exactly one entry point: the SaaS mints a pairing code already bound to a
+`{tenantId, productId}` pair, `POST /byok/pair` redeems it and writes those
+claims into the device row (both fields required — there is no optional,
+defaulted, or inferred tenant anywhere), and every access token thereafter
+carries `{tenantId, productId, deviceId}`.
+
+Three properties are load-bearing:
+
+- **Claims are lookup keys, never assertions.** A bearer token's tenant and
+  device identify which row to fetch; the row that comes back is the
+  authority. The server never trusts a claim it did not just re-resolve
+  against the registry. `conn.hello.productId` is likewise checked against the
+  device row's product, not only against static instance config, before the
+  connection is registered.
+- **The device never names its own tenant.** `PairRequest` carries no tenant
+  or product field (the wire contract is unchanged by S1), so the only path
+  by which tenant identity enters the system is a code the SaaS minted out of
+  band.
+- **No existence oracle.** Unknown device, wrong tenant, product mismatch, and
+  revoked device are indistinguishable in responses — same `401`, same body.
+  The registry is keyed by `(tenantId, deviceId)` so a wrong-tenant lookup
+  simply finds nothing, and no naked global device lookup is exported from
+  `@byok/server` at all.
+
+### Breaking change and migration (2026-08-07)
+
+S1 is a breaking cut to pairing and auth, taken in one batch:
+
+- `createPairingCode()` now requires claims; a claimless mint is a compile
+  error and a runtime reject.
+- Device rows require `tenantId`/`productId`, so a row written before S1 has
+  no valid shape.
+- Nonce signatures switch to the domain-separated `byok-nonce-v1\n` form on
+  both ends in the same batch; an unprefixed signature gets `401` with no
+  dual-mode acceptance (`docs/protocol.md` §6.2).
+
+Every existing pairing is therefore invalid. The recovery path is a **forced
+re-pair** against a freshly minted, claims-bound code — not a migration, shim,
+or grace window. This is acceptable precisely because it lands before any
+hosted durable data exists and before the packages carry a published
+compatibility contract; the same cut after either would not be affordable.
+Rolling back means reverting the tenant cut and the nonce domain separation
+together, since they were shipped as one batch. There is no persisted-state
+residue to clean up.
+
 ## Attack surfaces
 
 ### 1. Wire (daemon ↔ SaaS server)
@@ -160,7 +209,8 @@ rate limiting (`packages/server/src/rate-limiter.ts`, keyed and isolated by
 
 | Attacker position | Can | Cannot |
 |---|---|---|
-| Remote network, no valid device credentials | Attempt connections, flood a device's inbound budget (isolated per-device — see `rate-limit.test.ts`'s isolation test) | Forge a JWT (HS256, server-held random secret — `auth.ts`'s `createHmacTokenSigner`); forge an Ed25519 device signature; replay a pairing code (single-use, ~10min TTL — `pairing.ts`) or a challenge nonce (single-use, ~5min TTL, bound to `deviceId` — `auth.ts`'s `NonceStore`) |
+| Remote network, no valid device credentials | Attempt connections, flood a device's inbound budget (isolated per-device — see `rate-limit.test.ts`'s isolation test) | Forge a JWT (HS256, server-held random secret — `auth.ts`'s `createHmacTokenSigner`); forge an Ed25519 device signature; reuse a device signature produced for a different purpose (S1: nonce signatures are domain-separated under `byok-nonce-v1\n`, and an unprefixed signature is rejected — `auth.ts`'s `verifyNonceSignature`); replay a pairing code (single-use, ~10min TTL — `pairing.ts`) or a challenge nonce (single-use, ~5min TTL, bound to `deviceId` — `auth.ts`'s `NonceStore`) |
+| Holder of one tenant's valid device credentials | Everything that tenant's own devices can do | Reach another tenant's device on any surface (S1: `DeviceRegistry` is keyed by `(tenantId, deviceId)`, so a mismatched tenant finds nothing rather than finding a row it then fails a check against); revoke or enumerate another tenant's devices (`devices.revoke(tenantId, deviceId)` — no naked deviceId lookup is exported); learn whether another tenant's device exists — unknown device, wrong tenant, product mismatch, and revoked all return the same `401` with the same body, so there is no existence oracle (`auth.ts`'s `authenticateBearer`) |
 | Malicious or compromised SaaS | Offer any task/policy it wants; send `task.approve`/`task.reject`/`task.cancel` for tasks it itself offered (this is the wire's legitimate approve channel — see the approval-path section on why this isn't a privilege escalation) | Read the device's private key or forge its signature; force an adapter to run with a looser effective policy than offered (fail-closed mapping — `docs/protocol.md` §11.1); reach the daemon's local control socket or audit log (no network path to a Unix socket/named pipe) |
 | Same-user local process | Read `device.json`/the JWT directly off disk (same-user files) | — |
 | Other local user | — | Read `device.json` (0600), or anything else under `storeDir` (0700) |

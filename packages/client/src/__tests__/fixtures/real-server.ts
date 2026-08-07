@@ -4,6 +4,7 @@ import {
   createByokServer,
   type ByokServer,
   type CreateByokServerOptions,
+  type PairingCodeInfo,
   type ServerTaskEvent,
   type TaskHandle,
 } from '@byok/server';
@@ -29,10 +30,26 @@ import {
  */
 const LOOPBACK = '127.0.0.1';
 
+/**
+ * S1: the tenant every device paired through these fixtures lands in. The
+ * client-side tests are not about isolation — they are about real
+ * client<->server behavior — so they all share one tenant; what matters here
+ * is that a pairing code cannot be minted without naming one at all.
+ */
+export const TEST_TENANT_ID = 'tenant-test';
+
 export interface RealServerHandle {
   byok: ByokServer;
   httpServer: HttpServer;
   url: string;
+  /**
+   * Mint a pairing code carrying {@link TEST_TENANT_ID} and the SAME
+   * `productId` this server instance was started with (S1). Bound to the
+   * handle rather than left to each call site so a test can't accidentally
+   * pair a device into a product its own `conn.hello` then contradicts — the
+   * server's hello gate compares the announced product against the device row.
+   */
+  createPairingCode(): PairingCodeInfo;
   close(): Promise<void>;
 }
 
@@ -63,6 +80,8 @@ export async function startRealServer(opts: CreateByokServerOptions): Promise<Re
         byok,
         httpServer: httpServer as HttpServer,
         url: `http://${LOOPBACK}:${info.port}`,
+        createPairingCode: () =>
+          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
         close: () => closeServer(httpServer as HttpServer),
       });
     });
@@ -86,6 +105,8 @@ export async function startRealServerWithoutWebSocket(opts: CreateByokServerOpti
         byok,
         httpServer: httpServer as HttpServer,
         url: `http://${LOOPBACK}:${info.port}`,
+        createPairingCode: () =>
+          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
         close: () => closeServer(httpServer as HttpServer),
       });
     });
@@ -127,6 +148,8 @@ export async function startRealServerWithDeferredWebSocket(
         byok,
         httpServer: httpServer as HttpServer,
         url: `http://${LOOPBACK}:${info.port}`,
+        createPairingCode: () =>
+          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
         close: () => closeServer(httpServer as HttpServer),
         enableWebSocket: () => byok.attachWebSocket(httpServer as HttpServer),
       });

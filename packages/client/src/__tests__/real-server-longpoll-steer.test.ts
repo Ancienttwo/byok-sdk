@@ -64,7 +64,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 
@@ -131,7 +131,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 

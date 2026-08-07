@@ -1765,11 +1765,11 @@ export class ConnectionHub {
   // ---------------------------------------------------------------------
 
   listMachines(): MachineInfo[] {
-    return this.devices.listIds().map((deviceId) => {
+    return this.devices.list().map(({ deviceId, deviceName }) => {
       const conn = this.connections.get(deviceId);
       return {
         deviceId,
-        deviceName: this.devices.getName(deviceId) ?? '(unknown)',
+        deviceName,
         connected: conn?.connected ?? false,
         lastSeen: conn?.lastSeen,
         runtimes: conn?.runtimes,

@@ -61,7 +61,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 
@@ -153,7 +153,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
 
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const pairing = real.byok.pairing.createPairingCode();
+      const pairing = real.createPairingCode();
       const record = await daemon.pair(pairing.code);
       await daemon.start();
 

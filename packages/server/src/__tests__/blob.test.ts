@@ -2,7 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createByokServer } from '../index';
-import { pairFakeDaemon, startServer, stopServer } from './test-support';
+import { pairFakeDaemon, startServer, stopServer, testPairingClaims } from './test-support';
 
 const PRODUCT_ID = 'acme';
 
@@ -23,7 +23,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const content = Buffer.from('hello blob world');
@@ -68,7 +68,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const content = Buffer.from('some content');
@@ -96,7 +96,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const content = Buffer.from('never uploaded');
@@ -117,7 +117,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const declared = Buffer.from('expected-content'); // 16 bytes
@@ -144,7 +144,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const declared = Buffer.from('expected-content');
@@ -163,7 +163,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, maxBlobSizeBytes: 1024 });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const createRes = await fetch(`${started.baseUrl}/byok/blobs`, {
@@ -182,7 +182,7 @@ describe('blob flows (§7)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
     const validHash = sha256Hex(Buffer.from('cap-probe'));
 

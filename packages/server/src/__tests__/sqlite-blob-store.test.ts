@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { createByokServer } from '../index';
 import { loadOrCreateSigningSecret, SCHEMA, SqliteBlobStore } from '../sqlite-blob-store';
 import { isSqliteAvailable, openSqliteDatabase } from '../sqlite-support';
-import { pairFakeDaemon, startServer, stopServer } from './test-support';
+import { pairFakeDaemon, startServer, stopServer, testPairingClaims } from './test-support';
 
 // node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
 // until later in the 22.x line — so "Node >= 22.5" alone doesn't mean the
@@ -206,7 +206,7 @@ describe.skipIf(!sqliteReady)('createByokServer({ blobStore: new SqliteBlobStore
     const storeA = new SqliteBlobStore({ path: dbPath });
     const byokA = createByokServer({ productId: 'acme', blobStore: storeA });
     const startedA = await startServer(byokA);
-    const { code } = byokA.pairing.createPairingCode();
+    const { code } = byokA.pairing.createPairingCode(testPairingClaims('acme'));
     const { accessToken } = await pairFakeDaemon(startedA.baseUrl, code);
 
     const createRes = await fetch(`${startedA.baseUrl}/byok/blobs`, {

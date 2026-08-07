@@ -41,7 +41,7 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
       [adapterA],
     );
 
-    const firstPairing = real.byok.pairing.createPairingCode();
+    const firstPairing = real.createPairingCode();
     const recordA = await daemon.pair(firstPairing.code);
     await daemon.start();
     expect(daemon.status().connected).toBe(true);
@@ -59,7 +59,7 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
     // Re-pair the SAME daemon instance, same storeDir. The real server mints
     // a brand-new deviceId here regardless of the (reused) device keypair —
     // confirmed below, not assumed.
-    const secondPairing = real.byok.pairing.createPairingCode();
+    const secondPairing = real.createPairingCode();
     const recordB = await daemon.pair(secondPairing.code);
     expect(recordB.deviceId).not.toBe(recordA.deviceId);
 

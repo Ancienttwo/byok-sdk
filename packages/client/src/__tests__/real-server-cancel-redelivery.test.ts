@@ -58,7 +58,7 @@ describe('a task.cancel sent while disconnected is redelivered on reconnect and 
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     await daemon.pair(pairing.code);
     await daemon.start();
     expect(daemon.status().connected).toBe(true);

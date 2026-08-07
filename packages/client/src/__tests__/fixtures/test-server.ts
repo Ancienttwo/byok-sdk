@@ -10,6 +10,7 @@ import {
   PROTOCOL_VERSION,
   type Envelope,
 } from '@byok/protocol';
+import { NONCE_SIGNING_DOMAIN } from '../../daemon/device-keys';
 
 interface Waiter {
   predicate: (envelope: Envelope) => boolean;
@@ -385,7 +386,16 @@ export class TestServer {
   private verifySignature(device: DeviceAuthState, nonce: string, signatureBase64Url: string): boolean {
     try {
       const publicKey = createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: device.publicKeyBase64Url }, format: 'jwk' });
-      return edVerify(null, Buffer.from(nonce, 'utf8'), publicKey, Buffer.from(signatureBase64Url, 'base64url'));
+      // S1 (GAP-004): domain-separated, exactly like the real server — this
+      // stub enforces the same contract rather than accepting whatever the
+      // daemon happens to send, so a client that dropped the prefix fails
+      // here too instead of passing against a lenient fake.
+      return edVerify(
+        null,
+        Buffer.from(NONCE_SIGNING_DOMAIN + nonce, 'utf8'),
+        publicKey,
+        Buffer.from(signatureBase64Url, 'base64url'),
+      );
     } catch {
       return false;
     }

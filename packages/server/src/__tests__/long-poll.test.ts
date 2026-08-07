@@ -3,7 +3,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer } from '../index';
-import { connectFakeDaemon, connectFakeDaemonWs, pairFakeDaemon, startServer, stopServer, waitForTaskEvent } from './test-support';
+import {
+  connectFakeDaemon,
+  connectFakeDaemonWs,
+  pairFakeDaemon,
+  startServer,
+  stopServer,
+  testPairingClaims,
+  waitForTaskEvent,
+} from './test-support';
 
 const PRODUCT_ID = 'acme';
 /** Short injected hold so the empty-timeout case doesn't take the real ~50s default. */
@@ -29,7 +37,7 @@ describe('long-poll fallback (§8)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     // Start the poll before there's anything to deliver, then confirm the
@@ -57,7 +65,7 @@ describe('long-poll fallback (§8)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const startedAt = Date.now();
@@ -77,7 +85,7 @@ describe('long-poll fallback (§8)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
 
     const wsClosed = new Promise<{ code: number }>((resolve) => {
@@ -99,7 +107,7 @@ describe('long-poll fallback (§8)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 10_000 }); // deliberately long — proves WS reconnect wins the race, not the hold timing out
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const pollPromise = fetch(`${started.baseUrl}/byok/events?cursor=0`, {
@@ -158,7 +166,7 @@ describe('POST /byok/messages (§8, finding F6)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     // A device only counts as "connected" (and thus dispatchable) once it
@@ -203,7 +211,7 @@ describe('POST /byok/messages (§8, finding F6)', () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     const res = await fetch(`${started.baseUrl}/byok/messages`, {

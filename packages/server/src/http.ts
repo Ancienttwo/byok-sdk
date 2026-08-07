@@ -13,11 +13,11 @@ import {
   type PairResponse,
   type TokenResponse,
 } from '@byok/protocol';
-import { authenticateBearer, mintAccessToken, verifyEd25519Signature, type AuthDeps, type NonceStore } from './auth';
+import { authenticateBearer, mintAccessToken, verifyNonceSignature, type AuthDeps, type NonceStore } from './auth';
 import type { BlobStore } from './blob-store';
 import type { ConnectionHub } from './hub';
 import { generateDeviceId } from './ids';
-import { PairingCodeInvalidError, type PairingManager } from './pairing';
+import { PairingCodeInvalidError, type PairingCodeClaims, type PairingManager } from './pairing';
 
 export interface HttpDeps extends AuthDeps {
   pairing: PairingManager;
@@ -79,8 +79,15 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     }
     const { pairingCode, deviceName, devicePublicKey } = parsed.data;
 
+    // S1: the redeemed code's claims are the ONLY source of the device's
+    // tenant/product — `PairRequest` carries neither, so a device can never
+    // choose where it lands. Redeem and registration happen in one
+    // synchronous step, and the code's single-use semantics (`pairing.ts`)
+    // are what make that step exclusive: a second redeem throws above and
+    // never reaches the row write below.
+    let claims: PairingCodeClaims;
     try {
-      deps.pairing.redeemPairingCode(pairingCode);
+      claims = deps.pairing.redeemPairingCode(pairingCode);
     } catch (err) {
       if (err instanceof PairingCodeInvalidError) {
         return c.json({ error: err.message }, 401);
@@ -89,8 +96,18 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     }
 
     const deviceId = generateDeviceId();
-    deps.devices.register(deviceId, deviceName, devicePublicKey);
-    const { accessToken, expiresAt } = await mintAccessToken(deps.tokenSigner, deviceId);
+    deps.devices.register({
+      tenantId: claims.tenantId,
+      productId: claims.productId,
+      deviceId,
+      deviceName,
+      devicePublicKey,
+    });
+    const { accessToken, expiresAt } = await mintAccessToken(deps.tokenSigner, {
+      deviceId,
+      tenantId: claims.tenantId,
+      productId: claims.productId,
+    });
 
     const response: PairResponse = { deviceId, accessToken, refreshHint: expiresAt };
     return c.json(response, 200);
@@ -101,7 +118,13 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     if (!parsed.success) return c.json({ error: 'deviceId is required' }, 400);
     const { deviceId } = parsed.data;
 
-    if (deps.devices.isRevokedOrUnknown(deviceId)) {
+    // Pre-tenant by construction: `ChallengeRequest` is the pinned wire
+    // contract and carries only a deviceId, so the row is what tells this
+    // server which tenant the device belongs to (see
+    // `DeviceRegistry.resolveByDeviceId`). Unknown and revoked answer
+    // identically — no existence oracle.
+    const device = deps.devices.resolveByDeviceId(deviceId);
+    if (!device || device.revoked) {
       return c.json({ error: 'unknown or revoked device' }, 401);
     }
 
@@ -115,21 +138,31 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     if (!parsed.success) return c.json({ error: 'deviceId, nonce, and signature are required' }, 400);
     const { deviceId, nonce, signature } = parsed.data;
 
-    const device = deps.devices.get(deviceId);
+    // Same pre-tenant resolution as `/byok/challenge` above: key possession
+    // is the credential here, and the row supplies the tenant/product the
+    // renewed token gets bound to.
+    const device = deps.devices.resolveByDeviceId(deviceId);
     if (!device || device.revoked) {
       return c.json({ error: 'unknown or revoked device' }, 401);
     }
     if (!deps.nonces.validate(deviceId, nonce)) {
       return c.json({ error: 'invalid, expired, or already-used nonce' }, 401);
     }
-    if (!verifyEd25519Signature(device.devicePublicKey, nonce, signature)) {
+    // S1 (GAP-004): domain-separated — the device signs `byok-nonce-v1\n` +
+    // nonce (`auth.ts`'s `NONCE_SIGNING_DOMAIN`). A raw, unprefixed signature
+    // over the bare nonce is invalid here; there is no second accepted form.
+    if (!verifyNonceSignature(device.devicePublicKey, nonce, signature)) {
       return c.json({ error: 'invalid signature' }, 401);
     }
     // Only burn the nonce on a fully-verified success (§6.2) — an invalid
     // signature attempt doesn't consume the legitimate device's nonce.
     deps.nonces.markUsed(nonce);
 
-    const { accessToken, expiresAt } = await mintAccessToken(deps.tokenSigner, deviceId);
+    const { accessToken, expiresAt } = await mintAccessToken(deps.tokenSigner, {
+      deviceId: device.deviceId,
+      tenantId: device.tenantId,
+      productId: device.productId,
+    });
     const response: TokenResponse = { accessToken, expiresAt };
     return c.json(response, 200);
   });
@@ -149,8 +182,8 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // -------------------------------------------------------------------
 
   app.post('/byok/blobs', async (c) => {
-    const deviceId = await authenticateBearer(c.req.header('authorization'), deps);
-    if (!deviceId) return c.json({ error: 'unauthorized' }, 401);
+    const principal = await authenticateBearer(c.req.header('authorization'), deps);
+    if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
     const parsed = CreateBlobRequestSchema.safeParse(await readJsonBody(c));
     if (!parsed.success) return c.json({ error: 'size, contentType, and contentHash are required' }, 400);
@@ -164,8 +197,8 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   });
 
   app.get('/byok/blobs/:id/url', async (c) => {
-    const deviceId = await authenticateBearer(c.req.header('authorization'), deps);
-    if (!deviceId) return c.json({ error: 'unauthorized' }, 401);
+    const principal = await authenticateBearer(c.req.header('authorization'), deps);
+    if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
     const downloadUrl = await deps.blobStore.getDownloadUrl(c.req.param('id'));
     if (!downloadUrl) return c.json({ error: 'blob not found' }, 404);
@@ -204,8 +237,8 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // -------------------------------------------------------------------
 
   app.get('/byok/events', async (c) => {
-    const deviceId = await authenticateBearer(c.req.header('authorization'), deps);
-    if (!deviceId) return c.json({ error: 'unauthorized' }, 401);
+    const principal = await authenticateBearer(c.req.header('authorization'), deps);
+    if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
     const cursorRaw = c.req.query('cursor');
     let cursor = 0;
@@ -215,7 +248,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
       cursor = parsedCursor;
     }
 
-    const result = await deps.hub.pollEvents(deviceId, cursor, deps.longPollHoldMs);
+    const result = await deps.hub.pollEvents(principal.deviceId, cursor, deps.longPollHoldMs);
     const response: EventsPollResponse = result;
     return c.json(response, 200);
   });
@@ -253,8 +286,8 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // -------------------------------------------------------------------
 
   app.post('/byok/messages', async (c) => {
-    const deviceId = await authenticateBearer(c.req.header('authorization'), deps);
-    if (!deviceId) return c.json({ error: 'unauthorized' }, 401);
+    const principal = await authenticateBearer(c.req.header('authorization'), deps);
+    if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
     const parsed = MessagesSendRequestSchema.safeParse(await readJsonBody(c));
     if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
@@ -262,7 +295,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     let accepted = 0;
     let rejected = 0;
     for (const envelope of parsed.data.messages) {
-      const result = deps.hub.handleInbound(deviceId, envelope);
+      const result = deps.hub.handleInbound(principal.deviceId, envelope);
       if (result === 'rate_limited') {
         return c.json({ error: 'rate limit exceeded' }, 429);
       }

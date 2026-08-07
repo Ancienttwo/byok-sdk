@@ -53,7 +53,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 
