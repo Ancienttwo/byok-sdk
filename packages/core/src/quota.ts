@@ -36,6 +36,7 @@ export interface TenantStorageEntitlement {
   maxInlineBytes: bigint;
   mailboxLimitBytes: bigint;
   retentionPolicyId: string;
+  /** Canonical ISO-8601 UTC instant — see {@link TenantStorageEntitlementInput}. */
   downgradeGraceUntil?: string;
 }
 
@@ -62,6 +63,15 @@ export interface TenantStorageEntitlementInput {
   readonly maxInlineBytes: bigint;
   readonly mailboxLimitBytes: bigint;
   readonly retentionPolicyId: string;
+  /**
+   * Deadline after which an over-limit tenant is suspended rather than blocked.
+   *
+   * Must be a **canonical ISO-8601 UTC instant** (`YYYY-MM-DDTHH:mm:ss.sssZ`);
+   * anything else is rejected with `timestamp_not_canonical`. The in-memory
+   * composition compares this deadline as a string and a SQL composition
+   * compares it as a `timestamptz`, and those two agree only on the canonical
+   * form — see `time.ts`.
+   */
   readonly downgradeGraceUntil?: string;
 }
 
@@ -173,7 +183,11 @@ export interface MailboxUsageDeltaInput {
  */
 export interface QuotaStore {
   readEntitlement(tenant: TenantId): Promise<TenantStorageEntitlement | undefined>;
-  /** Version CAS: a write at or below the stored version is rejected with the current row. */
+  /**
+   * Version CAS: a write at or below the stored version is rejected with the
+   * current row. Raises `timestamp_not_canonical` when `downgradeGraceUntil` is
+   * not a canonical ISO-8601 UTC instant.
+   */
   writeEntitlement(
     tenant: TenantId,
     input: TenantStorageEntitlementInput,

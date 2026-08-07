@@ -91,7 +91,19 @@ export class InMemoryBoardStore implements BoardStore {
 
     if (item.assignee !== undefined) {
       if (item.assignee.holderId === input.holderId) {
-        // The same holder retrying is not a second winner.
+        // The same holder retrying is not a second winner. But an *explicit*
+        // expectedStatus is a full CAS by contract, and skipping it here would
+        // let the holder's retry succeed against a status it no longer believes
+        // in — a CAS in name only. The default is not applied on this path: a
+        // retry of a successful claim legitimately observes `in_progress`.
+        if (input.expectedStatus !== undefined && item.status !== input.expectedStatus) {
+          throw new CoreConflictError(
+            'board_status_conflict',
+            `Board item ${input.itemId} is ${item.status}, not ${input.expectedStatus}.`,
+            item,
+            this.#now(),
+          );
+        }
         return item;
       }
       throw new CoreConflictError(

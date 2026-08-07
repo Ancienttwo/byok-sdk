@@ -128,7 +128,14 @@ export interface ObjectReferenceInput {
 
 export interface ObjectListQuery {
   readonly state?: ObjectState;
-  /** Only rows whose `deletePendingAt` is at or before this instant. */
+  /**
+   * Only rows whose `deletePendingAt` is at or before this instant.
+   *
+   * Must be a **canonical ISO-8601 UTC instant** (`YYYY-MM-DDTHH:mm:ss.sssZ`);
+   * anything else is rejected with `timestamp_not_canonical`, because the
+   * in-memory composition compares it as a string and a SQL composition
+   * compares it as a `timestamptz` — see `time.ts`.
+   */
   readonly deletePendingBefore?: string;
   readonly limit?: number;
 }
@@ -138,7 +145,8 @@ export interface ObjectListQuery {
  *
  * Raises: `object_not_found`, `object_state_invalid`,
  * `storage_integrity_mismatch` (commit observed size/type disagreeing with the
- * declared manifest row).
+ * declared manifest row), `timestamp_not_canonical` (a `list` query whose
+ * `deletePendingBefore` is not a canonical ISO-8601 UTC instant).
  */
 export interface ObjectStore {
   /** Creates or returns the `pending` row for `hash`. Idempotent per (tenant, hash). */

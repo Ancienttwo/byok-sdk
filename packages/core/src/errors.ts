@@ -34,6 +34,9 @@ export const CORE_ERROR_CODES = {
   tenant_id_invalid: 'tenant_id_invalid',
   content_hash_invalid: 'content_hash_invalid',
 
+  // caller-supplied instants (see `time.ts`)
+  timestamp_not_canonical: 'timestamp_not_canonical',
+
   // capability declaration (ADR-010)
   capability_declaration_invalid: 'capability_declaration_invalid',
   capability_unavailable: 'capability_unavailable',

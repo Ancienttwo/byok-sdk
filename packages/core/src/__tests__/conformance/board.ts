@@ -81,6 +81,41 @@ export function runBoardConformance(factory: CoreCompositionFactory): void {
       });
     });
 
+    it('still enforces an explicit expectedStatus on the holder re-claim path', async () => {
+      // Without this, "supplying expectedStatus makes the claim a full CAS" is
+      // true only for the first claim: the holder's retry would short-circuit
+      // past the comparison and confirm a status it no longer believes in.
+      await withComposition(factory, async ({ stores }) => {
+        await stores.board.create(TENANT_A, newItem('item-1'));
+        const claimed = await stores.board.claim(TENANT_A, {
+          itemId: 'item-1',
+          holderId: 'device-1',
+        });
+        expect(claimed.status).toBe('in_progress');
+
+        const stale = await captureError(
+          stores.board.claim(TENANT_A, {
+            itemId: 'item-1',
+            holderId: 'device-1',
+            expectedStatus: 'todo',
+          }),
+        );
+        expect(isCoreConflictError(stale, 'board_status_conflict')).toBe(true);
+        expect((stale as CoreConflictError<BoardItem>).current.status).toBe('in_progress');
+        expect((stale as CoreConflictError<BoardItem>).current.assignee?.holderId).toBe(
+          'device-1',
+        );
+
+        // A matching expectation is still the idempotent retry.
+        const again = await stores.board.claim(TENANT_A, {
+          itemId: 'item-1',
+          holderId: 'device-1',
+          expectedStatus: 'in_progress',
+        });
+        expect(again.assignee?.heldSince).toBe(claimed.assignee?.heldSince);
+      });
+    });
+
     it('releases only to the holder and returns the item to todo', async () => {
       await withComposition(factory, async ({ stores }) => {
         await stores.board.create(TENANT_A, newItem('item-1'));

@@ -38,6 +38,13 @@ export type {
 export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors';
 export type { CoreErrorCode } from './errors';
 
+// Canonical instants (the format every caller-supplied timestamp must be in)
+export {
+  CANONICAL_TIMESTAMP_PATTERN,
+  assertCanonicalTimestamp,
+  isCanonicalTimestamp,
+} from './time';
+
 // Mailbox (§12.7.3)
 export { MAILBOX_MESSAGE_STATES } from './mailbox';
 export type {

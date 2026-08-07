@@ -82,6 +82,15 @@ export interface MailboxCursorState {
   readonly updatedAt: string;
 }
 
+/**
+ * Retention cutoffs.
+ *
+ * Both instants must be **canonical ISO-8601 UTC** (`YYYY-MM-DDTHH:mm:ss.sssZ`);
+ * anything else is rejected with `timestamp_not_canonical`. A retention sweep
+ * deletes rows, so an offset-bearing string that a string comparison and a SQL
+ * `timestamptz` comparison read differently is the worst place to guess — see
+ * `time.ts`.
+ */
 export interface MailboxRetentionInput {
   readonly deviceId?: string;
   /** Acked rows appended before this instant are deleted. */
@@ -100,7 +109,9 @@ export interface MailboxRetentionResult {
  * Mailbox port. Tenant-first, async.
  *
  * Raises: `mailbox_cursor_regression` (an ack that moves the cursor backwards,
- * which would silently re-deliver already-journaled work).
+ * which would silently re-deliver already-journaled work),
+ * `timestamp_not_canonical` (a retention cutoff that is not a canonical
+ * ISO-8601 UTC instant).
  */
 export interface MailboxStore {
   append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;

@@ -20,6 +20,7 @@ import type {
 } from '../mailbox';
 import type { Clock } from '../stores';
 import { tenantKey, type TenantId } from '../tenant';
+import { assertCanonicalTimestamp } from '../time';
 
 const DEFAULT_READ_LIMIT = 50;
 
@@ -117,6 +118,12 @@ export class InMemoryMailboxStore implements MailboxStore {
     tenant: TenantId,
     input: MailboxRetentionInput,
   ): Promise<MailboxRetentionResult> {
+    // Both cutoffs are compared against `appendedAt` as strings; the canonical
+    // form is what makes that a time comparison. Validate before the sweep so a
+    // malformed cutoff deletes nothing rather than a wrong prefix of history.
+    assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
+    assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
+
     let deletedCount = 0;
     let expiredCount = 0;
     let releasedBytes = 0n;

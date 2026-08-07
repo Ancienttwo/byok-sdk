@@ -21,6 +21,7 @@ import {
 import { ByokCoreError } from '../errors';
 import type { Clock } from '../stores';
 import { tenantKey, type TenantId } from '../tenant';
+import { assertCanonicalTimestamp } from '../time';
 
 const DEFAULT_LIST_LIMIT = 100;
 
@@ -79,6 +80,12 @@ export class InMemoryObjectStore implements ObjectStore {
     tenant: TenantId,
     query: ObjectListQuery,
   ): Promise<readonly ObjectManifestEntry[]> {
+    // The cutoff is compared against `deletePendingAt` as a string below, which
+    // only equals a time comparison for the canonical form. A GC sweep reading
+    // a mis-parsed cutoff would either miss tombstones or take live ones.
+    if (query.deletePendingBefore !== undefined) {
+      assertCanonicalTimestamp(query.deletePendingBefore, 'deletePendingBefore');
+    }
     const prefix = tenantKey(tenant, '');
     const matches: ObjectManifestEntry[] = [];
     for (const [key, entry] of this.#manifest.entries()) {

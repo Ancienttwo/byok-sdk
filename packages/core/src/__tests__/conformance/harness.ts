@@ -22,6 +22,7 @@ import { runPresenceConformance } from './presence';
 import { runObjectConformance } from './objects';
 import { runQuotaConformance } from './quota';
 import { runTenantIsolationConformance } from './tenant-isolation';
+import { runTimestampConformance } from './timestamps';
 import { runPortInventoryConformance } from './port-inventory';
 
 /** One live composition under test. */
@@ -77,6 +78,7 @@ export function runCoreConformance(name: string, factory: CoreCompositionFactory
     runPresenceConformance(factory);
     runObjectConformance(factory);
     runQuotaConformance(factory);
+    runTimestampConformance(factory);
     runTenantIsolationConformance(factory);
   });
 }

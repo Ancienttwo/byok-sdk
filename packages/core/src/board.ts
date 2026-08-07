@@ -98,6 +98,11 @@ export interface BoardClaimInput {
   /**
    * Status the claimer believes the item is in. Defaults to `todo`; supplying
    * it explicitly makes the claim a full CAS rather than an assignee-only one.
+   *
+   * The CAS holds on the idempotent path too: a re-claim by the current holder
+   * that supplies a stale `expectedStatus` fails with `board_status_conflict`
+   * and the current item. The default is *not* applied there — a retry of a
+   * successful claim legitimately observes `in_progress`.
    */
   readonly expectedStatus?: BoardStatus;
 }

@@ -31,6 +31,7 @@ import type {
 } from '../quota';
 import type { Clock } from '../stores';
 import { tenantKey, type TenantId } from '../tenant';
+import { assertCanonicalTimestamp } from '../time';
 
 /** Warning threshold from §12.7.8: 80% of the hard limit. */
 const WARNING_NUMERATOR = 80n;
@@ -60,6 +61,12 @@ export class InMemoryQuotaStore implements QuotaStore {
     tenant: TenantId,
     input: TenantStorageEntitlementInput,
   ): Promise<TenantStorageEntitlement> {
+    // Validated before the version CAS: an unusable deadline is a bad write
+    // regardless of which version wins, and `readStatus` compares this field as
+    // a string (canonical form is what makes that equal a time comparison).
+    if (input.downgradeGraceUntil !== undefined) {
+      assertCanonicalTimestamp(input.downgradeGraceUntil, 'downgradeGraceUntil');
+    }
     const existing = this.#entitlements.get(tenant);
     if (existing !== undefined && input.version <= existing.version) {
       throw new CoreConflictError(
