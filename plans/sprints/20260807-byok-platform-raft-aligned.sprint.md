@@ -753,8 +753,8 @@ Object 基本真相（按 D-8 从 S4B 前移）：
 
 ### S4A.5 Acceptance criteria
 
-- [ ] migrations pass order check；
-- [ ] fresh install + migrate-up；
+- [x] migrations pass order check（S4A-a，PR #23 merge `5f399f1`；CI `Migration ordering check` 兩腿實測 `[deploy-sql] OK`）；
+- [x] fresh install + migrate-up（S4A-a，compose 無 volume——CI dataplane job 每輪從空庫 migrate-up）；
 - [ ] rollback strategy documented；destructive down migration not required；
 - [ ] InMemory 与 Postgres + R2 两个 composition 跑同一份 domain/object contract suite；
 - [ ] **I4 的 SQL 侧补齐**（S3 延后项，见 D-2）；
