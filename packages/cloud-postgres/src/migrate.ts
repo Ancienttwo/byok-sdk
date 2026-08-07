@@ -216,7 +216,14 @@ export async function migrate(pool: Pool, directory: string): Promise<MigrationR
           );
           await client.query('COMMIT');
         } catch (error) {
-          await client.query('ROLLBACK');
+          // The rollback is best-effort on purpose. When the failure was a lost
+          // connection, `ROLLBACK` rejects too — and an unguarded await here
+          // would replace the migration error with a transport error, hiding
+          // the one fact an operator needs: which file failed and why. The
+          // server discards an abandoned transaction on disconnect anyway, so
+          // swallowing this rejection loses nothing and rethrowing the original
+          // keeps the diagnosis intact.
+          await client.query('ROLLBACK').catch(() => {});
           throw error;
         }
         applied.push(file.version);
