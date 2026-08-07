@@ -151,6 +151,6 @@ Same substrate as S4A-a: compose up → migrate runner applies `0001` (checksumm
 - [x] `deploy/sql/0002_core_domain.sql`: eleven tables per §5 (TEXT instants, BIGINT sizes, tenant-first keys); 0001 untouched; `check:deploy-sql` green
 - [x] Seven core port Postgres implementations (single-statement CAS; quota aggregate-guarded reserve; mailbox monotonic ack + mark-not-delete retirement)
 - [x] Postgres core composition entry green: `runCoreConformance('postgres', factory)` 56/56, conformance package zero-diff
-- [ ] `tests/sql/control_plane_invariants.sql` (catalog DO-blocks + migration reference header) + executing test; `check:deploy-sql` still green in reference mode
+- [x] `tests/sql/control_plane_invariants.sql` (catalog DO-blocks + migration reference header) + executing test; `check:deploy-sql` still green in reference mode
 - [ ] `deploy/runbooks/mailbox-retention.md`: windows, host-driven invocation, §12.7.5 mapping, ring-vs-SQL clause, noteSkippedSeq evidence gap
 - [ ] Full gates green incl. frozen-surface zero-diff machine check and cloud suite regression
