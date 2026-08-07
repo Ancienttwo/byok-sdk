@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-07T13:14:43+0800 -->
+<!-- updated_at: 2026-08-07T14:20:02+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-07T13:14:43+0800
+> **Updated At**: 2026-08-07T14:20:02+0800
 > **Source Branch**: main
-> **Source Commit**: 3b01d0e
+> **Source Commit**: c334467
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -40,7 +40,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: C1 Card closure: read the legal closed status from the repo-harness architecture-queue script, edit `docs/architecture/requests/root.md` with that status and a dated adjudication note (drift = K0 package creation a3ab9a9; boundary already canonical in §7).
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: P1 Manifest metadata: add `publishConfig.access: "public"`, `repository` (with the per-package `directory`), `bugs`, and `homepage` to `packages/{keys,protocol,server,client}/package.json`; bump `packages/keys` `version` to `0.1.0` and add `"prepublishOnly": "pnpm run build"` to its scripts, leaving the other three at `0.0.1`.
 
 ## Checks
 
@@ -51,17 +51,17 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 11 changed/untracked path(s)
 
 ```
- D plans/plan-20260807-1144-architecture-root-card-closeout.md
- D tasks/contracts/20260807-1144-architecture-root-card-closeout.contract.md
- D tasks/notes/20260807-1144-architecture-root-card-closeout.notes.md
- D tasks/reviews/20260807-1144-architecture-root-card-closeout.review.md
+ D plans/plan-20260807-1331-k4-publish-prep.md
+ D tasks/contracts/20260807-1331-k4-publish-prep.contract.md
+ D tasks/notes/20260807-1331-k4-publish-prep.notes.md
+ D tasks/reviews/20260807-1331-k4-publish-prep.review.md
  M tasks/todos.md
 ?? docs/researches/k4-aip-swap-dryrun.md
-?? plans/archive/plan-20260807-1144-architecture-root-card-closeout.md
-?? tasks/archive/contract-20260807-1314-architecture-root-card-closeout.md
-?? tasks/archive/notes-20260807-1314-architecture-root-card-closeout.md
-?? tasks/archive/review-20260807-1314-architecture-root-card-closeout.md
-?? tasks/archive/todo-20260807-1314-architecture-root-card-closeout.md
+?? plans/archive/plan-20260807-1331-k4-publish-prep.md
+?? tasks/archive/contract-20260807-1420-k4-publish-prep.md
+?? tasks/archive/notes-20260807-1420-k4-publish-prep.md
+?? tasks/archive/review-20260807-1420-k4-publish-prep.md
+?? tasks/archive/todo-20260807-1420-k4-publish-prep.md
 ```
 
 ## Source Artifacts

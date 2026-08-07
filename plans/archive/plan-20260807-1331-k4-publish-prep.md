@@ -1,6 +1,6 @@
 # Plan: K4 publish prep for @byok/keys
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260807-1331
 > **Slug**: k4-publish-prep
 > **Artifact Level**: work-package

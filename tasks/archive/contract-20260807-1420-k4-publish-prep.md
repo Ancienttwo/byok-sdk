@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-07 14:20
+> **Related Plan**: plans/archive/plan-20260807-1331-k4-publish-prep.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260807-1420
+
 # Task Contract: k4-publish-prep
 
 > **Status**: Fulfilled
