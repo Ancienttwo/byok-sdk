@@ -33,7 +33,7 @@
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Compose: `docker compose -f docker-compose.test.yml up -d --wait`，Postgres/MinIO healthy。
-- Hard dataplane package: cloud-postgres 10 files / 176 tests passed；cleanup/object/constraints focused matrix 42 tests passed。
+- Hard dataplane package: cloud-postgres 10 files / 180 tests passed；post-review cleanup/quota/object focused matrix 27 tests passed。
 - Full workspace: core 112、keys 330、protocol 189、cloud 91、server 217、client 935、conformance 111、cloud-postgres 176，全部 passed。
 - Fresh commands: hard-env `pnpm -r run typecheck`、`test`、`build` passed；`pnpm run check:deploy-sql` 与 `repo-harness run check-task-workflow --strict` passed。
 - Migration boundary: `0001`/`0002` 未改；`0003` 被 catalog invariant 声明，fresh schema 21 tenant-owned tables；无 `hash_verified`/checksum/read-back path。

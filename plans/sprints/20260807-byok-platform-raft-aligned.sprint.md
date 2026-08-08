@@ -1,7 +1,7 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S4B-b 已合入 `main`；S4B-c 本分支实现与本地 hard dataplane gate 已闭，待 PR/CI/acceptance 合入后 S4B 收官
+> **状态**：Executing。S0–S4B-b 已合入 `main`；S4B-c 本分支实现、hard dataplane gate 与 Claude AcceptanceReceipt 已闭，待 PR/CI 合入后 S4B 收官
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-08（见 D-9）
 > **仓库基线**：`Ancienttwo/byok-sdk@880e69f`（2026-08-08）
@@ -28,7 +28,7 @@
 
 | # | Status | Task | Mode | Acceptance | Plan |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | `plans/plan-20260809-0001-s4b-c-cloud-cleanup.md`；待 PR/CI/acceptance 合入 |
+| 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | `plans/plan-20260809-0001-s4b-c-cloud-cleanup.md`；Claude external pass，待 PR/CI 合入 |
 | 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | 待投影 |
 | 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
 | 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
@@ -788,7 +788,7 @@ Migrations are forward-only additive in this Sprint. Rollback application code c
 > **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）的容量与清理部分
 > **关键路径**：不阻塞 S5 的实现，但**是 Beta 闸的硬依赖**（见 §12）
 > **切片投影**：S4B-a 先落 finalize authority contract（删除 `StorageFinalizeInput.observedContentHash`，两 composition 的 dedupe/accounting 只读 reservation declaration）；S4B-b 落 reservation-bound cloud surface/presign；S4B-c 再以独立 migration contract 落 retention、tombstone、R2 GC/reconcile、metrics/runbook。只有 a/b/c 全闭才算 S4B 交付。
-> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b 同日完成（PR #28，merge `ae93b40`，CI 32/32）：`Idempotency-Key` 先 reserve 后签 PUT、显式 finalize、pending download fail-closed、R2 `HEAD` observation、Postgres 单 CTE 原子提交 manifest/reservation/usage、expired admission reap、client response-lost 同 key 重放，以及两 composition 的同一 conformance；`deploy/sql/**` 与 frozen protocol body/golden 零改动。独立 Claude AcceptanceReceipt 为 `external_pass`。S4B-c 2026-08-09 本分支完成：additive `0003` 落 retention policy/cleanup job/GC cursor 与 tombstone accounting metadata；host-owned maintenance 落 TTL/acked-mailbox retention、expired dead-letter list/replay/discard、tenant-serialized bounded GC、R2 ListObjectsV2/HEAD/DELETE、untracked-key witness+fresh grace、manifest/usage 单次 settlement、drift metrics/runbook 与 usage rebuild。real Postgres+MinIO hard gate：cloud-postgres 10 files/176 tests，全仓 typecheck/test/build 通过；PR/CI/AcceptanceReceipt 待记录。
+> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b 同日完成（PR #28，merge `ae93b40`，CI 32/32）：`Idempotency-Key` 先 reserve 后签 PUT、显式 finalize、pending download fail-closed、R2 `HEAD` observation、Postgres 单 CTE 原子提交 manifest/reservation/usage、expired admission reap、client response-lost 同 key 重放，以及两 composition 的同一 conformance；`deploy/sql/**` 与 frozen protocol body/golden 零改动。独立 Claude AcceptanceReceipt 为 `external_pass`。S4B-c 2026-08-09 本分支完成：additive `0003` 落 retention policy/cleanup job/GC cursor、exact-source replay provenance 与 tombstone accounting metadata；host-owned maintenance 落 TTL/acked-mailbox retention、expired dead-letter list/replay/discard、tenant-serialized bounded GC、rotating delete retry、R2 ListObjectsV2/HEAD/DELETE、untracked-key witness+fresh grace、manifest/usage 单次 settlement、drift metrics/runbook 与 usage rebuild。real Postgres+MinIO hard gate：cloud-postgres 10 files/180 tests，全仓 typecheck/test/build 通过；独立 Claude review 修复四条 concurrency 缺陷后以 subject `sha256:07b4b25d…` external pass；PR/CI 待记录。
 
 ### S4B.1 Stories
 
