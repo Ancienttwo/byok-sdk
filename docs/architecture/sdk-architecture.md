@@ -1648,7 +1648,7 @@ S7-a 先落 operational health/crash authority；quarantine/doctor/support bundl
 
 - daemon health 是独立于 transport/presence 的 `healthy/degraded/recovering` read model；默认 60s sliding window、3 failures degraded；
 - automatic reconnect/upload/maintenance outcome 进入同一 bounded failure window；状态文件只保存时间、类别、run marker 与 bounded crash history，不保存 prompt、secret、token 或错误正文；
-- start 写入 atomic+fsync run marker（POSIX 同步 target + parent directory；Windows 以 writable handle 同步 target 后 atomic rename，因为 Node/libuv 不提供 directory flush），clean shutdown 在完整 teardown 后清除；下次启动只把遗留 marker 记为 unclean crash，clean stop 不计 crash；
+- start 写入 atomic+fsync run marker（temp file 先同步再 atomic rename；POSIX 随后同步 published target + parent directory；Windows 随后以 writable handle 同步 published target，因为 Node/libuv 不提供 directory flush），clean shutdown 在完整 teardown 后清除；下次启动只把遗留 marker 记为 unclean crash，clean stop 不计 crash；
 - corrupt health JSON/shape 作为 typed `unavailable` 投影到 daemon/control/CLI status，原文件不删除、不覆写、不伪造 healthy；
 - runtime detection、control socket、journal/workspace 的细粒度 doctor 汇总仍属 S7-b；
 - malformed 或 corrupt 的本地状态**不自动删除**，搬进 quarantine；
