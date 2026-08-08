@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:558fc849f15c5d72cdf87eff5af8d2c957e37f70093c8f6f8ceb0342445c7e07
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 44898658cb6395b0dc46159b2c4721a866f37c8c
+> **Verification Evidence SHA256**: sha256:2f645e3b12636f2befd213947476e18100772d1c412bea93e31ccd4f25187c68
+> **Issued At**: 2026-08-08T08:02:06.025Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: ADR-024 honestly separates daemon-declared hash authority from R2 HEAD size/type observation, freezes the S4B interface/schema/GC constraints, and leaves runtime plus migrations unchanged; no blocking findings.
 - Findings: none
 
 ## Behavior Diff Notes
