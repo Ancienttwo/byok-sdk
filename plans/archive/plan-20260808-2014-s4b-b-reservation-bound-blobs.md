@@ -1,6 +1,6 @@
 # Plan: Sprint S4B-b: Reservation-bound Blob Surface
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260808-2014
 > **Slug**: s4b-b-reservation-bound-blobs
 > **Artifact Level**: work-package
@@ -123,4 +123,4 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 - [x] cloud reservation-bound grant/observe + create/finalize route，pending download fail-closed
 - [x] BlobClient/self-hosted surface 与 crash/idempotency/binding tests 全绿
 - [x] sprint/docs 投影、compose hard gate、protocol/migration frozen audit 通过
-- [ ] acceptance/PR/CI 合入，归档 workflow 并归还 K-line active-plan
+- [x] acceptance/PR #28/CI 32/32 合入（merge `ae93b40`），归档 workflow 并归还 K-line active-plan

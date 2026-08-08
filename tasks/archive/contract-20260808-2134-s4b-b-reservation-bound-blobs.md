@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 21:34
+> **Related Plan**: plans/archive/plan-20260808-2014-s4b-b-reservation-bound-blobs.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260808-2134
+
 # Task Contract: s4b-b-reservation-bound-blobs
 
 > **Status**: Fulfilled

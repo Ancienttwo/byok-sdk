@@ -788,7 +788,7 @@ Migrations are forward-only additive in this Sprint. Rollback application code c
 > **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）的容量与清理部分
 > **关键路径**：不阻塞 S5 的实现，但**是 Beta 闸的硬依赖**（见 §12）
 > **切片投影**：S4B-a 先落 finalize authority contract（删除 `StorageFinalizeInput.observedContentHash`，两 composition 的 dedupe/accounting 只读 reservation declaration）；S4B-b 落 reservation-bound cloud surface/presign；S4B-c 再以独立 migration contract 落 retention、tombstone、R2 GC/reconcile、metrics/runbook。只有 a/b/c 全闭才算 S4B 交付。
-> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b 同日完成：`Idempotency-Key` 先 reserve 后签 PUT、显式 finalize、pending download fail-closed、R2 `HEAD` observation、Postgres 单 CTE 原子提交 manifest/reservation/usage、client response-lost 同 key 重放，以及两 composition 的同一 conformance；`deploy/sql/**` 与 frozen protocol body/golden 零改动。S4B-c 未交付。
+> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b 同日完成（PR #28，merge `ae93b40`，CI 32/32）：`Idempotency-Key` 先 reserve 后签 PUT、显式 finalize、pending download fail-closed、R2 `HEAD` observation、Postgres 单 CTE 原子提交 manifest/reservation/usage、expired admission reap、client response-lost 同 key 重放，以及两 composition 的同一 conformance；`deploy/sql/**` 与 frozen protocol body/golden 零改动。独立 Claude AcceptanceReceipt 为 `external_pass`。S4B-c 未交付。
 
 ### S4B.1 Stories
 

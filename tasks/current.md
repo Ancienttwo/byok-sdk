@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-08T20:03:08+0800 -->
+<!-- updated_at: 2026-08-08T21:35:25+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Active
-> **Updated At**: 2026-08-08T20:03:08+0800
+> **Updated At**: 2026-08-08T21:35:25+0800
 > **Source Branch**: main
-> **Source Commit**: e0f9ed0
+> **Source Commit**: ae93b40
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: S4B-a worktree cleaned; K-line active
+> **Reason**: manual
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -49,10 +49,21 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 1 changed/untracked path(s)
+- Summary: 12 changed/untracked path(s)
 
 ```
+ D plans/plan-20260808-2014-s4b-b-reservation-bound-blobs.md
+ M plans/sprints/20260807-byok-platform-raft-aligned.sprint.md
+ D tasks/contracts/20260808-2014-s4b-b-reservation-bound-blobs.contract.md
  M tasks/current.md
+ D tasks/notes/20260808-2014-s4b-b-reservation-bound-blobs.notes.md
+ D tasks/reviews/20260808-2014-s4b-b-reservation-bound-blobs.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260808-2014-s4b-b-reservation-bound-blobs.md
+?? tasks/archive/contract-20260808-2134-s4b-b-reservation-bound-blobs.md
+?? tasks/archive/notes-20260808-2134-s4b-b-reservation-bound-blobs.md
+?? tasks/archive/review-20260808-2134-s4b-b-reservation-bound-blobs.md
+?? tasks/archive/todo-20260808-2134-s4b-b-reservation-bound-blobs.md
 ```
 
 ## Source Artifacts

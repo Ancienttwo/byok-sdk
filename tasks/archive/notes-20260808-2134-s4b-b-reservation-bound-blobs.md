@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 21:34
+> **Related Plan**: plans/archive/plan-20260808-2014-s4b-b-reservation-bound-blobs.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260808-2134
+
 # Implementation Notes: s4b-b-reservation-bound-blobs
 
 > **Status**: Active
@@ -44,6 +50,7 @@
 - Hard dataplane test: 9 files / 167 tests passed against Postgres + MinIO；其中 same-hash finalizer race 先锁住 pending manifest，确认四个 statement 同时阻塞后再释放，只允许一次计量。
 - Full hard-env workspace test: core 112、keys 328、protocol 189、cloud 91、server 217、client 935、conformance 111、cloud-postgres 167，全部通过。
 - Frozen audit: `deploy/sql/**` 与 `packages/protocol/src/**` 相对 `main` 零 diff；body schemas/golden 未改。
+- Delivery: PR #28，merge `ae93b40`，push + pull-request CI 32/32，Claude AcceptanceReceipt `external_pass`。
 
 ## Promotion Filter
 
