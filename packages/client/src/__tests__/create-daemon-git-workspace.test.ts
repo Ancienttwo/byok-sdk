@@ -4,8 +4,11 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonOverrides } from '../daemon/create-daemon';
+import { acquireDaemonOwner } from '../daemon/daemon-owner';
 import { GitWorkspaceManager, type GitCommandResult, type GitRunner } from '../daemon/git-workspace';
 import { GitWorkspaceStore } from '../daemon/git-workspace-store';
+import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
+import { LocalStoragePressureEngine } from '../daemon/journal/storage-policy';
 import type { DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -97,8 +100,19 @@ describe('daemon Git workspace startup/local-event boundary', () => {
     });
     const manager = new GitWorkspaceManager(workspaceRoot, { run, ownerId: `failure-${process.pid}` });
     const store = new GitWorkspaceStore(storeDir);
+    const pressureStart = vi.spyOn(LocalStoragePressureEngine.prototype, 'start');
+    const pressureStop = vi.spyOn(LocalStoragePressureEngine.prototype, 'stop');
+    const journalClose = vi.spyOn(SqliteLocalTaskJournal.prototype, 'close');
     daemon = createDaemonWithAdapters(
-      { ...baseConfig(server.url, workspaceRoot, storeDir), gitWorkspace: { mode: 'local-checkpoints' } },
+      {
+        ...baseConfig(server.url, workspaceRoot, storeDir),
+        gitWorkspace: { mode: 'local-checkpoints' },
+        hostedJournal: {
+          mode: 'sqlite',
+          tenantId: 'tenant-startup-failure',
+          storagePolicy: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 },
+        },
+      },
       [new StubRuntimeAdapter()],
       daemonOverrides(manager, store),
     );
@@ -108,6 +122,11 @@ describe('daemon Git workspace startup/local-event boundary', () => {
     expect(server.received).toEqual([]);
     expect(server.httpRequests.some((request) => request.pathname === '/byok/messages')).toBe(false);
     expect(run).toHaveBeenCalledWith(['--version'], expect.objectContaining({ timeout: 5000, maxBuffer: expect.any(Number) }));
+    expect(pressureStart).toHaveBeenCalledTimes(1);
+    expect(pressureStop).toHaveBeenCalledTimes(1);
+    expect(journalClose).toHaveBeenCalledTimes(1);
+    const doctorLease = await acquireDaemonOwner(storeDir, 'doctor');
+    await doctorLease.release();
   });
 
   it('reconciles preparing/active ledger records to interrupted before transport is observable', async () => {

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -144,6 +145,15 @@ describe('support bundle privacy and bounds', () => {
     expect(bundle.recentEvents.sourceTruncated).toBe(true);
   });
 
+  it.skipIf(process.platform === 'win32')('does not block when audit.jsonl is a FIFO', async () => {
+    const dir = await tempDir();
+    execFileSync('mkfifo', [auditLogPath(dir)]);
+    const started = Date.now();
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(bundle.recentEvents.status).toBe('unavailable');
+  });
+
   it('atomically creates a 0600 artifact and refuses to overwrite it', async () => {
     const dir = await tempDir();
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
@@ -175,12 +185,16 @@ describe('support bundle privacy and bounds', () => {
       platform: 'win32',
       run: async (_command, args) => {
         calls.push(args);
+        if (calls.length === 1) {
+          expect(args[0]).toContain('.windows-support.json.');
+          expect(await fs.readdir(args[0]!)).toEqual([]);
+        }
         return { code: 0, stdout: '', stderr: '' };
       },
     });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.[0]).toContain('.windows-support.json.');
+    expect(calls).toHaveLength(2);
     expect(calls[0]).toContain('/inheritance:r');
+    expect(calls[1]?.[0]).toContain('bundle.tmp');
     expect(await fs.stat(path.join(dir, 'windows-support.json'))).toBeDefined();
   });
 

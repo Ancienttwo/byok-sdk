@@ -4,7 +4,9 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
+import { LocalStoragePressureEngine } from '../daemon/journal/storage-policy';
 import { connectControlClient } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -158,4 +160,33 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const allFails = server.received.filter((e) => e.type === 'task.fail' && e.task_id === 't-double');
     expect(allFails).toHaveLength(1);
   }, 10000);
+
+  it('retains the mutation lease when a writer teardown barrier fails, then releases it after a clean retry', async () => {
+    const workspaceRoot = await tmpDir('byok-stop-barrier-ws-');
+    const storeDir = await tmpDir('byok-stop-barrier-store-');
+    const config: DaemonConfig = {
+      productName: 'Acme',
+      productId: 'acme-stop-barrier',
+      serverUrl: server.url,
+      workspaceRoot,
+      storeDir,
+      hostedJournal: {
+        mode: 'sqlite',
+        tenantId: 'tenant-stop-barrier',
+        storagePolicy: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 },
+      },
+    };
+    daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    await daemon.pair('pairing-code');
+    await daemon.start();
+
+    const stopSpy = vi.spyOn(LocalStoragePressureEngine.prototype, 'stop').mockRejectedValueOnce(new Error('maintenance stop failed'));
+    await expect(daemon.stop()).rejects.toThrow('maintenance stop failed');
+    await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+
+    stopSpy.mockRestore();
+    await expect(daemon.stop()).resolves.toBeUndefined();
+    const doctorLease = await acquireDaemonOwner(storeDir, 'doctor');
+    await doctorLease.release();
+  });
 });

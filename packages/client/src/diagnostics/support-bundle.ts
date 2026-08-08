@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { DaemonConfig, DaemonEvent } from '../index';
 import { auditLogPath } from '../bin/audit-log';
 import { atomicWriteFile } from '../util/atomic-write';
-import { ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';
+import { ensureSecureDir, ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
   collectDiagnostics,
   type CollectDiagnosticsOptions,
@@ -101,9 +101,23 @@ function isAuditKind(value: unknown): value is DaemonEvent['kind'] {
 
 async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recentEvents']> {
   const filePath = auditLogPath(storeDir);
+  try {
+    const pathStat = await fs.lstat(filePath);
+    if (!pathStat.isFile()) {
+      return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { status: 'missing', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
+    }
+    return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
+  }
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
-    handle = await fs.open(filePath, 'r');
+    handle = await fs.open(
+      filePath,
+      fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+    );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return { status: 'missing', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
@@ -112,6 +126,9 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
   }
   try {
     const stat = await handle.stat();
+    if (!stat.isFile()) {
+      return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
+    }
     const length = Math.min(stat.size, MAX_SUPPORT_AUDIT_TAIL_BYTES);
     const start = Math.max(0, stat.size - length);
     const buffer = Buffer.alloc(length);
@@ -227,8 +244,16 @@ export async function writeSupportBundle(
   const dir = path.dirname(outputPath);
   const parentStat = await fs.stat(dir);
   if (!parentStat.isDirectory()) throw new Error('support bundle output parent is not a directory');
-  const tempPath = path.join(dir, `.${path.basename(outputPath)}.${process.pid}.${randomUUID()}.tmp`);
+  // Harden an EMPTY private directory before any bundle byte exists. On
+  // Windows, changing a file's DACL after writing is too late: another local
+  // user can open the inherited-ACL temp file first and retain that handle.
+  // Files created below this directory inherit the restrictive DACL, while
+  // the final hard-link still remains on the operator-selected filesystem.
+  const privateDir = path.join(dir, `.${path.basename(outputPath)}.${process.pid}.${randomUUID()}.private`);
+  const tempPath = path.join(privateDir, 'bundle.tmp');
   try {
+    await fs.mkdir(privateDir, { mode: 0o700 });
+    await ensureSecureDir(privateDir, secureFileOptions);
     await atomicWriteFile(tempPath, `${JSON.stringify(bundle, null, 2)}\n`, { mode: 0o600, fsync: true });
     await ensureSecureFile(tempPath, secureFileOptions);
     await fs.link(tempPath, outputPath);
@@ -247,6 +272,6 @@ export async function writeSupportBundle(
       }
     }
   } finally {
-    await fs.unlink(tempPath).catch(() => undefined);
+    await fs.rm(privateDir, { recursive: true, force: true }).catch(() => undefined);
   }
 }

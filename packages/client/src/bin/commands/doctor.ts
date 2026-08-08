@@ -35,7 +35,9 @@ function formatDoctorLines(snapshot: DiagnosticsSnapshot, fixResult?: Operationa
     `system: node=${snapshot.system.node} platform=${snapshot.system.platform} arch=${snapshot.system.arch} sqlite=${snapshot.system.sqliteAvailable ? 'available' : 'unavailable'}`,
   ];
   for (const check of snapshot.checks) lines.push(`check ${check.id}: ${check.status} (${check.summary})`);
-  if (snapshot.health.status === 'corrupt') lines.push(`health-detail: ${snapshot.health.reason}; bytes=${snapshot.health.sizeBytes}`);
+  if (snapshot.health.status === 'corrupt' || snapshot.health.status === 'unavailable') {
+    lines.push(`health-detail: ${snapshot.health.reason}; bytes=${snapshot.health.sizeBytes ?? 'unknown'}`);
+  }
   if (snapshot.quarantine.truncated) {
     lines.push(`quarantine-detail: inventory truncated after ${snapshot.quarantine.scannedCount} scanned entries`);
   }

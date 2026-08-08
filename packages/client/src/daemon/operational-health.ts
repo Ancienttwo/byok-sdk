@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir } from '../util/secure-dir';
@@ -45,7 +45,8 @@ export type OperationalHealthFileInspection =
       currentRunStartedAt?: string;
       lastCrashAt?: string;
     }
-  | { status: 'corrupt'; sizeBytes: number; reason: string };
+  | { status: 'corrupt'; sizeBytes: number; reason: string }
+  | { status: 'unavailable'; sizeBytes?: number; reason: string };
 
 export type OperationalHealthSnapshot =
   | {
@@ -243,37 +244,51 @@ export class OperationalHealthTracker {
  * doctor can therefore report on an offline daemon without changing the very
  * evidence it is inspecting.
  */
-export async function inspectOperationalHealthFile(storeDir: string): Promise<OperationalHealthFileInspection> {
-  const filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
-  let stat;
+async function inspectOperationalHealthHandle(
+  handle: Awaited<ReturnType<typeof fs.open>>,
+): Promise<Exclude<OperationalHealthFileInspection, { status: 'missing' }>> {
+  let before: import('node:fs').BigIntStats;
   try {
-    stat = await fs.lstat(filePath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
-    return { status: 'corrupt', sizeBytes: 0, reason: 'operational health state could not be inspected' };
+    before = await handle.stat({ bigint: true });
+  } catch {
+    return { status: 'unavailable', reason: 'operational health state could not be inspected' };
   }
-  if (!stat.isFile()) return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state is not a regular file' };
-  if (stat.size > MAX_OPERATIONAL_HEALTH_FILE_BYTES) {
-    return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state exceeds the 1 MiB inspection limit' };
+  const sizeBytes = Number(before.size);
+  if (!before.isFile()) {
+    return { status: 'unavailable', sizeBytes, reason: 'operational health state is not a regular file' };
+  }
+  if (sizeBytes > MAX_OPERATIONAL_HEALTH_FILE_BYTES) {
+    return { status: 'corrupt', sizeBytes, reason: 'operational health state exceeds the 1 MiB inspection limit' };
   }
   let raw: string;
   try {
-    raw = await fs.readFile(filePath, 'utf8');
+    const buffer = Buffer.alloc(sizeBytes);
+    const { bytesRead } = await handle.read(buffer, 0, sizeBytes, 0);
+    const after = await handle.stat({ bigint: true });
+    if (
+      bytesRead !== sizeBytes ||
+      after.size !== before.size ||
+      after.mtimeNs !== before.mtimeNs ||
+      after.ctimeNs !== before.ctimeNs
+    ) {
+      return { status: 'unavailable', sizeBytes: Number(after.size), reason: 'operational health state changed during inspection' };
+    }
+    raw = buffer.toString('utf8');
   } catch {
-    return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state could not be read' };
+    return { status: 'unavailable', sizeBytes, reason: 'operational health state could not be read' };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state is corrupt JSON' };
+    return { status: 'corrupt', sizeBytes, reason: 'operational health state is corrupt JSON' };
   }
   if (!isHealthFile(parsed)) {
-    return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state has an invalid shape' };
+    return { status: 'corrupt', sizeBytes, reason: 'operational health state has an invalid shape' };
   }
   return {
     status: 'valid',
-    sizeBytes: stat.size,
+    sizeBytes,
     state: parsed.state,
     failureCount: parsed.failures.length,
     crashCount: parsed.crashes.length,
@@ -283,6 +298,32 @@ export async function inspectOperationalHealthFile(storeDir: string): Promise<Op
       : {}),
   };
 }
+
+/**
+ * Open read-only/non-blocking/no-follow before inspecting. The flags make a
+ * raced FIFO or symlink fail closed instead of hanging doctor indefinitely or
+ * following bytes outside the store.
+ */
+export async function inspectOperationalHealthFile(storeDir: string): Promise<OperationalHealthFileInspection> {
+  const filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    handle = await fs.open(
+      filePath,
+      fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+    );
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
+    return { status: 'unavailable', reason: 'operational health state could not be opened safely' };
+  }
+  try {
+    return await inspectOperationalHealthHandle(handle);
+  } finally {
+    await handle.close();
+  }
+}
+
+export { inspectOperationalHealthHandle };
 
 function isHealthFile(value: unknown): value is HealthFileV1 {
   if (typeof value !== 'object' || value === null) return false;

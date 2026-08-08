@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -105,6 +106,34 @@ describe('diagnostics collector', () => {
     expect(snapshot.quarantine.entries).toHaveLength(MAX_QUARANTINE_ENTRIES);
     expect(snapshot.quarantine.count).toBe(MAX_QUARANTINE_ENTRIES + 5);
     expect(snapshot.quarantine.truncated).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')('classifies unreadable health as unavailable and refuses to quarantine unconfirmed corruption', async () => {
+    const dir = await tempDir();
+    const healthPath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    const tracker = new OperationalHealthTracker(dir, { runId: () => 'run', pid: 1 });
+    await tracker.startRun();
+    await tracker.markCleanStop();
+    const before = await digest(healthPath);
+    await fs.chmod(healthPath, 0o000);
+    try {
+      const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+      expect(snapshot.health).toMatchObject({ status: 'unavailable' });
+      expect(snapshot.checks.find((check) => check.id === 'health')?.status).toBe('fail');
+      await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/unconfirmed corruption|opened safely/);
+    } finally {
+      await fs.chmod(healthPath, 0o600);
+    }
+    expect(await digest(healthPath)).toBe(before);
+  });
+
+  it.skipIf(process.platform === 'win32')('does not block when device.json is a FIFO', async () => {
+    const dir = await tempDir();
+    execFileSync('mkfifo', [path.join(dir, 'device.json')]);
+    const started = Date.now();
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(snapshot.device.status).toBe('unavailable');
   });
 
   it.skipIf(!isSqliteAvailable())('detects a corrupt journal through a read-only quick_check without moving it', async () => {
@@ -224,7 +253,7 @@ describe('doctor explicit fix', () => {
     const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
     await fs.symlink(outside, sourcePath);
 
-    await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow('not a regular file');
+    await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/opened safely|unconfirmed corruption/);
     expect(await fs.readlink(sourcePath)).toBe(outside);
     expect(await fs.readFile(outside, 'utf8')).toBe('{external-corrupt}');
     expect((await fs.stat(outside)).mode & 0o777).toBe(0o644);

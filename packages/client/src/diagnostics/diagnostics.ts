@@ -10,6 +10,7 @@ import type { ControlStatusResult } from '../daemon/control-protocol';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
 import { isSqliteAvailable, loadSqliteModule } from '../daemon/journal/sqlite-support';
 import {
+  inspectOperationalHealthHandle,
   inspectOperationalHealthFile,
   type OperationalHealthFileInspection,
   OPERATIONAL_HEALTH_FILENAME,
@@ -116,9 +117,19 @@ async function fileSize(filePath: string): Promise<number | undefined> {
 
 async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['device']> {
   const filePath = path.join(storeDir, 'device.json');
+  try {
+    const pathStat = await fs.lstat(filePath);
+    if (!pathStat.isFile()) return { status: 'unavailable' };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
+    return { status: 'unavailable' };
+  }
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
-    handle = await fs.open(filePath, 'r');
+    handle = await fs.open(
+      filePath,
+      fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+    );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
     return { status: 'unavailable' };
@@ -331,7 +342,12 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
     },
     {
       id: 'health',
-      status: snapshot.health.status === 'corrupt' ? 'fail' : snapshot.health.status === 'missing' ? 'warn' : 'pass',
+      status:
+        snapshot.health.status === 'corrupt' || snapshot.health.status === 'unavailable'
+          ? 'fail'
+          : snapshot.health.status === 'missing'
+            ? 'warn'
+            : 'pass',
       summary: snapshot.health.status,
     },
     {
@@ -437,28 +453,25 @@ export function stableIdentifierHash(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-async function hashFile(filePath: string): Promise<{ sha256: string; sizeBytes: number; mtimeMs: number }> {
-  const handle = await fs.open(filePath, 'r');
-  try {
-    const before = await handle.stat();
-    if (!before.isFile()) throw new Error('operational health state is not a regular file');
-    const hash = createHash('sha256');
-    const buffer = Buffer.allocUnsafe(64 * 1024);
-    let position = 0;
-    for (;;) {
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
-      if (bytesRead === 0) break;
-      hash.update(buffer.subarray(0, bytesRead));
-      position += bytesRead;
-    }
-    const after = await handle.stat();
-    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
-      throw new Error('operational health state changed during inspection');
-    }
-    return { sha256: hash.digest('hex'), sizeBytes: after.size, mtimeMs: after.mtimeMs };
-  } finally {
-    await handle.close();
+async function hashOpenFile(
+  handle: Awaited<ReturnType<typeof fs.open>>,
+): Promise<{ sha256: string; sizeBytes: number }> {
+  const before = await handle.stat({ bigint: true });
+  if (!before.isFile()) throw new Error('operational health state is not a regular file');
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let position = 0;
+  for (;;) {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+    if (bytesRead === 0) break;
+    hash.update(buffer.subarray(0, bytesRead));
+    position += bytesRead;
   }
+  const after = await handle.stat({ bigint: true });
+  if (after.size !== before.size || after.mtimeNs !== before.mtimeNs) {
+    throw new Error('operational health state changed during inspection');
+  }
+  return { sha256: hash.digest('hex'), sizeBytes: Number(after.size) };
 }
 
 /**
@@ -472,43 +485,61 @@ export async function quarantineCorruptOperationalHealth(
 ): Promise<OperationalHealthFixResult> {
   const owner = await acquireDaemonOwner(storeDir, 'doctor', options.clock);
   try {
-    const inspection = await inspectOperationalHealthFile(storeDir);
-    if (inspection.status === 'missing') return { status: 'not-needed', reason: 'missing' };
-    if (inspection.status === 'valid') return { status: 'not-needed', reason: 'valid' };
-
     const sourcePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
-    const sourceStat = await fs.lstat(sourcePath);
-    if (!sourceStat.isFile()) throw new Error('operational health state is not a regular file; refusing quarantine');
+    let source: Awaited<ReturnType<typeof fs.open>>;
+    try {
+      source = await fs.open(
+        sourcePath,
+        fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+      );
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'not-needed', reason: 'missing' };
+      throw new Error('operational health state could not be opened safely; refusing quarantine', { cause: err });
+    }
+    try {
+      const inspection = await inspectOperationalHealthHandle(source);
+      if (inspection.status === 'valid') return { status: 'not-needed', reason: 'valid' };
+      if (inspection.status === 'unavailable') {
+        throw new Error(`${inspection.reason}; refusing to quarantine unconfirmed corruption`);
+      }
 
-    const quarantineDir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
-    await ensureSecureDir(quarantineDir);
-    const stamp = (options.clock ?? (() => new Date()))().toISOString().replace(/[:.]/g, '-');
-    const evidenceName = `${stamp}-${randomUUID()}-${OPERATIONAL_HEALTH_FILENAME}`;
-    const manifestName = `${evidenceName}.manifest.json`;
-    const evidencePath = path.join(quarantineDir, evidenceName);
-    await fs.rename(sourcePath, evidencePath);
-    const movedStat = await fs.lstat(evidencePath);
-    if (!movedStat.isFile()) throw new Error('quarantined operational health evidence is not a regular file');
-    const hashed = await hashFile(evidencePath);
-    await fs.chmod(evidencePath, 0o600);
-    await atomicWriteFile(
-      path.join(quarantineDir, manifestName),
-      `${JSON.stringify(
-        {
-          version: 1,
-          quarantinedAt: (options.clock ?? (() => new Date()))().toISOString(),
-          reason: inspection.reason,
-          sourcePath,
-          evidenceFile: evidenceName,
-          sha256: hashed.sha256,
-          sizeBytes: hashed.sizeBytes,
-        },
-        null,
-        2,
-      )}\n`,
-      { mode: 0o600, fsync: true },
-    );
-    return { status: 'quarantined', evidenceName, manifestName, sha256: hashed.sha256, sizeBytes: hashed.sizeBytes };
+      const sourceStat = await source.stat({ bigint: true });
+      if (!sourceStat.isFile()) throw new Error('operational health state is not a regular file; refusing quarantine');
+
+      const quarantineDir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
+      await ensureSecureDir(quarantineDir);
+      const stamp = (options.clock ?? (() => new Date()))().toISOString().replace(/[:.]/g, '-');
+      const evidenceName = `${stamp}-${randomUUID()}-${OPERATIONAL_HEALTH_FILENAME}`;
+      const manifestName = `${evidenceName}.manifest.json`;
+      const evidencePath = path.join(quarantineDir, evidenceName);
+      await fs.rename(sourcePath, evidencePath);
+      const movedStat = await fs.lstat(evidencePath, { bigint: true });
+      if (!movedStat.isFile() || movedStat.dev !== sourceStat.dev || movedStat.ino !== sourceStat.ino) {
+        throw new Error('quarantined operational health evidence identity does not match the inspected inode');
+      }
+      const hashed = await hashOpenFile(source);
+      await source.chmod(0o600);
+      await atomicWriteFile(
+        path.join(quarantineDir, manifestName),
+        `${JSON.stringify(
+          {
+            version: 1,
+            quarantinedAt: (options.clock ?? (() => new Date()))().toISOString(),
+            reason: inspection.reason,
+            sourcePath,
+            evidenceFile: evidenceName,
+            sha256: hashed.sha256,
+            sizeBytes: hashed.sizeBytes,
+          },
+          null,
+          2,
+        )}\n`,
+        { mode: 0o600, fsync: true },
+      );
+      return { status: 'quarantined', evidenceName, manifestName, sha256: hashed.sha256, sizeBytes: hashed.sizeBytes };
+    } finally {
+      await source.close();
+    }
   } finally {
     await owner.release();
   }

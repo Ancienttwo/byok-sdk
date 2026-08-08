@@ -1126,13 +1126,11 @@ export function createDaemonWithAdapters(
     await connection.start();
     await connection.waitForAck();
     } catch (err) {
-      await connection?.stop(0).catch(() => undefined);
-      await controlServerHandle?.close().catch(() => undefined);
-      controlServerHandle = undefined;
-      auth.stop();
-      await operationalHealth.markCleanStop().catch(() => undefined);
-      await daemonOwnerLease?.release().catch(() => undefined);
-      daemonOwnerLease = undefined;
+      try {
+        await runShutdownSequence('startup failed', { drainTimeoutMs: 0 });
+      } catch (cleanupError) {
+        throw new AggregateError([err, cleanupError], 'daemon startup failed and teardown was incomplete');
+      }
       throw err;
     }
   }
@@ -1181,37 +1179,56 @@ export function createDaemonWithAdapters(
    * `daemon.stop()`), which must neither double-fail a task nor throw.
    */
   async function runShutdownSequence(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+    const errors: unknown[] = [];
+    let mutationBarrierComplete = true;
+    const attempt = async (operation: () => void | Promise<void>, mutationBarrier: boolean): Promise<boolean> => {
+      try {
+        await operation();
+        return true;
+      } catch (err) {
+        errors.push(err);
+        if (mutationBarrier) mutationBarrierComplete = false;
+        return false;
+      }
+    };
+
     // S3b (L-003): stop the maintenance cadence first — a compaction pass
     // starting while the journal is being drained would hold the single writer
     // against the terminal writes below for no benefit. Only the engine THIS
     // daemon constructed; an injected one belongs to its injector, exactly like
     // an injected journal is not closed here. Idempotent, like every other step
     // in this sequence.
-    const maintenanceStopped = ownedPressureEngine?.stop();
-    runner?.stopAcceptingOffers();
+    const maintenanceStopped = ownedPressureEngine?.stop() ?? Promise.resolve();
+    await attempt(() => runner?.stopAcceptingOffers(), true);
     const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
-    await Promise.race([activeTeardown, delay(graceMs)]);
+    let activeTeardownSettled = false;
+    const observedActiveTeardown = activeTeardown.then(
+      () => {
+        activeTeardownSettled = true;
+      },
+      (err: unknown) => {
+        activeTeardownSettled = true;
+        throw err;
+      },
+    );
+    await attempt(() => Promise.race([observedActiveTeardown, delay(graceMs)]), true);
+    if (!activeTeardownSettled) {
+      mutationBarrierComplete = false;
+      errors.push(new Error('active task teardown did not settle before the shutdown grace deadline'));
+    }
     // S3b: in hosted mode, a terminal is journaled before it is handed to the
     // outbox (see `sendEnvelope`), so a `task.fail` that `shutdownActiveTasks`
     // just produced may still be mid-chain right now. Awaiting the chain here
     // — before the drain wait below, which is what decides the connection is
     // idle — is what keeps that fail from being written into an outbox nobody
     // is draining any more. Exactly a no-op when no journal is configured.
-    if (journal) await journalTerminalTail;
+    const journalTailSettled = journal ? await attempt(() => journalTerminalTail, true) : true;
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before
     // closing the owned journal, so task interruption is not held behind a
     // slow checkpoint while the journal-close race remains impossible.
-    await maintenanceStopped;
-    // S3b: and only THEN release the handle — after the last terminal write
-    // has actually landed, or the write it was still holding would fail
-    // against a closed database. Only the journal THIS daemon constructed,
-    // the same ownership rule as `ownedPressureEngine` above: an injected
-    // journal's lifetime belongs to whoever injected it. Idempotent by
-    // `SqliteLocalTaskJournal.close`'s own contract, so the documented
-    // double-teardown path does not throw.
-    await ownedJournal?.close();
+    const maintenanceSettled = await attempt(() => maintenanceStopped, true);
     // Finding F5(b): bounded wait for the outbox (e.g. the task.fail(s)
     // shutdownActiveTasks just enqueued) to actually drain before closing
     // the connection out from under it — see ConnectionManager.stop's own
@@ -1220,21 +1237,44 @@ export function createDaemonWithAdapters(
     // comment for the honest-audit read a caller may take afterward.
     const drainTimeoutMs =
       opts.drainTimeoutMs ?? overrides.shutdown?.outboxDrainTimeoutMs ?? DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS;
-    await connection?.stop(drainTimeoutMs);
-    auth.stop();
+    const connectionStopped = await attempt(() => connection?.stop(drainTimeoutMs), true);
+    // Close the owned journal only after every producer has stopped: active
+    // task teardown and its terminal tail settled, maintenance settled, and
+    // the connection can no longer deliver a new inbound envelope. Closing it
+    // earlier would let a failed/slow connection shutdown append into a closed
+    // database after this function released the store lease.
+    if (activeTeardownSettled && journalTailSettled && maintenanceSettled && connectionStopped) {
+      await attempt(() => ownedJournal?.close(), true);
+    } else if (ownedJournal) {
+      mutationBarrierComplete = false;
+    }
+    await attempt(() => auth.stop(), true);
     connectionState = 'closed';
     // M4 Phase 2: stop the control socket in every shutdown path — this is
     // the single lifecycle choke point every caller (a foreground abort via
     // `bin/commands/start.ts`, `unpair()` below, and the control socket's
     // OWN `shutdown` RPC — see `performControlShutdown`) already funnels
     // through, so nothing else needs its own control-socket teardown logic.
-    await controlServerHandle?.close();
-    controlServerHandle = undefined;
-    try {
-      await operationalHealth.markCleanStop();
-    } finally {
-      await daemonOwnerLease?.release();
-      daemonOwnerLease = undefined;
+    await attempt(async () => {
+      await controlServerHandle?.close();
+      controlServerHandle = undefined;
+    }, true);
+    if (mutationBarrierComplete && daemonOwnerLease) {
+      await attempt(() => operationalHealth.markCleanStop(), false);
+      await attempt(async () => {
+        await daemonOwnerLease?.release();
+        daemonOwnerLease = undefined;
+      }, false);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'daemon shutdown completed with errors');
+    }
+    if (!mutationBarrierComplete) {
+      // Defensive invariant: every mutation-barrier failure is recorded above.
+      // Keep the lease if that invariant is ever violated rather than allowing
+      // doctor or a second daemon to overlap a residual writer.
+      throw new Error('daemon shutdown mutation barrier is incomplete; ownership lease retained');
     }
   }
 

@@ -12,8 +12,8 @@ The support bundle includes system version, bounded runtime presence/capability 
 
 ## Corrupt state
 
-- A malformed `operational-health.json` is reported as corrupt and left byte-identical by ordinary status/doctor runs.
-- Stop the daemon, retain a copy if local policy requires it, then run `byok-agent doctor --fix --yes --config <path>`. This is the only shipped fix: it must acquire the same cross-process store mutation lease held by a daemon, refuses symlink/non-regular evidence, moves the actual corrupt inode into `quarantine/`, and writes a manifest containing reason, source path, size and SHA-256. It does not create a healthy replacement.
+- A malformed/invalid-shape `operational-health.json` is reported as confirmed corrupt and left byte-identical by ordinary status/doctor runs. Open、permission、special-file or concurrent-change failures are reported as unavailable and are not eligible for fix.
+- Stop the daemon, retain a copy if local policy requires it, then run `byok-agent doctor --fix --yes --config <path>`. This is the only shipped fix: it must acquire the same cross-process store mutation lease held until all daemon writers stop, re-confirms corruption through a no-follow/non-blocking open handle, refuses unavailable/symlink/non-regular evidence, moves that same inode into `quarantine/`, and writes a manifest containing reason, source path, size and SHA-256. It does not create a healthy replacement.
 - `daemon.db` corruption follows the existing `JournalCorruptError` quarantine path. There is no doctor rebuild or SQLite fallback. Inspect/recover the quarantined database outside the SDK before re-pairing or accepting new work.
 - Quarantine is never automatically deleted. Retention is an explicit operator policy and must preserve incident/legal requirements.
 
