@@ -71,6 +71,11 @@ describe('the CI dataplane job', () => {
     expect(workflow).toMatch(/^ {2}dataplane:$/m);
     expect(workflow).toContain('BYOK_REQUIRE_DATAPLANE');
     expect(workflow).toContain('BYOK_TEST_POSTGRES_URL');
+    // Both halves, because from S4A-c the conformance scope includes a blob
+    // port whose Postgres composition signs against MinIO. A job carrying only
+    // the database URL would hard-fail at import, which is the correct
+    // behavior and a terrible thing to discover by pushing.
+    expect(workflow).toContain('BYOK_TEST_S3_ENDPOINT');
   });
 
   it('starts the substrate with the same command the skip message prints', () => {

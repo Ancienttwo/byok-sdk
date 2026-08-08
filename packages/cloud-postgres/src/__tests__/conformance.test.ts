@@ -26,7 +26,12 @@ import { createWebCrypto } from '@byok/cloud';
 import { runCloudConformance, type CloudCompositionFactory } from '@byok/conformance';
 import { migrate } from '../migrate';
 import { createPostgresCloudStores } from '../stores/index';
-import { createDataplaneScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
+import {
+  createDataplaneScope,
+  createObjectStorageScope,
+  SKIP_DATAPLANE,
+  SKIP_REASON,
+} from './support/dataplane';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 
@@ -34,12 +39,17 @@ const postgresFactory: CloudCompositionFactory = {
   async create() {
     const scope = await createDataplaneScope();
     await migrate(scope.pool, DEPLOY_SQL);
+    // A real bucket on the real MinIO, not a stand-in: the blobs dimension
+    // asserts what a grant does, and a grant nobody could redeem would be a
+    // pass with nothing behind it.
+    const objectStorage = await createObjectStorageScope();
 
     const clock = createMutableClock();
     const stores = createPostgresCloudStores({
       pool: scope.pool,
       clock,
       crypto: createWebCrypto(),
+      objectStorage: objectStorage.config,
     });
 
     return {

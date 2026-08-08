@@ -23,6 +23,7 @@ import { runDedupConformance } from './dedup';
 import { runTaskAttemptConformance } from './task-attempts';
 import { runReceiptConformance } from './receipts';
 import { runSequenceConformance } from './sequence';
+import { runBlobConformance } from './blobs';
 import { runCloudTenantIsolationConformance } from './tenant-isolation';
 
 /**
@@ -32,13 +33,15 @@ import { runCloudTenantIsolationConformance } from './tenant-isolation';
  * per-composition exemption, which is the distinction that matters. Every
  * composition must supply every port named here; none may supply a subset.
  *
- * `blobs` is absent because only half of it is a store: its bytes live in
- * object storage, and S4A-c lands that adapter together with the capability
- * split that narrows `CloudStores.blobs` to `{ createUpload, getDownloadUrl }`
- * (docs/researches/s4a-dataplane-design.md §6). Certifying the five-method
- * shape now would freeze a contract that is already scheduled to change. When
- * the R2 adapter arrives, `blobs` is added HERE, once, and every composition
- * owes it from that moment.
+ * `blobs` joined in S4A-c, once the port narrowed to
+ * `{ createUpload, getDownloadUrl }` and the byte-proxy trio left for
+ * `BlobContentProxy` (docs/researches/s4a-dataplane-design.md §6). Certifying
+ * the old five-method shape would have frozen a contract already scheduled to
+ * change, and certifying a subset of it for one composition would have been
+ * the silent downgrade this suite exists to prevent. Narrowed, it is something
+ * every composition can honestly implement — so every composition owes it, and
+ * the assertions in `blobs.ts` are the ones that mean the same thing whether
+ * the bytes live in a `Map` or in an object store nobody here can reach.
  *
  * `rateLimiter` IS here, and a durable composition satisfies it with the
  * in-memory allow-all reference rather than a table (§5): persisting an
@@ -54,6 +57,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'tasks',
   'receipts',
   'sequence',
+  'blobs',
   'rateLimiter',
 ] as const;
 
@@ -115,6 +119,7 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runTaskAttemptConformance(factory);
     runReceiptConformance(factory);
     runSequenceConformance(factory);
+    runBlobConformance(factory);
     runCloudTenantIsolationConformance(factory);
   });
 }

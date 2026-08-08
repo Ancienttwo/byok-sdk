@@ -1,25 +1,28 @@
 /**
  * The Postgres composition of the cloud-local ports.
  *
- * Seven durable stores, one in-memory limiter, and no blob store yet:
+ * Seven durable stores, one object-storage blob store, one in-memory limiter:
  *
- * - The seven implemented here are the ones with rows in
+ * - The seven durable ones are those with rows in
  *   `deploy/sql/0001_cloud_local.sql`.
+ * - `blobs` is the R2 adapter over the `object_manifest` row the core store
+ *   already owns: metadata in Postgres, bytes in the object store, one
+ *   reserve/verify protocol binding them (design §6). It supplies grants only,
+ *   and this composition deliberately hands `createByokCloud` NO
+ *   `BlobContentProxy` — a device uploading straight to R2 is what having no
+ *   byte-proxy path means, and saying so by absence is what keeps the two
+ *   `/content` routes from mounting on a deployment that cannot serve them.
  * - `rateLimiter` gets the allow-all reference and NO table, by design
  *   (docs/researches/s4a-dataplane-design.md §5). Persisting an allow-all would
  *   create a table that is always empty, and a real limiter is edge/infra work
  *   whose implementation would not be a per-request Postgres write either.
- * - `blobs` is absent because only half of it is a store: its bytes live in
- *   object storage, and S4A-c lands that adapter together with the capability
- *   split that narrows `CloudStores.blobs`. That is why this function returns
- *   the certified subset rather than a full `CloudStores` — an in-memory blob
- *   stand-in inside a composition calling itself "postgres" is exactly the
- *   silent downgrade this program exists to prevent.
  */
 import { AllowAllRateLimiter, type CloudStores } from '@byok/cloud';
 import type { CloudCrypto } from '@byok/cloud';
 import type { Clock } from '@byok/core';
 import type { Pool } from 'pg';
+import { PostgresObjectStore } from './core/objects';
+import { R2CloudBlobStore, type R2BlobStoreOptions } from './r2-blobs';
 import { PostgresDeviceDirectory } from './devices';
 import { PostgresInboundDedupStore } from './dedup';
 import { PostgresNonceStore } from './nonces';
@@ -44,28 +47,27 @@ export {
 } from './r2-blobs';
 export type { ObjectStoreFetch, R2BlobStoreOptions } from './r2-blobs';
 
-/** The ports this composition supplies today. `blobs` joins in S4A-c. */
-export type PostgresCloudStores = Pick<
-  CloudStores,
-  | 'devices'
-  | 'pairingCodes'
-  | 'nonces'
-  | 'dedup'
-  | 'tasks'
-  | 'receipts'
-  | 'sequence'
-  | 'rateLimiter'
->;
+/** Every cloud-local port. All nine, or it is not a composition. */
+export type PostgresCloudStores = CloudStores;
+
+/** Everything the blob store needs that is not already a composition-wide input. */
+export type PostgresObjectStorageOptions = Omit<R2BlobStoreOptions, 'objects'>;
 
 export interface PostgresCloudStoreOptions {
   readonly pool: Pool;
   /**
    * The clock every TTL and timestamp in this composition reads. Injected, not
-   * the database's `now()`: expiry has to be assertable under a test clock, and
-   * a store that asks the server for the time cannot be.
+   * the database's own: expiry has to be assertable under a test clock, and a
+   * store that asks the server for the time cannot be.
    */
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
+  /**
+   * Where the bytes go. Required, because a composition that cannot say where
+   * its objects live cannot honestly claim the `blobs` port — and the
+   * conformance suite certifies compositions whole, never in parts.
+   */
+  readonly objectStorage: PostgresObjectStorageOptions;
 }
 
 export function createPostgresCloudStores(
@@ -80,6 +82,14 @@ export function createPostgresCloudStores(
     tasks: new PostgresTaskAttemptStore(pool, clock),
     receipts: new PostgresRequestReceiptStore(pool, clock),
     sequence: new PostgresDeviceSequenceStore(pool),
+    // A second `PostgresObjectStore` instance, not a shared one: it is a
+    // stateless wrapper over the pool, so the two read and write the same rows
+    // under the same locks, and requiring the caller to build the core
+    // composition first would be an ordering dependency bought for nothing.
+    blobs: new R2CloudBlobStore({
+      ...options.objectStorage,
+      objects: new PostgresObjectStore(pool, clock),
+    }),
     rateLimiter: new AllowAllRateLimiter(),
   };
 }

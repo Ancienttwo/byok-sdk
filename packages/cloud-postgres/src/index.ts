@@ -29,7 +29,11 @@ export {
   PostgresTaskAttemptStore,
   createPostgresCloudStores,
 } from './stores/index';
-export type { PostgresCloudStoreOptions, PostgresCloudStores } from './stores/index';
+export type {
+  PostgresCloudStoreOptions,
+  PostgresCloudStores,
+  PostgresObjectStorageOptions,
+} from './stores/index';
 
 // The object-storage half of blobs. Grants only: this composition supplies no
 // `BlobContentProxy`, because a device uploading straight to R2 is exactly what

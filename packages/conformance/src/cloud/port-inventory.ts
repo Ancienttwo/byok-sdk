@@ -8,7 +8,7 @@
  * that therefore no other composition would implement.
  *
  * The suite's scope (`CLOUD_CONFORMANCE_PORTS`) is uniform across compositions;
- * see `harness.ts` for why `blobs` waits for S4A-c and why `rateLimiter` is
+ * see `harness.ts` for what narrowing `blobs` bought and why `rateLimiter` is
  * satisfied without a table.
  */
 import { describe, expect, it } from 'vitest';

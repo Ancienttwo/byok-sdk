@@ -95,7 +95,24 @@ export interface R2BlobStoreOptions {
    * one row per (tenant, hash), and this store never opens a second one.
    */
   readonly objects: ObjectStore;
-  readonly clock: Clock;
+  /**
+   * The clock SigV4's `X-Amz-Date` is read from — WALL time, and deliberately
+   * NOT the composition's logical clock.
+   *
+   * Every other instant in this program comes from an injected clock so TTLs
+   * are assertable without sleeping, and a store reaching for wall time is a
+   * bug. A request signature is the exception, and not a soft one: its validity
+   * window is adjudicated by the object store against the object store's own
+   * clock. Signing with a logical instant produces a credential the remote side
+   * rejects as skewed the moment the two disagree — a 403 at upload time, from
+   * a decision made at composition time.
+   *
+   * Separate and required rather than defaulted, so the distinction is a choice
+   * someone makes rather than one they inherit. A test that needs an EXPIRED
+   * grant backdates this clock, which is also the only way to assert expiry
+   * without sleeping through it.
+   */
+  readonly signingClock: Clock;
   /** Origin only, e.g. `https://<account>.r2.cloudflarestorage.com`. */
   readonly endpoint: string;
   readonly bucket: string;
@@ -122,7 +139,7 @@ interface HeadResult {
 
 export class R2CloudBlobStore implements CloudBlobStore {
   readonly #objects: ObjectStore;
-  readonly #clock: Clock;
+  readonly #signingClock: Clock;
   readonly #client: AwsClient;
   readonly #origin: string;
   readonly #bucket: string;
@@ -133,7 +150,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
 
   constructor(options: R2BlobStoreOptions) {
     this.#objects = options.objects;
-    this.#clock = options.clock;
+    this.#signingClock = options.signingClock;
     this.#client = new AwsClient({
       accessKeyId: options.accessKeyId,
       secretAccessKey: options.secretAccessKey,
@@ -349,9 +366,9 @@ export class R2CloudBlobStore implements CloudBlobStore {
     });
   }
 
-  /** SigV4's `YYYYMMDDTHHmmssZ`, read off the injected clock like every other instant here. */
+  /** SigV4's `YYYYMMDDTHHmmssZ`, off the signing clock — see its doc for why that is a separate one. */
   #datetime(): string {
-    return this.#clock.now().toISOString().replaceAll(/[:-]|\.\d{3}/g, '');
+    return this.#signingClock.now().toISOString().replaceAll(/[:-]|\.\d{3}/g, '');
   }
 
   #declaredSize(hash: ContentHash, size: number): bigint {

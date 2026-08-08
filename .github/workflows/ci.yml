@@ -105,6 +105,12 @@ jobs:
     env:
       BYOK_REQUIRE_DATAPLANE: '1'
       BYOK_TEST_POSTGRES_URL: postgres://byok:byok@127.0.0.1:5433/byok_test
+      # Both halves of the substrate, one gate: from S4A-c the blob port is
+      # part of the conformance scope, and its Postgres composition writes a
+      # manifest row and signs against MinIO in the same call. A missing
+      # endpoint is a hard failure here for exactly the same reason a missing
+      # database URL is.
+      BYOK_TEST_S3_ENDPOINT: http://127.0.0.1:9100
     steps:
       - name: Checkout
         uses: actions/checkout@v7

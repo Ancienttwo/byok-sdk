@@ -26,6 +26,7 @@ const inMemoryFactory: CloudCompositionFactory = {
         tasks: stores.tasks,
         receipts: stores.receipts,
         sequence: stores.sequence,
+        blobs: stores.blobs,
         rateLimiter: stores.rateLimiter,
       },
       now: () => clock.now().toISOString(),
