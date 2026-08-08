@@ -1,6 +1,6 @@
 # Plan: Sprint S4A-b: Core Seven-Port Postgres Implementation and the I4 SQL Side
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260808-0232
 > **Slug**: s4a-b-core-postgres
 > **Artifact Level**: work-package

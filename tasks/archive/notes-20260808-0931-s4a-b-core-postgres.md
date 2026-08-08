@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 09:31
+> **Related Plan**: plans/archive/plan-20260808-0232-s4a-b-core-postgres.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260808-0931
+
 # Implementation Notes: s4a-b-core-postgres
 
 > **Status**: Active
