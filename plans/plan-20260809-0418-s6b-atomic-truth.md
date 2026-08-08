@@ -59,4 +59,5 @@
 - [x] Implement typed commit contract and Postgres atomic authority.
 - [x] Wire proof-only manifest/get/put routes behind `truth.records` capability.
 - [x] Implement reference behavior and adversarial/rollback tests.
-- [ ] Push stacked Draft PR; retain independent review gate（hard env/full workspace gates 已通过）。
+- [x] Push stacked Draft PR #35（commit `2de841d`）；retain independent review gate（hard env/full workspace gates 已通过）。
+- [ ] Obtain independent security/transaction acceptance；Claude review remains paused，未通过/waive 前不 merge。

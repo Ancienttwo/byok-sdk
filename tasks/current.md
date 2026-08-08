@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-09T04:01:10+0800 -->
+<!-- updated_at: 2026-08-09T04:04:07+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Active
-> **Updated At**: 2026-08-09T04:01:10+0800
+> **Updated At**: 2026-08-09T04:04:07+0800
 > **Source Branch**: codex/s6b-atomic-truth
-> **Source Commit**: d8e7802
+> **Source Commit**: 2de841d
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: s6b-ready-for-draft-pr
+> **Reason**: s6b-draft-pr-open
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -20,7 +20,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Status: Active
 - Active Plan: plans/plan-20260809-0418-s6b-atomic-truth.md
 - Plan Status: Executing
-- Next Task: Push stacked Draft PR; retain independent review gate（hard env/full workspace gates 已通过）。
+- Next Task: Obtain independent security/transaction acceptance；Claude review remains paused，未通过/waive 前不 merge。
 - Clear Note: (none)
 
 ## Mainline Snapshot Reading
@@ -57,29 +57,12 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 20 changed/untracked path(s)
+- Summary: 3 changed/untracked path(s)
 
 ```
- M docs/architecture/sdk-architecture.md
- M docs/researches/s6-proof-truth-memory-design.md
- M packages/cloud-postgres/README.md
- M packages/cloud-postgres/src/index.ts
- M packages/cloud/src/capabilities.ts
- M packages/cloud/src/cloud.ts
- M packages/cloud/src/composition/in-memory.ts
- M packages/cloud/src/index.ts
- M packages/cloud/src/router/registry.ts
- M plans/sprints/20260807-byok-platform-raft-aligned.sprint.md
- M tasks/current.md
-?? packages/cloud-postgres/src/__tests__/truth-committer.test.ts
-?? packages/cloud-postgres/src/truth-committer.ts
-?? packages/cloud/src/__tests__/truth-routes.test.ts
-?? packages/cloud/src/handlers/truth.ts
-?? packages/cloud/src/truth/
-?? plans/plan-20260809-0418-s6b-atomic-truth.md
-?? tasks/contracts/20260809-0418-s6b-atomic-truth.contract.md
-?? tasks/notes/20260809-0418-s6b-atomic-truth.notes.md
-?? tasks/reviews/20260809-0418-s6b-atomic-truth.review.md
+ M plans/plan-20260809-0418-s6b-atomic-truth.md
+ M tasks/contracts/20260809-0418-s6b-atomic-truth.contract.md
+ M tasks/notes/20260809-0418-s6b-atomic-truth.notes.md
 ```
 
 ## Source Artifacts
