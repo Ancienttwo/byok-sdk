@@ -62,4 +62,4 @@
 - [x] Add signer, adversarial and real-cloud E2E tests。
 - [x] Run hard-env/full workspace gates and protocol/schema/migration zero-diff checks。
 - [x] Close first exact-SHA Codex findings with object-origin/redirect and write-confirmation guards。
-- [ ] Push stacked Draft PR and retain independent security acceptance gate。
+- [x] Push stacked Draft PR #36，pass 32/32 CI，并取得 exact-SHA independent Codex security acceptance；Claude review remains paused。
