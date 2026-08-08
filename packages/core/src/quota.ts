@@ -110,14 +110,18 @@ export interface StorageReservationInput {
 }
 
 /**
- * Finalize payload. Sizes/hash are what the composition observed on the object
+ * Finalize payload. Size/type are what the composition observed on the object
  * store, not what the client promised — disagreement is
  * `storage_integrity_mismatch`.
+ *
+ * Hash identity stays on the reservation as the authenticated daemon's
+ * declaration (ADR-024). Object-store HEAD does not independently observe a
+ * SHA-256 digest, so accepting one here would turn a copied declaration into a
+ * false verification claim.
  */
 export interface StorageFinalizeInput {
   readonly reservationId: string;
   readonly observedByteSize: bigint;
-  readonly observedContentHash: ContentHash;
   readonly observedContentType: string;
 }
 

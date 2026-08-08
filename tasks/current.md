@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-08T16:11:52+0800 -->
+<!-- updated_at: 2026-08-08T19:48:58+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-08T16:11:52+0800
-> **Source Branch**: codex/r2-hash-authority-adr
-> **Source Commit**: a8da789
+> **Updated At**: 2026-08-08T19:48:58+0800
+> **Source Branch**: codex/s4b-a-finalize-authority
+> **Source Commit**: 6d1d69a
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: ensure-task-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -18,9 +18,9 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Current Focus
 
 - Status: ManualClearedWithActiveWork
-- Active Plan: (none)
-- Plan Status: (none)
-- Next Task: inspect active worktree marker(s)
+- Active Plan: plans/plan-20260808-1940-s4b-a-finalize-authority.md
+- Plan Status: Executing
+- Next Task: sprint 投影 S4B-a 已交付、b/c 待执行；full hard gate 与 frozen-surface audit 通过
 - Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
@@ -31,8 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/ancienttwo/Projects/byok-sdk: plans/plan-20260808-1542-r2-hash-authority-adr.md
-- /Users/ancienttwo/Projects/byok-sdk: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
+- .: plans/plan-20260808-1940-s4b-a-finalize-authority.md
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4b-a-finalize-authority
 ## Active Sprint
 
 - Sprint: (none)
@@ -45,23 +45,20 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 7 changed/untracked path(s)
 
 ```
- D plans/plan-20260808-1542-r2-hash-authority-adr.md
- D tasks/contracts/20260808-1542-r2-hash-authority-adr.contract.md
- D tasks/notes/20260808-1542-r2-hash-authority-adr.notes.md
- D tasks/reviews/20260808-1542-r2-hash-authority-adr.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260808-1542-r2-hash-authority-adr.md
-?? tasks/archive/contract-20260808-1611-r2-hash-authority-adr.md
-?? tasks/archive/notes-20260808-1611-r2-hash-authority-adr.md
-?? tasks/archive/review-20260808-1611-r2-hash-authority-adr.md
-?? tasks/archive/todo-20260808-1611-r2-hash-authority-adr.md
+ M packages/cloud-postgres/src/stores/core/quota.ts
+ M packages/conformance/src/core/quota.ts
+ M packages/core/src/in-memory/quota.ts
+ M packages/core/src/quota.ts
+ M plans/plan-20260808-1940-s4b-a-finalize-authority.md
+ M plans/sprints/20260807-byok-platform-raft-aligned.sprint.md
+ M tasks/notes/20260808-1940-s4b-a-finalize-authority.notes.md
 ```
 
 ## Source Artifacts

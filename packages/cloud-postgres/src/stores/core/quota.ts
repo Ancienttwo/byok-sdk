@@ -384,7 +384,6 @@ export class PostgresQuotaStore implements QuotaStore {
       );
     }
     if (
-      input.observedContentHash !== existing.reservation.contentHash ||
       input.observedByteSize !== existing.reservation.expectedBytes ||
       input.observedContentType !== existing.reservation.contentType
     ) {
@@ -402,6 +401,8 @@ export class PostgresQuotaStore implements QuotaStore {
     // only for a transition that won. Per-tenant hash deduplication is computed
     // inside it against the rows already committed, so "same tenant, same hash,
     // counted once" (§12.7.6) cannot disagree with what was actually added.
+    // Hash identity comes from the locked reservation row: HEAD observes only
+    // size/type, so there is no second digest value to compare or persist.
     const settled = await this.#pool.query<ReservationRow>(
       `WITH settled AS (
          UPDATE storage_reservation r

@@ -200,7 +200,6 @@ export class InMemoryQuotaStore implements QuotaStore {
       );
     }
     if (
-      input.observedContentHash !== reservation.contentHash ||
       input.observedByteSize !== reservation.expectedBytes ||
       input.observedContentType !== reservation.contentType
     ) {
@@ -216,11 +215,11 @@ export class InMemoryQuotaStore implements QuotaStore {
     const hashes = this.#hashesOf(tenant);
     // Same tenant, same hash, counted once (§12.7.6). `#settle` has already
     // released the reserved bytes, so a deduplicated finalize adds nothing.
-    const deduplicated = hashes.has(input.observedContentHash);
+    const deduplicated = hashes.has(reservation.contentHash);
     const settled = this.#settle(tenant, key, record, 'committed', deduplicated);
 
     if (!deduplicated) {
-      hashes.add(input.observedContentHash);
+      hashes.add(reservation.contentHash);
       const current = this.#usageOf(tenant);
       this.#setUsage(tenant, {
         ...current,

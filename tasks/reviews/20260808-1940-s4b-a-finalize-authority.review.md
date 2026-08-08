@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:b65bae14ae2dbefac8821ea1afdc033a516af99540550c20f1bc61b22a33bfdc
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 6d1d69a1464dc70a70d4c925d98b998f93763e0c
+> **Verification Evidence SHA256**: sha256:35d1bb76ee22bcf29bb102a6575691dfbba167839bdd429640f1ecec6062039b
+> **Issued At**: 2026-08-08T11:53:19.434Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: ADR-024 is implemented faithfully: finalize observes only size and content type, both compositions deduplicate from the reservation declaration, the shared quota conformance and hard-env full suite pass, packages contain no observedContentHash, and frozen migrations plus cloud/protocol surfaces are unchanged.
 - Findings: none
 
 ## Behavior Diff Notes

@@ -1,6 +1,6 @@
 # Task Contract: s4b-a-finalize-authority
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260808-1940-s4b-a-finalize-authority.md
 > **Task Profile**: code-change
 > **Owner**: ancienttwo

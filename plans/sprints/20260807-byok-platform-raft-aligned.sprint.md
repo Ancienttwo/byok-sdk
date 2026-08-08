@@ -787,6 +787,7 @@ Migrations are forward-only additive in this Sprint. Rollback application code c
 > **依赖**：S4A（数据面与 conformance 套件）+ ADR-024（R2 hash authority，已 `Accepted`）
 > **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）的容量与清理部分
 > **关键路径**：不阻塞 S5 的实现，但**是 Beta 闸的硬依赖**（见 §12）
+> **切片投影**：S4B-a 先落 finalize authority contract（删除 `StorageFinalizeInput.observedContentHash`，两 composition 的 dedupe/accounting 只读 reservation declaration）；S4B-b 落 reservation-bound cloud surface/presign；S4B-c 再以独立 migration contract 落 retention、tombstone、R2 GC/reconcile、metrics/runbook。只有 a/b/c 全闭才算 S4B 交付。
 
 ### S4B.1 Stories
 

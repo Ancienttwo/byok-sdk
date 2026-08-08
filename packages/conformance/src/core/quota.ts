@@ -86,7 +86,6 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
         const result = await stores.quota.finalizeReservation(TENANT_A, {
           reservationId: 'res-1',
           observedByteSize: 300n,
-          observedContentHash: hashOf(1),
           observedContentType: 'application/octet-stream',
         });
         expect(result.deduplicated).toBe(false);
@@ -104,7 +103,6 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
         await stores.quota.finalizeReservation(TENANT_A, {
           reservationId: 'res-1',
           observedByteSize: 400n,
-          observedContentHash: hashOf(1),
           observedContentType: 'application/octet-stream',
         });
         await stores.quota.reserve(TENANT_A, reservation('res-2', 400n, 2));
@@ -157,7 +155,6 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
           stores.quota.finalizeReservation(TENANT_A, {
             reservationId: 'res-1',
             observedByteSize: 300n,
-            observedContentHash: hashOf(1),
             observedContentType: 'application/octet-stream',
           }),
         );
@@ -165,20 +162,29 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
       });
     });
 
-    it('releases the reservation when the observed object disagrees', async () => {
+    it('releases reservations when observed size or content type disagrees', async () => {
       await withComposition(factory, async ({ stores }) => {
         await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
-        await stores.quota.reserve(TENANT_A, reservation('res-1', 300n, 1));
+        await stores.quota.reserve(TENANT_A, reservation('res-size', 300n, 1));
 
-        const mismatch = await captureError(
+        const sizeMismatch = await captureError(
           stores.quota.finalizeReservation(TENANT_A, {
-            reservationId: 'res-1',
+            reservationId: 'res-size',
             observedByteSize: 299n,
-            observedContentHash: hashOf(1),
             observedContentType: 'application/octet-stream',
           }),
         );
-        expect(isCoreError(mismatch, 'storage_integrity_mismatch')).toBe(true);
+        expect(isCoreError(sizeMismatch, 'storage_integrity_mismatch')).toBe(true);
+
+        await stores.quota.reserve(TENANT_A, reservation('res-type', 300n, 2));
+        const typeMismatch = await captureError(
+          stores.quota.finalizeReservation(TENANT_A, {
+            reservationId: 'res-type',
+            observedByteSize: 300n,
+            observedContentType: 'application/json',
+          }),
+        );
+        expect(isCoreError(typeMismatch, 'storage_integrity_mismatch')).toBe(true);
 
         const usage = await stores.quota.readUsage(TENANT_A);
         expect(usage.reservedBytes).toBe(0n);
@@ -195,7 +201,6 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
           const result = await stores.quota.finalizeReservation(TENANT_A, {
             reservationId: id,
             observedByteSize: 300n,
-            observedContentHash: hashOf(7),
             observedContentType: 'application/octet-stream',
           });
           expect(result.deduplicated).toBe(id === 'res-2');
@@ -229,7 +234,6 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
         await stores.quota.finalizeReservation(TENANT_A, {
           reservationId: 'res-1',
           observedByteSize: 400n,
-          observedContentHash: hashOf(1),
           observedContentType: 'application/octet-stream',
         });
 
