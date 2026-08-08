@@ -95,7 +95,7 @@ describe('atomicWriteFile', () => {
     expect(JSON.parse(await fs.readFile(target, 'utf8'))).toEqual({ ok: true });
   });
 
-  it('fsyncs the parent directory after publishing a crash-durable write', async () => {
+  it.runIf(process.platform !== 'win32')('fsyncs the parent directory after publishing a crash-durable write', async () => {
     dir = await tmpDir('byok-atomic-write-fsync-dir-');
     const target = path.join(dir, 'operational-health.json');
     const realOpen = fs.open.bind(fs);
@@ -114,6 +114,23 @@ describe('atomicWriteFile', () => {
     expect(directorySync).toHaveBeenCalledOnce();
     expect(directoryClose).toHaveBeenCalledOnce();
     expect(JSON.parse(await fs.readFile(target, 'utf8'))).toEqual({ currentRun: { id: 'run-1' } });
+  });
+
+  it('uses a writable target flush and does not attempt an unsupported directory flush on Windows', async () => {
+    dir = await tmpDir('byok-atomic-write-fsync-win32-');
+    const target = path.join(dir, 'operational-health.json');
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' });
+    const openSpy = vi.spyOn(fs, 'open');
+    try {
+      await atomicWriteFile(target, JSON.stringify({ currentRun: { id: 'run-win' } }), { mode: 0o600, fsync: true });
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform });
+    }
+
+    expect(openSpy.mock.calls).toContainEqual([target, 'r+']);
+    expect(openSpy.mock.calls.some(([opened]) => opened === dir)).toBe(false);
+    expect(JSON.parse(await fs.readFile(target, 'utf8'))).toEqual({ currentRun: { id: 'run-win' } });
   });
 
   it('retries the plain rename (never unlinking the target) when fs.rename throws EPERM once (Windows: rename onto an existing, momentarily-locked target)', async () => {

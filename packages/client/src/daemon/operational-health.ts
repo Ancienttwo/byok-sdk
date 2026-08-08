@@ -79,6 +79,9 @@ export class OperationalHealthTracker {
     this.#pid = options.pid ?? process.pid;
     if (!Number.isSafeInteger(this.#windowMs) || this.#windowMs <= 0) throw new Error('health windowMs must be positive');
     if (!Number.isSafeInteger(this.#failureThreshold) || this.#failureThreshold <= 0) throw new Error('health failureThreshold must be positive');
+    if (!Number.isSafeInteger(this.#maxFailures) || this.#maxFailures <= 0) throw new Error('health maxFailures must be positive');
+    if (!Number.isSafeInteger(this.#maxCrashes) || this.#maxCrashes <= 0) throw new Error('health maxCrashes must be positive');
+    if (this.#maxFailures < this.#failureThreshold) throw new Error('health maxFailures must cover failureThreshold');
   }
 
   async startRun(): Promise<OperationalHealthSnapshot> {
@@ -94,6 +97,13 @@ export class OperationalHealthTracker {
     }
     this.#state = loaded;
     this.#prune(now);
+    // The load boundary enforces the same bounded-history invariant as the
+    // writer. A shape-valid file produced by an older/manual writer must not
+    // bypass the configured memory/disk bound simply because no new event is
+    // appended during this run.
+    loaded.failures = loaded.failures.slice(-this.#maxFailures);
+    loaded.crashes = loaded.crashes.slice(-this.#maxCrashes);
+    if (loaded.failures.length >= this.#failureThreshold) loaded.state = 'degraded';
     if (loaded.currentRun) {
       loaded.crashes.push({ detectedAt: now.toISOString(), previousRunStartedAt: loaded.currentRun.startedAt });
       loaded.crashes = loaded.crashes.slice(-this.#maxCrashes);

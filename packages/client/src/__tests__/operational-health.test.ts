@@ -71,6 +71,32 @@ describe('operational health', () => {
     expect(third.snapshot()).toMatchObject({ availability: 'available', crashCount: 1 });
   });
 
+  it('bounds shape-valid histories at the load boundary even without a new failure or crash', async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, 'operational-health.json');
+    const failures = Array.from({ length: 8 }, (_, index) => ({
+      at: `2026-08-09T00:00:0${index}.000Z`,
+      source: 'reconnect',
+    }));
+    const crashes = Array.from({ length: 8 }, (_, index) => ({
+      detectedAt: `2026-08-09T00:00:0${index}.000Z`,
+      previousRunStartedAt: `2026-08-08T23:59:0${index}.000Z`,
+    }));
+    await fs.writeFile(file, JSON.stringify({ version: 1, state: 'healthy', failures, crashes }), 'utf8');
+
+    const tracker = new OperationalHealthTracker(dir, {
+      clock: () => new Date('2026-08-09T00:00:08.000Z'),
+      runId: () => 'bounded-run',
+      maxFailures: 3,
+      maxCrashes: 2,
+    });
+    await tracker.startRun();
+    expect(tracker.snapshot()).toMatchObject({ availability: 'available', state: 'degraded', failureCount: 3, crashCount: 2 });
+    const persisted = JSON.parse(await fs.readFile(file, 'utf8')) as { failures: unknown[]; crashes: unknown[] };
+    expect(persisted.failures).toHaveLength(3);
+    expect(persisted.crashes).toHaveLength(2);
+  });
+
   it('reports corrupt state as unavailable without deleting or rebuilding it', async () => {
     const dir = await tempDir();
     const file = path.join(dir, 'operational-health.json');
