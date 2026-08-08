@@ -1,12 +1,12 @@
 # Task Contract: byok-keys-package
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260805-1659-byok-keys-package.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: ancienttwo
 > **Capability ID**: root
-> **Last Updated**: 2026-08-08 22:40
+> **Last Updated**: 2026-08-08 22:59
 > **Review File**: `tasks/reviews/20260805-1659-byok-keys-package.review.md`
 > **Notes File**: `tasks/notes/20260805-1659-byok-keys-package.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
