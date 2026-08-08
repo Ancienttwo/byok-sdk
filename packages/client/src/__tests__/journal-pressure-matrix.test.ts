@@ -73,7 +73,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
 
-it('serializes scheduled maintenance and stop waits for the in-flight pass before journal close', async () => {
+it.skipIf(!isSqliteAvailable())('serializes scheduled maintenance and stop waits for the in-flight pass before journal close', async () => {
   const storeDir = await tmpDir('byok-pressure-scheduler-barrier-');
   const journal = new SqliteLocalTaskJournal({ storeDir });
   const realMeasureUsage = journal.measureUsage.bind(journal);
