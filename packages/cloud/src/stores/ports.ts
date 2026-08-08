@@ -34,7 +34,7 @@
  * because a composition backed by object storage physically cannot proxy
  * bytes (see the blobs section below).
  */
-import type { TenantId } from '@byok/core';
+import type { StorageReservation, TenantId } from '@byok/core';
 
 // ---------------------------------------------------------------------------
 // Device directory (S1's `DeviceRegistry`, tenant-first)
@@ -227,6 +227,12 @@ export interface BlobDeclaration {
   readonly contentHash: string;
 }
 
+/** What object-store metadata can actually observe at finalize (ADR-024). */
+export interface BlobObservation {
+  readonly observedByteSize: bigint;
+  readonly observedContentType: string;
+}
+
 export type BlobWriteResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
 export interface BlobContent {
@@ -243,7 +249,10 @@ export interface BlobContent {
  * {@link BlobContentProxy} for where the other three went and why.
  */
 export interface CloudBlobStore {
-  createUpload(tenant: TenantId, input: BlobDeclaration): Promise<{ readonly blobId: string; readonly uploadUrl: string }>;
+  /** Mint only from an already-admitted object reservation. */
+  createUpload(tenant: TenantId, reservation: StorageReservation): Promise<{ readonly blobId: string; readonly uploadUrl: string }>;
+  /** Observe existence/size/type while proving this blob belongs to this reservation. */
+  observeUpload(tenant: TenantId, blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
   /** A presigned GET URL for a blob THIS tenant owns that has finished uploading; `undefined` otherwise — including for another tenant's blob. */
   getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined>;
 }

@@ -16,6 +16,7 @@
  * adds nothing.
  */
 import { ByokCoreError, CoreConflictError } from '../errors';
+import type { ObjectStore } from '../blob';
 import type {
   MailboxUsageDeltaInput,
   StorageFinalizeInput,
@@ -48,9 +49,11 @@ export class InMemoryQuotaStore implements QuotaStore {
   readonly #reservations = new Map<string, ReservationRecord>();
   readonly #committedHashes = new Map<string, Set<string>>();
   readonly #clock: Clock;
+  readonly #objects: ObjectStore;
 
-  constructor(clock: Clock) {
+  constructor(clock: Clock, objects: ObjectStore) {
     this.#clock = clock;
+    this.#objects = objects;
   }
 
   async readEntitlement(tenant: TenantId): Promise<TenantStorageEntitlement | undefined> {
@@ -113,15 +116,39 @@ export class InMemoryQuotaStore implements QuotaStore {
     };
   }
 
+  async readReservation(
+    tenant: TenantId,
+    reservationId: string,
+  ): Promise<StorageReservation | undefined> {
+    return this.#reservations.get(tenantKey(tenant, reservationId))?.reservation;
+  }
+
   async reserve(
     tenant: TenantId,
     input: StorageReservationInput,
   ): Promise<StorageReservation> {
     const entitlement = this.#requireEntitlement(tenant);
+    // Admission is the bounded product-side reap point. A daemon may die
+    // after receiving a grant and never call finalize/abort; expired holds
+    // therefore have to be settled before they can deny the next write.
+    await this.expireReservations(tenant);
     const key = tenantKey(tenant, input.reservationId);
     const existing = this.#reservations.get(key);
     if (existing !== undefined) {
-      if (existing.reservation.state === 'reserved') return existing.reservation;
+      if (existing.reservation.state === 'reserved') {
+        if (
+          existing.reservation.kind !== input.kind ||
+          existing.reservation.expectedBytes !== input.expectedBytes ||
+          existing.reservation.contentHash !== input.contentHash ||
+          existing.reservation.contentType !== input.contentType
+        ) {
+          throw new ByokCoreError(
+            'storage_integrity_mismatch',
+            `Reservation ${input.reservationId} already binds a different storage declaration.`,
+          );
+        }
+        return existing.reservation;
+      }
       throw new ByokCoreError(
         'storage_reservation_expired',
         `Reservation ${input.reservationId} is already ${existing.reservation.state}.`,
@@ -210,6 +237,29 @@ export class InMemoryQuotaStore implements QuotaStore {
         'storage_integrity_mismatch',
         `Observed object does not match reservation ${input.reservationId}.`,
       );
+    }
+
+    if (reservation.kind === 'object') {
+      try {
+        await this.#objects.commit(tenant, {
+          hash: reservation.contentHash,
+          observedByteSize: input.observedByteSize,
+          observedContentType: input.observedContentType,
+        });
+      } catch (error) {
+        this.#settle(tenant, key, record, 'aborted');
+        if (
+          error instanceof ByokCoreError &&
+          (error.code === 'object_not_found' || error.code === 'object_state_invalid')
+        ) {
+          throw new ByokCoreError(
+            'storage_integrity_mismatch',
+            `Reservation ${input.reservationId} has no committable object manifest.`,
+            { cause: error },
+          );
+        }
+        throw error;
+      }
     }
 
     const hashes = this.#hashesOf(tenant);

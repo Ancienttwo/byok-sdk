@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { BlobRef } from '@byok/protocol';
 import type { AuthManager } from './auth-manager';
 import { authedFetch } from './http-client';
@@ -55,7 +55,14 @@ export class BlobClient implements BlobResolver {
     if (!contentRes.ok) {
       throw new Error(`failed to download blob content: HTTP ${contentRes.status}`);
     }
-    return contentRes.text();
+    const bytes = new Uint8Array(await contentRes.arrayBuffer());
+    const observedHash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    if (observedHash !== blobRef.contentHash || bytes.length !== blobRef.size) {
+      throw new Error(
+        `downloaded blob failed declared integrity: expected ${blobRef.contentHash}/${blobRef.size} bytes, observed ${observedHash}/${bytes.length} bytes`,
+      );
+    }
+    return new TextDecoder().decode(bytes);
   }
 
   /** `POST /byok/blobs` (declares size/contentType/contentHash) -> PUT the bytes to the presigned upload URL -> a `BlobRef` for `task.artifact.blobRef`. */
@@ -63,12 +70,16 @@ export class BlobClient implements BlobResolver {
     const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
     const contentHash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     const base = toHttpBase(this.serverUrl);
+    const reservationId = `blob_${randomUUID()}`;
 
     const createRes = await authedFetch(
       new URL('/byok/blobs', base),
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': reservationId,
+        },
         body: JSON.stringify({ size: bytes.length, contentType, contentHash }),
       },
       this.auth,
@@ -88,6 +99,37 @@ export class BlobClient implements BlobResolver {
       throw new Error(`failed to upload blob content: HTTP ${putRes.status}`);
     }
 
+    await this.#finalize(base, blobId, reservationId);
+
     return { blobId, contentHash, size: bytes.length, contentType };
+  }
+
+  async #finalize(base: string, blobId: string, reservationId: string): Promise<void> {
+    let lastFailure: unknown;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      let response: Response;
+      try {
+        response = await authedFetch(
+          new URL(`/byok/blobs/${encodeURIComponent(blobId)}/finalize`, base),
+          {
+            method: 'POST',
+            headers: { 'idempotency-key': reservationId },
+          },
+          this.auth,
+        );
+      } catch (error) {
+        lastFailure = error;
+        if (attempt === 2) throw error;
+        continue;
+      }
+      if (response.ok) return;
+      if (response.status < 500 || attempt === 2) {
+        throw new Error(
+          `failed to finalize blob: HTTP ${response.status} ${await safeErrorText(response)}`.trimEnd(),
+        );
+      }
+      lastFailure = new Error(`failed to finalize blob: HTTP ${response.status}`);
+    }
+    throw lastFailure;
   }
 }

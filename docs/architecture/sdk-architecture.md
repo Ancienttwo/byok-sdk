@@ -1360,7 +1360,7 @@ sequenceDiagram
 - `HEAD` 只观测对象存在性、byte size 与 content type，不观测或验证 SHA-256；
 - `object_manifest.state = committed` 只表示 tenant-scoped 对象存在、observed size/type 与声明匹配且 manifest/accounting transaction 已提交，不表示 cloud 验证过摘要；
 - truth transaction 只引用 `object_manifest.state = committed` 的对象；
-- presigned capability 绑定 tenant、reservation、resource、最大 size 与 expiry；
+- presigned capability 绑定 tenant-scoped resource、最大 size/type 与 expiry；reservation/resource 绑定由 authenticated cloud finalize authority 持有，不伪装成 R2 可校验的 metadata；
 - object key 不承载 secret，也不承载可读的 instruction 标题；
 - inline payload 只用于小对象，并计入 tenant logical usage；
 - 任何声称下载内容完整性的 consumer 必须自行对 bytes 重算 SHA-256，并与 daemon 声明的摘要比较；
@@ -1420,17 +1420,17 @@ Postgres 至少新增：`storage_entitlement`、`storage_usage`、`storage_reser
 
 #### 12.7.7 Reservation/finalize：防止并发超卖
 
-reservation/finalize 的 port 契约、无超卖语义与下表五个稳定错误码已于 S2 落地（`@byok/core` 的 `QuotaStore`，含 per-tenant hash dedup 落在 `finalizeReservation`），并由 InMemory 参考跑通 conformance 套件；R2 presign、Postgres transaction 与 orphan GC 的组合仍是目标设计。
+reservation/finalize 的 port 契约与无超卖语义由 `@byok/core` 的 `QuotaStore` 持有。S4B-b 已把 R2 presign、显式 finalize 与 Postgres manifest/accounting transaction 接进 device surface；orphan GC 仍属 S4B-c。
 
 所有直接上传 R2 的 durable write 走两阶段流程：
 
-1. client/daemon 带 `expectedBytes`、kind、hash、content type 请求 reservation；
-2. Postgres transaction 锁定 tenant usage，检查 `committed + reserved + expected <= hardLimit`，成功则增加 `reservedBytes`；
-3. cloud 签发绑定该 reservation 的 R2 presigned PUT；
-4. upload 完成后，finalize 对 R2 做 `HEAD`，只观测存在性、byte size 与 content type；
-5. Postgres transaction 把 reservation 从 reserved 转为 committed，并建立 manifest/reference；
-6. reservation 过期或 finalize 失败时释放 reserved bytes，并把已上传但未被引用的对象列为 orphan candidate；
-7. 所有步骤按 reservation/request id 幂等。
+1. daemon 计算 canonical hash，并以 `Idempotency-Key` 作 reservation/request id 调用 `POST /byok/blobs`；
+2. Postgres transaction 锁定 tenant entitlement，检查 `committed + reserved + expected <= hardLimit`，写入 `storage_reservation.reserved`；
+3. cloud 先建立 `object_manifest.pending`，再从 reservation 声明签发绑定 tenant key 与 resource shape 的 R2 presigned PUT；reservation/resource 绑定由 cloud finalize authority 校验，不向 R2 注入无消费者的 query metadata；
+4. daemon PUT bytes 后，以同一 `Idempotency-Key` 调用 `POST /byok/blobs/:id/finalize`；R2 adapter 做 `HEAD`，只观测存在性、byte size 与 content type；
+5. Postgres 单一 data-modifying CTE 同时把 manifest 与 reservation 转为 committed，并更新 usage；在此之前 download route 对 pending manifest 一律 404，不隐式 finalize；
+6. reservation 过期后由下一次 tenant admission 的 bounded reap 释放 reserved bytes；对象缺失/shape mismatch 则由 finalize 立即释放；已上传 bytes 成为 S4B-c GC 的 orphan candidate；
+7. create collision fail-closed；finalize response lost 以同 key/path 重放，返回同一结果且不重复计量。
 
 S4B 的首个实现提交必须删除 `StorageFinalizeInput.observedContentHash`：reservation/manifest 保存的是 daemon 声明的 hash，不能把它回填成“观测值”；finalize 的 storage observation 只包含 `observedByteSize` 与 `observedContentType`。`object_manifest` 保留 `pending`、`committed`、`delete_pending`、`deleted` 四态，`0003` 不增加 `hash_verified` 字段或验证态。
 
@@ -1468,14 +1468,14 @@ R2 GC 使用 tombstone 加 reconcile：
 
 #### 12.7.9 储存控制面端点（目标设计）
 
-| 端点 | 主体 | 用途 |
-| --- | --- | --- |
-| `GET /byok/storage/usage` | tenant principal | committed / reserved / limit / grace 状态 |
-| `PUT /byok/admin/storage-entitlements/:tenantId` | control plane | 写入版本化数值 entitlement；不含套餐价格逻辑 |
-| `POST /byok/storage/reservations` | device proof / control | 原子预留预计 bytes 并签发 upload intent |
-| `POST /byok/storage/reservations/:id/complete` | device proof / control | R2 `HEAD` 确认存在性与 size/type 后转为 committed；不验证摘要 |
-| `POST /byok/storage/reservations/:id/abort` | device proof / control | 幂等释放 reservation；已上传对象进入 orphan grace |
-| object presign 端点 | device proof / control | reservation-bound 的 upload/download capability |
+| 端点 | 主体 | 用途 | 交付状态 |
+| --- | --- | --- | --- |
+| `GET /byok/storage/usage` | tenant principal | committed / reserved / limit / grace 状态 | 目标设计，未路由 |
+| `PUT /byok/admin/storage-entitlements/:tenantId` | control plane | 写入版本化数值 entitlement；不含套餐价格逻辑 | 目标设计，host 目前直接调用 port |
+| `POST /byok/blobs` + `Idempotency-Key` | device bearer | 原子预留预计 bytes、建立 pending manifest 并签发 reservation-bound upload capability | S4B-b 已交付 |
+| `POST /byok/blobs/:id/finalize` + 同一 `Idempotency-Key` | device bearer | R2 `HEAD` 观测存在性与 size/type 后，原子提交 manifest/reservation/usage；不验证摘要 | S4B-b 已交付 |
+| `POST /byok/storage/reservations/:id/abort` | device proof / control | 幂等释放 reservation；已上传对象进入 orphan grace | 目标设计，S4B-c |
+| object presign 端点 | device proof / control | reservation-bound 的 upload/download capability | metadata route 已交付；content 由 signed URL 承载 |
 
 能力降级同样由 `/capabilities` 声明，不用 404/405/501 嗅探推断（附录 A 的 ADR-010）。
 

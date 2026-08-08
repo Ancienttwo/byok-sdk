@@ -6,7 +6,7 @@
  * without a database — which is what makes those same assertions meaningful
  * when a durable composition (S3b's journal, S4A's schema) runs them later.
  */
-import type { Clock } from '@byok/core';
+import type { Clock, ObjectStore } from '@byok/core';
 import type { CloudCrypto } from '../../crypto/port';
 import type { BlobContentProxy, CloudStores } from '../ports';
 import { AllowAllRateLimiter } from './rate-limiter';
@@ -49,8 +49,12 @@ export interface InMemoryCloudComposition {
   readonly blobContentProxy: BlobContentProxy;
 }
 
-export function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto): InMemoryCloudComposition {
-  const blobs = createInMemoryBlobs(clock, crypto);
+export function createInMemoryCloudStores(
+  clock: Clock,
+  crypto: CloudCrypto,
+  objects: ObjectStore,
+): InMemoryCloudComposition {
+  const blobs = createInMemoryBlobs(clock, crypto, objects);
   return {
     stores: {
       devices: new InMemoryDeviceDirectory(),

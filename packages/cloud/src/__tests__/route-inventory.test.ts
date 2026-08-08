@@ -28,6 +28,7 @@ const EXPECTED_INVENTORY: Record<string, RouteClass> = {
   'GET /byok/events': 'device',
   'POST /byok/messages': 'device',
   'POST /byok/blobs': 'device',
+  'POST /byok/blobs/:id/finalize': 'device',
   'GET /byok/blobs/:id/url': 'device',
   'PUT /byok/blobs/:id/content': 'presigned',
   'GET /byok/blobs/:id/content': 'presigned',
@@ -225,7 +226,11 @@ const ALWAYS_MOUNTED = [
   'GET /byok/capabilities',
 ] as const;
 
-const GRANT_ROUTES = ['POST /byok/blobs', 'GET /byok/blobs/:id/url'] as const;
+const GRANT_ROUTES = [
+  'POST /byok/blobs',
+  'POST /byok/blobs/:id/finalize',
+  'GET /byok/blobs/:id/url',
+] as const;
 const CONTENT_ROUTES = ['PUT /byok/blobs/:id/content', 'GET /byok/blobs/:id/content'] as const;
 
 function declaration(...capabilities: CloudCapability[]): CapabilityDeclaration {
@@ -236,7 +241,11 @@ function declaration(...capabilities: CloudCapability[]): CapabilityDeclaration 
 function cloudWith(options: { readonly capabilities: CapabilityDeclaration; readonly withProxy: boolean }) {
   const clock = createMutableClock();
   const crypto = createWebCrypto();
-  const composition = createInMemoryCloudStores(clock, crypto);
+  const composition = createInMemoryCloudStores(
+    clock,
+    crypto,
+    createInMemoryCoreStores({ clock }).stores.objects,
+  );
   return createByokCloud({
     core: createInMemoryCoreStores({ clock }).stores,
     cloud: composition.stores,
@@ -358,13 +367,22 @@ async function uploadBlob(harness: CloudHarness, device: PairedDevice, text: str
   const bytes = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const reservationId = `inventory-${hex}`;
   const created = await harness.request('/byok/blobs', {
     method: 'POST',
-    headers: { ...device.authorization, 'content-type': 'application/json' },
+    headers: {
+      ...device.authorization,
+      'content-type': 'application/json',
+      'idempotency-key': reservationId,
+    },
     body: JSON.stringify({ size: bytes.length, contentType: 'text/plain', contentHash: `sha256:${hex}` }),
   });
   const { blobId, uploadUrl } = (await created.json()) as { blobId: string; uploadUrl: string };
   await harness.request(uploadUrl, { method: 'PUT', body: bytes });
+  await harness.request(`/byok/blobs/${blobId}/finalize`, {
+    method: 'POST',
+    headers: { ...device.authorization, 'idempotency-key': reservationId },
+  });
   return blobId;
 }
 

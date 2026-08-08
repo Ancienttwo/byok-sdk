@@ -1,6 +1,12 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
-import type { BlobStore, CreateUploadInput, ReadContentResult, WriteContentResult } from './blob-store';
+import {
+  BlobDeclarationConflictError,
+  type BlobStore,
+  type CreateUploadInput,
+  type ReadContentResult,
+  type WriteContentResult,
+} from './blob-store';
 import { openSqliteDatabase, secureSqliteFilePermissions } from './sqlite-support';
 
 export interface SqliteBlobStoreOptions {
@@ -157,8 +163,19 @@ export class SqliteBlobStore implements BlobStore {
     this.writeContentStmt = this.db.prepare('UPDATE blobs SET data = ?, uploaded = 1 WHERE blob_id = ?');
   }
 
-  async createUpload(input: CreateUploadInput): Promise<{ blobId: string; uploadUrl: string }> {
-    const blobId = `blob_${randomUUID()}`;
+  async createUpload(input: CreateUploadInput, requestedBlobId?: string): Promise<{ blobId: string; uploadUrl: string }> {
+    const blobId = requestedBlobId ?? `blob_${randomUUID()}`;
+    const existing = this.selectBlobStmt.get(blobId) as BlobRow | undefined;
+    if (existing !== undefined) {
+      if (
+        existing.size !== input.size ||
+        existing.content_type !== input.contentType ||
+        existing.content_hash !== input.contentHash
+      ) {
+        throw new BlobDeclarationConflictError(blobId);
+      }
+      return { blobId, uploadUrl: this.signUrl(blobId, 'put') };
+    }
     this.insertBlobStmt.run(blobId, input.size, input.contentType, input.contentHash);
     return { blobId, uploadUrl: this.signUrl(blobId, 'put') };
   }
@@ -186,6 +203,7 @@ export class SqliteBlobStore implements BlobStore {
   async writeContent(blobId: string, data: Buffer): Promise<WriteContentResult> {
     const row = this.selectBlobStmt.get(blobId) as BlobRow | undefined;
     if (!row) return { ok: false, reason: 'unknown blobId' };
+    if (row.uploaded) return { ok: false, reason: 'blob already uploaded' };
     if (data.length !== row.size) {
       return { ok: false, reason: `size mismatch: declared ${row.size}, received ${data.length}` };
     }

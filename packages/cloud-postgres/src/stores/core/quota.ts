@@ -70,6 +70,9 @@ const ENTITLEMENT_COLUMNS =
 
 const RESERVATION_COLUMNS =
   'tenant_id, reservation_id, state, kind, expected_bytes, content_hash, content_type, created_at, expires_at, settled_at, deduplicated';
+const QUALIFIED_RESERVATION_COLUMNS = RESERVATION_COLUMNS.split(', ')
+  .map((column) => `r.${column}`)
+  .join(', ');
 
 interface EntitlementRow {
   readonly tenant_id: string;
@@ -268,6 +271,13 @@ export class PostgresQuotaStore implements QuotaStore {
     };
   }
 
+  async readReservation(
+    tenant: TenantId,
+    reservationId: string,
+  ): Promise<StorageReservation | undefined> {
+    return (await this.#readReservation(tenant, reservationId))?.reservation;
+  }
+
   async reserve(
     tenant: TenantId,
     input: StorageReservationInput,
@@ -285,6 +295,17 @@ export class PostgresQuotaStore implements QuotaStore {
       if (entitlement === undefined) {
         rejection = this.#entitlementMissing();
       } else {
+        const now = this.#now();
+        // The tenant entitlement lock also serializes this bounded reap with
+        // admission. A client can disappear after PUT grant issuance; stale
+        // reservations must not remain in the aggregate and permanently
+        // consume the tenant's hard limit until an external scheduler runs.
+        await client.query(
+          `UPDATE storage_reservation
+              SET state = 'expired', settled_at = $2
+            WHERE tenant_id = $1 AND state = 'reserved' AND expires_at <= $2`,
+          [tenant, now],
+        );
         const inserted = await client.query<ReservationRow>(
           `WITH ent AS (
              SELECT hard_limit_bytes, max_object_bytes, max_inline_bytes, downgrade_grace_until
@@ -317,9 +338,9 @@ export class PostgresQuotaStore implements QuotaStore {
             input.expectedBytes,
             input.contentHash,
             input.contentType,
-            this.#now(),
+            now,
             this.#expiry(input.ttlMs),
-            this.#now(),
+            now,
           ],
         );
         const row = inserted.rows[0];
@@ -397,23 +418,67 @@ export class PostgresQuotaStore implements QuotaStore {
       );
     }
 
-    // One statement: the guarded transition decides, and the usage row moves
-    // only for a transition that won. Per-tenant hash deduplication is computed
-    // inside it against the rows already committed, so "same tenant, same hash,
-    // counted once" (§12.7.6) cannot disagree with what was actually added.
-    // Hash identity comes from the locked reservation row: HEAD observes only
-    // size/type, so there is no second digest value to compare or persist.
+    // One statement owns all three durable facts: object manifest, reservation,
+    // and usage. `candidate` reads the pre-transition manifest state so object
+    // deduplication is defined by manifest authority, not by a second shadow
+    // set of committed reservation rows. A missing or mismatched manifest
+    // aborts the reservation in this same statement and is surfaced below.
+    // Hash identity comes from the reservation row: HEAD observes only
+    // size/type (ADR-024), so there is no second digest to compare or persist.
     const settled = await this.#pool.query<ReservationRow>(
-      `WITH settled AS (
+      `WITH candidate AS MATERIALIZED (
+         SELECT r.tenant_id,
+                r.reservation_id,
+                r.kind,
+                r.content_hash,
+                r.expected_bytes,
+                r.content_type,
+                m.state AS manifest_state,
+                (m.tenant_id IS NOT NULL
+                 AND m.state IN ('pending', 'committed')
+                 AND m.byte_size = $4::bigint
+                 AND m.content_type = $5) AS manifest_valid,
+                EXISTS (
+                  SELECT 1 FROM storage_reservation p
+                   WHERE p.tenant_id = r.tenant_id
+                     AND p.content_hash = r.content_hash
+                     AND p.state = 'committed'
+                ) AS inline_deduplicated
+           FROM storage_reservation r
+           LEFT JOIN object_manifest m
+             ON m.tenant_id = r.tenant_id AND m.hash = r.content_hash
+          WHERE r.tenant_id = $1
+            AND r.reservation_id = $2
+            AND r.state = 'reserved'
+       ), committed_manifest AS (
+         UPDATE object_manifest m
+            SET state = 'committed', updated_at = $3
+           FROM candidate c
+          WHERE c.kind = 'object'
+            AND c.manifest_valid
+            AND m.state = 'pending'
+            AND m.tenant_id = c.tenant_id
+            AND m.hash = c.content_hash
+         RETURNING 1
+       ), settled AS (
          UPDATE storage_reservation r
-            SET state        = 'committed',
-                settled_at   = $3,
-                deduplicated = EXISTS (SELECT 1 FROM storage_reservation p
-                                        WHERE p.tenant_id = r.tenant_id
-                                          AND p.content_hash = r.content_hash
-                                          AND p.state = 'committed')
-          WHERE r.tenant_id = $1 AND r.reservation_id = $2 AND r.state = 'reserved'
-         RETURNING ${RESERVATION_COLUMNS}
+            SET state = CASE
+                          WHEN c.kind = 'object' AND NOT c.manifest_valid
+                            THEN 'aborted'
+                          ELSE 'committed'
+                        END,
+                settled_at = $3,
+                deduplicated = CASE
+                                 WHEN c.kind = 'object'
+                                   THEN NOT EXISTS (SELECT 1 FROM committed_manifest)
+                                 ELSE c.inline_deduplicated
+                               END
+           FROM candidate c,
+                (SELECT COUNT(*) FROM committed_manifest) AS manifest_barrier
+          WHERE r.tenant_id = c.tenant_id
+            AND r.reservation_id = c.reservation_id
+            AND r.state = 'reserved'
+         RETURNING ${QUALIFIED_RESERVATION_COLUMNS}
        ), accounted AS (
          UPDATE storage_usage u
             SET committed_object_bytes = u.committed_object_bytes
@@ -426,11 +491,17 @@ export class PostgresQuotaStore implements QuotaStore {
                   + CASE WHEN s.kind = 'object' AND NOT s.deduplicated THEN 1 ELSE 0 END,
                 updated_at = $3
            FROM settled s
-          WHERE u.tenant_id = $1
+          WHERE u.tenant_id = $1 AND s.state = 'committed'
          RETURNING 1
        )
        SELECT ${RESERVATION_COLUMNS} FROM settled`,
-      [tenant, input.reservationId, this.#now()],
+      [
+        tenant,
+        input.reservationId,
+        this.#now(),
+        input.observedByteSize,
+        input.observedContentType,
+      ],
     );
 
     const row = settled.rows[0];
@@ -452,8 +523,16 @@ export class PostgresQuotaStore implements QuotaStore {
       );
     }
 
+    const reservation = toReservation(row);
+    if (reservation.state === 'aborted') {
+      throw new ByokCoreError(
+        'storage_integrity_mismatch',
+        `Reservation ${input.reservationId} has no matching committable object manifest.`,
+      );
+    }
+
     return {
-      reservation: toReservation(row),
+      reservation,
       usage: await this.readUsage(tenant),
       deduplicated: row.deduplicated,
     };
@@ -559,7 +638,20 @@ export class PostgresQuotaStore implements QuotaStore {
     );
     const held = existing.rows[0];
     if (held !== undefined) {
-      if (held.state === 'reserved') return toReservation(held);
+      if (held.state === 'reserved') {
+        if (
+          held.kind !== input.kind ||
+          held.expected_bytes !== input.expectedBytes ||
+          held.content_hash !== input.contentHash ||
+          held.content_type !== input.contentType
+        ) {
+          return new ByokCoreError(
+            'storage_integrity_mismatch',
+            `Reservation ${input.reservationId} already binds a different storage declaration.`,
+          );
+        }
+        return toReservation(held);
+      }
       return new ByokCoreError(
         'storage_reservation_expired',
         `Reservation ${input.reservationId} is already ${held.state}.`,

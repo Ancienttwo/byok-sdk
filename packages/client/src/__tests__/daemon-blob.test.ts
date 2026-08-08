@@ -40,6 +40,7 @@ describe('blob client (protocol §7)', () => {
   it('resolves an instruction blobRef via GET /byok/blobs/:id/url + fetch, instead of failing closed', async () => {
     const bigInstruction = 'do the big thing: '.repeat(1000); // large enough to plausibly need a blob
     server.seedBlob('instr-blob-1', bigInstruction, 'text/plain');
+    const instructionHash = `sha256:${createHash('sha256').update(bigInstruction).digest('hex')}`;
 
     const adapter = new StubRuntimeAdapter();
     await setupDaemon(adapter);
@@ -51,7 +52,7 @@ describe('blob client (protocol §7)', () => {
           instruction: {
             blobRef: {
               blobId: 'instr-blob-1',
-              contentHash: `sha256:${'a1'.repeat(32)}`, // finding F9: must be 64 lowercase hex chars
+              contentHash: instructionHash,
               size: bigInstruction.length,
               contentType: 'text/plain',
             },
@@ -98,6 +99,36 @@ describe('blob client (protocol §7)', () => {
     expect(adapter.startCalls).toHaveLength(0);
   });
 
+  it('fails closed when downloaded bytes do not match the BlobRef digest', async () => {
+    server.seedBlob('instr-blob-tampered', 'tampered bytes', 'text/plain');
+    const adapter = new StubRuntimeAdapter();
+    await setupDaemon(adapter);
+
+    server.send(
+      createEnvelope(
+        'task.offer',
+        {
+          instruction: {
+            blobRef: {
+              blobId: 'instr-blob-tampered',
+              contentHash: `sha256:${'ab'.repeat(32)}`,
+              size: Buffer.byteLength('tampered bytes'),
+              contentType: 'text/plain',
+            },
+          },
+          policy: { mode: 'auto' },
+        },
+        { taskId: 'task-blob-tampered', seq: server.nextSeq() },
+      ),
+    );
+
+    const fail = await server.waitFor(
+      (e) => e.type === 'task.fail' && e.task_id === 'task-blob-tampered',
+    );
+    expect(fail.payload).toMatchObject({ retryable: true });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
   it('sends a small artifact inline (base64), without ever calling POST /byok/blobs', async () => {
     const adapter = new StubRuntimeAdapter();
     await setupDaemon(adapter);
@@ -137,6 +168,7 @@ describe('blob client (protocol §7)', () => {
     const bigContent = Buffer.from('x'.repeat(64 * 1024 + 100), 'utf8'); // just over the 64KB inline limit
     const expectedHash = `sha256:${createHash('sha256').update(bigContent).digest('hex')}`;
     await fs.writeFile(path.join(workspaceDir, 'big.bin'), bigContent);
+    server.dropNextFinalizeResponse();
     session.emit({ type: 'artifact', name: 'big.bin', contentType: 'application/octet-stream' });
     session.emit({ type: 'turn_end' });
 
@@ -154,6 +186,11 @@ describe('blob client (protocol §7)', () => {
 
     // The full round trip actually happened, not just a well-formed payload.
     expect(server.httpRequests.some((r) => r.method === 'POST' && r.pathname === '/byok/blobs')).toBe(true);
+    expect(
+      server.httpRequests.filter(
+        (r) => r.method === 'POST' && /^\/byok\/blobs\/[^/]+\/finalize$/.test(r.pathname),
+      ),
+    ).toHaveLength(2);
     const uploaded = server.blobContent(payload.blobRef!.blobId);
     expect(uploaded).toBeDefined();
     expect(uploaded?.equals(bigContent)).toBe(true);

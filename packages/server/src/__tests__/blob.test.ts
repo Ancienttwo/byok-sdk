@@ -31,16 +31,45 @@ describe('blob flows (§7)', () => {
 
     const createRes = await fetch(`${started.baseUrl}/byok/blobs`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'roundtrip' },
       body: JSON.stringify({ size: content.length, contentType: 'text/plain', contentHash }),
     });
     expect(createRes.status).toBe(200);
     const { blobId, uploadUrl } = (await createRes.json()) as { blobId: string; uploadUrl: string };
     expect(blobId).toBeTruthy();
 
+    const replayCreate = await fetch(`${started.baseUrl}/byok/blobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'roundtrip' },
+      body: JSON.stringify({ size: content.length, contentType: 'text/plain', contentHash }),
+    });
+    expect(replayCreate.status).toBe(200);
+    expect(((await replayCreate.json()) as { blobId: string }).blobId).toBe(blobId);
+
     // The upload URL is pre-signed — no bearer auth needed to use it.
     const putRes = await fetch(`${started.baseUrl}${uploadUrl}`, { method: 'PUT', body: content });
     expect(putRes.status).toBe(204);
+
+    const wrongBinding = await fetch(`${started.baseUrl}/byok/blobs/${blobId}/finalize`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'idempotency-key': 'different-key' },
+    });
+    expect(wrongBinding.status).toBe(422);
+
+    const finalizeRes = await fetch(`${started.baseUrl}/byok/blobs/${blobId}/finalize`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'idempotency-key': 'roundtrip' },
+    });
+    expect(finalizeRes.status).toBe(204);
+
+    const finalizeReplay = await fetch(`${started.baseUrl}/byok/blobs/${blobId}/finalize`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'idempotency-key': 'roundtrip' },
+    });
+    expect(finalizeReplay.status).toBe(204);
+
+    const overwrite = await fetch(`${started.baseUrl}${uploadUrl}`, { method: 'PUT', body: content });
+    expect(overwrite.status).toBe(422);
 
     const urlRes = await fetch(`${started.baseUrl}/byok/blobs/${blobId}/url`, {
       headers: { authorization: `Bearer ${accessToken}` },
@@ -85,7 +114,7 @@ describe('blob flows (§7)', () => {
     for (const contentHash of cases) {
       const createRes = await fetch(`${started.baseUrl}/byok/blobs`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'invalid-hash' },
         body: JSON.stringify({ size: content.length, contentType: 'text/plain', contentHash }),
       });
       expect(createRes.status, `expected 400 for contentHash ${JSON.stringify(contentHash)}`).toBe(400);
@@ -102,7 +131,7 @@ describe('blob flows (§7)', () => {
     const content = Buffer.from('never uploaded');
     const createRes = await fetch(`${started.baseUrl}/byok/blobs`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'never-uploaded' },
       body: JSON.stringify({ size: content.length, contentType: 'text/plain', contentHash: sha256Hex(content) }),
     });
     const { blobId } = (await createRes.json()) as { blobId: string };
@@ -125,7 +154,7 @@ describe('blob flows (§7)', () => {
 
     const createRes = await fetch(`${started.baseUrl}/byok/blobs`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'hash-mismatch' },
       body: JSON.stringify({ size: declared.length, contentType: 'text/plain', contentHash: sha256Hex(declared) }),
     });
     const { blobId, uploadUrl } = (await createRes.json()) as { blobId: string; uploadUrl: string };
@@ -150,7 +179,7 @@ describe('blob flows (§7)', () => {
     const declared = Buffer.from('expected-content');
     const createRes = await fetch(`${started.baseUrl}/byok/blobs`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'size-mismatch' },
       body: JSON.stringify({ size: declared.length, contentType: 'text/plain', contentHash: sha256Hex(declared) }),
     });
     const { uploadUrl } = (await createRes.json()) as { uploadUrl: string };
@@ -168,7 +197,7 @@ describe('blob flows (§7)', () => {
 
     const createRes = await fetch(`${started.baseUrl}/byok/blobs`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'over-cap' },
       body: JSON.stringify({
         size: 2048,
         contentType: 'application/octet-stream',
@@ -188,14 +217,14 @@ describe('blob flows (§7)', () => {
 
     const overCap = await fetch(`${started.baseUrl}/byok/blobs`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'over-cap-2' },
       body: JSON.stringify({ size: 100 * 1024 * 1024 + 1, contentType: 'application/octet-stream', contentHash: validHash }),
     });
     expect(overCap.status).toBe(413);
 
     const underCap = await fetch(`${started.baseUrl}/byok/blobs`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'under-cap' },
       body: JSON.stringify({ size: 1024, contentType: 'application/octet-stream', contentHash: validHash }),
     });
     expect(underCap.status).toBe(200);

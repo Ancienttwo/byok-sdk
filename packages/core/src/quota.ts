@@ -198,12 +198,18 @@ export interface QuotaStore {
   ): Promise<TenantStorageEntitlement>;
   readUsage(tenant: TenantId): Promise<TenantStorageUsage>;
   readStatus(tenant: TenantId): Promise<StorageStatus>;
+  /** Tenant-scoped lookup used to bind a finalize request to its reservation. */
+  readReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation | undefined>;
   /**
    * Atomically checks `committed + reserved + expected <= hardLimitBytes` and,
    * on success, adds `expectedBytes` to `reservedBytes`.
    */
   reserve(tenant: TenantId, input: StorageReservationInput): Promise<StorageReservation>;
-  /** Moves reserved bytes to committed after verifying the observed object. */
+  /**
+   * Moves reserved bytes to committed after verifying the observed object.
+   * For object reservations, the composition commits the matching manifest in
+   * the same authority step as reservation/accounting settlement.
+   */
   finalizeReservation(
     tenant: TenantId,
     input: StorageFinalizeInput,

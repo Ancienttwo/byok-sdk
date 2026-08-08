@@ -40,14 +40,15 @@ export function createInMemoryCoreStores(
   options: InMemoryCoreOptions = {},
 ): InMemoryCoreComposition {
   const clock: Clock = options.clock ?? createMutableClock();
+  const objects = new InMemoryObjectStore(clock);
   const stores: CoreStores = {
     mailbox: new InMemoryMailboxStore(clock),
     board: new InMemoryBoardStore(clock),
     truth: new InMemoryTruthStore(clock),
     presence: new InMemoryPresenceStore(clock),
     activity: new InMemoryActivityStore(clock),
-    objects: new InMemoryObjectStore(clock),
-    quota: new InMemoryQuotaStore(clock),
+    objects,
+    quota: new InMemoryQuotaStore(clock, objects),
   };
   return { stores, clock };
 }

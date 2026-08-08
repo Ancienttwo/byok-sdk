@@ -43,6 +43,7 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
     'writeEntitlement',
     'readUsage',
     'readStatus',
+    'readReservation',
     'reserve',
     'finalizeReservation',
     'abortReservation',

@@ -118,9 +118,9 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 [NOTE]: `api-design` skill 约束本刀使用明确的 device-auth action route、正确 4xx/5xx status 与既有 `{error}` envelope；不引入第二套 API version 或 body envelope。
 
 ## Task Breakdown
-- [ ] 建立/批准 contract worktree，切到 `codex/s4b-b-reservation-bound-blobs`
-- [ ] core reservation read/collision 与 atomic manifest/accounting finalize 两 composition 全绿
-- [ ] cloud reservation-bound grant/observe + create/finalize route，pending download fail-closed
-- [ ] BlobClient/self-hosted surface 与 crash/idempotency/binding tests 全绿
-- [ ] sprint/docs 投影、compose hard gate、protocol/migration frozen audit 通过
+- [x] 建立/批准 contract worktree，切到 `codex/s4b-b-reservation-bound-blobs`
+- [x] core reservation read/collision 与 atomic manifest/accounting finalize 两 composition 全绿
+- [x] cloud reservation-bound grant/observe + create/finalize route，pending download fail-closed
+- [x] BlobClient/self-hosted surface 与 crash/idempotency/binding tests 全绿
+- [x] sprint/docs 投影、compose hard gate、protocol/migration frozen audit 通过
 - [ ] acceptance/PR/CI 合入，归档 workflow 并归还 K-line active-plan

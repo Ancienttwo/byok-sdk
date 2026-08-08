@@ -23,13 +23,23 @@ import {
   type BlobDownloadUrlResponse,
   type CreateBlobResponse,
 } from '@byok/protocol';
+import {
+  STORAGE_ERROR_CODES,
+  STORAGE_ERROR_HTTP_STATUS,
+  contentHash,
+  isCoreError,
+  type StorageErrorCode,
+} from '@byok/core';
 import type { BlobContentProxy } from '../stores/ports';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
 
-/** The two bearer-authed routes: everything they touch goes through the tenant facade. */
+/** The three bearer-authed routes: everything they touch goes through the tenant facade. */
 export interface BlobRouteDeps extends DeviceRouteDeps {
   readonly maxBlobSizeBytes: number;
 }
+
+/** Reservation and presign grants deliberately share one expiry horizon. */
+export const BLOB_RESERVATION_TTL_MS = 15 * 60 * 1000;
 
 /**
  * The two presigned routes. No bearer deps at all — there is no principal to
@@ -61,9 +71,76 @@ export function createBlobHandler(deps: BlobRouteDeps) {
       return c.json({ error: `blob exceeds max size of ${deps.maxBlobSizeBytes} bytes` }, 413);
     }
 
-    const { blobId, uploadUrl } = await authenticated.stores.blobs.createUpload(parsed.data);
-    const response: CreateBlobResponse = { blobId, uploadUrl };
-    return c.json(response, 200);
+    const reservationId = idempotencyKey(c);
+    if (reservationId === undefined) {
+      return c.json({ error: 'Idempotency-Key header is required' }, 400);
+    }
+
+    try {
+      const reservation = await authenticated.stores.quota.reserve({
+        reservationId,
+        kind: 'object',
+        expectedBytes: BigInt(parsed.data.size),
+        contentHash: contentHash(parsed.data.contentHash),
+        contentType: parsed.data.contentType,
+        ttlMs: BLOB_RESERVATION_TTL_MS,
+      });
+      try {
+        const { blobId, uploadUrl } = await authenticated.stores.blobs.createUpload(reservation);
+        const response: CreateBlobResponse = { blobId, uploadUrl };
+        return c.json(response, 200);
+      } catch (error) {
+        // Preserve the grant failure as the client-facing authority. Cleanup
+        // is best-effort here; admission reaps an abandoned hold after TTL if
+        // the store is concurrently unavailable.
+        await authenticated.stores.quota.abortReservation(reservationId).catch(() => undefined);
+        const rendered = renderStorageError(c, error);
+        if (rendered !== undefined) return rendered;
+        throw error;
+      }
+    } catch (error) {
+      const rendered = renderStorageError(c, error);
+      if (rendered !== undefined) return rendered;
+      throw error;
+    }
+  };
+}
+
+export function finalizeBlobHandler(deps: BlobRouteDeps) {
+  return async (c: Context): Promise<Response> => {
+    const authenticated = await authenticateDevice(c, deps);
+    if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
+
+    const reservationId = idempotencyKey(c);
+    if (reservationId === undefined) {
+      return c.json({ error: 'Idempotency-Key header is required' }, 400);
+    }
+
+    try {
+      const reservation = await authenticated.stores.quota.readReservation(reservationId);
+      if (reservation === undefined) {
+        return c.json({ error: 'storage_reservation_not_found' }, 404);
+      }
+      const blobId = c.req.param('id') ?? '';
+      const observed = await authenticated.stores.blobs.observeUpload(
+        blobId,
+        reservation,
+      );
+      if (observed === undefined) {
+        await authenticated.stores.quota.abortReservation(reservationId);
+        return c.json({ error: 'storage_integrity_mismatch' }, 422);
+      }
+
+      await authenticated.stores.quota.finalizeReservation({
+        reservationId,
+        ...observed,
+      });
+      return c.body(null, 204);
+    } catch (error) {
+      const rendered = renderStorageError(c, error);
+      if (rendered !== undefined) return rendered;
+      throw error;
+    }
   };
 }
 
@@ -106,4 +183,28 @@ export function blobDownloadContentHandler(deps: BlobContentRouteDeps) {
     if (content === undefined) return c.json({ error: 'blob not found' }, 404);
     return c.body(new Uint8Array(content.data), 200, { 'content-type': content.contentType });
   };
+}
+
+function idempotencyKey(c: Context): string | undefined {
+  const value = c.req.header('Idempotency-Key');
+  if (value === undefined || value.length === 0 || value.length > 200) return undefined;
+  return value;
+}
+
+function renderStorageError(c: Context, error: unknown): Response | undefined {
+  if (!isCoreError(error)) return undefined;
+  if ((STORAGE_ERROR_CODES as readonly string[]).includes(error.code)) {
+    const code = error.code as StorageErrorCode;
+    return c.json({ error: code }, STORAGE_ERROR_HTTP_STATUS[code]);
+  }
+  if (error.code === 'storage_reservation_not_found' || error.code === 'object_not_found') {
+    return c.json({ error: error.code }, 404);
+  }
+  if (error.code === 'storage_entitlement_missing' || error.code === 'object_state_invalid') {
+    return c.json({ error: error.code }, 409);
+  }
+  if (error.code === 'content_hash_invalid') {
+    return c.json({ error: error.code }, 400);
+  }
+  return undefined;
 }

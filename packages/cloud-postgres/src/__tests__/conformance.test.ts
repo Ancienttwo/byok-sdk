@@ -26,6 +26,7 @@ import { createWebCrypto } from '@byok/cloud';
 import { runCloudConformance, type CloudCompositionFactory } from '@byok/conformance';
 import { migrate } from '../migrate';
 import { createPostgresCloudStores } from '../stores/index';
+import { createPostgresCoreStores } from '../stores/core/index';
 import {
   createDataplaneScope,
   createObjectStorageScope,
@@ -51,6 +52,7 @@ const postgresFactory: CloudCompositionFactory = {
       crypto: createWebCrypto(),
       objectStorage: objectStorage.config,
     });
+    const core = createPostgresCoreStores({ pool: scope.pool, clock });
 
     return {
       stores,
@@ -71,6 +73,12 @@ const postgresFactory: CloudCompositionFactory = {
         if (!response.ok) {
           throw new Error(`the object store refused the upload: HTTP ${response.status} ${await response.text()}`);
         }
+      },
+      commitBlob: async (tenant, reservation, observation) => {
+        await core.objects.commit(tenant, {
+          hash: reservation.contentHash,
+          ...observation,
+        });
       },
       dispose: () => scope.dispose(),
     };

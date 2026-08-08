@@ -12,7 +12,7 @@
  * They cannot be one object: the port's method inventory is contract data
  * (`CLOUD_PORT_METHODS`) and `@byok/conformance` asserts a composition's blob
  * store implements EXACTLY the two declared methods. An object carrying all
- * five would fail that assertion, which is the point — the suite is what keeps
+ * six would fail that assertion, which is the point — the suite is what keeps
  * the narrowed port narrow.
  *
  * The presigned URL form — `/byok/blobs/<id>/content?sig=&exp=` — is the
@@ -20,18 +20,18 @@
  * base, so a hosted deployment is indistinguishable from a self-hosted one on
  * this route too.
  *
- * Tenancy: `createUpload` records the owning tenant and `getDownloadUrl`
- * refuses to mint for any other, so the two bearer-authed routes are
+ * Tenancy: `createUpload` records the owning tenant and reservation while
+ * `observeUpload`/`getDownloadUrl` refuse any other, so the three bearer routes are
  * tenant-closed. The two `/content` routes are presigned by construction and
  * have no principal at all — the signature over the blob id IS the credential
  * (same posture as the reference server, §7).
  */
-import type { Clock, TenantId } from '@byok/core';
+import { ByokCoreError, type Clock, type ContentHash, type ObjectStore, type StorageReservation, type TenantId } from '@byok/core';
 import type { CloudCrypto } from '../../crypto/port';
 import type {
   BlobContent,
   BlobContentProxy,
-  BlobDeclaration,
+  BlobObservation,
   BlobWriteResult,
   CloudBlobStore,
 } from '../ports';
@@ -43,7 +43,10 @@ const SIGNING_SECRET_BYTES = 32;
 
 interface BlobRecord {
   readonly tenantId: TenantId;
-  readonly declaration: BlobDeclaration;
+  readonly reservationId: string;
+  readonly contentHash: ContentHash;
+  readonly byteSize: bigint;
+  readonly contentType: string;
   uploaded: boolean;
   data?: Uint8Array;
 }
@@ -61,6 +64,7 @@ export interface InMemoryBlobStoreOptions {
  */
 class InMemoryBlobRegistry {
   readonly blobs = new Map<string, BlobRecord>();
+  readonly reservationBlobs = new Map<string, string>();
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
   readonly secret: Uint8Array;
@@ -87,21 +91,90 @@ class InMemoryBlobRegistry {
 /** The narrowed port: tenant-first grants, no bytes. */
 export class InMemoryCloudBlobStore implements CloudBlobStore {
   readonly #registry: InMemoryBlobRegistry;
+  readonly #objects: ObjectStore;
 
-  constructor(registry: InMemoryBlobRegistry) {
+  constructor(registry: InMemoryBlobRegistry, objects: ObjectStore) {
     this.#registry = registry;
+    this.#objects = objects;
   }
 
-  async createUpload(tenant: TenantId, input: BlobDeclaration): Promise<{ blobId: string; uploadUrl: string }> {
+  async createUpload(tenant: TenantId, reservation: StorageReservation): Promise<{ blobId: string; uploadUrl: string }> {
+    assertReservedObject(tenant, reservation);
+    const reservationKey = `${tenant}\u0000${reservation.reservationId}`;
+    const existingBlobId = this.#registry.reservationBlobs.get(reservationKey);
+    if (existingBlobId !== undefined) {
+      const manifest = await this.#objects.get(tenant, reservation.contentHash);
+      if (manifest?.state === 'committed') {
+        throw new ByokCoreError(
+          'object_state_invalid',
+          `Object ${reservation.contentHash} is already committed and immutable.`,
+        );
+      }
+      return { blobId: existingBlobId, uploadUrl: await this.#registry.signUrl(existingBlobId, 'put') };
+    }
+
+    const entry = await this.#objects.putManifest(tenant, {
+      hash: reservation.contentHash,
+      byteSize: reservation.expectedBytes,
+      contentType: reservation.contentType,
+    });
+    if (
+      entry.byteSize !== reservation.expectedBytes ||
+      entry.contentType !== reservation.contentType
+    ) {
+      throw new ByokCoreError(
+        'storage_integrity_mismatch',
+        `Object ${reservation.contentHash} already binds a different storage declaration.`,
+      );
+    }
+    if (entry.state === 'committed') {
+      throw new ByokCoreError(
+        'object_state_invalid',
+        `Object ${reservation.contentHash} is already committed and immutable.`,
+      );
+    }
+
     const blobId = `blob_${this.#registry.crypto.randomUuid()}`;
-    this.#registry.blobs.set(blobId, { tenantId: tenant, declaration: input, uploaded: false });
+    this.#registry.blobs.set(blobId, {
+      tenantId: tenant,
+      reservationId: reservation.reservationId,
+      contentHash: reservation.contentHash,
+      byteSize: reservation.expectedBytes,
+      contentType: reservation.contentType,
+      uploaded: false,
+    });
+    this.#registry.reservationBlobs.set(reservationKey, blobId);
     return { blobId, uploadUrl: await this.#registry.signUrl(blobId, 'put') };
+  }
+
+  async observeUpload(
+    tenant: TenantId,
+    blobId: string,
+    reservation: StorageReservation,
+  ): Promise<BlobObservation | undefined> {
+    const record = this.#registry.blobs.get(blobId);
+    if (
+      record === undefined ||
+      record.tenantId !== tenant ||
+      reservation.tenantId !== tenant ||
+      record.reservationId !== reservation.reservationId ||
+      record.contentHash !== reservation.contentHash ||
+      !record.uploaded
+    ) {
+      return undefined;
+    }
+    return {
+      observedByteSize: BigInt(record.data?.length ?? 0),
+      observedContentType: record.contentType,
+    };
   }
 
   async getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined> {
     const record = this.#registry.blobs.get(blobId);
     // Another tenant's blob and a blob that does not exist answer identically.
     if (record === undefined || record.tenantId !== tenant || !record.uploaded) return undefined;
+    const manifest = await this.#objects.get(tenant, record.contentHash);
+    if (manifest?.state !== 'committed') return undefined;
     return this.#registry.signUrl(blobId, 'get');
   }
 }
@@ -123,11 +196,11 @@ export class InMemoryBlobContentProxy implements BlobContentProxy {
   async writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult> {
     const record = this.#registry.blobs.get(blobId);
     if (record === undefined) return { ok: false, reason: 'unknown blobId' };
-    if (data.length !== record.declaration.size) {
-      return { ok: false, reason: `size mismatch: declared ${record.declaration.size}, received ${data.length}` };
+    if (BigInt(data.length) !== record.byteSize) {
+      return { ok: false, reason: `size mismatch: declared ${String(record.byteSize)}, received ${data.length}` };
     }
     const actualHash = await this.#registry.crypto.sha256(data);
-    if (actualHash !== record.declaration.contentHash) {
+    if (actualHash !== record.contentHash) {
       return { ok: false, reason: 'contentHash mismatch' };
     }
     record.data = data;
@@ -138,7 +211,7 @@ export class InMemoryBlobContentProxy implements BlobContentProxy {
   async readContent(blobId: string): Promise<BlobContent | undefined> {
     const record = this.#registry.blobs.get(blobId);
     if (record === undefined || !record.uploaded || record.data === undefined) return undefined;
-    return { data: record.data, contentType: record.declaration.contentType };
+    return { data: record.data, contentType: record.contentType };
   }
 }
 
@@ -151,11 +224,27 @@ export interface InMemoryBlobs {
 export function createInMemoryBlobs(
   clock: Clock,
   crypto: CloudCrypto,
+  objects: ObjectStore,
   options: InMemoryBlobStoreOptions = {},
 ): InMemoryBlobs {
   const registry = new InMemoryBlobRegistry(clock, crypto, options);
   return {
-    blobs: new InMemoryCloudBlobStore(registry),
+    blobs: new InMemoryCloudBlobStore(registry, objects),
     contentProxy: new InMemoryBlobContentProxy(registry),
   };
+}
+
+function assertReservedObject(tenant: TenantId, reservation: StorageReservation): void {
+  if (
+    reservation.tenantId === tenant &&
+    reservation.kind === 'object' &&
+    reservation.state === 'reserved' &&
+    reservation.expectedBytes >= 0n
+  ) {
+    return;
+  }
+  throw new ByokCoreError(
+    'storage_integrity_mismatch',
+    'An upload grant requires a reserved object reservation owned by this tenant.',
+  );
 }

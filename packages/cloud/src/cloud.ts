@@ -34,6 +34,7 @@ import {
   blobDownloadUrlHandler,
   blobUploadContentHandler,
   createBlobHandler,
+  finalizeBlobHandler,
 } from './handlers/blobs';
 import { capabilitiesHandler } from './handlers/capabilities';
 import { challengeHandler, pairHandler, tokenHandler } from './handlers/auth';
@@ -179,6 +180,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       maxBlobSizeBytes: options.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES,
     };
     registry.register({ method: 'POST', path: '/byok/blobs', class: 'device' }, createBlobHandler(blobDeps));
+    registry.register({ method: 'POST', path: '/byok/blobs/:id/finalize', class: 'device' }, finalizeBlobHandler(blobDeps));
     registry.register({ method: 'GET', path: '/byok/blobs/:id/url', class: 'device' }, blobDownloadUrlHandler(blobDeps));
   }
 

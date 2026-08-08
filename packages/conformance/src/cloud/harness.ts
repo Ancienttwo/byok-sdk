@@ -15,7 +15,8 @@
  * predicate rather than reaching for the database's `now()`.
  */
 import { describe } from 'vitest';
-import type { BlobDeclaration, CloudStores } from '@byok/cloud';
+import type { BlobDeclaration, BlobObservation, CloudStores } from '@byok/cloud';
+import type { StorageReservation, TenantId } from '@byok/core';
 import { runCloudPortInventoryConformance } from './port-inventory';
 import { runPairingConformance } from './pairing';
 import { runNonceConformance } from './nonces';
@@ -96,8 +97,15 @@ export interface CloudCompositionHandle {
   landBlobBytes(input: {
     readonly grant: { readonly blobId: string; readonly uploadUrl: string };
     readonly declaration: BlobDeclaration;
+    readonly reservation: StorageReservation;
     readonly bytes: Uint8Array;
   }): Promise<void>;
+  /** Drives the manifest authority after the shared observation assertion. */
+  commitBlob(
+    tenant: TenantId,
+    reservation: StorageReservation,
+    observation: BlobObservation,
+  ): Promise<void>;
   /** Optional teardown for compositions holding connections. */
   dispose?(): void | Promise<void>;
 }

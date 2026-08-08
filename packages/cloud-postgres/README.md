@@ -24,7 +24,7 @@ is the R2 adapter described below.
 `pending` `object_manifest` row first, then signs a PUT bound to the tenant, the
 key, the declared `Content-Length`, the declared `Content-Type`, and an expiry;
 the device uploads straight to the object store. `pending → committed` happens
-on first download, behind an unconditional `HEAD` that compares what the store
+on explicit finalize, behind an unconditional `HEAD` that compares what the store
 actually holds against what was declared — a signed length proves what one
 client sent, not what is at the key now.
 

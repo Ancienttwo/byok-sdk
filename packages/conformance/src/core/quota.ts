@@ -18,6 +18,7 @@ import {
   isCoreConflictError,
   isCoreError,
   type CoreConflictError,
+  type CoreStores,
   type TenantStorageEntitlement,
 } from '@byok/core';
 import { ENTITLEMENT, hashOf, TENANT_A } from './fixtures';
@@ -39,6 +40,19 @@ function reservation(id: string, bytes: bigint, seed: number) {
     contentType: 'application/octet-stream',
     ttlMs: 60_000,
   };
+}
+
+async function putReservationManifest(
+  stores: CoreStores,
+  id: string,
+): Promise<void> {
+  const held = await stores.quota.readReservation(TENANT_A, id);
+  if (held === undefined) throw new Error(`missing reservation ${id}`);
+  await stores.objects.putManifest(TENANT_A, {
+    hash: held.contentHash,
+    byteSize: held.expectedBytes,
+    contentType: held.contentType,
+  });
 }
 
 export function runQuotaConformance(factory: CoreCompositionFactory): void {
@@ -79,6 +93,7 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
         await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
 
         await stores.quota.reserve(TENANT_A, reservation('res-1', 300n, 1));
+        await putReservationManifest(stores, 'res-1');
         const reserved = await stores.quota.readUsage(TENANT_A);
         expect(reserved.reservedBytes).toBe(300n);
         expect(reserved.committedObjectBytes).toBe(0n);
@@ -95,11 +110,35 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
       });
     });
 
+    it('replays a response-lost finalize without double-accounting', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        await stores.quota.reserve(TENANT_A, reservation('res-replay', 300n, 9));
+        await putReservationManifest(stores, 'res-replay');
+
+        const input = {
+          reservationId: 'res-replay',
+          observedByteSize: 300n,
+          observedContentType: 'application/octet-stream',
+        };
+        const first = await stores.quota.finalizeReservation(TENANT_A, input);
+        const replay = await stores.quota.finalizeReservation(TENANT_A, input);
+
+        expect(replay.reservation).toEqual(first.reservation);
+        expect(replay.usage.committedObjectBytes).toBe(300n);
+        expect(replay.usage.objectCount).toBe(1n);
+        expect(
+          (await stores.objects.get(TENANT_A, first.reservation.contentHash))?.state,
+        ).toBe('committed');
+      });
+    });
+
     it('never lets committed + reserved + expected exceed the hard limit', async () => {
       await withComposition(factory, async ({ stores }) => {
         await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
 
         await stores.quota.reserve(TENANT_A, reservation('res-1', 400n, 1));
+        await putReservationManifest(stores, 'res-1');
         await stores.quota.finalizeReservation(TENANT_A, {
           reservationId: 'res-1',
           observedByteSize: 400n,
@@ -162,6 +201,30 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
       });
     });
 
+    it('reaps expired abandoned reservations before admitting the next write', async () => {
+      await withComposition(factory, async (handle) => {
+        const { stores } = handle;
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        await stores.quota.reserve(TENANT_A, reservation('abandoned-1', 400n, 1));
+        await stores.quota.reserve(TENANT_A, reservation('abandoned-2', 400n, 2));
+
+        await handle.advanceTime(60_000);
+
+        const admitted = await stores.quota.reserve(
+          TENANT_A,
+          reservation('replacement', 300n, 3),
+        );
+        expect(admitted.state).toBe('reserved');
+        expect((await stores.quota.readReservation(TENANT_A, 'abandoned-1'))?.state).toBe(
+          'expired',
+        );
+        expect((await stores.quota.readReservation(TENANT_A, 'abandoned-2'))?.state).toBe(
+          'expired',
+        );
+        expect((await stores.quota.readUsage(TENANT_A)).reservedBytes).toBe(300n);
+      });
+    });
+
     it('releases reservations when observed size or content type disagrees', async () => {
       await withComposition(factory, async ({ stores }) => {
         await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
@@ -198,6 +261,7 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
 
         for (const id of ['res-1', 'res-2']) {
           await stores.quota.reserve(TENANT_A, reservation(id, 300n, 7));
+          await putReservationManifest(stores, id);
           const result = await stores.quota.finalizeReservation(TENANT_A, {
             reservationId: id,
             observedByteSize: 300n,
@@ -231,6 +295,7 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
         const { stores } = handle;
         await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
         await stores.quota.reserve(TENANT_A, reservation('res-1', 400n, 1));
+        await putReservationManifest(stores, 'res-1');
         await stores.quota.finalizeReservation(TENANT_A, {
           reservationId: 'res-1',
           observedByteSize: 400n,
@@ -275,6 +340,40 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
 
         const released = await stores.quota.applyMailboxDelta(TENANT_A, { deltaBytes: -500n });
         expect(released.mailboxBytes).toBe(0n);
+      });
+    });
+
+    it('reads reservations tenant-scoped and rejects id reuse with a different declaration', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        const first = await stores.quota.reserve(TENANT_A, reservation('res-bound', 300n, 1));
+        expect(await stores.quota.readReservation(TENANT_A, 'res-bound')).toEqual(first);
+
+        const collision = await captureError(
+          stores.quota.reserve(TENANT_A, reservation('res-bound', 299n, 2)),
+        );
+        expect(isCoreError(collision, 'storage_integrity_mismatch')).toBe(true);
+        expect((await stores.quota.readUsage(TENANT_A)).reservedBytes).toBe(300n);
+      });
+    });
+
+    it('aborts object finalize when the matching manifest is absent', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
+        await stores.quota.reserve(TENANT_A, reservation('res-no-manifest', 300n, 1));
+
+        const missing = await captureError(
+          stores.quota.finalizeReservation(TENANT_A, {
+            reservationId: 'res-no-manifest',
+            observedByteSize: 300n,
+            observedContentType: 'application/octet-stream',
+          }),
+        );
+        expect(isCoreError(missing, 'storage_integrity_mismatch')).toBe(true);
+        expect((await stores.quota.readReservation(TENANT_A, 'res-no-manifest'))?.state).toBe(
+          'aborted',
+        );
+        expect((await stores.quota.readUsage(TENANT_A)).reservedBytes).toBe(0n);
       });
     });
   });

@@ -19,7 +19,8 @@
  * port contract is wrong; escalate, do not branch.
  */
 import { describe, expect, it } from 'vitest';
-import type { BlobDeclaration } from '@byok/cloud';
+import type { BlobDeclaration, BlobObservation } from '@byok/cloud';
+import type { StorageReservation, TenantId } from '@byok/core';
 import { TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
@@ -37,11 +38,38 @@ async function declarationFor(text: string, contentType = 'text/plain'): Promise
   return { size: bytes.length, contentType, contentHash: `sha256:${hex}` };
 }
 
+function reservationFor(
+  tenant: TenantId,
+  declaration: BlobDeclaration,
+  reservationId: string,
+): StorageReservation {
+  return {
+    tenantId: tenant,
+    reservationId,
+    state: 'reserved',
+    kind: 'object',
+    expectedBytes: BigInt(declaration.size),
+    contentHash: declaration.contentHash as StorageReservation['contentHash'],
+    contentType: declaration.contentType,
+    createdAt: '2026-08-08T00:00:00.000Z',
+    expiresAt: '2026-08-08T01:00:00.000Z',
+  };
+}
+
+function requireObservation(value: BlobObservation | undefined): BlobObservation {
+  if (value === undefined) throw new Error('uploaded blob was not observable');
+  return value;
+}
+
 export function runBlobConformance(factory: CloudCompositionFactory): void {
   describe('blobs', () => {
     it('mints an upload grant for a declaration', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
-        const grant = await stores.blobs.createUpload(TENANT_A, await declarationFor('one'));
+        const declaration = await declarationFor('one');
+        const grant = await stores.blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, declaration, 'res-one'),
+        );
 
         expect(typeof grant.blobId).toBe('string');
         expect(grant.blobId.length).toBeGreaterThan(0);
@@ -55,7 +83,11 @@ export function runBlobConformance(factory: CloudCompositionFactory): void {
       // it: declaring an object is not the same as having one. A composition
       // that handed out a GET here would be promising bytes nobody uploaded.
       await withCloudComposition(factory, async ({ stores }) => {
-        const grant = await stores.blobs.createUpload(TENANT_A, await declarationFor('declared only'));
+        const declaration = await declarationFor('declared only');
+        const grant = await stores.blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, declaration, 'res-declared'),
+        );
 
         expect(await stores.blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeUndefined();
       });
@@ -66,7 +98,11 @@ export function runBlobConformance(factory: CloudCompositionFactory): void {
       // kind between the two would let one tenant test another's contents by
       // guessing ids, which is the existence oracle §12.7.4 forbids.
       await withCloudComposition(factory, async ({ stores }) => {
-        const grant = await stores.blobs.createUpload(TENANT_A, await declarationFor('a only'));
+        const declaration = await declarationFor('a only');
+        const grant = await stores.blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, declaration, 'res-a'),
+        );
 
         const foreign = await stores.blobs.getDownloadUrl(TENANT_B, grant.blobId);
         const unknown = await stores.blobs.getDownloadUrl(TENANT_B, 'sha256:' + 'f'.repeat(64));
@@ -80,8 +116,16 @@ export function runBlobConformance(factory: CloudCompositionFactory): void {
 
     it('gives two declarations in one tenant two grants', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
-        const first = await stores.blobs.createUpload(TENANT_A, await declarationFor('first'));
-        const second = await stores.blobs.createUpload(TENANT_A, await declarationFor('second'));
+        const firstDeclaration = await declarationFor('first');
+        const secondDeclaration = await declarationFor('second');
+        const first = await stores.blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, firstDeclaration, 'res-first'),
+        );
+        const second = await stores.blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, secondDeclaration, 'res-second'),
+        );
 
         expect(first.blobId).not.toEqual(second.blobId);
         expect(first.uploadUrl).not.toEqual(second.uploadUrl);
@@ -100,20 +144,39 @@ export function runBlobConformance(factory: CloudCompositionFactory): void {
       // landed object, the other addresses objects BY content hash and must
       // therefore refuse. Both outcomes are "no second write grant for this
       // object", which is the contract; neither shape is asserted.
-      await withCloudComposition(factory, async ({ stores, landBlobBytes }) => {
+      await withCloudComposition(factory, async ({ stores, landBlobBytes, commitBlob }) => {
         const text = 'vouched for';
         const declaration = await declarationFor(text);
-        const grant = await stores.blobs.createUpload(TENANT_A, declaration);
-        await landBlobBytes({ grant, declaration, bytes: new TextEncoder().encode(text) });
+        const reservation = reservationFor(TENANT_A, declaration, 'res-vouched');
+        const grant = await stores.blobs.createUpload(TENANT_A, reservation);
+        await landBlobBytes({
+          grant,
+          declaration,
+          reservation,
+          bytes: new TextEncoder().encode(text),
+        });
 
-        // Downloadable is the only "committed" signal every composition shares.
+        const observation = requireObservation(
+          await stores.blobs.observeUpload(TENANT_A, grant.blobId, reservation),
+        );
+        expect(observation).toEqual({
+          observedByteSize: BigInt(declaration.size),
+          observedContentType: declaration.contentType,
+        });
+        // Landing bytes is not a hidden commit. Only explicit finalization may
+        // make the object downloadable.
+        expect(await stores.blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeUndefined();
+        await commitBlob(TENANT_A, reservation, observation);
+
         expect(await stores.blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeDefined();
 
-        const reissued = await stores.blobs.createUpload(TENANT_A, declaration).then(
-          (second) => second.blobId,
-          () => undefined,
-        );
-        expect(reissued).not.toBe(grant.blobId);
+        const reissued = await stores.blobs
+          .createUpload(TENANT_A, reservationFor(TENANT_A, declaration, 'res-reissue'))
+          .then(
+            (second) => second.blobId,
+            () => undefined,
+          );
+        expect(reissued).toBeUndefined();
 
         // And the object stayed readable throughout: withholding a write grant
         // is not the same as withdrawing the object.
@@ -128,8 +191,14 @@ export function runBlobConformance(factory: CloudCompositionFactory): void {
       // cross-tenant oracle.
       await withCloudComposition(factory, async ({ stores }) => {
         const declaration = await declarationFor('the same bytes');
-        const forA = await stores.blobs.createUpload(TENANT_A, declaration);
-        const forB = await stores.blobs.createUpload(TENANT_B, declaration);
+        const forA = await stores.blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, declaration, 'res-a'),
+        );
+        const forB = await stores.blobs.createUpload(
+          TENANT_B,
+          reservationFor(TENANT_B, declaration, 'res-b'),
+        );
 
         expect(forA.uploadUrl).not.toEqual(forB.uploadUrl);
       });

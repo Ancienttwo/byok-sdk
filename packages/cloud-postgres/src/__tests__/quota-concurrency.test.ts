@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { contentHash, createMutableClock, isCoreError, tenantId } from '@byok/core';
 import { migrate } from '../migrate';
+import { PostgresObjectStore } from '../stores/core/objects';
 import { PostgresQuotaStore } from '../stores/core/quota';
 import { createDataplaneScope, SKIP_DATAPLANE } from './support/dataplane';
 
@@ -49,6 +50,7 @@ const ADMISSIBLE = 5;
  * escape rate to a few tenths of a percent, at the cost of two more races.
  */
 const ROUNDS = 3;
+const DEDUP_RACERS = 4;
 
 describe.skipIf(SKIP_DATAPLANE)('quota reservation under real concurrency', () => {
   it('admits exactly as many concurrent reservations as the hard limit allows', async () => {
@@ -101,6 +103,95 @@ describe.skipIf(SKIP_DATAPLANE)('quota reservation under real concurrency', () =
         await scope.pool.query('DELETE FROM storage_reservation');
       }
     } finally {
+      await scope.dispose();
+    }
+  });
+
+  it('accounts one object when same-hash finalizers race from a pending manifest', async () => {
+    const scope = await createDataplaneScope(DEDUP_RACERS + 3);
+    const locker = await scope.pool.connect();
+    let lockerReleased = false;
+    let finalizations: readonly Promise<Awaited<ReturnType<PostgresQuotaStore['finalizeReservation']>>>[] = [];
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const clock = createMutableClock();
+      const quota = new PostgresQuotaStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock);
+      const hash = contentHash(`sha256:${'a'.repeat(64)}`);
+      await quota.writeEntitlement(TENANT, {
+        version: 1n,
+        hardLimitBytes: HARD_LIMIT,
+        maxObjectBytes: 400n,
+        maxInlineBytes: 100n,
+        mailboxLimitBytes: 500n,
+        retentionPolicyId: 'default',
+      });
+      for (let index = 0; index < DEDUP_RACERS; index += 1) {
+        await quota.reserve(TENANT, {
+          reservationId: `dedup-${index}`,
+          kind: 'object',
+          expectedBytes: BYTES_EACH,
+          contentHash: hash,
+          contentType: 'application/octet-stream',
+          ttlMs: 60_000,
+        });
+      }
+      await objects.putManifest(TENANT, {
+        hash,
+        byteSize: BYTES_EACH,
+        contentType: 'application/octet-stream',
+      });
+
+      // Hold the manifest row so every statement materializes the same
+      // pre-transition `pending` state before one of them wins the update.
+      // This deterministically catches snapshot-based dedupe decisions.
+      await locker.query('BEGIN');
+      await locker.query(
+        'SELECT 1 FROM object_manifest WHERE tenant_id = $1 AND hash = $2 FOR UPDATE',
+        [TENANT, hash],
+      );
+      finalizations = Array.from({ length: DEDUP_RACERS }, (_unused, index) =>
+        quota.finalizeReservation(TENANT, {
+          reservationId: `dedup-${index}`,
+          observedByteSize: BYTES_EACH,
+          observedContentType: 'application/octet-stream',
+        }),
+      );
+
+      let blocked = 0;
+      for (let attempt = 0; attempt < 100 && blocked < DEDUP_RACERS; attempt += 1) {
+        const result = await scope.pool.query<{ count: string }>(
+          `SELECT count(*)::text AS count
+             FROM pg_stat_activity
+            WHERE application_name = $1
+              AND wait_event_type = 'Lock'
+              AND query LIKE '%WITH candidate AS MATERIALIZED%'`,
+          [scope.applicationName],
+        );
+        blocked = Number(result.rows[0]?.count ?? '0');
+        if (blocked < DEDUP_RACERS) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      expect(blocked).toBe(DEDUP_RACERS);
+
+      await locker.query('COMMIT');
+      locker.release();
+      lockerReleased = true;
+
+      const results = await Promise.all(finalizations);
+      expect(results.filter((result) => !result.deduplicated)).toHaveLength(1);
+      expect(results.filter((result) => result.deduplicated)).toHaveLength(DEDUP_RACERS - 1);
+      const usage = await quota.readUsage(TENANT);
+      expect(usage.committedObjectBytes).toBe(BYTES_EACH);
+      expect(usage.objectCount).toBe(1n);
+      expect(usage.reservedBytes).toBe(0n);
+    } finally {
+      if (!lockerReleased) {
+        await locker.query('ROLLBACK').catch(() => undefined);
+        locker.release();
+      }
+      await Promise.allSettled(finalizations);
       await scope.dispose();
     }
   });
