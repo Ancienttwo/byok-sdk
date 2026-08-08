@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 14:46
+> **Related Plan**: plans/archive/plan-20260808-1303-s4a-c-r2-deploy.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260808-1446
+
 # Implementation Notes: s4a-c-r2-deploy
 
 > **Status**: Active

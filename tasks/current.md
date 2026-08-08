@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-08T09:31:45+0800 -->
+<!-- updated_at: 2026-08-08T14:46:36+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-08T09:31:45+0800
+> **Updated At**: 2026-08-08T14:46:36+0800
 > **Source Branch**: main
-> **Source Commit**: 262832d
+> **Source Commit**: 98fb3e1
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,8 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/ancienttwo/Projects/byok-sdk-wt-s4a-b-core-postgres: plans/plan-20260808-0232-s4a-b-core-postgres.md
-- /Users/ancienttwo/Projects/byok-sdk-wt-s4a-b-core-postgres: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4a-b-core-postgres
+- /Users/ancienttwo/Projects/byok-sdk-wt-s4a-c-r2-deploy: plans/plan-20260808-1303-s4a-c-r2-deploy.md
+- /Users/ancienttwo/Projects/byok-sdk-wt-s4a-c-r2-deploy: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4a-c-r2-deploy
 ## Active Sprint
 
 - Sprint: (none)
@@ -52,16 +52,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260808-0232-s4a-b-core-postgres.md
- D tasks/contracts/20260808-0232-s4a-b-core-postgres.contract.md
- D tasks/notes/20260808-0232-s4a-b-core-postgres.notes.md
- D tasks/reviews/20260808-0232-s4a-b-core-postgres.review.md
+ D plans/plan-20260808-1303-s4a-c-r2-deploy.md
+ D tasks/contracts/20260808-1303-s4a-c-r2-deploy.contract.md
+ D tasks/notes/20260808-1303-s4a-c-r2-deploy.notes.md
+ D tasks/reviews/20260808-1303-s4a-c-r2-deploy.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260808-0232-s4a-b-core-postgres.md
-?? tasks/archive/contract-20260808-0931-s4a-b-core-postgres.md
-?? tasks/archive/notes-20260808-0931-s4a-b-core-postgres.md
-?? tasks/archive/review-20260808-0931-s4a-b-core-postgres.md
-?? tasks/archive/todo-20260808-0931-s4a-b-core-postgres.md
+?? plans/archive/plan-20260808-1303-s4a-c-r2-deploy.md
+?? tasks/archive/contract-20260808-1446-s4a-c-r2-deploy.md
+?? tasks/archive/notes-20260808-1446-s4a-c-r2-deploy.md
+?? tasks/archive/review-20260808-1446-s4a-c-r2-deploy.md
+?? tasks/archive/todo-20260808-1446-s4a-c-r2-deploy.md
 ```
 
 ## Source Artifacts
