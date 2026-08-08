@@ -78,7 +78,7 @@ a396942 区分用户local-agent
 
 **`apps/local-agent/src/providers.ts`（2327 行）**
 
-| 走（已進 `@byok/keys`） | 留（AiphaBee 領域 / market_data 分支） |
+| 走（已進 `@byok-sdk/keys`） | 留（AiphaBee 領域 / market_data 分支） |
 |---|---|
 | `LOCAL_MODEL_PROVIDER_IDS` `:30-36` | `LOCAL_PROVIDER_KINDS` `:27`、`LocalProviderKind` `:28` |
 | `LocalProviderProfile` model 分支 `:38-61` | `LocalProviderProfile` market_data 分支 `:38-51` |
@@ -95,16 +95,16 @@ a396942 区分用户local-agent
 
 | 檔案:行 | 目前 import | swap 後 |
 |---|---|---|
-| `apps/local-agent/src/cli.ts:44-54` | `LOCAL_PROVIDER_KINDS`, `LocalProviderRegistry`, `normalizeProviderUrl`, `LocalProviderAuthMode`, `LocalProviderConfiguration`, `LocalProviderKind`, `LocalProviderProfile`, `LocalModelProviderId` from `./providers.ts` | 仍從 `./providers.ts` 取（adapter 就住在這），`normalizeProviderUrl` 改為 `./providers.ts` re-export 自 `@byok/keys` |
+| `apps/local-agent/src/cli.ts:44-54` | `LOCAL_PROVIDER_KINDS`, `LocalProviderRegistry`, `normalizeProviderUrl`, `LocalProviderAuthMode`, `LocalProviderConfiguration`, `LocalProviderKind`, `LocalProviderProfile`, `LocalModelProviderId` from `./providers.ts` | 仍從 `./providers.ts` 取（adapter 就住在這），`normalizeProviderUrl` 改為 `./providers.ts` re-export 自 `@byok-sdk/keys` |
 | `apps/local-agent/src/cli.ts:92` | `./local-data-scope.ts` | 不變（`prepareLocalAccountDataScope` 留在 aip） |
-| `apps/local-agent/src/cli.ts:26` | `createDefaultLocalAgentSecretStore` from `./index.ts` | 不變，但工廠內部改建 `@byok/keys` 的 OS store（見 2.3 第 4 條） |
+| `apps/local-agent/src/cli.ts:26` | `createDefaultLocalAgentSecretStore` from `./index.ts` | 不變，但工廠內部改建 `@byok-sdk/keys` 的 OS store（見 2.3 第 4 條） |
 | `apps/local-agent/src/settings.ts:11-15` | `LocalProviderRegistry`, `LocalProviderConfiguration`, `LocalProviderStatus`, `LocalModelProviderId` | 不變（adapter 保持同名同形） |
 | `apps/local-agent/src/connected.ts:54,72` | `LocalProviderRegistry`、`scopeLocalAgentSecretStore` | 不變 |
 | `apps/local-agent/src/local-data-claim.ts:23,25` | `LocalProviderProfileStore`、`LocalAccountDataScope` | 不變（見 2.3 第 1 條） |
 | `apps/local-agent/src/local-data-migration.ts:13` | `LocalAccountDataScope` | 不變 |
 | 測試：`providers.test.ts:27`、`settings.test.ts:10`、`connected.test.ts:52,56`、`local-data-claim.test.ts:18,21`、`local-data-scope.test.ts:13`、`index.test.ts:38`、`local-data-migration.test.ts:9` | 同上 | 全部不變（這是 K4 的驗收條件之一） |
 
-**關鍵事實**：aip 沒有任何檔案跨過 `providers.ts` / `local-data-scope.ts` 的模組邊界去 import 內部符號。所有消費都走這兩個模組的 export。這意味著「把 `providers.ts` 改成一層 adapter，內部改調 `@byok/keys`」可以做到**對所有消費方零 import 變更**。這是 K4 最重要的正面事實。
+**關鍵事實**：aip 沒有任何檔案跨過 `providers.ts` / `local-data-scope.ts` 的模組邊界去 import 內部符號。所有消費都走這兩個模組的 export。這意味著「把 `providers.ts` 改成一層 adapter，內部改調 `@byok-sdk/keys`」可以做到**對所有消費方零 import 變更**。這是 K4 最重要的正面事實。
 
 ### 2.3 會斷的地方（逐條，都不在計畫的 K4/K4.1 清單裡）
 
@@ -170,7 +170,7 @@ function publicSettingsError(error: unknown): { code?: string; error: string } {
 
 **改成 code-based 的正確形狀是白名單，不是 duck-typing。** 現在 `instanceof` 失敗會落到最後的通用文案；若換成 `typeof (error as any).code === 'string'`，Node 的系統錯誤（`ENOENT`、`EACCES` 等都帶 `.code`）會命中這一支，把含檔案路徑的 `error.message` 洩漏進 HTTP 回應。這是一個真實的行為退化。
 
-`@byok/keys` 已經 export `BYOK_KEYS_ERROR_CODES`（`packages/keys/src/errors.ts:39-74`），所以白名單可以直接寫：
+`@byok-sdk/keys` 已經 export `BYOK_KEYS_ERROR_CODES`（`packages/keys/src/errors.ts:39-74`），所以白名單可以直接寫：
 
 ```ts
 function structuredErrorCode(error: unknown): string | undefined {
@@ -197,7 +197,7 @@ function structuredErrorCode(error: unknown): string | undefined {
 | `PROVIDER_REQUEST_TIMEOUT` | ✅ |
 | `MODEL_PROVIDER_TIMEOUT`（`settings.ts:384`） | ❌ —— 但全 aip 只有這一行提到它，**沒有任何產生者**，是既有死碼，非缺口 |
 
-結論：`@byok/keys` 的 code 覆蓋 `publicSettingsError` 需要的全部有效判斷值，**無缺口**。
+結論：`@byok-sdk/keys` 的 code 覆蓋 `publicSettingsError` 需要的全部有效判斷值，**無缺口**。
 
 ### 3.2 `providers.ts:1673-1677` —— `providerResolutionErrorCode()`
 
@@ -245,7 +245,7 @@ function providerResolutionErrorCode(error: unknown): string {
 
 | 項 | 狀態 |
 |---|---|
-| `name` | `@byok/keys` ✅ |
+| `name` | `@byok-sdk/keys` ✅ |
 | `type` / `exports` / `main` / `module` / `types` | ESM-only，`.` + `./package.json` 雙 export，與 `@byok/protocol|server|client` 完全一致 ✅ |
 | `files` | `["dist"]`；`npm pack --dry-run` 實測 22 個檔案，README.md 7.3kB 有進包（npm 永遠打包 README/LICENSE/package.json） ✅ |
 | `sideEffects: false` | ✅ |
@@ -259,7 +259,7 @@ function providerResolutionErrorCode(error: unknown): string {
 ### 5.2 缺什麼（按阻斷性排序）
 
 1. **未登入 npm。** `npm whoami` → `401 Unauthorized`。硬阻斷。
-2. **`@byok` scope 從未發過任何東西。** `npm view @byok/keys|@byok/protocol|@byok/client` 全部 `404 Not Found`。這是整個 scope 的首次發佈 —— 需要先確認 scope/org 可申請且未被他人佔用（404 只代表 package 不存在，不代表 scope 可用）。
+2. **npm identity 已在 2026-08-08 更正為 `@byok-sdk/keys`。** `byok-sdk@0.0.1` 是占位包且其 description 明定正式 packages 使用 `@byok-sdk`；`npm org ls byok-sdk --json` 讀回 `ancienttwo: owner`。原 `@byok/keys` Web Auth 後 PUT E404，不能使用且不保留 alias。
 3. **缺 `publishConfig`。** scoped package 首次 `npm publish` 預設 `restricted`；免費帳號會直接失敗。四個 package 都沒有 `publishConfig: { "access": "public" }`。
 4. **缺 `LICENSE` 檔案。** repo 根目錄與 `packages/keys/` 都沒有，但四個 package.json 都宣告 `"license": "MIT"`。
 5. **`dist/` 被 gitignore（`.gitignore:2`），且沒有 `prepublishOnly`。** 目前發佈完全依賴人工先跑 build，一旦漏跑就會發出空包或舊包。建議加 `"prepublishOnly": "pnpm run build"`。
@@ -292,7 +292,7 @@ function providerResolutionErrorCode(error: unknown): string {
 - **`test(kind, providerId?)`**（`providers.ts:1389-1416`，消費 `cli.ts:987`）：byok 無對應物。adapter 要用已存 profile 取 secret 再 `testConnection()`。
 - **`resolveDefaultModelProvider()` 的空物件語義**（`providers.ts:1331-1354`，消費 `cli.ts:778` 與 `connected.ts` 的雲端中繼路徑）：byok 丟例外，aip 回 `UnavailableNarrativeProvider`。adapter 要 catch `ByokKeysError` → `providerResolutionErrorCode(error)` → 包回空物件。**同時**，byok 回的是 transport client，aip 要的是 `LocalResearchNarrativeProvider`（帶 `planQueryIntent` / `generate` / `generateResearch` / `reviewResearch` / `analyzeImage`），所以 aip 的兩個 narrative provider 必須從「自己 fetch」重構成「組合 byok 的 client」。
 
-> 這第五面是 K4 真正的工作量所在，也是計畫「swap PR 只做刪碼 + 換依賴，零行為變更」這句話**不成立**的地方。aip 的 `OpenAiCompatibleNarrativeProvider` / `AnthropicNarrativeProvider`（`providers.ts:478-1067`，約 590 行）裡 narrative 與 transport 是交織的：每個方法都自己組 body、自己叫 `fetchWithProviderGuards`、自己 `providerHeaders`。要用 `@byok/keys` 的 client，這 590 行要逐方法改寫成「組 messages → 呼叫 client.createChatCompletion / createMessage → 用 aip 的 validator 解析」。這是重構，不是刪除。
+> 這第五面是 K4 真正的工作量所在，也是計畫「swap PR 只做刪碼 + 換依賴，零行為變更」這句話**不成立**的地方。aip 的 `OpenAiCompatibleNarrativeProvider` / `AnthropicNarrativeProvider`（`providers.ts:478-1067`，約 590 行）裡 narrative 與 transport 是交織的：每個方法都自己組 body、自己叫 `fetchWithProviderGuards`、自己 `providerHeaders`。要用 `@byok-sdk/keys` 的 client，這 590 行要逐方法改寫成「組 messages → 呼叫 client.createChatCompletion / createMessage → 用 aip 的 validator 解析」。這是重構，不是刪除。
 
 ---
 
@@ -302,7 +302,7 @@ function providerResolutionErrorCode(error: unknown): string {
 
 | 方案 | 內容 | 判斷 |
 |---|---|---|
-| **A（建議）** | aip 保留 `LocalProviderProfileStore` 與 `local_provider_profile` 表，把它收窄成實作 `@byok/keys` 的 `ProviderProfileStore` 介面（model 分支），注入 byok 的 `ProviderRegistry` | **採用**。零資料遷移；`local-data-claim.ts:51` 的表名清單不動；market_data 列繼續住同一張表；aip 現有的部分唯一索引（`providers.ts:141-145`）語義與 byok 的兩條 invariant 完全一致。K2 把 `ProviderProfileStore` 做成可插拔就是為了這一刻 |
+| **A（建議）** | aip 保留 `LocalProviderProfileStore` 與 `local_provider_profile` 表，把它收窄成實作 `@byok-sdk/keys` 的 `ProviderProfileStore` 介面（model 分支），注入 byok 的 `ProviderRegistry` | **採用**。零資料遷移；`local-data-claim.ts:51` 的表名清單不動；market_data 列繼續住同一張表；aip 現有的部分唯一索引（`providers.ts:141-145`）語義與 byok 的兩條 invariant 完全一致。K2 把 `ProviderProfileStore` 做成可插拔就是為了這一刻 |
 | B | aip 改用 `SqliteProviderProfileStore` | **否決**。表名 / 主鍵欄 / `tool_name` / market_data 共表四項全不相容，需要對每個既有安裝做資料遷移，而黃金測試抓不到失敗 |
 | C | 給 `SqliteProviderProfileStore` 加可設定表名 | **否決**。仍解不掉 `profile_id` vs `provider_id`、`tool_name`、共表 market_data；而且為單一 consumer 預埋設定項，違反 HANDOFF §3「不在只有一個消費者的階段預埋推測性配置項」 |
 
@@ -312,15 +312,15 @@ function providerResolutionErrorCode(error: unknown): string {
 
 0. **Drift 確認**：已完成（§1，零漂移）。K4 收尾時把 plan `:85` 的 drift 風險行標記為已消解。
 1. **byok 側 publish 前置**（本 repo，可與 aip 側並行）：
-   - 確認 `@byok` scope 可用；`npm login`
+   - 確認 `ancienttwo` 仍是 `@byok-sdk` owner；以 Web Auth 完成 publish write authentication
    - 四個 package.json 補 `publishConfig: { "access": "public" }`、`repository`
    - 加根 `LICENSE`（MIT）
    - `packages/keys` 加 `"prepublishOnly": "pnpm run build"`
    - README 的 `## What is in K0` 改成完整 18 模組表
    - 修 `errors.ts:30-36` 對 `SECRET_NAMESPACE_INVALID` 來源的錯誤陳述
-2. **發佈 `@byok/keys@0.1.0`**（版本理由見 §7.3）。發完 `npm view @byok/keys` 驗證，並在乾淨目錄 `npm i @byok/keys` + `node -e "import('@byok/keys')"` 做一次安裝煙測。
-3. **aip 側先加 adapter，不刪任何東西**（K4.1 全部五面）：`apps/local-agent/package.json` 加 `"@byok/keys": "^0.1.0"`；在 `providers.ts` 內把 `LocalProviderRegistry` 改成 adapter 外殼，內部**仍呼叫既有實作**。此時跑 `npm run typecheck --workspaces` + `npx vitest run apps/local-agent/src`，應該全綠 —— 這一步證明 adapter 的介面形狀對，且黃金測試不動。
-4. **切換內部實作**：adapter 內部改調 `@byok/keys` 的 `ProviderRegistry`（注入方案 A 的 profile store、注入 `servicePrefix: "com.aiphabee.local-agent"` 與 `envelopePrefix: "aiphabee-scoped-secrets-v1:"`），narrative provider 重構成組合 byok 的 client。
+2. **發佈 `@byok-sdk/keys@0.1.0`**（版本理由見 §7.3）。發完 `npm view @byok-sdk/keys` 驗證，並在乾淨目錄 `npm i @byok-sdk/keys` + `node -e "import('@byok-sdk/keys')"` 做一次安裝煙測。
+3. **aip 側先加 adapter，不刪任何東西**（K4.1 全部五面）：`apps/local-agent/package.json` 加 `"@byok-sdk/keys": "^0.1.0"`；在 `providers.ts` 內把 `LocalProviderRegistry` 改成 adapter 外殼，內部**仍呼叫既有實作**。此時跑 `npm run typecheck --workspaces` + `npx vitest run apps/local-agent/src`，應該全綠 —— 這一步證明 adapter 的介面形狀對，且黃金測試不動。
+4. **切換內部實作**：adapter 內部改調 `@byok-sdk/keys` 的 `ProviderRegistry`（注入方案 A 的 profile store、注入 `servicePrefix: "com.aiphabee.local-agent"` 與 `envelopePrefix: "aiphabee-scoped-secrets-v1:"`），narrative provider 重構成組合 byok 的 client。
 5. **刪除被取代的 symbol**：`providers.ts` 的 transport 半邊、`index.ts:413/:568/:748-757`、`local-data-scope.ts:129-199`。
 6. **轉換兩個 `instanceof`**（`settings.ts:358`、`providers.ts:1673`），用 §3.1 的白名單形狀。
 7. **驗收**：`npm run typecheck --workspaces`（含測試檔）、`npx vitest run apps/local-agent/src`、確認 `settings.test.ts` diff 為空、外加一次手動安裝升級煙測（既有 `local-agent.sqlite` + 既有 Keychain 條目，確認 model profile 讀得回、`/api/status` 顯示已配置）。
@@ -379,6 +379,6 @@ git -C .../aip-main-open diff --stat c6a5385..HEAD -- \
 cd packages/keys && pnpm run build      # exit 0
 cd packages/keys && pnpm run test       # exit 0, 15 files / 328 tests
 cd packages/keys && npm pack --dry-run  # 22 entries, README.md included
-npm view @byok/keys version             # 404
+npm view @byok-sdk/keys version             # 404
 npm whoami                              # 401
 ```

@@ -6,18 +6,18 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: ancienttwo
 > **Capability ID**: root
-> **Last Updated**: 2026-08-08 21:50
+> **Last Updated**: 2026-08-08 22:40
 > **Review File**: `tasks/reviews/20260805-1659-byok-keys-package.review.md`
 > **Notes File**: `tasks/notes/20260805-1659-byok-keys-package.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
 
 ## Why
 
-`@byok/keys` makes the already-shipped key-based BYOK implementation (API key in the OS credential store, direct provider calls) consumable as an npm package, and resolves the BYOK name collision between this repo's bring-your-own-agent SDK and aip-main-open's bring-your-own-key product. If the port is wrong, aip-main-open cannot swap at K4 without a behavior change — its golden test `apps/local-agent/src/settings.test.ts:313-318` asserts exact provider-facing wire bytes. If the security boundary is wrong, the M5 pilot audit claim that agent dispatch never touches credentials is polluted.
+`@byok-sdk/keys` makes the already-shipped key-based BYOK implementation (API key in the OS credential store, direct provider calls) consumable as an npm package, and resolves the BYOK name collision between this repo's bring-your-own-agent SDK and aip-main-open's bring-your-own-key product. If the port is wrong, aip-main-open cannot swap at K4 without a behavior change — its golden test `apps/local-agent/src/settings.test.ts:313-318` asserts exact provider-facing wire bytes. If the security boundary is wrong, the M5 pilot audit claim that agent dispatch never touches credentials is polluted.
 
 ## Goal
 
-Deliver `packages/keys` as a published `@byok/keys@0.1.0` package and make its public surface sufficient for the K4 aip-main-open swap. The release surface must preserve provider HTTP status on classified failures, export the shared request/response guards used by aip's retained finance connector, and accept non-model provider kinds in the generic header helpers.
+Deliver `packages/keys` as a published `@byok-sdk/keys@0.1.0` package and make its public surface sufficient for the K4 aip-main-open swap. The release surface must preserve provider HTTP status on classified failures, export the shared request/response guards used by aip's retained finance connector, and accept non-model provider kinds in the generic header helpers.
 
 This contract now covers the byok-sdk half of **K4**. Three concrete gaps were proven by `docs/researches/k4-aip-swap-dryrun.md` and the first aip adapter commit: image capability mapping needs the original HTTP status; the retained `McpHttpFinanceConnector` needs the package's canonical request/response guards; and `providerHeaders()` must accept aip's retained `market_data` profile shape. These are public-surface corrections before the first publish, not compatibility fallbacks.
 
@@ -76,6 +76,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ```yaml
 allowed_paths:
   - docs/spec.md
+  - ARCHITECTURE-PROPOSAL-byok-platform.md
   - plans/
   - tasks/todos.md
   - tasks/contracts/20260805-1659-byok-keys-package.contract.md
@@ -83,8 +84,11 @@ allowed_paths:
   - tasks/notes/20260805-1659-byok-keys-package.notes.md
   - .ai/context/capabilities.json
   - docs/researches/
+  - docs/architecture/sdk-architecture.md
+  - docs/security.md
   - .claude/templates/
   - packages/keys/
+  - packages/core/src/errors.ts
   - pnpm-lock.yaml
 ```
 
@@ -154,14 +158,14 @@ exit_criteria:
     - path: packages/keys/src/headers.ts
       pattern: "kind: string"
     - path: packages/keys/package.json
-      pattern: '"name": "@byok/keys"'
+      pattern: '"name": "@byok-sdk/keys"'
     - path: packages/keys/package.json
       pattern: '"version": "0.1.0"'
     - path: packages/keys/package.json
       pattern: '"access": "public"'
   files_not_contain:
     - path: packages/keys/package.json
-      pattern: '"name": "@byok-sdk/keys"'
+      pattern: '"name": "@byok/keys"'
   tests_pass:
     - path: packages/keys/src/headers.test.ts
     - path: packages/keys/src/openai-client.test.ts

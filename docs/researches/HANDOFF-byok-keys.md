@@ -1,4 +1,4 @@
-# Handoff: 在 byok-sdk 新建 `@byok/keys`（key-based BYOK 獨立包）
+# Handoff: 在 byok-sdk 新建 `@byok-sdk/keys`（key-based BYOK 獨立包）
 
 > 使用方式：在 `~/Projects/byok-sdk` 開新 session，把本文件作為第一手上下文。
 > 本 repo 走 repo-harness 工作流（見 AGENTS.md/CLAUDE.md），建議第一步先把本 handoff 轉成正式 plan（`tasks/current.md` 目前 Idle、Active Plan 為 none），再進入實作。
@@ -8,7 +8,7 @@
 
 ## 0. 已定決策：先走 byok-sdk，copy-port（2026-08-05 定案）
 
-**結論**：`@byok/keys` 直接在本 repo 從零建包，把 aip-main-open 的實作按層剝離移植過來；aip-main-open 在 K4 之前一行不動。
+**結論**：`@byok-sdk/keys` 直接在本 repo 從零建包，把 aip-main-open 的實作按層剝離移植過來；aip-main-open 在 K4 之前一行不動。
 
 **依據（都已實測）**：
 1. **移植本質是按層剝離，不是搬檔案**——`providers.ts` 的 AiphaBee 拖掛全部集中在 narrative 領域層（見 §4.5），通用層（headers/clients/registry/secrets/scope）拖掛趨近於零。剝離工作在哪個 repo 做都一樣重，那就在不干擾任何人的地方做。
@@ -20,7 +20,7 @@
 
 ## 1. 任務一句話
 
-把 AiphaBee（`~/Projects/aip-main-open`）裡已上線、有端到端測試的 **key-based BYOK** 實作（API key 存 OS 憑證庫 → 直連 LLM provider），移植成 byok-sdk monorepo 裡的獨立包 `@byok/keys`，讓 aip-main-open 和使用者的其他專案都能以 npm 依賴的方式消費。
+把 AiphaBee（`~/Projects/aip-main-open`）裡已上線、有端到端測試的 **key-based BYOK** 實作（API key 存 OS 憑證庫 → 直連 LLM provider），移植成 byok-sdk monorepo 裡的獨立包 `@byok-sdk/keys`，讓 aip-main-open 和使用者的其他專案都能以 npm 依賴的方式消費。
 
 ## 2. 背景：三個 repo 與「BYOK」撞名真相
 
@@ -32,14 +32,14 @@
 
 血緣：aip-main-open 的 `local-execution-protocol`（aiphabee-local-exec-v1）從本 repo 早期協議形狀 fork（共用 `task.offer`/`task.progress`/`task.cancel`），之後兩邊獨立演進成不同產品。本次任務**不**統一協議，只新增 key 管理包。
 
-戰略意圖：`@byok/keys` 落地後，byok-sdk 成為品牌傘——`@byok/protocol|server|client` 管 agent dispatch，`@byok/keys` 管 key 管理，撞名問題以包名自解釋的方式解決。
+戰略意圖：`@byok-sdk/keys` 落地後，byok-sdk 成為品牌傘——`@byok/protocol|server|client` 管 agent dispatch，`@byok-sdk/keys` 管 key 管理，撞名問題以包名自解釋的方式解決。
 
 ## 3. 目標與非目標
 
 **目標**
-1. 新建 `packages/keys`（`@byok/keys`），沿用本 repo 工具鏈（pnpm workspace、tsup、vitest、TypeScript）。
+1. 新建 `packages/keys`（`@byok-sdk/keys`），沿用本 repo 工具鏈（pnpm workspace、tsup、vitest、TypeScript）。
 2. 行為與 aip-main-open 現有實作對等（詳見 §6 驗收），API 面向「任意 SaaS/本機 app」而非 AiphaBee 專屬。
-3. 最終里程碑：aip-main-open 的 `apps/local-agent` 刪除被移植的程式碼，改依賴 `@byok/keys`。
+3. 最終里程碑：aip-main-open 的 `apps/local-agent` 刪除被移植的程式碼，改依賴 `@byok-sdk/keys`。
 
 **非目標（明確不做）**
 - 不移植 AiphaBee 領域邏輯：narrative/意圖規劃 prompts、finance schemas、`aiphabee://` 協議註冊、legacy secret migration（`#migrateLegacyModelSecret`）。
@@ -50,7 +50,7 @@
 
 移植源集中在 `apps/local-agent/src/`，耦合面已量過：**只有 4 個檔案** import BYOK 模組（cli.ts、connected.ts、settings.ts、local-data-claim.ts）。
 
-### 4.1 要移植的核心（→ 進 `@byok/keys`）
+### 4.1 要移植的核心（→ 進 `@byok-sdk/keys`）
 
 | 能力 | 位置（file:line，基線 c6a5385） |
 |---|---|
@@ -82,14 +82,14 @@
 
 - `cli.ts` import 清單：`LOCAL_PROVIDER_KINDS`、`LocalProviderRegistry`、`normalizeProviderUrl`、`LocalProviderAuthMode`、`LocalProviderConfiguration`、`LocalProviderKind`、`LocalProviderProfile`、`LocalModelProviderId`
 - `cli.ts:778`（/ask 取 provider）、`cli.ts:1299-1329`（喚起設置頁）、`connected.ts:2051,2176,2351`（雲端中繼任務取 provider + scope 綁定）
-- `apps/local-agent/package.json` 現以 `file:../../packages/*` 依賴 7 個 `@aiphabee/*` 包——swap 時 `@byok/keys` 以 npm 依賴加入
+- `apps/local-agent/package.json` 現以 `file:../../packages/*` 依賴 7 個 `@aiphabee/*` 包——swap 時 `@byok-sdk/keys` 以 npm 依賴加入
 
 ### 4.5 源檔案的對外拖掛（symbol 級，K0 剝離的依據）
 
 2026-08-05 實測四個源檔案的 outbound imports：
 
 - **`local-data-scope.ts`（scope 信封）**：node 內建 + `LocalExecutionError`（來自 `@aiphabee/local-device-runtime` 的通用錯誤類，移植時在包內重定義即可）+ `KeychainSecretName`/`LocalAgentSecretStore` 型別（本來就要一起移植）。**趨近零拖掛。**
-- **`providers.ts`**：通用層只掛 node 內建（sqlite/path/fs/crypto）；AiphaBee 拖掛集中在 narrative 領域層——`createStockQueryIntentPrompt`、`validateStockQueryIntentV1`、`validateStockResearchAnalysisV1`、`STOCK_RESEARCH_ANALYSIS_V1_VERSION`、`ResearchExecutionError`（均來自 `@aiphabee/research-execution-runtime`）+ `StockSdkFinanceConnector`（來自 `./index.ts`）。**這些 symbol 及其所在的 narrative provider 方法留在 aip-main-open**；`@byok/keys` 只帶走 transport 骨架（providerHeaders、chat/completions 與 Messages API 的通用呼叫、streaming 如有）。
+- **`providers.ts`**：通用層只掛 node 內建（sqlite/path/fs/crypto）；AiphaBee 拖掛集中在 narrative 領域層——`createStockQueryIntentPrompt`、`validateStockQueryIntentV1`、`validateStockResearchAnalysisV1`、`STOCK_RESEARCH_ANALYSIS_V1_VERSION`、`ResearchExecutionError`（均來自 `@aiphabee/research-execution-runtime`）+ `StockSdkFinanceConnector`（來自 `./index.ts`）。**這些 symbol 及其所在的 narrative provider 方法留在 aip-main-open**；`@byok-sdk/keys` 只帶走 transport 骨架（providerHeaders、chat/completions 與 Messages API 的通用呼叫、streaming 如有）。
 - **`settings.ts`**：額外掛 `./subscription-access.ts`（AiphaBee 訂閱檢查）——佐證 K3 的設置頁 server 若進包必須把這類產品邏輯做成注入點，或乾脆不進包。
 - **`index.ts`**：barrel 檔，掛著幾十個 local-* 領域模組；只切走 `SecretStore` 介面與兩個 OS 實作（`:258-268,413,568`），絕不移植整檔。
 
@@ -97,9 +97,9 @@
 
 ## 5. 目標 repo（本 repo）慣例與約束
 
-- pnpm monorepo（`pnpm@10.33.4`，node >=20），包版本 0.0.1，tsup 打包，vitest 測試（現有 118 個測試檔），protocol 有 frozen golden（`v1.frozen.json`）文化——`@byok/keys` 的公開 API 穩定後同樣值得立 golden。
+- pnpm monorepo（`pnpm@10.33.4`，node >=20），包版本 0.0.1，tsup 打包，vitest 測試（現有 118 個測試檔），protocol 有 frozen golden（`v1.frozen.json`）文化——`@byok-sdk/keys` 的公開 API 穩定後同樣值得立 golden。
 - repo-harness 檢查：`check:task-workflow --strict`、`check:task-sync` 等（見根 package.json scripts）。新包、新 plan 都要過這些 gate。
-- **安全邊界聲明（本次設計的關鍵約束）**：`@byok/client` 的 credential-isolation rule（`packages/client/src/types.ts:120-124`）與 M5 pilot audit（`docs/security-review-m5-pilot-entry.md`）承諾「agent-dispatch 側永不接觸任何憑證」。`@byok/keys` 是**獨立包、獨立安全模型**（它的本職就是管 key）。必須做到：
+- **安全邊界聲明（本次設計的關鍵約束）**：`@byok/client` 的 credential-isolation rule（`packages/client/src/types.ts:120-124`）與 M5 pilot audit（`docs/security-review-m5-pilot-entry.md`）承諾「agent-dispatch 側永不接觸任何憑證」。`@byok-sdk/keys` 是**獨立包、獨立安全模型**（它的本職就是管 key）。必須做到：
   1. `client`/`server`/`protocol` 三包**不得**新增對 `keys` 的依賴；
   2. 在 `keys` 的 README 和 docs/security.md 增補一節，明說兩個安全模型的分界，避免污染 M5 audit 的 claim。
 
@@ -108,8 +108,8 @@
 - **K0 — 骨架 + 純函式層**：`packages/keys` 建包；`ProviderProfile` 型別（zod schema，與 protocol 包風格一致）、`providerHeaders()`、OpenAI-compatible + Anthropic 兩個 client（注入 fetchImpl，mock 測試）。無 OS 依賴，全平台可測。
 - **K1 — SecretStore 層**：`SecretStore` 介面 + `InMemorySecretStore`（測試用）+ macOS Keychain + Windows Credential Manager 實作 + scope 信封。OS 實作用 smoke script 驗（照 templates/service 的 smoke-test 模式），CI 跑 fake。
 - **K2 — Registry 層**：configure/resolve 生命週期 + 可插拔 profile 持久化（InMemory + SQLite 雙實作，照 server 包 `InMemoryTaskStore`/`SqliteTaskStore` 的既有模式）。移植 §4.3 黃金測試的包內版本。
-- **K3 — 設置頁 server（可選）**：決定進 subpath（`@byok/keys/settings-server`）還是砍掉；品牌/喚起協議參數化。
-- **K4 — 回接 aip-main-open（跨 repo，需協調）**：發佈 `@byok/keys`（npm 公開或 GitHub Packages，待定）；在 aip-main-open 刪除 §4.1 移植走的程式碼、換 npm 依賴；黃金測試 `settings.test.ts` 留在 aip-main-open 作為整合證明，必須原樣通過。
+- **K3 — 設置頁 server（可選）**：決定進 subpath（`@byok-sdk/keys/settings-server`）還是砍掉；品牌/喚起協議參數化。
+- **K4 — 回接 aip-main-open（跨 repo，需協調）**：發佈 `@byok-sdk/keys`（npm 公開或 GitHub Packages，待定）；在 aip-main-open 刪除 §4.1 移植走的程式碼、換 npm 依賴；黃金測試 `settings.test.ts` 留在 aip-main-open 作為整合證明，必須原樣通過。
 
 每個 K 收尾跑：`pnpm -r typecheck && pnpm -r test && pnpm -r build`，加 repo-harness gates。
 
@@ -138,7 +138,7 @@
 - 多 server attach 模型（一台機器連多個 server；logout 保留 attachments）；`runners list/stop` 管理本機在跑的 agents
 - 狀態統一放 `~/.slock/`（SLOCK_HOME 可覆寫），跨 binary 換代時登入態自動延續
 
-**與本 repo 的差距對照**：byok-sdk 已有 service lifecycle 範本（launchd/systemd/WinSW）和 SEA/Bun packaging 範本，缺的是 channel + self-upgrade + rollback 體系和 doctor 這類自診斷命令——若要補，歸 `@byok/client` 的後續里程碑，**不進 `@byok/keys` 範圍**。
+**與本 repo 的差距對照**：byok-sdk 已有 service lifecycle 範本（launchd/systemd/WinSW）和 SEA/Bun packaging 範本，缺的是 channel + self-upgrade + rollback 體系和 doctor 這類自診斷命令——若要補，歸 `@byok/client` 的後續里程碑，**不進 `@byok-sdk/keys` 範圍**。
 
 ## 9. 開工驗證命令
 
