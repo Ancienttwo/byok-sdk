@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 16:11
+> **Related Plan**: plans/archive/plan-20260808-1542-r2-hash-authority-adr.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260808-1611
+
 # Task Review: r2-hash-authority-adr
 
 > **Status**: Pending
@@ -53,13 +59,13 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewer**: Codex
 > **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:558fc849f15c5d72cdf87eff5af8d2c957e37f70093c8f6f8ceb0342445c7e07
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 44898658cb6395b0dc46159b2c4721a866f37c8c
-> **Verification Evidence SHA256**: sha256:2f645e3b12636f2befd213947476e18100772d1c412bea93e31ccd4f25187c68
-> **Issued At**: 2026-08-08T08:02:06.025Z
+> **Reviewed Target Revision**: 0bebd56cbcbc6ad4360deda780e4dd01bae2942e
+> **Verification Evidence SHA256**: sha256:a16c521a2b308f9e4fe2615c4676a9e966b2e9b0870be405328c68a51a6f9162
+> **Issued At**: 2026-08-08T08:11:32.853Z
 
-- Summary: ADR-024 honestly separates daemon-declared hash authority from R2 HEAD size/type observation, freezes the S4B interface/schema/GC constraints, and leaves runtime plus migrations unchanged; no blocking findings.
+- Summary: Post-merge closeout readback: PR #26 merged as 0bebd56 after push and pull-request CI both passed 16/16; ADR-024 content and its S4B constraints remain exact, with packages and deploy SQL unchanged.
 - Findings: none
 
 ## Behavior Diff Notes

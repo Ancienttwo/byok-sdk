@@ -1,6 +1,6 @@
 # Plan: ADR-024: R2 Hash Authority
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260808-1542
 > **Slug**: r2-hash-authority-adr
 > **Artifact Level**: work-package

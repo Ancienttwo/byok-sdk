@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 16:11
+> **Related Plan**: plans/archive/plan-20260808-1542-r2-hash-authority-adr.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260808-1611
+
 # Implementation Notes: r2-hash-authority-adr
 
 > **Status**: Active

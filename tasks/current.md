@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-08T14:46:36+0800 -->
+<!-- updated_at: 2026-08-08T16:11:52+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-08T14:46:36+0800
-> **Source Branch**: main
-> **Source Commit**: 98fb3e1
+> **Updated At**: 2026-08-08T16:11:52+0800
+> **Source Branch**: codex/r2-hash-authority-adr
+> **Source Commit**: a8da789
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,8 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/ancienttwo/Projects/byok-sdk-wt-s4a-c-r2-deploy: plans/plan-20260808-1303-s4a-c-r2-deploy.md
-- /Users/ancienttwo/Projects/byok-sdk-wt-s4a-c-r2-deploy: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4a-c-r2-deploy
+- /Users/ancienttwo/Projects/byok-sdk: plans/plan-20260808-1542-r2-hash-authority-adr.md
+- /Users/ancienttwo/Projects/byok-sdk: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -41,7 +41,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -52,16 +52,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260808-1303-s4a-c-r2-deploy.md
- D tasks/contracts/20260808-1303-s4a-c-r2-deploy.contract.md
- D tasks/notes/20260808-1303-s4a-c-r2-deploy.notes.md
- D tasks/reviews/20260808-1303-s4a-c-r2-deploy.review.md
+ D plans/plan-20260808-1542-r2-hash-authority-adr.md
+ D tasks/contracts/20260808-1542-r2-hash-authority-adr.contract.md
+ D tasks/notes/20260808-1542-r2-hash-authority-adr.notes.md
+ D tasks/reviews/20260808-1542-r2-hash-authority-adr.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260808-1303-s4a-c-r2-deploy.md
-?? tasks/archive/contract-20260808-1446-s4a-c-r2-deploy.md
-?? tasks/archive/notes-20260808-1446-s4a-c-r2-deploy.md
-?? tasks/archive/review-20260808-1446-s4a-c-r2-deploy.md
-?? tasks/archive/todo-20260808-1446-s4a-c-r2-deploy.md
+?? plans/archive/plan-20260808-1542-r2-hash-authority-adr.md
+?? tasks/archive/contract-20260808-1611-r2-hash-authority-adr.md
+?? tasks/archive/notes-20260808-1611-r2-hash-authority-adr.md
+?? tasks/archive/review-20260808-1611-r2-hash-authority-adr.md
+?? tasks/archive/todo-20260808-1611-r2-hash-authority-adr.md
 ```
 
 ## Source Artifacts
