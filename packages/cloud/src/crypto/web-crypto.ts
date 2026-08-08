@@ -84,7 +84,11 @@ export function createWebCrypto(): CloudCrypto {
       return out;
     },
 
-    async verifyEd25519(publicKeyBase64Url: string, message: string, signature: string): Promise<boolean> {
+    async verifyEd25519(
+      publicKeyBase64Url: string,
+      message: string | Uint8Array,
+      signature: string,
+    ): Promise<boolean> {
       const signatureBytes = base64UrlDecode(signature);
       if (signatureBytes === undefined) return false;
       try {
@@ -95,7 +99,8 @@ export function createWebCrypto(): CloudCrypto {
           false,
           ['verify'],
         );
-        return await subtle().verify({ name: 'Ed25519' }, key, signatureBytes, new TextEncoder().encode(message));
+        const messageBytes = typeof message === 'string' ? new TextEncoder().encode(message) : message;
+        return await subtle().verify({ name: 'Ed25519' }, key, signatureBytes, messageBytes);
       } catch {
         // A key that will not import is a key that cannot have signed this —
         // same answer as a bad signature, with no distinguishing error.

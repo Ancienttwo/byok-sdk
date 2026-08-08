@@ -65,6 +65,7 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
 
         const resolved = await stores.devices.resolveByDeviceId('device-1');
         expect(resolved?.tenantId).toBe(TENANT_A);
+        expect(resolved).toMatchObject({ proofKeyId: 'identity', proofKeyEpoch: 0 });
         expect((await stores.devices.resolveByDeviceId('device-2'))?.tenantId).toBe(TENANT_B);
         expect(await stores.devices.resolveByDeviceId('never-registered')).toBeUndefined();
       });
@@ -160,6 +161,26 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
         expect(foreign.created).toBe(true);
         expect(foreign.receipt.body).toBe('b');
         expect((await stores.receipts.get(TENANT_A, 'terminal:task-1'))?.body).toBe('a');
+      });
+    });
+
+    it('does not share proof receipts across tenants', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const input = {
+          deviceId: 'device-1',
+          requestId: 'request-1',
+          operation: 'truth.write',
+          resource: 'memory/key',
+          bodySha256: `sha256:${'a'.repeat(64)}`,
+          bodySize: 1n,
+          responseStatus: 200,
+          responseBody: '{}',
+        } as const;
+        await stores.proofReceipts.record(TENANT_A, input);
+        expect(
+          await stores.proofReceipts.get(TENANT_B, input.deviceId, input.requestId),
+        ).toBeUndefined();
+        expect((await stores.proofReceipts.record(TENANT_B, input)).created).toBe(true);
       });
     });
 

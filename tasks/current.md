@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-09T02:12:29+0800 -->
+<!-- updated_at: 2026-08-09T03:15:45+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-09T02:12:29+0800
-> **Source Branch**: codex/s5-board-streams
-> **Source Commit**: 140b109
+> **Updated At**: 2026-08-09T03:15:45+0800
+> **Source Branch**: codex/s6-device-proof-memory
+> **Source Commit**: 2a1c4a7
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: ensure-task-workflow
@@ -18,9 +18,9 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Current Focus
 
 - Status: ManualClearedWithActiveWork
-- Active Plan: plans/plan-20260809-0148-s5-board-streams.md
+- Active Plan: plans/plan-20260809-0340-s6a-proof-authority.md
 - Plan Status: Executing
-- Next Task: Record S5 design/contract and update S4B merge ledger.
+- Next Task: Add device proof key authority and dedicated receipt schema/adapters.
 - Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
@@ -31,12 +31,14 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- .: plans/plan-20260809-0148-s5-board-streams.md
-- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s5-board-streams
+- .: plans/plan-20260809-0340-s6a-proof-authority.md
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s6-device-proof-memory
 - /Users/ancienttwo/Projects/byok-sdk: plans/plan-20260805-1659-byok-keys-package.md
 - /Users/ancienttwo/Projects/byok-sdk: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 - /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup: plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
 - /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup
+- /Users/ancienttwo/Projects/byok-sdk-wt-s5-board-streams: plans/plan-20260809-0148-s5-board-streams.md
+- /Users/ancienttwo/Projects/byok-sdk-wt-s5-board-streams: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s5-board-streams
 ## Active Sprint
 
 - Sprint: (none)
@@ -53,40 +55,39 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 31 changed/untracked path(s)
+- Summary: 30 changed/untracked path(s)
 
 ```
  M docs/architecture/sdk-architecture.md
- M packages/cloud-postgres/src/stores/core/presence.ts
+ M packages/cloud-postgres/README.md
+ M packages/cloud-postgres/src/stores/devices.ts
+ M packages/cloud-postgres/src/stores/index.ts
  M packages/cloud/src/__tests__/constraints.test.ts
- M packages/cloud/src/__tests__/route-inventory.test.ts
- M packages/cloud/src/capabilities.ts
- M packages/cloud/src/cloud.ts
- M packages/cloud/src/composition/in-memory.ts
- M packages/cloud/src/errors.ts
- M packages/cloud/src/handlers/messages.ts
- M packages/cloud/src/inbound.ts
+ M packages/cloud/src/auth/plane.ts
+ M packages/cloud/src/crypto/port.ts
+ M packages/cloud/src/crypto/web-crypto.ts
  M packages/cloud/src/index.ts
- M packages/cloud/src/tenant-stores.ts
- M packages/conformance/src/core/presence.ts
- M packages/conformance/src/core/tenant-isolation.ts
- M packages/core/src/errors.ts
- M packages/core/src/in-memory/presence.ts
- M packages/core/src/presence.ts
+ M packages/cloud/src/stores/in-memory/device-directory.ts
+ M packages/cloud/src/stores/in-memory/index.ts
+ M packages/cloud/src/stores/ports-contract.ts
+ M packages/cloud/src/stores/ports.ts
+ M packages/conformance/src/cloud/fixtures.ts
+ M packages/conformance/src/cloud/harness.ts
+ M packages/conformance/src/cloud/tenant-isolation.ts
+ M packages/conformance/src/compositions/in-memory-cloud.test.ts
  M plans/sprints/20260807-byok-platform-raft-aligned.sprint.md
- M tasks/todos.md
-?? docs/researches/s5-board-streams-design.md
-?? packages/cloud-postgres/src/__tests__/board-concurrency.test.ts
-?? packages/cloud/src/__tests__/board-streams.test.ts
-?? packages/cloud/src/board-projection.ts
-?? packages/cloud/src/coordination-client.ts
-?? packages/cloud/src/coordination.ts
-?? packages/cloud/src/handlers/board.ts
-?? packages/cloud/src/handlers/presence.ts
-?? plans/plan-20260809-0148-s5-board-streams.md
-?? tasks/contracts/20260809-0148-s5-board-streams.contract.md
-?? tasks/notes/20260809-0148-s5-board-streams.notes.md
-?? tasks/reviews/20260809-0148-s5-board-streams.review.md
+ M tests/sql/control_plane_invariants.sql
+?? deploy/sql/0004_device_proof_truth.sql
+?? docs/researches/s6-proof-truth-memory-design.md
+?? packages/cloud-postgres/src/stores/proof-receipts.ts
+?? packages/cloud/src/__tests__/device-proof.test.ts
+?? packages/cloud/src/auth/device-proof.ts
+?? packages/cloud/src/stores/in-memory/proof-receipts.ts
+?? packages/conformance/src/cloud/proof-receipts.ts
+?? plans/plan-20260809-0340-s6a-proof-authority.md
+?? tasks/contracts/20260809-0340-s6a-proof-authority.contract.md
+?? tasks/notes/20260809-0340-s6a-proof-authority.notes.md
+?? tasks/reviews/20260809-0340-s6a-proof-authority.review.md
 ```
 
 ## Source Artifacts

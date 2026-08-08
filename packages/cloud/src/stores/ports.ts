@@ -47,6 +47,10 @@ export interface DeviceRecord {
   readonly deviceName: string;
   /** Ed25519 public key, base64url-encoded (JWK `x` form). */
   readonly devicePublicKey: string;
+  /** Proof key identity stored on the row; verifier claims never supply a default. */
+  readonly proofKeyId: string;
+  /** Current proof signing-key rotation generation. */
+  readonly proofKeyEpoch: number;
   readonly revoked: boolean;
 }
 
@@ -56,6 +60,8 @@ export interface DeviceRegistration {
   readonly deviceId: string;
   readonly deviceName: string;
   readonly devicePublicKey: string;
+  readonly proofKeyId: string;
+  readonly proofKeyEpoch: number;
 }
 
 export interface DeviceDirectory {
@@ -198,6 +204,45 @@ export interface RequestReceiptStore {
 }
 
 // ---------------------------------------------------------------------------
+// Device-proof request receipts — request-bound replay authority (S6)
+// ---------------------------------------------------------------------------
+
+export interface ProofRequestReceipt {
+  readonly tenantId: TenantId;
+  readonly deviceId: string;
+  readonly requestId: string;
+  readonly operation: string;
+  readonly resource: string;
+  readonly bodySha256: string;
+  readonly bodySize: bigint;
+  readonly responseStatus: number;
+  readonly responseBody: string;
+  readonly recordedAt: string;
+}
+
+export type ProofRequestReceiptInput = Omit<
+  ProofRequestReceipt,
+  'tenantId' | 'recordedAt'
+>;
+
+/**
+ * First-result-wins replay store. The application layer compares every stored
+ * binding before returning an exact replay; a reused request id with any
+ * different binding is a conflict, never a second write.
+ */
+export interface ProofRequestReceiptStore {
+  record(
+    tenant: TenantId,
+    input: ProofRequestReceiptInput,
+  ): Promise<{ readonly receipt: ProofRequestReceipt; readonly created: boolean }>;
+  get(
+    tenant: TenantId,
+    deviceId: string,
+    requestId: string,
+  ): Promise<ProofRequestReceipt | undefined>;
+}
+
+// ---------------------------------------------------------------------------
 // Per-device delivery sequence
 // ---------------------------------------------------------------------------
 
@@ -321,6 +366,7 @@ export interface CloudStores {
   readonly dedup: InboundDedupStore;
   readonly tasks: TaskAttemptStore;
   readonly receipts: RequestReceiptStore;
+  readonly proofReceipts: ProofRequestReceiptStore;
   readonly sequence: DeviceSequenceStore;
   readonly blobs: CloudBlobStore;
   readonly rateLimiter: InboundRateLimiter;
@@ -334,6 +380,7 @@ export const CLOUD_STORE_NAMES = [
   'dedup',
   'tasks',
   'receipts',
+  'proofReceipts',
   'sequence',
   'blobs',
   'rateLimiter',

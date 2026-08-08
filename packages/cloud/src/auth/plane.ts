@@ -27,6 +27,10 @@ export const PAIRING_CODE_TTL_MS = 10 * 60 * 1000;
 
 const PAIRING_CODE_LENGTH = 8;
 
+/** The paired identity key is the first and only proof key in S6. */
+export const DEVICE_IDENTITY_PROOF_KEY_ID = 'identity';
+export const DEVICE_IDENTITY_PROOF_KEY_EPOCH = 0;
+
 export interface PairInput {
   readonly pairingCode: string;
   readonly deviceName: string;
@@ -92,6 +96,8 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
         deviceId: `dev_${crypto.randomUuid()}`,
         deviceName: input.deviceName,
         devicePublicKey: input.devicePublicKey,
+        proofKeyId: DEVICE_IDENTITY_PROOF_KEY_ID,
+        proofKeyEpoch: DEVICE_IDENTITY_PROOF_KEY_EPOCH,
       });
     },
 

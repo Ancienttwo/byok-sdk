@@ -1178,10 +1178,10 @@ sequenceDiagram
   D->>C: request + proof + requestId
   C->>C: 按 tenant 前缀载入 device / key row
   C->>C: 校验 product、epoch、clock skew、body hash、签名
-  C->>R: 写入 idempotency receipt
+  C->>R: 查询 (tenant, device, requestId) receipt
   alt 首次受理
-    C->>T: immutable 写入或 expectedRev CAS
-    T-->>C: committed record
+    C->>T: 单事务 receipt + truth + reference/accounting
+    T-->>C: committed record + receipt
   else 完全相同的重放
     R-->>C: 返回原结果
   else requestId 复用但 body 不同
@@ -1190,14 +1190,14 @@ sequenceDiagram
   C-->>D: 稳定结果
 ```
 
-canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约与 InMemory 参考已于 S2 落地（`@byok/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）；签名/验证仍是注入式 port，与 cloud 的组合仍为目标设计。
+canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约已于 S2 落地（`@byok/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）。S6-a 在不改变该 golden 的前提下接入 Workers-safe WebCrypto verifier、device row 的 `proof_key_id/proof_key_epoch` authority 与专用 replay receipt；daemon signer 与 record routes 分别由 S6-c / S6-b 承接。
 
-三个 domain 前缀（取一致小写形式，与 `schema: 'byok-device-proof-v1'` 自洽；第一个已在 S1 落地并冻结，第二个的 canonical bytes 已在 S2 由 core 的 golden 冻结、签名/验证组合仍待落地，第三个仍是目标设计、位元组形状待冻结）：
+三个 domain 前缀（取一致小写形式，与 `schema: 'byok-device-proof-v1'` 自洽；第一个已在 S1 落地并冻结，第二个的 canonical bytes 已在 S2 冻结且 verifier 于 S6-a 落地，第三个仍是目标设计、位元组形状待冻结）：
 
 | 用途 | 前缀 | 状态 |
 | --- | --- | --- |
 | token renewal | `byok-nonce-v1\n` + nonce | **已实现（S1）**：两端同字面量（server `auth.ts` 的 `NONCE_SIGNING_DOMAIN`、client `device-keys.ts` 的 `signNonce`），无前缀签名 401 |
-| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | **契约已实现（S2）**：`@byok/core` 的 envelope + canonicalizer + golden fixture；签名/验证组合仍目标设计 |
+| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | **core bytes + cloud verifier 已实现（S2/S6-a）**：DB row 是 tenant/product/key/epoch authority；daemon signer 与 record route 尚由 S6-c/S6-b 承接 |
 | record 级 attest | `byok-attest-v1\n` | 保留，若最终启用 |
 
 上表首行的字节形状已在 S1 冻结并两端同批切换（breaking，恢复路径是 forced re-pair，见 `docs/protocol.md` §6.2 与 `docs/security.md`）；第二行的 canonical bytes 已由 S2 的 core golden 冻结；`byok-attest-v1\n` 仍是目标设计，最终字节序列以 golden fixture 冻结为准。
@@ -1505,7 +1505,7 @@ R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 
 | P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示；**已实现（S5）** |
-| P4 | client 侧 device proof 上行 + memory manifest/selector seam（`signNonce` 的 domain separation 修复 / GAP-004 已提前随 S1 交付，不再是 P4 的待办项） |
+| P4 | device proof + truth/memory：S6-a verifier/key/receipt，S6-b atomic truth routes，S6-c client signer/manifest selector/fetch；`signNonce` domain separation / GAP-004 已提前随 S1 交付 |
 | P5 | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore`。**Deferred standalone plan，不在本 sprint program（S0-S7）内**；触发条件是 K4/K4.1 完成且 TruthStore 的 production composition 可用，两者都满足后单独立计划，不占 S 线任何 slot |
 
 K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
