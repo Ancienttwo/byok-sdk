@@ -60,4 +60,4 @@
 - [x] Wire proof-only manifest/get/put routes behind `truth.records` capability.
 - [x] Implement reference behavior and adversarial/rollback tests.
 - [x] Push stacked Draft PR #35（commit `2de841d`）；retain independent review gate（hard env/full workspace gates 已通过）。
-- [ ] Obtain independent security/transaction acceptance；Claude review remains paused，未通过/waive 前不 merge。
+- [x] Obtain full-stack independent Codex security/transaction acceptance at `ead8a8746188b8f480c0115ad556b766dfbd73fa`；Claude review remained paused and was not invoked。

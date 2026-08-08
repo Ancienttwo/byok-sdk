@@ -72,4 +72,4 @@
 - [x] Add device proof key authority and dedicated receipt schema/adapters.
 - [x] Add byte-exact WebCrypto verifier and request/row/time binding.
 - [x] Prove core cross-runtime golden and I3 adversarial matrix.
-- [ ] Run hard gates, independent Codex security review, receipt, PR/CI/merge/readback.
+- [x] Run hard gates, obtain full-stack independent Codex security acceptance, and deliver Draft PR #34 with 32/32 CI；merge/readback由 stacked closeout 执行。

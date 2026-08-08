@@ -64,6 +64,9 @@ importers:
 
   packages/client:
     dependencies:
+      '@byok/core':
+        specifier: workspace:*
+        version: link:../core
       '@byok/protocol':
         specifier: workspace:*
         version: link:../protocol

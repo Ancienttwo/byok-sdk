@@ -1,12 +1,12 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S4B 已合入 `main`；S5 实现与本地验收已绿，待 PR/CI/merge
+> **状态**：Executing。S0–S5 已合入 `main`；S6 三刀实现、CI 与 independent security acceptance 已绿，待 stacked merge/readback
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-09（见 D-10）
-> **仓库基线**：`Ancienttwo/byok-sdk@140b109`（2026-08-09）
-> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）
-> **下一可执行 slice**：**S5**。入口是 `plans/plan-20260809-0148-s5-board-streams.md`；范围固定为 board、SSE/Poll 与 Presence/Activity，零 protocol/schema/migration drift
+> **仓库基线**：`Ancienttwo/byok-sdk@2a1c4a7`（2026-08-09）
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）
+> **下一可执行 slice**：先按 #34 → #35 → #36 顺序完成 S6 stacked merge/readback；随后投影 S7 operations/release RC，且不再启动 Claude review
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -29,8 +29,8 @@
 | # | Status | Task | Mode | Acceptance | Plan |
 | --- | --- | --- | --- | --- | --- |
 | 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | PR #32；merge `140b109`；Claude external pass；CI 32/32 |
-| 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | `plans/plan-20260809-0148-s5-board-streams.md`；implementation + hard-env gates + focused Claude review green，待 receipt/PR/CI/merge |
-| 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
+| 2 | [x] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | PR #33；merge `2a1c4a7`；CI green |
+| 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | S6-a/b/c Draft PR #34/#35/#36；各 32/32 CI；full-stack Codex exact-SHA accepted；待 stacked merge |
 | 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
 
 已交付并合入 `main` 的 S0、S1、S2、S3a、S3b、S4A、S4B 不再列入后续 backlog；S4B-c 行仅保留本轮 merge readback 记录，其 merge SHA 见文首交付清单。
@@ -1056,11 +1056,11 @@ Write：
 - [x] terminal immutable（S6-b）；
 - [x] memory manifest contains metadata, not body（S6-b）；
 - [x] cloud source contains no embedding/semantic merge path（S6-b）；
-- [ ] selector unit/integration tests；
+- [x] selector unit/integration tests（S6-c：selected-only fetch、unknown/duplicate selector、list/get race、inline/object rehash、real cloud handler E2E）；
 - [x] snapshot >1 MiB metric/revisit trigger documented（S6 design research；metric implementation 由 S6-c daemon path 承接）；
-- [ ] security review passes before capability default-on。
+- [x] security review passes before capability default-on（independent Codex exact-SHA `2a1c4a7..ead8a87` accepted；Claude paused/not invoked）。
 
-> **执行记录（未宣告 S6 完成）**：S6-a commit `d8e7802` / Draft PR #34 已交付 proof authority；S6-b 在 `codex/s6b-atomic-truth` 实现 proof-only routes 与 Postgres atomic authority。S6-c daemon signer/selector/fetch/rehash 及独立 security acceptance 尚未完成，因此 S6 与 Sprint 均保持未完成。
+> **执行记录（尚未宣告 S6 合入完成）**：S6-a commit `d8e7802` / Draft PR #34、S6-b commits `2de841d` + `7f26b5c` / Draft PR #35、S6-c commits `42632c0` + `ead8a87` / Draft PR #36 已全部交付；三 PR 各 32/32 CI green。首次 Codex review 在 `42632c0` 拒绝 SSRF 与 write-confirmation 两条 HIGH，修复后完整 stack `2a1c4a7..ead8a87` 由 read-only Codex session `019fe324-7ce7-7311-87a9-349184499800` exact-SHA accepted。Claude review 因额度暂停且未调用。仅剩按 #34 → #35 → #36 顺序 merge/readback；三刀全部合入前仍不把 S6 行勾为完成。
 
 ### S6.6 Rollback
 
