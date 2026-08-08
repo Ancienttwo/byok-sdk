@@ -114,6 +114,61 @@ describe('the compose substrate', () => {
   });
 });
 
+describe('the deployment surface', () => {
+  const sample = repoFile('deploy/env/hosted.env.example');
+
+  /** Every `KEY=VALUE` line, comments and blanks dropped. */
+  const assignments = sample
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .map((line) => {
+      const separator = line.indexOf('=');
+      return { key: line.slice(0, separator), value: line.slice(separator + 1) };
+    });
+
+  it('carries a non-trivial set of assignments', () => {
+    expect(assignments.length).toBeGreaterThan(5);
+    for (const { key } of assignments) expect(key).toMatch(/^[A-Z][A-Z0-9_]*$/);
+  });
+
+  it('holds no value that could be a real credential', () => {
+    // `deploy/` is tracked, so a secret committed here is a secret published.
+    // Two shapes are allowed: an explicit `REPLACE_` placeholder, or a value
+    // that is plainly not a secret (a region, a byte count, a capability list).
+    // Anything with a long unbroken run of credential-shaped characters — a
+    // base64 key, a hex token, an access key id — is neither.
+    for (const { key, value } of assignments) {
+      if (value.includes('REPLACE_')) continue;
+      expect(value, `${key} is neither a placeholder nor obviously non-secret`).not.toMatch(
+        /[A-Za-z0-9+/=]{20,}/,
+      );
+    }
+  });
+
+  it('declares the capabilities an object-storage composition can actually serve', () => {
+    // The split's operational consequence: a deployment whose bytes live in R2
+    // has no byte-proxy path, so `blobs.contentproxy` must NOT appear here. The
+    // routes would not mount either way — a proxy is required as well as a
+    // declaration — but a sample that over-declares teaches the wrong thing.
+    const capabilities = assignments.find((entry) => entry.key === 'BYOK_CAPABILITIES');
+    expect(capabilities?.value).toContain('blobs.presigned');
+    expect(capabilities?.value).not.toContain('blobs.contentproxy');
+  });
+
+  it('ships a migrate script that runs the runner and nothing else', () => {
+    const script = repoFile('deploy/scripts/migrate');
+    expect(script.startsWith('#!')).toBe(true);
+    expect(script).toContain('DATABASE_URL');
+    // The runner owns ordering, locking, transactions, the ledger, and the
+    // checksum check. A script that reimplemented any of it would be a second
+    // source of truth about how this schema moves.
+    expect(script).toContain('migrate(pool');
+    expect(script).not.toMatch(/\bDROP\b/i);
+    expect(script).not.toMatch(/\bpsql\b/);
+  });
+});
+
 describe('the migration runner', () => {
   const runner = shipped('migrate.ts');
 
