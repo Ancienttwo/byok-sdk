@@ -523,6 +523,8 @@ export interface LocalStoragePressureEngineOptions {
   readonly executor?: CleanupExecutor;
   readonly clock?: () => Date;
   readonly onEvent?: (event: StoragePressureEvent) => void;
+  /** Reports only the scheduler's own maintenance pass outcome; never includes task-domain failures. */
+  readonly onMaintenanceOutcome?: (outcome: 'success' | 'failure') => void;
   /** Injected so `start()`'s periodic driver is substitutable; the matrix never uses it and drives {@link LocalStoragePressureEngine.tick} directly. */
   readonly timers?: TimerLike;
 }
@@ -546,6 +548,7 @@ export class LocalStoragePressureEngine {
   readonly #executor: CleanupExecutor;
   readonly #clock: () => Date;
   readonly #onEvent: ((event: StoragePressureEvent) => void) | undefined;
+  readonly #onMaintenanceOutcome: ((outcome: 'success' | 'failure') => void) | undefined;
   readonly #timers: TimerLike;
 
   #state: StoragePressureState = 'normal';
@@ -567,6 +570,7 @@ export class LocalStoragePressureEngine {
     this.#executor = options.executor ?? createFilesystemCleanupExecutor();
     this.#clock = options.clock ?? (() => new Date());
     this.#onEvent = options.onEvent;
+    this.#onMaintenanceOutcome = options.onMaintenanceOutcome;
     this.#timers = options.timers ?? {
       setInterval: (handler, ms) => {
         const timer = setInterval(handler, ms);
@@ -702,11 +706,15 @@ export class LocalStoragePressureEngine {
       // timer callback with no caller to reject to. The state simply does not
       // advance, which leaves the last known one in force — and the last known
       // one erring toward MORE restriction is the safe direction.
-      void this.tick().catch((err: unknown) => {
-        console.warn(
-          `[byok/client] local storage maintenance pass failed (state stays "${this.#state}"): ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+      void this.tick().then(
+        () => this.#onMaintenanceOutcome?.('success'),
+        (err: unknown) => {
+          this.#onMaintenanceOutcome?.('failure');
+          console.warn(
+            `[byok/client] local storage maintenance pass failed (state stays "${this.#state}"): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        },
+      );
     }, intervalMs);
   }
 

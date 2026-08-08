@@ -5,6 +5,7 @@ import type { TaskState } from '@byok/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
+import type { OperationalHealthSnapshot } from './operational-health';
 
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
@@ -414,6 +415,8 @@ export interface ControlStatusResult {
   approvalsPending: number;
   /** S3b (L-003): local storage usage + pressure — see {@link ControlStorageStatus}. Absent unless a storage policy is configured. */
   storage?: ControlStorageStatus;
+  /** Local lifecycle/retry budget. This is not the transport state above. */
+  operationalHealth: OperationalHealthSnapshot;
 }
 
 export interface ApprovalsListResult {

@@ -20,6 +20,7 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig } from './daemon/create-daemon';
+export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health';
 
 // S3b (L-001/L-002): the durable local journal (architecture §12.7.2). The
 // PORT is exported, not just the SQLite implementation, because §12.7.2 lets a

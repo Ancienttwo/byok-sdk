@@ -1612,7 +1612,7 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 | 压力 | 最先失败处 | 已有/目标缓解 |
 | --- | --- | --- |
 | 单节点更多 devices/tasks | Hub in-memory maps、outbox ring、poll waiter、event queues | embedded 模式承认单 owner；hosted 目标转 mailbox/store ports |
-| fleet reconnect | backoff cohort 仍可能聚簇重试 | `ws-transport.ts:248-254` 已有 ±20% random jitter（`delay * (0.8 + Math.random() * 0.4)`）；缺的是 device-id 派生的**确定性**种子，因此退避不可复现、也无法按设备稳定错峰（GAP-010） |
+| fleet reconnect | backoff cohort 仍可能聚簇重试 | **已实现（S7-a）**：`productId + deviceId` 稳定 seed，按 reconnect/upload/maintenance domain 分离的 ±20% deterministic jitter；10,000-device production-function simulation 对 bucket peak 设硬界 |
 | high-frequency UI hints | presence/activity SQL write amplification | bounded batch + TTL + dropped；必要时可单独换 KV/DO adapter |
 | board concurrency | per-tenant `board_seq` 与 claim hot rows | SQL CAS、索引、contract suite；P2 后再做 P3 board |
 | large memory | snapshot >1MiB 与 rev CAS conflict | 当前 key-granular snapshot；阈值触发 delta-chain deferred |
@@ -1620,7 +1620,7 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 | 本机磁盘增长 | journal / WAL / workspace / cache 填满磁盘 | **已实现（S3b）**：有界 WAL checkpoint/incremental vacuum、型别级 never-delete 的分类 GC、水位状态机、hard-pressure admission decline（§12.7.2.1） |
 | tenant storage 增长 | 并发上传超卖、降级后超限、R2 orphan | **目标设计**：Postgres 作 reservation/usage authority、grace/只读、tombstone reconciler（§12.7.7、§12.7.8） |
 
-### 14.3 可靠性、恢复与并发（目标设计）
+### 14.3 可靠性、恢复与并发（S7-a 部分已实现）
 
 #### 14.3.1 At-least-once 的完整链条
 
@@ -1633,23 +1633,24 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 
 #### 14.3.2 Reconnect：确定性 jitter
 
-当前已有 random jitter（见 §14.2），目标是把它换成可复现的确定性 jitter：
+S7-a 已将 automatic retry 的 random/fixed fleet cadence 收敛到一个可复现 authority：
 
-- seed 取 device id 或稳定 machine lock id 的 hash；
-- exponential backoff 加 bounded deterministic offset；
-- server 重启时 fleet 不齐步重连；
-- jitter 可复现，因此可被测试断言——这是 random jitter 给不了的性质；
-- auth / revoked 类错误不进入无限 reconnect；
-- 明确声明为 capability unavailable 的不重试；
-- 只有 5xx 与 network timeout 才重试。
+- seed 固定为已加载的 `productId + deviceId`；身份不存在就不构造 retry authority，不生成随机 fallback；
+- reconnect、upload、maintenance 使用 domain-separated SHA-256 stream，exponential backoff / base cadence 加 bounded ±20% deterministic offset；
+- automatic WS reconnect、long-poll failure/stall、outbox upload retry、long-poll→WS probe 与 storage maintenance 共用该 authority；显式 `connect({auto:false})` 不延迟；
+- 10,000-device fleet simulation 直接调用 production function 并约束 peak bucket；同 seed/domain/sequence 重算逐字一致；
+- revoked device 进入终态，不进入无限 reconnect；manual probe 也不接管 automatic scheduler；
+- HTTP retryability 的细分仍沿用既有 transport 行为，不由 jitter authority 改写；若未来收窄到特定 5xx/network timeout，必须以独立行为契约落地，不能只改本节文字。
 
 #### 14.3.3 Health 与 quarantine
 
-借鉴外部产品的运维语义，但守住 SDK 边界：
+S7-a 先落 operational health/crash authority；quarantine/doctor/support bundle 仍由 S7-b 消费：
 
-- daemon health snapshot 覆盖 connection、runtime detection、control socket、journal、workspace；
-- rolling failure window 与 degraded 状态；
-- crash history；
+- daemon health 是独立于 transport/presence 的 `healthy/degraded/recovering` read model；默认 60s sliding window、3 failures degraded；
+- automatic reconnect/upload/maintenance outcome 进入同一 bounded failure window；状态文件只保存时间、类别、run marker 与 bounded crash history，不保存 prompt、secret、token 或错误正文；
+- start 写入 atomic+fsync run marker，clean shutdown 在完整 teardown 后清除；下次启动只把遗留 marker 记为 unclean crash，clean stop 不计 crash；
+- corrupt health JSON/shape 作为 typed `unavailable` 投影到 daemon/control/CLI status，原文件不删除、不覆写、不伪造 healthy；
+- runtime detection、control socket、journal/workspace 的细粒度 doctor 汇总仍属 S7-b；
 - malformed 或 corrupt 的本地状态**不自动删除**，搬进 quarantine；
 - doctor 可以报告，并在明确的 `--fix` 下才修复；
 - security-sensitive 的修复不静默降级；

@@ -1091,8 +1091,8 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | K-402 | K4.1 aip-side settings adapter | 独立 track |
 | K-502 | default secret-store factory/data scope decisions | 中 |
 | K-503 | generic testConnection 或 host adapter定案 | 低 |
-| L-004 | deterministic reconnect jitter | 中 |
-| L-005 | health window + crash budget | 中 |
+| L-004 | deterministic reconnect jitter（S7-a 已实现，待 PR 验收） | 中 |
+| L-005 | health window + crash budget（S7-a 已实现，待 PR 验收） | 中 |
 | L-006 | local corrupt-state quarantine | 中 |
 | L-007 | doctor/status/support bundle | 中 |
 | O-013 | hosted/self-hosted runbooks | 中 |
@@ -1144,6 +1144,8 @@ K-401/K-402/K-502/K-503 已由 D-11 收口；S7 实作从 L-004 开始。
 - doctor reports only；
 - `doctor --fix` requires explicit confirmation/flag；
 - no automatic destructive cleanup。
+
+> **S7-a 执行边界**：L-004/L-005 已由 `plans/plan-20260809-0520-s7a-fleet-health.md` 实现。稳定 seed 只来自已加载的 product/device identity，automatic reconnect/upload/maintenance 使用 domain-separated deterministic jitter，manual probe 即时；operational health 以 atomic run marker、60s/3-failure window、recovering transition 与 bounded crash history投影到 daemon/control/CLI。corrupt health state 只报告 `unavailable` 且原地保留。L-006/L-007 的 quarantine manifest、doctor/support bundle 与显式 `--fix` 仍留给 S7-b，不在 S7-a 偷做自动清理。
 
 #### Support bundle
 
