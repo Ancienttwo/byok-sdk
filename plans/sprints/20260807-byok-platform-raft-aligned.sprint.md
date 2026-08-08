@@ -755,15 +755,15 @@ Object 基本真相（按 D-8 从 S4B 前移）：
 
 - [x] migrations pass order check（S4A-a，PR #23 merge `5f399f1`；CI `Migration ordering check` 兩腿實測 `[deploy-sql] OK`）；
 - [x] fresh install + migrate-up（S4A-a，compose 無 volume——CI dataplane job 每輪從空庫 migrate-up）；
-- [ ] rollback strategy documented；destructive down migration not required；
+- [x] rollback strategy documented；destructive down migration not required（S4A-a/b，runner 無 down 路徑且有機檢；S4A.6 + runbook）；
 - [ ] InMemory 与 Postgres + R2 两个 composition 跑同一份 domain/object contract suite；
-- [ ] **I4 的 SQL 侧补齐**（S3 延后项，见 D-2）；
+- [x] **I4 的 SQL 侧补齐**（S3 延后项，见 D-2）（S4A-b，PR #24 merge `aff8dda`：core 56 例跑上 Postgres composition 零斷言改動 + catalog 斷言）；
 - [ ] no naked task/device/object index，也没有跨租户 object key；
-- [ ] mailbox retention behavior documented；
-- [ ] cross-tenant query plan cannot use a naked key path；
+- [x] mailbox retention behavior documented（S4A-b，`deploy/runbooks/mailbox-retention.md`：ring-vs-SQL 不可互換條款 + noteSkippedSeq 證據缺口）；
+- [x] cross-tenant query plan cannot use a naked key path（S4A-b，`tests/sql/control_plane_invariants.sql` catalog 斷言：UNIQUE 首列必須 `tenant_id`，白名單恰兩條，附 mutation check）；
 - [ ] Postgres optional RLS hardening documented but not relied upon；
 - [ ] deploy/ no longer only `.gitkeep`；
-- [ ] `pnpm run check:deploy-sql` 通过；
+- [x] `pnpm run check:deploy-sql` 通过（S4A-a 檔名序 + S4A-b reference mode 實質化，CI 兩腿實測 `[deploy-sql] OK`）；
 - [ ] secrets/environment sample excludes real keys。
 
 ### S4A.6 Rollback
