@@ -19,6 +19,8 @@ interface DeviceRow {
   readonly product_id: string;
   readonly device_name: string;
   readonly device_public_key: string;
+  readonly proof_key_id: string;
+  readonly proof_key_epoch: number;
   readonly revoked: boolean;
 }
 
@@ -35,12 +37,14 @@ function toRecord(row: DeviceRow): DeviceRecord {
     deviceId: row.device_id,
     deviceName: row.device_name,
     devicePublicKey: row.device_public_key,
+    proofKeyId: row.proof_key_id,
+    proofKeyEpoch: row.proof_key_epoch,
     revoked: row.revoked,
   };
 }
 
 const SELECT_COLUMNS =
-  'tenant_id, device_id, product_id, device_name, device_public_key, revoked';
+  'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked';
 
 export class PostgresDeviceDirectory implements DeviceDirectory {
   readonly #pool: Pool;
@@ -54,15 +58,28 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
     // than creating a second row, matching the in-memory reference. `revoked`
     // resets because a fresh pairing IS a new grant.
     const result = await this.#pool.query<DeviceRow>(
-      `INSERT INTO device (tenant_id, device_id, product_id, device_name, device_public_key, revoked)
-       VALUES ($1, $2, $3, $4, $5, false)
+      `INSERT INTO device (
+         tenant_id, device_id, product_id, device_name, device_public_key,
+         proof_key_id, proof_key_epoch, revoked
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false)
        ON CONFLICT (tenant_id, device_id) DO UPDATE
          SET product_id = EXCLUDED.product_id,
              device_name = EXCLUDED.device_name,
              device_public_key = EXCLUDED.device_public_key,
+             proof_key_id = EXCLUDED.proof_key_id,
+             proof_key_epoch = EXCLUDED.proof_key_epoch,
              revoked = false
        RETURNING ${SELECT_COLUMNS}`,
-      [tenant, input.deviceId, input.productId, input.deviceName, input.devicePublicKey],
+      [
+        tenant,
+        input.deviceId,
+        input.productId,
+        input.deviceName,
+        input.devicePublicKey,
+        input.proofKeyId,
+        input.proofKeyEpoch,
+      ],
     );
     return toRecord(result.rows[0]!);
   }

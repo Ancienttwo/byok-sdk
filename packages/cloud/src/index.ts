@@ -61,7 +61,24 @@ export type { AccessTokenClaims, TokenSigner } from './auth/tokens';
 export { NONCE_SIGNING_DOMAIN, verifyNonceSignature } from './auth/verify';
 export { authenticateBearer, extractBearerToken } from './auth/bearer';
 export type { BearerAuthDeps } from './auth/bearer';
-export { PAIRING_CODE_TTL_MS, createAuthPlane } from './auth/plane';
+export {
+  DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS,
+  DEFAULT_DEVICE_PROOF_MAX_LIFETIME_MS,
+  MAX_DEVICE_PROOF_CLOCK_SKEW_MS,
+  MAX_DEVICE_PROOF_MAX_LIFETIME_MS,
+  authenticateDeviceProof,
+} from './auth/device-proof';
+export type {
+  AuthenticatedDeviceProof,
+  DeviceProofAuthDeps,
+  DeviceProofRequestBinding,
+} from './auth/device-proof';
+export {
+  DEVICE_IDENTITY_PROOF_KEY_EPOCH,
+  DEVICE_IDENTITY_PROOF_KEY_ID,
+  PAIRING_CODE_TTL_MS,
+  createAuthPlane,
+} from './auth/plane';
 export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane';
 
 // The crypto seam
@@ -138,6 +155,9 @@ export type {
   PairingCodeInfo,
   PairingCodeIssueInput,
   PairingCodeStore,
+  ProofRequestReceipt,
+  ProofRequestReceiptInput,
+  ProofRequestReceiptStore,
   RequestReceipt,
   RequestReceiptStore,
   TaskAttempt,
@@ -158,6 +178,7 @@ export {
   InMemoryNonceStore,
   InMemoryPairingCodeStore,
   InMemoryRequestReceiptStore,
+  InMemoryProofRequestReceiptStore,
   InMemoryTaskAttemptStore,
   NONCE_TTL_MS,
   createInMemoryBlobs,

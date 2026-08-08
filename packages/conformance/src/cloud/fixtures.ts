@@ -18,6 +18,8 @@ export function registration(deviceId: string, overrides: Partial<DeviceRegistra
     deviceId,
     deviceName: `name-${deviceId}`,
     devicePublicKey: `pk-${deviceId}`,
+    proofKeyId: 'identity',
+    proofKeyEpoch: 0,
     ...overrides,
   };
 }

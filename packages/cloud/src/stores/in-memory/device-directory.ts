@@ -21,6 +21,8 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
       deviceId: input.deviceId,
       deviceName: input.deviceName,
       devicePublicKey: input.devicePublicKey,
+      proofKeyId: input.proofKeyId,
+      proofKeyEpoch: input.proofKeyEpoch,
       revoked: false,
     };
     const key = tenantKey(tenant, record.deviceId);

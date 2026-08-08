@@ -3,7 +3,7 @@
 > **Status**: Executing
 > **状态**：Executing。S0–S4B 已合入 `main`；S5 实现与本地验收已绿，待 PR/CI/merge
 > **创建日期**：2026-08-07
-> **最后修订**：2026-08-08（见 D-9）
+> **最后修订**：2026-08-09（见 D-10）
 > **仓库基线**：`Ancienttwo/byok-sdk@140b109`（2026-08-09）
 > **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）
 > **下一可执行 slice**：**S5**。入口是 `plans/plan-20260809-0148-s5-board-streams.md`；范围固定为 board、SSE/Poll 与 Presence/Activity，零 protocol/schema/migration drift
@@ -130,6 +130,12 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **裁定**：ADR-024 `Accepted`。通过认证的配对 daemon 声明是 canonical hash authority；cloud 认证 principal/tenant、校验声明格式并签入 size/type，`HEAD` 只观测存在性、byte size 与 content type。`committed` 只表示 tenant-scoped object 存在、observed size/type 匹配且 manifest/accounting transaction 已提交，不表示 cloud/R2 验证过 SHA-256。同 tenant dedupe/accounting 按 daemon 声明执行；任何声称下载完整性的 consumer 自行 rehash bytes。
 - **理由**：配对 device credential 的持有者本来就拥有其 tenant 内 device 能力；tenant-scoped key 不扩大跨 tenant 权限。read-back 重算会抵消 direct upload 的主要价值，且在 10x 时先撞上 verifier 带宽/CPU。诚实保留 tenant 内风险优于用 reservation 自身的 hash 冒充观测值。
 - **S4B 影响**：首个实现提交删除 `StorageFinalizeInput.observedContentHash`，`HEAD` 只提供 `observedByteSize`/`observedContentType`；`object_manifest` 保留 `pending`/`committed`/`delete_pending`/`deleted` 四态，`0003` 不加 `hash_verified`；GC 只依据 tenant-scoped key、manifest、reservation、reference 与 grace/tombstone，不读回重算、不加 checksum fallback。仅当 R2 支持 SHA-256 `FULL_OBJECT`，或产品不再信任 tenant 内配对 device 时，以新 ADR supersede；不预埋双模式。
+
+### D-10：S6 按 security/transaction/daemon 边界拆为 S6-a / S6-b / S6-c
+
+- **改动**：S6 依 §1.3 拆为三刀。S6-a 冻结 device proof bytes、device-row key authority、专用 replay receipt 与 I3；S6-b 落 proof-bound record routes 及 receipt/truth/object-reference/accounting 的单事务提交；S6-c 落 daemon signer、`MemorySelector`、selected fetch/rehash/filter 与端到端行为。
+- **理由**：签名 verifier、跨资源原子事务与 daemon local-semantic path 是三个独立高风险面，rollback 与 falsifier 不同。先证明 principal 再开放写 route，避免 handler 在不完整 auth 上扩张；生产 capability 仍须等 S6-b reservation-aware composition 与独立 security review 后才可 default-on。
+- **验收影响**：三刀全部合入前 S6 保持未完成。Claude review 因 provider quota 暂停，不构成交付豁免；独立 security review 改由 SHA-bound 的 Codex 独立 execution context 完成，implementer self-review 不得记为 external pass。
 
 ---
 

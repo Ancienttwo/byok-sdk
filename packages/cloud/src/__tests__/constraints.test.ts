@@ -223,6 +223,7 @@ describe('the public surface', () => {
       'dedup',
       'tasks',
       'receipts',
+      'proofReceipts',
       'sequence',
       'blobs',
       'rateLimiter',

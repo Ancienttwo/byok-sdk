@@ -1,13 +1,13 @@
 # @byok/cloud-postgres
 
 The durable data plane for the BYOK SDK's hosted device surface: Postgres
-implementations of **all nine cloud-local store ports and all seven `@byok/core`
+implementations of **all ten cloud-local store ports and all seven `@byok/core`
 ports**, the R2/S3 object adapter that backs the blob port, and the forward-only
 migration runner that creates the tables they read.
 
 Three compositions ship from here. `createPostgresCloudStores` supplies the full
 `CloudStores` bundle (`devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
-`receipts`, `sequence`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
+`receipts`, `proofReceipts`, `sequence`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
 supplies the full `CoreStores` bundle (`mailbox`, `board`, `truth`, `presence`,
 `activity`, `objects`, `quota`). Both return every port rather than a subset,
 because the conformance suites certify a composition as a whole — there is no
@@ -15,7 +15,7 @@ partial bundle for them to run. `createPostgresCloudMaintenance` is the third,
 host-only operational composition; it is deliberately outside both port
 inventories.
 
-Two of those nine are not tables. `rateLimiter` is the allow-all reference and
+Two of those ten are not tables. `rateLimiter` is the allow-all reference and
 gets no table by design: persisting an allow-all would be a table that is always
 empty, and a real limiter is edge work rather than a per-request write. `blobs`
 is the R2 adapter described below.
@@ -86,7 +86,7 @@ import { createByokPool, migrate } from '@byok/cloud-postgres';
 
 const pool = createByokPool({ connectionString: process.env.DATABASE_URL! });
 const result = await migrate(pool, '/path/to/deploy/sql');
-console.log(result.applied); // e.g. ['0001_cloud_local.sql', '0002_core_domain.sql', '0003_cloud_cleanup.sql']
+console.log(result.applied); // e.g. ['0001_cloud_local.sql', ..., '0004_device_proof_truth.sql']
 ```
 
 The runner:

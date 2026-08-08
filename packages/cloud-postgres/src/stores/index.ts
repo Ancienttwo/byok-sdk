@@ -1,10 +1,10 @@
 /**
  * The Postgres composition of the cloud-local ports.
  *
- * Seven durable stores, one object-storage blob store, one in-memory limiter:
+ * Eight durable stores, one object-storage blob store, one in-memory limiter:
  *
- * - The seven durable ones are those with rows in
- *   `deploy/sql/0001_cloud_local.sql`.
+ * - Seven durable ones have rows in `deploy/sql/0001_cloud_local.sql`; S6's
+ *   proof receipt authority is the eighth, in `0004_device_proof_truth.sql`.
  * - `blobs` is the R2 adapter over the `object_manifest` row the core store
  *   already owns: metadata in Postgres, bytes in the object store, one
  *   reserve/verify protocol binding them (design §6). It supplies grants only,
@@ -28,6 +28,7 @@ import { PostgresInboundDedupStore } from './dedup';
 import { PostgresNonceStore } from './nonces';
 import { PostgresPairingCodeStore } from './pairing-codes';
 import { PostgresRequestReceiptStore } from './receipts';
+import { PostgresProofRequestReceiptStore } from './proof-receipts';
 import { PostgresDeviceSequenceStore } from './sequence';
 import { PostgresTaskAttemptStore } from './task-attempts';
 
@@ -36,6 +37,7 @@ export { PostgresInboundDedupStore } from './dedup';
 export { PostgresNonceStore } from './nonces';
 export { PostgresPairingCodeStore } from './pairing-codes';
 export { PostgresRequestReceiptStore } from './receipts';
+export { PostgresProofRequestReceiptStore } from './proof-receipts';
 export { PostgresDeviceSequenceStore } from './sequence';
 export { PostgresTaskAttemptStore } from './task-attempts';
 export {
@@ -59,7 +61,7 @@ export type {
   R2ObjectPage,
 } from './r2-blobs';
 
-/** Every cloud-local port. All nine, or it is not a composition. */
+/** Every cloud-local port. All ten, or it is not a composition. */
 export type PostgresCloudStores = CloudStores;
 
 /** Everything the blob store needs that is not already a composition-wide input. */
@@ -93,6 +95,7 @@ export function createPostgresCloudStores(
     dedup: new PostgresInboundDedupStore(pool),
     tasks: new PostgresTaskAttemptStore(pool, clock),
     receipts: new PostgresRequestReceiptStore(pool, clock),
+    proofReceipts: new PostgresProofRequestReceiptStore(pool, clock),
     sequence: new PostgresDeviceSequenceStore(pool),
     // A second `PostgresObjectStore` instance, not a shared one: it is a
     // stateless wrapper over the pool, so the two read and write the same rows

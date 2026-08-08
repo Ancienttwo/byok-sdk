@@ -22,15 +22,21 @@ export interface CloudCrypto {
   /** A short, human-typeable pairing code (uppercase, unambiguous alphabet). */
   randomPairingCode(length: number): string;
   /**
-   * Verify `signature` (base64url) over `message` (UTF-8) against
+   * Verify `signature` (base64url) over `message` against
    * `publicKeyBase64Url` — a raw 32-byte Ed25519 public key in the same
    * base64url encoding a JWK's `x` field uses, which is what a device
-   * registers at pairing time.
+   * registers at pairing time. String input is encoded as UTF-8; byte input is
+   * used verbatim so core's frozen device-proof signing bytes are not decoded
+   * and re-encoded by the adapter.
    *
    * Never throws: a malformed key or signature is a failed verification, not
    * an exception a route has to translate.
    */
-  verifyEd25519(publicKeyBase64Url: string, message: string, signature: string): Promise<boolean>;
+  verifyEd25519(
+    publicKeyBase64Url: string,
+    message: string | Uint8Array,
+    signature: string,
+  ): Promise<boolean>;
   /** HMAC-SHA-256 over `message`, base64url-encoded. Used for presigned blob URLs. */
   hmacSha256(secret: Uint8Array, message: string): Promise<string>;
   /** SHA-256 of `data`, in core's canonical `sha256:<64 lowercase hex>` form. */

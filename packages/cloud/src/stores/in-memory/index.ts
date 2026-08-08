@@ -17,6 +17,7 @@ import { InMemoryInboundDedupStore } from './dedup';
 import { InMemoryNonceStore } from './nonces';
 import { InMemoryPairingCodeStore } from './pairing-codes';
 import { InMemoryRequestReceiptStore } from './receipts';
+import { InMemoryProofRequestReceiptStore } from './proof-receipts';
 import { InMemoryTaskAttemptStore } from './task-attempts';
 
 export { AllowAllRateLimiter } from './rate-limiter';
@@ -33,6 +34,7 @@ export { InMemoryDeviceSequenceStore } from './sequence';
 export { InMemoryNonceStore, NONCE_TTL_MS } from './nonces';
 export { InMemoryPairingCodeStore } from './pairing-codes';
 export { InMemoryRequestReceiptStore } from './receipts';
+export { InMemoryProofRequestReceiptStore } from './proof-receipts';
 export { InMemoryTaskAttemptStore } from './task-attempts';
 
 /**
@@ -63,6 +65,7 @@ export function createInMemoryCloudStores(
       dedup: new InMemoryInboundDedupStore(),
       tasks: new InMemoryTaskAttemptStore(clock),
       receipts: new InMemoryRequestReceiptStore(clock),
+      proofReceipts: new InMemoryProofRequestReceiptStore(clock),
       sequence: new InMemoryDeviceSequenceStore(),
       blobs: blobs.blobs,
       rateLimiter: new AllowAllRateLimiter(),
