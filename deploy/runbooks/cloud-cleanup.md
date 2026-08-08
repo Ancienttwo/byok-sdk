@@ -107,7 +107,8 @@ SELECT hash, state, ref_count, updated_at, delete_pending_at,
 
 `listDeadLetters` pages `expired` rows. `replayDeadLetter` requires an
 operator-issued idempotency key, clones the original bytes to a new monotonic
-sequence, applies mailbox quota, and keeps the original as evidence.
+sequence, binds the new row to the exact source via `replay_source_seq`, applies
+mailbox quota, and keeps the original as evidence.
 `discardDeadLetter` is the only explicit delete; it removes one expired row and
 settles mailbox usage transactionally. Automatic cleanup never calls discard.
 

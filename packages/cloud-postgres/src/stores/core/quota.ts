@@ -326,6 +326,11 @@ export class PostgresQuotaStore implements QuotaStore {
                                       THEN ent.max_object_bytes
                                       ELSE ent.max_inline_bytes END)
               AND used.used_bytes + $4::bigint <= ent.hard_limit_bytes
+              AND ($3::text <> 'object' OR NOT EXISTS (
+                    SELECT 1 FROM object_manifest m
+                     WHERE m.tenant_id = $1 AND m.hash = $5
+                       AND m.state = 'delete_pending'
+                  ))
               AND NOT (used.used_bytes >= ent.hard_limit_bytes
                        AND ent.downgrade_grace_until IS NOT NULL
                        AND ent.downgrade_grace_until <= $9)
@@ -656,6 +661,20 @@ export class PostgresQuotaStore implements QuotaStore {
         'storage_reservation_expired',
         `Reservation ${input.reservationId} is already ${held.state}.`,
       );
+    }
+
+    if (input.kind === 'object') {
+      const tombstone = await client.query<{ readonly state: string }>(
+        `SELECT state FROM object_manifest
+          WHERE tenant_id = $1 AND hash = $2 AND state = 'delete_pending'`,
+        [tenant, input.contentHash],
+      );
+      if (tombstone.rows[0] !== undefined) {
+        return new ByokCoreError(
+          'object_state_invalid',
+          `Object ${input.contentHash} is pending deletion and cannot accept a new reservation.`,
+        );
+      }
     }
 
     const usageResult = await client.query<UsageRow>(USAGE_SQL, [tenant, this.#now()]);

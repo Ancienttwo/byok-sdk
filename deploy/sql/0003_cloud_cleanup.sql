@@ -7,6 +7,13 @@
 -- Every table below is tenant-owned and every unique key starts with
 -- tenant_id. tests/sql/control_plane_invariants.sql enforces that catalog rule.
 
+-- Replayed mailbox rows retain the exact expired source sequence. The existing
+-- tenant/device/message-id unique key remains the idempotency authority; this
+-- provenance prevents equal bytes from two different dead letters aliasing the
+-- same operator replay id. The source row remains independently discardable.
+ALTER TABLE outbox
+  ADD COLUMN replay_source_seq bigint;
+
 -- The host names a retention policy in storage_entitlement. Missing policy is
 -- an operator error and cleanup fails closed; there is no hidden default that
 -- can delete data under a window nobody selected.

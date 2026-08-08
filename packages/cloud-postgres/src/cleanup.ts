@@ -25,7 +25,7 @@ const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;
 const ADVISORY_LOCK_NAMESPACE = 1_106_736_963;
 const OUTBOX_COLUMNS =
-  'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at';
+  'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at, replay_source_seq';
 
 export const CLOUD_CLEANUP_ERROR_CODES = {
   cleanup_invalid_input: 'cleanup_invalid_input',
@@ -165,6 +165,7 @@ interface RetentionResultRow {
   readonly mailbox_deleted_count: bigint;
   readonly mailbox_expired_count: bigint;
   readonly mailbox_released_bytes: bigint;
+  readonly usage_accounted: bigint;
   readonly reservations_expired: bigint;
   readonly ttl_rows_deleted: bigint;
 }
@@ -188,6 +189,7 @@ interface OutboxRow {
   readonly byte_size: bigint;
   readonly state: string;
   readonly appended_at: string;
+  readonly replay_source_seq: bigint | null;
 }
 
 interface MutableCounts {
@@ -263,8 +265,8 @@ export class PostgresCloudCleanup {
     let jobStarted = false;
     try {
       const lock = await client.query<{ readonly locked: boolean }>(
-        'SELECT pg_try_advisory_lock($1, hashtext($2)) AS locked',
-        [ADVISORY_LOCK_NAMESPACE, tenant],
+        'SELECT pg_try_advisory_lock(hashtextextended($1, $2)) AS locked',
+        [tenant, ADVISORY_LOCK_NAMESPACE],
       );
       if (lock.rows[0]?.locked !== true) {
         throw new CloudCleanupError(
@@ -289,6 +291,7 @@ export class PostgresCloudCleanup {
       const orphanCutoff = cutoff(this.#clock.now(), policy.objectOrphanGraceMs);
       counts.objectsTombstoned = await this.#markTombstones(client, tenant, orphanCutoff);
 
+      const deleteCursor = await this.#readCursor(client, tenant, 'delete');
       const pending = await client.query<ManifestMaintenanceRow>(
         `SELECT hash, byte_size, content_type, state,
                 gc_accounted_bytes, gc_accounted_object
@@ -297,9 +300,10 @@ export class PostgresCloudCleanup {
             AND state = 'delete_pending'
             AND gc_accounted_bytes IS NOT NULL
             AND gc_accounted_object IS NOT NULL
-          ORDER BY delete_pending_at, hash
-          LIMIT $2`,
-        [tenant, this.#batchSize],
+            AND hash > $2
+          ORDER BY hash
+          LIMIT $3`,
+        [tenant, deleteCursor ?? '', this.#batchSize],
       );
       for (const manifest of pending.rows) {
         try {
@@ -315,6 +319,13 @@ export class PostgresCloudCleanup {
           counts.operationErrors += 1n;
         }
       }
+      await this.#advanceLexicalCursor(
+        client,
+        tenant,
+        'delete',
+        pending.rows.at(-1)?.hash,
+        pending.rows.length,
+      );
 
       await this.#reconcileManifests(client, tenant, counts);
       await this.#reconcileR2(client, tenant, counts);
@@ -329,7 +340,10 @@ export class PostgresCloudCleanup {
       throw cause;
     } finally {
       await client
-        .query('SELECT pg_advisory_unlock($1, hashtext($2))', [ADVISORY_LOCK_NAMESPACE, tenant])
+        .query('SELECT pg_advisory_unlock(hashtextextended($1, $2))', [
+          tenant,
+          ADVISORY_LOCK_NAMESPACE,
+        ])
         .catch(() => {});
       client.release();
     }
@@ -401,7 +415,11 @@ export class PostgresCloudCleanup {
         );
         const existing = existingResult.rows[0];
         if (existing !== undefined) {
-          if (existing.body_hash !== original.body_hash || existing.byte_size !== original.byte_size) {
+          if (
+            existing.body_hash !== original.body_hash ||
+            existing.byte_size !== original.byte_size ||
+            existing.replay_source_seq !== original.seq
+          ) {
             rejection = new CloudCleanupError(
               'cleanup_invalid_input',
               `Replay id ${input.replayMessageId} already binds different mailbox bytes.`,
@@ -422,7 +440,30 @@ export class PostgresCloudCleanup {
             [tenant],
           );
           const capacity = entitlement.rows[0];
-          if (capacity === undefined) {
+          // A different dead-letter row may race on the same operator-issued
+          // replay id. The usage lock above is the serialization point; read
+          // the idempotency key again after acquiring it so the loser returns
+          // the winner instead of surfacing a raw unique violation.
+          const serializedExisting = await client.query<OutboxRow>(
+            `SELECT ${OUTBOX_COLUMNS} FROM outbox
+              WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
+            [tenant, input.deviceId, input.replayMessageId],
+          );
+          const winner = serializedExisting.rows[0];
+          if (winner !== undefined) {
+            if (
+              winner.body_hash !== original.body_hash ||
+              winner.byte_size !== original.byte_size ||
+              winner.replay_source_seq !== original.seq
+            ) {
+              rejection = new CloudCleanupError(
+                'cleanup_invalid_input',
+                `Replay id ${input.replayMessageId} already binds different mailbox bytes.`,
+              );
+            } else {
+              result = toMailboxMessage(winner);
+            }
+          } else if (capacity === undefined) {
             rejection = new CloudCleanupError(
               'cleanup_policy_missing',
               `Tenant ${tenant} has no storage entitlement/usage row.`,
@@ -442,7 +483,7 @@ export class PostgresCloudCleanup {
                  RETURNING next_seq - 1 AS seq
                )
                INSERT INTO outbox (${OUTBOX_COLUMNS})
-               SELECT $1, $2, allocated.seq, $3, $4, $5, $6, 'pending', $7
+               SELECT $1, $2, allocated.seq, $3, $4, $5, $6, 'pending', $7, $8
                  FROM allocated
                RETURNING ${OUTBOX_COLUMNS}`,
               [
@@ -453,6 +494,7 @@ export class PostgresCloudCleanup {
                 original.body_hash,
                 original.byte_size,
                 this.#now(),
+                original.seq,
               ],
             );
             await client.query(
@@ -644,34 +686,13 @@ export class PostgresCloudCleanup {
     const now = this.#now();
     try {
       await client.query('BEGIN');
-      const usage = await client.query<{ readonly mailbox_bytes: bigint }>(
-        'SELECT mailbox_bytes FROM storage_usage WHERE tenant_id = $1 FOR UPDATE',
-        [tenant],
-      );
-      const current = usage.rows[0];
-      if (current === undefined) {
-        throw new CloudCleanupError(
-          'cleanup_policy_missing',
-          `Tenant ${tenant} has no storage usage row.`,
-        );
-      }
-      const releasable = await client.query<{ readonly bytes: bigint }>(
-        `SELECT COALESCE(SUM(byte_size), 0)::bigint AS bytes FROM outbox
-          WHERE tenant_id = $1 AND state = 'acked' AND appended_at < $2`,
-        [tenant, ackedBefore],
-      );
-      const releaseBytes = releasable.rows[0]!.bytes;
-      if (current.mailbox_bytes < releaseBytes) {
-        throw new CloudCleanupError(
-          'cleanup_accounting_drift',
-          `Mailbox accounting is ${String(current.mailbox_bytes)} bytes but retention would release ${String(releaseBytes)} bytes.`,
-        );
-      }
       const swept = await client.query<RetentionResultRow>(
         `WITH deleted AS (
            DELETE FROM outbox
             WHERE tenant_id = $1 AND state = 'acked' AND appended_at < $2
            RETURNING byte_size
+         ), released AS MATERIALIZED (
+           SELECT COALESCE(SUM(byte_size), 0)::bigint AS bytes FROM deleted
          ), expired AS (
            UPDATE outbox SET state = 'expired'
             WHERE tenant_id = $1 AND state = 'pending' AND appended_at < $3
@@ -702,24 +723,33 @@ export class PostgresCloudCleanup {
             WHERE tenant_id = $1 AND expires_at <= $4
            RETURNING 1
          ), accounted AS (
-           UPDATE storage_usage
-              SET mailbox_bytes = mailbox_bytes - $6::bigint, updated_at = $4
-            WHERE tenant_id = $1
-           RETURNING 1
+           UPDATE storage_usage u
+              SET mailbox_bytes = u.mailbox_bytes - released.bytes, updated_at = $4
+             FROM released
+            WHERE u.tenant_id = $1 AND u.mailbox_bytes >= released.bytes
+           RETURNING released.bytes
          )
          SELECT (SELECT count(*) FROM deleted)::bigint AS mailbox_deleted_count,
                 (SELECT count(*) FROM expired)::bigint AS mailbox_expired_count,
-                $6::bigint AS mailbox_released_bytes,
+                (SELECT bytes FROM released)::bigint AS mailbox_released_bytes,
+                (SELECT count(*) FROM accounted)::bigint AS usage_accounted,
                 (SELECT count(*) FROM reservations)::bigint AS reservations_expired,
                 ((SELECT count(*) FROM nonces)
                  + (SELECT count(*) FROM pairing_codes)
                  + (SELECT count(*) FROM receipts)
                  + (SELECT count(*) FROM presence)
                  + (SELECT count(*) FROM activity))::bigint AS ttl_rows_deleted`,
-        [tenant, ackedBefore, expireBefore, now, receiptBefore, releaseBytes],
+        [tenant, ackedBefore, expireBefore, now, receiptBefore],
       );
+      const result = swept.rows[0]!;
+      if (result.usage_accounted !== 1n) {
+        throw new CloudCleanupError(
+          'cleanup_accounting_drift',
+          `Mailbox accounting cannot release ${String(result.mailbox_released_bytes)} deleted bytes for tenant ${tenant}.`,
+        );
+      }
       await client.query('COMMIT');
-      return swept.rows[0]!;
+      return result;
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});
       throw cause;
@@ -731,8 +761,18 @@ export class PostgresCloudCleanup {
     tenant: TenantId,
     orphanCutoff: string,
   ): Promise<bigint> {
-    const marked = await client.query<{ readonly hash: string }>(
-      `WITH candidates AS MATERIALIZED (
+    try {
+      await client.query('BEGIN');
+      // Reservation admission uses this same tenant row as its serialization
+      // point. Acquiring it before the candidate statement gives that
+      // statement a fresh snapshot after every already-started reservation,
+      // while later reservations see `delete_pending` and fail closed.
+      await client.query(
+        'SELECT 1 FROM storage_entitlement WHERE tenant_id = $1 FOR UPDATE',
+        [tenant],
+      );
+      const marked = await client.query<{ readonly hash: string }>(
+        `WITH candidates AS MATERIALIZED (
          SELECT m.tenant_id, m.hash
            FROM object_manifest m
           WHERE m.tenant_id = $1
@@ -759,9 +799,14 @@ export class PostgresCloudCleanup {
          FROM candidates c
         WHERE m.tenant_id = c.tenant_id AND m.hash = c.hash
        RETURNING m.hash`,
-      [tenant, orphanCutoff, this.#batchSize, this.#now()],
-    );
-    return BigInt(marked.rowCount ?? 0);
+        [tenant, orphanCutoff, this.#batchSize, this.#now()],
+      );
+      await client.query('COMMIT');
+      return BigInt(marked.rowCount ?? 0);
+    } catch (cause) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw cause;
+    }
   }
 
   async #settleDeleted(

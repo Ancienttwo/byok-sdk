@@ -109,7 +109,8 @@ second queue. S4B-c adds a Postgres maintenance surface:
 
 - `listDeadLetters` pages expired rows for operator inspection;
 - `replayDeadLetter` requires a new operator idempotency key and clones the
-  bytes to a new monotonic sequence while retaining the original evidence;
+  bytes to a new monotonic sequence; `replay_source_seq` binds that key to the
+  exact expired row while retaining the original evidence;
 - `discardDeadLetter` explicitly removes one expired row and releases mailbox
   accounting in the same transaction.
 

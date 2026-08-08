@@ -8,6 +8,7 @@ import {
   type TenantId,
 } from '@byok/core';
 import type { BlobObservation } from '@byok/cloud';
+import type { Pool, PoolClient } from 'pg';
 import { PostgresCloudCleanup } from '../cleanup';
 import { migrate } from '../migrate';
 import { PostgresMailboxStore } from '../stores/core/mailbox';
@@ -51,6 +52,7 @@ class MutableClock implements Clock {
 
 class FakeObjectMaintenance implements R2ObjectMaintenance {
   readonly objects = new Map<string, BlobObservation>();
+  readonly failingDeletes = new Set<ContentHash>();
   deleteThenFail = false;
   inspectionFailure = false;
 
@@ -67,6 +69,7 @@ class FakeObjectMaintenance implements R2ObjectMaintenance {
   }
 
   async deleteObject(tenant: TenantId, hash: ContentHash): Promise<R2DeleteResult> {
+    if (this.failingDeletes.has(hash)) throw new Error(`injected DELETE failure for ${hash}`);
     const key = `${tenant}/${hash}`;
     const present = this.objects.delete(key);
     if (this.deleteThenFail) throw new Error('injected response loss after DELETE');
@@ -140,6 +143,45 @@ async function configurePolicy(cleanup: PostgresCloudCleanup): Promise<void> {
     requestReceiptRetentionMs: 1_000n,
     objectOrphanGraceMs: 1_000n,
   });
+}
+
+function interceptCleanupDelete(pool: Pool, beforeDelete: () => Promise<void>): Pool {
+  let intercepted = false;
+  return interceptClientQueries(pool, async (sql) => {
+    if (!intercepted && sql.includes('WITH deleted AS')) {
+      intercepted = true;
+      await beforeDelete();
+    }
+  });
+}
+
+function interceptClientQueries(
+  pool: Pool,
+  beforeQuery: (sql: string) => Promise<void>,
+): Pool {
+  return {
+    query: pool.query.bind(pool),
+    connect: async (): Promise<PoolClient> => {
+      const client = await pool.connect();
+      return new Proxy(client, {
+        get(clientTarget, clientProperty) {
+          if (clientProperty === 'query') {
+            return async (...args: unknown[]) => {
+              const query = args[0];
+              const sql =
+                typeof query === 'string'
+                  ? query
+                  : ((query as { readonly text?: string } | undefined)?.text ?? '');
+              await beforeQuery(sql);
+              return Reflect.apply(clientTarget.query, clientTarget, args);
+            };
+          }
+          const value: unknown = Reflect.get(clientTarget, clientProperty, clientTarget);
+          return typeof value === 'function' ? value.bind(clientTarget) : value;
+        },
+      });
+    },
+  } as unknown as Pool;
 }
 
 describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
@@ -218,6 +260,198 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       await cleanup.discardDeadLetter(TENANT, { deviceId: 'device-a', seq: second.seq });
       expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(3n);
       expect((await cleanup.listDeadLetters(TENANT)).messages).toEqual([]);
+    } finally {
+      await scope.dispose();
+    }
+  });
+
+  it('derives released mailbox bytes from the rows deleted after a concurrent ACK', async () => {
+    const scope = await createDataplaneScope(4);
+    const clock = new MutableClock('2026-01-01T00:00:00.000Z');
+    const storage = new FakeObjectMaintenance();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const quota = new PostgresQuotaStore(scope.pool, clock);
+      const mailbox = new PostgresMailboxStore(scope.pool, clock);
+      await seedEntitlement(quota, 100n, 100n);
+
+      const first = await mailbox.append(TENANT, {
+        deviceId: 'device-race',
+        messageId: 'message-race-1',
+        body: 'one',
+        bodyHash: HASH_A,
+        byteSize: 3n,
+      });
+      const second = await mailbox.append(TENANT, {
+        deviceId: 'device-race',
+        messageId: 'message-race-2',
+        body: 'two',
+        bodyHash: HASH_B,
+        byteSize: 3n,
+      });
+      await quota.applyMailboxDelta(TENANT, { deltaBytes: 6n });
+      await mailbox.advanceCursor(TENANT, { deviceId: 'device-race', ackedSeq: first.seq });
+
+      const cleanup = new PostgresCloudCleanup({
+        pool: interceptCleanupDelete(scope.pool, async () => {
+          await scope.pool.query(
+            `UPDATE outbox SET state = 'acked'
+              WHERE tenant_id = $1 AND device_id = 'device-race' AND seq = $2`,
+            [TENANT, second.seq],
+          );
+        }),
+        clock,
+        objectStorage: storage,
+      });
+      await configurePolicy(cleanup);
+      clock.set('2026-01-01T00:00:02.000Z');
+
+      const result = await cleanup.runTenant(TENANT, 'retention-concurrent-ack');
+      expect(result.mailboxDeletedCount).toBe(2n);
+      expect(result.mailboxReleasedBytes).toBe(6n);
+      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(0n);
+    } finally {
+      await scope.dispose();
+    }
+  });
+
+  it('serializes one replay id across different dead-letter rows', async () => {
+    const scope = await createDataplaneScope(4);
+    const clock = new MutableClock('2026-01-01T00:00:00.000Z');
+    const storage = new FakeObjectMaintenance();
+    let arrivals = 0;
+    let releaseBarrier!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const quota = new PostgresQuotaStore(scope.pool, clock);
+      const mailbox = new PostgresMailboxStore(scope.pool, clock);
+      await seedEntitlement(quota, 100n, 100n);
+
+      const first = await mailbox.append(TENANT, {
+        deviceId: 'device-replay-race',
+        messageId: 'expired-race-1',
+        body: 'same',
+        bodyHash: HASH_A,
+        byteSize: 4n,
+      });
+      const second = await mailbox.append(TENANT, {
+        deviceId: 'device-replay-race',
+        messageId: 'expired-race-2',
+        body: 'same',
+        bodyHash: HASH_A,
+        byteSize: 4n,
+      });
+      await quota.applyMailboxDelta(TENANT, { deltaBytes: 8n });
+
+      const cleanup = new PostgresCloudCleanup({
+        pool: interceptClientQueries(scope.pool, async (sql) => {
+          if (!sql.includes('WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3')) {
+            return;
+          }
+          arrivals += 1;
+          if (arrivals === 2) releaseBarrier();
+          await barrier;
+        }),
+        clock,
+        objectStorage: storage,
+      });
+      await configurePolicy(cleanup);
+      clock.set('2026-01-01T00:00:02.000Z');
+      await cleanup.runTenant(TENANT, 'expire-replay-race');
+
+      const outcomes = await Promise.allSettled([
+        cleanup.replayDeadLetter(TENANT, {
+          deviceId: 'device-replay-race',
+          seq: first.seq,
+          replayMessageId: 'shared-operator-replay',
+        }),
+        cleanup.replayDeadLetter(TENANT, {
+          deviceId: 'device-replay-race',
+          seq: second.seq,
+          replayMessageId: 'shared-operator-replay',
+        }),
+      ]);
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+      expect(rejected).toMatchObject({
+        status: 'rejected',
+        reason: { code: 'cleanup_invalid_input' },
+      });
+      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(12n);
+    } finally {
+      releaseBarrier();
+      await scope.dispose();
+    }
+  });
+
+  it('refuses a new object reservation once the manifest is tombstoned', async () => {
+    const scope = await createDataplaneScope(4);
+    const clock = new MutableClock('2026-01-01T00:00:00.000Z');
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const quota = new PostgresQuotaStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock);
+      await seedEntitlement(quota, 100n);
+      await objects.putManifest(TENANT, {
+        hash: HASH_A,
+        byteSize: 5n,
+        contentType: 'text/plain',
+      });
+      await objects.markDeletePending(TENANT, HASH_A);
+
+      await expect(
+        quota.reserve(TENANT, {
+          reservationId: 'reservation-after-tombstone',
+          kind: 'object',
+          expectedBytes: 5n,
+          contentHash: HASH_A,
+          contentType: 'text/plain',
+          ttlMs: 86_400_000,
+        }),
+      ).rejects.toMatchObject({ code: 'object_state_invalid' });
+      expect((await quota.readUsage(TENANT)).reservedBytes).toBe(0n);
+    } finally {
+      await scope.dispose();
+    }
+  });
+
+  it('rotates past a poison delete tombstone instead of starving later objects', async () => {
+    const scope = await createDataplaneScope(4);
+    const clock = new MutableClock('2026-01-01T00:00:00.000Z');
+    const storage = new FakeObjectMaintenance();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const quota = new PostgresQuotaStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock);
+      const cleanup = new PostgresCloudCleanup({
+        pool: scope.pool,
+        clock,
+        objectStorage: storage,
+        batchSize: 1,
+      });
+      await seedEntitlement(quota, 100n);
+      await configurePolicy(cleanup);
+      await seedCommittedObject(quota, objects, HASH_A, 5n, 'reservation-poison-a');
+      await seedCommittedObject(quota, objects, HASH_B, 5n, 'reservation-poison-b');
+      storage.put(TENANT, HASH_A, 5n);
+      storage.put(TENANT, HASH_B, 5n);
+      storage.failingDeletes.add(HASH_A);
+      clock.set('2026-01-01T00:00:02.000Z');
+
+      const first = await cleanup.runTenant(TENANT, 'poison-delete-1');
+      expect(first.objectsTombstoned).toBe(1n);
+      expect(first.operationErrors).toBeGreaterThan(0n);
+      expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'delete_pending' });
+
+      const second = await cleanup.runTenant(TENANT, 'poison-delete-2');
+      expect(second.objectsTombstoned).toBe(1n);
+      expect(second.objectsDeleted).toBe(1n);
+      expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'delete_pending' });
+      expect(await objects.get(TENANT, HASH_B)).toMatchObject({ state: 'deleted' });
+      expect(storage.objects.has(`${TENANT}/${HASH_B}`)).toBe(false);
     } finally {
       await scope.dispose();
     }
