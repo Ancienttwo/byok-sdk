@@ -12,11 +12,17 @@
  */
 export class ByokKeysError extends Error {
   public readonly code: string;
+  public readonly httpStatus?: number;
 
-  constructor(code: string, message: string, options?: ErrorOptions) {
+  constructor(
+    code: string,
+    message: string,
+    options?: ErrorOptions & { httpStatus?: number },
+  ) {
     super(message, options);
     this.name = 'ByokKeysError';
     this.code = code;
+    this.httpStatus = options?.httpStatus;
   }
 }
 

@@ -124,6 +124,7 @@ function modelProviderHttpError(
   return new ByokKeysError(
     classifyModelProviderHttpError(status, payload),
     `Model provider request failed with HTTP ${status}`,
+    { httpStatus: status },
   );
 }
 

@@ -27,11 +27,16 @@ export {
 } from './url';
 
 export {
+  assertLiveModelResponse,
   classifyModelProviderHttpError,
+  fetchWithProviderGuards,
   modelApiUrl,
   modelMessageText,
+  objectValue,
+  parseBoundedJsonResponse,
   PROVIDER_RESPONSE_MAX_BYTES,
   PROVIDER_TIMEOUT_MS,
+  readModelProviderResponse,
 } from './http';
 export type { ProviderFetch } from './http';
 

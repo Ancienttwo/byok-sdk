@@ -33,6 +33,16 @@ describe('providerHeaders', () => {
     });
   });
 
+  it('accepts a non-model provider kind because header semantics are shared', () => {
+    expect(
+      providerHeaders({ auth_mode: 'bearer', kind: 'market_data' }, CANARY),
+    ).toEqual({
+      accept: 'application/json',
+      'content-type': 'application/json',
+      authorization: `Bearer ${CANARY}`,
+    });
+  });
+
   it('does not leak the secret into a non-authenticating mode', () => {
     const headers = providerHeaders(profile('none'), CANARY);
     expect(JSON.stringify(headers)).not.toContain(CANARY);
