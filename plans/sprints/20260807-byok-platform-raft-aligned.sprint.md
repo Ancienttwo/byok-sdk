@@ -6,7 +6,7 @@
 > **最后修订**：2026-08-09（见 D-10）
 > **仓库基线**：`Ancienttwo/byok-sdk@140b109`（2026-08-09）
 > **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）
-> **下一可执行 slice**：**S5**。入口是 `plans/plan-20260809-0148-s5-board-streams.md`；范围固定为 board、SSE/Poll 与 Presence/Activity，零 protocol/schema/migration drift
+> **下一可执行 slice**：**S6-c**。入口是 `plans/plan-20260809-0408-s6c-daemon-memory.md`；范围固定为 daemon proof signer、metadata-only manifest、本地 selector、selected fetch/rehash/filter 与 proof-bound write，零 protocol/schema/migration drift
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -1056,11 +1056,11 @@ Write：
 - [x] terminal immutable（S6-b）；
 - [x] memory manifest contains metadata, not body（S6-b）；
 - [x] cloud source contains no embedding/semantic merge path（S6-b）；
-- [ ] selector unit/integration tests；
+- [x] selector unit/integration tests（S6-c：selected-only fetch、unknown/duplicate selector、list/get race、inline/object rehash、real cloud handler E2E）；
 - [x] snapshot >1 MiB metric/revisit trigger documented（S6 design research；metric implementation 由 S6-c daemon path 承接）；
 - [ ] security review passes before capability default-on。
 
-> **执行记录（未宣告 S6 完成）**：S6-a commit `d8e7802` / Draft PR #34 已交付 proof authority；S6-b 在 `codex/s6b-atomic-truth` 实现 proof-only routes 与 Postgres atomic authority。S6-c daemon signer/selector/fetch/rehash 及独立 security acceptance 尚未完成，因此 S6 与 Sprint 均保持未完成。
+> **执行记录（未宣告 S6 完成）**：S6-a commit `d8e7802` / Draft PR #34 已交付 proof authority；S6-b commit `2de841d` / Draft PR #35 已交付 proof-only routes 与 Postgres atomic authority；S6-c 在 `codex/s6c-daemon-memory` 已实现 stored-key signer、explicit identity、selector/selected fetch/rehash/filter、proof-bound write 与 real cloud E2E。尚缺 S6-c Draft PR/CI 与三刀 exact-SHA independent security acceptance，因此 S6 与 Sprint 仍保持未完成。
 
 ### S6.6 Rollback
 

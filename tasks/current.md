@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-09T04:04:07+0800 -->
+<!-- updated_at: 2026-08-09T04:26:30+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Active
-> **Updated At**: 2026-08-09T04:04:07+0800
-> **Source Branch**: codex/s6b-atomic-truth
-> **Source Commit**: 2de841d
+> **Updated At**: 2026-08-09T04:26:30+0800
+> **Source Branch**: codex/s6c-daemon-memory
+> **Source Commit**: 7f26b5c
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: s6b-draft-pr-open
+> **Reason**: s6c-implementation-gates-green
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -18,9 +18,9 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Current Focus
 
 - Status: Active
-- Active Plan: plans/plan-20260809-0418-s6b-atomic-truth.md
+- Active Plan: plans/plan-20260809-0408-s6c-daemon-memory.md
 - Plan Status: Executing
-- Next Task: Obtain independent security/transaction acceptance；Claude review remains paused，未通过/waive 前不 merge。
+- Next Task: Push stacked Draft PR and retain independent security acceptance gate。
 - Clear Note: (none)
 
 ## Mainline Snapshot Reading
@@ -31,8 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- .: plans/plan-20260809-0418-s6b-atomic-truth.md
-- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s6b-atomic-truth
+- .: plans/plan-20260809-0408-s6c-daemon-memory.md
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s6c-daemon-memory
 - /Users/ancienttwo/Projects/byok-sdk: plans/plan-20260805-1659-byok-keys-package.md
 - /Users/ancienttwo/Projects/byok-sdk: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 - /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup: plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
@@ -41,6 +41,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - /Users/ancienttwo/Projects/byok-sdk-wt-s5-board-streams: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s5-board-streams
 - /Users/ancienttwo/Projects/byok-sdk-wt-s6-device-proof-memory: plans/plan-20260809-0340-s6a-proof-authority.md
 - /Users/ancienttwo/Projects/byok-sdk-wt-s6-device-proof-memory: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s6-device-proof-memory
+- /Users/ancienttwo/Projects/byok-sdk-wt-s6b-atomic-truth: plans/plan-20260809-0418-s6b-atomic-truth.md
+- /Users/ancienttwo/Projects/byok-sdk-wt-s6b-atomic-truth: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s6b-atomic-truth
 ## Active Sprint
 
 - Sprint: (none)
@@ -49,7 +51,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Push stacked Draft PR; retain independent review gate（hard env/full workspace gates 已通过）。
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -57,12 +59,26 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 3 changed/untracked path(s)
+- Summary: 17 changed/untracked path(s)
 
 ```
- M plans/plan-20260809-0418-s6b-atomic-truth.md
- M tasks/contracts/20260809-0418-s6b-atomic-truth.contract.md
- M tasks/notes/20260809-0418-s6b-atomic-truth.notes.md
+ M docs/architecture/sdk-architecture.md
+ M docs/researches/s6-proof-truth-memory-design.md
+ M packages/client/package.json
+ M packages/client/src/__tests__/fixtures/real-cloud.ts
+ M packages/client/src/index.ts
+ M plans/sprints/20260807-byok-platform-raft-aligned.sprint.md
+ M pnpm-lock.yaml
+ M tasks/current.md
+ M tasks/todos.md
+?? packages/client/src/__tests__/device-proof-signer.test.ts
+?? packages/client/src/__tests__/truth-memory-client.test.ts
+?? packages/client/src/daemon/device-proof-signer.ts
+?? packages/client/src/daemon/truth-memory-client.ts
+?? plans/plan-20260809-0408-s6c-daemon-memory.md
+?? tasks/contracts/20260809-0408-s6c-daemon-memory.contract.md
+?? tasks/notes/20260809-0408-s6c-daemon-memory.notes.md
+?? tasks/reviews/20260809-0408-s6c-daemon-memory.review.md
 ```
 
 ## Source Artifacts

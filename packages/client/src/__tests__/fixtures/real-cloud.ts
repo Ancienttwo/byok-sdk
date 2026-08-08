@@ -4,13 +4,14 @@ import { serve } from '@hono/node-server';
 //
 // `@byok/client` must not gain a package dependency on the hosted surface —
 // not even a dev one. The whole claim this fixture exists to prove is that the
-// daemon is unchanged and unaware of which server implementation is on the
+// daemon transport is unchanged and unaware of which server implementation is on the
 // other end; a `client -> cloud` edge in `package.json` would be the first
 // thing to read as evidence against that, and it would invert the intended
 // dependency direction (`cloud -> core + protocol`, and nothing depends on
 // cloud). A test file importing a sibling package's source has neither effect:
-// nothing that ships is touched, and the daemon under test still resolves
-// `@byok/protocol` and nothing else.
+// nothing that ships is touched. S6-c adds the intended `client -> core` edge
+// for canonical device-proof bytes and truth selector contracts; it still does
+// not make the daemon depend on the hosted implementation.
 import {
   createInMemoryByokCloud,
   tenantId,

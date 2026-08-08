@@ -24,7 +24,7 @@
 - Agent dispatch plane：`@byok/protocol` + `@byok/server` + `@byok/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
 
-目标平台会新增 `@byok/core` 与 `@byok/cloud`，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 已于 2026-08-07（S2）落地为 workspace package：zod-only、protocol-free、Node-free，且已被 `@byok/cloud` 接线消费（`packages/cloud/src/**` 真实 import `@byok/core` 与 `@byok/protocol`）；仍未接线到 `client`/`server`/`keys`。`@byok/cloud` 已于 2026-08-07（S3a）落地为**骨架已实现**：无状态 device surface + InMemory 组合；本机 durable journal 已于 2026-08-08（S3b）落地在 client 侧，cloud 的 board 与 truth 面仍是**目标设计**。本文在第 12 节单独描述这两者。
+目标平台新增的 `@byok/core` 与 `@byok/cloud` 已落地，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok/cloud` 消费其 hosted contracts，S6-c 再让 `@byok/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。`@byok/cloud` 已具无状态 device surface、board/presence/activity、proof-only truth routes；本机 durable journal 位于 client，生产 durable composition 位于 `@byok/cloud-postgres`。本文在第 12 节记录执行状态。
 
 ## 1. P1：全局架构地图
 
@@ -98,7 +98,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库是 Node `>=20`、pnpm workspace。六个 package（`client`/`cloud`/`core`/`keys`/`protocol`/`server`）都可独立 build/package，但仓库本身不能证明它们已经发布到 npm。下图画 dispatch、key 与 hosted cloud 三条线；`@byok/core` 当前只有 `cloud` 一个 consumer，指向 `client`/`server`/`keys` 的目标边见 §12.1。
+仓库是 Node `>=20`、pnpm workspace。六个 package（`client`/`cloud`/`core`/`keys`/`protocol`/`server`）都可独立 build/package，但仓库本身不能证明它们已经发布到 npm。下图画 dispatch、key 与 hosted cloud 三条线；`@byok/core` 当前有 `cloud` 与 `client` 两个 runtime consumer，`server`/`keys` 的目标边见 §12.1。
 
 ```mermaid
 flowchart LR
@@ -119,6 +119,7 @@ flowchart LR
 
   Server --> Protocol
   Client --> Protocol
+  Client --> Core
   Cloud --> Core
   Cloud --> Protocol
   Client -.->|"devDependency<br/>integration tests only"| Server
@@ -132,12 +133,12 @@ flowchart LR
 
 | package | 生产 TS files / LOC | test files / LOC | 设计压力 |
 | --- | ---: | ---: | --- |
-| protocol | 11 / 1,372 | 9 / 2,149 | 小而冻结；跨端契约变化风险最高 |
-| server | 16 / 4,409 | 24 / 5,494 | `ConnectionHub` 集中持有 embedded authority |
-| client | 68 / 17,535 | 90 / 20,070 | 最大模块；runtime、IPC、service、Git、transport 都在此包 |
-| keys | 18 / 2,697 | 15 / 2,934 | 独立 key-custody 安全模型 |
-| core | 21 / 3,145 | 17 / 2,360 | S2 落地的契约层；InMemory 参考实现 + composition 参数化 conformance 套件，当前唯一 consumer 是 `cloud` |
-| cloud | 31 / 2,609 | 7 / 1,519 | S3a 落地的无状态 hosted surface；device handlers + InMemory 组合，消费 `core` 与 `protocol` |
+| protocol | 11 / 1,389 | 9 / 2,246 | 小而冻结；跨端契约变化风险最高 |
+| server | 16 / 4,926 | 26 / 6,638 | `ConnectionHub` 集中持有 embedded authority |
+| client | 75 / 21,313 | 101 / 23,655 | 最大模块；runtime、IPC、service、Git、transport 与 S6 local truth path 都在此包 |
+| keys | 18 / 2,718 | 15 / 2,958 | 独立 key-custody 安全模型 |
+| core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
+| cloud | 42 / 5,045 | 10 / 3,003 | stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
 
 统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。六个 package 的复算命令：
 
@@ -149,10 +150,11 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 
 对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余五个 package。
 
-强依赖是 `server/client → protocol` 与 `cloud → core/protocol`；弱依赖是 `client -dev→ server`。当前的依赖 invariant 清单：
+强依赖是 `server → protocol`、`client → protocol/core` 与 `cloud → core/protocol`；弱依赖是 `client -dev→ server`。当前的依赖 invariant 清单：
 
 - `core !→ protocol`、`core !→ node`：core 必须保持 protocol-free、Node-free，由包内 constraint test 执行（ADR-003）。
-- `client/server/keys !→ core`（当前事实）：这三包尚未接线到 core，不是永久禁令，其目标边见 §12.1。
+- `client → core`（S6-c 当前事实）：只消费 proof canonicalizer 与 truth selector contracts，不依赖 cloud implementation。
+- `server/keys !→ core`（当前事实）：尚未接线，不是永久禁令，其目标边见 §12.1。
 - `cloud → core`、`cloud → protocol`（当前事实）：`packages/cloud/src/**` 真实 import 这两个包。
 - `keys` 与 dispatch 三包之间的零边是安全 invariant，不是尚未整理的偶然状态。
 
@@ -443,7 +445,7 @@ Library exports 分成六组：
 | daemon | `start` |
 | OS service | `install`、`uninstall`、`service-start`、`service-stop`、`service-status` |
 
-`@byok/client` 的 runtime dependencies 是 `@byok/protocol` 与 `ws`；另有 optional `@earendil-works/pi-coding-agent`，并被 tsup 标记 external。Claude/Codex 永远依赖用户本机已安装且已登录的 official CLI。
+`@byok/client` 的 runtime dependencies 是 `@byok/protocol`、`@byok/core` 与 `ws`；core 只提供 frozen proof bytes 与 truth contract types，client 不依赖 `@byok/cloud`。另有 optional `@earendil-works/pi-coding-agent`，并被 tsup 标记 external。Claude/Codex 永远依赖用户本机已安装且已登录的 official CLI。
 
 ### 4.3 Daemon 模块清单
 
@@ -462,6 +464,7 @@ Library exports 分成六组：
 | `store.ts` / `cursor-store.ts` / `session-workspace-store.ts` | device identity/token、redelivery cursor、sessionRef→workspace mapping |
 | `git-workspace.ts` / `git-workspace-store.ts` | optional local checkpoints、one-writer lease、private recovery ledger |
 | `blob-client.ts` | signed URL 方式上传/下载 instruction/artifact |
+| `device-proof-signer.ts` / `truth-memory-client.ts` | 显式 tenant/product/key proof、metadata-only manifest、本地 selector、selected fetch/rehash/filter 与 truth write |
 | `url.ts` | HTTP/WS URL conversion；remote plaintext 默认拒绝 |
 | `util/*` | bounded async queue、atomic write、POSIX mode / Windows DACL hardening |
 
@@ -916,7 +919,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 | --- | --- | --- | --- |
 | GAP-006 | **已收口（S3b，2026-08-08）**：hosted mailbox 的无状态 device 面与 InMemory 组合（S3a，既有 daemon long-poll 零改动跑通）＋本机 durable journal（S3b，`SqliteLocalTaskJournal` 与 append-then-ack 顺序）合并闭环 | Pri-0（平台线） | S3a + S3b |
 | GAP-008 | **已收口（S5）**：board / presence / activity 与 SSE/poll reconciliation 已实现 | Pri-1 | S5 |
-| GAP-009 | **部分收口（S6-a/S6-b）**：device proof row authority/verifier、proof-only truth routes 与 Postgres atomic commit 已实现；daemon signer/selector/fetch/rehash 仍由 S6-c 承接 | Pri-1 | S6 |
+| GAP-009 | **实现已收口（S6-a/S6-b/S6-c）**：device proof row authority/verifier、proof-only truth routes、Postgres atomic commit、daemon signer 与 selector/fetch/rehash/filter 均已实现；default-on 仍受独立 security acceptance gate 约束 | Pri-1 | S6 |
 | GAP-011 | doctor / quarantine / crash budget 不完整 | Pri-1 | S7 |
 | GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
 | GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
@@ -924,9 +927,9 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 | GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
 | GAP-016 | **已收口（S4A/S4B）**：Postgres + R2 entitlement/usage/reservation/quota/GC 与 reconciliation 已实现 | Pri-0（hosted storage） | S4A/S4B |
 
-## 12. 目标平台架构（core/cloud/Postgres+R2 主干已落地，S6-c/S7 仍在执行）
+## 12. 目标平台架构（core/cloud/Postgres+R2 与 S6 implementation 已落地，S7 仍在执行）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok/core`（S2）已实现并被 cloud 消费；`@byok/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority。client 侧 proof signer、manifest selector、selected fetch/rehash 仍由 S6-c 承接，S7 operations/release 尚未收口。wire v1 保持冻结。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok/core`（S2）已实现并被 cloud/client 消费；`@byok/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7 operations/release 尚未收口，wire v1 保持冻结。
 
 ### 12.1 目标 package graph
 
@@ -939,7 +942,7 @@ flowchart TB
 
   Protocol(["@byok/protocol<br/>existing, frozen v1"]):::existing
   Core(["@byok/core<br/>implemented, consumed by cloud<br/>zod-only, protocol-free, Node-free"]):::existing
-  Cloud(["@byok/cloud<br/>skeleton implemented S3a<br/>stateless device surface + in-memory composition<br/>durable journal/board/truth 仍目标设计"]):::planned
+  Cloud(["@byok/cloud<br/>stateless device + board + truth surface<br/>InMemory composition"]):::existing
   Client(["@byok/client<br/>existing local authority"]):::existing
   Server(["@byok/server<br/>existing self-hosted option"]):::existing
   Keys(["@byok-sdk/keys<br/>existing isolated key plane"]):::isolated
@@ -948,7 +951,7 @@ flowchart TB
 
   Cloud --> Core
   Cloud --> Protocol
-  Client -.-> Core
+  Client --> Core
   Client --> Protocol
   Server -.-> Core
   Server --> Protocol
@@ -957,7 +960,7 @@ flowchart TB
   Workers -.-> Cloud
 ```
 
-`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 再落 board/presence/activity 与 SSE/poll；durable local journal 已由 S3b 落地，truth/proof 仍属 S6。`Cloud → Core` 与 `Cloud → Protocol` 两条边是实线：`@byok/cloud` 真实 import 这两个包。其余指向 `core` 的三条边（`client/server/keys → core`）仍是虚线——这三包内当前零 import site；core 本身已由 cloud 消费，不再是零 consumer 的隔离状态。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge 只用于 canonical proof bytes 与 truth contracts。`server/keys → core` 仍是虚线目标边。
 
 关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
@@ -974,7 +977,7 @@ core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 
 | core store ports | Truth/Mailbox/Board/Presence/Blob/Quota/StorageUsage async contracts；首参数永远是 tenant | **已实现（S2）**；tenant-scoped store 组装留给 S3 |
 | cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface，外加 hosted-only `GET /byok/capabilities` | **已实现（S3a）**：九条 device 路由无状态重现，既有 daemon 零改动跑通 long-poll |
 | cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | **已实现（S5）**：device bearer 只写非 `done` 协调态；host `acceptBoardItem` 独占 review acceptance |
-| cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs | 目标设计 |
+| cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs | **已实现（S6-b）**：proof-only routes + Postgres atomic authority；client local path 于 S6-c 实现 |
 | cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | 目标设计 |
 | cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 当前实现（S4B-c） |
 | cloud hints | device presence TTL、task activity tail + explicit dropped count | **已实现（S5）**：store-authoritative minimum interval、ProgressBatcher-shaped bounded batch、cumulative producer/capacity dropped |
@@ -1190,14 +1193,14 @@ sequenceDiagram
   C-->>D: 稳定结果
 ```
 
-canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约已于 S2 落地（`@byok/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）。S6-a 在不改变该 golden 的前提下接入 Workers-safe WebCrypto verifier、device row 的 `proof_key_id/proof_key_epoch` authority 与专用 replay receipt；S6-b 已把该 verifier 接入 record routes 与 Postgres atomic truth authority；daemon signer 由 S6-c 承接。
+canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约已于 S2 落地（`@byok/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）。S6-a 接入 Workers-safe verifier与 device row authority；S6-b 接入 record routes 与 Postgres atomic authority；S6-c 的 `StoredDeviceProofSigner` 直接消费同一个 `deviceProofSigningInput`，只补 Node Ed25519 私钥操作，不复制 canonicalizer。
 
 三个 domain 前缀（取一致小写形式，与 `schema: 'byok-device-proof-v1'` 自洽；第一个已在 S1 落地并冻结，第二个的 canonical bytes 已在 S2 冻结且 verifier 于 S6-a 落地，第三个仍是目标设计、位元组形状待冻结）：
 
 | 用途 | 前缀 | 状态 |
 | --- | --- | --- |
 | token renewal | `byok-nonce-v1\n` + nonce | **已实现（S1）**：两端同字面量（server `auth.ts` 的 `NONCE_SIGNING_DOMAIN`、client `device-keys.ts` 的 `signNonce`），无前缀签名 401 |
-| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | **core bytes + cloud verifier + record routes 已实现（S2/S6-a/S6-b）**：DB row 是 tenant/product/key/epoch authority；daemon signer 由 S6-c 承接 |
+| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | **已实现（S2/S6-a/S6-b/S6-c）**：DB row 是 tenant/product/key/epoch authority；daemon signer 要求显式 identity config并从本地 paired store 逐次取 key |
 | record 级 attest | `byok-attest-v1\n` | 保留，若最终启用 |
 
 上表首行的字节形状已在 S1 冻结并两端同批切换（breaking，恢复路径是 forced re-pair，见 `docs/protocol.md` §6.2 与 `docs/security.md`）；第二行的 canonical bytes 已由 S2 的 core golden 冻结；`byok-attest-v1\n` 仍是目标设计，最终字节序列以 golden fixture 冻结为准。
@@ -1212,7 +1215,9 @@ canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规�
 
 三条路由归类为 `proof`，不接受 bearer-only fallback。capability 只有在 composition 同时供应 atomic `TruthCommitter` 与 content-hash keyed object download authority 时才可声明；标准 InMemory composition 默认不声明，避免把顺序拼接伪装成跨 store atomicity。Postgres production path 在一个 transaction 内完成 receipt、terminal/snapshot precondition、committed manifest 检查、object reference replacement/recount 与 inline logical accounting；同 tenant 同 hash 多 reference 只计一次。
 
-`terminal` body 对 cloud 是 opaque bytes/object ref；S6-c daemon 从 frozen v1 terminal journal 选择其来源，cloud 不做第二套 envelope 语义解析。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
+S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回 `(kind, recordKey)`；client 只 fetch 这些 key，并要求 GET metadata 与 selector 所见 manifest 完全一致，再对 inline/object bytes 验 byte size 与 SHA-256。任何 list/get race 或同 size 字节替换都在 local filter 之前 fail-closed。>1 MiB snapshot 只发 metric，不拒绝、不切 delta。filter 的泛型返回值是唯一对外 context，runtime prompt shape 继续由 host 决定。
+
+`terminal` body 对 cloud 是 opaque bytes/object ref；client 提供 proof-bound `writeTerminal`，caller/journal 负责选择要提交的 frozen-v1 terminal 来源，cloud 不做第二套 envelope 语义解析，S6-c 也不猜现有 task loop 的 prompt/flush policy。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
 
 #### 12.6.5 Key rotation
 
@@ -1507,7 +1512,7 @@ R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 
 | P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示；**已实现（S5）** |
-| P4 | device proof + truth/memory：S6-a verifier/key/receipt 与 S6-b atomic truth routes 已实现；S6-c client signer/manifest selector/fetch 待交付；`signNonce` domain separation / GAP-004 已提前随 S1 交付 |
+| P4 | device proof + truth/memory：S6-a verifier/key/receipt、S6-b atomic truth routes、S6-c client signer/manifest selector/selected fetch/rehash/filter implementation 已交付；default-on 仍等独立 security acceptance；`signNonce` domain separation / GAP-004 已提前随 S1 交付 |
 | P5 | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore`。**Deferred standalone plan，不在本 sprint program（S0-S7）内**；触发条件是 K4/K4.1 完成且 TruthStore 的 production composition 可用，两者都满足后单独立计划，不占 S 线任何 slot |
 
 K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。

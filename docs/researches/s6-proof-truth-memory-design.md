@@ -75,3 +75,12 @@ terminal write DTO 可携带零个或多个 memory/profile snapshot candidates�
 - **S6-c Daemon memory path**：proof signer、explicit tenant config、MemorySelector、selected fetch/rehash/filter 与 end-to-end tests。
 
 三刀都不修改 frozen protocol。S6 仅在三刀合入、security review 与全量门禁通过后标记完成。
+
+## S6-c 实现裁定
+
+- `@byok/client` 直接依赖 protocol-free 的 `@byok/core`，只读取已冻结的 `deviceProofSigningInput` 与 truth selector contracts；client 不依赖 `@byok/cloud`，也不复制 canonicalizer。
+- `StoredDeviceProofSigner` 要求 host 显式传 `tenantId/productId/keyId/keyEpoch`，逐次从 `DeviceStore` 读取 paired private key。没有从 bearer/JWT 推导 tenant 的路径；unpair 清除本地 record 后，后续签名立即失败。
+- `TruthMemoryClient` 的 public read path 是 manifest → local selector → selected GET → manifest equality → size/hash verify → local filter。它不把 verified raw records作为 runtime context返回；只有 host filter 的泛型结果离开该方法。
+- list/get 之间若 rev/hash/size/label/time 任一变化即 fail-closed并要求 caller 重走 manifest decision。object download 用声明 size 做 bounded stream read，再按 daemon 声明摘要 rehash；同 size 字节替换不能进入 filter。
+- client 提供 snapshot/terminal proof write，inline hash由 client从 exact bytes计算；object body只接受已经完成 reservation/finalize 的 canonical hash/size。write requestId 由 caller持有，重试不重新生成 id。
+- 1 MiB 是 metric threshold而非 admission limit；metric sink失败只记本地固定错误，不拒绝已验证 snapshot。现有 daemon task loop没有正式 memory/prompt policy，因此本刀不猜自动注入或 terminal flush时机；这些仍由 host在公开 selector/filter/write seam上组装。

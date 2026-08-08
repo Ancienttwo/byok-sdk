@@ -105,6 +105,28 @@ export type {
 } from './daemon/journal/storage-policy';
 export type { DeviceRecord } from './daemon/store';
 export { AuthManager, DeviceRevokedError } from './daemon/auth-manager';
+export { StoredDeviceProofSigner } from './daemon/device-proof-signer';
+export type {
+  DeviceProofRequest,
+  DeviceProofSigner,
+  StoredDeviceProofSignerOptions,
+} from './daemon/device-proof-signer';
+export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client';
+export type {
+  LocalMemoryFilter,
+  MemorySelector,
+  TruthManifestQueryInput,
+  TruthManifestRecord,
+  TruthMemoryClientErrorCode,
+  TruthMemoryClientOptions,
+  TruthMemoryMetric,
+  TruthSnapshotCandidateInput,
+  TruthSnapshotWriteInput,
+  TruthTerminalWriteInput,
+  TruthWriteBody,
+  TruthWriteResult,
+  VerifiedTruthRecord,
+} from './daemon/truth-memory-client';
 export type { ConnectionState } from './daemon/ws-transport';
 export { BlobClient } from './daemon/blob-client';
 export type { BlobResolver } from './daemon/blob-client';

@@ -49,6 +49,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@byok/core": "workspace:*",
     "@byok/protocol": "workspace:*",
     "ws": "^8.21.1"
   },
