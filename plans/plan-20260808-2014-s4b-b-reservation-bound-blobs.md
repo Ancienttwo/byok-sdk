@@ -1,6 +1,6 @@
 # Plan: Sprint S4B-b: Reservation-bound Blob Surface
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260808-2014
 > **Slug**: s4b-b-reservation-bound-blobs
 > **Artifact Level**: work-package
