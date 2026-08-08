@@ -83,6 +83,9 @@ export {
   PostgresCloudCleanup,
   createPostgresCloudMaintenance,
 } from './cleanup';
+
+export { PostgresTruthCommitter } from './truth-committer';
+export type { PostgresTruthCommitterOptions } from './truth-committer';
 export type {
   CleanupJobState,
   CloudCleanupErrorCode,

@@ -15,6 +15,7 @@ import type { CloudCrypto } from '../crypto/port';
 import { createByokCloud, type ByokCloud } from '../cloud';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import type { BlobContentProxy, CloudStores } from '../stores/ports';
+import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
 
 const TOKEN_SECRET_BYTES = 32;
 
@@ -55,6 +56,10 @@ export interface InMemoryByokCloudOptions {
   readonly activityMaxBytes?: number;
   readonly activityCapacity?: number;
   readonly activityTtlMs?: number;
+  /** Test/host supplied atomic truth authority; never synthesized from sequential stores. */
+  readonly truthCommitter?: TruthCommitter;
+  readonly truthObjectDownloads?: TruthObjectDownloads;
+  readonly maxTruthRequestBytes?: number;
 }
 
 export interface InMemoryByokCloud {
@@ -89,6 +94,10 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     tokenSigner,
     clock,
     capabilities: options.capabilities ?? fullCapabilityDeclaration(),
+    ...(options.truthCommitter === undefined ? {} : { truthCommitter: options.truthCommitter }),
+    ...(options.truthObjectDownloads === undefined
+      ? {}
+      : { truthObjectDownloads: options.truthObjectDownloads }),
     ...(options.operatorId !== undefined ? { operatorId: options.operatorId } : {}),
     ...(options.maxBlobSizeBytes !== undefined ? { maxBlobSizeBytes: options.maxBlobSizeBytes } : {}),
     ...(options.longPollHoldMs !== undefined ? { longPollHoldMs: options.longPollHoldMs } : {}),
@@ -124,6 +133,9 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     ...(options.activityMaxBytes === undefined ? {} : { activityMaxBytes: options.activityMaxBytes }),
     ...(options.activityCapacity === undefined ? {} : { activityCapacity: options.activityCapacity }),
     ...(options.activityTtlMs === undefined ? {} : { activityTtlMs: options.activityTtlMs }),
+    ...(options.maxTruthRequestBytes === undefined
+      ? {}
+      : { maxTruthRequestBytes: options.maxTruthRequestBytes }),
   });
 
   return { cloud, core, stores, blobContentProxy, clock, crypto };

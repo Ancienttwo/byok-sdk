@@ -27,7 +27,7 @@ S6 横跨四个现有边界，但不改变 frozen protocol v1：
 4. cloud 先做 schema/header/body size 上限，再对请求 method/path/body hash/size 做绑定校验；以 claim tenant/device 查 DB row，并用 row 的 product、public key、key id/epoch、revoked 状态做 authority check；随后检查 bounded clock skew/expiry，最后验签。任一失败统一 401。
 5. verifier 产出由 DB row 构造的 authenticated proof principal。handler 不再信任原始 claims 选择 tenant。
 6. write application port 以 `(tenant_id, device_id, request_id)` 查 receipt。完全相同的 operation/resource/body hash 返回首次结果；同 requestId 的任何绑定差异返回 conflict。
-7. inline body：事务内检查/settle inline reservation、写 `attested_record`、更新 `storage_usage`、写 receipt。object body：事务内确认 manifest 已 committed、写/替换 `object_reference`、写 truth row 与 receipt。snapshot 用 `expectedRev` CAS；terminal 首写不可变。
+7. inline body：在同一事务内锁 tenant entitlement/usage，按 live truth hash reference 计算最终 logical usage、写 `attested_record`、更新 `storage_usage`、写 receipt。inline bytes 与 accounting 同属 Postgres transaction，不制造跨系统 reservation；同 tenant 同 hash 多 record 只计一次，最后一个 reference 移走才释放。object body：事务内确认 manifest 已 committed、写/替换 `object_reference`、写 truth row 与 receipt。snapshot 用 `expectedRev` CAS；terminal 首写不可变。
 8. `GET /byok/records` 只返回 manifest metadata。daemon 的 `MemorySelector` 选 key 后才 fetch body；object 下载完成后本地 rehash，不匹配即 fail-closed，bytes 不进入 runtime context。
 
 同步边界是 HTTP；数据库内 receipt/truth/reference/accounting 是一个 transaction。R2 upload/download 在 transaction 外，靠既有 committed manifest 与 content hash 连接。CAS conflict 返回当前 manifest entry，cloud 不合并。
@@ -50,7 +50,7 @@ record routes 以 request-bound proof 完成 device authentication；DB row 是 
 
 ### D4：写入用高层原子 committer，不顺序拼 raw stores
 
-保留 core `TruthStore` 作为 domain/conformance authority；新增 cloud application port 负责 receipt + truth + reference/accounting 的原子提交。生产 Postgres 实现使用一个 transaction，InMemory reference 使用单一串行临界区并保持相同结果。handler 不直接顺序调用 `TruthStore`、`ObjectStore` 与 `QuotaStore`，避免 crash window 让 GC 删除已被 truth 引用的对象，或让 inline bytes 已落库但未计费。
+保留 core `TruthStore` 作为 domain/conformance authority；新增 cloud application port 负责 receipt + truth + reference/accounting 的原子提交。生产 Postgres 实现使用一个 transaction。现有 InMemory stores 各自封装 state，无法在不另造第二套 authority 的前提下提供跨 store rollback，因此标准 InMemory composition 不声明 `truth.records`；handler suite 只使用明确标注的 deterministic route fake，不把它当 atomicity 证据。handler 不直接顺序调用 `TruthStore`、`ObjectStore` 与 `QuotaStore`，避免 crash window 让 GC 删除已被 truth 引用的对象，或让 inline bytes 已落库但未计费。
 
 ### D5：terminal + memory candidates 是一个 commit unit
 
@@ -63,7 +63,7 @@ terminal write DTO 可携带零个或多个 memory/profile snapshot candidates�
 ## 安全与运维后果
 
 - I3 必须覆盖 wrong tenant/product、revoked、old epoch、body/path/resource tamper、exact replay、mismatched replay、skew、missing key、malformed canonical input、key order、large object ref 与 terminal conflict。
-- capability 在没有 reservation-aware truth committer 的 composition 上构造失败或不声明；production 不存在测试-only 自动降级。
+- capability 在没有 atomic truth committer 与 content-hash keyed object download authority 的 composition 上构造失败或不声明；production 不存在测试-only 自动降级。
 - proof clock skew 默认 60 秒，并受有界配置约束。`expiresAt` 不能晚于产品允许的最大 proof lifetime。
 - 10x 首先失败的是大型 snapshot 的对象下载带宽与 manifest scan，不是 cloud CPU；1 MiB metric、bounded manifest page 与 local selection 是观察/控制面。若 conflict rate 或 >1 MiB 比例持续升高，再开新设计，不预埋 delta。
 - 独立安全审查仍是 capability default-on 前置。Claude review 暂停期间使用独立 Codex review execution context；不得把 implementer self-review 记录为 external pass。

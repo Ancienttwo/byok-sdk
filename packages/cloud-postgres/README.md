@@ -5,7 +5,7 @@ implementations of **all ten cloud-local store ports and all seven `@byok/core`
 ports**, the R2/S3 object adapter that backs the blob port, and the forward-only
 migration runner that creates the tables they read.
 
-Three compositions ship from here. `createPostgresCloudStores` supplies the full
+Three store/maintenance compositions plus one transaction authority ship from here. `createPostgresCloudStores` supplies the full
 `CloudStores` bundle (`devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
 `receipts`, `proofReceipts`, `sequence`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
 supplies the full `CoreStores` bundle (`mailbox`, `board`, `truth`, `presence`,
@@ -14,6 +14,26 @@ because the conformance suites certify a composition as a whole — there is no
 partial bundle for them to run. `createPostgresCloudMaintenance` is the third,
 host-only operational composition; it is deliberately outside both port
 inventories.
+
+`PostgresTruthCommitter` is the S6 transaction authority rather than another
+raw store bundle. It owns the one transaction that couples proof receipt,
+terminal/snapshot preconditions, committed object checks, object references,
+tenant/hash inline logical accounting and the stored response. A production
+cloud composition declares `truth.records` only when it supplies both this
+committer and `stores.blobs` as the content-hash keyed `TruthObjectDownloads`
+authority; `R2CloudBlobStore` uses the content hash as its blob id, so it
+satisfies that contract directly.
+
+```ts
+const stores = createPostgresCloudStores(options);
+const truthCommitter = new PostgresTruthCommitter({ pool, clock, crypto });
+
+createByokCloud({
+  // core, cloud: stores, crypto, tokenSigner, clock, capabilities, ...
+  truthCommitter,
+  truthObjectDownloads: stores.blobs,
+});
+```
 
 Two of those ten are not tables. `rateLimiter` is the allow-all reference and
 gets no table by design: persisting an allow-all would be a table that is always

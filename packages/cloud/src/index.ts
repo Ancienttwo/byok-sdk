@@ -49,7 +49,11 @@ export {
   declares,
   fullCapabilityDeclaration,
 } from './capabilities';
-export type { CapabilitiesResponse, CloudCapability } from './capabilities';
+export type {
+  CapabilitiesResponse,
+  CloudCapability,
+  FullCapabilityDeclarationOptions,
+} from './capabilities';
 
 // Route inventory (I1)
 export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry';
@@ -129,6 +133,41 @@ export type {
   BoardFeedPage,
   BoardFeedRead,
 } from './coordination-client';
+
+export {
+  TRUTH_BATCH_MAX_RECORDS,
+  TRUTH_INLINE_CONTENT_TYPE,
+  TRUTH_LABEL_MAX_LENGTH,
+  TRUTH_MANIFEST_MAX_LIMIT,
+  TRUTH_RECORD_CAPABILITY,
+  TRUTH_RECORD_KEY_MAX_LENGTH,
+  TRUTH_REQUEST_ID_MAX_LENGTH,
+  TruthBodyInputSchema,
+  TruthCommitResponseSchema,
+  TruthRecordKeySchema,
+  TruthRecordMetadataSchema,
+  TruthWriteRequestSchema,
+  truthManifestMetadata,
+  truthRecordMetadata,
+} from './truth/contract';
+export {
+  DEFAULT_MAX_TRUTH_REQUEST_BYTES,
+  DEVICE_PROOF_HEADER,
+  MAX_DEVICE_PROOF_HEADER_BYTES,
+} from './handlers/truth';
+export type {
+  PreparedTruthWrite,
+  TruthBodyInput,
+  TruthCommitInput,
+  TruthCommitResponse,
+  TruthCommitResult,
+  TruthCommitter,
+  TruthObjectDownloads,
+  TruthRecordMetadata,
+  TruthWriteRequest,
+} from './truth/contract';
+export { TruthCommitError, isTruthCommitError } from './truth/errors';
+export type { TruthCommitErrorCode } from './truth/errors';
 
 // Cloud-local ports
 export { CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES } from './stores/ports';

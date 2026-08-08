@@ -898,10 +898,10 @@ CI 验证层次：
 | GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | **已决策（S0）**：维持 reserved 并已文档化（§2.2、`docs/protocol.md` §2、ADR-023）；wire 保留、禁止声称工作区选择能力，接线需另立 ADR 先定 resolver 设计 | 已收口 | S0（已交付） |
 | GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | 原证据：`auth.ts` 发裸 `randomBytes(24)`，`http.ts` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | **已修复（S1）**：修复形状是单一域常数 `NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n'`（`auth.ts`），server 侧只有 `verifyNonceSignature` 一个 nonce 签名检查点、前缀在函数内部施加，client `device-keys.ts` 的 `signNonce` 签同一字面量；裸签名 401，无双模、无 flag、无过渡窗口，两端同批交付 | 已收口 | S1（已交付） |
 | GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | 原证据：`auth.ts` 的 `DeviceRecord` 只有 `deviceId/deviceName/devicePublicKey/revoked` | **已修复（S1）**：修复形状是 required tenant——`DeviceRecord` 增加 required `tenantId`/`productId`（无 optional、无默认值），值只来自 server 铸造的 pairing claims；`DeviceRegistry` 按 `(tenantId, deviceId)` 复合键查找且公开面 tenant-first（`get`/`revoke` 均带 tenantId），naked deviceId 查找不从包入口导出 | 已收口 | S1（已交付） |
-| GAP-007 | `deploy/` 只有 skeleton | 平台设计没有部署实证 | §1.3 | 不把 SQL/Workers/runbook 画成当前模块 | Pri-1 | S4 |
+| GAP-007 | **已收口（S4A/S4B）**：`deploy/sql` forward-only migrations、Postgres+R2 composition、compose substrate 与 hosted env/runbook 已落地 | 平台设计已有 real Postgres+MinIO 实证 | §12.7 | 保留 SQL order/checksum、hard env 与 deploy runbook gate | 已收口 | S4 |
 | GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | `ws-transport.ts:248-254` 已有 `delay * (0.8 + Math.random() * 0.4)`，即 ±20% random jitter | 已有 random jitter，缺的是 device-id 派生的确定性种子；不要描述成"无 jitter" | Pri-1 | S7 |
 
-GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留在表内是为了留下修复轨迹，不再是待办。GAP-007/010 仍未修。
+GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4A/S4B 已收口；这些行保留在表内是为了留下修复轨迹，不再是待办。GAP-010 仍未修。
 
 以下两条列在缺口表里是历史记法，实为**已公开的设计约束**，不是待关闭的缺陷：
 
@@ -915,18 +915,18 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 | ID | 缺口 | 优先级 | 落点 |
 | --- | --- | --- | --- |
 | GAP-006 | **已收口（S3b，2026-08-08）**：hosted mailbox 的无状态 device 面与 InMemory 组合（S3a，既有 daemon long-poll 零改动跑通）＋本机 durable journal（S3b，`SqliteLocalTaskJournal` 与 append-then-ack 顺序）合并闭环 | Pri-0（平台线） | S3a + S3b |
-| GAP-008 | board / presence / activity 未实现 | Pri-1 | S5 |
-| GAP-009 | device proof / truth / memory 未实现 | Pri-1 | S6 |
+| GAP-008 | **已收口（S5）**：board / presence / activity 与 SSE/poll reconciliation 已实现 | Pri-1 | S5 |
+| GAP-009 | **部分收口（S6-a/S6-b）**：device proof row authority/verifier、proof-only truth routes 与 Postgres atomic commit 已实现；daemon signer/selector/fetch/rehash 仍由 S6-c 承接 | Pri-1 | S6 |
 | GAP-011 | doctor / quarantine / crash budget 不完整 | Pri-1 | S7 |
 | GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
 | GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
 | GAP-014 | hosted release/signing/update owner 尚未形成 production runbook | Pri-1 | S7 |
 | GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
-| GAP-016 | Postgres + R2 的 entitlement/usage/reservation/quota/GC 尚未实现 | Pri-0（hosted storage） | S4A/S4B |
+| GAP-016 | **已收口（S4A/S4B）**：Postgres + R2 entitlement/usage/reservation/quota/GC 与 reconciliation 已实现 | Pri-0（hosted storage） | S4A/S4B |
 
-## 12. 目标平台架构（`@byok/core` 已落地并由 cloud 消费，`@byok/cloud` 骨架已实现，其余尚未实现）
+## 12. 目标平台架构（core/cloud/Postgres+R2 主干已落地，S6-c/S7 仍在执行）
 
-本节只复述 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定。`@byok/core`（2026-08-07 / S2 落地）状态为**已实现、已被 cloud 接线消费**，仍未接线到 client/server/keys；`@byok/cloud`（2026-08-07 / S3a 落地）状态为**骨架已实现**——无状态 device surface 与 InMemory 组合在，durable 归属与 board/truth 面不在。其余节点与组合均为**目标设计**。它解决当前 embedded coordinator 无法成为多租户、水平扩展、可组合 cloud service 的问题，同时保留 wire v1。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok/core`（S2）已实现并被 cloud 消费；`@byok/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority。client 侧 proof signer、manifest selector、selected fetch/rehash 仍由 S6-c 承接，S7 operations/release 尚未收口。wire v1 保持冻结。
 
 ### 12.1 目标 package graph
 
@@ -1190,27 +1190,29 @@ sequenceDiagram
   C-->>D: 稳定结果
 ```
 
-canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约已于 S2 落地（`@byok/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）。S6-a 在不改变该 golden 的前提下接入 Workers-safe WebCrypto verifier、device row 的 `proof_key_id/proof_key_epoch` authority 与专用 replay receipt；daemon signer 与 record routes 分别由 S6-c / S6-b 承接。
+canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约已于 S2 落地（`@byok/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）。S6-a 在不改变该 golden 的前提下接入 Workers-safe WebCrypto verifier、device row 的 `proof_key_id/proof_key_epoch` authority 与专用 replay receipt；S6-b 已把该 verifier 接入 record routes 与 Postgres atomic truth authority；daemon signer 由 S6-c 承接。
 
 三个 domain 前缀（取一致小写形式，与 `schema: 'byok-device-proof-v1'` 自洽；第一个已在 S1 落地并冻结，第二个的 canonical bytes 已在 S2 冻结且 verifier 于 S6-a 落地，第三个仍是目标设计、位元组形状待冻结）：
 
 | 用途 | 前缀 | 状态 |
 | --- | --- | --- |
 | token renewal | `byok-nonce-v1\n` + nonce | **已实现（S1）**：两端同字面量（server `auth.ts` 的 `NONCE_SIGNING_DOMAIN`、client `device-keys.ts` 的 `signNonce`），无前缀签名 401 |
-| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | **core bytes + cloud verifier 已实现（S2/S6-a）**：DB row 是 tenant/product/key/epoch authority；daemon signer 与 record route 尚由 S6-c/S6-b 承接 |
+| HTTP device proof | `byok-device-proof-v1\n` + JCS(protected claims) | **core bytes + cloud verifier + record routes 已实现（S2/S6-a/S6-b）**：DB row 是 tenant/product/key/epoch authority；daemon signer 由 S6-c 承接 |
 | record 级 attest | `byok-attest-v1\n` | 保留，若最终启用 |
 
 上表首行的字节形状已在 S1 冻结并两端同批切换（breaking，恢复路径是 forced re-pair，见 `docs/protocol.md` §6.2 与 `docs/security.md`）；第二行的 canonical bytes 已由 S2 的 core golden 冻结；`byok-attest-v1\n` 仍是目标设计，最终字节序列以 golden fixture 冻结为准。
 
-#### 12.6.4 真相层端点（目标设计）
+#### 12.6.4 真相层端点（S6-b 已实现 cloud/Postgres 面）
 
 | 端点 | 用途 |
 | --- | --- |
 | `GET /byok/records?kind=&prefix=` | 回 manifest（key/rev/hash/size/label），**不回 body** |
 | `GET /byok/records/:kind/:key` | 回 presigned object GET URL，或小 payload 直接 inline |
-| `PUT /byok/records/:kind/:key` | body 是确权封套；`expectedRev` CAS，不符回 409 |
+| `PUT /byok/records/:kind/:key` | proof 在专用 header，raw JSON body 被 hash/size 绑定；snapshot `expectedRev` CAS，不符回 409 |
 
-`terminal` 写入只接受 `task.complete`、`task.fail`、`task.cancelled` 三种 frozen v1 envelope，外加 opaque 的 context/memory object ref。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
+三条路由归类为 `proof`，不接受 bearer-only fallback。capability 只有在 composition 同时供应 atomic `TruthCommitter` 与 content-hash keyed object download authority 时才可声明；标准 InMemory composition 默认不声明，避免把顺序拼接伪装成跨 store atomicity。Postgres production path 在一个 transaction 内完成 receipt、terminal/snapshot precondition、committed manifest 检查、object reference replacement/recount 与 inline logical accounting；同 tenant 同 hash 多 reference 只计一次。
+
+`terminal` body 对 cloud 是 opaque bytes/object ref；S6-c daemon 从 frozen v1 terminal journal 选择其来源，cloud 不做第二套 envelope 语义解析。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
 
 #### 12.6.5 Key rotation
 
@@ -1505,7 +1507,7 @@ R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 
 | P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示；**已实现（S5）** |
-| P4 | device proof + truth/memory：S6-a verifier/key/receipt，S6-b atomic truth routes，S6-c client signer/manifest selector/fetch；`signNonce` domain separation / GAP-004 已提前随 S1 交付 |
+| P4 | device proof + truth/memory：S6-a verifier/key/receipt 与 S6-b atomic truth routes 已实现；S6-c client signer/manifest selector/fetch 待交付；`signNonce` domain separation / GAP-004 已提前随 S1 交付 |
 | P5 | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore`。**Deferred standalone plan，不在本 sprint program（S0-S7）内**；触发条件是 K4/K4.1 完成且 TruthStore 的 production composition 可用，两者都满足后单独立计划，不占 S 线任何 slot |
 
 K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
