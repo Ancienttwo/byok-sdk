@@ -1,12 +1,12 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S3b 已交付并合入 `main`，S4A 起为剩余 backlog（见 `## Backlog`）
+> **状态**：Executing。S0–S4A 已交付并合入 `main`，S4B 起为剩余 backlog（见 `## Backlog`）
 > **创建日期**：2026-08-07
-> **最后修订**：2026-08-08（见 D-8）
+> **最后修订**：2026-08-08（见 D-9）
 > **仓库基线**：`Ancienttwo/byok-sdk@880e69f`（2026-08-08）
-> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）
-> **下一可执行 slice**：**S4A**。正式投影前置：R2 hash authority 为待做决策，须先形成 ADR（`docs/researches/s4a-dataplane-design.md` 尚未覆盖该决策），未定稿前不得开 S4A contract
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）
+> **下一可执行 slice**：**S4B**。R2 hash-authority 前置已由 ADR-024 `Accepted` 解除；S4B 按 D-9 的 finalize/manifest/GC constraints 投影
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -28,13 +28,12 @@
 
 | # | Status | Task | Mode | Acceptance | Plan |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [ ] | S4A — Postgres + R2 数据面与共用 conformance 套件 | contract | §S4A 全部验收项通过，且 `pnpm -r run typecheck/test/build` 全绿 | `plans/plan-20260808-0046-s4a-a-dataplane-foundations.md` |
-| 2 | [ ] | S4B — Quota、Reservation 与 cloud cleanup | contract | §S4B 全部验收项通过，配额拒写与 GC/tombstone 有回归测试 | 待投影 |
-| 3 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | 待投影 |
-| 4 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
-| 5 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
+| 1 | [ ] | S4B — Quota、Reservation 与 cloud cleanup | contract | §S4B 全部验收项通过，配额拒写与 GC/tombstone 有回归测试 | 待投影 |
+| 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | 待投影 |
+| 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
+| 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
 
-已交付并合入 `main` 的 S0、S1、S2、S3a、S3b 不再列入 backlog，其 merge SHA 见文首交付清单。
+已交付并合入 `main` 的 S0、S1、S2、S3a、S3b、S4A 不再列入 backlog，其 merge SHA 见文首交付清单。
 
 ---
 
@@ -81,7 +80,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 ### D-3：主生产 storage composition 已裁定为 Postgres + R2，D1 降为 optional post-Beta adapter
 
 - **原决策**：本文件此前把 primary hosted SQL backend 列为 S4A 进入 Executing 前的待决项，默认 Postgres/S3 primary、D1/R2 由 S4B 做 parity，且 parity 是 RC 闸的硬依赖（原 §8 决策行、原 S4B、原 R-018）。**该记录保留**；本条是它的后继裁定，不是把它删掉。
-- **改动**：`docs/architecture/sdk-architecture.md` §12.7 与 ADR-020 已裁定主生产组合为 **Postgres + R2**——Postgres 持 domain metadata、quota、usage、reservation 与 object manifest，R2 只持验证过 hash/size 的对象 bytes。选型闸随之取消：S4A 重切为 Postgres + R2 数据面，S4B 重切为 quota/reservation/GC，D1 降为可选 compatibility adapter，不进 Beta/RC 闸（见 S4B.8）。
+- **改动**：`docs/architecture/sdk-architecture.md` §12.7 与 ADR-020 已裁定主生产组合为 **Postgres + R2**——Postgres 持 domain metadata、quota、usage、reservation 与 object manifest，R2 持按 daemon 声明的 canonical hash 命名、由 cloud 观测 size/content-type 的对象 bytes（hash authority 的后继裁定见 D-9 / ADR-024）。选型闸随之取消：S4A 重切为 Postgres + R2 数据面，S4B 重切为 quota/reservation/GC，D1 降为可选 compatibility adapter，不进 Beta/RC 闸（见 S4B.8）。
 - **理由**：跨后端 parity 的成本换来的是可移植性声明，而真正阻塞 hosted 上线的是容量安全——并发上传超卖、降级后超限、R2 orphan 累积。把 S4B 的预算从「证明第二后端能跑」换成「证明满额与清理不吃掉用户数据」，才是这一刀的实际收益。
 - **影响**：Beta 闸新增 quota/reservation/GC 要求；RC 闸不再要求第二后端 parity；R-018 改述为 quota/GC 迟做的风险；§8 的 backend 选型行改记为已裁定。
 
@@ -114,7 +113,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」切三刀。**S4A-a**：`docker-compose.test.yml`（postgres + minio）测试基建、`@byok/conformance` 私有包定型（core 维度平移 + `runCloudConformance` 新增、`CORE_PORT_*`/`CLOUD_PORT_*` 上移进 shipped source）、`@byok/cloud-postgres` 包骨架（`pg` Pool + int8 parser + 手写 ordered migrate runner）、`deploy/sql/0001` 与 cloud-local ports 的 Postgres 实现（`rateLimiter` 留 in-memory 不建表）、CI dataplane job（`BYOK_REQUIRE_DATAPLANE=1`）与钉住该 job 的 constraint 测试。**S4A-b**：`deploy/sql/0002`（core domain 表，含 D-6 的 quota 三表）、core 七 port 的 Postgres 实现、`runCoreConformance` 跑 Postgres composition、I4 SQL 侧 = 行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言（UNIQUE 首列必须 `tenant_id`，白名单仅 `device.device_id` 与 `pairing_code.code`）、mailbox retention runbook。**S4A-c**：capability 由 `blobs.presigned` 裂出 `blobs.contentProxy`、`CloudStores.blobs` 收窄为 `{createUpload, getDownloadUrl}`（content-proxy 三方法移出为可选 composition 输入）、`aws4fetch` R2 adapter（presign PUT/GET + HEAD 复核 + tenant-scoped key）、S4A.4 九项 object tests（MinIO 为独立 SigV4 验证方）、`deploy/env`/`runbooks`/`scripts` 实装。
 - **理由**：core 七 port 无法再分——port-inventory 全有全无，分刀没有中间绿态，这决定了 b 刀的边界；机制刀（测试基建 + 套件形态 + 包骨架）与实现刀合并会得到审查者无法分辨「机制错了」还是「实现错了」的单个巨型 PR；c 刀的 capability 拆分与 R2 adapter 是同一个设计决策的两面，再拆会留下「capability 已裂但无实现使用」的中间态。
 - **影响**：S4A.5 分三批验收——a 收 migrations order check、fresh install + migrate-up、cloud conformance 两 composition 绿；b 收 core conformance 两 composition 绿、I4 SQL 侧、catalog 断言、retention documented；c 收九项 object tests、`deploy/` 非 `.gitkeep`、`check:deploy-sql` 实质化、secrets sample 无真实凭据。三刀各自可独立回滚（compose 文件与新包纯附加；migrations forward-only；capability 拆分回退 = 恢复五方法端口）。
-- **交付记录**：S4A-a 2026-08-08（PR #23，merge `5f399f1`）、S4A-b 同日（PR #24，merge `aff8dda`）、S4A-c 同日（PR #25，merge `e97a2db`，CI 32/32）。**S4A.5 十二格全闭，S4A 收官**：ordered migrations + 手写 runner（advisory lock / per-file tx / checksum fail-closed / 无 down）、`0001`+`0002` 十八表全 tenant-first、七个 cloud-local port 与七个 core port 的 Postgres 实现、`@byok/conformance` 单一断言源认证 in-memory 与 Postgres 两个 composition（core 56 + cloud 51）、I4 SQL 侧（行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言，白名单恰两条）、R2 object adapter 与十五项 object 测试（MinIO 作独立 SigV4 裁决方）、`deploy/` 实装。**S4A-c 走双轨验收**（gatekeeper + Codex 独立二轨），二轨额外捞出三条真缺陷并已修：tenant key alias（`..` 经 `new URL()` 正规化产生跨租户别名）、committed 对象仍被签发 PUT（可变性）、capability over-declare（宣告 `blobs.contentproxy` 而无 proxy 仍对外公布）。**未闭的前置**：R2 hash authority ADR（§10 投影前置，`HEAD` 只复核 size/content-type，不重算摘要）已记入 `tasks/todos.md`，S4B 的 reservation-bound presign 与 GC/reconciliation 直接依赖它。
+- **交付记录**：S4A-a 2026-08-08（PR #23，merge `5f399f1`）、S4A-b 同日（PR #24，merge `aff8dda`）、S4A-c 同日（PR #25，merge `e97a2db`，CI 32/32）。**S4A.5 十二格全闭，S4A 收官**：ordered migrations + 手写 runner（advisory lock / per-file tx / checksum fail-closed / 无 down）、`0001`+`0002` 十八表全 tenant-first、七个 cloud-local port 与七个 core port 的 Postgres 实现、`@byok/conformance` 单一断言源认证 in-memory 与 Postgres 两个 composition（core 56 + cloud 51）、I4 SQL 侧（行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言，白名单恰两条）、R2 object adapter 与十五项 object 测试（MinIO 作独立 SigV4 裁决方）、`deploy/` 实装。**S4A-c 走双轨验收**（gatekeeper + Codex 独立二轨），二轨额外捞出三条真缺陷并已修：tenant key alias（`..` 经 `new URL()` 正规化产生跨租户别名）、committed 对象仍被签发 PUT（可变性）、capability over-declare（宣告 `blobs.contentproxy` 而无 proxy 仍对外公布）。当时尚未闭合的 R2 hash authority 已由后继 D-9 / ADR-024 收口，S4B 可据此投影。
 
 ### D-8：按外部 review 验收裁定修订本文件（2026-08-08）
 
@@ -123,6 +122,14 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **理由**：已完成 Sprint 的验收字面与历史事实矛盾会让后续 Sprint 的 gate 失去可执行含义；文件里的 S3 单节点与 S0 outline 是已被执行事实作废的残留。
 - **影响**：已勾选的历史验收条目不改勾选状态，只改与事实矛盾的措辞；S4A 投影前置为 R2 hash authority 决策形成 ADR。
 - **后续修订（同日）**：harness 的 sprint Status 词表只接受 Draft/Approved/Executing/Done/Archived，故状态由 `Partially Executed` 改为 `Executing`，并补 `## PRD` 与 `## Backlog` 两段；「部分执行」的语义由文首的已完成 Sprint + merge SHA 交付清单承载，剩余切片由 `## Backlog` 表承载。同时把三处手工 active plan 状态快照改为引用 `tasks/current.md`，并把 R2 hash authority 的措辞更正为「待做决策，须先形成 ADR」——`docs/researches/s4a-dataplane-design.md` 并未包含该裁定。
+
+### D-9：R2 object hash authority 由通过认证的 daemon 声明（ADR-024）
+
+- **原决策**：§10 把 R2 hash authority 列为投影前置，但未裁定 daemon 声明、cloud read-back 重算与 object-store checksum 三者谁是 SHA-256 authority。S4A-c 实际 `HEAD` 只观测存在性、size/content-type；`object_manifest` 四态已随 `0002` 发布。
+- **触发事实**：S4A-c probe 证明 MinIO 支持的 checksum 路径不能代表生产 R2；R2 当前 SHA-256 只支持 `COMPOSITE`，不支持单次 PutObject 需要的 `FULL_OBJECT`。cloud 若要独立验证摘要，只能完整读回每个对象并再算一遍 SHA-256，付出第二份全量带宽、CPU 与 finalize 延迟。
+- **裁定**：ADR-024 `Accepted`。通过认证的配对 daemon 声明是 canonical hash authority；cloud 认证 principal/tenant、校验声明格式并签入 size/type，`HEAD` 只观测存在性、byte size 与 content type。`committed` 只表示 tenant-scoped object 存在、observed size/type 匹配且 manifest/accounting transaction 已提交，不表示 cloud/R2 验证过 SHA-256。同 tenant dedupe/accounting 按 daemon 声明执行；任何声称下载完整性的 consumer 自行 rehash bytes。
+- **理由**：配对 device credential 的持有者本来就拥有其 tenant 内 device 能力；tenant-scoped key 不扩大跨 tenant 权限。read-back 重算会抵消 direct upload 的主要价值，且在 10x 时先撞上 verifier 带宽/CPU。诚实保留 tenant 内风险优于用 reservation 自身的 hash 冒充观测值。
+- **S4B 影响**：首个实现提交删除 `StorageFinalizeInput.observedContentHash`，`HEAD` 只提供 `observedByteSize`/`observedContentType`；`object_manifest` 保留 `pending`/`committed`/`delete_pending`/`deleted` 四态，`0003` 不加 `hash_verified`；GC 只依据 tenant-scoped key、manifest、reservation、reference 与 grace/tombstone，不读回重算、不加 checksum fallback。仅当 R2 支持 SHA-256 `FULL_OBJECT`，或产品不再信任 tenant 内配对 device 时，以新 ADR supersede；不预埋双模式。
 
 ---
 
@@ -741,7 +748,7 @@ Object 基本真相（按 D-8 从 S4B 前移）：
 ### S4A.4 Object tests
 
 - same hash duplicate upload idempotent；
-- size/hash/content type mismatch reject；
+- invalid/colliding hash declaration reject；R2 observed size/content type mismatch reject（`HEAD` 不验证摘要）；
 - tenant/resource-bound presign；
 - expired presign；
 - object exists before truth reference——由 `object_manifest.state = committed` 的事务性检查支撑，与 truth 写入同一事务判定，不靠 R2 HEAD 探测；
@@ -777,7 +784,7 @@ Migrations are forward-only additive in this Sprint. Rollback application code c
 
 > **目标**：在 S4A 的数据面之上，建立免费/付费套餐可复用的数值 entitlement、原子 usage/reservation、超限保护、retention/dead-letter 与 R2 GC/reconciliation。
 > **风险等级**：极高；Postgres/R2 跨系统一致性、并发超卖与用户数据删除风险
-> **依赖**：S4A（数据面与 conformance 套件）
+> **依赖**：S4A（数据面与 conformance 套件）+ ADR-024（R2 hash authority，已 `Accepted`）
 > **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）的容量与清理部分
 > **关键路径**：不阻塞 S5 的实现，但**是 Beta 闸的硬依赖**（见 §12）
 
@@ -802,7 +809,7 @@ Storage / quota：
 - `tenant_retention_policy`
 - `cleanup_job` / `gc_cursor`
 
-`object_manifest` 与 `object_reference` 已按 D-8 前移到 S4A.2；S4B 只在其上增列 tombstone/GC 所需的增量字段与索引。**S4B 是容量控制增强，不补数据面基本真相表**——真相表在 S4A 就必须齐备，S4B 负责的是配额、预留、保留期与清理。
+`object_manifest` 与 `object_reference` 已按 D-8 前移到 S4A.2；S4B 只在其上增列 tombstone/GC 所需的增量字段与索引。**S4B 是容量控制增强，不补数据面基本真相表**——真相表在 S4A 就必须齐备，S4B 负责的是配额、预留、保留期与清理。按 D-9，`0003` 不新增 `hash_verified` 字段或验证态，现有四态保持不变。
 
 ### S4B.3 Entitlement 与计量契约
 
@@ -819,7 +826,7 @@ SDK 只接受版本化数值 entitlement，代码里不出现 `free`、`pro`、�
 
 - 100 个并发 reservation 在 limit 边界只有可容纳者成功，绝不超卖；
 - same request/reservation id 幂等；
-- size/hash/content type mismatch reject，且 reserved bytes 释放；
+- invalid/colliding hash declaration、对象缺失或 observed size/content type mismatch reject，且 reserved bytes 释放；不以 read-back/checksum 验证摘要；
 - tenant/resource/reservation-bound presign；
 - expired/aborted reservation；
 - upload succeeded but finalize crashed；
@@ -1309,11 +1316,11 @@ tasks/notes/20260807-<time>-s0-runtime-hardening.notes.md
 
 ---
 
-## 10. Sprint S4A 可投影的 Contract Outline
+## 10. Sprint S4A Contract Outline（已消费）
 
-> **投影前置**：**R2 hash authority 为待做决策，须先形成 ADR**（`docs/researches/s4a-dataplane-design.md` 尚未覆盖该决策）。该决策决定 object 的 hash/size 由谁认定为权威（daemon 声明 vs. R2 HEAD 复核 vs. 二者交叉校验），它同时决定 `object_manifest` 的状态机与 S4A.4 九项 object tests 的断言形状。ADR 未定稿前不得开 S4A contract——否则 schema 一旦发布即难改。
+> **历史前置与后继裁定**：本节曾要求先形成 R2 hash authority ADR；S4A 三刀实际已先行交付，`object_manifest` 四态随 `0002` 冻结。该未闭项现由 D-9 / ADR-024 `Accepted` 收口：daemon 声明是 canonical hash authority，R2 `HEAD` 只观测存在性与 size/content-type。S4B 的 schema/finalize/GC 投影必须服从 D-9，不再阻塞。
 >
-> S4A 按 D-7 切三刀（S4A-a 机制与 cloud ports / S4A-b core 七 port + I4 SQL 侧 / S4A-c R2 adapter + deploy）。下列 outline 是整个 S4A 的合并面，投影时按刀次收窄 `allowed_paths`。
+> S4A 已按 D-7 三刀交付（S4A-a 机制与 cloud ports / S4A-b core 七 port + I4 SQL 侧 / S4A-c R2 adapter + deploy）。下列 outline 作为已消费的历史合并面保留，不是当前 active contract；下一投影面是 S4B。
 
 ### Allowed paths
 
