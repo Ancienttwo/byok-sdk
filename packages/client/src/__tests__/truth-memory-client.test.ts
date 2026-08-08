@@ -87,6 +87,7 @@ describe('truth memory client', () => {
     const client = new TruthMemoryClient({
       serverUrl: 'https://cloud.example',
       signer,
+      allowedObjectDownloadOrigins: [],
       fetch: fetcher as typeof fetch,
       requestId: () => 'read-id',
     });
@@ -113,7 +114,12 @@ describe('truth memory client', () => {
     const signer = new RecordingSigner();
     const one = metadata('memory', 'one', 'one');
     const fetcher = vi.fn(async () => json({ records: [one.record] }));
-    const client = new TruthMemoryClient({ serverUrl: 'https://cloud.example', signer, fetch: fetcher as typeof fetch });
+    const client = new TruthMemoryClient({
+      serverUrl: 'https://cloud.example',
+      signer,
+      allowedObjectDownloadOrigins: [],
+      fetch: fetcher as typeof fetch,
+    });
     await expect(
       client.loadSelected(
         { select: () => [{ kind: 'memory', recordKey: 'missing' }] },
@@ -144,7 +150,12 @@ describe('truth memory client', () => {
         ? json({ records: [listed.record] })
         : json({ ...listed.record, body: { kind: 'inline', content: 'evil' } });
     });
-    const client = new TruthMemoryClient({ serverUrl: 'https://cloud.example', signer, fetch: fetcher as typeof fetch });
+    const client = new TruthMemoryClient({
+      serverUrl: 'https://cloud.example',
+      signer,
+      allowedObjectDownloadOrigins: [],
+      fetch: fetcher as typeof fetch,
+    });
     await expect(
       client.loadSelected(
         { select: () => [{ kind: 'memory', recordKey: 'profile' }] },
@@ -165,7 +176,12 @@ describe('truth memory client', () => {
         ? json({ records: [listed.record] })
         : json({ ...changed.record, body: { kind: 'inline', content: changed.content } });
     });
-    const client = new TruthMemoryClient({ serverUrl: 'https://cloud.example', signer, fetch: fetcher as typeof fetch });
+    const client = new TruthMemoryClient({
+      serverUrl: 'https://cloud.example',
+      signer,
+      allowedObjectDownloadOrigins: [],
+      fetch: fetcher as typeof fetch,
+    });
     await expect(
       client.loadSelected(
         { select: () => [{ kind: 'memory', recordKey: 'profile' }] },
@@ -181,6 +197,7 @@ describe('truth memory client', () => {
     const client = new TruthMemoryClient({
       serverUrl: 'https://cloud.example',
       signer,
+      allowedObjectDownloadOrigins: [],
       fetch: (async () =>
         json({ records: [{ ...listed.record, body: { kind: 'inline', content: listed.content } }] })) as typeof fetch,
     });
@@ -199,7 +216,7 @@ describe('truth memory client', () => {
       updatedAt: NOW,
     };
     const metric = vi.fn();
-    const fetcher = vi.fn(async (input: string | URL | Request) => {
+    const fetcher = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       if (url.pathname === '/byok/records') return json({ records: [record] });
       if (url.pathname.endsWith('/profile/large')) {
@@ -211,6 +228,7 @@ describe('truth memory client', () => {
     const client = new TruthMemoryClient({
       serverUrl: 'https://cloud.example',
       signer,
+      allowedObjectDownloadOrigins: ['https://objects.example'],
       fetch: fetcher as typeof fetch,
       onMetric: metric,
     });
@@ -226,6 +244,62 @@ describe('truth memory client', () => {
       byteSize: content.byteLength,
       thresholdBytes: 1024 * 1024,
     });
+    expect(fetcher.mock.calls[2]?.[1]).toMatchObject({ redirect: 'manual' });
+  });
+
+  it('rejects untrusted object URLs before network access and never follows redirects', async () => {
+    const signer = new RecordingSigner();
+    const content = new TextEncoder().encode('trusted bytes');
+    const record: TruthManifestRecord = {
+      kind: 'memory',
+      recordKey: 'object',
+      rev: 1,
+      contentHash: contentHash(hash(content)),
+      byteSize: content.byteLength,
+      updatedAt: NOW,
+    };
+    let downloadUrl = 'http://169.254.169.254/latest/meta-data';
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (url.pathname === '/byok/records') return json({ records: [record] });
+      if (url.pathname.endsWith('/memory/object')) {
+        return json({ ...record, body: { kind: 'object', downloadUrl } });
+      }
+      if (url.origin === 'https://objects.example') {
+        expect(init?.redirect).toBe('manual');
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'http://169.254.169.254/latest/meta-data' },
+        });
+      }
+      throw new Error(`unexpected object network access ${url}`);
+    });
+    const client = new TruthMemoryClient({
+      serverUrl: 'https://cloud.example',
+      signer,
+      allowedObjectDownloadOrigins: ['https://objects.example'],
+      fetch: fetcher as typeof fetch,
+    });
+    const load = () =>
+      client.loadSelected(
+        { select: () => [{ kind: 'memory', recordKey: 'object' }] },
+        { filter: () => 'must not run' },
+      );
+
+    for (const rejected of [
+      'http://169.254.169.254/latest/meta-data',
+      'javascript:alert(1)',
+      'https://user:password@objects.example/blob',
+      '/byok/blobs/not-explicitly-allowed',
+    ]) {
+      downloadUrl = rejected;
+      await expect(load()).rejects.toMatchObject({ code: 'truth_object_url_rejected' });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(8);
+
+    downloadUrl = 'https://objects.example/blob';
+    await expect(load()).rejects.toMatchObject({ code: 'truth_http_failed', status: 302 });
+    expect(fetcher).toHaveBeenCalledTimes(11);
   });
 
   it('does not turn a broken metric sink into a >1 MiB rejection threshold', async () => {
@@ -251,6 +325,7 @@ describe('truth memory client', () => {
     const client = new TruthMemoryClient({
       serverUrl: 'https://cloud.example',
       signer,
+      allowedObjectDownloadOrigins: ['https://objects.example'],
       fetch: fetcher as typeof fetch,
       onMetric: () => {
         throw new Error('metrics offline');
@@ -274,7 +349,12 @@ describe('truth memory client', () => {
       observedBody = new Uint8Array(init?.body as Uint8Array);
       return json({ primary: responseRecord, snapshots: [] }, { headers: { 'x-byok-replayed': 'true' } });
     });
-    const client = new TruthMemoryClient({ serverUrl: 'https://cloud.example', signer, fetch: fetcher as typeof fetch });
+    const client = new TruthMemoryClient({
+      serverUrl: 'https://cloud.example',
+      signer,
+      allowedObjectDownloadOrigins: [],
+      fetch: fetcher as typeof fetch,
+    });
     const result = await client.writeSnapshot({
       kind: 'memory',
       recordKey: 'profile',
@@ -294,6 +374,81 @@ describe('truth memory client', () => {
       path: '/byok/records/memory/profile',
     });
     expect(signer.requests[0]?.body).toEqual(observedBody);
+  });
+
+  it('rejects write confirmations not bound to the requested primary or ordered snapshot set', async () => {
+    const primarySigner = new RecordingSigner();
+    const primaryClient = new TruthMemoryClient({
+      serverUrl: 'https://cloud.example',
+      signer: primarySigner,
+      allowedObjectDownloadOrigins: [],
+      fetch: (async () =>
+        json(
+          { primary: metadata('memory', 'other', 'remember').record, snapshots: [] },
+          { headers: { 'x-byok-replayed': 'false' } },
+        )) as typeof fetch,
+    });
+    await expect(
+      primaryClient.writeSnapshot({
+        kind: 'memory',
+        recordKey: 'profile',
+        expectedRev: 0,
+        requestId: 'wrong-primary',
+        body: { kind: 'inline', content: 'remember' },
+      }),
+    ).rejects.toMatchObject({ code: 'truth_write_confirmation_mismatch' });
+
+    const batchSigner = new RecordingSigner();
+    const first = metadata('memory', 'one', 'first').record;
+    const second = metadata('profile', 'two', 'second').record;
+    const batchClient = new TruthMemoryClient({
+      serverUrl: 'https://cloud.example',
+      signer: batchSigner,
+      allowedObjectDownloadOrigins: [],
+      fetch: (async () =>
+        json(
+          {
+            primary: metadata('task.terminal', 'task-1', 'terminal').record,
+            snapshots: [second, first],
+          },
+          { headers: { 'x-byok-replayed': 'true' } },
+        )) as typeof fetch,
+    });
+    await expect(
+      batchClient.writeTerminal({
+        taskId: 'task-1',
+        requestId: 'wrong-snapshot-order',
+        body: { kind: 'inline', content: 'terminal' },
+        snapshots: [
+          { kind: 'memory', recordKey: 'one', expectedRev: 0, body: { kind: 'inline', content: 'first' } },
+          { kind: 'profile', recordKey: 'two', expectedRev: 0, body: { kind: 'inline', content: 'second' } },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'truth_write_confirmation_mismatch' });
+  });
+
+  it('rejects duplicate write selectors before signing or sending the request', async () => {
+    const signer = new RecordingSigner();
+    const fetcher = vi.fn();
+    const client = new TruthMemoryClient({
+      serverUrl: 'https://cloud.example',
+      signer,
+      allowedObjectDownloadOrigins: [],
+      fetch: fetcher as typeof fetch,
+    });
+    await expect(
+      client.writeTerminal({
+        taskId: 'task-1',
+        requestId: 'duplicate-write',
+        body: { kind: 'inline', content: 'terminal' },
+        snapshots: [
+          { kind: 'memory', recordKey: 'same', expectedRev: 0, body: { kind: 'inline', content: 'first' } },
+          { kind: 'memory', recordKey: 'same', expectedRev: 0, body: { kind: 'inline', content: 'second' } },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'truth_write_invalid' });
+    expect(signer.requests).toHaveLength(0);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('runs a real stored-key signer through the real cloud verifier and truth routes', async () => {
@@ -338,6 +493,7 @@ describe('truth memory client', () => {
     const client = new TruthMemoryClient({
       serverUrl: 'http://local',
       signer,
+      allowedObjectDownloadOrigins: [],
       fetch: ((input: string | URL | Request, init?: RequestInit) =>
         composition.cloud.fetch(new Request(input, init))) as typeof fetch,
       requestId: () => 'read-e2e',
@@ -366,6 +522,7 @@ describe('truth memory client', () => {
     const client = new TruthMemoryClient({
       serverUrl: 'https://cloud.example',
       signer,
+      allowedObjectDownloadOrigins: [],
       fetch: (async () => json({ error: 'proof_request_conflict' }, { status: 409 })) as typeof fetch,
     });
     const failure = await client

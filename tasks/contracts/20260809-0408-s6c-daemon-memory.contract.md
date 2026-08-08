@@ -15,11 +15,11 @@ Cloud 已能验证 proof 并原子提交 truth，但 daemon 尚无 canonical sig
 
 ## Goal
 
-交付 client-side device proof signer 与 `TruthMemoryClient`：显式 tenant/product/key identity；metadata-only manifest；local selector；selected-only fetch；inline/object byte-size + SHA-256 verification；manifest race fail-closed；local filter 是唯一输出；1 MiB snapshot metric；proof-bound snapshot/terminal write。
+交付 client-side device proof signer 与 `TruthMemoryClient`：显式 tenant/product/key identity；metadata-only manifest；local selector；selected-only fetch；explicit object-origin/redirect boundary；inline/object byte-size + SHA-256 verification；manifest race fail-closed；local filter 是唯一输出；1 MiB snapshot metric；proof-bound snapshot/terminal write 与 request-bound success confirmation。
 
 ## Scope
 
-- In scope: client runtime dependency on core；proof signer；truth HTTP DTO decoding；read/write methods；selector/filter/metric seams；real-cloud E2E；architecture/sprint/ledger sync。
+- In scope: client runtime dependency on core；proof signer；truth HTTP DTO decoding；read/write methods；object grant origin/redirect gate；selector/filter/metric seams；write confirmation binding；real-cloud E2E；architecture/sprint/ledger sync。
 - Out of scope: protocol/schema/migration；cloud semantic merge/ranking；automatic task-loop prompt injection；key rotation；object upload implementation（复用既有 reservation/finalize 后的 hash/size）。
 - Taste: explicit identity, proof-only auth, fail-closed remote parsing/integrity, no compatibility or bearer fallback。
 
@@ -126,7 +126,7 @@ exit_criteria:
 ## Acceptance Notes (Human Review)
 
 - Functional: proof headers work for list/read/write and exact write replay；selector fetches only selected entries。
-- Security: explicit identity, no bearer fallback, remote JSON fail-closed, list/get binding, rehash before filter。
+- Security: explicit identity, no bearer fallback, remote JSON fail-closed, explicit object-origin allowlist with no redirect following, list/get binding, rehash before filter, write receipt bound to the requested primary/ordered snapshots。
 - Reliability: requestId caller-owned for writes；large snapshot metric does not reject or synthesize delta。
 
 ## Rollback Point

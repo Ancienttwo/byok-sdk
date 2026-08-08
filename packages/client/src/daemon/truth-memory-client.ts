@@ -57,6 +57,8 @@ export interface TruthMemoryMetric {
 export interface TruthMemoryClientOptions {
   readonly serverUrl: string;
   readonly signer: DeviceProofSigner;
+  /** Exact http(s) origins permitted to receive object-download grants. An empty list disables object reads. */
+  readonly allowedObjectDownloadOrigins: readonly string[];
   readonly fetch?: typeof globalThis.fetch;
   readonly requestId?: () => string;
   readonly onMetric?: (metric: TruthMemoryMetric) => void;
@@ -97,13 +99,30 @@ export interface TruthWriteResult {
   readonly replayed: boolean;
 }
 
+interface PreparedTransportBody {
+  readonly transport: Record<string, unknown>;
+  readonly contentHash: ContentHash;
+  readonly byteSize: number;
+}
+
+interface ExpectedTruthWrite {
+  readonly kind: TruthRecordKind;
+  readonly recordKey: string;
+  readonly rev: number;
+  readonly contentHash: ContentHash;
+  readonly byteSize: number;
+}
+
 export type TruthMemoryClientErrorCode =
   | 'truth_http_failed'
   | 'truth_response_invalid'
   | 'truth_selection_invalid'
   | 'truth_manifest_changed'
   | 'truth_content_size_mismatch'
-  | 'truth_content_hash_mismatch';
+  | 'truth_content_hash_mismatch'
+  | 'truth_object_url_rejected'
+  | 'truth_write_invalid'
+  | 'truth_write_confirmation_mismatch';
 
 export class TruthMemoryClientError extends Error {
   constructor(
@@ -121,11 +140,15 @@ export class TruthMemoryClient {
   readonly #base: string;
   readonly #fetch: typeof globalThis.fetch;
   readonly #requestId: () => string;
+  readonly #allowedObjectDownloadOrigins: ReadonlySet<string>;
 
   constructor(private readonly options: TruthMemoryClientOptions) {
     this.#base = toHttpBase(options.serverUrl);
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#requestId = options.requestId ?? randomUUID;
+    this.#allowedObjectDownloadOrigins = new Set(
+      options.allowedObjectDownloadOrigins.map(normalizeAllowedObjectDownloadOrigin),
+    );
   }
 
   async listManifest(query: TruthManifestQueryInput = {}): Promise<readonly TruthManifestRecord[]> {
@@ -197,29 +220,56 @@ export class TruthMemoryClient {
   }
 
   async writeSnapshot(input: TruthSnapshotWriteInput): Promise<TruthWriteResult> {
+    const body = prepareTransportBody(input.body);
     return this.#write(input.kind, input.recordKey, input.requestId, {
       expectedRev: input.expectedRev,
-      body: transportBody(input.body),
+      body: body.transport,
       ...(input.label === undefined ? {} : { label: input.label }),
-    });
+    }, {
+      kind: input.kind,
+      recordKey: input.recordKey,
+      rev: nextSnapshotRev(input.expectedRev),
+      contentHash: body.contentHash,
+      byteSize: body.byteSize,
+    }, []);
   }
 
   async writeTerminal(input: TruthTerminalWriteInput): Promise<TruthWriteResult> {
+    const body = prepareTransportBody(input.body);
+    const snapshots = (input.snapshots ?? []).map((snapshot) => {
+      const snapshotBody = prepareTransportBody(snapshot.body);
+      return {
+        payload: {
+          kind: snapshot.kind,
+          recordKey: snapshot.recordKey,
+          expectedRev: snapshot.expectedRev,
+          body: snapshotBody.transport,
+          ...(snapshot.label === undefined ? {} : { label: snapshot.label }),
+        },
+        expected: {
+          kind: snapshot.kind,
+          recordKey: snapshot.recordKey,
+          rev: nextSnapshotRev(snapshot.expectedRev),
+          contentHash: snapshotBody.contentHash,
+          byteSize: snapshotBody.byteSize,
+        } satisfies ExpectedTruthWrite,
+      };
+    });
     return this.#write('task.terminal', input.taskId, input.requestId, {
-      body: transportBody(input.body),
+      body: body.transport,
       ...(input.label === undefined ? {} : { label: input.label }),
       ...(input.snapshots === undefined
         ? {}
         : {
-            snapshots: input.snapshots.map((snapshot) => ({
-              kind: snapshot.kind,
-              recordKey: snapshot.recordKey,
-              expectedRev: snapshot.expectedRev,
-              body: transportBody(snapshot.body),
-              ...(snapshot.label === undefined ? {} : { label: snapshot.label }),
-            })),
+            snapshots: snapshots.map((snapshot) => snapshot.payload),
           }),
-    });
+    }, {
+      kind: 'task.terminal',
+      recordKey: input.taskId,
+      rev: 1,
+      contentHash: body.contentHash,
+      byteSize: body.byteSize,
+    }, snapshots.map((snapshot) => snapshot.expected));
   }
 
   async #write(
@@ -227,7 +277,10 @@ export class TruthMemoryClient {
     recordKey: string,
     requestId: string,
     payload: Record<string, unknown>,
+    expectedPrimary: ExpectedTruthWrite,
+    expectedSnapshots: readonly ExpectedTruthWrite[],
   ): Promise<TruthWriteResult> {
+    assertDistinctExpectedWrites([expectedPrimary, ...expectedSnapshots]);
     const path = recordPath(kind, recordKey);
     const body = new TextEncoder().encode(JSON.stringify(payload));
     const response = await this.#proofFetch(path, {
@@ -250,9 +303,12 @@ export class TruthMemoryClient {
     if (replayed !== 'true' && replayed !== 'false') {
       throw invalidResponse('truth write response has no valid replay marker');
     }
+    const primary = parseMetadata(parsed['primary']);
+    const snapshots = parsed['snapshots'].map((entry) => parseMetadata(entry));
+    assertWriteConfirmation(expectedPrimary, expectedSnapshots, primary, snapshots);
     return {
-      primary: parseMetadata(parsed['primary']),
-      snapshots: parsed['snapshots'].map((entry) => parseMetadata(entry)),
+      primary,
+      snapshots,
       replayed: replayed === 'true',
     };
   }
@@ -288,7 +344,12 @@ export class TruthMemoryClient {
       if (Object.keys(body).some((key) => key !== 'kind' && key !== 'downloadUrl')) {
         throw invalidResponse('object truth body contains unknown fields');
       }
-      const download = await this.#fetch(new URL(body['downloadUrl'], this.#base));
+      const downloadUrl = resolveObjectDownloadUrl(
+        body['downloadUrl'],
+        this.#base,
+        this.#allowedObjectDownloadOrigins,
+      );
+      const download = await this.#fetch(downloadUrl, { redirect: 'manual' });
       if (!download.ok) {
         throw new TruthMemoryClientError(
           'truth_http_failed',
@@ -367,14 +428,131 @@ function recordPath(kind: TruthRecordKind, recordKey: string): string {
   return `/byok/records/${encodeURIComponent(kind)}/${encodeURIComponent(recordKey)}`;
 }
 
-function transportBody(body: TruthWriteBody): Record<string, unknown> {
+function prepareTransportBody(body: TruthWriteBody): PreparedTransportBody {
   if (body.kind === 'inline') {
-    return { kind: 'inline', content: body.content, contentHash: sha256(new TextEncoder().encode(body.content)) };
+    const bytes = new TextEncoder().encode(body.content);
+    const hash = sha256(bytes);
+    return {
+      transport: { kind: 'inline', content: body.content, contentHash: hash },
+      contentHash: hash,
+      byteSize: bytes.byteLength,
+    };
   }
   if (!Number.isSafeInteger(body.byteSize) || body.byteSize < 0) {
-    throw new Error('object truth byteSize must be a non-negative safe integer');
+    throw new TruthMemoryClientError(
+      'truth_write_invalid',
+      'object truth byteSize must be a non-negative safe integer',
+    );
   }
-  return { kind: 'object', contentHash: contentHash(body.contentHash), byteSize: body.byteSize };
+  const hash = contentHash(body.contentHash);
+  return {
+    transport: { kind: 'object', contentHash: hash, byteSize: body.byteSize },
+    contentHash: hash,
+    byteSize: body.byteSize,
+  };
+}
+
+function nextSnapshotRev(expectedRev: number): number {
+  if (!Number.isSafeInteger(expectedRev) || expectedRev < 0 || expectedRev >= Number.MAX_SAFE_INTEGER) {
+    throw new TruthMemoryClientError(
+      'truth_write_invalid',
+      'snapshot expectedRev must be a non-negative safe integer with room for the next revision',
+    );
+  }
+  return expectedRev + 1;
+}
+
+function assertDistinctExpectedWrites(writes: readonly ExpectedTruthWrite[]): void {
+  const seen = new Set<string>();
+  for (const write of writes) {
+    const key = selectorKey(write);
+    if (seen.has(key)) {
+      throw new TruthMemoryClientError(
+        'truth_write_invalid',
+        `truth write contains duplicate ${key}`,
+      );
+    }
+    seen.add(key);
+  }
+}
+
+function assertWriteConfirmation(
+  expectedPrimary: ExpectedTruthWrite,
+  expectedSnapshots: readonly ExpectedTruthWrite[],
+  primary: TruthManifestRecord,
+  snapshots: readonly TruthManifestRecord[],
+): void {
+  if (
+    !sameExpectedWrite(expectedPrimary, primary) ||
+    snapshots.length !== expectedSnapshots.length ||
+    snapshots.some((snapshot, index) => !sameExpectedWrite(expectedSnapshots[index]!, snapshot))
+  ) {
+    throw new TruthMemoryClientError(
+      'truth_write_confirmation_mismatch',
+      'truth write response does not confirm the requested selector, revision, hash, size and snapshot order',
+    );
+  }
+}
+
+function sameExpectedWrite(expected: ExpectedTruthWrite, observed: TruthManifestRecord): boolean {
+  return (
+    expected.kind === observed.kind &&
+    expected.recordKey === observed.recordKey &&
+    expected.rev === observed.rev &&
+    expected.contentHash === observed.contentHash &&
+    expected.byteSize === observed.byteSize
+  );
+}
+
+function normalizeAllowedObjectDownloadOrigin(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new TruthMemoryClientError(
+      'truth_object_url_rejected',
+      `allowed object download origin is not an absolute URL: ${value}`,
+    );
+  }
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    url.pathname !== '/' ||
+    url.search.length > 0 ||
+    url.hash.length > 0
+  ) {
+    throw new TruthMemoryClientError(
+      'truth_object_url_rejected',
+      `allowed object download origin must be an exact credential-free http(s) origin: ${value}`,
+    );
+  }
+  return url.origin;
+}
+
+function resolveObjectDownloadUrl(
+  value: string,
+  base: string,
+  allowedOrigins: ReadonlySet<string>,
+): URL {
+  let url: URL;
+  try {
+    url = new URL(value, base);
+  } catch {
+    throw new TruthMemoryClientError('truth_object_url_rejected', 'truth object download URL is invalid');
+  }
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    !allowedOrigins.has(url.origin)
+  ) {
+    throw new TruthMemoryClientError(
+      'truth_object_url_rejected',
+      'truth object download URL is outside the configured credential-free http(s) origins',
+    );
+  }
+  return url;
 }
 
 function encodeProof(proof: DeviceProofEnvelopeV1): string {

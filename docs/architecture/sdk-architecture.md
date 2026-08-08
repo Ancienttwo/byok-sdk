@@ -1215,9 +1215,9 @@ canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规�
 
 三条路由归类为 `proof`，不接受 bearer-only fallback。capability 只有在 composition 同时供应 atomic `TruthCommitter` 与 content-hash keyed object download authority 时才可声明；标准 InMemory composition 默认不声明，避免把顺序拼接伪装成跨 store atomicity。Postgres production path 在一个 transaction 内完成 receipt、terminal/snapshot precondition、committed manifest 检查、object reference replacement/recount 与 inline logical accounting；同 tenant 同 hash 多 reference 只计一次。
 
-S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回 `(kind, recordKey)`；client 只 fetch 这些 key，并要求 GET metadata 与 selector 所见 manifest 完全一致，再对 inline/object bytes 验 byte size 与 SHA-256。任何 list/get race 或同 size 字节替换都在 local filter 之前 fail-closed。>1 MiB snapshot 只发 metric，不拒绝、不切 delta。filter 的泛型返回值是唯一对外 context，runtime prompt shape 继续由 host 决定。
+S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回 `(kind, recordKey)`；client 只 fetch 这些 key，并要求 GET metadata 与 selector 所见 manifest 完全一致，再对 inline/object bytes 验 byte size 与 SHA-256。object grant 只能访问 host 显式配置的 credential-free HTTP(S) origin，redirect 固定为 `manual`，未列入 allowlist 的 relative/absolute URL 在网络访问前拒绝。任何 list/get race、同 size 字节替换或 grant URL confusion 都在 local filter 之前 fail-closed。>1 MiB snapshot 只发 metric，不拒绝、不切 delta。filter 的泛型返回值是唯一对外 context，runtime prompt shape 继续由 host 决定。
 
-`terminal` body 对 cloud 是 opaque bytes/object ref；client 提供 proof-bound `writeTerminal`，caller/journal 负责选择要提交的 frozen-v1 terminal 来源，cloud 不做第二套 envelope 语义解析，S6-c 也不猜现有 task loop 的 prompt/flush policy。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
+`terminal` body 对 cloud 是 opaque bytes/object ref；client 提供 proof-bound `writeTerminal`，caller/journal 负责选择要提交的 frozen-v1 terminal 来源，cloud 不做第二套 envelope 语义解析，S6-c 也不猜现有 task loop 的 prompt/flush policy。client 将成功 receipt 的 primary 与 ordered snapshots 逐项绑定到请求的 selector、next revision、content hash 与 byte size，结构合法但属于另一请求的 response 不能冒充提交成功。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
 
 #### 12.6.5 Key rotation
 
