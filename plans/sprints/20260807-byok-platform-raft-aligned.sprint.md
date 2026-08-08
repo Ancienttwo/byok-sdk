@@ -1,12 +1,12 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S4A 已交付并合入 `main`，S4B 起为剩余 backlog（见 `## Backlog`）
+> **状态**：Executing。S0–S4A 与 S4B-a 已交付并合入 `main`，S4B-b 起为剩余 backlog（见 `## Backlog`）
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-08（见 D-9）
 > **仓库基线**：`Ancienttwo/byok-sdk@880e69f`（2026-08-08）
-> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）
-> **下一可执行 slice**：**S4B**。R2 hash-authority 前置已由 ADR-024 `Accepted` 解除；S4B 按 D-9 的 finalize/manifest/GC constraints 投影
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）
+> **下一可执行 slice**：**S4B-b**。S4B-a 已完成 finalize authority contract；下一刀只落 reservation-bound cloud surface/presign，GC/migration 留给 S4B-c
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -28,7 +28,7 @@
 
 | # | Status | Task | Mode | Acceptance | Plan |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [ ] | S4B — Quota、Reservation 与 cloud cleanup | contract | §S4B 全部验收项通过，配额拒写与 GC/tombstone 有回归测试 | 待投影 |
+| 1 | [ ] | S4B-b/c — Reservation-bound cloud surface 与 cloud cleanup | contract | §S4B 全部验收项通过，配额拒写与 GC/tombstone 有回归测试 | S4B-a 已交付；b/c 待投影 |
 | 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | 待投影 |
 | 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
 | 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
@@ -788,6 +788,7 @@ Migrations are forward-only additive in this Sprint. Rollback application code c
 > **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）的容量与清理部分
 > **关键路径**：不阻塞 S5 的实现，但**是 Beta 闸的硬依赖**（见 §12）
 > **切片投影**：S4B-a 先落 finalize authority contract（删除 `StorageFinalizeInput.observedContentHash`，两 composition 的 dedupe/accounting 只读 reservation declaration）；S4B-b 落 reservation-bound cloud surface/presign；S4B-c 再以独立 migration contract 落 retention、tombstone、R2 GC/reconcile、metrics/runbook。只有 a/b/c 全闭才算 S4B 交付。
+> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b/c 仍未交付。
 
 ### S4B.1 Stories
 

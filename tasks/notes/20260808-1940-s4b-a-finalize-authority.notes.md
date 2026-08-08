@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260808-1940-s4b-a-finalize-authority.md
 > **Contract**: tasks/contracts/20260808-1940-s4b-a-finalize-authority.contract.md
 > **Review**: tasks/reviews/20260808-1940-s4b-a-finalize-authority.review.md
-> **Last Updated**: 2026-08-08 19:52
+> **Last Updated**: 2026-08-08 19:58
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -42,6 +42,8 @@
 - `git diff --exit-code main -- deploy/sql/ packages/cloud/ packages/protocol/`: pass。
 - `repo-harness run verify-contract --contract tasks/contracts/20260808-1940-s4b-a-finalize-authority.contract.md --strict`: 27/27 pass，contract `Fulfilled`。
 - compose hard env full `pnpm -r run test`: pass；随后 `pnpm -r run build`、`pnpm run check:deploy-sql`、workflow strict、diff check 均 pass。
+- Acceptance Receipt：`external_pass`，findings none；PR #27 以 merge commit `bf228a1` 合入 `main`。
+- CI：planning baseline 与 PR head 两轮合计 32/32 checks pass；Node 20/22 dataplane、macOS/Linux/Windows IPC、Bun/SEA packageability 与 Windows service/Git 全绿。
 
 ## Promotion Filter
 

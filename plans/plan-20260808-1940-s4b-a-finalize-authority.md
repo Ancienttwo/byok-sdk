@@ -124,4 +124,4 @@
 - [x] 删除 `StorageFinalizeInput.observedContentHash`，同步 InMemory/Postgres finalize 与 dedupe/accounting
 - [x] quota conformance 两 composition 全绿；`packages/**` 对 `observedContentHash` 零命中
 - [x] sprint 投影 S4B-a 已交付、b/c 待执行；full hard gate 与 frozen-surface audit 通过
-- [ ] acceptance/PR/CI 合入，归档 workflow 并归还 K-line active-plan
+- [x] acceptance/PR/CI 合入（PR #27，merge `bf228a1`，CI 32/32），归档 workflow 并归还 K-line active-plan
