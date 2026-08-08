@@ -41,7 +41,14 @@ import { eventsHandler } from './handlers/events';
 import { messagesHandler } from './handlers/messages';
 import { CloudRouteRegistry, type RouteDescriptor } from './router/registry';
 import { terminalReceiptKey } from './inbound';
-import type { CloudStores, DeviceRecord, PairingCodeInfo, RequestReceipt, TaskAttempt } from './stores/ports';
+import type {
+  BlobContentProxy,
+  CloudStores,
+  DeviceRecord,
+  PairingCodeInfo,
+  RequestReceipt,
+  TaskAttempt,
+} from './stores/ports';
 import { tenantStoresFor, type CloudRootStores } from './tenant-stores';
 
 /** Matches the reference server's ceiling (§7). */
@@ -56,6 +63,15 @@ export const DEFAULT_EVENTS_PAGE_LIMIT = 50;
 export interface ByokCloudOptions {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
+  /**
+   * Byte proxying for the two `/byok/blobs/:id/content` routes. OPTIONAL, and
+   * absent is a first-class answer: a composition backed by object storage
+   * hands the device a presigned URL to the object store and never carries a
+   * byte, so it has nothing to supply here. Supplying it is necessary but not
+   * sufficient for the routes to exist — the deployment must also declare
+   * `blobs.contentProxy` (ADR-010).
+   */
+  readonly blobContentProxy?: BlobContentProxy;
   readonly crypto: CloudCrypto;
   readonly tokenSigner: TokenSigner;
   readonly clock: Clock;
@@ -159,18 +175,28 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   if (declares(declaration, CLOUD_CAPABILITIES.blobsPresigned)) {
     const blobDeps = {
       ...deviceRouteDeps,
-      blobs: options.cloud.blobs,
       maxBlobSizeBytes: options.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES,
     };
     registry.register({ method: 'POST', path: '/byok/blobs', class: 'device' }, createBlobHandler(blobDeps));
     registry.register({ method: 'GET', path: '/byok/blobs/:id/url', class: 'device' }, blobDownloadUrlHandler(blobDeps));
+  }
+
+  // Byte proxying: BOTH conditions, and neither is inferred from the other.
+  // A deployment that declares `blobs.contentProxy` without supplying a proxy
+  // would over-declare its surface; one that supplies a proxy without
+  // declaring it would serve a route no client is allowed to learn about by
+  // any means other than probing, which is exactly what ADR-010 forbids. There
+  // is no third state: a composition either carries bytes or it does not.
+  const contentProxy = options.blobContentProxy;
+  if (contentProxy !== undefined && declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) {
+    const contentDeps = { contentProxy };
     registry.register(
       { method: 'PUT', path: '/byok/blobs/:id/content', class: 'presigned' },
-      blobUploadContentHandler(blobDeps),
+      blobUploadContentHandler(contentDeps),
     );
     registry.register(
       { method: 'GET', path: '/byok/blobs/:id/content', class: 'presigned' },
-      blobDownloadContentHandler(blobDeps),
+      blobDownloadContentHandler(contentDeps),
     );
   }
 

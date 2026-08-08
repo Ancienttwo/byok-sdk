@@ -154,11 +154,25 @@ describe('tenant plumbing', () => {
     expect(facade.match(/const tenant =/g)).toHaveLength(1);
   });
 
-  it('keeps the three pre-tenant store methods off the facade', () => {
+  it('keeps every pre-tenant method off the facade, port or proxy', () => {
+    // Two of these are the documented pre-tenant exceptions on `CloudStores`;
+    // the other three are `BlobContentProxy`, which is not a port at all and
+    // must be no more reachable from a handler than they are.
     const facade = shipped('tenant-stores.ts');
     for (const method of ['resolveByDeviceId', 'redeem(', 'verifySignedUrl', 'writeContent', 'readContent']) {
       expect(facade, method).not.toContain(method);
     }
+  });
+
+  it('never lets a byte proxy onto the port bundle', () => {
+    // The whole point of the split: `CloudStores` stays all-or-nothing, and
+    // "this composition cannot carry bytes" is expressed by the proxy being
+    // absent from `createByokCloud`'s options — not by a tenth port, and not by
+    // three methods that throw.
+    const ports = shipped('stores/ports.ts');
+    const bundle = ports.slice(ports.indexOf('export interface CloudStores {'));
+    expect(bundle).not.toContain('BlobContentProxy');
+    expect(bundle).not.toContain('contentProxy');
   });
 
   it('reaches the pre-tenant device lookup from the auth plane only', () => {

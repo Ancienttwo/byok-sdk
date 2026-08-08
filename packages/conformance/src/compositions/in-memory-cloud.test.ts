@@ -13,7 +13,7 @@ import { runCloudConformance, type CloudCompositionFactory } from '../cloud/harn
 const inMemoryFactory: CloudCompositionFactory = {
   create() {
     const clock = createMutableClock();
-    const stores = createInMemoryCloudStores(clock, createWebCrypto());
+    const { stores } = createInMemoryCloudStores(clock, createWebCrypto());
     return {
       // Exactly the certified ports, in `CLOUD_CONFORMANCE_PORTS` order: the
       // suite asserts the key set, so a composition cannot quietly hand over
