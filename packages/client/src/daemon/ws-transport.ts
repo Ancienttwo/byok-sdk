@@ -68,6 +68,8 @@ export interface WsTransportOptions {
   onConnectOutcome?: (acked: boolean, err?: unknown) => void;
   backoff?: BackoffOptions;
   liveness?: LivenessOptions;
+  /** Deterministic automatic reconnect delay. Manual `connect({auto:false})` never reaches this scheduler. */
+  reconnectDelayMs?: (attempt: number, baseDelayMs: number) => number;
 }
 
 /**
@@ -188,7 +190,6 @@ export class WsTransport {
     this.startLivenessCheck(socket);
 
     socket.on('open', () => {
-      this.reconnectAttempt = 0;
       const hello = createEnvelope('conn.hello', {
         protocolVersions: [PROTOCOL_VERSION],
         capabilities: this.opts.capabilities,
@@ -214,6 +215,7 @@ export class WsTransport {
         return; // unparsable or unknown-type frame — ignore for forward-compat
       }
       if (envelope.type === 'conn.ack') {
+        this.reconnectAttempt = 0;
         this.acked = true;
         this.everAckedThisAttempt = true;
         this.opts.onStateChange?.('open');
@@ -248,7 +250,7 @@ export class WsTransport {
   private scheduleReconnect(): void {
     const { baseMs = 1000, maxMs = 30_000, factor = 2 } = this.opts.backoff ?? {};
     const delay = Math.min(maxMs, baseMs * factor ** this.reconnectAttempt);
-    const jitter = delay * (0.8 + Math.random() * 0.4);
+    const jitter = this.opts.reconnectDelayMs?.(this.reconnectAttempt, delay) ?? delay;
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => void this.openSocket(), jitter);
   }

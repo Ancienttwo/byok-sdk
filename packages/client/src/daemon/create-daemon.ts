@@ -23,6 +23,8 @@ import {
   type ShutdownReason,
 } from './control-protocol';
 import { ConnectionManager } from './connection-manager';
+import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
+import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
@@ -288,6 +290,8 @@ export interface DaemonStatus {
   activeTaskCount: number;
   /** Passthrough of `DaemonConfig.branding` — `undefined` when the product configured none. See `DaemonBranding`. */
   branding?: DaemonBranding;
+  /** Local lifecycle/retry budget, separate from transport fallback state. */
+  operationalHealth: OperationalHealthSnapshot;
 }
 
 export interface Daemon {
@@ -560,6 +564,9 @@ export function createDaemonWithAdapters(
 
   const storeDir = config.storeDir ?? DeviceStore.defaultDir(config.productId);
   const store = new DeviceStore(storeDir);
+  const operationalHealth = new OperationalHealthTracker(storeDir);
+  let fleetJitter: FleetJitter | undefined;
+  let maintenanceSequence = 0;
   const cursorStore = new CursorStore(storeDir);
   const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
@@ -632,6 +639,23 @@ export function createDaemonWithAdapters(
           executor: createFilesystemCleanupExecutor(
             ownedJournal ? { pruneJournalTask: (taskId) => ownedJournal.pruneConfirmedJournalTask(taskId) } : {},
           ),
+          timers: {
+            setInterval: (handler, baseMs) => {
+              if (!fleetJitter) throw new Error('maintenance scheduler started before device identity was loaded');
+              const timer = setInterval(handler, fleetJitter.delay('maintenance', maintenanceSequence++, baseMs));
+              timer.unref?.();
+              return timer;
+            },
+            clearInterval: (handle) => clearInterval(handle as NodeJS.Timeout),
+          },
+          onMaintenanceOutcome: (outcome) => {
+            const write = outcome === 'success'
+              ? operationalHealth.recordSuccess('maintenance')
+              : operationalHealth.recordFailure('maintenance');
+            void write.catch((err: unknown) => {
+              console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
+            });
+          },
           onEvent: (event) => {
             if (event.kind !== 'state-changed') return;
             // §12.7.2.1's "发出告警", on the operator-facing channel this file
@@ -772,6 +796,7 @@ export function createDaemonWithAdapters(
     if (!record) {
       throw new Error('device is not paired yet; call pair(pairingCode) first');
     }
+    fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
     // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own
     // doc comment above — a configured ceiling `workspaceRoot` is merged
@@ -860,6 +885,11 @@ export function createDaemonWithAdapters(
       );
       controlServerHandle = undefined;
     }
+    // The run marker begins only after this process has passed the daemon's
+    // existing single-owner bind check. Writing it before that check would let
+    // a rejected second process overwrite the live daemon's marker and create
+    // a false crash record on the next restart.
+    await operationalHealth.startRun();
 
     if (gitWorkspaceManager) {
       await gitWorkspaceManager.preflight();
@@ -1079,6 +1109,15 @@ export function createDaemonWithAdapters(
       wsRetryIntervalMs: overrides.longPoll?.wsRetryIntervalMs,
       longPollRetryDelayMs: overrides.longPoll?.retryDelayMs,
       longPollIdleDelayMs: overrides.longPoll?.idleDelayMs,
+      fleetJitter,
+      onOperationalOutcome: (outcome, source) => {
+        const write = outcome === 'success'
+          ? operationalHealth.recordSuccess(source)
+          : operationalHealth.recordFailure(source);
+        void write.catch((err: unknown) => {
+          console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      },
     });
     await connection.start();
     await connection.waitForAck();
@@ -1134,7 +1173,7 @@ export function createDaemonWithAdapters(
     // daemon constructed; an injected one belongs to its injector, exactly like
     // an injected journal is not closed here. Idempotent, like every other step
     // in this sequence.
-    ownedPressureEngine?.stop();
+    const maintenanceStopped = ownedPressureEngine?.stop();
     runner?.stopAcceptingOffers();
     const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
@@ -1146,6 +1185,11 @@ export function createDaemonWithAdapters(
     // idle — is what keeps that fail from being written into an outbox nobody
     // is draining any more. Exactly a no-op when no journal is configured.
     if (journal) await journalTerminalTail;
+    // stop() cleared the maintenance timer synchronously above. Await the pass
+    // that may already have been inside SQLite only here, immediately before
+    // closing the owned journal, so task interruption is not held behind a
+    // slow checkpoint while the journal-close race remains impossible.
+    await maintenanceStopped;
     // S3b: and only THEN release the handle — after the last terminal write
     // has actually landed, or the write it was still holding would fail
     // against a closed database. Only the journal THIS daemon constructed,
@@ -1172,6 +1216,7 @@ export function createDaemonWithAdapters(
     // through, so nothing else needs its own control-socket teardown logic.
     await controlServerHandle?.close();
     controlServerHandle = undefined;
+    await operationalHealth.markCleanStop();
   }
 
   /**
@@ -1308,6 +1353,7 @@ export function createDaemonWithAdapters(
       // surface that conflates them is how an operator concludes a full disk is
       // fine.
       ...(storageStatus === undefined ? {} : { storage: storageStatus }),
+      operationalHealth: operationalHealth.snapshot(),
     };
   }
 
@@ -1449,6 +1495,7 @@ export function createDaemonWithAdapters(
       deviceId: auth.deviceId,
       activeTaskCount: runner?.activeTaskCount ?? 0,
       branding: config.branding,
+      operationalHealth: operationalHealth.snapshot(),
     };
   }
 

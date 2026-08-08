@@ -261,6 +261,14 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
     `live-paired: ${live.paired ? 'yes' : 'no'}${live.deviceId ? ` deviceId=${live.deviceId}` : ''}`,
     `live-runtimes: ${live.runtimeIds.length ? live.runtimeIds.join(',') : '(none)'}`,
   ];
+  const health = live.operationalHealth;
+  if (health.availability === 'unavailable') {
+    lines.push(`live-operational-health: unavailable reason=${quote(health.reason)}`);
+  } else {
+    lines.push(
+      `live-operational-health: state=${health.state} failures=${health.failureCount}/${health.failureThreshold} windowMs=${health.windowMs} crashes=${health.crashCount}${health.lastCrashAt ? ` lastCrashAt=${health.lastCrashAt}` : ''}`,
+    );
+  }
   if (live.activeTasks.length === 0) {
     lines.push('live-active-tasks: (none)');
   } else {

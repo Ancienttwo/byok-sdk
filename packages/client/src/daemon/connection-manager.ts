@@ -1,6 +1,7 @@
 import { MAX_MESSAGES_PER_BATCH, type CapabilityFlag, type Envelope, type RuntimeInfo } from '@byok/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import type { CursorStore } from './cursor-store';
+import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { LongPollClient } from './long-poll-transport';
 import {
   WsTransport,
@@ -42,6 +43,8 @@ export interface ConnectionManagerOptions {
   longPollRetryDelayMs?: number;
   /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
   longPollIdleDelayMs?: number;
+  fleetJitter?: FleetJitter;
+  onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
 }
 
 /**
@@ -62,11 +65,14 @@ export interface ConnectionManagerOptions {
  * queued envelope. See `drainOutbox`.
  */
 export class ConnectionManager {
+  private readonly fleetJitter: FleetJitter;
   private readonly ws: WsTransport;
   private readonly longPoll: LongPollClient;
   private mode: 'ws' | 'long-poll' = 'ws';
   private consecutiveFailures = 0;
   private wsRetryTimer: ReturnType<typeof setInterval> | undefined;
+  private wsProbeSequence = 0;
+  private uploadRetryAttempt = 0;
   private cursor: number | undefined;
   /**
    * Finding F3 (at-most-once redelivery): the lowest `task.*` envelope `seq`
@@ -197,6 +203,7 @@ export class ConnectionManager {
   private serverCapabilities: string[] = [];
 
   constructor(private readonly opts: ConnectionManagerOptions) {
+    this.fleetJitter = opts.fleetJitter ?? createFleetJitter(opts.productId, opts.deviceId);
     this.ws = new WsTransport({
       serverUrl: opts.serverUrl,
       getToken: () => opts.auth.getValidAccessToken(),
@@ -213,6 +220,7 @@ export class ConnectionManager {
       onConnectOutcome: (acked, err) => this.onWsOutcome(acked, err),
       backoff: opts.backoff,
       liveness: opts.liveness,
+      reconnectDelayMs: (attempt, baseMs) => this.fleetJitter.delay('reconnect', attempt, baseMs),
     });
 
     this.longPoll = new LongPollClient({
@@ -245,6 +253,8 @@ export class ConnectionManager {
       // on `isStalled`.
       isStalled: () => this.stalledAtSeq !== undefined,
       retryDelayMs: opts.longPollRetryDelayMs,
+      retryDelayForAttempt: (attempt, baseMs) => this.fleetJitter.delay('reconnect', attempt, baseMs),
+      onOperationalOutcome: (outcome) => opts.onOperationalOutcome?.(outcome, 'reconnect'),
       idleDelayMs: opts.longPollIdleDelayMs,
     });
   }
@@ -324,7 +334,13 @@ export class ConnectionManager {
         } finally {
           this.inFlightBatchSize = 0;
         }
-        if (ok) continue; // loop back around — more may be queued, or the next chunk still needs sending
+        if (ok) {
+          this.uploadRetryAttempt = 0;
+          this.opts.onOperationalOutcome?.('success', 'upload');
+          continue;
+        }
+
+        this.opts.onOperationalOutcome?.('failure', 'upload');
 
         this.outbox.unshift(...batch); // retry, preserving order — same objects, same ids (finding F1)
         // Finding P3: a revoked device can never recover without a fresh
@@ -335,7 +351,8 @@ export class ConnectionManager {
         // the time `ok` is `false` for that reason, so this check catches
         // it on the very next iteration rather than sleeping first.
         if (this.stopped || this.revoked) return;
-        await this.drainRetryDelay(this.opts.longPollRetryDelayMs ?? 2000);
+        const baseMs = this.opts.longPollRetryDelayMs ?? 2000;
+        await this.drainRetryDelay(this.fleetJitter.delay('upload', this.uploadRetryAttempt++, baseMs));
       }
     } finally {
       this.draining = false;
@@ -776,6 +793,7 @@ export class ConnectionManager {
     this.serverCapabilities = capabilities;
     this.consecutiveFailures = 0;
     this.notifySettled();
+    this.opts.onOperationalOutcome?.('success', 'reconnect');
     if (this.mode === 'long-poll') this.exitLongPoll();
     void this.drainOutbox(); // Design B: pick up anything queued while WS was (re)connecting
   }
@@ -807,6 +825,7 @@ export class ConnectionManager {
     // long-poll the moment that happened, so there's nothing left to do.
     if (acked) return;
 
+    this.opts.onOperationalOutcome?.('failure', 'reconnect');
     this.consecutiveFailures += 1;
     if (this.mode === 'ws' && this.consecutiveFailures >= (this.opts.wsFailureThreshold ?? 3)) {
       this.enterLongPoll();
@@ -831,12 +850,7 @@ export class ConnectionManager {
     this.notifySettled();
     void this.drainOutbox(); // Design B: anything already queued now drains over the freshly-started long-poll POST path
 
-    const intervalMs = this.opts.wsRetryIntervalMs ?? 5 * 60 * 1000;
-    const timer = setInterval(() => {
-      if (!this.stopped) this.ws.connect({ auto: false });
-    }, intervalMs);
-    timer.unref?.();
-    this.wsRetryTimer = timer;
+    this.scheduleWsProbe();
   }
 
   private exitLongPoll(): void {
@@ -849,6 +863,19 @@ export class ConnectionManager {
     this.consecutiveFailures = 0;
     this.ws.resumeAutoReconnect();
     void this.drainOutbox(); // Design B: anything still queued from long-poll now drains over WS
+  }
+
+  private scheduleWsProbe(): void {
+    const baseMs = this.opts.wsRetryIntervalMs ?? 5 * 60 * 1000;
+    const delayMs = this.fleetJitter.delay('reconnect', this.wsProbeSequence++, baseMs);
+    const timer = setTimeout(() => {
+      this.wsRetryTimer = undefined;
+      if (this.stopped || this.revoked || this.mode !== 'long-poll') return;
+      this.ws.connect({ auto: false });
+      this.scheduleWsProbe();
+    }, delayMs);
+    timer.unref?.();
+    this.wsRetryTimer = timer;
   }
 
   private enterRevoked(): void {

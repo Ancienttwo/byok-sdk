@@ -73,6 +73,55 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
 
+it.skipIf(!isSqliteAvailable())('serializes scheduled maintenance and stop waits for the in-flight pass before journal close', async () => {
+  const storeDir = await tmpDir('byok-pressure-scheduler-barrier-');
+  const journal = new SqliteLocalTaskJournal({ storeDir });
+  const realMeasureUsage = journal.measureUsage.bind(journal);
+  let releaseMeasure: (() => void) | undefined;
+  const measureGate = new Promise<void>((resolve) => {
+    releaseMeasure = resolve;
+  });
+  const measureSpy = vi.spyOn(journal, 'measureUsage').mockImplementation(async () => {
+    await measureGate;
+    return realMeasureUsage();
+  });
+  let scheduled: (() => void) | undefined;
+  const clearInterval = vi.fn();
+  const outcomes: string[] = [];
+  const engine = new LocalStoragePressureEngine({
+    policy: freeDrivenPolicy(),
+    journal,
+    freeBytesProvider: () => ROOMY_FREE_BYTES,
+    onMaintenanceOutcome: (outcome) => outcomes.push(outcome),
+    timers: {
+      setInterval: (handler) => {
+        scheduled = handler;
+        return 'maintenance-timer';
+      },
+      clearInterval,
+    },
+  });
+
+  engine.start();
+  scheduled?.();
+  scheduled?.();
+  await Promise.resolve();
+  expect(measureSpy).toHaveBeenCalledOnce();
+
+  let stopSettled = false;
+  const stop = engine.stop().then(() => {
+    stopSettled = true;
+  });
+  await Promise.resolve();
+  expect(stopSettled).toBe(false);
+  expect(clearInterval).toHaveBeenCalledWith('maintenance-timer');
+
+  releaseMeasure?.();
+  await stop;
+  expect(outcomes).toEqual(['success']);
+  await journal.close();
+});
+
 function offerRecord(taskId: string, seq: number): ReceivedEnvelopeRecord {
   const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer', task_id: taskId, seq });
   return {

@@ -87,8 +87,8 @@
 
 ## Task Breakdown
 
-- [ ] Implement and freeze domain-separated deterministic jitter。
-- [ ] Replace automatic WS/long-poll/outbox/maintenance retry timing and prove manual retry remains immediate。
-- [ ] Implement atomic health window、crash budget、run marker and bounded crash history。
-- [ ] Project operational health through daemon/control/CLI status。
+- [x] Implement and freeze domain-separated deterministic jitter。
+- [x] Replace automatic WS/long-poll/outbox/maintenance retry timing and prove manual retry remains immediate。
+- [x] Implement atomic health window、crash budget、run marker and bounded crash history。
+- [x] Project operational health through daemon/control/CLI status。
 - [ ] Run fleet/crash drills、hard gates、independent Codex acceptance、PR CI and merge/readback。
