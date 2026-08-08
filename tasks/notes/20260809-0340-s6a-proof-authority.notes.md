@@ -22,4 +22,4 @@
 - Fresh workspace: build passed; typecheck passed; hard-env test passed (core 112, keys 330, protocol 189, cloud 125, server 217, client 935, conformance 117, cloud-postgres 189).
 - `repo-harness run check-task-workflow --strict`: pass.
 - `packages/protocol/**`: zero diff.
-- Pending: independent Codex security review, receipt, PR/CI/merge/readback.
+- Closed: full-stack independent Codex security review accepted；PR #34 passed 32/32 CI and merged as `3bc3e744791d7d457acecb2b16b1abeafbb47582`。

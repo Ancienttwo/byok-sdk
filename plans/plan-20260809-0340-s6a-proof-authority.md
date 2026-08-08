@@ -1,6 +1,6 @@
 # Plan: S6-a Device Proof Authority
 
-> **Status**: Executing
+> **Status**: Done
 > **Created**: 20260809-0340
 > **Slug**: s6a-proof-authority
 > **Artifact Level**: work-package
@@ -72,4 +72,4 @@
 - [x] Add device proof key authority and dedicated receipt schema/adapters.
 - [x] Add byte-exact WebCrypto verifier and request/row/time binding.
 - [x] Prove core cross-runtime golden and I3 adversarial matrix.
-- [x] Run hard gates, obtain full-stack independent Codex security acceptance, and deliver Draft PR #34 with 32/32 CI；merge/readback由 stacked closeout 执行。
+- [x] Run hard gates, obtain full-stack independent Codex security acceptance, deliver PR #34 with 32/32 CI, and merge/read back as `3bc3e744791d7d457acecb2b16b1abeafbb47582`。
