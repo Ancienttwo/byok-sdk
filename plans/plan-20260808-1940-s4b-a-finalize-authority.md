@@ -120,8 +120,8 @@
 
 ## Task Breakdown
 
-- [ ] 建立/批准 contract worktree，切到 `codex/s4b-a-finalize-authority`
-- [ ] 删除 `StorageFinalizeInput.observedContentHash`，同步 InMemory/Postgres finalize 与 dedupe/accounting
-- [ ] quota conformance 两 composition 全绿；`packages/**` 对 `observedContentHash` 零命中
+- [x] 建立/批准 contract worktree，切到 `codex/s4b-a-finalize-authority`
+- [x] 删除 `StorageFinalizeInput.observedContentHash`，同步 InMemory/Postgres finalize 与 dedupe/accounting
+- [x] quota conformance 两 composition 全绿；`packages/**` 对 `observedContentHash` 零命中
 - [ ] sprint 投影 S4B-a 已交付、b/c 待执行；full hard gate 与 frozen-surface audit 通过
 - [ ] acceptance/PR/CI 合入，归档 workflow 并归还 K-line active-plan

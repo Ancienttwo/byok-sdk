@@ -4,12 +4,15 @@
 > **Plan**: plans/plan-20260808-1940-s4b-a-finalize-authority.md
 > **Contract**: tasks/contracts/20260808-1940-s4b-a-finalize-authority.contract.md
 > **Review**: tasks/reviews/20260808-1940-s4b-a-finalize-authority.review.md
-> **Last Updated**: 2026-08-08 19:43
+> **Last Updated**: 2026-08-08 19:49
 > **Lifecycle**: notes
 
 ## Design Decisions
 
-- ...
+- `StorageFinalizeInput` 只保留 R2 `HEAD` 实际能提供的 `observedByteSize` 与 `observedContentType`。Hash authority 不重新进入 finalize input；它留在通过认证的 daemon 建立的 reservation declaration。
+- InMemory dedupe 显式改读 `reservation.contentHash`；Postgres SQL 原本已在 guarded transition 内比较 reservation rows 的 `content_hash`，只删除伪 observation guard，不改 transaction shape。
+- `0002_core_domain.sql` 保持 immutable；按 `database-migrations` skill 的 forward-only 规则，本刀不创建空壳 `0003`。S4B-c 才以独立 migration contract 增加 retention/cleanup schema。
+- S4B 显式拆为 a/b/c：a 是 authority contract，b 是 reservation-bound cloud surface/presign，c 是 migration/GC/reconcile/metrics。a 不冒充完整 S4B。
 
 ## Deviations From Plan Or Spec
 
@@ -19,7 +22,8 @@
 
 | Option | Decision | Reason |
 |--------|----------|--------|
-| ... | ... | ... |
+| Optional/deprecated `observedContentHash` | Rejected | 没有 wire migration window；optional 字段会保留第二个 hash authority 与 steady-state compatibility path。 |
+| 本刀连做 `0003` / GC | Rejected | ListObjects paging、tombstone crash matrix 与删除安全需要独立高风险验收面。 |
 
 ## Open Questions
 
@@ -29,6 +33,13 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
+- CodeGraph trace: `StorageFinalizeInput` → InMemory/Postgres `finalizeReservation` → `runQuotaConformance`; R2 `HeadResult` 只有 present/size/type。
+- `pnpm -r run build`: pass。
+- `pnpm -r run typecheck`: pass。
+- InMemory core conformance: 2 files / 107 tests pass。
+- Postgres dataplane targeted run: 9 files / 162 tests pass（含 core conformance 与 quota concurrency）。
+- `rg -n observedContentHash packages`: zero match。
+- `git diff --exit-code main -- deploy/sql/ packages/cloud/ packages/protocol/`: pass。
 
 ## Promotion Filter
 
