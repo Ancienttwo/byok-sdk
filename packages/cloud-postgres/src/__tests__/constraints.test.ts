@@ -206,13 +206,22 @@ describe('dependency boundaries', () => {
     expect(ALL_SOURCES.some((file) => file.path === SCANNER)).toBe(true);
   });
 
-  it('imports nothing outside core, cloud, pg, aws4fetch, and node builtins', () => {
+  it('imports nothing outside core, cloud, pg, aws4fetch, fast-xml-parser, and node builtins', () => {
     // `aws4fetch` is a single-file WebCrypto SigV4 signer, chosen over
     // `@aws-sdk/client-s3` for five actions' worth of need: a hundred
     // transitive packages is the smaller half of the objection, and the AWS
     // SDK's ambient credential provider chain — an authorization source nobody
     // configured — is the larger one (design §3).
-    const allowed = new Set(['@byok/core', '@byok/cloud', 'pg', 'aws4fetch']);
+    // ListObjectsV2 is the one S4B-c surface aws4fetch does not decode. The
+    // dedicated XML dependency keeps pagination fail-closed without replacing
+    // the signer or importing the AWS SDK credential-provider graph.
+    const allowed = new Set([
+      '@byok/core',
+      '@byok/cloud',
+      'pg',
+      'aws4fetch',
+      'fast-xml-parser',
+    ]);
     for (const file of SHIPPED) {
       for (const [, specifier] of code(file.text).matchAll(/from\s+'([^']+)'/g)) {
         if (specifier === undefined) continue;

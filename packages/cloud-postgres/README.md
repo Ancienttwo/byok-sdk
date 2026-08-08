@@ -5,13 +5,15 @@ implementations of **all nine cloud-local store ports and all seven `@byok/core`
 ports**, the R2/S3 object adapter that backs the blob port, and the forward-only
 migration runner that creates the tables they read.
 
-Two compositions ship from here. `createPostgresCloudStores` supplies the full
+Three compositions ship from here. `createPostgresCloudStores` supplies the full
 `CloudStores` bundle (`devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
 `receipts`, `sequence`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
 supplies the full `CoreStores` bundle (`mailbox`, `board`, `truth`, `presence`,
 `activity`, `objects`, `quota`). Both return every port rather than a subset,
 because the conformance suites certify a composition as a whole — there is no
-partial bundle for them to run.
+partial bundle for them to run. `createPostgresCloudMaintenance` is the third,
+host-only operational composition; it is deliberately outside both port
+inventories.
 
 Two of those nine are not tables. `rateLimiter` is the allow-all reference and
 gets no table by design: persisting an allow-all would be a table that is always
@@ -44,8 +46,23 @@ Two consequences worth stating outright:
 `x-amz-checksum-sha256` is deliberately not signed. MinIO honors it, but R2's S3
 compatibility table implements SHA-256 as `COMPOSITE` only — not the
 `FULL_OBJECT` type a single-shot PutObject uses — so signing it would mint URLs
-that pass against the test substrate and fail in production. The `HEAD`
-re-verification was never conditional on it.
+that pass against the test substrate and fail in production. `HEAD` only
+observes existence, size and content type; it never verifies SHA-256.
+
+## Cleanup maintenance
+
+`createPostgresCloudMaintenance` builds the separate host-operations
+composition. It intentionally does not add methods to the conformance-certified
+`CloudBlobStore`: LIST/HEAD/DELETE, retention policy, dead-letter replay and
+usage rebuild are host operations, not device blob capabilities.
+
+The host calls `runTenant(tenant, jobId)` from its scheduler. Postgres stores the
+job/cursor readback, eligible objects are tombstoned before R2 DELETE, and
+manifest plus usage settle once after deletion. An R2 key without a manifest is
+first recorded as a pending witness and waits the tenant's orphan grace; it is
+never deleted from a single LIST observation. See
+`deploy/runbooks/cloud-cleanup.md` for metrics, alerts, replay/discard,
+crash recovery and rollback.
 
 `@byok/cloud` is a stateless handler package — it serves the frozen v1 device
 wire contract over ports and owns no storage. This package is one composition of
@@ -54,8 +71,9 @@ those ports. It sits here rather than inside `@byok/cloud` for two reasons: a
 and `@byok/cloud` stay loadable on Workers precisely because `pg` never enters
 their dependency graph.
 
-Dependency direction is one-way: `cloud-postgres → core + cloud + pg`. Nothing
-depends back on it.
+Dependency direction is one-way: `cloud-postgres → core + cloud + pg +` the
+explicit S3 signer/XML parser. Nothing depends back on it; no ambient AWS
+credential-provider chain is installed.
 
 ## Migrations
 
@@ -68,7 +86,7 @@ import { createByokPool, migrate } from '@byok/cloud-postgres';
 
 const pool = createByokPool({ connectionString: process.env.DATABASE_URL! });
 const result = await migrate(pool, '/path/to/deploy/sql');
-console.log(result.applied); // e.g. ['0001_cloud_local.sql', '0002_core_domain.sql']
+console.log(result.applied); // e.g. ['0001_cloud_local.sql', '0002_core_domain.sql', '0003_cloud_cleanup.sql']
 ```
 
 The runner:

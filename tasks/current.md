@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-08T21:35:57+0800 -->
+<!-- updated_at: 2026-08-09T00:08:54+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Active
-> **Updated At**: 2026-08-08T21:35:57+0800
-> **Source Branch**: main
-> **Source Commit**: 4f33928
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-09T00:08:54+0800
+> **Source Branch**: codex/s4b-c-cloud-cleanup
+> **Source Commit**: 4aafc82
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: manual
+> **Reason**: ensure-task-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Active
-- Active Plan: plans/plan-20260805-1659-byok-keys-package.md
-- Plan Status: Executing
-- Next Task: K4 Swap back into aip-main-open: diff baseline `c6a5385..HEAD` for drift, publish `@byok/keys`, delete the ported code, switch to the npm dependency, convert the two `instanceof LocalExecutionError` sites (`settings.ts:358`, `providers.ts:1673-1677`) to structured code detection, and require `apps/local-agent/src/settings.test.ts` (`:313-318`) to pass unchanged
-- Clear Note: (none)
+- Status: ManualClearedWithActiveWork
+- Active Plan: plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
+- Plan Status: Approved
+- Next Task: 新增 additive `0003` 与 catalog/order invariants
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,8 +31,10 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- .: plans/plan-20260805-1659-byok-keys-package.md
-- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
+- .: plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup
+- /Users/ancienttwo/Projects/byok-sdk: plans/plan-20260805-1659-byok-keys-package.md
+- /Users/ancienttwo/Projects/byok-sdk: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -41,18 +43,22 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: K4 Swap back into aip-main-open: diff baseline `c6a5385..HEAD` for drift, publish `@byok/keys`, delete the ported code, switch to the npm dependency, convert the two `instanceof LocalExecutionError` sites (`settings.ts:358`, `providers.ts:1673-1677`) to structured code detection, and require `apps/local-agent/src/settings.test.ts` (`:313-318`) to pass unchanged
+- Exact Next Step: (none)
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: clean
+- Summary: 5 changed/untracked path(s)
 
 ```
-(none)
+?? docs/researches/s4b-c-cleanup-design.md
+?? plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
+?? tasks/contracts/20260809-0001-s4b-c-cloud-cleanup.contract.md
+?? tasks/notes/20260809-0001-s4b-c-cloud-cleanup.notes.md
+?? tasks/reviews/20260809-0001-s4b-c-cloud-cleanup.review.md
 ```
 
 ## Source Artifacts

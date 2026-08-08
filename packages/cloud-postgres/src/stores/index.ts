@@ -48,8 +48,16 @@ export {
   R2_BLOB_ERROR_CODES,
   R2BlobStoreError,
   R2CloudBlobStore,
+  R2ObjectMaintenanceStore,
 } from './r2-blobs';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './r2-blobs';
+export type {
+  R2DeleteResult,
+  R2ListedObject,
+  R2ObjectMaintenance,
+  R2ObjectMaintenanceOptions,
+  R2ObjectPage,
+} from './r2-blobs';
 
 /** Every cloud-local port. All nine, or it is not a composition. */
 export type PostgresCloudStores = CloudStores;

@@ -283,6 +283,21 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     });
   });
 
+  it('never reissues a PUT after the GC tombstone wins the reservation race', async () => {
+    await withObjects(async ({ blobs, objects }) => {
+      const item = await content('tombstoned bytes');
+      const reservation = reservationFor(TENANT_A, item);
+      await blobs.createUpload(TENANT_A, reservation);
+      await objects.markDeletePending(TENANT_A, item.hash);
+
+      await expectCoreError(
+        blobs.createUpload(TENANT_A, reservation),
+        'object_state_invalid',
+      );
+      expect((await objects.get(TENANT_A, item.hash))?.state).toBe('delete_pending');
+    });
+  });
+
   // 2 ------------------------------------------------------------------
   it('rejects a declaration or an object whose size, hash, or type disagrees', async () => {
     await withObjects(async ({ blobs, objects, storage }) => {

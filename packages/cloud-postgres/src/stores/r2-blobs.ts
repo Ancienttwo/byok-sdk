@@ -61,6 +61,7 @@ import {
 } from '@byok/core';
 import type { BlobObservation, CloudBlobStore } from '@byok/cloud';
 import { AwsClient } from 'aws4fetch';
+import { XMLParser } from 'fast-xml-parser';
 
 /** 15 minutes, matching the in-memory reference's `BLOB_URL_TTL_MS`. */
 export const DEFAULT_PRESIGN_TTL_SECONDS = 15 * 60;
@@ -122,6 +123,10 @@ export const R2_BLOB_ERROR_CODES = {
   storage_tenant_key_unsafe: 'storage_tenant_key_unsafe',
   /** A presign lifetime outside `[MIN_PRESIGN_TTL_SECONDS, MAX_PRESIGN_TTL_SECONDS]`. Construction-time only. */
   storage_presign_ttl_invalid: 'storage_presign_ttl_invalid',
+  /** ListObjectsV2 accepts 1..1000 keys per page. Maintenance input only. */
+  storage_list_limit_invalid: 'storage_list_limit_invalid',
+  /** Continuation tokens are opaque but non-empty. Maintenance input only. */
+  storage_list_cursor_invalid: 'storage_list_cursor_invalid',
 } as const;
 
 export type R2BlobErrorCode = (typeof R2_BLOB_ERROR_CODES)[keyof typeof R2_BLOB_ERROR_CODES];
@@ -182,6 +187,32 @@ interface HeadResult {
   readonly present: boolean;
   readonly byteSize: bigint;
   readonly contentType: string;
+}
+
+/** One tenant-prefixed R2 key returned by ListObjectsV2. */
+export interface R2ListedObject {
+  readonly key: string;
+  /** Present only when the key is exactly `<tenant>/sha256/<64 lowercase hex>`. */
+  readonly hash?: ContentHash;
+  readonly byteSize: bigint;
+}
+
+export interface R2ObjectPage {
+  readonly objects: readonly R2ListedObject[];
+  readonly nextContinuationToken?: string;
+}
+
+export type R2DeleteResult = 'deleted' | 'absent';
+
+/** Operations used only by the host-owned S4B-c maintenance worker. */
+export interface R2ObjectMaintenance {
+  inspectObject(tenant: TenantId, hash: ContentHash): Promise<BlobObservation | undefined>;
+  deleteObject(tenant: TenantId, hash: ContentHash): Promise<R2DeleteResult>;
+  listTenantObjects(
+    tenant: TenantId,
+    continuationToken?: string,
+    limit?: number,
+  ): Promise<R2ObjectPage>;
 }
 
 export class R2CloudBlobStore implements CloudBlobStore {
@@ -270,10 +301,10 @@ export class R2CloudBlobStore implements CloudBlobStore {
     // never recomputed anywhere. `pending` stays grantable — a device retrying
     // an interrupted upload is the case idempotence is FOR, and there is
     // nothing yet for a replacement to invalidate.
-    if (entry.state === 'committed') {
+    if (entry.state !== 'pending') {
       throw new ByokCoreError(
         'object_state_invalid',
-        `Object ${hash} is already committed; a committed object is immutable, so no upload grant is issued for it.`,
+        `Object ${hash} is ${entry.state}; only a pending object can receive an upload grant.`,
       );
     }
 
@@ -497,6 +528,172 @@ export class R2CloudBlobStore implements CloudBlobStore {
   }
 }
 
+export type R2ObjectMaintenanceOptions = Omit<
+  R2BlobStoreOptions,
+  'objects' | 'presignTtlSeconds'
+>;
+
+/**
+ * R2 maintenance adapter kept deliberately outside `CloudBlobStore`.
+ *
+ * Cloud conformance certifies the device-facing blob port with an exact method
+ * inventory. LIST/HEAD/DELETE are host operations, so putting them on
+ * `R2CloudBlobStore` would over-declare a capability no other cloud composition
+ * implements.
+ */
+export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
+  readonly #signingClock: Clock;
+  readonly #client: AwsClient;
+  readonly #origin: string;
+  readonly #bucket: string;
+  readonly #fetch: ObjectStoreFetch;
+  readonly #maxAttempts: number;
+  readonly #retryDelayMs: number;
+
+  constructor(options: R2ObjectMaintenanceOptions) {
+    this.#signingClock = options.signingClock;
+    this.#client = new AwsClient({
+      accessKeyId: options.accessKeyId,
+      secretAccessKey: options.secretAccessKey,
+      service: 's3',
+      region: options.region,
+      retries: 0,
+    });
+    this.#origin = options.endpoint.replace(/\/+$/, '');
+    this.#bucket = options.bucket;
+    this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
+    this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    this.#retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  }
+
+  async inspectObject(
+    tenant: TenantId,
+    hash: ContentHash,
+  ): Promise<BlobObservation | undefined> {
+    const observed = await this.#head(tenant, hash);
+    if (!observed.present) return undefined;
+    return {
+      observedByteSize: observed.byteSize,
+      observedContentType: observed.contentType,
+    };
+  }
+
+  async deleteObject(tenant: TenantId, hash: ContentHash): Promise<R2DeleteResult> {
+    const url = this.#objectUrl(tenant, hash);
+    const { response, attempts } = await this.#send(new Request(url, { method: 'DELETE' }));
+    if (response.status === 404) return 'absent';
+    if (!response.ok) {
+      throw new ObjectStoreRequestError(
+        `DELETE on the object store answered ${response.status}.`,
+        attempts,
+        response.status,
+      );
+    }
+    return 'deleted';
+  }
+
+  async listTenantObjects(
+    tenant: TenantId,
+    continuationToken?: string,
+    limit = 100,
+  ): Promise<R2ObjectPage> {
+    assertKeySegmentTenant(tenant);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      throw new R2BlobStoreError(
+        'storage_list_limit_invalid',
+        `A ListObjectsV2 page limit of ${String(limit)} is not a whole number in [1, 1000].`,
+      );
+    }
+
+    const prefix = `${tenant}/sha256/`;
+    const url = new URL(`${this.#origin}/${this.#bucket}`);
+    url.searchParams.set('list-type', '2');
+    url.searchParams.set('prefix', prefix);
+    url.searchParams.set('max-keys', String(limit));
+    if (continuationToken !== undefined) {
+      if (continuationToken.length === 0) {
+        throw new R2BlobStoreError(
+          'storage_list_cursor_invalid',
+          'A ListObjectsV2 continuation token must not be empty.',
+        );
+      }
+      url.searchParams.set('continuation-token', continuationToken);
+    }
+
+    const { response, attempts } = await this.#send(new Request(url, { method: 'GET' }));
+    if (!response.ok) {
+      throw new ObjectStoreRequestError(
+        `ListObjectsV2 on the object store answered ${response.status}.`,
+        attempts,
+        response.status,
+      );
+    }
+    return parseListObjectsV2(await response.text(), prefix, attempts);
+  }
+
+  async #head(tenant: TenantId, hash: ContentHash): Promise<HeadResult> {
+    const { response, attempts } = await this.#send(
+      new Request(this.#objectUrl(tenant, hash), { method: 'HEAD' }),
+    );
+    if (response.status === 404) {
+      return { present: false, byteSize: 0n, contentType: '' };
+    }
+    if (!response.ok) {
+      throw new ObjectStoreRequestError(
+        `HEAD on the object store answered ${response.status}.`,
+        attempts,
+        response.status,
+      );
+    }
+    const length = response.headers.get('content-length');
+    const contentType = response.headers.get('content-type');
+    if (length === null || contentType === null) {
+      throw new ObjectStoreRequestError(
+        `HEAD on the object store omitted content-length or content-type, so ${hash} cannot be observed.`,
+        attempts,
+        response.status,
+      );
+    }
+    return { present: true, byteSize: BigInt(length), contentType };
+  }
+
+  #objectUrl(tenant: TenantId, hash: ContentHash): URL {
+    assertKeySegmentTenant(tenant);
+    return new URL(`${this.#origin}/${this.#bucket}/${tenantObjectKey(tenant, hash)}`);
+  }
+
+  async #send(request: Request): Promise<{ readonly response: Response; readonly attempts: number }> {
+    const failures: string[] = [];
+    for (let attempt = 1; attempt <= this.#maxAttempts; attempt += 1) {
+      const signed = await this.#client.sign(request.clone(), {
+        aws: { datetime: this.#datetime() },
+      });
+      try {
+        const response = await this.#fetch(signed);
+        if (response.status !== 429 && response.status < 500) {
+          return { response, attempts: attempt };
+        }
+        failures.push(`HTTP ${response.status}`);
+      } catch (cause) {
+        failures.push(cause instanceof Error ? cause.message : String(cause));
+      }
+      if (attempt < this.#maxAttempts) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, this.#retryDelayMs * 2 ** (attempt - 1));
+        });
+      }
+    }
+    throw new ObjectStoreRequestError(
+      `The object store failed ${this.#maxAttempts} attempt(s): ${failures.join(', ')}.`,
+      this.#maxAttempts,
+    );
+  }
+
+  #datetime(): string {
+    return this.#signingClock.now().toISOString().replaceAll(/[:-]|\.\d{3}/g, '');
+  }
+}
+
 /**
  * The character set a tenant id may use once it is a KEY SEGMENT.
  *
@@ -538,5 +735,116 @@ function assertPresignTtl(seconds: number): number {
   throw new R2BlobStoreError(
     'storage_presign_ttl_invalid',
     `A presign lifetime of ${String(seconds)} is not a whole number of seconds in [${String(MIN_PRESIGN_TTL_SECONDS)}, ${String(MAX_PRESIGN_TTL_SECONDS)}], which is the range R2 will honor.`,
+  );
+}
+
+const LIST_OBJECTS_XML = new XMLParser({
+  ignoreAttributes: true,
+  parseTagValue: false,
+  trimValues: true,
+  processEntities: false,
+});
+
+function parseListObjectsV2(xml: string, prefix: string, attempts: number): R2ObjectPage {
+  let parsed: unknown;
+  try {
+    parsed = LIST_OBJECTS_XML.parse(xml) as unknown;
+  } catch (cause) {
+    throw new ObjectStoreRequestError(
+      'ListObjectsV2 returned malformed XML.',
+      attempts,
+      undefined,
+      { cause },
+    );
+  }
+
+  const document = asRecord(parsed);
+  const root = asRecord(document?.ListBucketResult);
+  if (root === undefined) {
+    throw new ObjectStoreRequestError(
+      'ListObjectsV2 XML omitted ListBucketResult.',
+      attempts,
+    );
+  }
+
+  const isTruncated = requiredText(root, 'IsTruncated', attempts);
+  if (isTruncated !== 'true' && isTruncated !== 'false') {
+    throw new ObjectStoreRequestError(
+      `ListObjectsV2 XML contained invalid IsTruncated=${JSON.stringify(isTruncated)}.`,
+      attempts,
+    );
+  }
+
+  const rawContents = root.Contents === undefined
+    ? []
+    : Array.isArray(root.Contents)
+      ? root.Contents
+      : [root.Contents];
+  const objects = rawContents.map((raw, index): R2ListedObject => {
+    const content = asRecord(raw);
+    if (content === undefined) {
+      throw new ObjectStoreRequestError(
+        `ListObjectsV2 XML contained a non-object Contents entry at index ${String(index)}.`,
+        attempts,
+      );
+    }
+    const key = requiredText(content, 'Key', attempts);
+    const sizeText = requiredText(content, 'Size', attempts);
+    let byteSize: bigint;
+    try {
+      byteSize = BigInt(sizeText);
+    } catch (cause) {
+      throw new ObjectStoreRequestError(
+        `ListObjectsV2 XML contained invalid Size=${JSON.stringify(sizeText)}.`,
+        attempts,
+        undefined,
+        { cause },
+      );
+    }
+    if (byteSize < 0n) {
+      throw new ObjectStoreRequestError(
+        `ListObjectsV2 XML contained negative Size=${sizeText}.`,
+        attempts,
+      );
+    }
+    const suffix = key.startsWith(prefix) ? key.slice(prefix.length) : '';
+    return {
+      key,
+      byteSize,
+      ...(HASH_KEY_SUFFIX.test(suffix)
+        ? { hash: contentHash(`sha256:${suffix}`) }
+        : {}),
+    };
+  });
+
+  if (isTruncated === 'false') return { objects };
+  const nextContinuationToken = requiredText(root, 'NextContinuationToken', attempts);
+  if (nextContinuationToken.length === 0) {
+    throw new ObjectStoreRequestError(
+      'ListObjectsV2 XML was truncated but its continuation token was empty.',
+      attempts,
+    );
+  }
+  return { objects, nextContinuationToken };
+}
+
+const HASH_KEY_SUFFIX = /^[0-9a-f]{64}$/;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function requiredText(
+  record: Record<string, unknown>,
+  field: string,
+  attempts: number,
+): string {
+  const value = record[field];
+  if (typeof value === 'string') return value;
+  throw new ObjectStoreRequestError(
+    `ListObjectsV2 XML omitted text field ${field}.`,
+    attempts,
   );
 }

@@ -48,8 +48,16 @@ export {
   R2_BLOB_ERROR_CODES,
   R2BlobStoreError,
   R2CloudBlobStore,
+  R2ObjectMaintenanceStore,
 } from './stores/index';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
+export type {
+  R2DeleteResult,
+  R2ListedObject,
+  R2ObjectMaintenance,
+  R2ObjectMaintenanceOptions,
+  R2ObjectPage,
+} from './stores/index';
 
 // The seven core port implementations, and the composition that bundles them.
 // All seven ship together because `runCoreConformance` certifies a composition
@@ -65,3 +73,27 @@ export {
   createPostgresCoreStores,
 } from './stores/core/index';
 export type { PostgresCoreStoreOptions } from './stores/core/index';
+
+// Host-owned retention/dead-letter/R2 GC and reconciliation. This is separate
+// from CoreStores because it coordinates one concrete SQL authority with one
+// concrete byte store; it is not a domain port every composition must fake.
+export {
+  CLOUD_CLEANUP_ERROR_CODES,
+  CloudCleanupError,
+  PostgresCloudCleanup,
+  createPostgresCloudMaintenance,
+} from './cleanup';
+export type {
+  CleanupJobState,
+  CloudCleanupErrorCode,
+  CloudCleanupResult,
+  DeadLetterPage,
+  DeadLetterQuery,
+  DeadLetterRef,
+  DeadLetterReplayInput,
+  ObjectUsageRebuildResult,
+  PostgresCloudCleanupOptions,
+  PostgresCloudMaintenanceOptions,
+  TenantRetentionPolicy,
+  TenantRetentionPolicyInput,
+} from './cleanup';
