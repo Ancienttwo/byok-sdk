@@ -7,6 +7,7 @@
  * slow enough that nothing expires during the test.
  */
 import { describe, expect, it } from 'vitest';
+import { isCoreError } from '@byok/core';
 import { TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 
@@ -19,6 +20,7 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
             deviceId: 'device-1',
             level,
             ttlMs: 60_000,
+            minimumIntervalMs: 0,
           });
           expect(published.level).toBe(level);
           expect((await stores.presence.read(TENANT_A, 'device-1'))?.level).toBe(level);
@@ -33,6 +35,7 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
           deviceId: 'device-1',
           level: 'working',
           ttlMs: 60_000,
+          minimumIntervalMs: 0,
         });
         expect(await stores.presence.read(TENANT_A, 'device-1')).toBeDefined();
         expect(await stores.presence.list(TENANT_A)).toHaveLength(1);
@@ -43,6 +46,38 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
         expect(await stores.presence.list(TENANT_A)).toHaveLength(0);
       });
     });
+
+    it('enforces the configured publication interval at the store authority', async () => {
+      await withComposition(factory, async (handle) => {
+        await handle.stores.presence.publish(TENANT_A, {
+          deviceId: 'device-throttled',
+          level: 'online',
+          ttlMs: 60_000,
+          minimumIntervalMs: 10_000,
+        });
+        const tooSoon = await handle.stores.presence
+          .publish(TENANT_A, {
+            deviceId: 'device-throttled',
+            level: 'working',
+            ttlMs: 60_000,
+            minimumIntervalMs: 10_000,
+          })
+          .catch((caught: unknown) => caught);
+        expect(isCoreError(tooSoon, 'hint_rate_limited')).toBe(true);
+
+        await handle.advanceTime(10_000);
+        expect(
+          (
+            await handle.stores.presence.publish(TENANT_A, {
+              deviceId: 'device-throttled',
+              level: 'working',
+              ttlMs: 60_000,
+              minimumIntervalMs: 10_000,
+            })
+          ).level,
+        ).toBe('working');
+      });
+    });
   });
 
   describe('activity', () => {
@@ -50,14 +85,16 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
       await withComposition(factory, async ({ stores }) => {
         let tail = await stores.activity.append(TENANT_A, {
           taskId: 'task-1',
-          detail: 'entry-0',
+          details: ['entry-0'],
+          dropped: 0,
           ttlMs: 300_000,
           capacity: 3,
         });
         for (let index = 1; index < 6; index += 1) {
           tail = await stores.activity.append(TENANT_A, {
             taskId: 'task-1',
-            detail: `entry-${index}`,
+            details: [`entry-${index}`],
+            dropped: 0,
             ttlMs: 300_000,
             capacity: 3,
           });
@@ -79,13 +116,28 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
         const { stores } = handle;
         await stores.activity.append(TENANT_A, {
           taskId: 'task-1',
-          detail: 'entry-0',
+          details: ['entry-0'],
+          dropped: 0,
           ttlMs: 300_000,
         });
         expect(await stores.activity.read(TENANT_A, 'task-1')).toBeDefined();
 
         await handle.advanceTime(300_000);
         expect(await stores.activity.read(TENANT_A, 'task-1')).toBeUndefined();
+      });
+    });
+
+    it('adds producer drops to capacity eviction', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        const tail = await stores.activity.append(TENANT_A, {
+          taskId: 'task-dropped',
+          details: ['one', 'two', 'three'],
+          dropped: 4,
+          ttlMs: 300_000,
+          capacity: 2,
+        });
+        expect(tail.entries.map((entry) => entry.detail)).toEqual(['two', 'three']);
+        expect(tail.dropped).toBe(5);
       });
     });
   });

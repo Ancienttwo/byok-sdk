@@ -40,6 +40,14 @@ export const CLOUD_CAPABILITIES = {
    * above reads `events.longpoll` and not `events.longPoll`.
    */
   blobsContentProxy: 'blobs.contentproxy',
+  /** Board list/claim/unclaim/status routes. Polling is first-class under this declaration. */
+  boardCoordination: 'board.coordination',
+  /** Additional SSE transport for the same board read model. */
+  boardSse: 'board.sse',
+  /** Device-scoped five-level presence publication. */
+  presenceHints: 'presence.hints',
+  /** Bounded task activity batch publication. */
+  activityTail: 'activity.tail',
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];

@@ -27,6 +27,13 @@ const EXPECTED_INVENTORY: Record<string, RouteClass> = {
   'GET /byok/capabilities': 'public',
   'GET /byok/events': 'device',
   'POST /byok/messages': 'device',
+  'GET /byok/board': 'device',
+  'POST /byok/board/:id/claim': 'device',
+  'POST /byok/board/:id/unclaim': 'device',
+  'POST /byok/board/:id/status': 'device',
+  'GET /byok/board/stream': 'device',
+  'PUT /byok/presence': 'device',
+  'POST /byok/activity': 'device',
   'POST /byok/blobs': 'device',
   'POST /byok/blobs/:id/finalize': 'device',
   'GET /byok/blobs/:id/url': 'device',
@@ -327,6 +334,12 @@ describe('capability x composition route matrix', () => {
         expect.objectContaining({ code: 'capability_over_declared' }),
       );
     }
+  });
+
+  it('refuses SSE without the polling/reconciliation capability it depends on', () => {
+    expect(() =>
+      cloudWith({ capabilities: declaration(CLOUD_CAPABILITIES.boardSse), withProxy: true }),
+    ).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
   });
 
   it('accepts a proxy that the declaration does not name, and mounts nothing for it', () => {

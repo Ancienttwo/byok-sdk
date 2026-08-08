@@ -957,7 +957,7 @@ flowchart TB
   Workers -.-> Cloud
 ```
 
-`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点在 S3a 后也画成实线，但它只覆盖 stateless device surface 与 InMemory 组合，durable journal/board/truth 仍是目标设计。`Cloud → Core` 与 `Cloud → Protocol` 两条边是实线：`@byok/cloud` 真实 import 这两个包。其余指向 `core` 的三条边（`client/server/keys → core`）仍是虚线——这三包内当前零 import site；core 本身已由 cloud 消费，不再是零 consumer 的隔离状态。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 再落 board/presence/activity 与 SSE/poll；durable local journal 已由 S3b 落地，truth/proof 仍属 S6。`Cloud → Core` 与 `Cloud → Protocol` 两条边是实线：`@byok/cloud` 真实 import 这两个包。其余指向 `core` 的三条边（`client/server/keys → core`）仍是虚线——这三包内当前零 import site；core 本身已由 cloud 消费，不再是零 consumer 的隔离状态。
 
 关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
@@ -973,12 +973,12 @@ core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 
 | core `quota.ts` | tenant storage entitlement、usage、reservation、retention policy 与稳定 quota 错误码 | **已实现（S2）** |
 | core store ports | Truth/Mailbox/Board/Presence/Blob/Quota/StorageUsage async contracts；首参数永远是 tenant | **已实现（S2）**；tenant-scoped store 组装留给 S3 |
 | cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface，外加 hosted-only `GET /byok/capabilities` | **已实现（S3a）**：九条 device 路由无状态重现，既有 daemon 零改动跑通 long-poll |
-| cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | 目标设计 |
+| cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | **已实现（S5）**：device bearer 只写非 `done` 协调态；host `acceptBoardItem` 独占 review acceptance |
 | cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs | 目标设计 |
 | cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | 目标设计 |
 | cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 当前实现（S4B-c） |
-| cloud hints | device presence TTL、task activity tail + explicit dropped count | 目标设计 |
-| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | core 侧 InMemory composition 与参数化 conformance 套件**已实现（S2）**；cloud 侧 InMemory composition（七个 tenant-first auth/task port + `TenantStores` facade）**已实现（S3a）**；其余仍是目标设计 |
+| cloud hints | device presence TTL、task activity tail + explicit dropped count | **已实现（S5）**：store-authoritative minimum interval、ProgressBatcher-shaped bounded batch、cumulative producer/capacity dropped |
+| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | core 侧 InMemory composition 与参数化 conformance 套件**已实现（S2）**；cloud 侧 InMemory composition 与 tenant facade **已实现（S3a/S5）**；Postgres core/cloud ports 与 R2 主生产 adapter **已实现（S4A/S4B）**；D1 仍是 optional post-RC |
 
 ### 12.3 三套状态词汇 + 一套 truth concurrency model
 
@@ -1008,7 +1008,7 @@ stateDiagram-v2
 
 `AwaitApproval` 是执行中暂停；`in_review` 是执行结束后人工验收。二者不能互相触发。`Running` 不得由 presence 推断；`done` 不代表某个 runtime process 仍存活。`closed` 在 final proposal 中暂取“终止未验收”，RAFT 原义仍需标为 unverified。
 
-三套状态词汇与 truth record 形状的 core 侧契约（board 5 态与合法转移、presence level、truth record 的 rev/hash 形状、以及它们与 wire execution 的隔离）连同 InMemory 参考实现已于 S2 落地（`@byok/core`），并由包内的 vocabulary-isolation 约束测试守住；下面各小节的 cloud SQL 组合、SSE/轮询与端点行为仍是目标设计。
+三套状态词汇与 truth record 形状的 core 侧契约（board 5 态与合法转移、presence level、truth record 的 rev/hash 形状、以及它们与 wire execution 的隔离）连同 InMemory 参考实现已于 S2 落地（`@byok/core`），并由包内的 vocabulary-isolation 约束测试守住。board 的 Postgres 组合在 S4A 落地，S5 已补齐 hosted handler、SSE/轮询、terminal/progress 单向投影与提示限流；truth/proof endpoint 仍是 S6 目标。
 
 #### wire execution 规则（当前已实现，此处只重申跨层约束）
 
@@ -1017,15 +1017,18 @@ stateDiagram-v2
 - server 与 cloud 都不得依据 presence 合成 execution state。
 - hosted mailbox 只运输 envelope，**不是** execution-state authority。
 
-#### board coordination 规则（目标设计）
+#### board coordination 规则（当前实现）
 
 - assignee 与 status 分离，是两个字段而非一个枚举。
 - claim 用 CAS；status update 必须带 `expectedStatus`。
 - 冲突返回 holder / current snapshot，不做 silent last-write-wins。
 - `closed` 暂定义为“终止、未验收”；未来若改为归档语义，用 `archived_at` 字段表达，**不新增第六个状态**。
 - `task.complete` 可以把工作项推到 `in_review`，但不能自动变成 `done`——`done` 需要人工验收。
+- host 必须显式提供 bounded `channel`/`title`；cloud 不从 instruction/result 派生 label。
+- poll 与 SSE 共享 `BoardStore.list`；`board_seq` 是 per-tenant current-state cursor，不是完整事件历史。SSE 以 heartbeat 保活、以 120s `reconcile` 信号要求 full poll，且每轮 query 返回后才 sleep。
+- `BoardFeedClient` 只按 `GET /byok/capabilities` 的 `board.sse` 选择 transport；temporary 5xx/idle watchdog 是 retryable SSE failure，不会永久降级。401/revocation 则停止。
 
-#### presence 与 activity 规则（目标设计）
+#### presence 与 activity 规则（当前实现）
 
 presence 是设备级最近提示，activity 是 task 级有损尾部。两者共同的约束：
 
@@ -1035,6 +1038,7 @@ presence 是设备级最近提示，activity 是 task 级有损尾部。两者�
 - 不用于授权、billing、终态判断或恢复；
 - 写入频率必须 bounded；
 - 可以独立从 SQL 迁往 KV/DO，不影响 truth 与 mailbox。
+- presence minimum interval 在 store 内原子裁决，不依赖单 instance handler timer；activity 以 batch event count + UTF-8 byte ceiling 入场，capacity eviction 与 producer dropped 累加到同一计数。
 
 #### truth record 写入与冲突模型（目标设计）
 
@@ -1500,7 +1504,7 @@ R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 
 | P0 | 建 `@byok/core` 契约层，不改既有包；**已完成（S2，2026-08-07）**，交付含 InMemory 参考实现与 composition 参数化 conformance 套件 |
 | P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
-| P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示 |
+| P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示；**已实现（S5）** |
 | P4 | client 侧 device proof 上行 + memory manifest/selector seam（`signNonce` 的 domain separation 修复 / GAP-004 已提前随 S1 交付，不再是 P4 的待办项） |
 | P5 | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore`。**Deferred standalone plan，不在本 sprint program（S0-S7）内**；触发条件是 K4/K4.1 完成且 TruthStore 的 production composition 可用，两者都满足后单独立计划，不占 S 线任何 slot |
 
@@ -1515,7 +1519,7 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | S2 | `@byok/core` contracts（已完成 2026-08-07） | P0 |
 | S3 | Cloud mailbox + 本机 SQLite journal（含磁盘水位与安全 cleanup）（已完成 2026-08-08：S3a + S3b） | P1 |
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
-| S5 | Board + presence + SSE/poll | P3 |
+| S5 | Board + presence + SSE/poll（已实现；PR gate 见 sprint ledger） | P3 |
 | S6 | Device proof + memory | P4 |
 | S7 | operations/release RC + keys dependency boundary（K4 parity 只对 Umbrella BYOK RC 生效） | 不对应 P5；P5 是独立 deferred plan |
 | 并行 | K4/K4.1 aip swap | K 线，不阻塞 P0/P1 |

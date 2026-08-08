@@ -187,6 +187,24 @@ describe('tenant plumbing', () => {
   });
 });
 
+describe('coordination vocabulary isolation', () => {
+  it('keeps board status literals out of the frozen wire ingress module', () => {
+    const inbound = shipped('inbound.ts');
+    for (const status of ['todo', 'in_progress', 'in_review', 'done', 'closed']) {
+      expect(inbound, status).not.toContain(`'${status}'`);
+    }
+  });
+
+  it('keeps wire message and execution-state vocabulary out of the board projection', () => {
+    const projection = shipped('board-projection.ts');
+    expect(projection).not.toContain('task.complete');
+    expect(projection).not.toContain('task.fail');
+    for (const state of ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'Complete', 'Failed', 'Cancelled']) {
+      expect(projection, state).not.toContain(state);
+    }
+  });
+});
+
 describe('the public surface', () => {
   it('exports the composition entry points the contract names', () => {
     expect(typeof publicApi.createByokCloud).toBe('function');

@@ -84,6 +84,15 @@ function assertTtl(ttlMs: number): void {
   }
 }
 
+function assertMinimumInterval(minimumIntervalMs: number): void {
+  if (!Number.isFinite(minimumIntervalMs) || minimumIntervalMs < 0) {
+    throw new ByokCoreError(
+      'hint_ttl_invalid',
+      `Hint minimum interval must be a non-negative number of milliseconds, received ${String(minimumIntervalMs)}.`,
+    );
+  }
+}
+
 export class PostgresPresenceStore implements PresenceStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
@@ -95,6 +104,10 @@ export class PostgresPresenceStore implements PresenceStore {
 
   async publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint> {
     assertTtl(input.ttlMs);
+    assertMinimumInterval(input.minimumIntervalMs);
+    const now = this.#clock.now();
+    const observedAt = now.toISOString();
+    const allowedBefore = new Date(now.getTime() - input.minimumIntervalMs).toISOString();
     const result = await this.#pool.query<PresenceRow>(
       `INSERT INTO device_presence (${PRESENCE_COLUMNS})
        VALUES ($1, $2, $3, $4, $5, $6)
@@ -103,10 +116,27 @@ export class PostgresPresenceStore implements PresenceStore {
               detail      = EXCLUDED.detail,
               observed_at = EXCLUDED.observed_at,
               expires_at  = EXCLUDED.expires_at
+        WHERE device_presence.expires_at <= EXCLUDED.observed_at
+           OR device_presence.observed_at <= $7
        RETURNING ${PRESENCE_COLUMNS}`,
-      [tenant, input.deviceId, input.level, input.detail ?? null, this.#now(), this.#expiry(input.ttlMs)],
+      [
+        tenant,
+        input.deviceId,
+        input.level,
+        input.detail ?? null,
+        observedAt,
+        new Date(now.getTime() + input.ttlMs).toISOString(),
+        allowedBefore,
+      ],
     );
-    return toHint(result.rows[0]!);
+    const row = result.rows[0];
+    if (row === undefined) {
+      throw new ByokCoreError(
+        'hint_rate_limited',
+        `Presence for ${input.deviceId} was published more recently than the configured minimum interval.`,
+      );
+    }
+    return toHint(row);
   }
 
   async read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined> {
@@ -156,42 +186,70 @@ export class PostgresActivityStore implements ActivityStore {
         `Activity capacity must be a positive integer, received ${String(capacity)}.`,
       );
     }
+    if (input.details.length === 0 || !Number.isSafeInteger(input.dropped) || input.dropped < 0) {
+      throw new ByokCoreError(
+        'activity_batch_invalid',
+        'Activity batches require at least one detail and a non-negative integer dropped count.',
+      );
+    }
 
-    // One statement. `live` reads the stored tail only if it has not expired —
-    // an expired tail restarts from empty rather than resurrecting entries a
-    // reader was already told did not exist. `trimmed` then drops from the
-    // FRONT down to `capacity` and adds however many it dropped to the running
-    // counter, so lossiness stays in the data instead of being a gap the reader
-    // has to notice.
+    const now = this.#now();
+    const incoming = input.details.map((detail) => ({ at: now, detail }));
+
+    // One statement. The INSERT arm trims a new batch. The conflict arm builds
+    // from `activity_tail` itself, which Postgres re-reads AFTER acquiring the
+    // conflicting row lock; building EXCLUDED from a pre-lock SELECT would let
+    // two concurrent batches both append to the same old snapshot and the
+    // second writer would erase the first. Expired rows restart from empty.
     const result = await this.#pool.query<TailRow>(
-      `WITH live AS (
-         SELECT entries, dropped FROM activity_tail
-          WHERE tenant_id = $1 AND task_id = $2 AND expires_at > $3
-       ), combined AS (
-         SELECT COALESCE((SELECT entries FROM live), '[]'::jsonb)
-                  || jsonb_build_array(jsonb_build_object('at', $3::text, 'detail', $4::text))
-                AS entries,
-                COALESCE((SELECT dropped FROM live), 0) AS dropped
-       ), trimmed AS (
+      `WITH trimmed AS (
          SELECT COALESCE(
                   (SELECT jsonb_agg(entry ORDER BY ordinality)
-                     FROM jsonb_array_elements(combined.entries)
+                     FROM jsonb_array_elements($4::jsonb)
                           WITH ORDINALITY AS element(entry, ordinality)
-                    WHERE ordinality > GREATEST(jsonb_array_length(combined.entries) - $5, 0)),
+                    WHERE ordinality > GREATEST(jsonb_array_length($4::jsonb) - $6, 0)),
                   '[]'::jsonb) AS entries,
-                combined.dropped
-                  + GREATEST(jsonb_array_length(combined.entries) - $5, 0) AS dropped
-           FROM combined
+                $5::integer + GREATEST(jsonb_array_length($4::jsonb) - $6, 0) AS dropped
        )
        INSERT INTO activity_tail (tenant_id, task_id, entries, dropped, capacity, expires_at)
-       SELECT $1, $2, trimmed.entries, trimmed.dropped, $5, $6 FROM trimmed
+       SELECT $1, $2, trimmed.entries, trimmed.dropped, $6, $7 FROM trimmed
        ON CONFLICT (tenant_id, task_id) DO UPDATE
-          SET entries    = EXCLUDED.entries,
-              dropped    = EXCLUDED.dropped,
+          SET entries    = (
+                SELECT COALESCE(jsonb_agg(entry ORDER BY ordinality), '[]'::jsonb)
+                  FROM jsonb_array_elements(
+                         (CASE WHEN activity_tail.expires_at > $3
+                               THEN activity_tail.entries ELSE '[]'::jsonb END) || $4::jsonb
+                       ) WITH ORDINALITY AS element(entry, ordinality)
+                 WHERE ordinality > GREATEST(
+                   jsonb_array_length(
+                     (CASE WHEN activity_tail.expires_at > $3
+                           THEN activity_tail.entries ELSE '[]'::jsonb END) || $4::jsonb
+                   ) - $6,
+                   0
+                 )
+              ),
+              dropped    = (CASE WHEN activity_tail.expires_at > $3
+                                 THEN activity_tail.dropped ELSE 0 END)
+                           + $5::integer
+                           + GREATEST(
+                               jsonb_array_length(
+                                 (CASE WHEN activity_tail.expires_at > $3
+                                       THEN activity_tail.entries ELSE '[]'::jsonb END) || $4::jsonb
+                               ) - $6,
+                               0
+                             ),
               capacity   = EXCLUDED.capacity,
               expires_at = EXCLUDED.expires_at
        RETURNING tenant_id, task_id, entries, dropped, capacity, expires_at`,
-      [tenant, input.taskId, this.#now(), input.detail, capacity, this.#expiry(input.ttlMs)],
+      [
+        tenant,
+        input.taskId,
+        now,
+        JSON.stringify(incoming),
+        input.dropped,
+        capacity,
+        this.#expiry(input.ttlMs),
+      ],
     );
     return toTail(result.rows[0]!);
   }

@@ -32,6 +32,14 @@ import {
   type Envelope,
   type MessageType,
 } from '@byok/protocol';
+import {
+  activityDetails,
+  appendActivityEvents,
+  DEFAULT_ACTIVITY_BOUNDS,
+  type ActivityBounds,
+} from './coordination';
+import { isCloudError } from './errors';
+import { projectTerminalToReview } from './board-projection';
 import type { TenantStores } from './tenant-stores';
 
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
@@ -45,6 +53,7 @@ export async function handleInboundEnvelope(
   stores: TenantStores,
   deviceId: string,
   envelope: Envelope,
+  activityBounds: ActivityBounds = DEFAULT_ACTIVITY_BOUNDS,
 ): Promise<InboundOutcome> {
   if (!(await stores.rateLimiter.consume(deviceId))) return 'rate_limited';
 
@@ -58,9 +67,23 @@ export async function handleInboundEnvelope(
   const attempt = await stores.tasks.get(taskId);
   if (attempt?.ownerDeviceId !== undefined && attempt.ownerDeviceId !== deviceId) return 'rejected';
 
+  if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
+    try {
+      activityDetails(envelope.payload.events, 0, activityBounds);
+    } catch (caught) {
+      if (
+        isCloudError(caught, 'activity_batch_too_large') ||
+        isCloudError(caught, 'coordination_input_invalid')
+      ) {
+        return 'rejected';
+      }
+      throw caught;
+    }
+  }
+
   if (await stores.dedup.checkAndRecord(deviceId, envelope.id)) return 'duplicate';
 
-  await applyLifecycle(stores, deviceId, taskId, envelope);
+  await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds);
   return 'accepted';
 }
 
@@ -76,6 +99,7 @@ async function applyLifecycle(
   deviceId: string,
   taskId: string,
   envelope: Envelope,
+  activityBounds: ActivityBounds,
 ): Promise<void> {
   switch (envelope.type) {
     case 'task.claim':
@@ -86,6 +110,15 @@ async function applyLifecycle(
       return;
     case 'task.decline':
       await stores.tasks.recordStatus({ taskId, status: 'failed' });
+      return;
+    case 'task.progress':
+      if (envelope.payload.events.length > 0) {
+        await appendActivityEvents(
+          stores.activity,
+          { taskId, events: envelope.payload.events, dropped: 0 },
+          activityBounds,
+        );
+      }
       return;
     case 'task.complete':
       await recordTerminal(stores, taskId, envelope, 'complete');
@@ -127,4 +160,5 @@ async function recordTerminal(
   });
   if (!created) return;
   await stores.tasks.recordStatus({ taskId, status });
+  await projectTerminalToReview(stores.board, taskId);
 }
