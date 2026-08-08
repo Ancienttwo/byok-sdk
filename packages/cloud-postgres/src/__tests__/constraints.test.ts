@@ -146,8 +146,13 @@ describe('dependency boundaries', () => {
     expect(ALL_SOURCES.some((file) => file.path === SCANNER)).toBe(true);
   });
 
-  it('imports nothing outside core, cloud, pg, and node builtins', () => {
-    const allowed = new Set(['@byok/core', '@byok/cloud', 'pg']);
+  it('imports nothing outside core, cloud, pg, aws4fetch, and node builtins', () => {
+    // `aws4fetch` is a single-file WebCrypto SigV4 signer, chosen over
+    // `@aws-sdk/client-s3` for five actions' worth of need: a hundred
+    // transitive packages is the smaller half of the objection, and the AWS
+    // SDK's ambient credential provider chain — an authorization source nobody
+    // configured — is the larger one (design §3).
+    const allowed = new Set(['@byok/core', '@byok/cloud', 'pg', 'aws4fetch']);
     for (const file of SHIPPED) {
       for (const [, specifier] of code(file.text).matchAll(/from\s+'([^']+)'/g)) {
         if (specifier === undefined) continue;

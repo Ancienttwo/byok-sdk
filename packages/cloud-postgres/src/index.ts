@@ -31,6 +31,18 @@ export {
 } from './stores/index';
 export type { PostgresCloudStoreOptions, PostgresCloudStores } from './stores/index';
 
+// The object-storage half of blobs. Grants only: this composition supplies no
+// `BlobContentProxy`, because a device uploading straight to R2 is exactly what
+// having no byte-proxy path means.
+export {
+  DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_PRESIGN_TTL_SECONDS,
+  DEFAULT_RETRY_DELAY_MS,
+  ObjectStoreRequestError,
+  R2CloudBlobStore,
+} from './stores/index';
+export type { ObjectStoreFetch, R2BlobStoreOptions } from './stores/index';
+
 // The seven core port implementations, and the composition that bundles them.
 // All seven ship together because `runCoreConformance` certifies a composition
 // as a whole — a partial `CoreStores` is not something the suite can run.

@@ -35,6 +35,14 @@ export { PostgresPairingCodeStore } from './pairing-codes';
 export { PostgresRequestReceiptStore } from './receipts';
 export { PostgresDeviceSequenceStore } from './sequence';
 export { PostgresTaskAttemptStore } from './task-attempts';
+export {
+  DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_PRESIGN_TTL_SECONDS,
+  DEFAULT_RETRY_DELAY_MS,
+  ObjectStoreRequestError,
+  R2CloudBlobStore,
+} from './r2-blobs';
+export type { ObjectStoreFetch, R2BlobStoreOptions } from './r2-blobs';
 
 /** The ports this composition supplies today. `blobs` joins in S4A-c. */
 export type PostgresCloudStores = Pick<
