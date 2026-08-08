@@ -1,26 +1,26 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-08T20:01:19+0800 -->
+<!-- updated_at: 2026-08-08T20:03:08+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Idle
-> **Updated At**: 2026-08-08T20:01:19+0800
-> **Source Branch**: codex/s4b-a-finalize-authority
-> **Source Commit**: ce50734
+> **Status**: Active
+> **Updated At**: 2026-08-08T20:03:08+0800
+> **Source Branch**: main
+> **Source Commit**: e0f9ed0
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: S4B-a worktree cleaned; K-line active
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Idle
-- Active Plan: (none)
-- Plan Status: (none)
-- Next Task: (none)
+- Status: Active
+- Active Plan: plans/plan-20260805-1659-byok-keys-package.md
+- Plan Status: Executing
+- Next Task: K4 Swap back into aip-main-open: diff baseline `c6a5385..HEAD` for drift, publish `@byok/keys`, delete the ported code, switch to the npm dependency, convert the two `instanceof LocalExecutionError` sites (`settings.ts:358`, `providers.ts:1673-1677`) to structured code detection, and require `apps/local-agent/src/settings.test.ts` (`:313-318`) to pass unchanged
 - Clear Note: (none)
 
 ## Mainline Snapshot Reading
@@ -31,7 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- (none)
+- .: plans/plan-20260805-1659-byok-keys-package.md
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -40,7 +41,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: K4 Swap back into aip-main-open: diff baseline `c6a5385..HEAD` for drift, publish `@byok/keys`, delete the ported code, switch to the npm dependency, convert the two `instanceof LocalExecutionError` sites (`settings.ts:358`, `providers.ts:1673-1677`) to structured code detection, and require `apps/local-agent/src/settings.test.ts` (`:313-318`) to pass unchanged
 
 ## Checks
 
@@ -48,19 +49,10 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 1 changed/untracked path(s)
 
 ```
- D plans/plan-20260808-1940-s4b-a-finalize-authority.md
- D tasks/contracts/20260808-1940-s4b-a-finalize-authority.contract.md
- D tasks/notes/20260808-1940-s4b-a-finalize-authority.notes.md
- D tasks/reviews/20260808-1940-s4b-a-finalize-authority.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260808-1940-s4b-a-finalize-authority.md
-?? tasks/archive/contract-20260808-2001-s4b-a-finalize-authority.md
-?? tasks/archive/notes-20260808-2001-s4b-a-finalize-authority.md
-?? tasks/archive/review-20260808-2001-s4b-a-finalize-authority.md
-?? tasks/archive/todo-20260808-2001-s4b-a-finalize-authority.md
+ M tasks/current.md
 ```
 
 ## Source Artifacts
