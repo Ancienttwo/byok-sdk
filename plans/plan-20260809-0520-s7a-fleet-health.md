@@ -1,6 +1,6 @@
 # Plan: S7-a Deterministic Fleet Health
 
-> **Status**: Executing
+> **Status**: Completed
 > **Created**: 20260809-0520
 > **Slug**: s7a-fleet-health
 > **Artifact Level**: work-package
@@ -91,4 +91,4 @@
 - [x] Replace automatic WS/long-poll/outbox/maintenance retry timing and prove manual retry remains immediate。
 - [x] Implement atomic health window、crash budget、run marker and bounded crash history。
 - [x] Project operational health through daemon/control/CLI status。
-- [ ] Run fleet/crash drills、hard gates、independent Codex acceptance、PR CI and merge/readback。
+- [x] Run fleet/crash drills、hard gates、independent Codex acceptance、PR CI and merge/readback（PR #38，CI 32/32，merge `489255b`）。

@@ -31,6 +31,22 @@ interface HealthFileV1 {
   currentRun?: RunMarker;
 }
 
+export const OPERATIONAL_HEALTH_FILENAME = 'operational-health.json';
+export const MAX_OPERATIONAL_HEALTH_FILE_BYTES = 1024 * 1024;
+
+export type OperationalHealthFileInspection =
+  | { status: 'missing' }
+  | {
+      status: 'valid';
+      sizeBytes: number;
+      state: OperationalHealthState;
+      failureCount: number;
+      crashCount: number;
+      currentRunStartedAt?: string;
+      lastCrashAt?: string;
+    }
+  | { status: 'corrupt'; sizeBytes: number; reason: string };
+
 export type OperationalHealthSnapshot =
   | {
       availability: 'available';
@@ -69,7 +85,7 @@ export class OperationalHealthTracker {
   #started = false;
 
   constructor(storeDir: string, options: OperationalHealthOptions = {}) {
-    this.#filePath = path.join(storeDir, 'operational-health.json');
+    this.#filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
     this.#windowMs = options.windowMs ?? 60_000;
     this.#failureThreshold = options.failureThreshold ?? 3;
     this.#maxFailures = options.maxFailures ?? 128;
@@ -219,6 +235,51 @@ export class OperationalHealthTracker {
       throw err;
     }
   }
+}
+
+/**
+ * Read-only S7-b inspection seam. Unlike `OperationalHealthTracker.startRun`,
+ * this never writes a run marker, prunes history, or repairs malformed bytes;
+ * doctor can therefore report on an offline daemon without changing the very
+ * evidence it is inspecting.
+ */
+export async function inspectOperationalHealthFile(storeDir: string): Promise<OperationalHealthFileInspection> {
+  const filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
+  let stat;
+  try {
+    stat = await fs.stat(filePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
+    return { status: 'corrupt', sizeBytes: 0, reason: 'operational health state could not be inspected' };
+  }
+  if (!stat.isFile()) return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state is not a regular file' };
+  if (stat.size > MAX_OPERATIONAL_HEALTH_FILE_BYTES) {
+    return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state exceeds the 1 MiB inspection limit' };
+  }
+  let raw: string;
+  try {
+    raw = await fs.readFile(filePath, 'utf8');
+  } catch {
+    return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state could not be read' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state is corrupt JSON' };
+  }
+  if (!isHealthFile(parsed)) {
+    return { status: 'corrupt', sizeBytes: stat.size, reason: 'operational health state has an invalid shape' };
+  }
+  return {
+    status: 'valid',
+    sizeBytes: stat.size,
+    state: parsed.state,
+    failureCount: parsed.failures.length,
+    crashCount: parsed.crashes.length,
+    ...(parsed.currentRun ? { currentRunStartedAt: parsed.currentRun.startedAt } : {}),
+    ...(parsed.crashes.at(-1) ? { lastCrashAt: parsed.crashes.at(-1)!.detectedAt } : {}),
+  };
 }
 
 function isHealthFile(value: unknown): value is HealthFileV1 {

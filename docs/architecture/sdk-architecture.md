@@ -1642,17 +1642,18 @@ S7-a 已将 automatic retry 的 random/fixed fleet cadence 收敛到一个可复
 - revoked device 进入终态，不进入无限 reconnect；manual probe 也不接管 automatic scheduler；
 - HTTP retryability 的细分仍沿用既有 transport 行为，不由 jitter authority 改写；若未来收窄到特定 5xx/network timeout，必须以独立行为契约落地，不能只改本节文字。
 
-#### 14.3.3 Health 与 quarantine
+#### 14.3.3 Health、doctor 与 quarantine
 
-S7-a 先落 operational health/crash authority；quarantine/doctor/support bundle 仍由 S7-b 消费：
+S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/journal/workspace/quarantine 汇成 operator diagnostics：
 
 - daemon health 是独立于 transport/presence 的 `healthy/degraded/recovering` read model；默认 60s sliding window、3 failures degraded；
 - automatic reconnect/upload/maintenance outcome 进入同一 bounded failure window；状态文件只保存时间、类别、run marker 与 bounded crash history，不保存 prompt、secret、token 或错误正文；
 - start 写入 atomic+fsync run marker（temp file 先同步再 atomic rename；POSIX 随后同步 published target + parent directory；Windows 随后以 writable handle 同步 published target，因为 Node/libuv 不提供 directory flush），clean shutdown 在完整 teardown 后清除；下次启动只把遗留 marker 记为 unclean crash，clean stop 不计 crash；
 - corrupt health JSON/shape 作为 typed `unavailable` 投影到 daemon/control/CLI status，原文件不删除、不覆写、不伪造 healthy；
-- runtime detection、control socket、journal/workspace 的细粒度 doctor 汇总仍属 S7-b；
-- malformed 或 corrupt 的本地状态**不自动删除**，搬进 quarantine；
-- doctor 可以报告，并在明确的 `--fix` 下才修复；
+- `byok-agent doctor` 默认只读，汇总 config protocol、runtime detection、authenticated control reachability、health、SQLite read-only `quick_check`、workspace accessibility 与 bounded quarantine inventory；`--json` 只改变渲染，不改变 authority；
+- malformed/corrupt health state 在 ordinary status/doctor 下保持 byte-identical；只有 daemon 已停且 operator 明确给出 `doctor --fix --yes` 时，才搬进 quarantine，并写 source path、reason、size 与 SHA-256 manifest；不创建伪造 healthy replacement；
+- corrupt journal 继续由既有 `JournalCorruptError` 路径 quarantine；doctor 只做 read-only detection，不提供 rebuild、plain-file fallback 或自动清理；
+- `byok-agent support-bundle --output <new-path>` 以 exclusive atomic publish 写 0600 bounded JSON，已存在路径拒绝覆盖；它复用同一 typed collector，不另造诊断真相；
 - security-sensitive 的修复不静默降级；
 - 进程重启仍归 OS supervisor，daemon 不再造第二层 supervisor（§10）。
 
@@ -1736,7 +1737,7 @@ S7-a 先落 operational health/crash authority；quarantine/doctor/support bundl
 - path 默认脱敏；
 - object 与 payload 只记录 hash、size、content type；
 - tenant 维度的 metrics 避免高基数、形似 secret 的 label；
-- support bundle 生成前先做 redaction，并列出所含内容。
+- support bundle 生成前先做 allowlist projection，并在 artifact 内列出 omitted/transformed class：server host/path/query、local paths、control/provider credential、task/prompt/tool/approval body 与 raw audit/quarantine contents 不进入 bundle；product/device/quarantine filename 只留 SHA-256，audit 只留 bounded kind/timestamp。
 
 这组约束与 §9 审计控制表的“只记录 task id、event type、tool/runtime name、counts/sizes”是同一条线：审计要能证明发生过什么，但不以保存 tool input/output 原文为代价。
 

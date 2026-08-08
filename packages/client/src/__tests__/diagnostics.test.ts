@@ -1,0 +1,172 @@
+import { createHash } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { DaemonConfig } from '../index';
+import type { ConnectControlResult, ControlClient } from '../bin/control-client';
+import {
+  DoctorConfirmationRequiredError,
+  DoctorDaemonRunningError,
+  runDoctorCommand,
+} from '../bin/commands/doctor';
+import {
+  collectDiagnostics,
+  MAX_QUARANTINE_ENTRIES,
+  quarantineCorruptOperationalHealth,
+} from '../diagnostics/diagnostics';
+import { OPERATIONAL_HEALTH_FILENAME, OperationalHealthTracker } from '../daemon/operational-health';
+import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
+
+const dirs: string[] = [];
+
+async function tempDir(): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-diagnostics-'));
+  dirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+});
+
+function config(storeDir: string): DaemonConfig {
+  return {
+    productName: 'Acme',
+    productId: 'acme-product',
+    serverUrl: 'https://example.invalid/byok',
+    workspaceRoot: path.join(storeDir, 'workspace'),
+    storeDir,
+  };
+}
+
+function unreachable(): Promise<ConnectControlResult> {
+  return Promise.resolve({ ok: false, reason: 'offline' });
+}
+
+function connected(): Promise<ConnectControlResult> {
+  const client: ControlClient = {
+    request: vi.fn().mockResolvedValue({
+      pid: 1,
+      uptimeMs: 1,
+      paired: false,
+      transport: 'open',
+      activeTasks: [],
+      runtimeIds: [],
+      queueWatermarks: [],
+      approvals: [],
+      approvalsPending: 0,
+      operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 60_000, failureThreshold: 3, crashCount: 0 },
+    }),
+    subscribe: () => ({ close: vi.fn() }),
+    close: vi.fn(),
+  };
+  return Promise.resolve({ ok: true, client });
+}
+
+async function digest(filePath: string): Promise<string> {
+  return createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+}
+
+describe('diagnostics collector', () => {
+  it('reports a corrupt health file without changing its bytes', async () => {
+    const dir = await tempDir();
+    const healthPath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    await fs.writeFile(healthPath, '{corrupt-health', { mode: 0o600 });
+    const before = await digest(healthPath);
+
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+
+    expect(snapshot.health).toMatchObject({ status: 'corrupt', reason: 'operational health state is corrupt JSON' });
+    expect(snapshot.checks.find((check) => check.id === 'health')?.status).toBe('fail');
+    expect(await digest(healthPath)).toBe(before);
+    expect(await fs.readdir(dir)).toEqual([OPERATIONAL_HEALTH_FILENAME]);
+  });
+
+  it('reports valid health and bounds quarantine inventory', async () => {
+    const dir = await tempDir();
+    const tracker = new OperationalHealthTracker(dir, { runId: () => 'run', pid: 1 });
+    await tracker.startRun();
+    await tracker.markCleanStop();
+    const quarantineDir = path.join(dir, 'quarantine');
+    await fs.mkdir(quarantineDir);
+    await Promise.all(
+      Array.from({ length: MAX_QUARANTINE_ENTRIES + 5 }, (_, index) =>
+        fs.writeFile(path.join(quarantineDir, `evidence-${String(index).padStart(3, '0')}`), 'x'),
+      ),
+    );
+
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+
+    expect(snapshot.health.status).toBe('valid');
+    expect(snapshot.quarantine.entries).toHaveLength(MAX_QUARANTINE_ENTRIES);
+    expect(snapshot.quarantine.count).toBe(MAX_QUARANTINE_ENTRIES + 5);
+    expect(snapshot.quarantine.truncated).toBe(true);
+  });
+
+  it.skipIf(!isSqliteAvailable())('detects a corrupt journal through a read-only quick_check without moving it', async () => {
+    const dir = await tempDir();
+    const journalPath = path.join(dir, 'daemon.db');
+    await fs.writeFile(journalPath, 'not a sqlite database');
+    const before = await digest(journalPath);
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(snapshot.journal).toMatchObject({ status: 'corrupt' });
+    expect(await digest(journalPath)).toBe(before);
+    expect(await fs.readdir(dir)).toEqual(['daemon.db']);
+  });
+});
+
+describe('doctor explicit fix', () => {
+  it('requires --yes and refuses to mutate while a daemon is reachable', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
+    await expect(runDoctorCommand(config(dir), { fix: true, adapters: [], connectControl: unreachable })).rejects.toBeInstanceOf(
+      DoctorConfirmationRequiredError,
+    );
+    await expect(
+      runDoctorCommand(config(dir), { fix: true, confirmed: true, adapters: [], connectControl: connected }),
+    ).rejects.toBeInstanceOf(DoctorDaemonRunningError);
+    expect(await fs.readFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), 'utf8')).toBe('{bad');
+  });
+
+  it('moves confirmed corrupt bytes to quarantine and writes a matching digest manifest', async () => {
+    const dir = await tempDir();
+    const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    const bytes = Buffer.from('{not-json-secret-evidence');
+    await fs.writeFile(sourcePath, bytes, { mode: 0o600 });
+
+    const result = await quarantineCorruptOperationalHealth(dir, {
+      clock: () => new Date('2026-08-09T06:45:00.000Z'),
+    });
+
+    expect(result.status).toBe('quarantined');
+    if (result.status !== 'quarantined') throw new Error('expected quarantine result');
+    await expect(fs.stat(sourcePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    const evidencePath = path.join(dir, 'quarantine', result.evidenceName);
+    expect(await fs.readFile(evidencePath)).toEqual(bytes);
+    expect(result.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+    const manifest = JSON.parse(await fs.readFile(path.join(dir, 'quarantine', result.manifestName), 'utf8')) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      sourcePath,
+      evidenceFile: result.evidenceName,
+      sha256: result.sha256,
+      sizeBytes: bytes.length,
+      reason: 'operational health state is corrupt JSON',
+    });
+  });
+
+  it('doctor --fix --yes reports the move and recollects missing health without rebuilding it', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
+    const lines: string[] = [];
+    await runDoctorCommand(config(dir), {
+      fix: true,
+      confirmed: true,
+      adapters: [],
+      connectControl: unreachable,
+      log: (line) => lines.push(line),
+    });
+    expect(lines.some((line) => line.startsWith('fix: quarantined '))).toBe(true);
+    await expect(fs.stat(path.join(dir, OPERATIONAL_HEALTH_FILENAME))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});

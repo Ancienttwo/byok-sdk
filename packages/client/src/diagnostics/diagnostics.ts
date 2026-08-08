@@ -1,0 +1,392 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { constants as fsConstants } from 'node:fs';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import type { DaemonConfig, RuntimeAdapter } from '../index';
+import { connectControlClient } from '../bin/control-client';
+import { defaultRuntimeAdapters, probeRuntimes, type ProbedRuntime } from '../bin/runtime-probe';
+import type { ControlStatusResult } from '../daemon/control-protocol';
+import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
+import { isSqliteAvailable, loadSqliteModule } from '../daemon/journal/sqlite-support';
+import {
+  inspectOperationalHealthFile,
+  type OperationalHealthFileInspection,
+  OPERATIONAL_HEALTH_FILENAME,
+} from '../daemon/operational-health';
+import { DeviceStore } from '../daemon/store';
+import { atomicWriteFile } from '../util/atomic-write';
+import { ensureSecureDir } from '../util/secure-dir';
+
+export const MAX_QUARANTINE_ENTRIES = 100;
+export const MAX_QUARANTINE_SCAN_ENTRIES = 10_000;
+
+export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
+
+export interface DiagnosticCheck {
+  id: 'config' | 'device' | 'runtimes' | 'control' | 'health' | 'journal' | 'workspace' | 'quarantine';
+  status: DiagnosticStatus;
+  summary: string;
+}
+
+export interface DiagnosticsSnapshot {
+  version: 1;
+  generatedAt: string;
+  product: { name: string; id: string };
+  system: { node: string; platform: NodeJS.Platform; arch: string; sqliteAvailable: boolean };
+  config: {
+    serverProtocol: string;
+    customStoreDir: boolean;
+    hostedJournal: boolean;
+    runtimeAllowlist?: string[];
+  };
+  device: { status: 'paired' | 'unpaired' | 'unavailable'; deviceId?: string };
+  runtimes: ProbedRuntime[];
+  control:
+    | { status: 'offline'; reason: string }
+    | {
+        status: 'online';
+        pid: number;
+        uptimeMs: number;
+        transport: string;
+        activeTaskCount: number;
+        pendingApprovalCount: number;
+        operationalHealth: ControlStatusResult['operationalHealth'];
+        storage?: ControlStatusResult['storage'];
+      };
+  health: OperationalHealthFileInspection;
+  journal: {
+    status: 'missing' | 'present' | 'corrupt' | 'unavailable';
+    sizeBytes?: number;
+    walBytes?: number;
+    integrity?: 'ok' | 'not-checked';
+    reason?: string;
+  };
+  workspace: { status: 'available' | 'missing' | 'unavailable'; writable?: boolean; reason?: string };
+  quarantine: {
+    status: 'available' | 'missing' | 'unavailable';
+    count: number;
+    scannedCount: number;
+    truncated: boolean;
+    entries: Array<{ name: string; sizeBytes: number; modifiedAt: string }>;
+    reason?: string;
+  };
+  checks: DiagnosticCheck[];
+}
+
+export interface CollectDiagnosticsOptions {
+  clock?: () => Date;
+  adapters?: RuntimeAdapter[];
+  connectControl?: typeof connectControlClient;
+}
+
+export type OperationalHealthFixResult =
+  | { status: 'not-needed'; reason: 'missing' | 'valid' }
+  | { status: 'quarantined'; evidenceName: string; manifestName: string; sha256: string; sizeBytes: number };
+
+function safeProtocol(serverUrl: string): string {
+  try {
+    return new URL(serverUrl).protocol.replace(/:$/, '');
+  } catch {
+    return 'invalid';
+  }
+}
+
+async function fileSize(filePath: string): Promise<number | undefined> {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile() ? stat.size : undefined;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+}
+
+async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['journal']> {
+  try {
+    const sizeBytes = await fileSize(path.join(storeDir, JOURNAL_DB_FILENAME));
+    if (sizeBytes === undefined) return { status: 'missing' };
+    const walBytes = await fileSize(path.join(storeDir, `${JOURNAL_DB_FILENAME}-wal`));
+    if (!isSqliteAvailable()) {
+      return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'not-checked' };
+    }
+    const { DatabaseSync } = loadSqliteModule();
+    let db: InstanceType<typeof DatabaseSync> | undefined;
+    try {
+      db = new DatabaseSync(path.join(storeDir, JOURNAL_DB_FILENAME), { readOnly: true });
+      const result = db.prepare('PRAGMA quick_check(1)').get() as { quick_check?: unknown } | undefined;
+      if (result?.quick_check !== 'ok') {
+        return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal quick_check failed' };
+      }
+      return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'ok' };
+    } catch {
+      return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal could not be opened read-only' };
+    } finally {
+      db?.close();
+    }
+  } catch {
+    return { status: 'unavailable', reason: 'journal files could not be inspected' };
+  }
+}
+
+async function inspectWorkspace(workspaceRoot: string): Promise<DiagnosticsSnapshot['workspace']> {
+  try {
+    const stat = await fs.stat(workspaceRoot);
+    if (!stat.isDirectory()) return { status: 'unavailable', reason: 'workspace root is not a directory' };
+    try {
+      await fs.access(workspaceRoot, fsConstants.R_OK | fsConstants.W_OK);
+      return { status: 'available', writable: true };
+    } catch {
+      return { status: 'available', writable: false };
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
+    return { status: 'unavailable', reason: 'workspace root could not be inspected' };
+  }
+}
+
+async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot['quarantine']> {
+  const dir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
+  const entries: DiagnosticsSnapshot['quarantine']['entries'] = [];
+  let count = 0;
+  let scannedCount = 0;
+  let handle: Awaited<ReturnType<typeof fs.opendir>>;
+  try {
+    handle = await fs.opendir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { status: 'missing', count: 0, scannedCount: 0, truncated: false, entries: [] };
+    }
+    return {
+      status: 'unavailable',
+      count: 0,
+      scannedCount: 0,
+      truncated: false,
+      entries: [],
+      reason: 'quarantine directory could not be inspected',
+    };
+  }
+  try {
+    for await (const entry of handle) {
+      scannedCount += 1;
+      if (scannedCount > MAX_QUARANTINE_SCAN_ENTRIES) break;
+      if (!entry.isFile()) continue;
+      count += 1;
+      if (entries.length >= MAX_QUARANTINE_ENTRIES) continue;
+      try {
+        const stat = await fs.stat(path.join(dir, entry.name));
+        entries.push({ name: entry.name, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() });
+      } catch {
+        // A concurrent operator move can make one entry disappear between
+        // readdir and stat. The aggregate remains honest via `scannedCount`.
+      }
+    }
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    status: 'available',
+    count,
+    scannedCount: Math.min(scannedCount, MAX_QUARANTINE_SCAN_ENTRIES),
+    truncated: scannedCount > MAX_QUARANTINE_SCAN_ENTRIES || count > entries.length,
+    entries,
+  };
+}
+
+function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticCheck[] {
+  return [
+    {
+      id: 'config',
+      status: snapshot.config.serverProtocol === 'invalid' ? 'fail' : 'pass',
+      summary: `server protocol=${snapshot.config.serverProtocol}; hostedJournal=${snapshot.config.hostedJournal}`,
+    },
+    {
+      id: 'device',
+      status: snapshot.device.status === 'unavailable' ? 'fail' : snapshot.device.status === 'unpaired' ? 'warn' : 'pass',
+      summary: snapshot.device.status,
+    },
+    {
+      id: 'runtimes',
+      status: snapshot.runtimes.some((runtime) => runtime.present) ? 'pass' : 'warn',
+      summary: `${snapshot.runtimes.filter((runtime) => runtime.present).length}/${snapshot.runtimes.length} present`,
+    },
+    {
+      id: 'control',
+      status: snapshot.control.status === 'online' ? 'pass' : 'warn',
+      summary: snapshot.control.status === 'online' ? `online transport=${snapshot.control.transport}` : 'daemon offline',
+    },
+    {
+      id: 'health',
+      status: snapshot.health.status === 'corrupt' ? 'fail' : snapshot.health.status === 'missing' ? 'warn' : 'pass',
+      summary: snapshot.health.status,
+    },
+    {
+      id: 'journal',
+      status:
+        snapshot.journal.status === 'unavailable' || snapshot.journal.status === 'corrupt'
+          ? 'fail'
+          : snapshot.journal.status === 'missing'
+            ? 'warn'
+            : 'pass',
+      summary: snapshot.journal.status,
+    },
+    {
+      id: 'workspace',
+      status:
+        snapshot.workspace.status === 'unavailable'
+          ? 'fail'
+          : snapshot.workspace.status === 'missing' || snapshot.workspace.writable === false
+            ? 'warn'
+            : 'pass',
+      summary: `${snapshot.workspace.status}${snapshot.workspace.writable === false ? '; read-only' : ''}`,
+    },
+    {
+      id: 'quarantine',
+      status: snapshot.quarantine.status === 'unavailable' ? 'fail' : snapshot.quarantine.count > 0 ? 'warn' : 'pass',
+      summary: `${snapshot.quarantine.count} evidence file(s)`,
+    },
+  ];
+}
+
+export async function collectDiagnostics(
+  config: DaemonConfig,
+  storeDir: string,
+  options: CollectDiagnosticsOptions = {},
+): Promise<DiagnosticsSnapshot> {
+  const adapters = options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
+  const connectControl = options.connectControl ?? connectControlClient;
+  const [device, runtimes, health, journal, workspace, quarantine, controlConnection] = await Promise.all([
+    new DeviceStore(storeDir)
+      .load()
+      .then((record) => (record ? ({ status: 'paired', deviceId: record.deviceId } as const) : ({ status: 'unpaired' } as const)))
+      .catch(() => ({ status: 'unavailable' } as const)),
+    probeRuntimes(adapters),
+    inspectOperationalHealthFile(storeDir),
+    inspectJournal(storeDir),
+    inspectWorkspace(config.workspaceRoot),
+    inspectQuarantine(storeDir),
+    connectControl({ storeDir, productId: config.productId }),
+  ]);
+
+  let control: DiagnosticsSnapshot['control'];
+  if (!controlConnection.ok) {
+    control = { status: 'offline', reason: 'daemon control socket unavailable' };
+  } else {
+    try {
+      const live = await controlConnection.client.request<ControlStatusResult>('status');
+      control = {
+        status: 'online',
+        pid: live.pid,
+        uptimeMs: live.uptimeMs,
+        transport: live.transport,
+        activeTaskCount: live.activeTasks.length,
+        pendingApprovalCount: live.approvalsPending,
+        operationalHealth: live.operationalHealth,
+        ...(live.storage ? { storage: live.storage } : {}),
+      };
+    } catch {
+      control = { status: 'offline', reason: 'daemon status request failed' };
+    } finally {
+      controlConnection.client.close();
+    }
+  }
+
+  const withoutChecks: Omit<DiagnosticsSnapshot, 'checks'> = {
+    version: 1,
+    generatedAt: (options.clock ?? (() => new Date()))().toISOString(),
+    product: { name: config.productName, id: config.productId },
+    system: { node: process.versions.node, platform: process.platform, arch: process.arch, sqliteAvailable: isSqliteAvailable() },
+    config: {
+      serverProtocol: safeProtocol(config.serverUrl),
+      customStoreDir: config.storeDir !== undefined,
+      hostedJournal: config.hostedJournal !== undefined,
+      ...(config.runtimeAllowlist ? { runtimeAllowlist: [...config.runtimeAllowlist] } : {}),
+    },
+    device,
+    runtimes,
+    control,
+    health,
+    journal,
+    workspace,
+    quarantine,
+  };
+  return { ...withoutChecks, checks: checksFor(withoutChecks) };
+}
+
+export function stableIdentifierHash(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+async function hashFile(filePath: string): Promise<{ sha256: string; sizeBytes: number; mtimeMs: number }> {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) throw new Error('operational health state is not a regular file');
+    const hash = createHash('sha256');
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    const after = await handle.stat();
+    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+      throw new Error('operational health state changed during inspection');
+    }
+    return { sha256: hash.digest('hex'), sizeBytes: after.size, mtimeMs: after.mtimeMs };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * The only S7-b repair: preserve a confirmed-corrupt health file in the
+ * never-auto-delete quarantine. Callers must separately enforce the CLI's
+ * `--fix --yes` and offline-daemon preconditions.
+ */
+export async function quarantineCorruptOperationalHealth(
+  storeDir: string,
+  options: { clock?: () => Date } = {},
+): Promise<OperationalHealthFixResult> {
+  const inspection = await inspectOperationalHealthFile(storeDir);
+  if (inspection.status === 'missing') return { status: 'not-needed', reason: 'missing' };
+  if (inspection.status === 'valid') return { status: 'not-needed', reason: 'valid' };
+
+  const sourcePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
+  const hashed = await hashFile(sourcePath);
+  const current = await fs.stat(sourcePath);
+  if (current.size !== hashed.sizeBytes || current.mtimeMs !== hashed.mtimeMs) {
+    throw new Error('operational health state changed before quarantine');
+  }
+
+  const quarantineDir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
+  await ensureSecureDir(quarantineDir);
+  const stamp = (options.clock ?? (() => new Date()))().toISOString().replace(/[:.]/g, '-');
+  const evidenceName = `${stamp}-${randomUUID()}-${OPERATIONAL_HEALTH_FILENAME}`;
+  const manifestName = `${evidenceName}.manifest.json`;
+  const evidencePath = path.join(quarantineDir, evidenceName);
+  await fs.rename(sourcePath, evidencePath);
+  await fs.chmod(evidencePath, 0o600);
+  await atomicWriteFile(
+    path.join(quarantineDir, manifestName),
+    `${JSON.stringify(
+      {
+        version: 1,
+        quarantinedAt: (options.clock ?? (() => new Date()))().toISOString(),
+        reason: inspection.reason,
+        sourcePath,
+        evidenceFile: evidenceName,
+        sha256: hashed.sha256,
+        sizeBytes: hashed.sizeBytes,
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o600, fsync: true },
+  );
+  return { status: 'quarantined', evidenceName, manifestName, sha256: hashed.sha256, sizeBytes: hashed.sizeBytes };
+}
+
+export { OPERATIONAL_HEALTH_FILENAME };
