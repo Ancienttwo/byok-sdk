@@ -1230,7 +1230,7 @@ canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规�
 
 ### 12.7 数据与存储架构（云端面为目标设计；本机 journal 面已实现）
 
-主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 只持有经过 hash/size 验证的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
+主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 持有按 daemon 声明的 canonical hash 命名、且由 cloud 观测 size/content-type 的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
 
 #### 12.7.1 五类云端数据与一类本地连续态
 
@@ -1354,13 +1354,16 @@ sequenceDiagram
 
 #### 12.7.4 Postgres + R2 object storage
 
-对象 key 必须 tenant-scoped，例如 `tenants/<tenant_id>/objects/sha256/<hex>`。同一 tenant 内的同 hash 可以去重并只计一次 committed bytes；禁止用全局跨租户 key，那会把 object existence 变成跨租户 oracle。
+对象 key 必须 tenant-scoped，例如 `tenants/<tenant_id>/objects/sha256/<hex>`。同一 tenant 内按 daemon 声明的 canonical hash 去重并只计一次 committed bytes；禁止用全局跨租户 key，那会把 object existence 变成跨租户 oracle。这里的 hash authority 是通过认证的配对 daemon（ADR-024）：cloud 验证 principal/tenant、声明格式与签入的 size/type，但不读回 bytes 重算摘要。
 
-- 上传前校验声明的 size、hash、content type 与 per-object 上限；
+- 上传前校验 daemon 声明的 size、canonical hash、content type 与 per-object 上限；
+- `HEAD` 只观测对象存在性、byte size 与 content type，不观测或验证 SHA-256；
+- `object_manifest.state = committed` 只表示 tenant-scoped 对象存在、observed size/type 与声明匹配且 manifest/accounting transaction 已提交，不表示 cloud 验证过摘要；
 - truth transaction 只引用 `object_manifest.state = committed` 的对象；
 - presigned capability 绑定 tenant、reservation、resource、最大 size 与 expiry；
 - object key 不承载 secret，也不承载可读的 instruction 标题；
 - inline payload 只用于小对象，并计入 tenant logical usage；
+- 任何声称下载内容完整性的 consumer 必须自行对 bytes 重算 SHA-256，并与 daemon 声明的摘要比较；
 - R2 与 Postgres 之间没有跨系统 transaction，因此必须用 reservation/finalize/reconcile，不能假设原子写入。
 
 #### 12.7.5 Retention
@@ -1424,10 +1427,12 @@ reservation/finalize 的 port 契约、无超卖语义与下表五个稳定错�
 1. client/daemon 带 `expectedBytes`、kind、hash、content type 请求 reservation；
 2. Postgres transaction 锁定 tenant usage，检查 `committed + reserved + expected <= hardLimit`，成功则增加 `reservedBytes`；
 3. cloud 签发绑定该 reservation 的 R2 presigned PUT；
-4. upload 完成后，finalize 对 R2 做 `HEAD`/metadata 的 size/hash/type 验证；
+4. upload 完成后，finalize 对 R2 做 `HEAD`，只观测存在性、byte size 与 content type；
 5. Postgres transaction 把 reservation 从 reserved 转为 committed，并建立 manifest/reference；
 6. reservation 过期或 finalize 失败时释放 reserved bytes，并把已上传但未被引用的对象列为 orphan candidate；
 7. 所有步骤按 reservation/request id 幂等。
+
+S4B 的首个实现提交必须删除 `StorageFinalizeInput.observedContentHash`：reservation/manifest 保存的是 daemon 声明的 hash，不能把它回填成“观测值”；finalize 的 storage observation 只包含 `observedByteSize` 与 `observedContentType`。`object_manifest` 保留 `pending`、`committed`、`delete_pending`、`deleted` 四态，`0003` 不增加 `hash_verified` 字段或验证态。
 
 task admission 必须按 `limits.maxOutputBytes` 或产品给定预算预留 terminal/artifact 空间。无法预留时应在 runtime 启动前 decline，而不是任务跑完才发现结果存不下。少量 terminal failure metadata 使用独立且严格有界的 system reserve，保证「quota 已满」仍能留下可诊断终态。
 
@@ -1438,7 +1443,7 @@ task admission 必须按 `limits.maxOutputBytes` 或产品给定预算预留 ter
 | `storage_object_too_large` | 413 | 单对象超过限制 |
 | `storage_quota_exceeded` | 507 | tenant 的 committed + reserved 将超过硬限额 |
 | `storage_reservation_expired` | 409 | reservation 已过期或已终结 |
-| `storage_integrity_mismatch` | 422 | R2 实际 size/hash/type 与声明不符 |
+| `storage_integrity_mismatch` | 422 | declaration 冲突，或 R2 对象缺失 / observed size/type 与声明不符 |
 | `storage_write_suspended` | 423 | 降级 grace 结束后仍超限，进入只读保护 |
 
 #### 12.7.8 云端满额行为与清理逻辑
@@ -1457,8 +1462,9 @@ R2 GC 使用 tombstone 加 reconcile：
 1. Postgres 把 `ref_count = 0` 且超过 grace 的 manifest 标记为 `delete_pending`；
 2. worker 删除 R2 object；
 3. 成功后标记 `deleted` 并扣减 usage；
-4. 任一步失败都可重试；reconciler 定期检查 Postgres manifest 与 R2 object 是否漂移；
-5. 只靠 refcount 不够，周期性 reference scan 是第二道保护。
+4. 任一步失败都可重试；reconciler 依据 tenant-scoped key、manifest、reservation、reference 与 grace 检查 Postgres/R2 是否漂移；
+5. `HEAD` 可发现对象缺失与 observed size/type 漂移，但无法发现同 size/type 的字节替换；GC 不读回重算摘要，也不加入 checksum fallback；
+6. 只靠 refcount 不够，周期性 reference scan 是第二道保护。
 
 #### 12.7.9 储存控制面端点（目标设计）
 
@@ -1467,7 +1473,7 @@ R2 GC 使用 tombstone 加 reconcile：
 | `GET /byok/storage/usage` | tenant principal | committed / reserved / limit / grace 状态 |
 | `PUT /byok/admin/storage-entitlements/:tenantId` | control plane | 写入版本化数值 entitlement；不含套餐价格逻辑 |
 | `POST /byok/storage/reservations` | device proof / control | 原子预留预计 bytes 并签发 upload intent |
-| `POST /byok/storage/reservations/:id/complete` | device proof / control | R2 `HEAD`/hash 验证后转为 committed |
+| `POST /byok/storage/reservations/:id/complete` | device proof / control | R2 `HEAD` 确认存在性与 size/type 后转为 committed；不验证摘要 |
 | `POST /byok/storage/reservations/:id/abort` | device proof / control | 幂等释放 reservation；已上传对象进入 orphan grace |
 | object presign 端点 | device proof / control | reservation-bound 的 upload/download capability |
 
@@ -1788,3 +1794,4 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-021 | 套餐与计费归宿主所有；SDK 只执行版本化数值 entitlement、reservation 与 usage | Accepted |
 | ADR-022 | quota 满不自动删除 durable user truth；先拒绝新写，并保留删除/导出/扩容路径 | Accepted |
 | ADR-023 | `workspaceHint` 维持 reserved，接线需另立 ADR 与明确 resolver 设计 | Accepted |
+| ADR-024 | R2 object 的 canonical SHA-256 以通过认证的 daemon 声明为权威；cloud `HEAD` 只观测存在性与 size/type | Accepted |

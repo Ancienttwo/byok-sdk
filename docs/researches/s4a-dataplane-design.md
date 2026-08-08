@@ -100,12 +100,12 @@ runner 契约（约 120 行，落在 `@byok/cloud-postgres/src/migrate.ts`）：
 - 九项 object test 分两类，替身策略也分两类：
   - 打**我们自己逻辑**的（hash/size/type mismatch、no key traversal、cross-tenant 不产生 existence oracle、same hash duplicate idempotent）→ MinIO 上跑真流程即可；
   - 打**重试语义**的（R2 transient error/backoff/idempotency）→ 用一层包在 `fetch` 外的故障注入器确定性地吐 500/503，不需要也不应该去伪造一个 S3。这是 fault injector，不是 shadow S3。
-- presign 的完整性绑定：签名里必须带 `Content-Length`（SigV4 signed header，R2 侧强制），这样错误大小的上传在对象存储层就被拒。sha256 checksum header 是否被 R2 接受，**实现时必须先验证再决定是否加**（`[unverified]`）；无论如何 §12.7.7 第 4 步的 `HEAD` 复核都是必需的，不因为签名带了长度就省掉。
+- presign 的完整性绑定：签名里必须带 `Content-Length`（SigV4 signed header，R2 侧强制），这样错误大小的上传在对象存储层就被拒。**S4A-c probe 已裁定 checksum header 不签**：MinIO 支持该测试路径，但 R2 的 SHA-256 只支持 `COMPOSITE`、不支持单次 PutObject 需要的 `FULL_OBJECT`；签入会形成「测试基底过、生产失败」的假保证。`Content-Type` 同样签入；`HEAD` 仍无条件复核存在性、size 与 content type，但不观测 SHA-256。Hash authority 见 ADR-024（`r2-hash-authority-decision.md`）。
 
 **风险与回退**
 
 - 风险：S4B 的 reconciler 需要 `ListObjectsV2`，`aws4fetch` 路线要自己解 XML 分页。这是本裁定最实在的代价，写在这里让 S4B 知道。若 S4B 判定 List/multipart 的手写成本超过 SDK 的依赖成本，换回 `@aws-sdk/client-s3` 只影响这一个 adapter 文件。
-- 风险：MinIO 与真 R2 的行为差异（条件请求、checksum header 支持面）。缓解：把 `HEAD` 复核作为无条件步骤，不把正确性押在某一个实现的严格程度上。
+- 风险：MinIO 与真 R2 的行为差异（条件请求、checksum header 支持面）。缓解：checksum 仅采用两者共同支持的生产能力；当前 SHA-256 `FULL_OBJECT` 不在交集，因此不签、不加 fallback。把 `HEAD` 复核作为无条件步骤，但只承诺它真实观测的存在性、size 与 content type。
 
 ---
 
@@ -173,7 +173,7 @@ runner 契约（约 120 行，落在 `@byok/cloud-postgres/src/migrate.ts`）：
 - `cloud.blobs`（`CloudBlobStore`）= **capability 铸造面**，R2 adapter 实现：
   - `createUpload(tenant, decl)` → 写 `object_manifest` 的 `pending` 行 + 返回**指向 R2 的绝对 presigned PUT URL**（key = `tenants/<tenantId>/objects/sha256/<hex>`，由 `tenantObjectKey` 生成）；
   - `getDownloadUrl(tenant, blobId)` → 仅对本租户、`state = committed` 的行签 GET；
-  - `pending → committed` 由「首次被引用或首次下载」时的 `HEAD` 复核驱动（观测到的 size/contentType 与声明不符即 `storage_integrity_mismatch`）。显式 finalize 端点属 S4B（S4A.4 已把 reservation-bound presign 与 finalize crash 矩阵划出去），S4A 不新开 wire route。
+  - `pending → committed` 由「首次被引用或首次下载」时的 `HEAD` 复核驱动（观测到的 size/contentType 与声明不符即 `storage_integrity_mismatch`）。`HEAD` 不观测 digest；canonical hash 以通过认证的 daemon 声明为权威（ADR-024）。显式 finalize 端点属 S4B（S4A.4 已把 reservation-bound presign 与 finalize crash 矩阵划出去），S4A 不新开 wire route。
 
 **必须做的一处契约调整：把字节代理三方法从 `CloudBlobStore` 拆出去。**
 

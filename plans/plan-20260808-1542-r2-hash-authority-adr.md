@@ -1,6 +1,6 @@
 # Plan: ADR-024: R2 Hash Authority
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260808-1542
 > **Slug**: r2-hash-authority-adr
 > **Artifact Level**: work-package
@@ -105,7 +105,7 @@
 已核对：contract scope 仅覆盖本刀 docs/workflow artifacts；acceptance reviewer/source 使用 `Codex` / `codex-review`。
 
 ## Task Breakdown
-- [ ] 建立并批准 docs-only contract/worktree，切到 `codex/r2-hash-authority-adr`
-- [ ] 新增 ADR-024 并同步 architecture、sprint、todo、S4A research
-- [ ] compose dataplane hard gate 全绿；runtime/migration zero-diff；canonical wording audit 通过
+- [x] 建立并批准 docs-only contract/worktree，切到 `codex/r2-hash-authority-adr`
+- [x] 新增 ADR-024 并同步 architecture、sprint、todo、S4A research
+- [x] compose dataplane hard gate 全绿；runtime/migration zero-diff；canonical wording audit 通过
 - [ ] review/receipt/PR/CI 合入，归档本 workflow 并归还 K-line active-plan 槽位
