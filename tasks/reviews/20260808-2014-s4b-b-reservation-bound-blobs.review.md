@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:5f50e61aece5e9c2f8db369d3a6a9e1634d48d29f5ae1fdb98d3c328f94673a0
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 537cba47ccb4a6c2f77409a75f0a6a56e16d582e
+> **Verification Evidence SHA256**: sha256:621b448fb92450025e85f2ac7a9cdeb01c5976da635ad07ce4795c9c46faca50
+> **Issued At**: 2026-08-08T13:28:10.578Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Independent second-pass review accepted e636eb3: abandoned reservations are reaped under tenant admission serialization; R2 carries no false reservation query binding; self-hosted idempotency is deterministic and SQLite restart-safe; atomic manifest/reservation/usage, same-hash concurrency, tenant binding, pending denial, replay, and frozen SQL/protocol-body boundaries were verified.
 - Findings: none
 
 ## Behavior Diff Notes
