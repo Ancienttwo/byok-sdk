@@ -1,16 +1,16 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S5 已合入 `main`；S6 三刀实现、CI 与 independent security acceptance 已绿，待 stacked merge/readback
+> **状态**：Executing。S0–S6 已合入 `main`；K4/K4.1 跨仓库依赖轨也已合入，当前进入 S7 operations/release RC
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-09（见 D-10）
-> **仓库基线**：`Ancienttwo/byok-sdk@2a1c4a7`（2026-08-09）
-> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）
-> **下一可执行 slice**：先按 #34 → #35 → #36 顺序完成 S6 stacked merge/readback；随后投影 S7 operations/release RC，且不再启动 Claude review
+> **仓库基线**：`Ancienttwo/byok-sdk@68b6020`（2026-08-09）
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）、S6-a（merge `3bc3e74`，PR #34）、S6-b（merge `639f2e5`，PR #35）、S6-c（merge `68b6020`，PR #36）
+> **下一可执行 slice**：S7-a deterministic fleet health，计划 `plans/plan-20260809-0520-s7a-fleet-health.md`；Claude review 按 owner 指令暂停，验收走 independent Codex exact-SHA
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
-> **既有 K 线**：K0–K3 已完成；K4/K4.1 仍待执行，并作为独立跨仓库轨道继续
+> **既有 K 线**：K0–K4.1 已完成；AiphaBee PR #7 merge `390307a50c0728a0fc243578b5b4b94ff4351360`
 > **计划跨度**：S0–S7，共 8 个 delivery Sprint（S4 拆为 S4A/S4B）；不含跨团队等待时间
 > **执行原则**：验收条件固定，日历可压缩或延长；不得通过减少安全/恢复测试来“按期完成”。本文件不含工期、人力或 story point 估算——排序只表达相对复杂度与依赖，不表达容量承诺
 
@@ -30,8 +30,8 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | PR #32；merge `140b109`；Claude external pass；CI 32/32 |
 | 2 | [x] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | PR #33；merge `2a1c4a7`；CI green |
-| 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | S6-a/b/c Draft PR #34/#35/#36；各 32/32 CI；full-stack Codex exact-SHA accepted；待 stacked merge |
-| 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
+| 3 | [x] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | PR #34/#35/#36；merge `3bc3e74`/`639f2e5`/`68b6020`；各 32/32 CI；full-stack Codex exact-SHA accepted |
+| 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | S7-a plan `20260809-0520-s7a-fleet-health` 已批准；S7-b diagnostics、S7-c package/RC 后续投影 |
 
 已交付并合入 `main` 的 S0、S1、S2、S3a、S3b、S4A、S4B 不再列入后续 backlog；S4B-c 行仅保留本轮 merge readback 记录，其 merge SHA 见文首交付清单。
 
@@ -135,7 +135,14 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 
 - **改动**：S6 依 §1.3 拆为三刀。S6-a 冻结 device proof bytes、device-row key authority、专用 replay receipt 与 I3；S6-b 落 proof-bound record routes 及 receipt/truth/object-reference/accounting 的单事务提交；S6-c 落 daemon signer、`MemorySelector`、selected fetch/rehash/filter 与端到端行为。
 - **理由**：签名 verifier、跨资源原子事务与 daemon local-semantic path 是三个独立高风险面，rollback 与 falsifier 不同。先证明 principal 再开放写 route，避免 handler 在不完整 auth 上扩张；生产 capability 仍须等 S6-b reservation-aware composition 与独立 security review 后才可 default-on。
-- **验收影响**：三刀全部合入前 S6 保持未完成。Claude review 因 provider quota 暂停，不构成交付豁免；独立 security review 改由 SHA-bound 的 Codex 独立 execution context 完成，implementer self-review 不得记为 external pass。
+- **验收影响**：三刀均已合入（PR #34/#35/#36；merge `3bc3e74`/`639f2e5`/`68b6020`），S6 完成。Claude review 因 provider quota 暂停，不构成交付豁免；独立 security review 由 SHA-bound 的 Codex 独立 execution context 完成，implementer self-review 未记为 external pass。
+
+### D-11：K4/K4.1 已合入；S7 keys 只验边界，不再扩 generic API
+
+- **交付事实**：`@byok-sdk/keys@0.1.0` 已从 registry 安装；AiphaBee PR #7 在 exact implementation head `3a53054761471e63c4785019cd6192a973dcae82` 通过独立 Codex review，docs-only acceptance head `d6bb8311693557ef21f51f663578963bdcf11b26` 的 GitHub CI run `31278628304` green，merge `390307a50c0728a0fc243578b5b4b94ff4351360`。
+- **K-502 裁定**：platform-selecting secret-store factory 与 account data-scope manifest 都是 host/release-channel policy，留在 AiphaBee host adapter；`@byok-sdk/keys` 继续要求显式 store/path injection，不引入 vendor-aware factory。
+- **K-503 裁定**：test-before-save 保留为 AiphaBee narrative adapter，由已存在的 provider clients 执行；不向 generic `ProviderRegistry` 添加只有一个 host 需要的 convenience API。
+- **S7 影响**：K4/K4.1 前置解除。S7 的 keys 面只做 dependency-graph 与 credential isolation audit；P5 profile→TruthStore 仍是 sprint 外新 plan，不偷偷并入 RC。
 
 ---
 
@@ -1060,7 +1067,7 @@ Write：
 - [x] snapshot >1 MiB metric/revisit trigger documented（S6 design research；metric implementation 由 S6-c daemon path 承接）；
 - [x] security review passes before capability default-on（independent Codex exact-SHA `2a1c4a7..ead8a87` accepted；Claude paused/not invoked）。
 
-> **执行记录（尚未宣告 S6 合入完成）**：S6-a commit `d8e7802` / Draft PR #34、S6-b commits `2de841d` + `7f26b5c` / Draft PR #35、S6-c commits `42632c0` + `ead8a87` / Draft PR #36 已全部交付；三 PR 各 32/32 CI green。首次 Codex review 在 `42632c0` 拒绝 SSRF 与 write-confirmation 两条 HIGH，修复后完整 stack `2a1c4a7..ead8a87` 由 read-only Codex session `019fe324-7ce7-7311-87a9-349184499800` exact-SHA accepted。Claude review 因额度暂停且未调用。仅剩按 #34 → #35 → #36 顺序 merge/readback；三刀全部合入前仍不把 S6 行勾为完成。
+> **执行记录（S6 已完成）**：S6-a commit `d8e7802` / PR #34、S6-b commits `2de841d` + `7f26b5c` / PR #35、S6-c commits `42632c0` + `ead8a87` / PR #36 全部交付；三 PR 各 32/32 CI green。首次 Codex review 在 `42632c0` 拒绝 SSRF 与 write-confirmation 两条 HIGH，修复后完整 stack `2a1c4a7..ead8a87` 由 read-only Codex session `019fe324-7ce7-7311-87a9-349184499800` exact-SHA accepted。Claude review 因额度暂停且未调用。stack 已按 #34 → #35 → #36 合入，merge SHA 为 `3bc3e74`、`639f2e5`、`68b6020`，`origin/main` readback 完成。
 
 ### S6.6 Rollback
 
@@ -1072,7 +1079,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 
 > **目标**：确认 keys plane 与平台线的依赖边界，补齐 fleet reliability、doctor/quarantine、release/runbook，并形成 RC。
 > **风险等级**：高；跨 package、跨 repo、发布与运维
-> **依赖**：S6、S4B；K4/K4.1 必须完成
+> **依赖**：S6、S4B、K4/K4.1（均已完成）
 > **对应**：§9.2 储备行 C1–C3（`ARCHITECTURE-PROPOSAL:699`）与 K4（`:693`）。**P5（`:698`，`@byok-sdk/keys` profile 持久化接 `TruthStore`）已移出本 sprint**——见 `tasks/todos.md` deferred 项
 > **可拆**：S7A integration / S7B operations
 
@@ -1094,6 +1101,8 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | O-016 | RC security/audit review | 低 |
 
 > `@byok-sdk/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于 K 线 plan（状态以 `tasks/current.md` 为准），不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok/core` TruthStore 落地。
+
+K-401/K-402/K-502/K-503 已由 D-11 收口；S7 实作从 L-004 开始。
 
 ### S7.2 Keys integration boundary
 
@@ -1177,23 +1186,23 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 
 ## Parallel Track K4/K4.1 — `@byok-sdk/keys` 回接 aip-main-open
 
-> **不纳入 S0–S6 critical path。** 它属于 K 线 plan `plans/plan-20260805-1659-byok-keys-package.md` 的未完成任务（该 plan 的状态以 `tasks/current.md` 为准），本 sprint 不重新定义其范围，只记录依赖：S7 的 keys 边界验收依赖其结果；`tasks/todos.md` 中移出的 P5 项也以其收口为触发条件。
+> **不纳入 S0–S6 critical path。** K4/K4.1 已由 AiphaBee PR #7 独立交付并合入；本节保留 exact closeout 清单，S7 只消费其结果。
 
 ### K4.1 Tasks
 
-- [ ] diff `aip-main-open@c6a5385..HEAD` 相关文件；
-- [ ] 决定 npm public vs GitHub Packages；
-- [ ] publish exact package version；
-- [ ] delete duplicated ported implementation；
-- [ ] switch dependency；
-- [ ] convert `instanceof LocalExecutionError` to structured code detection；
-- [ ] preserve byte-compatible defaults via constructor injection；
-- [ ] run `apps/local-agent/src/settings.test.ts` unchanged；
-- [ ] create thin settings adapter for surfaces generic registry does not expose；
-- [ ] settle default secret-store factory；
-- [ ] settle local account data-scope manifest；
-- [ ] decide generic `testConnection()` vs aip-only adapter；
-- [ ] independent PR/rollback/release notes。
+- [x] diff `aip-main-open@c6a5385..HEAD` 相关文件；
+- [x] 决定 npm public vs GitHub Packages；
+- [x] publish exact package version；
+- [x] delete duplicated ported implementation；
+- [x] switch dependency；
+- [x] convert `instanceof LocalExecutionError` to structured code detection；
+- [x] preserve byte-compatible defaults via constructor injection；
+- [x] run `apps/local-agent/src/settings.test.ts` unchanged；
+- [x] create thin settings adapter for surfaces generic registry does not expose；
+- [x] settle default secret-store factory（host-owned）；
+- [x] settle local account data-scope manifest（host-owned）；
+- [x] decide generic `testConnection()` vs aip-only adapter（aip-only）；
+- [x] independent PR/rollback/release notes（PR #7，merge `390307a`）。
 
 ### K4.2 Stop conditions
 

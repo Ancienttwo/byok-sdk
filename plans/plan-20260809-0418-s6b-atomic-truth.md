@@ -1,6 +1,6 @@
 # Plan: S6-b Atomic Truth Write
 
-> **Status**: Executing
+> **Status**: Done
 > **Created**: 20260809-0418
 > **Slug**: s6b-atomic-truth
 > **Artifact Level**: work-package
@@ -61,3 +61,4 @@
 - [x] Implement reference behavior and adversarial/rollback tests.
 - [x] Push stacked Draft PR #35（commit `2de841d`）；retain independent review gate（hard env/full workspace gates 已通过）。
 - [x] Obtain full-stack independent Codex security/transaction acceptance at `ead8a8746188b8f480c0115ad556b766dfbd73fa`；Claude review remained paused and was not invoked。
+- [x] Retarget PR #35 to `main`, pass 32/32 CI, and merge/read back as `639f2e5b3e61366180890fed0fc11a465cd90514`。

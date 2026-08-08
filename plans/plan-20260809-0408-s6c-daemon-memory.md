@@ -1,6 +1,6 @@
 # Plan: S6-c Daemon Proof and Memory Path
 
-> **Status**: Executing
+> **Status**: Done
 > **Created**: 20260809-0408
 > **Slug**: s6c-daemon-memory
 > **Artifact Level**: work-package
@@ -63,3 +63,4 @@
 - [x] Run hard-env/full workspace gates and protocol/schema/migration zero-diff checks。
 - [x] Close first exact-SHA Codex findings with object-origin/redirect and write-confirmation guards。
 - [x] Push stacked Draft PR #36，pass 32/32 CI，并取得 exact-SHA independent Codex security acceptance；Claude review remains paused。
+- [x] Retarget PR #36 to `main`, preserve exact accepted code head, and merge/read back as `68b6020921cd5a104d8df071599b6cac2226a387`。
