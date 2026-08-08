@@ -47,6 +47,7 @@
     "@byok/cloud": "workspace:*",
     "@byok/core": "workspace:*",
     "aws4fetch": "1.0.20",
+    "fast-xml-parser": "^5.10.1",
     "pg": "^8.22.0"
   },
   "devDependencies": {

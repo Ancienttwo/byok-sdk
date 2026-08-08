@@ -976,7 +976,7 @@ core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 
 | cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | 目标设计 |
 | cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs | 目标设计 |
 | cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | 目标设计 |
-| cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 目标设计 |
+| cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 当前实现（S4B-c） |
 | cloud hints | device presence TTL、task activity tail + explicit dropped count | 目标设计 |
 | compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | core 侧 InMemory composition 与参数化 conformance 套件**已实现（S2）**；cloud 侧 InMemory composition（七个 tenant-first auth/task port + `TenantStores` facade）**已实现（S3a）**；其余仍是目标设计 |
 
@@ -1420,7 +1420,7 @@ Postgres 至少新增：`storage_entitlement`、`storage_usage`、`storage_reser
 
 #### 12.7.7 Reservation/finalize：防止并发超卖
 
-reservation/finalize 的 port 契约与无超卖语义由 `@byok/core` 的 `QuotaStore` 持有。S4B-b 已把 R2 presign、显式 finalize 与 Postgres manifest/accounting transaction 接进 device surface；orphan GC 仍属 S4B-c。
+reservation/finalize 的 port 契约与无超卖语义由 `@byok/core` 的 `QuotaStore` 持有。S4B-b 已把 R2 presign、显式 finalize 与 Postgres manifest/accounting transaction 接进 device surface；S4B-c 已交付 host-owned retention/dead-letter/R2 GC 与 reconciliation composition。
 
 所有直接上传 R2 的 durable write 走两阶段流程：
 
@@ -1466,6 +1466,15 @@ R2 GC 使用 tombstone 加 reconcile：
 5. `HEAD` 可发现对象缺失与 observed size/type 漂移，但无法发现同 size/type 的字节替换；GC 不读回重算摘要，也不加入 checksum fallback；
 6. 只靠 refcount 不够，周期性 reference scan 是第二道保护。
 
+S4B-c 的 current implementation 是 `PostgresCloudCleanup` +
+`R2ObjectMaintenanceStore`，schema authority 为 `0003_cloud_cleanup.sql`。
+host 以 tenant/job id 显式调度；每 tenant advisory serialization、bounded
+batch 与 `gc_cursor` 限制 10x 时的 LIST/HEAD 成本。`cleanup_job` 保存 quota/
+retention/GC counters 供 metrics 与 support readback。未追踪但 key 合法的
+R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 一次
+观测而直接删除。完整 crash/rollback/usage rebuild 流程见
+`deploy/runbooks/cloud-cleanup.md`。
+
 #### 12.7.9 储存控制面端点（目标设计）
 
 | 端点 | 主体 | 用途 | 交付状态 |
@@ -1474,7 +1483,7 @@ R2 GC 使用 tombstone 加 reconcile：
 | `PUT /byok/admin/storage-entitlements/:tenantId` | control plane | 写入版本化数值 entitlement；不含套餐价格逻辑 | 目标设计，host 目前直接调用 port |
 | `POST /byok/blobs` + `Idempotency-Key` | device bearer | 原子预留预计 bytes、建立 pending manifest 并签发 reservation-bound upload capability | S4B-b 已交付 |
 | `POST /byok/blobs/:id/finalize` + 同一 `Idempotency-Key` | device bearer | R2 `HEAD` 观测存在性与 size/type 后，原子提交 manifest/reservation/usage；不验证摘要 | S4B-b 已交付 |
-| `POST /byok/storage/reservations/:id/abort` | device proof / control | 幂等释放 reservation；已上传对象进入 orphan grace | 目标设计，S4B-c |
+| `POST /byok/storage/reservations/:id/abort` | device proof / control | 幂等释放 reservation；已上传对象进入 orphan grace | 目标设计，尚未路由；host 可直接调用既有 `QuotaStore.abortReservation` |
 | object presign 端点 | device proof / control | reservation-bound 的 upload/download capability | metadata route 已交付；content 由 signed URL 承载 |
 
 能力降级同样由 `/capabilities` 声明，不用 404/405/501 嗅探推断（附录 A 的 ADR-010）。

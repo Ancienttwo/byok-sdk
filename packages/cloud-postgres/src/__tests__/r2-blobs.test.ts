@@ -9,12 +9,14 @@
  * says nothing about which option was wrong.
  */
 import { describe, expect, it } from 'vitest';
-import type { Clock, ObjectStore } from '@byok/core';
+import { contentHash, tenantId, type Clock, type ObjectStore } from '@byok/core';
 import {
   MAX_PRESIGN_TTL_SECONDS,
   MIN_PRESIGN_TTL_SECONDS,
   R2BlobStoreError,
   R2CloudBlobStore,
+  R2ObjectMaintenanceStore,
+  ObjectStoreRequestError,
   type R2BlobStoreOptions,
 } from '../stores/r2-blobs';
 
@@ -74,5 +76,71 @@ describe('presign lifetime', () => {
     for (const presignTtlSeconds of [MIN_PRESIGN_TTL_SECONDS, 900, MAX_PRESIGN_TTL_SECONDS, undefined]) {
       expect(new R2CloudBlobStore(optionsWith(presignTtlSeconds))).toBeInstanceOf(R2CloudBlobStore);
     }
+  });
+});
+
+describe('R2 maintenance surface', () => {
+  const tenant = tenantId('tenant-a');
+  const hashA = contentHash(`sha256:${'a'.repeat(64)}`);
+  const hashB = contentHash(`sha256:${'b'.repeat(64)}`);
+
+  it('parses one bounded ListObjectsV2 page and round-trips the opaque cursor', async () => {
+    const requests: Request[] = [];
+    const store = new R2ObjectMaintenanceStore({
+      ...optionsWith(),
+      fetch: async (request) => {
+        requests.push(request);
+        return new Response(
+          `<?xml version="1.0" encoding="UTF-8"?>
+           <ListBucketResult>
+             <IsTruncated>true</IsTruncated>
+             <NextContinuationToken>opaque+/=token</NextContinuationToken>
+             <Contents><Key>tenant-a/sha256/${hashA.slice('sha256:'.length)}</Key><Size>7</Size></Contents>
+             <Contents><Key>tenant-a/sha256/not-a-hash</Key><Size>9</Size></Contents>
+           </ListBucketResult>`,
+          { status: 200 },
+        );
+      },
+    });
+
+    const page = await store.listTenantObjects(tenant, 'before+/=token', 2);
+    expect(page).toEqual({
+      objects: [
+        { key: `tenant-a/sha256/${hashA.slice('sha256:'.length)}`, hash: hashA, byteSize: 7n },
+        { key: 'tenant-a/sha256/not-a-hash', byteSize: 9n },
+      ],
+      nextContinuationToken: 'opaque+/=token',
+    });
+    const url = new URL(requests[0]!.url);
+    expect(url.searchParams.get('prefix')).toBe('tenant-a/sha256/');
+    expect(url.searchParams.get('max-keys')).toBe('2');
+    expect(url.searchParams.get('continuation-token')).toBe('before+/=token');
+  });
+
+  it('fails closed when a truncated page has no continuation token', async () => {
+    const store = new R2ObjectMaintenanceStore({
+      ...optionsWith(),
+      fetch: async () =>
+        new Response(
+          '<ListBucketResult><IsTruncated>true</IsTruncated></ListBucketResult>',
+          { status: 200 },
+        ),
+    });
+    await expect(store.listTenantObjects(tenant)).rejects.toBeInstanceOf(ObjectStoreRequestError);
+  });
+
+  it('treats DELETE absence as an idempotent success outcome', async () => {
+    const statuses = [204, 404];
+    const methods: string[] = [];
+    const store = new R2ObjectMaintenanceStore({
+      ...optionsWith(),
+      fetch: async (request) => {
+        methods.push(request.method);
+        return new Response(null, { status: statuses.shift()! });
+      },
+    });
+    await expect(store.deleteObject(tenant, hashB)).resolves.toBe('deleted');
+    await expect(store.deleteObject(tenant, hashB)).resolves.toBe('absent');
+    expect(methods).toEqual(['DELETE', 'DELETE']);
   });
 });

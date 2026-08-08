@@ -243,7 +243,9 @@ export class PostgresObjectStore implements ObjectStore {
     // tombstone it must refuse against).
     const marked = await this.#pool.query<ManifestRow>(
       `UPDATE object_manifest
-          SET state = 'delete_pending', delete_pending_at = $3, updated_at = $3
+          SET gc_accounted_bytes = CASE WHEN state = 'committed' THEN byte_size ELSE 0 END,
+              gc_accounted_object = (state = 'committed'),
+              state = 'delete_pending', delete_pending_at = $3, updated_at = $3
         WHERE tenant_id = $1 AND hash = $2
           AND ref_count = 0
           AND state IN ('pending', 'committed')

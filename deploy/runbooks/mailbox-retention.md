@@ -102,13 +102,21 @@ component notices — the ring is doing exactly what it was told. When you size
 one against the other, convert to the same unit first and size for the **peak**
 rate, not the mean.
 
-## `expired` rows are marked, not moved
+## `expired` rows and the operator dead-letter flow
 
-`expired` is a terminal marking in this slice. Nothing routes those rows
-anywhere, nothing retries them, nothing notifies. Dead-letter flow — a queue, a
-replay path, an operator surface — is S4B story O-009.
+`expired` remains the durable dead-letter row; it is not silently moved to a
+second queue. S4B-c adds a Postgres maintenance surface:
 
-Until then, an operator reads them with a direct query:
+- `listDeadLetters` pages expired rows for operator inspection;
+- `replayDeadLetter` requires a new operator idempotency key and clones the
+  bytes to a new monotonic sequence; `replay_source_seq` binds that key to the
+  exact expired row while retaining the original evidence;
+- `discardDeadLetter` explicitly removes one expired row and releases mailbox
+  accounting in the same transaction.
+
+Automatic retention calls none of the latter two. A non-zero
+`mailbox_expired_count`/`expiredCount` means work was dropped and must alert.
+Direct SQL remains a read-only support surface:
 
 ```sql
 SELECT device_id, seq, message_id, byte_size, appended_at
@@ -117,8 +125,8 @@ SELECT device_id, seq, message_id, byte_size, appended_at
  ORDER BY device_id, seq;
 ```
 
-A non-zero `expiredCount` from a sweep means work was dropped. It is worth an
-alert, not a dashboard tile nobody reads.
+The host-wide scheduling, metrics, crash recovery and rollback contract is in
+`deploy/runbooks/cloud-cleanup.md`.
 
 ## Evidence gap: `noteSkippedSeq`
 
