@@ -30,3 +30,18 @@ export {
   createPostgresCloudStores,
 } from './stores/index';
 export type { PostgresCloudStoreOptions, PostgresCloudStores } from './stores/index';
+
+// The seven core port implementations, and the composition that bundles them.
+// All seven ship together because `runCoreConformance` certifies a composition
+// as a whole — a partial `CoreStores` is not something the suite can run.
+export {
+  PostgresActivityStore,
+  PostgresBoardStore,
+  PostgresMailboxStore,
+  PostgresObjectStore,
+  PostgresPresenceStore,
+  PostgresQuotaStore,
+  PostgresTruthStore,
+  createPostgresCoreStores,
+} from './stores/core/index';
+export type { PostgresCoreStoreOptions } from './stores/core/index';

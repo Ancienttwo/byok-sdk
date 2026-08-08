@@ -1,6 +1,6 @@
 # Plan: Sprint S4A-b: Core Seven-Port Postgres Implementation and the I4 SQL Side
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260808-0232
 > **Slug**: s4a-b-core-postgres
 > **Artifact Level**: work-package
@@ -147,10 +147,10 @@ Same substrate as S4A-a: compose up → migrate runner applies `0001` (checksumm
 ## Annotations
 
 ## Task Breakdown
-- [ ] Ride-alongs (first commit): migrate.ts ROLLBACK shadowing fix + todos noteSkippedSeq trigger narrowed to protocol-bump-only
-- [ ] `deploy/sql/0002_core_domain.sql`: eleven tables per §5 (TEXT instants, BIGINT sizes, tenant-first keys); 0001 untouched; `check:deploy-sql` green
-- [ ] Seven core port Postgres implementations (single-statement CAS; quota aggregate-guarded reserve; mailbox monotonic ack + mark-not-delete retirement)
-- [ ] Postgres core composition entry green: `runCoreConformance('postgres', factory)` 56/56, conformance package zero-diff
-- [ ] `tests/sql/control_plane_invariants.sql` (catalog DO-blocks + migration reference header) + executing test; `check:deploy-sql` still green in reference mode
-- [ ] `deploy/runbooks/mailbox-retention.md`: windows, host-driven invocation, §12.7.5 mapping, ring-vs-SQL clause, noteSkippedSeq evidence gap
-- [ ] Full gates green incl. frozen-surface zero-diff machine check and cloud suite regression
+- [x] Ride-alongs (first commit): migrate.ts ROLLBACK shadowing fix + todos noteSkippedSeq trigger narrowed to protocol-bump-only
+- [x] `deploy/sql/0002_core_domain.sql`: eleven tables per §5 (TEXT instants, BIGINT sizes, tenant-first keys); 0001 untouched; `check:deploy-sql` green
+- [x] Seven core port Postgres implementations (single-statement CAS; quota aggregate-guarded reserve; mailbox monotonic ack + mark-not-delete retirement)
+- [x] Postgres core composition entry green: `runCoreConformance('postgres', factory)` 56/56, conformance package zero-diff
+- [x] `tests/sql/control_plane_invariants.sql` (catalog DO-blocks + migration reference header) + executing test; `check:deploy-sql` still green in reference mode
+- [x] `deploy/runbooks/mailbox-retention.md`: windows, host-driven invocation, §12.7.5 mapping, ring-vs-SQL clause, noteSkippedSeq evidence gap
+- [x] Full gates green incl. frozen-surface zero-diff machine check and cloud suite regression
