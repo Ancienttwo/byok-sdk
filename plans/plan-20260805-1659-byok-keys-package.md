@@ -1,4 +1,4 @@
-# Plan: @byok/keys Package Port
+# Plan: @byok-sdk/keys Package Port
 
 > **Status**: Executing
 > **Created**: 20260805-1659
@@ -37,7 +37,7 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 
 ## Approach
 ### Strategy
-Build `packages/keys` (`@byok/keys`) from zero in this repo, porting the already-shipped key-based BYOK implementation out of `~/Projects/aip-main-open` layer by layer: API key stored in the OS credential store, provider profile persisted locally, direct HTTP calls to the LLM provider. One sentence of scope: `docs/researches/HANDOFF-byok-keys.md` §1.
+Build `packages/keys` (`@byok-sdk/keys`) from zero in this repo, porting the already-shipped key-based BYOK implementation out of `~/Projects/aip-main-open` layer by layer: API key stored in the OS credential store, provider profile persisted locally, direct HTTP calls to the LLM provider. One sentence of scope: `docs/researches/HANDOFF-byok-keys.md` §1.
 
 Decisions already made (`docs/researches/HANDOFF-byok-keys.md` §0, 2026-08-05):
 - **copy-port**, not extract-in-place. aip-main-open is untouched until K4 — its maintainer's daily edit surface stays clean, and this repo is 100% under our ownership.
@@ -54,7 +54,7 @@ Decisions already made (`docs/researches/HANDOFF-byok-keys.md` §0, 2026-08-05):
 ### File Changes
 | File | Action | Description |
 |------|--------|-------------|
-| `packages/keys/**` | Create | New `@byok/keys` package; layers and per-milestone content per `docs/researches/HANDOFF-byok-keys.md` §6 |
+| `packages/keys/**` | Create | New `@byok-sdk/keys` package; layers and per-milestone content per `docs/researches/HANDOFF-byok-keys.md` §6 |
 | `pnpm-workspace.yaml` / root workspace config | Verify | Confirm `packages/*` already covers the new package; do not widen |
 | `docs/security.md` | Edit (K3) | Add the boundary declaration between the agent-dispatch security model and the key-management security model |
 | `packages/client/**`, `packages/server/**`, `packages/protocol/**` | Do not touch | Hard constraint, see security boundary below |
@@ -66,7 +66,7 @@ Source-material map with `file:line`: `docs/researches/HANDOFF-byok-keys.md` §4
 `configure()` writes the API key to the OS credential store and the non-secret profile (adapter / auth_mode / base_url / model) to local persistence → `resolveDefaultModelProvider()` reads profile + secret and builds a client → `providerHeaders()` maps auth mode to headers (bearer → `Authorization: Bearer`; x_api_key → `x-api-key` plus `anthropic-version: 2023-06-01`) → the OpenAI-compatible or Anthropic transport issues the HTTP call. Tenant isolation wraps the secret store in a scope envelope keyed by `SHA-256(account_id + workspace_id)`.
 
 ### Security Boundary
-Per `docs/researches/HANDOFF-byok-keys.md` §5, `@byok/client`'s credential-isolation rule (`packages/client/src/types.ts:120-124`) and the M5 pilot audit (`docs/security-review-m5-pilot-entry.md`) promise the agent-dispatch side never touches credentials. `@byok/keys` is a separate package with a separate security model. Two enforceable consequences:
+Per `docs/researches/HANDOFF-byok-keys.md` §5, `@byok/client`'s credential-isolation rule (`packages/client/src/types.ts:120-124`) and the M5 pilot audit (`docs/security-review-m5-pilot-entry.md`) promise the agent-dispatch side never touches credentials. `@byok-sdk/keys` is a separate package with a separate security model. Two enforceable consequences:
 1. `client`, `server`, and `protocol` must not gain a dependency on `keys`.
 2. The `keys` README and `docs/security.md` must state the boundary between the two security models so the M5 audit claim is not polluted. This documentation work is a K3 task.
 
@@ -120,7 +120,7 @@ Per `docs/researches/HANDOFF-byok-keys.md` §5, `@byok/client`'s credential-isol
 - Resolved: direction was decided by the user on 2026-08-05 (copy-port, aip-main-open untouched until K4). No open annotations remain.
 
 ## Task Breakdown
-- [x] K0.1 Scaffold `packages/keys` (`@byok/keys`): package.json, tsconfig, tsup config with `platform: 'node'`, vitest config, README stub — following the existing package layout in this repo
+- [x] K0.1 Scaffold `packages/keys` (`@byok-sdk/keys`): package.json, tsconfig, tsup config with `platform: 'node'`, vitest config, README stub — following the existing package layout in this repo
 - [x] K0.2 `errors.ts`: `ByokKeysError` carrying the same code strings aip currently derives from `LocalExecutionError`
 - [x] K0.3 `provider-profile.ts`: zod schema for `ProviderProfile` covering the model branch only (no key field), matching the protocol package's schema style
 - [x] K0.4 `headers.ts`: `providerHeaders()` and `requiredProviderSecret()`, key-for-key equivalent to the source, including `anthropic-version: 2023-06-01` for the x_api_key mode
@@ -131,8 +131,8 @@ Per `docs/researches/HANDOFF-byok-keys.md` §5, `@byok/client`'s credential-isol
 - [x] K1 SecretStore layer: `SecretStore<TName>` interface with fail-closed name validator, `InMemorySecretStore`, macOS Keychain (fail-closed prefix decoding, explicit `allowUnprefixedRead` defaulting to false), Windows Credential Manager, and the scope envelope with required `scope()` and `EnvelopeScopedSecretStore` as an explicit decorator
 - [x] K2 Registry layer: configure/resolve lifecycle plus pluggable profile persistence (InMemory + SQLite, following the server package's `InMemoryTaskStore`/`SqliteTaskStore` pattern); port the in-package version of the §4.3 golden test
 - [x] K3 Settings-page server decision: **dropped** — the settings-page HTTP server is not ported, on the grounds that the host owns its own UI, a library should not bind a socket, and a key custodian should open no listening port. Recorded in `packages/keys/README.md` (*Not in this package*, including the security-property transfer: the "key never leaves the machine" guarantee moves from this package to the host's page) and as the third enforceable consequence in `docs/security.md`
-- [ ] K4 Swap back into aip-main-open: diff baseline `c6a5385..HEAD` for drift, publish `@byok/keys`, delete the ported code, switch to the npm dependency, convert the two `instanceof LocalExecutionError` sites (`settings.ts:358`, `providers.ts:1673-1677`) to structured code detection, and require `apps/local-agent/src/settings.test.ts` (`:313-318`) to pass unchanged
-- [ ] K4.1 aip-side adapter (consequence of K3 dropping the settings-page server): aip keeps its own `settings.ts`, so the swap needs a thin adapter over `@byok/keys`'s `ProviderRegistry` supplying the three surfaces aip's settings page calls but the generic registry does not expose. Without these, `settings.test.ts` cannot pass unchanged:
-  - `testConfiguration()` — test-before-save. aip's version routes through `createNarrativeProvider().testConnection()`; `createNarrativeProvider` is on the §4.5 stay-behind list, so the adapter keeps it in aip and calls `@byok/keys`'s `OpenAiCompatibleChatClient.testConnection()` / `AnthropicMessagesClient.testConnection()` underneath. A generic `ProviderRegistry.testConnection()` is deferred, not assumed — see `tasks/todos.md`
-  - Multi-kind `delete(kind, providerId)` and `list()` signatures — `@byok/keys` ports the model branch only, so the `market_data` / `mcp_http` branch (and the `kind` parameter it exists for) stays in aip; the adapter dispatches on `kind` and forwards only the model branch
+- [ ] K4 Swap back into aip-main-open: diff baseline `c6a5385..HEAD` for drift, publish `@byok-sdk/keys`, delete the ported code, switch to the npm dependency, convert the two `instanceof LocalExecutionError` sites (`settings.ts:358`, `providers.ts:1673-1677`) to structured code detection, and require `apps/local-agent/src/settings.test.ts` (`:313-318`) to pass unchanged
+- [ ] K4.1 aip-side adapter (consequence of K3 dropping the settings-page server): aip keeps its own `settings.ts`, so the swap needs a thin adapter over `@byok-sdk/keys`'s `ProviderRegistry` supplying the three surfaces aip's settings page calls but the generic registry does not expose. Without these, `settings.test.ts` cannot pass unchanged:
+  - `testConfiguration()` — test-before-save. aip's version routes through `createNarrativeProvider().testConnection()`; `createNarrativeProvider` is on the §4.5 stay-behind list, so the adapter keeps it in aip and calls `@byok-sdk/keys`'s `OpenAiCompatibleChatClient.testConnection()` / `AnthropicMessagesClient.testConnection()` underneath. A generic `ProviderRegistry.testConnection()` is deferred, not assumed — see `tasks/todos.md`
+  - Multi-kind `delete(kind, providerId)` and `list()` signatures — `@byok-sdk/keys` ports the model branch only, so the `market_data` / `mcp_http` branch (and the `kind` parameter it exists for) stays in aip; the adapter dispatches on `kind` and forwards only the model branch
   - Code-based error identification for `publicSettingsError()` — it currently branches on `instanceof LocalExecutionError`; `ByokKeysError` carries the same `code` strings, so the adapter must map by `error.code` rather than class identity. This is the same conversion as the two `instanceof` sites above, and the three sites should land together

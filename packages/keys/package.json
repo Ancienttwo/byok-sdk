@@ -1,5 +1,5 @@
 {
-  "name": "@byok/keys",
+  "name": "@byok-sdk/keys",
   "version": "0.1.0",
   "description": "BYOK SDK key management: provider profiles, credential-backed auth headers, and direct provider transports",
   "type": "module",

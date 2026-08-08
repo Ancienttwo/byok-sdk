@@ -1,4 +1,4 @@
-# @byok/keys
+# @byok-sdk/keys
 
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
@@ -11,7 +11,7 @@ landed. K3 settled the settings-page question, recorded under
 
 ## Security boundary
 
-`@byok/keys` is a separate package with a separate security model from
+`@byok-sdk/keys` is a separate package with a separate security model from
 `@byok/client` / `@byok/server` / `@byok/protocol`. Those three dispatch tasks to
 agent runtimes the user already authenticated, and their credential-isolation
 rule (`packages/client/src/types.ts:120-124`, audited in
@@ -23,13 +23,13 @@ depend on `keys`.
 Two consequences hold today and are the package's standing constraints:
 
 1. `client`, `server`, and `protocol` must not gain a dependency on `keys`.
-2. `@byok/keys` is outside the scope of the M5 credential-isolation claim.
+2. `@byok-sdk/keys` is outside the scope of the M5 credential-isolation claim.
    Installing it is opting into a package that holds a provider API key, and
    that choice is yours, not something the dispatch SDK does on your behalf.
 
 The full declaration of the boundary between the two security models is
 [`docs/security.md`](../../docs/security.md), section *Key management
-(`@byok/keys`) is a separate package with a separate security model*.
+(`@byok-sdk/keys`) is a separate package with a separate security model*.
 
 ## Not in this package
 
@@ -69,7 +69,7 @@ section. In the source, the settings page was part of the same local process
 and never sent the API key anywhere; **the package itself underwrote the
 guarantee that the key does not leave the machine.**
 
-With the page gone, `@byok/keys` guarantees only its own half: the key goes
+With the page gone, `@byok-sdk/keys` guarantees only its own half: the key goes
 into the OS credential store, it is never written to the profile store, it is
 never present in any `ProviderStatus`, and it leaves the process only in the
 `authorization` / `x-api-key` header of a request to the provider base URL the
@@ -99,7 +99,7 @@ than degrading to a plaintext file.
 
 The floor rises only when a consumer needs on-disk persistence as an
 install-time guarantee rather than a runtime capability — that is, when
-"`@byok/keys` installed successfully" must by itself imply
+"`@byok-sdk/keys` installed successfully" must by itself imply
 `SqliteProviderProfileStore` will construct. Until then, raising it would drop
 Node 20 hosts that are served perfectly well by the in-memory store.
 

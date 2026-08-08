@@ -80,7 +80,7 @@ task board 這條輸入進來之後，原六條共識裡有兩條的**措辭**�
 | `LongPollClient` | `idleDelayMs` 預設 250ms（`long-poll-transport.ts:83-92,341-351`）；`longPoll.{retryDelayMs,idleDelayMs}` 已由 `create-daemon.ts:743-744` 曝露 | **派工路徑零 client 改動**，改配置即可 |
 | `CursorStore` | 游標按 `(serverUrl, deviceId)` 持久化（`cursor-store.ts:27-33`） | 原樣。它就是信箱「領走即棄」的 ack 依據 |
 | `device-keys.ts` | Ed25519 生成、PKCS8 存 `device.json` 0600（`:24,35`、`store.ts:13-16`）、`signNonce` 直簽 raw nonce（`:44-45`） | 確權封套復用同把私鑰，**必須加 domain separation 前綴**，見 D3 |
-| `@byok/keys` | K1 完成、K2 執行中，deps 只有 zod | K4 之後才接 core 的 `TruthStore`，見 D5 |
+| `@byok-sdk/keys` | K1 完成、K2 執行中，deps 只有 zod | K4 之後才接 core 的 `TruthStore`，見 D5 |
 
 ---
 
@@ -94,7 +94,7 @@ task board 這條輸入進來之後，原六條共識裡有兩條的**措辭**�
 @byok/cloud      無狀態 handler + SQL/R2 實現         ← protocol + core + hono
 @byok/server     Node 嵌入式 coordinator（現狀）       ← protocol + core（BlobStore）
 @byok/client     本機 daemon                          ← protocol + core（封套 + board）
-@byok/keys       key 管理                             ← core（僅契約）—— 永不碰 protocol
+@byok-sdk/keys       key 管理                             ← core（僅契約）—— 永不碰 protocol
 ```
 
 `@byok/core` 的全部內容（五個檔案，只有契約，沒有實現）：
@@ -462,7 +462,7 @@ byok-attest-v1\n{av}\n{subject}\n{kind}\n{key}\n{rev}\n{deviceId}\n{payloadHash}
 | 3 | **P2** | SQL（Postgres/Hyperdrive + D1）與 R2/S3 實現；`deploy/sql/` migration | store conformance 套件同一份測試跑兩種後端（照 `InMemoryTaskStore`/`SqliteTaskStore` 的既有雙實現慣例）；`check:deploy-sql` 過 |
 | 4 | **P3** | board 層：5 態 + claim CAS + status CAS + `board_seq` 增量 + SSE/輪詢雙路徑 + 兩級提示 | claim 併發測試（N 個並發 claim 只有一個 200，其餘 409 且 holder 快照一致）；SSE 與輪詢兩條路徑跑同一份行為測試；120s 對賬能修復人為製造的漏事件 |
 | 5 | **P4** | client 側確權封套上行 + memory manifest/selector seam + nonce 簽名補 domain prefix | `attest-v1.golden.json` 凍結簽名輸入；pair/token 的 breaking 變更在同一 PR 內兩側同步 |
-| 6 | **P5**（K4 之後） | `@byok/keys` 的 profile 持久化接上 core 的 `TruthStore` | keys 依賴圖仍不含 protocol；aip-main-open 的 `settings.test.ts` 黃金測試原樣通過 |
+| 6 | **P5**（K4 之後） | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore` | keys 依賴圖仍不含 protocol；aip-main-open 的 `settings.test.ts` 黃金測試原樣通過 |
 | 儲備 | C1-C3 | v1 的 doctor/upgrade/backoff 三個里程碑 | 排在 P3 之後 |
 
 **時序理由**
@@ -504,7 +504,7 @@ K4 是跨 repo 且需對方配合的協調閘，會浮動，所以 P5 掛在它�
 2. `subject_id` 的來源形狀：SaaS mint pairing code 時攜帶，還是 pair 請求帶一個 SaaS 簽發的 subject token。這決定 `PairingManager` 的介面改動幅度。
 3. board 的 claim 是否允許人搶佔 agent 已 claim 的項目（強制 unclaim）。影響 claim CAS 是否需要一條 admin 旁路。
 4. `closed` 的準確語義（終止未驗收 vs 歸檔）——本方案取前者，探針未能確認 raft 的原意，若採後者則改為加 `archived_at` 欄位。
-5. `@byok/cloud` 的 npm 發佈形態，與 v1 §6.1 的 `@byok/keys` 同一問題，一起定。
+5. `@byok/cloud` 的 npm 發佈形態，與 v1 §6.1 的 `@byok-sdk/keys` 同一問題，一起定。
 
 ---
 
@@ -520,8 +520,8 @@ pnpm --filter @byok/protocol test
 git diff --exit-code packages/protocol/src/__tests__/golden/
 
 # 鐵律 1 的機檢（依賴圖）
-pnpm why @byok/protocol --filter @byok/keys    # 必須無結果
-pnpm why @byok/keys                             # 不得出現在 client/server/protocol/cloud 下
+pnpm why @byok/protocol --filter @byok-sdk/keys    # 必須無結果
+pnpm why @byok-sdk/keys                             # 不得出現在 client/server/protocol/cloud 下
 
 # P1 關鍵驗證：client 零改動跑通雲端 handler
 pnpm --filter @byok/client test -- --grep "long-poll"

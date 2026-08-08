@@ -50,7 +50,7 @@
 | S4A / S4B | **P2**（`:695`） | **T3**（`:254`） | Postgres + R2 composition 与 `deploy/sql/` migration。S4A 落数据面 + conformance 套件，S4B 落 quota/reservation/GC（见 D-3） |
 | S5 | **P3**（`:696`） | **T4**（`:255`） | board 5 态 + claim/`expectedStatus` CAS + `board_seq` + SSE/轮询 + 两级提示 |
 | S6 | **P4**（`:697`），扣除已提前到 S1 的 `signNonce` 修复 | — | device proof 上行 + memory manifest/selector/CAS |
-| S7 | **P5**（`:698`）**已移出本 sprint**；承接 §9.2 储备行 C1–C3（`:699`）与 K4（`:693`） | — | ops/release RC。P5（`@byok/keys` profile 持久化接 `TruthStore`）见 `tasks/todos.md` deferred 项 |
+| S7 | **P5**（`:698`）**已移出本 sprint**；承接 §9.2 储备行 C1–C3（`:699`）与 K4（`:693`） | — | ops/release RC。P5（`@byok-sdk/keys` profile 持久化接 `TruthStore`）见 `tasks/todos.md` deferred 项 |
 
 T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2、T4 挂 P3；T0 独立于 P 线且先行。
 
@@ -145,7 +145,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 6. 建立 Postgres + R2、storage entitlement/usage/reservation、quota 与 cleanup compositions；
 7. 建立 board/presence/activity；
 8. 建立 device proof、memory manifest/CAS；
-9. 保持 `@byok/keys` 独立，并完成 K4/K4.1；
+9. 保持 `@byok-sdk/keys` 独立，并完成 K4/K4.1；
 10. 补齐 deterministic jitter、doctor、quarantine、release/runbook；
 11. 全程保持 protocol v1 golden 不漂移。
 
@@ -161,7 +161,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - kernel sandbox；
 - live agent migration；
 - 将 embedded `TaskHandle` 变成 hosted API；
-- `@byok/keys` profile 持久化接 `TruthStore`（P5）——已移出，见 `tasks/todos.md`。
+- `@byok-sdk/keys` profile 持久化接 `TruthStore`（P5）——已移出，见 `tasks/todos.md`。
 
 ---
 
@@ -1064,7 +1064,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 > **目标**：确认 keys plane 与平台线的依赖边界，补齐 fleet reliability、doctor/quarantine、release/runbook，并形成 RC。
 > **风险等级**：高；跨 package、跨 repo、发布与运维
 > **依赖**：S6、S4B；K4/K4.1 必须完成
-> **对应**：§9.2 储备行 C1–C3（`ARCHITECTURE-PROPOSAL:699`）与 K4（`:693`）。**P5（`:698`，`@byok/keys` profile 持久化接 `TruthStore`）已移出本 sprint**——见 `tasks/todos.md` deferred 项
+> **对应**：§9.2 储备行 C1–C3（`ARCHITECTURE-PROPOSAL:699`）与 K4（`:693`）。**P5（`:698`，`@byok-sdk/keys` profile 持久化接 `TruthStore`）已移出本 sprint**——见 `tasks/todos.md` deferred 项
 > **可拆**：S7A integration / S7B operations
 
 ### S7.1 Stories
@@ -1084,7 +1084,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | O-015 | load/reconnect/retention tests | 中 |
 | O-016 | RC security/audit review | 低 |
 
-> `@byok/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于 K 线 plan（状态以 `tasks/current.md` 为准），不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok/core` TruthStore 落地。
+> `@byok-sdk/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于 K 线 plan（状态以 `tasks/current.md` 为准），不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok/core` TruthStore 落地。
 
 ### S7.2 Keys integration boundary
 
@@ -1166,7 +1166,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 
 ---
 
-## Parallel Track K4/K4.1 — `@byok/keys` 回接 aip-main-open
+## Parallel Track K4/K4.1 — `@byok-sdk/keys` 回接 aip-main-open
 
 > **不纳入 S0–S6 critical path。** 它属于 K 线 plan `plans/plan-20260805-1659-byok-keys-package.md` 的未完成任务（该 plan 的状态以 `tasks/current.md` 为准），本 sprint 不重新定义其范围，只记录依赖：S7 的 keys 边界验收依赖其结果；`tasks/todos.md` 中移出的 P5 项也以其收口为触发条件。
 
@@ -1470,7 +1470,7 @@ Program 完成时，必须可以演示：
 10. memory 通过 manifest、本地 selector、hash verify、revision CAS 读写；
 11. tenant B 无法通过任何 route/store 观察 tenant A；
 12. presence/activity 可丢但 dropped 可见，且不覆盖 truth；
-13. `@byok/keys` secret 留在 OS store，dispatch plane 仍零依赖；
+13. `@byok-sdk/keys` secret 留在 OS store，dispatch plane 仍零依赖；
 14. self-hosted 与 hosted 都通过各自 composition suite；
 15. fleet reconnect 不形成同步峰值；
 16. corrupt local state 被 quarantine；

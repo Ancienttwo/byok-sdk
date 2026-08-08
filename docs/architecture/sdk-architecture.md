@@ -22,7 +22,7 @@
 当前系统有两条安全模型完全不同的产品线：
 
 - Agent dispatch plane：`@byok/protocol` + `@byok/server` + `@byok/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
-- Provider key plane：`@byok/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
+- Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
 
 目标平台会新增 `@byok/core` 与 `@byok/cloud`，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 已于 2026-08-07（S2）落地为 workspace package：zod-only、protocol-free、Node-free，且已被 `@byok/cloud` 接线消费（`packages/cloud/src/**` 真实 import `@byok/core` 与 `@byok/protocol`）；仍未接线到 `client`/`server`/`keys`。`@byok/cloud` 已于 2026-08-07（S3a）落地为**骨架已实现**：无状态 device surface + InMemory 组合；本机 durable journal 已于 2026-08-08（S3b）落地在 client 侧，cloud 的 board 与 truth 面仍是**目标设计**。本文在第 12 节单独描述这两者。
 
@@ -71,7 +71,7 @@ flowchart LR
   end
 
   Provider(["Model Provider APIs"]):::runtime
-  Keys(["@byok/keys<br/>已实现、隔离"]):::isolated
+  Keys(["@byok-sdk/keys<br/>已实现、隔离"]):::isolated
 
   Dev --> App
   Human --> Agent
@@ -111,7 +111,7 @@ flowchart LR
   Protocol(["@byok/protocol<br/>zod-only wire contract"]):::contract
   Server(["@byok/server<br/>embedded coordinator"]):::runtime
   Client(["@byok/client<br/>local daemon + CLI"]):::runtime
-  Keys(["@byok/keys<br/>provider credential plane"]):::key
+  Keys(["@byok-sdk/keys<br/>provider credential plane"]):::key
   Core(["@byok/core<br/>zod-only composable contracts"]):::contract
   Cloud(["@byok/cloud<br/>stateless hosted surface"]):::runtime
   Basic(["examples/basic<br/>E2E SaaS demo"]):::example
@@ -597,7 +597,7 @@ flowchart TB
 
 Git 只记录 code state，不改变 wire task state。daemon 不自动 commit、不改 identity、不执行 network Git、不 reset/stash/clean/rebase/merge/切分支，也不删除 workspace。重启只把遗留 `preparing/active` 记录标成 `interrupted`；它不会伪造协议恢复。operator view 默认隐藏路径，只有 `workspaces --show-paths` 才显示。
 
-## 7. `@byok/keys`：独立 provider credential plane
+## 7. `@byok-sdk/keys`：独立 provider credential plane
 
 ### 7.1 架构与模块
 
@@ -658,7 +658,7 @@ flowchart LR
 
 `ProviderRegistry.configure()` 的顺序是先写 secret，再验证 secret 已存在，最后写 profile；status 只暴露 `secret_configured` boolean，不返回 secret。`resolve()` 只对 enabled、valid、secret-complete 的 profile 构造 transport。
 
-`@byok/keys` 不是 daemon 的 runtime credential source。当前没有任何 `client/server/protocol/examples/templates` import site；把它画进 agent spawn environment 会直接破坏 dispatch plane 的 credential-isolation claim。
+`@byok-sdk/keys` 不是 daemon 的 runtime credential source。当前没有任何 `client/server/protocol/examples/templates` import site；把它画进 agent spawn environment 会直接破坏 dispatch plane 的 credential-isolation claim。
 
 ## 8. P2：端到端数据流
 
@@ -818,7 +818,7 @@ dispatch daemon 当前的 credential 边界由六条构成，前五条是已实�
 - 不读取 model provider key；
 - 不读取 runtime 自己的 login store；
 - 不把 host/server token 注入 runtime 子进程；
-- 不 import `@byok/keys`（package graph 的零边，§1.2）；
+- 不 import `@byok-sdk/keys`（package graph 的零边，§1.2）；
 - task environment 走 per-runtime allowlist，`BYOK_*` hard deny；
 - credential-isolation audit 是 release gate，不是可选检查。
 
@@ -907,7 +907,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口；五行保留�
 
 | 条目 | 架构影响 | 当前正确表述 |
 | --- | --- | --- |
-| `@byok/keys` 零主链 import | key custody 与 dispatch 尚未组合 | 标为“已实现、隔离”，不是 placeholder，也不是 daemon secret source；这条零边是安全 invariant（§1.2、§14.3） |
+| `@byok-sdk/keys` 零主链 import | key custody 与 dispatch 尚未组合 | 标为“已实现、隔离”，不是 placeholder，也不是 daemon secret source；这条零边是安全 invariant（§1.2、§14.3） |
 | embedded SQLite 不恢复 in-flight | record persistence 不等于 runtime recovery | 只承诺 task/blob record 跨重启，不承诺 live handle/session；应作为 self-hosted 的公开契约而非隐藏实现细节 |
 
 ### 11.2 目标平台缺口（尚未实现，非当前缺陷）
@@ -942,7 +942,7 @@ flowchart TB
   Cloud(["@byok/cloud<br/>skeleton implemented S3a<br/>stateless device surface + in-memory composition<br/>durable journal/board/truth 仍目标设计"]):::planned
   Client(["@byok/client<br/>existing local authority"]):::existing
   Server(["@byok/server<br/>existing self-hosted option"]):::existing
-  Keys(["@byok/keys<br/>existing isolated key plane"]):::isolated
+  Keys(["@byok-sdk/keys<br/>existing isolated key plane"]):::isolated
   Node(["Node composition<br/>Postgres + R2（主生产）"]):::deploy
   Workers(["Workers composition<br/>可选 D1 compatibility adapter"]):::deploy
 
@@ -1493,7 +1493,7 @@ R2 GC 使用 tombstone 加 reconcile：
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示 |
 | P4 | client 侧 device proof 上行 + memory manifest/selector seam（`signNonce` 的 domain separation 修复 / GAP-004 已提前随 S1 交付，不再是 P4 的待办项） |
-| P5 | `@byok/keys` 的 profile 持久化接上 core 的 `TruthStore`。**Deferred standalone plan，不在本 sprint program（S0-S7）内**；触发条件是 K4/K4.1 完成且 TruthStore 的 production composition 可用，两者都满足后单独立计划，不占 S 线任何 slot |
+| P5 | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore`。**Deferred standalone plan，不在本 sprint program（S0-S7）内**；触发条件是 K4/K4.1 完成且 TruthStore 的 production composition 可用，两者都满足后单独立计划，不占 S 线任何 slot |
 
 K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 
@@ -1540,7 +1540,7 @@ flowchart LR
 | RC profile | 范围 | 门禁 |
 | --- | --- | --- |
 | Dispatch Platform RC | `protocol` + `server` + `client` + `cloud` + `core` 的 hosted/self-hosted dispatch 面 | S7 的 operations/release 项；**不被 K4 阻塞**，keys 线的状态不进入这条 RC 的准出 |
-| Umbrella BYOK RC | 上面全部 + `@byok/keys` 一起以单一 BYOK 套件发布 | 追加要求 K4 golden parity 通过；K4/K4.1 未闭环时只能发 Dispatch Platform RC |
+| Umbrella BYOK RC | 上面全部 + `@byok-sdk/keys` 一起以单一 BYOK 套件发布 | 追加要求 K4 golden parity 通过；K4/K4.1 未闭环时只能发 Dispatch Platform RC |
 
 排序原则：
 

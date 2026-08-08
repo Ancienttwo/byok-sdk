@@ -4,7 +4,7 @@
  * Two rules the rest of the package is built around:
  *
  * 1. **One class, code-based branching.** Consumers switch on `error.code`, not
- *    on class identity — the same idiom `@byok/keys` uses. A composition that
+ *    on class identity — the same idiom `@byok-sdk/keys` uses. A composition that
  *    maps core errors onto HTTP does it with a code table, so adding a code is
  *    an additive change instead of a new `instanceof` chain everywhere.
  * 2. **Every conflict carries the current snapshot.** A CAS failure that

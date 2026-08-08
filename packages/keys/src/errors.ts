@@ -1,5 +1,5 @@
 /**
- * Single error class for `@byok/keys`.
+ * Single error class for `@byok-sdk/keys`.
  *
  * The ported source (`aip-main-open@c6a5385`, `apps/local-agent/src/providers.ts`)
  * raised two different classes — `LocalExecutionError` and

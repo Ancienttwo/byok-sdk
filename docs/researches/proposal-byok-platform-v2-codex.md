@@ -44,7 +44,7 @@ v2 不應把現在的 `ConnectionHub` 搬進 Workers，也不應把 `TaskStore` 
 | 連線模型 | WS 為主、long-poll fallback，hub 保持 live maps | 平台標準路徑只要求 polling + cursor；WS hub 僅留 self-hosted optional |
 | 持久化 | `TaskStore` 可換 SQLite | 拆成 `MailboxStore`、`TerminalRecordStore`、`StatusHintStore`、`ContextStore`、`DeviceAuthorityStore` |
 | 協議 | wire v1 FROZEN | 繼續 FROZEN；平台 API 與 device proof 均在 wire 外層 |
-| keys 線 | `@byok/keys` 獨立 | 維持獨立；不 import platform-core/cloud，也不被它們 import |
+| keys 線 | `@byok-sdk/keys` 獨立 | 維持獨立；不 import platform-core/cloud，也不被它們 import |
 | 優先序 | doctor／upgrade／watchdog 等 client 產品化 | 先關閉 authority/storage 邊界；上述能力仍是 client 後續，不混入本次平台 core |
 
 ---
@@ -76,7 +76,7 @@ v2 不應把現在的 `ConnectionHub` 搬進 Workers，也不應把 `TaskStore` 
 ### 2.4 明確 out of scope
 
 - 不在本文設計 agent runtime adapter、prompt、tool policy 或本機 Git workspace 細節。
-- 不把 provider API key、`@byok/keys` registry 或 settings server 放進 platform core。
+- 不把 provider API key、`@byok-sdk/keys` registry 或 settings server 放進 platform core。
 - 不以 WS presence、lease timer 或 cloud task transition 作為平台正確性條件。
 - 不在本方案中解決 doctor、self-upgrade、rollback、watchdog；它們仍屬 `@byok/client` 產品化工作。
 
@@ -99,7 +99,7 @@ v2 不應把現在的 `ConnectionHub` 搬進 Workers，也不應把 `TaskStore` 
      Postgres + S3      D1 + R2
 @byok/server ──→ @byok/protocol + @byok/platform-core
 (self-hosted optional coordinator; never the hosted authority)
-@byok/keys ──→ zod / OS credential APIs only
+@byok-sdk/keys ──→ zod / OS credential APIs only
 (no edge to or from any dispatch/platform package)
 </pre>
 
@@ -389,13 +389,13 @@ proof 只確權「哪個 device 對哪個 resource 做哪個 operation、簽了�
 | 1 | K2 | 完成 Registry + InMemory/SQLite `ProfileStore` + package golden | `ProfileStore` 從第一版就是 async；不 import `TaskStore` 或 platform-core，只借鏡 interface injection/CAS 思路 |
 | 2 | K3 | 完成 settings-server 取捨與 security docs | 不把 settings UI/server 放入 `@byok/cloud`；兩者 auth、資料與部署面不同 |
 | 3 | P0 | additive 新增 `@byok/platform-core` 與 `@byok/cloud` 骨架 | 不改 `client/server/protocol/keys` public API；先立 dependency-rule test |
-| 4 | K4 | 發佈 `@byok/keys`、AiphaBee swap、原 golden 原樣通過 | 獨立 cross-repo release；不得順帶導入 platform packages |
+| 4 | K4 | 發佈 `@byok-sdk/keys`、AiphaBee swap、原 golden 原樣通過 | 獨立 cross-repo release；不得順帶導入 platform packages |
 | 5 | P1 | mailbox → local journal → terminal end-to-end | wire v1 golden 必須零 diff；Node/Postgres/S3 與 Workers/D1/R2 contract suite 共用 |
 | 6 | P2 | `@byok/server` TaskStore 一次性 async breaking cut與 self-hosted relabel | 在 keys K4 已閉環後進行，避免同一 release 同時承擔兩條 breaking surface |
 
 目前 active plan 明確顯示 K0/K1 已完成、K2-K4 未完成（`plans/plan-20260805-1659-byok-keys-package.md:122-134`）；K4 又是獨立跨 repo PR（`:101-107`）。因此 platform 不應搶改 K2 的工作面，也不應把 K4 綁成 cloud migration prerequisite。
 
-K2 的特別要求是：**不要照抄今天同步的 server TaskStore signature**。`@byok/keys` 現有 `SecretStore` 已是 Promise-based（`packages/keys/src/secret-store.ts:25-40`），Registry 的 profile persistence 應維持同一 async 風格。如此 K2 無需等待 server async 化，也不會在 P2 再做一次 breaking migration。
+K2 的特別要求是：**不要照抄今天同步的 server TaskStore signature**。`@byok-sdk/keys` 現有 `SecretStore` 已是 Promise-based（`packages/keys/src/secret-store.ts:25-40`），Registry 的 profile persistence 應維持同一 async 風格。如此 K2 無需等待 server async 化，也不會在 P2 再做一次 breaking migration。
 
 P0 可在 K3 後 additive 開始；若 K4 正等待外部 repo 時間窗，P0/P1 可平行推進，但 merge unit、changelog、release tag 與驗收證據仍完全分開。唯一共享面是 workspace lockfile／根文件，靠小 PR 與 merge order 協調，不用 runtime dependency 解決組織問題。
 
@@ -410,7 +410,7 @@ P0 可在 K3 後 additive 開始；若 K4 正等待外部 repo 時間窗，P0/P1
 1. **否決：暫停 K2，先把共同 `@byok/core` 做完。** keys 並沒有需要共用的 dispatch/platform domain；這只會製造錯誤依賴與阻塞 active plan。
 2. **否決：K2 複製同步 TaskStore，再等 P2 一起 async 化。** 這會讓 keys 線承擔無必要的二次 breaking change；現有 SecretStore 已給出 async 本地慣例。
 3. **否決：K4 與 `@byok/server` async cut 放同一 release。** 兩者無技術依賴，合併只會讓 regression 與 rollback 無法歸因。
-4. **否決：platform-core import `@byok/keys` 以共用 profile。** provider profile 與 agent/context profile 是不同 domain；共用名字不是共用模型。
+4. **否決：platform-core import `@byok-sdk/keys` 以共用 profile。** provider profile 與 agent/context profile 是不同 domain；共用名字不是共用模型。
 
 ---
 
@@ -473,7 +473,7 @@ P0 可在 K3 後 additive 開始；若 K4 正等待外部 repo 時間窗，P0/P1
 4. memory CAS conflict 不做 server merge；
 5. revoked key／錯 tenant/product/scope／錯 body hash 全拒絕；
 6. Node 與 Workers 對 canonical proof bytes、hash 與 error code 完全一致；
-7. `@byok/keys` 與 dispatch/platform dependency graph 零邊；
+7. `@byok-sdk/keys` 與 dispatch/platform dependency graph 零邊；
 8. protocol golden files零 diff，freeze guard 原樣通過。
 
 ### 11.2 Repo gates

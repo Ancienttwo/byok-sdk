@@ -5,7 +5,7 @@
 > **Contract**: tasks/contracts/20260805-1659-byok-keys-package.contract.md
 > **Notes File**: tasks/notes/20260805-1659-byok-keys-package.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-05 17:33
+> **Last Updated**: 2026-08-08 22:40
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
@@ -13,6 +13,13 @@
 > **Reviewed Target Revision**: uncommitted work on 6037c3ba381495cecc35eb99a7f26783769130d6
 
 ## Human Review Card
+
+### 2026-08-08 npm identity correction
+
+- Verdict: pass. The user corrected the first-publish identity from the unavailable `@byok/keys` scope to the existing SDK-owned `@byok-sdk/keys` scope.
+- Registry evidence: `byok-sdk@0.0.1` names `@byok-sdk/keys` as the official package; `npm org ls byok-sdk --json` returns `ancienttwo: owner`; the earlier authenticated PUT to `@byok/keys` returned E404.
+- Change surface: package metadata, package-name prose, canonical architecture/security references, and one code comment only. Runtime exports, schemas, persistence, wire bytes, and dependency graph are unchanged. No alias or dual-scope compatibility path was added.
+- Verification: fresh build passed; fresh typecheck passed after dependency dist generation; the package passed 330/330 tests; the full workspace rerun passed after one known timing-sensitive `@byok/client` flake also passed 935/935 in isolation; strict workflow passed.
 
 - Verdict: pass (milestone K0 only; K1-K4 remain open in the plan)
 - Change type: code-change
@@ -67,9 +74,9 @@ The contract declares no `manual_checks` requirements, so there is nothing to co
 
 ## Residual Risks / Follow-ups
 
-- K4 parity is not yet proven. The only proof that counts is `apps/local-agent/src/settings.test.ts:313-318` passing unchanged against `@byok/keys`, and that runs in aip-main-open at K4.
+- K4 parity is not yet proven. The only proof that counts is `apps/local-agent/src/settings.test.ts:313-318` passing unchanged against `@byok-sdk/keys`, and that runs in aip-main-open at K4.
 - Source drift: the port is against baseline `c6a5385`; aip-main-open HEAD is now `fbefda1`. Diff `apps/local-agent/src/{providers.ts,index.ts,local-data-scope.ts}` before the K4 swap.
-- `docs/security.md` gained a `@byok/keys` boundary section from a parallel session, outside this contract's allowed paths. The package README deliberately describes that declaration as landing at K3 rather than citing a section this commit does not contain.
+- `docs/security.md` gained a `@byok-sdk/keys` boundary section from a parallel session, outside this contract's allowed paths. The package README deliberately describes that declaration as landing at K3 rather than citing a section this commit does not contain.
 - No AcceptanceReceipt yet; see the projection section above for the exact unblock.
 
 ## Scorecard
@@ -92,4 +99,4 @@ The contract declares no `manual_checks` requirements, so there is nothing to co
 
 ## Summary
 
-K0 delivers `packages/keys` (`@byok/keys` 0.0.1) as a new workspace package: `ByokKeysError`, the model-branch provider-profile zod schema, `providerHeaders()` with fail-closed `requiredProviderSecret()`, `normalizeProviderUrl()` with the loopback and private-network guard, the shared transport guards, and the two transport skeletons with injected `fetchImpl` — 101 fully mocked tests, no OS or network dependency. Every AiphaBee narrative and finance symbol on `docs/researches/HANDOFF-byok-keys.md` §4.5's coupling list stayed behind. The security boundary holds: `client`, `server`, and `protocol` gained no dependency on `keys`. Recommendation is pass for K0; the AcceptanceReceipt remains unrecorded for the tree-state reason documented above, and K1 is the next dispatch.
+K0 delivers `packages/keys` (`@byok-sdk/keys` 0.0.1) as a new workspace package: `ByokKeysError`, the model-branch provider-profile zod schema, `providerHeaders()` with fail-closed `requiredProviderSecret()`, `normalizeProviderUrl()` with the loopback and private-network guard, the shared transport guards, and the two transport skeletons with injected `fetchImpl` — 101 fully mocked tests, no OS or network dependency. Every AiphaBee narrative and finance symbol on `docs/researches/HANDOFF-byok-keys.md` §4.5's coupling list stayed behind. The security boundary holds: `client`, `server`, and `protocol` gained no dependency on `keys`. Recommendation is pass for K0; the AcceptanceReceipt remains unrecorded for the tree-state reason documented above, and K1 is the next dispatch.

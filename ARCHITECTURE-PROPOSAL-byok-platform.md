@@ -25,7 +25,7 @@ board 這條輸入進來之後，原共識裡有兩條的**措辭**必須收緊�
 ```
 byok-sdk monorepo
 ├── K 線（key 管理，bring-your-own-key）
-│   └── @byok/keys                ← K0/K1 已 merge，K2 已過閘待 ship
+│   └── @byok-sdk/keys                ← K0/K1 已 merge，K2 已過閘待 ship
 │       安全模型：主動管理使用者的 provider API key（OS Keychain/Credential Manager）
 │
 └── C 線（agent 調度，bring-your-own-agent）
@@ -103,7 +103,7 @@ byok-sdk monorepo
 | `LongPollClient` | `idleDelayMs` 預設 250ms（`long-poll-transport.ts:83-92,341-351`）；`longPoll.{retryDelayMs,idleDelayMs}` 已由 `create-daemon.ts:743-744` 曝露 | **派工路徑零 client 改動**，改配置即可 |
 | `CursorStore` | 游標按 `(serverUrl, deviceId)` 持久化（`cursor-store.ts:27-33`） | 原樣。它就是信箱「領走即棄」的 ack 依據 |
 | `device-keys.ts` | Ed25519 生成、PKCS8 存 `device.json` 0600（`:3-16,23-46`、`store.ts:13-16`）；**`signNonce` 直簽 raw nonce，無 domain separation（`:44-45`）** | 確權封套復用同把私鑰，**P4 必須先補 domain separation 前綴**，見 §6.3 |
-| `@byok/keys` | K1 已 merge、K2 已過閘待 ship；deps 只有 zod（`packages/keys/package.json:32-34`）；`SecretStore` 已 Promise-based（`secret-store.ts:25-40`） | K4 之後（P5）才接 core 的 `TruthStore`。K 線不被平台線阻塞 |
+| `@byok-sdk/keys` | K1 已 merge、K2 已過閘待 ship；deps 只有 zod（`packages/keys/package.json:32-34`）；`SecretStore` 已 Promise-based（`secret-store.ts:25-40`） | K4 之後（P5）才接 core 的 `TruthStore`。K 線不被平台線阻塞 |
 
 ---
 
@@ -117,7 +117,7 @@ byok-sdk monorepo
 @byok/cloud      無狀態 handler + SQL/R2 實現         ← protocol + core + hono
 @byok/server     Node 自託管可選 coordinator          ← protocol + core（BlobStore）
 @byok/client     本機 daemon                          ← protocol + core（封套 + board）
-@byok/keys       key 管理                             ← core（P5 起，僅契約）—— 永不碰 protocol
+@byok-sdk/keys       key 管理                             ← core（P5 起，僅契約）—— 永不碰 protocol
 ```
 
 ### 3.1 `@byok/core` 的全部內容（只有契約，沒有實現）
@@ -681,7 +681,7 @@ principal 兩型：`DevicePrincipal { tenantId, productId, deviceId }`（租戶�
 | K3 設置頁 server 取捨 + `docs/security.md` 編輯 | 待做 |
 | K4 回接 aip-main-open（跨 repo，需協調） | 待做 |
 
-K2 的 `ProfileStore` 從第一版就是 async（`@byok/keys` 的 `SecretStore` 已是 Promise-based，`secret-store.ts:25-40`），**不照抄今天同步的 server `TaskStore` signature**——如此 K 線無需等待任何 server 側遷移，也不會二次 breaking。**keys 線不中斷，不被平台線阻塞。**
+K2 的 `ProfileStore` 從第一版就是 async（`@byok-sdk/keys` 的 `SecretStore` 已是 Promise-based，`secret-store.ts:25-40`），**不照抄今天同步的 server `TaskStore` signature**——如此 K 線無需等待任何 server 側遷移，也不會二次 breaking。**keys 線不中斷，不被平台線阻塞。**
 
 ### 9.2 完整時序
 
@@ -695,7 +695,7 @@ K2 的 `ProfileStore` 從第一版就是 async（`@byok/keys` 的 `SecretStore` 
 | 5 | **P2** | SQL（Postgres/Hyperdrive + D1）與 R2/S3 實現；`deploy/sql/` migration | store conformance 套件同一份測試跑四種 composition（§10）；`check:deploy-sql` 過；T3 |
 | 6 | **P3** | board 層：5 態 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/輪詢雙路徑 + 兩級提示 | claim 併發測試；SSE 與輪詢兩條路徑跑同一份行為測試；120s 對賬能修復人為製造的漏事件；T4、I6 |
 | 7 | **P4** | client 側 device proof 上行 + memory manifest/selector seam + **`signNonce` domain separation 修復** | `device-proof-v1.golden.json` 凍結 canonical bytes；pair/token 的 breaking 變更在同一 PR 內兩側同步 |
-| 8 | **P5** | `@byok/keys` 的 profile 持久化接上 core 的 `TruthStore` | 掛在 K4 之後。keys 依賴圖仍不含 protocol；aip-main-open 黃金測試原樣通過 |
+| 8 | **P5** | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore` | 掛在 K4 之後。keys 依賴圖仍不含 protocol；aip-main-open 黃金測試原樣通過 |
 | 儲備 | C1-C3 | v1 的 doctor/logs/setup、channel/upgrade/rollback、退避/watchdog/併發閘 | 排在 P3 之後 |
 
 ### 9.3 時序理由
@@ -729,7 +729,7 @@ K2 的 `ProfileStore` 從第一版就是 async（`@byok/keys` 的 `SecretStore` 
 | 4 | memory CAS conflict 不做 server merge |
 | 5 | revoked key／錯 tenant/product/scope／錯 body hash 全拒絕 |
 | 6 | Node 與 Workers 對 canonical proof bytes、hash 與 error code 完全一致 |
-| 7 | `@byok/keys` 與 dispatch/platform dependency graph 零邊 |
+| 7 | `@byok-sdk/keys` 與 dispatch/platform dependency graph 零邊 |
 | 8 | protocol golden files 零 diff，freeze guard 原樣通過 |
 | 9 | **board claim 衝突**：N 個並發 claim 只有一個 200，其餘 409 且 holder 快照一致 |
 | 10 | **`expectedStatus` CAS**：不符回 409 + 現況快照，不做 last-write-wins |
@@ -749,8 +749,8 @@ pnpm --filter @byok/protocol test
 git diff --exit-code packages/protocol/src/__tests__/golden/
 
 # 鐵律 1 的機檢（依賴圖）
-pnpm why @byok/protocol --filter @byok/keys    # 必須無結果
-pnpm why @byok/keys                             # 不得出現在 client/server/protocol/cloud 下
+pnpm why @byok/protocol --filter @byok-sdk/keys    # 必須無結果
+pnpm why @byok-sdk/keys                             # 不得出現在 client/server/protocol/cloud 下
 
 # P1 關鍵驗證：client 零改動跑通雲端 handler
 pnpm --filter @byok/client test -- --grep "long-poll"
@@ -799,7 +799,7 @@ npx vitest run --root . apps/local-agent/src/settings.test.ts
 2. **信箱認證面**：凍結 bearer 長輪詢（P1「client 零改動」的前提）vs device proof 簽名 pull。租戶隔離保證與該選擇正交（§8.4 第一層）；P1 實作按 §4.2 端點表取捨。
 3. **board claim 是否允許人搶佔 agent 已 claim 的項目**（強制 unclaim）。影響 claim CAS 是否需要一條 admin 旁路。
 4. **`closed` 的準確語義**（終止未驗收 vs 歸檔）——本方案取前者，探針未能確認 raft 原意 [unverified]；若採後者則改為加 `archived_at` 欄位，不加第 6 態。
-5. **`@byok/keys` 與 `@byok/cloud` 的 npm 發佈形態**：公開（repo MIT）vs GitHub Packages 私有。K4 前定，兩者一起定。
+5. **`@byok-sdk/keys` 與 `@byok/cloud` 的 npm 發佈形態**：公開（repo MIT）vs GitHub Packages 私有。K4 前定，兩者一起定。
 6. **K3 設置頁 server 進包與否**（v1 遺留開放項）。
 
 ---
