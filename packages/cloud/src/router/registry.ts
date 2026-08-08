@@ -23,11 +23,13 @@ import { Hono, type Context } from 'hono';
  *
  * - `device` — a bearer access token; resolves to a `DevicePrincipal` and a
  *   tenant-closed facade.
+ * - `proof` — a request-bound Ed25519 device proof; tenant/product/key
+ *   authority comes from the current device row, not protected claims.
  * - `presigned` — no principal at all; an HMAC signature over the resource id
  *   plus an expiry IS the credential (§7's two `/content` routes).
  * - `public` — deliberately unauthenticated; must expose nothing tenant-scoped.
  */
-export const ROUTE_CLASSES = ['device', 'presigned', 'public'] as const;
+export const ROUTE_CLASSES = ['device', 'proof', 'presigned', 'public'] as const;
 export type RouteClass = (typeof ROUTE_CLASSES)[number];
 
 export const ROUTE_METHODS = ['GET', 'POST', 'PUT'] as const;

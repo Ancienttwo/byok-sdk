@@ -967,7 +967,7 @@ Board routes can be disabled via capability/config while preserving rows. Do not
 > **依赖**：S5 + **S4B**（production truth/object write 必须走 reservation）+ S1 nonce domain separation（D-1 提前项）+ S2 canonicalizer
 > **对应**：P4（`ARCHITECTURE-PROPOSAL:697`），扣除已在 S1 完成的 `signNonce` domain separation
 > **入口闸**：独立 security review；I3 在本 Sprint 补齐（S3 延后项，见 D-2）
-> **生产约束**：production proof/truth write capability 在没有 reservation 的 composition 上**默认关闭**——签名过的 truth 写入会持久占用 object bytes，缺 reservation 就等于绕过配额，只允许在测试 composition 上打开
+> **生产约束**：production proof/truth write capability 在没有 atomic truth committer 与 content-hash keyed object download authority 的 composition 上**默认关闭**。object body 必须先经 S4B reservation/finalize 成为 committed manifest；inline body 与 accounting 同属一个 Postgres transaction，不制造跨系统 reservation。标准 InMemory composition 不声明该 capability。
 
 ### S6.1 Stories
 
@@ -1047,18 +1047,20 @@ Write：
 
 ### S6.5 Acceptance criteria
 
-- [ ] proof golden stable across Node/Workers runtime；
-- [ ] all protected fields body/resource-bound；
-- [ ] DB row is tenant/device authority；
-- [ ] **I3 通过**（S3 延后项）；
-- [ ] replay exact result idempotent；
-- [ ] requestId/body mismatch conflict；
-- [ ] terminal immutable；
-- [ ] memory manifest contains metadata, not body；
-- [ ] cloud source contains no embedding/semantic merge path；
+- [x] proof golden stable across Node/Workers runtime（S6-a）；
+- [x] all protected fields body/resource-bound（S6-a verifier + S6-b raw HTTP binding）；
+- [x] DB row is tenant/device authority（S6-a）；
+- [x] **I3 通过**（S6-a）；
+- [x] replay exact result idempotent（S6-b Postgres receipt lock + stored response parse）；
+- [x] requestId/body mismatch conflict（S6-b）；
+- [x] terminal immutable（S6-b）；
+- [x] memory manifest contains metadata, not body（S6-b）；
+- [x] cloud source contains no embedding/semantic merge path（S6-b）；
 - [ ] selector unit/integration tests；
-- [ ] snapshot >1 MiB metric/revisit trigger documented；
+- [x] snapshot >1 MiB metric/revisit trigger documented（S6 design research；metric implementation 由 S6-c daemon path 承接）；
 - [ ] security review passes before capability default-on。
+
+> **执行记录（未宣告 S6 完成）**：S6-a commit `d8e7802` / Draft PR #34 已交付 proof authority；S6-b 在 `codex/s6b-atomic-truth` 实现 proof-only routes 与 Postgres atomic authority。S6-c daemon signer/selector/fetch/rehash 及独立 security acceptance 尚未完成，因此 S6 与 Sprint 均保持未完成。
 
 ### S6.6 Rollback
 

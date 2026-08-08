@@ -48,6 +48,8 @@ export const CLOUD_CAPABILITIES = {
   presenceHints: 'presence.hints',
   /** Bounded task activity batch publication. */
   activityTail: 'activity.tail',
+  /** Request-bound device proof record manifest/read/write surface (S6). */
+  truthRecords: 'truth.records',
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
@@ -56,12 +58,27 @@ export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAP
 export const CapabilitiesResponseSchema = CapabilityDeclarationSchema;
 export type CapabilitiesResponse = CapabilityDeclaration;
 
-/** Everything this package can serve. A deployment narrows it; it never widens past what the routes implement. */
-export function fullCapabilityDeclaration(version = 1): CapabilityDeclaration {
+export interface FullCapabilityDeclarationOptions {
+  /**
+   * Composition-bound capabilities require an explicit application authority.
+   * `truth.records` is omitted by default because the standard in-memory
+   * composition cannot truthfully promise a cross-store atomic commit.
+   */
+  readonly includeTruthRecords?: boolean;
+}
+
+/** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
+export function fullCapabilityDeclaration(
+  version = 1,
+  options: FullCapabilityDeclarationOptions = {},
+): CapabilityDeclaration {
   return {
     schema: 'byok-capabilities-v1',
     version,
-    capabilities: Object.values(CLOUD_CAPABILITIES),
+    capabilities: Object.values(CLOUD_CAPABILITIES).filter(
+      (capability) =>
+        capability !== CLOUD_CAPABILITIES.truthRecords || options.includeTruthRecords === true,
+    ),
   };
 }
 

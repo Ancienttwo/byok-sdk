@@ -71,6 +71,12 @@ import {
   DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS,
 } from './handlers/board';
 import { activityAppendHandler, presencePublishHandler } from './handlers/presence';
+import {
+  DEFAULT_MAX_TRUTH_REQUEST_BYTES,
+  truthGetHandler,
+  truthManifestHandler,
+  truthPutHandler,
+} from './handlers/truth';
 import { CloudRouteRegistry, type RouteDescriptor } from './router/registry';
 import { terminalReceiptKey } from './inbound';
 import type {
@@ -82,6 +88,7 @@ import type {
   TaskAttempt,
 } from './stores/ports';
 import { tenantStoresFor, type CloudRootStores } from './tenant-stores';
+import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 
 /** Matches the reference server's ceiling (§7). */
 export const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
@@ -104,6 +111,10 @@ export interface ByokCloudOptions {
    * `blobs.contentproxy` (ADR-010).
    */
   readonly blobContentProxy?: BlobContentProxy;
+  /** Atomic proof receipt + truth/reference/accounting authority for S6 routes. */
+  readonly truthCommitter?: TruthCommitter;
+  /** Content-hash keyed object GET grants for object-backed truth bodies. */
+  readonly truthObjectDownloads?: TruthObjectDownloads;
   readonly crypto: CloudCrypto;
   readonly tokenSigner: TokenSigner;
   readonly clock: Clock;
@@ -129,6 +140,7 @@ export interface ByokCloudOptions {
   readonly activityMaxBytes?: number;
   readonly activityCapacity?: number;
   readonly activityTtlMs?: number;
+  readonly maxTruthRequestBytes?: number;
 }
 
 export interface EnqueueOfferInput {
@@ -178,7 +190,12 @@ export interface ByokCloud {
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   const declaration = parseDeclaration(options.capabilities);
-  assertNoOverDeclaration(declaration, options.blobContentProxy);
+  assertNoOverDeclaration(
+    declaration,
+    options.blobContentProxy,
+    options.truthCommitter,
+    options.truthObjectDownloads,
+  );
   const root: CloudRootStores = { core: options.core, cloud: options.cloud };
   const auth: AuthPlane = createAuthPlane({
     stores: options.cloud,
@@ -287,6 +304,37 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     registry.register(
       { method: 'POST', path: '/byok/activity', class: 'device' },
       activityAppendHandler({ ...deviceRouteDeps, bounds: activityBounds }),
+    );
+  }
+
+  const truthCommitter = options.truthCommitter;
+  const truthObjectDownloads = options.truthObjectDownloads;
+  if (
+    truthCommitter !== undefined &&
+    truthObjectDownloads !== undefined &&
+    declares(declaration, CLOUD_CAPABILITIES.truthRecords)
+  ) {
+    const truthDeps = {
+      proof: {
+        devices: options.cloud.devices,
+        crypto: options.crypto,
+        clock: options.clock,
+      },
+      truth: truthCommitter,
+      objectDownloads: truthObjectDownloads,
+      maxRequestBytes: options.maxTruthRequestBytes ?? DEFAULT_MAX_TRUTH_REQUEST_BYTES,
+    };
+    registry.register(
+      { method: 'GET', path: '/byok/records', class: 'proof' },
+      truthManifestHandler(truthDeps),
+    );
+    registry.register(
+      { method: 'GET', path: '/byok/records/:kind/:key', class: 'proof' },
+      truthGetHandler(truthDeps),
+    );
+    registry.register(
+      { method: 'PUT', path: '/byok/records/:kind/:key', class: 'proof' },
+      truthPutHandler(truthDeps),
     );
   }
 
@@ -445,6 +493,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 function assertNoOverDeclaration(
   declaration: CapabilityDeclaration,
   contentProxy: BlobContentProxy | undefined,
+  truthCommitter: TruthCommitter | undefined,
+  truthObjectDownloads: TruthObjectDownloads | undefined,
 ): void {
   if (
     declares(declaration, CLOUD_CAPABILITIES.boardSse) &&
@@ -455,12 +505,24 @@ function assertNoOverDeclaration(
       `${CLOUD_CAPABILITIES.boardSse} requires ${CLOUD_CAPABILITIES.boardCoordination}; without polling, reconciliation and declared fallback cannot be served.`,
     );
   }
-  if (contentProxy !== undefined) return;
-  if (!declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) return;
-  throw new ByokCloudError(
-    'capability_over_declared',
-    `This deployment declares ${CLOUD_CAPABILITIES.blobsContentProxy} but was given no BlobContentProxy, so both /byok/blobs/:id/content routes would be published and unserved.`,
-  );
+  if (contentProxy === undefined && declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) {
+    throw new ByokCloudError(
+      'capability_over_declared',
+      `This deployment declares ${CLOUD_CAPABILITIES.blobsContentProxy} but was given no BlobContentProxy, so both /byok/blobs/:id/content routes would be published and unserved.`,
+    );
+  }
+  if (truthCommitter === undefined && declares(declaration, CLOUD_CAPABILITIES.truthRecords)) {
+    throw new ByokCloudError(
+      'capability_over_declared',
+      `This deployment declares ${CLOUD_CAPABILITIES.truthRecords} but was given no atomic TruthCommitter.`,
+    );
+  }
+  if (truthObjectDownloads === undefined && declares(declaration, CLOUD_CAPABILITIES.truthRecords)) {
+    throw new ByokCloudError(
+      'capability_over_declared',
+      `This deployment declares ${CLOUD_CAPABILITIES.truthRecords} but was given no content-hash keyed TruthObjectDownloads authority.`,
+    );
+  }
 }
 
 function parseDeclaration(declaration: CapabilityDeclaration): CapabilityDeclaration {
