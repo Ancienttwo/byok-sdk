@@ -1,8 +1,11 @@
 import { ByokKeysError } from './errors';
-import type { ModelProviderProfile } from './provider-profile';
+import type { ProviderAuthMode } from './provider-profile';
 
 /** The subset of a profile the header builder reads. */
-export type ProviderAuthProfile = Pick<ModelProviderProfile, 'auth_mode' | 'kind'>;
+export interface ProviderAuthProfile {
+  auth_mode: ProviderAuthMode;
+  kind: string;
+}
 
 /**
  * Fail-closed secret check. Ported from `aip-main-open@c6a5385`

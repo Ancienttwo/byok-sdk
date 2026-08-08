@@ -178,6 +178,20 @@ describe('OpenAiCompatibleChatClient', () => {
     ).rejects.toThrowError(expect.objectContaining({ code }));
   });
 
+  it('preserves the observed HTTP status on a classified provider error', async () => {
+    const { fetchImpl } = recorder(() => jsonResponse({}, 422));
+    await expect(
+      client({ fetchImpl }).createChatCompletion({
+        messages: [{ content: 'hi', role: 'user' }],
+      }),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        code: 'MODEL_PROVIDER_HTTP_ERROR',
+        httpStatus: 422,
+      }),
+    );
+  });
+
   it('maps a non-JSON error body to the classified HTTP error', async () => {
     const { fetchImpl } = recorder(
       () => new Response('<html>gateway timeout</html>', { status: 504 }),

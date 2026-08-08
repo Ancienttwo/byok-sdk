@@ -1,12 +1,12 @@
 # Task Contract: byok-keys-package
 
-> **Status**: Fulfilled
+> **Status**: Active
 > **Plan**: plans/plan-20260805-1659-byok-keys-package.md
-> **Task Profile**: docs-only
+> **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: ancienttwo
 > **Capability ID**: root
-> **Last Updated**: 2026-08-06 10:05
+> **Last Updated**: 2026-08-08 21:50
 > **Review File**: `tasks/reviews/20260805-1659-byok-keys-package.review.md`
 > **Notes File**: `tasks/notes/20260805-1659-byok-keys-package.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -17,27 +17,15 @@
 
 ## Goal
 
-Deliver `packages/keys` as a new `@byok/keys` workspace package, ported layer by layer from `aip-main-open@c6a5385` per `docs/researches/HANDOFF-byok-keys.md`. K4 refreshes this contract before its own dispatch.
+Deliver `packages/keys` as a published `@byok/keys@0.1.0` package and make its public surface sufficient for the K4 aip-main-open swap. The release surface must preserve provider HTTP status on classified failures, export the shared request/response guards used by aip's retained finance connector, and accept non-model provider kinds in the generic header helpers.
 
-This contract covers milestone **K3 — the settings-page server decision**, projected from the plan's `## Task Breakdown` K3 entry (`plans/plan-20260805-1659-byok-keys-package.md:133`), which is the authority for what "done" means here:
-
-> K3 Settings-page server decision: ship as `@byok/keys/settings-server` subpath with branding and invoke-protocol parameterized, or drop it; either way add the two-security-models boundary declaration to `docs/security.md` and the package README
-
-The decision is taken: **drop the settings-page server.** K3 is therefore a documentation slice that records the exclusion and its consequences, and ships no runtime code. Five acceptance targets:
-
-1. **README states the exclusion.** `packages/keys/README.md` gains a "Not in this package" section giving the reason the local settings-page HTTP server is deliberately excluded (the host owns its own UI; this is a library, not a local web server; a key custodian does not open a listening port) and the host's alternative (drive `ProviderRegistry` directly). It must state the **security-property transfer**: the guarantee that the key never leaves the machine is now underwritten by the host's page, not by this package. The same edit fixes two stale claims: the `Status:` line still says K0, and the security-boundary section still says the full declaration "lands in `docs/security.md` at milestone K3" when it already landed.
-2. **`docs/security.md` gains a third enforceable consequence.** The existing section is *not* rewritten; one bullet is appended after the two current ones: a key custodian opens no listening port, and this repo's local control plane is `@byok/client`'s Unix control socket (`packages/client/src/daemon/control-server.ts`).
-3. **The Node floor is documented, not raised.** `packages/keys/package.json` keeps `engines.node: ">=20"`. The README states the split — on Node 20 the package is fully usable through `InMemoryProviderProfileStore`, while `SqliteProviderProfileStore` needs 22.5+ and fails closed with `PROVIDER_STORE_UNAVAILABLE` via `isSqliteAvailable()` — and names the trigger that would justify raising the floor (a consumer requiring on-disk persistence as an install-time guarantee).
-4. **The plan's K4 entry names the adapter work.** Dropping the settings server means aip-main-open keeps its own `settings.ts`, so the K4 entry must name the three surfaces an aip-side adapter has to supply for `settings.test.ts` to pass unchanged: `testConfiguration()`, the multi-kind `delete(kind, providerId)` / `list()` signatures, and code-based error identification for `publicSettingsError()`.
-5. **The deferred ledger records the generic test hook.** `tasks/todos.md` gains a row for a generic `ProviderRegistry.testConnection()`, with why it is deferred and what would trigger it.
-
-One constraint binds the milestone: this is a documentation slice. No source or test file changes, and the package's test counts must be identical before and after.
+This contract now covers the byok-sdk half of **K4**. Three concrete gaps were proven by `docs/researches/k4-aip-swap-dryrun.md` and the first aip adapter commit: image capability mapping needs the original HTTP status; the retained `McpHttpFinanceConnector` needs the package's canonical request/response guards; and `providerHeaders()` must accept aip's retained `market_data` profile shape. These are public-surface corrections before the first publish, not compatibility fallbacks.
 
 ## Scope
 
-- In scope: `packages/keys/**` creation, its workspace registration (including the `pnpm-lock.yaml` entry `pnpm install` produces), the source handoff `docs/researches/HANDOFF-byok-keys.md` that this port's `file:line` references depend on, and the plan/contract/notes/review workflow artifacts.
+- In scope: `packages/keys/**`, `pnpm-lock.yaml` if package metadata changes require it, and the plan/contract/notes/review workflow artifacts.
 - Out of scope: `packages/client/**`, `packages/server/**`, `packages/protocol/**` (must not gain a dependency on `keys`); `~/Projects/aip-main-open` (untouched until K4); AiphaBee narrative-domain symbols listed in `docs/researches/HANDOFF-byok-keys.md` §4.5; legacy secret migration.
-- Out of scope for K3 specifically: any runtime code or test change — this is a documentation slice, so `packages/keys/src/**` is deliberately absent from `allowed_paths` below and the test counts must not move. Raising `engines.node` is also out of scope: the floor is documented, not changed. The settings-page HTTP server itself (`settings.ts:107,244,262-274,493,836,1422`) is not ported at all, which is the decision this milestone records.
+- Out of scope for K4 release preparation: runtime API renames, schema changes, compatibility aliases, settings-page code, and changes to `packages/client`, `packages/server`, or `packages/protocol`.
 - Carried forward from K2: the platform-selecting default secret-store factory and the scope data-directory manifest remain unscheduled and are tracked in `tasks/todos.md`; the plan names them in no milestone entry.
 - Taste constraints: follow the existing package layout in this repo (tsup, vitest, zod schema style from `protocol`); `keys` builds with `platform: 'node'`, not `protocol`'s `'neutral'`.
 
@@ -96,10 +84,8 @@ allowed_paths:
   - .ai/context/capabilities.json
   - docs/researches/
   - .claude/templates/
-  # K3 is docs-only: the package's source tree is deliberately NOT allowed here,
-  # so the scope gate itself enforces "no runtime change" rather than trusting it.
-  - packages/keys/README.md
-  - docs/security.md
+  - packages/keys/
+  - pnpm-lock.yaml
 ```
 
 ## Evidence Requirements
@@ -149,51 +135,36 @@ delegation:
 ```yaml
 exit_criteria:
   files_exist:
-    - packages/keys/README.md
-    - docs/security.md
+    - packages/keys/LICENSE
+    - packages/keys/src/errors.ts
+    - packages/keys/src/http.ts
+    - packages/keys/src/index.ts
   artifacts_exist:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260805-1659-byok-keys-package.notes.md
   files_contain:
-    # Target 1: the exclusion, its reason, and the security-property transfer.
-    - path: packages/keys/README.md
-      pattern: "^## Not in this package"
-    - path: packages/keys/README.md
-      pattern: "listening port"
-    - path: packages/keys/README.md
-      pattern: "ProviderRegistry"
-    # Target 3: the Node floor split, both halves named.
-    - path: packages/keys/README.md
-      pattern: "InMemoryProviderProfileStore"
-    - path: packages/keys/README.md
-      pattern: "PROVIDER_STORE_UNAVAILABLE"
-    - path: packages/keys/README.md
-      pattern: "isSqliteAvailable"
-    # Target 3: the floor is pinned positively, not only guarded negatively.
+    - path: packages/keys/src/errors.ts
+      pattern: "httpStatus"
+    - path: packages/keys/src/http.ts
+      pattern: "httpStatus: status"
+    - path: packages/keys/src/index.ts
+      pattern: "fetchWithProviderGuards"
+    - path: packages/keys/src/index.ts
+      pattern: "parseBoundedJsonResponse"
+    - path: packages/keys/src/headers.ts
+      pattern: "kind: string"
     - path: packages/keys/package.json
-      pattern: '"node": ">=20"' 
-    # Target 2: the third enforceable consequence, pointing at the real file.
-    - path: docs/security.md
-      pattern: "packages/client/src/daemon/control-server\.ts"
-    - path: docs/security.md
-      pattern: "listening port"
-    # Target 4: K4 carries the adapter requirement.
-    - path: plans/plan-20260805-1659-byok-keys-package.md
-      pattern: "testConfiguration\(\)"
-    - path: plans/plan-20260805-1659-byok-keys-package.md
-      pattern: "publicSettingsError\(\)"
-    # Target 5: the deferred ledger row.
-    - path: tasks/todos.md
-      pattern: "testConnection\(\)"
+      pattern: '"name": "@byok/keys"'
+    - path: packages/keys/package.json
+      pattern: '"version": "0.1.0"'
+    - path: packages/keys/package.json
+      pattern: '"access": "public"'
   files_not_contain:
-    # Target 1: the two stale claims this milestone retires.
-    - path: packages/keys/README.md
-      pattern: "Status: \*\*K0\*\*"
-    - path: packages/keys/README.md
-      pattern: "security\.md. at milestone K3"
-    # Target 3: the Node floor is documented, not raised.
     - path: packages/keys/package.json
-      pattern: '"node": ">=22'
+      pattern: '"name": "@byok-sdk/keys"'
+  tests_pass:
+    - path: packages/keys/src/headers.test.ts
+    - path: packages/keys/src/openai-client.test.ts
   commands_succeed:
     - pnpm -r run typecheck
     - pnpm -r run test

@@ -63,6 +63,7 @@
 - **產品定位**:byok-sdk 是獨立 SDK,aip 是第一個接入專案。npm 身份走 SDK 自己的品牌,不掛 aiphabee。
 - **npm 現況(2026-08-07 實測)**:`npm whoami` = ancienttwo(已 browser auth 登入);unscoped 占位包 `byok-sdk@0.0.1` 存在且 ancienttwo read-write;`@byok/keys`、`@byok-sdk/keys` 均 404;`npm team ls byok:developers` 403(org `byok` 疑似存在且不屬於本帳號)、`npm org ls byok` 回空 `{}`——訊號矛盾,scope 可用性以實際 `npm publish @byok/keys` 為準,403 則按使用者預留的備選改 scope(名稱屆時由使用者定,傾向 `@byok-sdk`)。
 - **發佈前置六項**(dry-run §5.2/§7.2 step 1)已另開 slice 執行:publishConfig、LICENSE、prepublishOnly、repository、README 完整模組表、errors.ts:30-36 註解修正;keys 版本 0.1.0,其餘三包不發。
+- **2026-08-08 K4 release-surface refresh**：aip 的 c1 adapter 已證明三個 c2 blocker。首發前補齊 `ByokKeysError.httpStatus`（保留 provider 回應狀態）、從 barrel export canonical HTTP guards/helpers、把 `ProviderAuthProfile.kind` 泛化為字串以承接留在 aip 的 `market_data` 分支。這三項只暴露已存在的 package authority，不加相容 fallback；首發仍為 `@byok/keys@0.1.0`。
 
 ## Evidence Links
 
