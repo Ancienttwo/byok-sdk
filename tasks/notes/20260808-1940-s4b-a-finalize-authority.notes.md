@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260808-1940-s4b-a-finalize-authority.md
 > **Contract**: tasks/contracts/20260808-1940-s4b-a-finalize-authority.contract.md
 > **Review**: tasks/reviews/20260808-1940-s4b-a-finalize-authority.review.md
-> **Last Updated**: 2026-08-08 19:49
+> **Last Updated**: 2026-08-08 19:52
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -40,6 +40,8 @@
 - Postgres dataplane targeted run: 9 files / 162 tests pass（含 core conformance 与 quota concurrency）。
 - `rg -n observedContentHash packages`: zero match。
 - `git diff --exit-code main -- deploy/sql/ packages/cloud/ packages/protocol/`: pass。
+- `repo-harness run verify-contract --contract tasks/contracts/20260808-1940-s4b-a-finalize-authority.contract.md --strict`: 27/27 pass，contract `Fulfilled`。
+- compose hard env full `pnpm -r run test`: pass；随后 `pnpm -r run build`、`pnpm run check:deploy-sql`、workflow strict、diff check 均 pass。
 
 ## Promotion Filter
 
