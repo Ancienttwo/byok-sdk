@@ -15,7 +15,7 @@
  * predicate rather than reaching for the database's `now()`.
  */
 import { describe } from 'vitest';
-import type { CloudStores } from '@byok/cloud';
+import type { BlobDeclaration, CloudStores } from '@byok/cloud';
 import { runCloudPortInventoryConformance } from './port-inventory';
 import { runPairingConformance } from './pairing';
 import { runNonceConformance } from './nonces';
@@ -23,6 +23,7 @@ import { runDedupConformance } from './dedup';
 import { runTaskAttemptConformance } from './task-attempts';
 import { runReceiptConformance } from './receipts';
 import { runSequenceConformance } from './sequence';
+import { runBlobConformance } from './blobs';
 import { runCloudTenantIsolationConformance } from './tenant-isolation';
 
 /**
@@ -32,13 +33,15 @@ import { runCloudTenantIsolationConformance } from './tenant-isolation';
  * per-composition exemption, which is the distinction that matters. Every
  * composition must supply every port named here; none may supply a subset.
  *
- * `blobs` is absent because only half of it is a store: its bytes live in
- * object storage, and S4A-c lands that adapter together with the capability
- * split that narrows `CloudStores.blobs` to `{ createUpload, getDownloadUrl }`
- * (docs/researches/s4a-dataplane-design.md §6). Certifying the five-method
- * shape now would freeze a contract that is already scheduled to change. When
- * the R2 adapter arrives, `blobs` is added HERE, once, and every composition
- * owes it from that moment.
+ * `blobs` joined in S4A-c, once the port narrowed to
+ * `{ createUpload, getDownloadUrl }` and the byte-proxy trio left for
+ * `BlobContentProxy` (docs/researches/s4a-dataplane-design.md §6). Certifying
+ * the old five-method shape would have frozen a contract already scheduled to
+ * change, and certifying a subset of it for one composition would have been
+ * the silent downgrade this suite exists to prevent. Narrowed, it is something
+ * every composition can honestly implement — so every composition owes it, and
+ * the assertions in `blobs.ts` are the ones that mean the same thing whether
+ * the bytes live in a `Map` or in an object store nobody here can reach.
  *
  * `rateLimiter` IS here, and a durable composition satisfies it with the
  * in-memory allow-all reference rather than a table (§5): persisting an
@@ -54,6 +57,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'tasks',
   'receipts',
   'sequence',
+  'blobs',
   'rateLimiter',
 ] as const;
 
@@ -74,6 +78,26 @@ export interface CloudCompositionHandle {
   now(): string;
   /** Moves the composition's clock forward. Must affect every TTL the stores observe. */
   advanceTime(ms: number): void | Promise<void>;
+  /**
+   * Redeems a grant: puts the declared bytes wherever it addresses, and leaves
+   * the store in whatever state it calls "the object is here".
+   *
+   * Part of the factory contract for the same reason `advanceTime` is. What an
+   * object store does AFTER an object exists is contract behavior — a committed
+   * object is the only thing a truth record may reference — but no composition
+   * can be driven there through {@link CloudConformanceStores} alone: the blob
+   * port mints grants and never carries a byte, which is precisely the fact
+   * that narrowed it. So the composition supplies the byte path, and the
+   * assertions stay composition-blind.
+   *
+   * @throws if the bytes did not land. A silent failure here would turn every
+   * committed-state assertion into a vacuous one.
+   */
+  landBlobBytes(input: {
+    readonly grant: { readonly blobId: string; readonly uploadUrl: string };
+    readonly declaration: BlobDeclaration;
+    readonly bytes: Uint8Array;
+  }): Promise<void>;
   /** Optional teardown for compositions holding connections. */
   dispose?(): void | Promise<void>;
 }
@@ -115,6 +139,7 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runTaskAttemptConformance(factory);
     runReceiptConformance(factory);
     runSequenceConformance(factory);
+    runBlobConformance(factory);
     runCloudTenantIsolationConformance(factory);
   });
 }

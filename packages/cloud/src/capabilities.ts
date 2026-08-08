@@ -11,8 +11,9 @@
  * frozen device wire contract, `@byok/protocol` is untouched by it, and the
  * daemon does not consume it yet (that lands in a later slice). What it
  * already does here is drive route selection — a deployment that does not
- * declare `blobs.presigned` does not mount the blob routes at all, so the
- * declaration and the surface cannot disagree.
+ * declare `blobs.presigned` does not mount the grant routes at all, and one
+ * that does not declare `blobs.contentproxy` does not mount the two `/content`
+ * routes, so the declaration and the surface cannot disagree.
  */
 import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok/core';
 
@@ -22,8 +23,23 @@ export const CLOUD_CAPABILITIES = {
   eventsLongPoll: 'events.longpoll',
   /** `POST /byok/messages` batched send (§8.2). */
   messagesBatch: 'messages.batch',
-  /** The four `/byok/blobs` routes (§7). */
+  /** The two bearer-authed `/byok/blobs` routes: mint an upload grant, mint a download URL (§7). */
   blobsPresigned: 'blobs.presigned',
+  /**
+   * The two presigned `/byok/blobs/:id/content` routes — cloud carrying the
+   * bytes itself.
+   *
+   * Split out of `blobs.presigned` because it was one capability describing two
+   * separable facts. A composition whose bytes live in object storage mints
+   * grants (`blobs.presigned`) but has no byte-proxy path at all, and saying so
+   * by declaration is ADR-010's whole posture: a client reads what a deployment
+   * serves, it never probes a `/content` route and interprets the status code.
+   *
+   * Spelled all-lowercase because core's declaration schema pins capability
+   * names to `/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/` — the same reason the sibling
+   * above reads `events.longpoll` and not `events.longPoll`.
+   */
+  blobsContentProxy: 'blobs.contentproxy',
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];

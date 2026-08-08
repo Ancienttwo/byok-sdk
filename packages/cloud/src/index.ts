@@ -88,6 +88,7 @@ export { CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES } from './stores/ports';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
 export type {
   BlobContent,
+  BlobContentProxy,
   BlobDeclaration,
   BlobWriteResult,
   CloudBlobStore,
@@ -116,6 +117,7 @@ export {
   AllowAllRateLimiter,
   BLOB_URL_TTL_MS,
   DEDUP_RING_CAPACITY,
+  InMemoryBlobContentProxy,
   InMemoryCloudBlobStore,
   InMemoryDeviceDirectory,
   InMemoryDeviceSequenceStore,
@@ -125,5 +127,11 @@ export {
   InMemoryRequestReceiptStore,
   InMemoryTaskAttemptStore,
   NONCE_TTL_MS,
+  createInMemoryBlobs,
   createInMemoryCloudStores,
+} from './stores/in-memory/index';
+export type {
+  InMemoryBlobStoreOptions,
+  InMemoryBlobs,
+  InMemoryCloudComposition,
 } from './stores/in-memory/index';

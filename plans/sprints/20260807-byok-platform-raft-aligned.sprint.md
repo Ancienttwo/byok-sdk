@@ -756,15 +756,15 @@ Object 基本真相（按 D-8 从 S4B 前移）：
 - [x] migrations pass order check（S4A-a，PR #23 merge `5f399f1`；CI `Migration ordering check` 兩腿實測 `[deploy-sql] OK`）；
 - [x] fresh install + migrate-up（S4A-a，compose 無 volume——CI dataplane job 每輪從空庫 migrate-up）；
 - [x] rollback strategy documented；destructive down migration not required（S4A-a/b，runner 無 down 路徑且有機檢；S4A.6 + runbook）；
-- [ ] InMemory 与 Postgres + R2 两个 composition 跑同一份 domain/object contract suite；
+- [x] InMemory 与 Postgres + R2 两个 composition 跑同一份 domain/object contract suite（S4A-c：`CLOUD_CONFORMANCE_PORTS` 由 8 長到 9，`blobs` 端口收窄後兩 composition 同跑同一份斷言，零 per-composition 分支；cloud conformance 兩 composition 各 50 例、core conformance 各 56 例、object suite 12 例，實測全綠）；
 - [x] **I4 的 SQL 侧补齐**（S3 延后项，见 D-2）（S4A-b，PR #24 merge `aff8dda`：core 56 例跑上 Postgres composition 零斷言改動 + catalog 斷言）；
-- [ ] no naked task/device/object index，也没有跨租户 object key；
+- [x] no naked task/device/object index，也没有跨租户 object key（S4A-c：R2 adapter 的 `blobId` 即 content hash，不存在代理 id，每次讀都是 `(tenant, hash)` 打 manifest 主鍵；object key 只在一處由 core 的 `tenantObjectKey` 構造，非 hex 值成不了 `ContentHash` 也就到不了那一處，`object-suite.test.ts` 以「零請求發出」斷言之）；
 - [x] mailbox retention behavior documented（S4A-b，`deploy/runbooks/mailbox-retention.md`：ring-vs-SQL 不可互換條款 + noteSkippedSeq 證據缺口）；
 - [x] cross-tenant query plan cannot use a naked key path（S4A-b，`tests/sql/control_plane_invariants.sql` catalog 斷言：UNIQUE 首列必須 `tenant_id`，白名單恰兩條，附 mutation check）；
-- [ ] Postgres optional RLS hardening documented but not relied upon；
-- [ ] deploy/ no longer only `.gitkeep`；
+- [x] Postgres optional RLS hardening documented but not relied upon（S4A-c，`deploy/runbooks/postgres-rls.md`：明寫 enforced 層是 port 契約 + facade + catalog 斷言，RLS 不被任何套件或閘門依賴）；
+- [x] deploy/ no longer only `.gitkeep`（S4A-c，`deploy/env/hosted.env.example` + `deploy/scripts/migrate` + `deploy/runbooks/postgres-rls.md`；migrate script 對 compose Postgres 實測從空庫 apply 兩檔、重跑報 already present、缺 `DATABASE_URL` 退出 2）；
 - [x] `pnpm run check:deploy-sql` 通过（S4A-a 檔名序 + S4A-b reference mode 實質化，CI 兩腿實測 `[deploy-sql] OK`）；
-- [ ] secrets/environment sample excludes real keys。
+- [x] secrets/environment sample excludes real keys（S4A-c，機檢：`hosted.env.example` 每個賦值不是 `REPLACE_` 佔位就是明顯非密文，任何 20 字元以上的憑證形字串即紅）。
 
 ### S4A.6 Rollback
 

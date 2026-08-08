@@ -23,6 +23,16 @@ export const CLOUD_ERROR_CODES = {
   mailbox_seq_mismatch: 'mailbox_seq_mismatch',
   /** A capability declaration the host supplied that core refused. */
   capability_declaration_invalid: 'capability_declaration_invalid',
+  /**
+   * The declaration names a capability this composition cannot serve, so the
+   * deployment would publish a surface it does not have (ADR-010).
+   *
+   * Construction-time and fatal. A client learns what a deployment supports by
+   * READING the declaration and is entitled to act on it without probing, so a
+   * declaration that over-states is not a degraded deployment — it is a
+   * deployment whose one honest interface lies.
+   */
+  capability_over_declared: 'capability_over_declared',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

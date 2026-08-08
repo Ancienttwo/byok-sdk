@@ -10,6 +10,11 @@
  * JWT in scope at all. The HMAC signature over the blob id plus its expiry IS
  * the credential there, which is why those two carry the `presigned` class in
  * the route inventory rather than being lumped in with the device routes.
+ *
+ * The split runs all the way down: the bearer-authed pair reaches blobs only
+ * through the tenant facade and never holds a naked store, and the presigned
+ * pair holds only a {@link BlobContentProxy} and no bearer deps. A composition
+ * without a proxy does not mount them (`cloud.ts`).
  */
 import type { Context } from 'hono';
 import { z } from 'zod';
@@ -18,13 +23,20 @@ import {
   type BlobDownloadUrlResponse,
   type CreateBlobResponse,
 } from '@byok/protocol';
-import type { CloudBlobStore } from '../stores/ports';
+import type { BlobContentProxy } from '../stores/ports';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
 
+/** The two bearer-authed routes: everything they touch goes through the tenant facade. */
 export interface BlobRouteDeps extends DeviceRouteDeps {
-  /** The naked store: the presigned routes have no principal to build a facade from. */
-  readonly blobs: CloudBlobStore;
   readonly maxBlobSizeBytes: number;
+}
+
+/**
+ * The two presigned routes. No bearer deps at all — there is no principal to
+ * build a facade from, and the proxy is the only thing they need.
+ */
+export interface BlobContentRouteDeps {
+  readonly contentProxy: BlobContentProxy;
 }
 
 /**
@@ -68,29 +80,29 @@ export function blobDownloadUrlHandler(deps: BlobRouteDeps) {
   };
 }
 
-export function blobUploadContentHandler(deps: BlobRouteDeps) {
+export function blobUploadContentHandler(deps: BlobContentRouteDeps) {
   return async (c: Context): Promise<Response> => {
     const blobId = c.req.param('id') ?? '';
     const query = SignedUrlQuerySchema.safeParse({ sig: c.req.query('sig'), exp: c.req.query('exp') });
-    if (!query.success || !(await deps.blobs.verifySignedUrl(blobId, 'put', query.data.sig, query.data.exp))) {
+    if (!query.success || !(await deps.contentProxy.verifySignedUrl(blobId, 'put', query.data.sig, query.data.exp))) {
       return c.json({ error: 'invalid or expired signature' }, 401);
     }
 
-    const result = await deps.blobs.writeContent(blobId, new Uint8Array(await c.req.arrayBuffer()));
+    const result = await deps.contentProxy.writeContent(blobId, new Uint8Array(await c.req.arrayBuffer()));
     if (!result.ok) return c.json({ error: result.reason }, 422);
     return c.body(null, 204);
   };
 }
 
-export function blobDownloadContentHandler(deps: BlobRouteDeps) {
+export function blobDownloadContentHandler(deps: BlobContentRouteDeps) {
   return async (c: Context): Promise<Response> => {
     const blobId = c.req.param('id') ?? '';
     const query = SignedUrlQuerySchema.safeParse({ sig: c.req.query('sig'), exp: c.req.query('exp') });
-    if (!query.success || !(await deps.blobs.verifySignedUrl(blobId, 'get', query.data.sig, query.data.exp))) {
+    if (!query.success || !(await deps.contentProxy.verifySignedUrl(blobId, 'get', query.data.sig, query.data.exp))) {
       return c.json({ error: 'invalid or expired signature' }, 401);
     }
 
-    const content = await deps.blobs.readContent(blobId);
+    const content = await deps.contentProxy.readContent(blobId);
     if (content === undefined) return c.json({ error: 'blob not found' }, 404);
     return c.body(new Uint8Array(content.data), 200, { 'content-type': content.contentType });
   };

@@ -14,7 +14,7 @@ import { createWebCrypto } from '../crypto/web-crypto';
 import type { CloudCrypto } from '../crypto/port';
 import { createByokCloud, type ByokCloud } from '../cloud';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
-import type { CloudStores } from '../stores/ports';
+import type { BlobContentProxy, CloudStores } from '../stores/ports';
 
 const TOKEN_SECRET_BYTES = 32;
 
@@ -49,6 +49,8 @@ export interface InMemoryByokCloud {
   /** The naked stores, for a host that wants to inspect or seed state directly. */
   readonly core: CoreStores;
   readonly stores: CloudStores;
+  /** The byte proxy the two `/content` routes were mounted on. */
+  readonly blobContentProxy: BlobContentProxy;
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
 }
@@ -57,7 +59,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
   const clock = options.clock ?? systemClock();
   const crypto = options.crypto ?? createWebCrypto();
   const core = createInMemoryCoreStores({ clock }).stores;
-  const stores = createInMemoryCloudStores(clock, crypto);
+  const { stores, blobContentProxy } = createInMemoryCloudStores(clock, crypto);
   const tokenSigner =
     options.tokenSigner ??
     createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(TOKEN_SECRET_BYTES)), clock);
@@ -65,6 +67,11 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
   const cloud = createByokCloud({
     core,
     cloud: stores,
+    // This composition has nowhere else to put bytes, so it supplies the proxy
+    // and `fullCapabilityDeclaration()` declares `blobs.contentproxy`. That
+    // pairing is what keeps hosted-in-memory behavior identical to what it was
+    // before the port narrowed.
+    blobContentProxy,
     crypto,
     tokenSigner,
     clock,
@@ -79,5 +86,5 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
       : {}),
   });
 
-  return { cloud, core, stores, clock, crypto };
+  return { cloud, core, stores, blobContentProxy, clock, crypto };
 }

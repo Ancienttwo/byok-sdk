@@ -13,24 +13,26 @@
  * 1. **Async.** Every method returns a `Promise`, so a SQL or KV composition
  *    can implement the same contract the in-memory reference does.
  * 2. **Tenant-first.** Every method's first parameter is a required
- *    `TenantId` — with exactly three documented exceptions below, each of
+ *    `TenantId` — with exactly two documented exceptions below, each of
  *    which is pre-tenant *by construction* because the credential it is
  *    handed is itself what resolves the tenant.
  *
- * The three exceptions:
+ * The two exceptions:
  *
  * - {@link DeviceDirectory.resolveByDeviceId} — `POST /byok/challenge` and
  *   `POST /byok/token` carry only a deviceId (the pinned wire contract), and
  *   the row is what tells the deployment which tenant to mint for.
  * - {@link PairingCodeStore.redeem} — the code IS the tenant lookup; it was
  *   minted against a tenant that only the host's control plane knew.
- * - {@link CloudBlobStore.verifySignedUrl}/`writeContent`/`readContent` — the
- *   two `/content` routes are presigned, not bearer-authed, so there is no
- *   principal in scope at all; the HMAC signature over the blob id is the
- *   whole credential.
  *
- * None of the three is reachable through {@link TenantStores} (see
- * `tenant-stores.ts`), so a device-facing handler cannot call them.
+ * Neither is reachable through {@link TenantStores} (see `tenant-stores.ts`),
+ * so a device-facing handler cannot call them.
+ *
+ * The byte-proxy trio that used to be a third pre-tenant exception is no
+ * longer part of this bundle at all: it moved to {@link BlobContentProxy},
+ * an OPTIONAL composition input rather than a {@link CloudStores} member,
+ * because a composition backed by object storage physically cannot proxy
+ * bytes (see the blobs section below).
  */
 import type { TenantId } from '@byok/core';
 
@@ -232,11 +234,47 @@ export interface BlobContent {
   readonly contentType: string;
 }
 
+/**
+ * The capability-minting half of blobs: what EVERY composition can honestly
+ * provide, whoever holds the bytes.
+ *
+ * Both methods are tenant-first, and both are reachable through {@link
+ * TenantStores}. There is no pre-tenant method left on this port — see
+ * {@link BlobContentProxy} for where the other three went and why.
+ */
 export interface CloudBlobStore {
   createUpload(tenant: TenantId, input: BlobDeclaration): Promise<{ readonly blobId: string; readonly uploadUrl: string }>;
   /** A presigned GET URL for a blob THIS tenant owns that has finished uploading; `undefined` otherwise — including for another tenant's blob. */
   getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined>;
-  /** Pre-tenant: the two `/content` routes are presigned, not bearer-authed. */
+}
+
+/**
+ * The byte-proxying half: an OPTIONAL composition input, not a port.
+ *
+ * These three serve the two `/byok/blobs/:id/content` routes, which exist
+ * because the in-memory and self-hosted compositions have nowhere else to put
+ * bytes — cloud has to carry them. A composition whose bytes live in object
+ * storage (S3/R2) hands the device a presigned URL to the object store itself
+ * and never sees a byte, so it cannot implement these at all.
+ *
+ * That is why this is a separate interface supplied at composition time rather
+ * than a member of {@link CloudStores}: "this deployment cannot proxy bytes"
+ * becomes a type-level fact (the proxy is simply absent) instead of three
+ * methods that throw. The alternatives were both anti-patterns — a conformance
+ * suite that skips three methods for one composition is a subset waiver, and
+ * one that asserts a typed rejection proves nothing
+ * (docs/researches/s4a-dataplane-design.md §6).
+ *
+ * All three are pre-tenant by construction: the `/content` routes are
+ * presigned, not bearer-authed, so there is no principal in scope at all and
+ * the HMAC signature over the blob id is the whole credential. They stay off
+ * {@link TenantStores} for the same reason the two exceptions above do.
+ *
+ * A deployment supplying a proxy must also declare `blobs.contentproxy`
+ * (ADR-010): the routes mount on proxy-presence AND declaration, never on
+ * either alone.
+ */
+export interface BlobContentProxy {
   verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): Promise<boolean>;
   writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult>;
   readContent(blobId: string): Promise<BlobContent | undefined>;
@@ -261,6 +299,12 @@ export interface InboundRateLimiter {
 // The bundle a composition supplies
 // ---------------------------------------------------------------------------
 
+/**
+ * All-or-nothing: a composition supplies every port here or it is not a
+ * composition. {@link BlobContentProxy} is deliberately absent — it is an
+ * optional input to `createByokCloud`, not a port, precisely so that the
+ * bundle can stay all-or-nothing while byte proxying stays optional.
+ */
 export interface CloudStores {
   readonly devices: DeviceDirectory;
   readonly pairingCodes: PairingCodeStore;

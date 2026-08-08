@@ -46,6 +46,7 @@
   "dependencies": {
     "@byok/cloud": "workspace:*",
     "@byok/core": "workspace:*",
+    "aws4fetch": "1.0.20",
     "pg": "^8.22.0"
   },
   "devDependencies": {

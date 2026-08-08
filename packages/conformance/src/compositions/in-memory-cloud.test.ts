@@ -13,7 +13,7 @@ import { runCloudConformance, type CloudCompositionFactory } from '../cloud/harn
 const inMemoryFactory: CloudCompositionFactory = {
   create() {
     const clock = createMutableClock();
-    const stores = createInMemoryCloudStores(clock, createWebCrypto());
+    const { stores, blobContentProxy } = createInMemoryCloudStores(clock, createWebCrypto());
     return {
       // Exactly the certified ports, in `CLOUD_CONFORMANCE_PORTS` order: the
       // suite asserts the key set, so a composition cannot quietly hand over
@@ -26,11 +26,18 @@ const inMemoryFactory: CloudCompositionFactory = {
         tasks: stores.tasks,
         receipts: stores.receipts,
         sequence: stores.sequence,
+        blobs: stores.blobs,
         rateLimiter: stores.rateLimiter,
       },
       now: () => clock.now().toISOString(),
       advanceTime: (ms: number) => {
         clock.advance(ms);
+      },
+      // This composition IS the byte path — the proxy and the blob store share
+      // one registry — so redeeming a grant is a direct write through it.
+      landBlobBytes: async ({ grant, bytes }) => {
+        const result = await blobContentProxy.writeContent(grant.blobId, bytes);
+        if (!result.ok) throw new Error(`in-memory write refused the bytes: ${result.reason}`);
       },
     };
   },

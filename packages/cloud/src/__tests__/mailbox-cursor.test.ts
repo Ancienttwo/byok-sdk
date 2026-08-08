@@ -163,6 +163,10 @@ describe('enqueueOffer', () => {
     const skewed = createByokCloud({
       core: skewedCore,
       cloud: base.stores,
+      // `fullCapabilityDeclaration()` names `blobs.contentproxy`, and a
+      // declaration is not allowed to out-run the parts, so the proxy comes
+      // along with it.
+      blobContentProxy: base.blobContentProxy,
       crypto: base.crypto,
       tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(3), clock),
       clock,

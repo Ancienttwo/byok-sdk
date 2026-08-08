@@ -9,8 +9,14 @@
  * eleventh route added tomorrow either goes through the registry (and appears
  * in the inventory) or fails this suite.
  */
+import { createInMemoryCoreStores, createMutableClock, type CapabilityDeclaration } from '@byok/core';
 import { describe, expect, it } from 'vitest';
+import { createHmacTokenSigner } from '../auth/tokens';
+import { CLOUD_CAPABILITIES, fullCapabilityDeclaration, type CloudCapability } from '../capabilities';
+import { createByokCloud } from '../cloud';
+import { createWebCrypto } from '../crypto/web-crypto';
 import { CloudRouteRegistry, ROUTE_CLASSES, routeKey, type RouteClass } from '../router/registry';
+import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import { CLOUD_ORIGIN, createHarness, offerPayload, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
 
 /** The inventory as of S3a. Kept here so a route ADDED without a decision fails a review, not just a diff. */
@@ -186,6 +192,158 @@ describe('tenant isolation across every device-class resource', () => {
       });
       expect(response.status, routeKey(route)).toBe(401);
       expect(response.body, routeKey(route)).toEqual({ error: 'unauthorized' });
+    }
+  });
+});
+
+/**
+ * The capability matrix, closed over the axis S4A-c added.
+ *
+ * `blobs.presigned` used to gate all four blob routes at once, which made a
+ * composition that mints grants but cannot carry bytes inexpressible. Now the
+ * grant pair and the `/content` pair have one capability each, and the
+ * `/content` pair additionally needs a proxy to have been supplied — the
+ * declaration says what a deployment serves, and the composition says what it
+ * physically can serve, and BOTH have to agree before a route exists.
+ *
+ * Enumerated rather than spot-checked: the point of an inventory is that it is
+ * exhaustive, so every CONSTRUCTIBLE combination on the new axis is a row here,
+ * including the one that must produce no `/content` routes (a proxy supplied
+ * but not declared).
+ *
+ * The opposite combination — declared but unsupplied — is not a row, because it
+ * is not a deployment: `createByokCloud` refuses it, and the two assertions
+ * below the matrix are what pin that. Leaving it as a "mounts nothing" row was
+ * the bug: `GET /byok/capabilities` publishes the declaration whether or not a
+ * route backs it, so "mounts nothing" described the router while the client was
+ * still being told the capability was there.
+ */
+const ALWAYS_MOUNTED = [
+  'POST /byok/pair',
+  'POST /byok/challenge',
+  'POST /byok/token',
+  'GET /byok/capabilities',
+] as const;
+
+const GRANT_ROUTES = ['POST /byok/blobs', 'GET /byok/blobs/:id/url'] as const;
+const CONTENT_ROUTES = ['PUT /byok/blobs/:id/content', 'GET /byok/blobs/:id/content'] as const;
+
+function declaration(...capabilities: CloudCapability[]): CapabilityDeclaration {
+  return { schema: 'byok-capabilities-v1', version: 1, capabilities };
+}
+
+/** A cloud built straight from the parts, so "no proxy supplied" is expressible. */
+function cloudWith(options: { readonly capabilities: CapabilityDeclaration; readonly withProxy: boolean }) {
+  const clock = createMutableClock();
+  const crypto = createWebCrypto();
+  const composition = createInMemoryCloudStores(clock, crypto);
+  return createByokCloud({
+    core: createInMemoryCoreStores({ clock }).stores,
+    cloud: composition.stores,
+    ...(options.withProxy ? { blobContentProxy: composition.blobContentProxy } : {}),
+    crypto,
+    tokenSigner: createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(32)), clock),
+    clock,
+    capabilities: options.capabilities,
+  });
+}
+
+describe('capability x composition route matrix', () => {
+  const rows: {
+    readonly name: string;
+    readonly capabilities: CapabilityDeclaration;
+    readonly withProxy: boolean;
+    readonly expected: readonly string[];
+  }[] = [
+    {
+      name: 'no blob capability, no proxy',
+      capabilities: declaration(),
+      withProxy: false,
+      expected: [],
+    },
+    {
+      name: 'no blob capability, proxy supplied — a proxy is not a declaration',
+      capabilities: declaration(),
+      withProxy: true,
+      expected: [],
+    },
+    {
+      name: 'grants only, no proxy — the object-storage composition',
+      capabilities: declaration(CLOUD_CAPABILITIES.blobsPresigned),
+      withProxy: false,
+      expected: GRANT_ROUTES,
+    },
+    {
+      name: 'grants only, proxy supplied but undeclared',
+      capabilities: declaration(CLOUD_CAPABILITIES.blobsPresigned),
+      withProxy: true,
+      expected: GRANT_ROUTES,
+    },
+    {
+      name: 'content proxy declared and supplied, no grants',
+      capabilities: declaration(CLOUD_CAPABILITIES.blobsContentProxy),
+      withProxy: true,
+      expected: CONTENT_ROUTES,
+    },
+    {
+      name: 'both declared and supplied — the in-memory composition',
+      capabilities: declaration(CLOUD_CAPABILITIES.blobsPresigned, CLOUD_CAPABILITIES.blobsContentProxy),
+      withProxy: true,
+      expected: [...GRANT_ROUTES, ...CONTENT_ROUTES],
+    },
+  ];
+
+  for (const row of rows) {
+    it(`mounts exactly the blob routes it can serve: ${row.name}`, () => {
+      const cloud = cloudWith(row);
+      const mounted = cloud.mountedRoutes.map(routeKey);
+
+      expect(mounted.sort()).toEqual([...ALWAYS_MOUNTED, ...row.expected].sort());
+      // Both directions, per row: the inventory and the router agree here too,
+      // not just for the fully-declared harness above.
+      expect(cloud.routes.map(routeKey).sort()).toEqual(mounted.sort());
+    });
+  }
+
+  it('refuses to construct a deployment that declares a byte proxy it was not given', () => {
+    // Fail closed at construction, both with and without the grant capability
+    // beside it: the fault is the declaration out-running the parts, and it
+    // does not become smaller when the deployment serves other routes well.
+    for (const capabilities of [
+      declaration(CLOUD_CAPABILITIES.blobsContentProxy),
+      declaration(CLOUD_CAPABILITIES.blobsPresigned, CLOUD_CAPABILITIES.blobsContentProxy),
+      fullCapabilityDeclaration(),
+    ]) {
+      expect(() => cloudWith({ capabilities, withProxy: false })).toThrowError(
+        expect.objectContaining({ code: 'capability_over_declared' }),
+      );
+    }
+  });
+
+  it('accepts a proxy that the declaration does not name, and mounts nothing for it', () => {
+    // The other direction, and deliberately not symmetric. Declaring more than
+    // the composition can serve tells a client something false; supplying more
+    // than the declaration names tells it less than the whole truth, which is
+    // what withholding a capability IS.
+    const cloud = cloudWith({ capabilities: declaration(CLOUD_CAPABILITIES.blobsPresigned), withProxy: true });
+    const mounted = new Set(cloud.mountedRoutes.map(routeKey));
+    expect(CONTENT_ROUTES.some((route) => mounted.has(route))).toBe(false);
+  });
+
+  it('serves every route in the reviewed inventory when everything is declared and supplied', () => {
+    // `fullCapabilityDeclaration()` is what a host gets by default, so it has
+    // to name `blobs.contentproxy` — otherwise the split would have silently
+    // dropped two routes from every existing deployment.
+    expect(fullCapabilityDeclaration().capabilities).toContain(CLOUD_CAPABILITIES.blobsContentProxy);
+    const cloud = cloudWith({ capabilities: fullCapabilityDeclaration(), withProxy: true });
+    expect(cloud.mountedRoutes.map(routeKey).sort()).toEqual(Object.keys(EXPECTED_INVENTORY).sort());
+  });
+
+  it('never produces a third state: the /content pair is all-or-nothing', () => {
+    for (const row of rows) {
+      const mounted = new Set(cloudWith(row).mountedRoutes.map(routeKey));
+      const present = CONTENT_ROUTES.filter((route) => mounted.has(route));
+      expect(present.length === 0 || present.length === CONTENT_ROUTES.length, row.name).toBe(true);
     }
   });
 });
