@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 20:01
+> **Related Plan**: plans/archive/plan-20260808-1940-s4b-a-finalize-authority.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260808-2001
+
 # Task Contract: s4b-a-finalize-authority
 
 > **Status**: Fulfilled

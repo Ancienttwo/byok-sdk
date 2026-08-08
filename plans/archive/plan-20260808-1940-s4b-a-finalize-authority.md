@@ -1,6 +1,6 @@
 # Plan: Sprint S4B-a: Finalize Authority Contract
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260808-1940
 > **Slug**: s4b-a-finalize-authority
 > **Artifact Level**: work-package

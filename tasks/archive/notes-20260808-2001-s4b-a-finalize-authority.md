@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 20:01
+> **Related Plan**: plans/archive/plan-20260808-1940-s4b-a-finalize-authority.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260808-2001
+
 # Implementation Notes: s4b-a-finalize-authority
 
 > **Status**: Active

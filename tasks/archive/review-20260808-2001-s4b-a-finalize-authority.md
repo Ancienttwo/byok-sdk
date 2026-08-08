@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-08 20:01
+> **Related Plan**: plans/archive/plan-20260808-1940-s4b-a-finalize-authority.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260808-2001
+
 # Task Review: s4b-a-finalize-authority
 
 > **Status**: Pending
@@ -53,13 +59,13 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewer**: Codex
 > **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:b65bae14ae2dbefac8821ea1afdc033a516af99540550c20f1bc61b22a33bfdc
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 6d1d69a1464dc70a70d4c925d98b998f93763e0c
-> **Verification Evidence SHA256**: sha256:35d1bb76ee22bcf29bb102a6575691dfbba167839bdd429640f1ecec6062039b
-> **Issued At**: 2026-08-08T11:53:19.434Z
+> **Reviewed Target Revision**: 69f5e0925755f8aee34e5bb55ef35f7ef3069a68
+> **Verification Evidence SHA256**: sha256:29ac193cf1f4e09a2ca1ce75fed8b653f53b29f43e0c3dab03bb21a27bbeca81
+> **Issued At**: 2026-08-08T12:01:05.646Z
 
-- Summary: ADR-024 is implemented faithfully: finalize observes only size and content type, both compositions deduplicate from the reservation declaration, the shared quota conformance and hard-env full suite pass, packages contain no observedContentHash, and frozen migrations plus cloud/protocol surfaces are unchanged.
+- Summary: No findings; finalize authority contract matches ADR-024 and preserves the frozen migration and runtime boundaries.
 - Findings: none
 
 ## Behavior Diff Notes
