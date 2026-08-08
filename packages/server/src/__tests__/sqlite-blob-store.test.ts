@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createByokServer } from '../index';
+import { BlobDeclarationConflictError } from '../blob-store';
 import { loadOrCreateSigningSecret, SCHEMA, SqliteBlobStore } from '../sqlite-blob-store';
 import { isSqliteAvailable, openSqliteDatabase } from '../sqlite-support';
 import { pairFakeDaemon, startServer, stopServer, testPairingClaims } from './test-support';
@@ -118,6 +119,34 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     storeB.close();
   });
 
+  it('persists an explicit idempotent blob id across restart and rejects declaration drift', async () => {
+    const dbPath = tempDbPath('byok-sqlite-blob-idempotency-');
+    const blobId = `blob_${'a'.repeat(64)}`;
+    const content = Buffer.from('restart between create and finalize');
+    const declaration = {
+      size: content.length,
+      contentType: 'text/plain',
+      contentHash: sha256Hex(content),
+    };
+
+    const storeA = new SqliteBlobStore({ path: dbPath });
+    expect((await storeA.createUpload(declaration, blobId)).blobId).toBe(blobId);
+    expect(await storeA.writeContent(blobId, content)).toEqual({ ok: true });
+    storeA.close();
+
+    const storeB = new SqliteBlobStore({ path: dbPath });
+    expect((await storeB.createUpload(declaration, blobId)).blobId).toBe(blobId);
+    await expect(
+      storeB.createUpload({ ...declaration, contentType: 'application/json' }, blobId),
+    ).rejects.toBeInstanceOf(BlobDeclarationConflictError);
+    expect(await storeB.exists(blobId)).toBe(true);
+    expect(await storeB.writeContent(blobId, content)).toEqual({
+      ok: false,
+      reason: 'blob already uploaded',
+    });
+    storeB.close();
+  });
+
   it('the HMAC signing secret itself persists across restart: a URL signed by instance A verifies via instance B', async () => {
     const dbPath = tempDbPath('byok-sqlite-blob-sig-');
     const content = Buffer.from('signed url restart check');
@@ -211,7 +240,7 @@ describe.skipIf(!sqliteReady)('createByokServer({ blobStore: new SqliteBlobStore
 
     const createRes = await fetch(`${startedA.baseUrl}/byok/blobs`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}`, 'idempotency-key': 'sqlite-restart' },
       body: JSON.stringify({ size: content.length, contentType: 'text/plain', contentHash }),
     });
     expect(createRes.status).toBe(200);
@@ -219,6 +248,12 @@ describe.skipIf(!sqliteReady)('createByokServer({ blobStore: new SqliteBlobStore
 
     const putRes = await fetch(`${startedA.baseUrl}${uploadUrl}`, { method: 'PUT', body: content });
     expect(putRes.status).toBe(204);
+
+    const finalizeRes = await fetch(`${startedA.baseUrl}/byok/blobs/${blobId}/finalize`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'idempotency-key': 'sqlite-restart' },
+    });
+    expect(finalizeRes.status).toBe(204);
 
     const urlRes = await fetch(`${startedA.baseUrl}/byok/blobs/${blobId}/url`, {
       headers: { authorization: `Bearer ${accessToken}` },

@@ -33,9 +33,16 @@ export interface ReadContentResult {
   contentType: string;
 }
 
+export class BlobDeclarationConflictError extends Error {
+  constructor(blobId: string) {
+    super(`Blob ${blobId} already binds a different declaration.`);
+    this.name = 'BlobDeclarationConflictError';
+  }
+}
+
 export interface BlobStore {
-  /** Declare a blob before upload; returns its id + a presigned PUT URL. */
-  createUpload(input: CreateUploadInput): Promise<{ blobId: string; uploadUrl: string }>;
+  /** Declare a blob before upload; an explicit id makes the declaration idempotent across host restart. */
+  createUpload(input: CreateUploadInput, blobId?: string): Promise<{ blobId: string; uploadUrl: string }>;
   /** A presigned GET URL for a blob that has finished uploading, or `undefined` if unknown/not yet uploaded. */
   getDownloadUrl(blobId: string): Promise<string | undefined>;
   /** Whether `blobId` is known *and* has finished uploading. */
@@ -81,9 +88,20 @@ export class LocalDiskBlobStore implements BlobStore {
     this.ready = mkdir(this.directory, { recursive: true }).then(() => undefined);
   }
 
-  async createUpload(input: CreateUploadInput): Promise<{ blobId: string; uploadUrl: string }> {
+  async createUpload(input: CreateUploadInput, requestedBlobId?: string): Promise<{ blobId: string; uploadUrl: string }> {
     await this.ready;
-    const blobId = `blob_${randomUUID()}`;
+    const blobId = requestedBlobId ?? `blob_${randomUUID()}`;
+    const existing = this.blobs.get(blobId);
+    if (existing !== undefined) {
+      if (
+        existing.meta.size !== input.size ||
+        existing.meta.contentType !== input.contentType ||
+        existing.meta.contentHash !== input.contentHash
+      ) {
+        throw new BlobDeclarationConflictError(blobId);
+      }
+      return { blobId, uploadUrl: this.signUrl(blobId, 'put') };
+    }
     this.blobs.set(blobId, { meta: input, uploaded: false });
     return { blobId, uploadUrl: this.signUrl(blobId, 'put') };
   }
@@ -111,6 +129,7 @@ export class LocalDiskBlobStore implements BlobStore {
     await this.ready;
     const record = this.blobs.get(blobId);
     if (!record) return { ok: false, reason: 'unknown blobId' };
+    if (record.uploaded) return { ok: false, reason: 'blob already uploaded' };
     if (data.length !== record.meta.size) {
       return { ok: false, reason: `size mismatch: declared ${record.meta.size}, received ${data.length}` };
     }

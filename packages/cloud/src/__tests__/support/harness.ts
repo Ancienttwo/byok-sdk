@@ -75,6 +75,16 @@ export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarn
       return { status: response.status, body: text.length > 0 ? JSON.parse(text) : undefined };
     },
     async pairDevice(tenant, productId = PRODUCT_ID) {
+      if ((await composition.core.quota.readEntitlement(tenant)) === undefined) {
+        await composition.core.quota.writeEntitlement(tenant, {
+          version: 1n,
+          hardLimitBytes: 1_000_000_000n,
+          maxObjectBytes: 100_000_000n,
+          maxInlineBytes: 1_000_000n,
+          mailboxLimitBytes: 100_000_000n,
+          retentionPolicyId: 'test',
+        });
+      }
       const keys = createDeviceKeys();
       const pairing = await composition.cloud.createPairingCode(tenant, { productId });
       const response = await request('/byok/pair', {

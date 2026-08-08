@@ -31,10 +31,14 @@ import {
   type MailboxPage,
   type MailboxReadQuery,
   type Principal,
+  type StorageFinalizeInput,
+  type StorageFinalizeResult,
+  type StorageReservation,
+  type StorageReservationInput,
   type TenantId,
 } from '@byok/core';
 import type {
-  BlobDeclaration,
+  BlobObservation,
   CloudStores,
   DeviceRecord,
   RequestReceipt,
@@ -76,8 +80,16 @@ export interface TenantBoundReceipts {
 }
 
 export interface TenantBoundBlobs {
-  createUpload(input: BlobDeclaration): Promise<{ readonly blobId: string; readonly uploadUrl: string }>;
+  createUpload(reservation: StorageReservation): Promise<{ readonly blobId: string; readonly uploadUrl: string }>;
+  observeUpload(blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
   getDownloadUrl(blobId: string): Promise<string | undefined>;
+}
+
+export interface TenantBoundQuota {
+  readReservation(reservationId: string): Promise<StorageReservation | undefined>;
+  reserve(input: StorageReservationInput): Promise<StorageReservation>;
+  finalizeReservation(input: StorageFinalizeInput): Promise<StorageFinalizeResult>;
+  abortReservation(reservationId: string): Promise<StorageReservation>;
 }
 
 export interface TenantBoundSequence {
@@ -97,6 +109,7 @@ export interface TenantStores {
   readonly dedup: TenantBoundDedup;
   readonly receipts: TenantBoundReceipts;
   readonly blobs: TenantBoundBlobs;
+  readonly quota: TenantBoundQuota;
   readonly sequence: TenantBoundSequence;
   readonly rateLimiter: TenantBoundRateLimiter;
 }
@@ -139,8 +152,15 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       get: (key) => cloud.receipts.get(tenant, key),
     },
     blobs: {
-      createUpload: (input) => cloud.blobs.createUpload(tenant, input),
+      createUpload: (reservation) => cloud.blobs.createUpload(tenant, reservation),
+      observeUpload: (blobId, reservation) => cloud.blobs.observeUpload(tenant, blobId, reservation),
       getDownloadUrl: (blobId) => cloud.blobs.getDownloadUrl(tenant, blobId),
+    },
+    quota: {
+      readReservation: (reservationId) => core.quota.readReservation(tenant, reservationId),
+      reserve: (input) => core.quota.reserve(tenant, input),
+      finalizeReservation: (input) => core.quota.finalizeReservation(tenant, input),
+      abortReservation: (reservationId) => core.quota.abortReservation(tenant, reservationId),
     },
     sequence: {
       next: (deviceId) => cloud.sequence.next(tenant, deviceId),

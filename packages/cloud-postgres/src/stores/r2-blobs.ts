@@ -20,13 +20,12 @@
  *    `Content-Type` are in the signed headers, so a body of the wrong size or
  *    the wrong type is refused by the object store itself — before a byte is
  *    stored, and without this process being in the path.
- * 3. `pending → committed` is driven by an unconditional `HEAD` re-verification
- *    on first download. Unconditional because §12.7.7 step 4 is about what the
- *    store OBSERVES versus what the client DECLARED, and signing the length
- *    proves what one client sent, not what is at the key now. Observed size or
- *    type disagreeing is `storage_integrity_mismatch`, and the row stays
- *    `pending` so the S4B GC worker can reclaim it rather than a truth record
- *    pointing at bytes nobody vouched for.
+ * 3. The explicit finalize route calls `observeUpload`, which performs an
+ *    unconditional `HEAD`. Unconditional because §12.7.7 step 4 is about what
+ *    the store OBSERVES versus what the client DECLARED, and signing the length
+ *    proves what one client sent, not what is at the key now. The quota
+ *    authority then commits manifest/reservation/usage in one Postgres
+ *    statement; download never performs that transition.
  * 4. `committed` is terminal for writes. Step 1 is re-runnable while a row is
  *    `pending` — that is what makes a retried upload idempotent — and refused
  *    once it is `committed`, because §12.7.4 lets truth reference a committed
@@ -57,9 +56,10 @@ import {
   type Clock,
   type ContentHash,
   type ObjectStore,
+  type StorageReservation,
   type TenantId,
 } from '@byok/core';
-import type { BlobDeclaration, CloudBlobStore } from '@byok/cloud';
+import type { BlobObservation, CloudBlobStore } from '@byok/cloud';
 import { AwsClient } from 'aws4fetch';
 
 /** 15 minutes, matching the in-memory reference's `BLOB_URL_TTL_MS`. */
@@ -234,12 +234,11 @@ export class R2CloudBlobStore implements CloudBlobStore {
    */
   async createUpload(
     tenant: TenantId,
-    input: BlobDeclaration,
+    reservation: StorageReservation,
   ): Promise<{ readonly blobId: string; readonly uploadUrl: string }> {
-    // Mint first: this is the gate a non-canonical digest dies at, and it is
-    // upstream of every path that could reach key construction.
-    const hash = contentHash(input.contentHash);
-    const byteSize = this.#declaredSize(hash, input.size);
+    this.#assertReservedObject(tenant, reservation);
+    const hash = contentHash(reservation.contentHash);
+    const byteSize = reservation.expectedBytes;
     // The same guard {@link #objectUrl} enforces, run before the manifest is
     // touched. Ordering only — the authority is still the one key-construction
     // point — but a tenant whose id can never address a key should not get to
@@ -249,17 +248,17 @@ export class R2CloudBlobStore implements CloudBlobStore {
     const entry = await this.#objects.putManifest(tenant, {
       hash,
       byteSize,
-      contentType: input.contentType,
+      contentType: reservation.contentType,
     });
     // `putManifest` returns an existing non-`deleted` row untouched, which is
     // what makes a retried upload idempotent. The flip side is that a SECOND
     // declaration of the same hash under a different size or type would
     // silently get a URL signed for the FIRST declaration's headers, so the
     // disagreement is refused here rather than discovered as a 403.
-    if (entry.byteSize !== byteSize || entry.contentType !== input.contentType) {
+    if (entry.byteSize !== byteSize || entry.contentType !== reservation.contentType) {
       throw new ByokCoreError(
         'storage_integrity_mismatch',
-        `Object ${hash} is already declared as ${String(entry.byteSize)} bytes of ${entry.contentType}; this upload declares ${String(byteSize)} bytes of ${input.contentType}.`,
+        `Object ${hash} is already declared as ${String(entry.byteSize)} bytes of ${entry.contentType}; this upload declares ${String(byteSize)} bytes of ${reservation.contentType}.`,
       );
     }
     // A committed object is immutable, so no write authorization exists to
@@ -285,7 +284,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
         method: 'PUT',
         headers: {
           'content-length': String(byteSize),
-          'content-type': input.contentType,
+          'content-type': reservation.contentType,
         },
       }),
       {
@@ -300,6 +299,31 @@ export class R2CloudBlobStore implements CloudBlobStore {
     return { blobId: hash, uploadUrl: signed.url };
   }
 
+  async observeUpload(
+    tenant: TenantId,
+    blobId: string,
+    reservation: StorageReservation,
+  ): Promise<BlobObservation | undefined> {
+    if (
+      !isContentHash(blobId) ||
+      reservation.tenantId !== tenant ||
+      reservation.kind !== 'object' ||
+      reservation.contentHash !== blobId
+    ) {
+      return undefined;
+    }
+    const entry = await this.#objects.get(tenant, reservation.contentHash);
+    if (entry === undefined || (entry.state !== 'pending' && entry.state !== 'committed')) {
+      return undefined;
+    }
+    const observed = await this.#head(tenant, reservation.contentHash);
+    if (!observed.present) return undefined;
+    return {
+      observedByteSize: observed.byteSize,
+      observedContentType: observed.contentType,
+    };
+  }
+
   /**
    * A GET for a committed object this tenant owns; `undefined` otherwise.
    *
@@ -308,10 +332,8 @@ export class R2CloudBlobStore implements CloudBlobStore {
    * tell them apart, which is what keeps `getDownloadUrl` from being an
    * existence oracle across tenants.
    *
-   * The one thing it does besides read: a `pending` row whose bytes are
-   * actually there is re-verified and committed here. First download is the
-   * first moment anyone needs the object to be real, and §12.7.7 puts the
-   * observed-versus-declared check exactly there.
+   * This is a pure committed-manifest gate. Observation and commit belong to
+   * the explicit finalize route; a download must never decide accounting.
    */
   async getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined> {
     // Not an error: a caller holding a junk id learns the same nothing a caller
@@ -323,17 +345,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
     const entry = await this.#objects.get(tenant, hash);
     if (entry === undefined) return undefined;
 
-    if (entry.state === 'pending') {
-      const observed = await this.#head(tenant, hash);
-      if (!observed.present) return undefined;
-      // Throws `storage_integrity_mismatch` when what is at the key disagrees
-      // with what was declared, and leaves the row `pending`.
-      await this.#objects.commit(tenant, {
-        hash,
-        observedByteSize: observed.byteSize,
-        observedContentType: observed.contentType,
-      });
-    } else if (entry.state !== 'committed') {
+    if (entry.state !== 'committed') {
       // `delete_pending` and `deleted` are tombstones. Handing out a GET for
       // one would be a URL whose object the GC worker is entitled to remove.
       return undefined;
@@ -469,14 +481,19 @@ export class R2CloudBlobStore implements CloudBlobStore {
     return this.#signingClock.now().toISOString().replaceAll(/[:-]|\.\d{3}/g, '');
   }
 
-  #declaredSize(hash: ContentHash, size: number): bigint {
-    if (!Number.isSafeInteger(size) || size < 0) {
-      throw new ByokCoreError(
-        'storage_integrity_mismatch',
-        `Object ${hash} was declared with a size of ${String(size)}, which is not a byte count.`,
-      );
+  #assertReservedObject(tenant: TenantId, reservation: StorageReservation): void {
+    if (
+      reservation.tenantId === tenant &&
+      reservation.kind === 'object' &&
+      reservation.state === 'reserved' &&
+      reservation.expectedBytes >= 0n
+    ) {
+      return;
     }
-    return BigInt(size);
+    throw new ByokCoreError(
+      'storage_integrity_mismatch',
+      'An upload grant requires a reserved object reservation owned by this tenant.',
+    );
   }
 }
 

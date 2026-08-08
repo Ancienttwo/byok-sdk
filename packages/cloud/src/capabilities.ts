@@ -23,7 +23,7 @@ export const CLOUD_CAPABILITIES = {
   eventsLongPoll: 'events.longpoll',
   /** `POST /byok/messages` batched send (§8.2). */
   messagesBatch: 'messages.batch',
-  /** The two bearer-authed `/byok/blobs` routes: mint an upload grant, mint a download URL (§7). */
+  /** The three bearer-authed blob routes: reserve/grant, explicit finalize, committed-only download (§7). */
   blobsPresigned: 'blobs.presigned',
   /**
    * The two presigned `/byok/blobs/:id/content` routes — cloud carrying the

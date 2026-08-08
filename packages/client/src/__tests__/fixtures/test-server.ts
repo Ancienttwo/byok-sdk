@@ -56,6 +56,7 @@ export class TestServer {
   private readonly devicesById = new Map<string, DeviceAuthState>();
   private readonly pendingNonces = new Map<string, string>(); // nonce -> deviceId
   private readonly blobs = new Map<string, StoredBlob>();
+  private readonly blobReservations = new Map<string, string>();
   /**
    * M4 Phase 4 (version-negotiation drill): ONE ordered queue for the next
    * long-poll response's `events` array — typed pushes (`pushLongPollEvent`)
@@ -76,6 +77,7 @@ export class TestServer {
   private tokenTtlMs = 60 * 60 * 1000;
   private rejectWs = false;
   private failBlobUploads = false;
+  private dropNextBlobFinalizeResponse = false;
   /** Finding R2: capabilities advertised in every subsequent `conn.ack` — see `setAckCapabilities`. */
   private ackCapabilities: string[] = [];
 
@@ -130,6 +132,11 @@ export class TestServer {
   /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
   setFailBlobUploads(fail: boolean): void {
     this.failBlobUploads = fail;
+  }
+
+  /** Commit finalize, then drop the first response to exercise same-key replay. */
+  dropNextFinalizeResponse(): void {
+    this.dropNextBlobFinalizeResponse = true;
   }
 
   /** Mark a device revoked: its next `/byok/challenge`, `/byok/token`, or WS connect gets a 401 (protocol §6.3). */
@@ -306,6 +313,9 @@ export class TestServer {
       if (method === 'POST' && url.pathname === '/byok/challenge') return void (await this.handleChallenge(req, res));
       if (method === 'POST' && url.pathname === '/byok/token') return void (await this.handleToken(req, res));
       if (method === 'POST' && url.pathname === '/byok/blobs') return void (await this.handleCreateBlob(req, res));
+      if (method === 'POST' && /^\/byok\/blobs\/[^/]+\/finalize$/.test(url.pathname)) {
+        return void this.handleFinalizeBlob(req, res, url.pathname.split('/')[3] ?? '');
+      }
       if (method === 'GET' && /^\/byok\/blobs\/[^/]+\/url$/.test(url.pathname)) {
         return void this.handleBlobUrl(req, res, url.pathname.split('/')[3] ?? '');
       }
@@ -403,10 +413,24 @@ export class TestServer {
 
   private async handleCreateBlob(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.requireBearer(req, res)) return;
+    const reservationId = req.headers['idempotency-key'];
+    if (typeof reservationId !== 'string' || reservationId.length === 0) {
+      respondJson(res, 400, { error: 'Idempotency-Key header is required' });
+      return;
+    }
     const body = (await readJsonBody(req)) as { size: number; contentType: string; contentHash: string };
+    const existingBlobId = this.blobReservations.get(reservationId);
+    if (existingBlobId !== undefined) {
+      respondJson(res, 200, {
+        blobId: existingBlobId,
+        uploadUrl: `/_test/blob-upload/${existingBlobId}`,
+      });
+      return;
+    }
     this.blobSeq += 1;
     const blobId = `blob-${this.blobSeq}`;
     this.blobs.set(blobId, { blobId, contentType: body.contentType, contentHash: body.contentHash, size: body.size });
+    this.blobReservations.set(reservationId, blobId);
     // Origin-relative, deliberately NOT `${this.url}/...` — matches the real
     // reference `LocalDiskBlobStore` (packages/server/src/blob-store.ts),
     // which mints relative content URLs. An M1-4 e2e run against a real
@@ -417,6 +441,25 @@ export class TestServer {
     // the blob just never actually uploaded. Kept absolute here would mask
     // that class of bug again.
     respondJson(res, 200, { blobId, uploadUrl: `/_test/blob-upload/${blobId}` });
+  }
+
+  private handleFinalizeBlob(req: IncomingMessage, res: ServerResponse, blobId: string): void {
+    if (!this.requireBearer(req, res)) return;
+    const reservationId = req.headers['idempotency-key'];
+    if (
+      typeof reservationId !== 'string' ||
+      this.blobReservations.get(reservationId) !== blobId ||
+      this.blobs.get(blobId)?.bytes === undefined
+    ) {
+      respondJson(res, 422, { error: 'storage_integrity_mismatch' });
+      return;
+    }
+    if (this.dropNextBlobFinalizeResponse) {
+      this.dropNextBlobFinalizeResponse = false;
+      req.socket.destroy();
+      return;
+    }
+    res.writeHead(204).end();
   }
 
   private handleBlobUrl(req: IncomingMessage, res: ServerResponse, blobId: string): void {

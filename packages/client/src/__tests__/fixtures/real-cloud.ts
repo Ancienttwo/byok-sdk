@@ -78,9 +78,17 @@ function closeServer(httpServer: HttpServer): Promise<void> {
 
 export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealCloudHandle> {
   const tenant = tenantId(CLOUD_TEST_TENANT);
-  const { cloud } = createInMemoryByokCloud({
+  const { cloud, core } = createInMemoryByokCloud({
     longPollHoldMs: opts.longPollHoldMs ?? 200,
     longPollIntervalMs: opts.longPollIntervalMs ?? 20,
+  });
+  await core.quota.writeEntitlement(tenant, {
+    version: 1n,
+    hardLimitBytes: 1_000_000_000n,
+    maxObjectBytes: 100_000_000n,
+    maxInlineBytes: 1_000_000n,
+    mailboxLimitBytes: 100_000_000n,
+    retentionPolicyId: 'test',
   });
 
   return new Promise((resolve) => {

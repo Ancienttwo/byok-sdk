@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
   ChallengeRequestSchema,
@@ -14,7 +15,7 @@ import {
   type TokenResponse,
 } from '@byok/protocol';
 import { authenticateBearer, mintAccessToken, verifyNonceSignature, type AuthDeps, type NonceStore } from './auth';
-import type { BlobStore } from './blob-store';
+import { BlobDeclarationConflictError, type BlobStore } from './blob-store';
 import type { ConnectionHub } from './hub';
 import { generateDeviceId } from './ids';
 import { PairingCodeInvalidError, type PairingCodeClaims, type PairingManager } from './pairing';
@@ -191,9 +192,40 @@ export function buildHonoApp(deps: HttpDeps): Hono {
       return c.json({ error: `blob exceeds max size of ${deps.maxBlobSizeBytes} bytes` }, 413);
     }
 
-    const { blobId, uploadUrl } = await deps.blobStore.createUpload(parsed.data);
-    const response: CreateBlobResponse = { blobId, uploadUrl };
-    return c.json(response, 200);
+    const reservationId = c.req.header('idempotency-key');
+    if (!reservationId || reservationId.length > 200) {
+      return c.json({ error: 'Idempotency-Key header is required' }, 400);
+    }
+
+    const blobId = reservationBlobId(principal.tenantId, reservationId);
+    try {
+      const created = await deps.blobStore.createUpload(parsed.data, blobId);
+      const response: CreateBlobResponse = created;
+      return c.json(response, 200);
+    } catch (error) {
+      if (error instanceof BlobDeclarationConflictError) {
+        return c.json({ error: 'storage_integrity_mismatch' }, 422);
+      }
+      throw error;
+    }
+  });
+
+  app.post('/byok/blobs/:id/finalize', async (c) => {
+    const principal = await authenticateBearer(c.req.header('authorization'), deps);
+    if (!principal) return c.json({ error: 'unauthorized' }, 401);
+
+    const reservationId = c.req.header('idempotency-key');
+    if (!reservationId || reservationId.length > 200) {
+      return c.json({ error: 'Idempotency-Key header is required' }, 400);
+    }
+    const blobId = c.req.param('id');
+    if (reservationBlobId(principal.tenantId, reservationId) !== blobId) {
+      return c.json({ error: 'storage_integrity_mismatch' }, 422);
+    }
+    if (!(await deps.blobStore.exists(blobId))) {
+      return c.json({ error: 'storage_reservation_not_found' }, 404);
+    }
+    return c.body(null, 204);
   });
 
   app.get('/byok/blobs/:id/url', async (c) => {
@@ -327,6 +359,10 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // directly rather than proxying through any bearer-authed SDK route.
 
   return app;
+}
+
+function reservationBlobId(tenantId: string, reservationId: string): string {
+  return `blob_${createHash('sha256').update(`${tenantId}\u0000${reservationId}`).digest('hex')}`;
 }
 
 function signedUrlParams(sig: string | undefined, expRaw: string | undefined): { sig?: string; exp?: number } {

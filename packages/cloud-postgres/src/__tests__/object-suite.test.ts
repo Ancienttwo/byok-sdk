@@ -27,6 +27,7 @@ import {
   tenantObjectKey,
   type Clock,
   type ContentHash,
+  type StorageReservation,
   type TenantId,
 } from '@byok/core';
 import type { BlobDeclaration } from '@byok/cloud';
@@ -119,6 +120,39 @@ async function content(text: string | Uint8Array, contentType = 'text/plain'): P
   return { bytes, hash, declaration: { size: bytes.length, contentType, contentHash: hash } };
 }
 
+let reservationSequence = 0;
+
+function reservationFor(
+  tenant: TenantId,
+  item: Content,
+  declaration: BlobDeclaration = item.declaration,
+): StorageReservation {
+  reservationSequence += 1;
+  return {
+    tenantId: tenant,
+    reservationId: `object-suite-${reservationSequence}`,
+    state: 'reserved',
+    kind: 'object',
+    expectedBytes: BigInt(declaration.size),
+    contentHash: declaration.contentHash as ContentHash,
+    contentType: declaration.contentType,
+    createdAt: '2026-08-08T00:00:00.000Z',
+    expiresAt: '2026-08-08T01:00:00.000Z',
+  };
+}
+
+async function finalizeObserved(
+  blobs: R2CloudBlobStore,
+  objects: PostgresObjectStore,
+  tenant: TenantId,
+  blobId: string,
+  reservation: StorageReservation,
+): Promise<void> {
+  const observed = await blobs.observeUpload(tenant, blobId, reservation);
+  expect(observed).toBeDefined();
+  await objects.commit(tenant, { hash: reservation.contentHash, ...observed! });
+}
+
 /** Redeem a grant exactly as a device would: the signed headers must be sent verbatim. */
 function putViaGrant(uploadUrl: string, item: Content): Promise<Response> {
   return globalThis.fetch(uploadUrl, {
@@ -180,8 +214,9 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     await withObjects(async ({ blobs, objects, storage }) => {
       const item = await content('duplicate me');
 
-      const first = await blobs.createUpload(TENANT_A, item.declaration);
-      const second = await blobs.createUpload(TENANT_A, item.declaration);
+      const reservation = reservationFor(TENANT_A, item);
+      const first = await blobs.createUpload(TENANT_A, reservation);
+      const second = await blobs.createUpload(TENANT_A, reservation);
 
       // Same object, not a second one: the id IS the content hash, so a client
       // that re-declares the same bytes cannot create a parallel manifest row.
@@ -193,6 +228,7 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
       expect(await objects.list(TENANT_A, {})).toHaveLength(1);
 
       expect((await putViaGrant(first.uploadUrl, item)).status).toBe(200);
+      await finalizeObserved(blobs, objects, TENANT_A, first.blobId, reservation);
       expect(await blobs.getDownloadUrl(TENANT_A, first.blobId)).toBeDefined();
       expect((await objects.get(TENANT_A, item.hash))?.state).toBe('committed');
 
@@ -200,7 +236,10 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
       // would move — `putManifest` leaves a committed row exactly where it is —
       // but because the grant itself would be a fresh licence to write over
       // bytes a truth record is entitled to reference.
-      await expectCoreError(blobs.createUpload(TENANT_A, item.declaration), 'object_state_invalid');
+      await expectCoreError(
+        blobs.createUpload(TENANT_A, reservationFor(TENANT_A, item)),
+        'object_state_invalid',
+      );
       expect((await objects.get(TENANT_A, item.hash))?.state).toBe('committed');
       expect(await objects.list(TENANT_A, {})).toHaveLength(1);
       // Refusing to re-authorize a WRITE is not withdrawing the object.
@@ -216,8 +255,10 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     // meaning "the bytes here hash to <hex>" — §12.7.4's whole premise.
     await withObjects(async ({ blobs, objects, storage }) => {
       const item = await content('the vouched bytes');
-      const grant = await blobs.createUpload(TENANT_A, item.declaration);
+      const reservation = reservationFor(TENANT_A, item);
+      const grant = await blobs.createUpload(TENANT_A, reservation);
       expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
+      await finalizeObserved(blobs, objects, TENANT_A, grant.blobId, reservation);
       expect(await blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeDefined();
       expect((await objects.get(TENANT_A, item.hash))?.state).toBe('committed');
 
@@ -227,7 +268,10 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
       expect(impostor.declaration.contentType).toBe(item.declaration.contentType);
       expect(impostor.hash).not.toBe(item.hash);
 
-      await expectCoreError(blobs.createUpload(TENANT_A, item.declaration), 'object_state_invalid');
+      await expectCoreError(
+        blobs.createUpload(TENANT_A, reservationFor(TENANT_A, item)),
+        'object_state_invalid',
+      );
 
       // Read back out of band: the claim is about the object store's contents,
       // not about the row this process wrote.
@@ -246,29 +290,57 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
 
       // (a) A digest that is not a canonical content address never becomes one.
       await expectCoreError(
-        blobs.createUpload(TENANT_A, { ...item.declaration, contentHash: 'sha256:not-hex' }),
+        blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, item, {
+            ...item.declaration,
+            contentHash: 'sha256:not-hex',
+          }),
+        ),
         'content_hash_invalid',
       );
       await expectCoreError(
-        blobs.createUpload(TENANT_A, { ...item.declaration, contentHash: item.hash.toUpperCase() }),
+        blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, item, {
+            ...item.declaration,
+            contentHash: item.hash.toUpperCase(),
+          }),
+        ),
         'content_hash_invalid',
       );
 
       // (b) A size that is not a byte count.
       await expectCoreError(
-        blobs.createUpload(TENANT_A, { ...item.declaration, size: -1 }),
+        blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, item, { ...item.declaration, size: -1 }),
+        ),
         'storage_integrity_mismatch',
       );
 
       // (c) The same hash re-declared under a different shape. Refused here,
       // rather than silently handed a URL signed for the FIRST declaration.
-      await blobs.createUpload(TENANT_A, item.declaration);
+      const reservation = reservationFor(TENANT_A, item);
+      await blobs.createUpload(TENANT_A, reservation);
       await expectCoreError(
-        blobs.createUpload(TENANT_A, { ...item.declaration, size: item.declaration.size + 1 }),
+        blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, item, {
+            ...item.declaration,
+            size: item.declaration.size + 1,
+          }),
+        ),
         'storage_integrity_mismatch',
       );
       await expectCoreError(
-        blobs.createUpload(TENANT_A, { ...item.declaration, contentType: 'application/json' }),
+        blobs.createUpload(
+          TENANT_A,
+          reservationFor(TENANT_A, item, {
+            ...item.declaration,
+            contentType: 'application/json',
+          }),
+        ),
         'storage_integrity_mismatch',
       );
 
@@ -279,8 +351,10 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
       const impostor = await content('a different length entirely', 'application/json');
       await plantBytes(storage, TENANT_A, item.hash, impostor);
 
+      const observed = await blobs.observeUpload(TENANT_A, item.hash, reservation);
+      expect(observed).toBeDefined();
       await expectCoreError(
-        blobs.getDownloadUrl(TENANT_A, item.hash),
+        objects.commit(TENANT_A, { hash: item.hash, ...observed! }),
         'storage_integrity_mismatch',
       );
       // Still `pending`, so the GC worker can reclaim it. A `committed` row
@@ -292,7 +366,8 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
   it('lets the object store refuse a body that is not the declared length or type', async () => {
     await withObjects(async ({ blobs }) => {
       const item = await content('exactly this');
-      const grant = await blobs.createUpload(TENANT_A, item.declaration);
+      const reservation = reservationFor(TENANT_A, item);
+      const grant = await blobs.createUpload(TENANT_A, reservation);
 
       // Both are in the signed headers, so MinIO — not this process — is what
       // rejects them, before a byte is stored.
@@ -312,7 +387,7 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
   it('binds a presign to one tenant and one key, adjudicated by MinIO', async () => {
     await withObjects(async ({ blobs, storage }) => {
       const item = await content('bound bytes');
-      const grant = await blobs.createUpload(TENANT_A, item.declaration);
+      const grant = await blobs.createUpload(TENANT_A, reservationFor(TENANT_A, item));
 
       // Re-point the same signed URL at another tenant's prefix. The path is
       // part of the canonical request, so the signature no longer covers it.
@@ -348,7 +423,7 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     await withObjects(
       async ({ blobs }) => {
         const item = await content('too late');
-        const grant = await blobs.createUpload(TENANT_A, item.declaration);
+        const grant = await blobs.createUpload(TENANT_A, reservationFor(TENANT_A, item));
 
         const response = await putViaGrant(grant.uploadUrl, item);
         // Expiry is `X-Amz-Date + X-Amz-Expires`, evaluated by MinIO against
@@ -366,7 +441,7 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     await withObjects(
       async ({ blobs }) => {
         const item = await content('in time');
-        const grant = await blobs.createUpload(TENANT_A, item.declaration);
+        const grant = await blobs.createUpload(TENANT_A, reservationFor(TENANT_A, item));
         expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
       },
       { signingClock: wallClock, presignTtlSeconds: 60 },
@@ -377,7 +452,8 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
   it('requires the object to exist before a truth record may reference it', async () => {
     await withObjects(async ({ blobs, objects }) => {
       const item = await content('referenced later');
-      const grant = await blobs.createUpload(TENANT_A, item.declaration);
+      const reservation = reservationFor(TENANT_A, item);
+      const grant = await blobs.createUpload(TENANT_A, reservation);
 
       // Declared, not uploaded: the manifest is `pending` and a reference is
       // refused transactionally, by the state machine and not by a probe.
@@ -387,7 +463,8 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
       );
 
       expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
-      // First download is what drives `pending -> committed`.
+      expect(await blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeUndefined();
+      await finalizeObserved(blobs, objects, TENANT_A, grant.blobId, reservation);
       expect(await blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeDefined();
 
       const referenced = await objects.addReference(TENANT_A, {
@@ -407,11 +484,13 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     const recorder = recordCalls();
 
     await withObjects(
-      async ({ blobs, storage }) => {
+      async ({ blobs, objects, storage }) => {
         const item = await content(large, 'application/octet-stream');
-        const grant = await blobs.createUpload(TENANT_A, item.declaration);
+        const reservation = reservationFor(TENANT_A, item);
+        const grant = await blobs.createUpload(TENANT_A, reservation);
         expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
 
+        await finalizeObserved(blobs, objects, TENANT_A, grant.blobId, reservation);
         const downloadUrl = await blobs.getDownloadUrl(TENANT_A, grant.blobId);
         expect(downloadUrl).toBeDefined();
 
@@ -455,7 +534,10 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
           // On the way in: a declaration carrying one dies at the mint, which
           // is upstream of every path to key construction.
           await expectCoreError(
-            blobs.createUpload(TENANT_A, { ...item.declaration, contentHash: candidate }),
+            blobs.createUpload(
+              TENANT_A,
+              reservationFor(TENANT_A, item, { ...item.declaration, contentHash: candidate }),
+            ),
             'content_hash_invalid',
           );
           // On the way out: the same value is simply not a blob anyone has.
@@ -501,7 +583,10 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
         ];
 
         for (const tenant of unsafe) {
-          await expectAdapterError(blobs.createUpload(tenant, item.declaration), 'storage_tenant_key_unsafe');
+          await expectAdapterError(
+            blobs.createUpload(tenant, reservationFor(tenant, item)),
+            'storage_tenant_key_unsafe',
+          );
           // Refused BEFORE the manifest: an id that can never address a key
           // does not get to reserve a row on the way to being told so.
           expect(await objects.get(tenant, item.hash)).toBeUndefined();
@@ -516,8 +601,10 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
 
         // The control: the tenant the alias was aiming at is unaffected, so
         // this passes by refusing the alias rather than by refusing everything.
-        const grant = await blobs.createUpload(TENANT_B, item.declaration);
+        const reservation = reservationFor(TENANT_B, item);
+        const grant = await blobs.createUpload(TENANT_B, reservation);
         expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
+        await finalizeObserved(blobs, objects, TENANT_B, grant.blobId, reservation);
         expect(await blobs.getDownloadUrl(TENANT_B, grant.blobId)).toBeDefined();
       },
       { fetch: recorder.fetch },
@@ -529,13 +616,15 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     await withObjects(async ({ blobs, objects, storage }) => {
       const item = await content('shared bytes');
 
-      const forA = await blobs.createUpload(TENANT_A, item.declaration);
+      const reservationA = reservationFor(TENANT_A, item);
+      const forA = await blobs.createUpload(TENANT_A, reservationA);
       expect((await putViaGrant(forA.uploadUrl, item)).status).toBe(200);
+      await finalizeObserved(blobs, objects, TENANT_A, forA.blobId, reservationA);
       expect(await blobs.getDownloadUrl(TENANT_A, forA.blobId)).toBeDefined();
 
       // B declares the identical content. No dedupe: a separate manifest row
       // and a separate key, because the key embeds the tenant.
-      const forB = await blobs.createUpload(TENANT_B, item.declaration);
+      const forB = await blobs.createUpload(TENANT_B, reservationFor(TENANT_B, item));
       expect(forB.blobId).toBe(forA.blobId);
       expect(forB.uploadUrl).not.toBe(forA.uploadUrl);
       expect((await objects.get(TENANT_B, item.hash))?.state).toBe('pending');
@@ -571,11 +660,14 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     await withObjects(
       async ({ blobs, objects }) => {
         const item = await content('flaky path');
-        const grant = await blobs.createUpload(TENANT_A, item.declaration);
+        const reservation = reservationFor(TENANT_A, item);
+        const grant = await blobs.createUpload(TENANT_A, reservation);
         expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
 
-        const url = await blobs.getDownloadUrl(TENANT_A, grant.blobId);
-        expect(url).toBeDefined();
+        const observed = await blobs.observeUpload(TENANT_A, grant.blobId, reservation);
+        expect(observed).toBeDefined();
+        await objects.commit(TENANT_A, { hash: item.hash, ...observed! });
+        expect(await blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeDefined();
 
         // Three attempts, in the scripted order, all HEAD. Retrying is only
         // safe because HEAD is idempotent — nothing that writes is retried.
@@ -608,10 +700,11 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     await withObjects(
       async ({ blobs, objects }) => {
         const item = await content('refused after retrying');
-        const grant = await blobs.createUpload(TENANT_A, item.declaration);
+        const reservation = reservationFor(TENANT_A, item);
+        const grant = await blobs.createUpload(TENANT_A, reservation);
         expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
 
-        const failure = await blobs.getDownloadUrl(TENANT_A, grant.blobId).then(
+        const failure = await blobs.observeUpload(TENANT_A, grant.blobId, reservation).then(
           () => undefined,
           (caught: unknown) => caught,
         );
@@ -632,10 +725,11 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     await withObjects(
       async ({ blobs, objects }) => {
         const item = await content('never reachable');
-        const grant = await blobs.createUpload(TENANT_A, item.declaration);
+        const reservation = reservationFor(TENANT_A, item);
+        const grant = await blobs.createUpload(TENANT_A, reservation);
         expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
 
-        const failure = await blobs.getDownloadUrl(TENANT_A, grant.blobId).then(
+        const failure = await blobs.observeUpload(TENANT_A, grant.blobId, reservation).then(
           () => undefined,
           (caught: unknown) => caught,
         );

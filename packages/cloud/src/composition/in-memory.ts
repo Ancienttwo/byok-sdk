@@ -59,7 +59,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
   const clock = options.clock ?? systemClock();
   const crypto = options.crypto ?? createWebCrypto();
   const core = createInMemoryCoreStores({ clock }).stores;
-  const { stores, blobContentProxy } = createInMemoryCloudStores(clock, crypto);
+  const { stores, blobContentProxy } = createInMemoryCloudStores(clock, crypto, core.objects);
   const tokenSigner =
     options.tokenSigner ??
     createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(TOKEN_SECRET_BYTES)), clock);

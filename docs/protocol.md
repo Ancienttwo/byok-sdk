@@ -740,18 +740,39 @@ indistinguishable from revoking one that does not exist at all.
 
 ## 7. Blob flows
 
-`BlobRef` (`src/blob.ts`) is unchanged. These are the two HTTP calls that
-produce the presigned URLs a `BlobRef` points at; both require a valid bearer
-access token.
+`BlobRef` (`src/blob.ts`) is unchanged. These are the three bearer-authenticated
+metadata calls around the presigned byte transfer. `Idempotency-Key` is the
+reservation/request id: create and finalize for one upload use the exact same
+non-empty value. It is a load-bearing header, not a request-body field, so the
+frozen `CreateBlobRequest`/`CreateBlobResponse` bodies remain unchanged.
 
 ```
 POST /byok/blobs
+  Header: Idempotency-Key: <reservation-id>
   Request  (CreateBlobRequestSchema):    { size, contentType, contentHash }
   Response (CreateBlobResponseSchema):   { blobId, uploadUrl }
+
+POST /byok/blobs/:id/finalize
+  Header: Idempotency-Key: <same reservation-id>
+  Response: 204 No Content
 
 GET /byok/blobs/:id/url
   Response (BlobDownloadUrlResponseSchema): { downloadUrl }
 ```
+
+The lifecycle is `POST create → presigned PUT → POST finalize → GET url`.
+Create reserves quota before minting the PUT. Finalize binds tenant, blob
+resource, and reservation; hosted object storage observes only existence,
+size, and content type, then commits manifest/reservation/usage atomically.
+Before finalize, `GET .../url` returns 404 even when bytes already landed.
+Replaying finalize after its response was lost returns the same 204 without
+double-accounting. Reusing one key for a different declaration or blob is a
+422 `storage_integrity_mismatch`; an unknown key is 404. Hosted create also
+requires the tenant's host-issued storage entitlement to exist; otherwise it
+returns 409 `storage_entitlement_missing` before minting any upload grant.
+Because cloud does not rehash R2 bytes (ADR-024), a consumer claiming download
+integrity must hash the downloaded bytes itself; `BlobClient` compares both
+SHA-256 and byte length against `BlobRef` before returning instruction text.
 
 ### 7.1 Content transfer — signed-URL-only, not bearer (resolves a carried-forward pin)
 
@@ -766,8 +787,8 @@ GET /byok/blobs/:id/content?sig=...&exp=...   — fetch the blob's bytes
 **These two `/content` routes are authenticated ENTIRELY differently from
 every other route in this document: signed-URL-only (an HMAC `sig` +
 expiry `exp` query pair), never a bearer token.** The bearer
-`Authorization` header is what gates the two metadata calls above (`POST
-/byok/blobs`, `GET /byok/blobs/:id/url`) — the URLs those calls hand back
+`Authorization` header is what gates the three metadata calls above (`POST
+/byok/blobs`, `POST /byok/blobs/:id/finalize`, `GET /byok/blobs/:id/url`) — the URLs those calls hand back
 already encode their own short-lived authorization, precisely so the content
 itself can be `PUT`/`GET` directly (e.g. from a browser, or any HTTP client
 that never sees the device's JWT) without needing to attach or even possess

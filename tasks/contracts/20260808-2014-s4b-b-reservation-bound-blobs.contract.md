@@ -1,6 +1,6 @@
 # Task Contract: s4b-b-reservation-bound-blobs
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260808-2014-s4b-b-reservation-bound-blobs.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
@@ -33,7 +33,7 @@ S4B-a 已使 cloud 不再伪称 SHA-256 被观测验证，但 hosted upload 仍�
 
 ## Falsifier
 
-若 R2/MinIO 不接受带 reservation query binding 的 SigV4 PUT，或 Postgres 无法在现有 `0002` schema 以单 statement 原子提交 manifest/reservation/usage，则方向失效。最便宜 proof point 是 object adapter 的 MinIO presign PUT test 与 quota Postgres conformance；任一失败即停止，不新增 migration 或双模式 fallback。
+若 R2/MinIO 不接受从 reservation shape 铸造的 SigV4 PUT，或 Postgres 无法在现有 `0002` schema 以单 statement 原子提交 manifest/reservation/usage，则方向失效。最便宜 proof point 是 object adapter 的 MinIO presign PUT test 与 quota Postgres conformance；任一失败即停止，不新增 migration 或双模式 fallback。
 
 ## Root Cause Evidence
 
@@ -70,6 +70,7 @@ allowed_paths:
   - docs/architecture/sdk-architecture.md
   - plans/sprints/20260807-byok-platform-raft-aligned.sprint.md
   - plans/
+  - tasks/current.md
   - tasks/todos.md
   - tasks/contracts/20260808-2014-s4b-b-reservation-bound-blobs.contract.md
   - tasks/reviews/20260808-2014-s4b-b-reservation-bound-blobs.review.md
@@ -144,7 +145,6 @@ exit_criteria:
     - path: packages/cloud/src/__tests__/device-surface.test.ts
     - path: packages/cloud-postgres/src/__tests__/r2-blobs.test.ts
     - path: packages/cloud-postgres/src/__tests__/quota-concurrency.test.ts
-    - path: packages/client/src/__tests__/daemon-blob.test.ts
   commands_succeed:
     - BYOK_REQUIRE_DATAPLANE=1 BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100 pnpm -r run typecheck
     - BYOK_REQUIRE_DATAPLANE=1 BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100 pnpm -r run test

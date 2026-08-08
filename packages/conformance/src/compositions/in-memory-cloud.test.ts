@@ -6,14 +6,19 @@
  * — if either ever needs more than that, the port contract is what needs
  * fixing.
  */
-import { createMutableClock } from '@byok/core';
+import { createInMemoryCoreStores, createMutableClock } from '@byok/core';
 import { createInMemoryCloudStores, createWebCrypto } from '@byok/cloud';
 import { runCloudConformance, type CloudCompositionFactory } from '../cloud/harness';
 
 const inMemoryFactory: CloudCompositionFactory = {
   create() {
     const clock = createMutableClock();
-    const { stores, blobContentProxy } = createInMemoryCloudStores(clock, createWebCrypto());
+    const core = createInMemoryCoreStores({ clock }).stores;
+    const { stores, blobContentProxy } = createInMemoryCloudStores(
+      clock,
+      createWebCrypto(),
+      core.objects,
+    );
     return {
       // Exactly the certified ports, in `CLOUD_CONFORMANCE_PORTS` order: the
       // suite asserts the key set, so a composition cannot quietly hand over
@@ -38,6 +43,12 @@ const inMemoryFactory: CloudCompositionFactory = {
       landBlobBytes: async ({ grant, bytes }) => {
         const result = await blobContentProxy.writeContent(grant.blobId, bytes);
         if (!result.ok) throw new Error(`in-memory write refused the bytes: ${result.reason}`);
+      },
+      commitBlob: async (tenant, reservation, observation) => {
+        await core.objects.commit(tenant, {
+          hash: reservation.contentHash,
+          ...observation,
+        });
       },
     };
   },

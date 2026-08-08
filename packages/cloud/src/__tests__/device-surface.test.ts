@@ -138,7 +138,11 @@ describe('blob flows (§7)', () => {
 
     const created = await harness.request('/byok/blobs', {
       method: 'POST',
-      headers: { ...device.authorization, 'content-type': 'application/json' },
+      headers: {
+        ...device.authorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'blob-roundtrip',
+      },
       body: JSON.stringify({ size: bytes.length, contentType: 'text/plain', contentHash: sha256(bytes) }),
     });
     expect(created.status).toBe(200);
@@ -147,6 +151,21 @@ describe('blob flows (§7)', () => {
 
     const uploaded = await harness.request(uploadUrl, { method: 'PUT', body: bytes });
     expect(uploaded.status).toBe(204);
+
+    expect(
+      (await harness.request(`/byok/blobs/${blobId}/url`, { headers: device.authorization }))
+        .status,
+    ).toBe(404);
+    const finalized = await harness.request(`/byok/blobs/${blobId}/finalize`, {
+      method: 'POST',
+      headers: { ...device.authorization, 'idempotency-key': 'blob-roundtrip' },
+    });
+    expect(finalized.status).toBe(204);
+    const replayed = await harness.request(`/byok/blobs/${blobId}/finalize`, {
+      method: 'POST',
+      headers: { ...device.authorization, 'idempotency-key': 'blob-roundtrip' },
+    });
+    expect(replayed.status).toBe(204);
 
     const urlResponse = await harness.request(`/byok/blobs/${blobId}/url`, { headers: device.authorization });
     expect(urlResponse.status).toBe(200);
@@ -165,7 +184,11 @@ describe('blob flows (§7)', () => {
 
     const created = await harness.request('/byok/blobs', {
       method: 'POST',
-      headers: { ...device.authorization, 'content-type': 'application/json' },
+      headers: {
+        ...device.authorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'blob-signature',
+      },
       body: JSON.stringify({ size: bytes.length, contentType: 'text/plain', contentHash: sha256(bytes) }),
     });
     const { uploadUrl } = (await created.json()) as CreateBlobResponse;
@@ -188,7 +211,11 @@ describe('blob flows (§7)', () => {
 
     const created = await harness.request('/byok/blobs', {
       method: 'POST',
-      headers: { ...device.authorization, 'content-type': 'application/json' },
+      headers: {
+        ...device.authorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'blob-mismatch',
+      },
       body: JSON.stringify({ size: declared.length, contentType: 'text/plain', contentHash: sha256(declared) }),
     });
     const { uploadUrl } = (await created.json()) as CreateBlobResponse;
@@ -198,6 +225,90 @@ describe('blob flows (§7)', () => {
       body: new TextEncoder().encode('different'),
     });
     expect(wrong.status).toBe(422);
+  });
+
+  it('requires one request id and binds finalize to its exact blob resource', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const bytes = new TextEncoder().encode('bound');
+
+    const missingKey = await harness.request('/byok/blobs', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        size: bytes.length,
+        contentType: 'text/plain',
+        contentHash: sha256(bytes),
+      }),
+    });
+    expect(missingKey.status).toBe(400);
+
+    const created = await harness.request('/byok/blobs', {
+      method: 'POST',
+      headers: {
+        ...device.authorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'blob-binding',
+      },
+      body: JSON.stringify({
+        size: bytes.length,
+        contentType: 'text/plain',
+        contentHash: sha256(bytes),
+      }),
+    });
+    const { blobId, uploadUrl } = (await created.json()) as CreateBlobResponse;
+    expect((await harness.request(uploadUrl, { method: 'PUT', body: bytes })).status).toBe(204);
+
+    const wrongResource = await harness.json('/byok/blobs/blob_wrong/finalize', {
+      method: 'POST',
+      headers: { ...device.authorization, 'idempotency-key': 'blob-binding' },
+    });
+    expect(wrongResource).toEqual({
+      status: 422,
+      body: { error: 'storage_integrity_mismatch' },
+    });
+    expect((await harness.core.quota.readUsage(TENANT_A)).reservedBytes).toBe(0n);
+    expect((await harness.core.quota.readReservation(TENANT_A, 'blob-binding'))?.state).toBe(
+      'aborted',
+    );
+
+    const late = await harness.request(`/byok/blobs/${blobId}/finalize`, {
+      method: 'POST',
+      headers: { ...device.authorization, 'idempotency-key': 'blob-binding' },
+    });
+    expect(late.status).toBe(409);
+  });
+
+  it('renders quota admission failures before minting an upload grant', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.core.quota.writeEntitlement(TENANT_A, {
+      version: 2n,
+      hardLimitBytes: 10n,
+      maxObjectBytes: 1n,
+      maxInlineBytes: 1n,
+      mailboxLimitBytes: 10n,
+      retentionPolicyId: 'test-small',
+    });
+    const bytes = new TextEncoder().encode('too large');
+
+    const response = await harness.json('/byok/blobs', {
+      method: 'POST',
+      headers: {
+        ...device.authorization,
+        'content-type': 'application/json',
+        'idempotency-key': 'blob-too-large',
+      },
+      body: JSON.stringify({
+        size: bytes.length,
+        contentType: 'text/plain',
+        contentHash: sha256(bytes),
+      }),
+    });
+    expect(response).toEqual({
+      status: 413,
+      body: { error: 'storage_object_too_large' },
+    });
   });
 
   it('413s a declaration over the deployment ceiling', async () => {

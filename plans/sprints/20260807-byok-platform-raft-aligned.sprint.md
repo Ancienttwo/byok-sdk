@@ -1,12 +1,12 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S4A 与 S4B-a 已交付并合入 `main`，S4B-b 起为剩余 backlog（见 `## Backlog`）
+> **状态**：Executing。S0–S4A 与 S4B-a 已合入 `main`；S4B-b 本刀交付，S4B-c 为剩余 backlog（见 `## Backlog`）
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-08（见 D-9）
 > **仓库基线**：`Ancienttwo/byok-sdk@880e69f`（2026-08-08）
 > **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）
-> **下一可执行 slice**：**S4B-b**。S4B-a 已完成 finalize authority contract；下一刀只落 reservation-bound cloud surface/presign，GC/migration 留给 S4B-c
+> **下一可执行 slice**：**S4B-c**。S4B-b 已收口 reservation-bound create/PUT/finalize/download 与 atomic manifest/accounting；下一刀只落 GC/retention/migration，不重开 hash/finalize authority
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -28,7 +28,7 @@
 
 | # | Status | Task | Mode | Acceptance | Plan |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [ ] | S4B-b/c — Reservation-bound cloud surface 与 cloud cleanup | contract | §S4B 全部验收项通过，配额拒写与 GC/tombstone 有回归测试 | S4B-a 已交付；b/c 待投影 |
+| 1 | [ ] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有回归测试 | S4B-a/b 已交付；c 待投影 |
 | 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | 待投影 |
 | 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
 | 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
@@ -788,7 +788,7 @@ Migrations are forward-only additive in this Sprint. Rollback application code c
 > **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）的容量与清理部分
 > **关键路径**：不阻塞 S5 的实现，但**是 Beta 闸的硬依赖**（见 §12）
 > **切片投影**：S4B-a 先落 finalize authority contract（删除 `StorageFinalizeInput.observedContentHash`，两 composition 的 dedupe/accounting 只读 reservation declaration）；S4B-b 落 reservation-bound cloud surface/presign；S4B-c 再以独立 migration contract 落 retention、tombstone、R2 GC/reconcile、metrics/runbook。只有 a/b/c 全闭才算 S4B 交付。
-> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b/c 仍未交付。
+> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b 同日完成：`Idempotency-Key` 先 reserve 后签 PUT、显式 finalize、pending download fail-closed、R2 `HEAD` observation、Postgres 单 CTE 原子提交 manifest/reservation/usage、client response-lost 同 key 重放，以及两 composition 的同一 conformance；`deploy/sql/**` 与 frozen protocol body/golden 零改动。S4B-c 未交付。
 
 ### S4B.1 Stories
 
@@ -851,15 +851,15 @@ Hard-limit behavior：
 
 ### S4B.6 Acceptance criteria
 
-- [ ] quota concurrent reservation test proves no overcommit；
-- [ ] usage cannot become negative or drift after retry/crash；
-- [ ] entitlement version/downgrade grace behavior passes；
+- [x] quota concurrent reservation test proves no overcommit（S4A-b 已有 Postgres lock-boundary test，S4B-b hard dataplane gate 继续实跑）；
+- [x] usage cannot become negative or drift after retry/crash（S4B-b：missing/mismatch abort release + finalize response-lost replay 不重复计量）；
+- [x] entitlement version/downgrade grace behavior passes（两 composition 共用 quota conformance）；
 - [ ] hard limit rejects new durable writes while read/delete/export continue；
 - [ ] durable user data is never auto-deleted to make room；
 - [ ] mailbox retention/dead-letter behavior documented and tested；
 - [ ] R2 orphan GC uses tombstone + grace + reconciliation；
 - [ ] quota/usage/GC metrics 与 support runbook 存在；
-- [ ] quota composition 复用 S4A 套件，domain 断言零改动。
+- [x] quota composition 复用 S4A 套件，既有 domain 断言零 composition 分支；S4B-b 只在同一断言源追加 manifest/replay/binding 维度。
 
 ### S4B.7 Rollback
 
