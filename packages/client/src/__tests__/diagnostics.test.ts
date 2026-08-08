@@ -17,6 +17,9 @@ import {
 } from '../diagnostics/diagnostics';
 import { OPERATIONAL_HEALTH_FILENAME, OperationalHealthTracker } from '../daemon/operational-health';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
+import { loadSqliteModule } from '../daemon/journal/sqlite-support';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
+import type { RuntimeAdapter } from '../types';
 
 const dirs: string[] = [];
 
@@ -114,6 +117,49 @@ describe('diagnostics collector', () => {
     expect(await digest(journalPath)).toBe(before);
     expect(await fs.readdir(dir)).toEqual(['daemon.db']);
   });
+
+  it.skipIf(!isSqliteAvailable())('checks a WAL snapshot without creating or changing store sidecars', async () => {
+    const dir = await tempDir();
+    const { DatabaseSync } = loadSqliteModule();
+    const db = new DatabaseSync(path.join(dir, 'daemon.db'));
+    db.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE evidence(value TEXT); INSERT INTO evidence VALUES (\'x\');');
+    await fs.rm(path.join(dir, 'daemon.db-shm'), { force: true });
+    const beforeNames = (await fs.readdir(dir)).sort();
+    const before = new Map(await Promise.all(beforeNames.map(async (name) => [name, await digest(path.join(dir, name))] as const)));
+
+    try {
+      await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+      const afterNames = (await fs.readdir(dir)).sort();
+      expect(afterNames).toEqual(beforeNames);
+      for (const name of afterNames) expect(await digest(path.join(dir, name))).toBe(before.get(name));
+    } finally {
+      db.close();
+    }
+  });
+
+  it('bounds runtime detection and oversized device input', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(path.join(dir, 'device.json'), 'x'.repeat(70 * 1024));
+    const hanging: RuntimeAdapter = {
+      id: 'hanging',
+      detect: () => new Promise(() => undefined),
+      capabilities: () => ({ steer: false, resume: false, approvalInteractive: false, permissionModes: [] }),
+      environmentRequirements: () => ({ credentialNames: [] }),
+      start: async () => {
+        throw new Error('not used');
+      },
+    };
+    const started = Date.now();
+    const snapshot = await collectDiagnostics(config(dir), dir, {
+      adapters: [hanging],
+      connectControl: unreachable,
+      runtimeProbeTimeoutMs: 20,
+    });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(snapshot.device.status).toBe('unavailable');
+    expect(snapshot.runtimes).toMatchObject([{ present: false }]);
+    expect(JSON.stringify(snapshot)).not.toContain('hanging');
+  });
 });
 
 describe('doctor explicit fix', () => {
@@ -168,5 +214,32 @@ describe('doctor explicit fix', () => {
     });
     expect(lines.some((line) => line.startsWith('fix: quarantined '))).toBe(true);
     await expect(fs.stat(path.join(dir, OPERATIONAL_HEALTH_FILENAME))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses symlink evidence without moving it or chmodding its external target', async () => {
+    const dir = await tempDir();
+    const outside = path.join(await tempDir(), 'outside-health');
+    await fs.writeFile(outside, '{external-corrupt}', { mode: 0o644 });
+    await fs.chmod(outside, 0o644);
+    const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    await fs.symlink(outside, sourcePath);
+
+    await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow('not a regular file');
+    expect(await fs.readlink(sourcePath)).toBe(outside);
+    expect(await fs.readFile(outside, 'utf8')).toBe('{external-corrupt}');
+    expect((await fs.stat(outside)).mode & 0o777).toBe(0o644);
+  });
+
+  it('refuses fix while the daemon ownership lease is held', async () => {
+    const dir = await tempDir();
+    const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    await fs.writeFile(sourcePath, '{bad');
+    const lease = await acquireDaemonOwner(dir, 'daemon');
+    try {
+      await expect(quarantineCorruptOperationalHealth(dir)).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      expect(await fs.readFile(sourcePath, 'utf8')).toBe('{bad');
+    } finally {
+      await lease.release();
+    }
   });
 });

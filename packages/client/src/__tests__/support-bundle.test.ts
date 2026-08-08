@@ -2,9 +2,10 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { DaemonConfig, DeviceRecord } from '../index';
+import type { DaemonConfig, DeviceRecord, RuntimeAdapter } from '../index';
 import type { ConnectControlResult } from '../bin/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
+import { runDoctorCommand } from '../bin/commands/doctor';
 import { auditLogPath } from '../bin/audit-log';
 import { DeviceStore } from '../daemon/store';
 import {
@@ -32,7 +33,7 @@ function unreachable(): Promise<ConnectControlResult> {
 
 function config(storeDir: string): DaemonConfig {
   return {
-    productName: 'Acme',
+    productName: 'SENTINEL_PRODUCT_NAME_SECRET',
     productId: 'SENTINEL_PRODUCT_ID',
     serverUrl: 'https://user:SENTINEL_URL_SECRET@example.invalid/private/path?token=SENTINEL_QUERY_SECRET',
     workspaceRoot: path.join(storeDir, 'SENTINEL_WORKSPACE_PATH'),
@@ -54,7 +55,8 @@ describe('support bundle privacy and bounds', () => {
     await new DeviceStore(dir).save(record);
     await fs.appendFile(
       auditLogPath(dir),
-      `${JSON.stringify({ kind: 'progress', ts: '2026-08-09T00:00:00.000Z', raw: 'SENTINEL_PROMPT_TOOL_BODY' })}\n`,
+      `${JSON.stringify({ kind: 'SENTINEL_AUDIT_KIND', ts: '2026-08-09T00:00:00.000Z', raw: 'SENTINEL_PROMPT_TOOL_BODY' })}\n` +
+        `${JSON.stringify({ kind: 'progress', ts: '2026-08-09T00:00:01.000Z' })}\n`,
     );
     const quarantineDir = path.join(dir, 'quarantine');
     await fs.mkdir(quarantineDir);
@@ -62,9 +64,18 @@ describe('support bundle privacy and bounds', () => {
 
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
     const serialized = JSON.stringify(bundle);
+    const doctorLines: string[] = [];
+    await runDoctorCommand(config(dir), {
+      json: true,
+      adapters: [],
+      connectControl: unreachable,
+      log: (line) => doctorLines.push(line),
+    });
+    const doctorOutput = doctorLines.join('\n');
 
     for (const sentinel of [
       'SENTINEL_PRODUCT_ID',
+      'SENTINEL_PRODUCT_NAME_SECRET',
       'SENTINEL_URL_SECRET',
       'SENTINEL_QUERY_SECRET',
       'SENTINEL_WORKSPACE_PATH',
@@ -73,15 +84,50 @@ describe('support bundle privacy and bounds', () => {
       'SENTINEL_PRIVATE_KEY',
       'SENTINEL_PUBLIC_KEY',
       'SENTINEL_PROMPT_TOOL_BODY',
+      'SENTINEL_AUDIT_KIND',
       'SENTINEL_CONTROL_PATH_SECRET',
       'SENTINEL_QUARANTINE_FILENAME',
       'SENTINEL_QUARANTINE_BYTES',
       'SENTINEL_ALLOWLIST_SECRET',
     ]) {
       expect(serialized).not.toContain(sentinel);
+      expect(doctorOutput).not.toContain(sentinel);
     }
-    expect(bundle.recentEvents.facts).toEqual([{ kind: 'progress', ts: '2026-08-09T00:00:00.000Z' }]);
+    expect(bundle.recentEvents.facts).toEqual([{ kind: 'progress', ts: '2026-08-09T00:00:01.000Z' }]);
     expect(bundle.redaction.policy).toBe('allowlist-v1');
+  });
+
+  it('projects runtime identifiers and version output through a closed bounded shape', async () => {
+    const dir = await tempDir();
+    const runtime: RuntimeAdapter = {
+      id: 'SENTINEL_RUNTIME_ID',
+      detect: async () => ({ present: true, version: `SENTINEL_RUNTIME_VERSION\n${'x'.repeat(10_000)}`, authPresent: true }),
+      capabilities: () => ({
+        steer: true,
+        resume: false,
+        approvalInteractive: false,
+        permissionModes: ['SENTINEL_PERMISSION_MODE'],
+      }),
+      environmentRequirements: () => ({ credentialNames: [] }),
+      start: async () => {
+        throw new Error('not used');
+      },
+    };
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [runtime], connectControl: unreachable });
+    const serialized = JSON.stringify(bundle);
+    const doctorLines: string[] = [];
+    await runDoctorCommand(config(dir), {
+      json: true,
+      adapters: [runtime],
+      connectControl: unreachable,
+      log: (line) => doctorLines.push(line),
+    });
+    expect(serialized).not.toContain('SENTINEL_RUNTIME_ID');
+    expect(serialized).not.toContain('SENTINEL_RUNTIME_VERSION');
+    expect(serialized).not.toContain('SENTINEL_PERMISSION_MODE');
+    expect(doctorLines.join('\n')).not.toContain('SENTINEL_RUNTIME');
+    expect(bundle.runtimes).toMatchObject([{ present: true, versionPresent: true, permissionModeCount: 1 }]);
+    expect(serialized.length).toBeLessThan(64 * 1024);
   });
 
   it('reads only a bounded audit tail and retains at most 200 facts', async () => {
@@ -119,6 +165,23 @@ describe('support bundle privacy and bounds', () => {
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
     await writeSupportBundle(path.join(outputDir, 'support.json'), bundle);
     expect((await fs.stat(outputDir)).mode & 0o777).toBe(0o755);
+  });
+
+  it('hardens the unpublished inode with a Windows DACL before linking it into place', async () => {
+    const dir = await tempDir();
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
+    const calls: string[][] = [];
+    await writeSupportBundle(path.join(dir, 'windows-support.json'), bundle, {
+      platform: 'win32',
+      run: async (_command, args) => {
+        calls.push(args);
+        return { code: 0, stdout: '', stderr: '' };
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[0]).toContain('.windows-support.json.');
+    expect(calls[0]).toContain('/inheritance:r');
+    expect(await fs.stat(path.join(dir, 'windows-support.json'))).toBeDefined();
   });
 
   it('CLI writes the requested bundle and prints an explicit redaction summary', async () => {

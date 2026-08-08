@@ -1650,10 +1650,10 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 - automatic reconnect/upload/maintenance outcome 进入同一 bounded failure window；状态文件只保存时间、类别、run marker 与 bounded crash history，不保存 prompt、secret、token 或错误正文；
 - start 写入 atomic+fsync run marker（temp file 先同步再 atomic rename；POSIX 随后同步 published target + parent directory；Windows 随后以 writable handle 同步 published target，因为 Node/libuv 不提供 directory flush），clean shutdown 在完整 teardown 后清除；下次启动只把遗留 marker 记为 unclean crash，clean stop 不计 crash；
 - corrupt health JSON/shape 作为 typed `unavailable` 投影到 daemon/control/CLI status，原文件不删除、不覆写、不伪造 healthy；
-- `byok-agent doctor` 默认只读，汇总 config protocol、runtime detection、authenticated control reachability、health、SQLite read-only `quick_check`、workspace accessibility 与 bounded quarantine inventory；`--json` 只改变渲染，不改变 authority；
-- malformed/corrupt health state 在 ordinary status/doctor 下保持 byte-identical；只有 daemon 已停且 operator 明确给出 `doctor --fix --yes` 时，才搬进 quarantine，并写 source path、reason、size 与 SHA-256 manifest；不创建伪造 healthy replacement；
+- `byok-agent doctor` 默认只读，汇总 config protocol、bounded runtime detection、authenticated control reachability、health、workspace accessibility 与 bounded quarantine inventory；SQLite `quick_check` 只对复制到 OS temp 的 bounded DB/WAL/SHM snapshot 执行，绝不直接打开 store 内数据库，因此 report-only 不会创建 `-wal`/`-shm` sidecar；snapshot 期间源 identity/size/mtime/ctime 漂移则诚实报告 unavailable；`--json` 只改变渲染，不改变 authority；
+- malformed/corrupt health state 在 ordinary status/doctor 下保持 byte-identical；daemon 从 start 到 stop 持有 cross-process store mutation lease，只有 operator 明确给出 `doctor --fix --yes` 且成功取得同一 lease 时才可搬进 quarantine；fix 先拒绝 symlink/non-regular path，再 atomic rename 实际 inode，随后对已搬 evidence 计算 SHA-256 并写 source path、reason、size manifest，不创建伪造 healthy replacement；
 - corrupt journal 继续由既有 `JournalCorruptError` 路径 quarantine；doctor 只做 read-only detection，不提供 rebuild、plain-file fallback 或自动清理；
-- `byok-agent support-bundle --output <new-path>` 以 exclusive atomic publish 写 0600 bounded JSON，已存在路径拒绝覆盖；它复用同一 typed collector，不另造诊断真相；
+- `byok-agent support-bundle --output <new-path>` 以 exclusive atomic publish 写 bounded JSON，POSIX 为 0600，Windows 在尚未 publish 的 inode 上先施加 restrictive DACL 再 hard-link 到目标名；已存在路径拒绝覆盖；它复用同一 typed collector，不另造诊断真相；
 - security-sensitive 的修复不静默降级；
 - 进程重启仍归 OS supervisor，daemon 不再造第二层 supervisor（§10）。
 
@@ -1737,7 +1737,7 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 - path 默认脱敏；
 - object 与 payload 只记录 hash、size、content type；
 - tenant 维度的 metrics 避免高基数、形似 secret 的 label；
-- support bundle 生成前先做 allowlist projection，并在 artifact 内列出 omitted/transformed class：server host/path/query、local paths、control/provider credential、task/prompt/tool/approval body 与 raw audit/quarantine contents 不进入 bundle；product/device/quarantine filename 只留 SHA-256，audit 只留 bounded kind/timestamp。
+- support bundle 生成前先做逐字段 closed allowlist projection，并在 artifact 内列出 omitted/transformed class：server host/path/query、local paths、control/provider credential、task/prompt/tool/approval body、runtime version/raw identifiers 与 raw audit/quarantine contents 不进入 bundle；product/device/runtime/quarantine filename 只留 SHA-256，audit kind 必须属于 `DaemonEvent` closed set 后才保留 bounded kind/timestamp。
 
 这组约束与 §9 审计控制表的“只记录 task id、event type、tool/runtime name、counts/sizes”是同一条线：审计要能证明发生过什么，但不以保存 tool input/output 原文为代价。
 

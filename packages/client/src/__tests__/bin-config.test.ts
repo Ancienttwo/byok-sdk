@@ -67,6 +67,7 @@ describe('bin/config: arg helpers', () => {
   it('argValue finds the value following a flag', () => {
     expect(argValue(['--config', '/path', '--server', 'url'], '--config')).toBe('/path');
     expect(argValue(['--config', '/path'], '--missing')).toBeUndefined();
+    expect(argValue(['--output', '--config', '/path'], '--output')).toBeUndefined();
   });
 
   it('hasFlag detects a bare boolean flag anywhere in args', () => {

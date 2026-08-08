@@ -25,6 +25,7 @@ import {
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
+import { acquireDaemonOwner, type DaemonOwnerLease } from './daemon-owner';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
@@ -703,6 +704,7 @@ export function createDaemonWithAdapters(
   // running, or when binding it failed non-fatally (see `start()`'s own
   // try/catch below).
   let controlServerHandle: ControlServerHandle | undefined;
+  let daemonOwnerLease: DaemonOwnerLease | undefined;
   /** M4 Phase 2: when this `start()` began — backs the control socket's `status.uptimeMs`. */
   let startedAt: number | undefined;
 
@@ -796,6 +798,8 @@ export function createDaemonWithAdapters(
     if (!record) {
       throw new Error('device is not paired yet; call pair(pairingCode) first');
     }
+    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+    try {
     fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
     // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own
@@ -1121,6 +1125,16 @@ export function createDaemonWithAdapters(
     });
     await connection.start();
     await connection.waitForAck();
+    } catch (err) {
+      await connection?.stop(0).catch(() => undefined);
+      await controlServerHandle?.close().catch(() => undefined);
+      controlServerHandle = undefined;
+      auth.stop();
+      await operationalHealth.markCleanStop().catch(() => undefined);
+      await daemonOwnerLease?.release().catch(() => undefined);
+      daemonOwnerLease = undefined;
+      throw err;
+    }
   }
 
   /**
@@ -1216,7 +1230,12 @@ export function createDaemonWithAdapters(
     // through, so nothing else needs its own control-socket teardown logic.
     await controlServerHandle?.close();
     controlServerHandle = undefined;
-    await operationalHealth.markCleanStop();
+    try {
+      await operationalHealth.markCleanStop();
+    } finally {
+      await daemonOwnerLease?.release();
+      daemonOwnerLease = undefined;
+    }
   }
 
   /**

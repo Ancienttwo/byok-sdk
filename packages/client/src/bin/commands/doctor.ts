@@ -31,7 +31,7 @@ export class DoctorDaemonRunningError extends Error {
 
 function formatDoctorLines(snapshot: DiagnosticsSnapshot, fixResult?: OperationalHealthFixResult): string[] {
   const lines = [
-    `doctor: product=${snapshot.product.name} generatedAt=${snapshot.generatedAt}`,
+    `doctor: productHash=${snapshot.product.nameHash} generatedAt=${snapshot.generatedAt}`,
     `system: node=${snapshot.system.node} platform=${snapshot.system.platform} arch=${snapshot.system.arch} sqlite=${snapshot.system.sqliteAvailable ? 'available' : 'unavailable'}`,
   ];
   for (const check of snapshot.checks) lines.push(`check ${check.id}: ${check.status} (${check.summary})`);

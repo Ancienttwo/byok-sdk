@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
 import { connectControlClient } from '../bin/control-client';
-import { defaultRuntimeAdapters, probeRuntimes, type ProbedRuntime } from '../bin/runtime-probe';
+import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
 import { isSqliteAvailable, loadSqliteModule } from '../daemon/journal/sqlite-support';
@@ -13,12 +14,14 @@ import {
   type OperationalHealthFileInspection,
   OPERATIONAL_HEALTH_FILENAME,
 } from '../daemon/operational-health';
-import { DeviceStore } from '../daemon/store';
+import { acquireDaemonOwner } from '../daemon/daemon-owner';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir } from '../util/secure-dir';
 
 export const MAX_QUARANTINE_ENTRIES = 100;
 export const MAX_QUARANTINE_SCAN_ENTRIES = 10_000;
+export const MAX_DEVICE_RECORD_BYTES = 64 * 1024;
+export const MAX_JOURNAL_COPY_BYTES = 512 * 1024 * 1024;
 
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 
@@ -31,16 +34,24 @@ export interface DiagnosticCheck {
 export interface DiagnosticsSnapshot {
   version: 1;
   generatedAt: string;
-  product: { name: string; id: string };
+  product: { nameHash: string; idHash: string };
   system: { node: string; platform: NodeJS.Platform; arch: string; sqliteAvailable: boolean };
   config: {
-    serverProtocol: string;
+    serverProtocol: 'http' | 'https' | 'ws' | 'wss' | 'invalid' | 'unsupported';
     customStoreDir: boolean;
     hostedJournal: boolean;
-    runtimeAllowlist?: string[];
+    runtimeAllowlistCount?: number;
   };
-  device: { status: 'paired' | 'unpaired' | 'unavailable'; deviceId?: string };
-  runtimes: ProbedRuntime[];
+  device: { status: 'paired' | 'unpaired' | 'unavailable'; deviceIdHash?: string };
+  runtimes: Array<{
+    idHash: string;
+    present: boolean;
+    versionPresent: boolean;
+    authPresent?: boolean;
+    steer: boolean;
+    resume: boolean;
+    permissionModeCount: number;
+  }>;
   control:
     | { status: 'offline'; reason: string }
     | {
@@ -67,7 +78,7 @@ export interface DiagnosticsSnapshot {
     count: number;
     scannedCount: number;
     truncated: boolean;
-    entries: Array<{ name: string; sizeBytes: number; modifiedAt: string }>;
+    entries: Array<{ nameHash: string; sizeBytes: number; modifiedAt: string }>;
     reason?: string;
   };
   checks: DiagnosticCheck[];
@@ -77,15 +88,17 @@ export interface CollectDiagnosticsOptions {
   clock?: () => Date;
   adapters?: RuntimeAdapter[];
   connectControl?: typeof connectControlClient;
+  runtimeProbeTimeoutMs?: number;
 }
 
 export type OperationalHealthFixResult =
   | { status: 'not-needed'; reason: 'missing' | 'valid' }
   | { status: 'quarantined'; evidenceName: string; manifestName: string; sha256: string; sizeBytes: number };
 
-function safeProtocol(serverUrl: string): string {
+function safeProtocol(serverUrl: string): DiagnosticsSnapshot['config']['serverProtocol'] {
   try {
-    return new URL(serverUrl).protocol.replace(/:$/, '');
+    const protocol = new URL(serverUrl).protocol.replace(/:$/, '');
+    return protocol === 'http' || protocol === 'https' || protocol === 'ws' || protocol === 'wss' ? protocol : 'unsupported';
   } catch {
     return 'invalid';
   }
@@ -101,27 +114,128 @@ async function fileSize(filePath: string): Promise<number | undefined> {
   }
 }
 
-async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['journal']> {
+async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['device']> {
+  const filePath = path.join(storeDir, 'device.json');
+  let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
-    const sizeBytes = await fileSize(path.join(storeDir, JOURNAL_DB_FILENAME));
+    handle = await fs.open(filePath, 'r');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
+    return { status: 'unavailable' };
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_DEVICE_RECORD_BYTES) return { status: 'unavailable' };
+    const parsed = JSON.parse(await handle.readFile('utf8')) as Record<string, unknown>;
+    return typeof parsed.deviceId === 'string' && parsed.deviceId.length > 0
+      ? { status: 'paired', deviceIdHash: stableIdentifierHash(parsed.deviceId) }
+      : { status: 'unavailable' };
+  } catch {
+    return { status: 'unavailable' };
+  } finally {
+    await handle.close();
+  }
+}
+
+interface FileIdentity {
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+}
+
+async function regularFileIdentity(filePath: string): Promise<FileIdentity | undefined> {
+  try {
+    const stat = await fs.lstat(filePath, { bigint: true });
+    if (!stat.isFile()) throw new Error('journal component is not a regular file');
+    return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+}
+
+function sameIdentity(left: FileIdentity | undefined, right: FileIdentity | undefined): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['journal']> {
+  const journalPath = path.join(storeDir, JOURNAL_DB_FILENAME);
+  try {
+    const sizeBytes = await fileSize(journalPath);
     if (sizeBytes === undefined) return { status: 'missing' };
     const walBytes = await fileSize(path.join(storeDir, `${JOURNAL_DB_FILENAME}-wal`));
     if (!isSqliteAvailable()) {
       return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'not-checked' };
     }
+    const componentNames = [JOURNAL_DB_FILENAME, `${JOURNAL_DB_FILENAME}-wal`, `${JOURNAL_DB_FILENAME}-shm`] as const;
+    const before = new Map<string, FileIdentity | undefined>();
+    let totalBytes = 0n;
+    for (const name of componentNames) {
+      const identity = await regularFileIdentity(path.join(storeDir, name));
+      before.set(name, identity);
+      totalBytes += identity?.size ?? 0n;
+    }
+    if (totalBytes > BigInt(MAX_JOURNAL_COPY_BYTES)) {
+      return {
+        status: 'present',
+        sizeBytes,
+        ...(walBytes === undefined ? {} : { walBytes }),
+        integrity: 'not-checked',
+        reason: 'journal exceeds the bounded diagnostics copy limit',
+      };
+    }
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-journal-inspect-'));
     const { DatabaseSync } = loadSqliteModule();
     let db: InstanceType<typeof DatabaseSync> | undefined;
     try {
-      db = new DatabaseSync(path.join(storeDir, JOURNAL_DB_FILENAME), { readOnly: true });
+      for (const name of componentNames) {
+        if (before.get(name)) await fs.copyFile(path.join(storeDir, name), path.join(tempDir, name));
+      }
+      for (const name of componentNames) {
+        if (!sameIdentity(before.get(name), await regularFileIdentity(path.join(storeDir, name)))) {
+          return {
+            status: 'unavailable',
+            sizeBytes,
+            ...(walBytes === undefined ? {} : { walBytes }),
+            reason: 'journal changed during diagnostics snapshot',
+          };
+        }
+      }
+      const header = Buffer.alloc(16);
+      const copiedHandle = await fs.open(path.join(tempDir, JOURNAL_DB_FILENAME), 'r');
+      try {
+        const { bytesRead } = await copiedHandle.read(header, 0, header.length, 0);
+        if (bytesRead !== 16 || header.toString('binary') !== 'SQLite format 3\u0000') {
+          return {
+            status: 'corrupt',
+            sizeBytes,
+            ...(walBytes === undefined ? {} : { walBytes }),
+            reason: 'journal has an invalid SQLite header',
+          };
+        }
+      } finally {
+        await copiedHandle.close();
+      }
+      db = new DatabaseSync(path.join(tempDir, JOURNAL_DB_FILENAME), { readOnly: true });
       const result = db.prepare('PRAGMA quick_check(1)').get() as { quick_check?: unknown } | undefined;
       if (result?.quick_check !== 'ok') {
         return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal quick_check failed' };
       }
       return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'ok' };
     } catch {
-      return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal could not be opened read-only' };
+      return { status: 'unavailable', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal snapshot could not be checked' };
     } finally {
       db?.close();
+      await fs.rm(tempDir, { recursive: true, force: true });
     }
   } catch {
     return { status: 'unavailable', reason: 'journal files could not be inspected' };
@@ -174,7 +288,7 @@ async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot[
       if (entries.length >= MAX_QUARANTINE_ENTRIES) continue;
       try {
         const stat = await fs.stat(path.join(dir, entry.name));
-        entries.push({ name: entry.name, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() });
+        entries.push({ nameHash: stableIdentifierHash(entry.name), sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() });
       } catch {
         // A concurrent operator move can make one entry disappear between
         // readdir and stat. The aggregate remains honest via `scannedCount`.
@@ -183,7 +297,7 @@ async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot[
   } finally {
     await handle.close().catch(() => undefined);
   }
-  entries.sort((a, b) => a.name.localeCompare(b.name));
+  entries.sort((a, b) => a.nameHash.localeCompare(b.nameHash));
   return {
     status: 'available',
     count,
@@ -255,18 +369,24 @@ export async function collectDiagnostics(
 ): Promise<DiagnosticsSnapshot> {
   const adapters = options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [device, runtimes, health, journal, workspace, quarantine, controlConnection] = await Promise.all([
-    new DeviceStore(storeDir)
-      .load()
-      .then((record) => (record ? ({ status: 'paired', deviceId: record.deviceId } as const) : ({ status: 'unpaired' } as const)))
-      .catch(() => ({ status: 'unavailable' } as const)),
-    probeRuntimes(adapters),
+  const [device, probedRuntimes, health, journal, workspace, quarantine, controlConnection] = await Promise.all([
+    inspectDevice(storeDir),
+    probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs }),
     inspectOperationalHealthFile(storeDir),
     inspectJournal(storeDir),
     inspectWorkspace(config.workspaceRoot),
     inspectQuarantine(storeDir),
     connectControl({ storeDir, productId: config.productId }),
   ]);
+  const runtimes: DiagnosticsSnapshot['runtimes'] = probedRuntimes.map((runtime) => ({
+    idHash: stableIdentifierHash(runtime.id),
+    present: runtime.present,
+    versionPresent: runtime.version !== undefined,
+    ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
+    steer: runtime.steer,
+    resume: runtime.resume,
+    permissionModeCount: runtime.permissionModes.length,
+  }));
 
   let control: DiagnosticsSnapshot['control'];
   if (!controlConnection.ok) {
@@ -294,13 +414,13 @@ export async function collectDiagnostics(
   const withoutChecks: Omit<DiagnosticsSnapshot, 'checks'> = {
     version: 1,
     generatedAt: (options.clock ?? (() => new Date()))().toISOString(),
-    product: { name: config.productName, id: config.productId },
+    product: { nameHash: stableIdentifierHash(config.productName), idHash: stableIdentifierHash(config.productId) },
     system: { node: process.versions.node, platform: process.platform, arch: process.arch, sqliteAvailable: isSqliteAvailable() },
     config: {
       serverProtocol: safeProtocol(config.serverUrl),
       customStoreDir: config.storeDir !== undefined,
       hostedJournal: config.hostedJournal !== undefined,
-      ...(config.runtimeAllowlist ? { runtimeAllowlist: [...config.runtimeAllowlist] } : {}),
+      ...(config.runtimeAllowlist ? { runtimeAllowlistCount: config.runtimeAllowlist.length } : {}),
     },
     device,
     runtimes,
@@ -350,43 +470,48 @@ export async function quarantineCorruptOperationalHealth(
   storeDir: string,
   options: { clock?: () => Date } = {},
 ): Promise<OperationalHealthFixResult> {
-  const inspection = await inspectOperationalHealthFile(storeDir);
-  if (inspection.status === 'missing') return { status: 'not-needed', reason: 'missing' };
-  if (inspection.status === 'valid') return { status: 'not-needed', reason: 'valid' };
+  const owner = await acquireDaemonOwner(storeDir, 'doctor', options.clock);
+  try {
+    const inspection = await inspectOperationalHealthFile(storeDir);
+    if (inspection.status === 'missing') return { status: 'not-needed', reason: 'missing' };
+    if (inspection.status === 'valid') return { status: 'not-needed', reason: 'valid' };
 
-  const sourcePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
-  const hashed = await hashFile(sourcePath);
-  const current = await fs.stat(sourcePath);
-  if (current.size !== hashed.sizeBytes || current.mtimeMs !== hashed.mtimeMs) {
-    throw new Error('operational health state changed before quarantine');
+    const sourcePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
+    const sourceStat = await fs.lstat(sourcePath);
+    if (!sourceStat.isFile()) throw new Error('operational health state is not a regular file; refusing quarantine');
+
+    const quarantineDir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
+    await ensureSecureDir(quarantineDir);
+    const stamp = (options.clock ?? (() => new Date()))().toISOString().replace(/[:.]/g, '-');
+    const evidenceName = `${stamp}-${randomUUID()}-${OPERATIONAL_HEALTH_FILENAME}`;
+    const manifestName = `${evidenceName}.manifest.json`;
+    const evidencePath = path.join(quarantineDir, evidenceName);
+    await fs.rename(sourcePath, evidencePath);
+    const movedStat = await fs.lstat(evidencePath);
+    if (!movedStat.isFile()) throw new Error('quarantined operational health evidence is not a regular file');
+    const hashed = await hashFile(evidencePath);
+    await fs.chmod(evidencePath, 0o600);
+    await atomicWriteFile(
+      path.join(quarantineDir, manifestName),
+      `${JSON.stringify(
+        {
+          version: 1,
+          quarantinedAt: (options.clock ?? (() => new Date()))().toISOString(),
+          reason: inspection.reason,
+          sourcePath,
+          evidenceFile: evidenceName,
+          sha256: hashed.sha256,
+          sizeBytes: hashed.sizeBytes,
+        },
+        null,
+        2,
+      )}\n`,
+      { mode: 0o600, fsync: true },
+    );
+    return { status: 'quarantined', evidenceName, manifestName, sha256: hashed.sha256, sizeBytes: hashed.sizeBytes };
+  } finally {
+    await owner.release();
   }
-
-  const quarantineDir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
-  await ensureSecureDir(quarantineDir);
-  const stamp = (options.clock ?? (() => new Date()))().toISOString().replace(/[:.]/g, '-');
-  const evidenceName = `${stamp}-${randomUUID()}-${OPERATIONAL_HEALTH_FILENAME}`;
-  const manifestName = `${evidenceName}.manifest.json`;
-  const evidencePath = path.join(quarantineDir, evidenceName);
-  await fs.rename(sourcePath, evidencePath);
-  await fs.chmod(evidencePath, 0o600);
-  await atomicWriteFile(
-    path.join(quarantineDir, manifestName),
-    `${JSON.stringify(
-      {
-        version: 1,
-        quarantinedAt: (options.clock ?? (() => new Date()))().toISOString(),
-        reason: inspection.reason,
-        sourcePath,
-        evidenceFile: evidenceName,
-        sha256: hashed.sha256,
-        sizeBytes: hashed.sizeBytes,
-      },
-      null,
-      2,
-    )}\n`,
-    { mode: 0o600, fsync: true },
-  );
-  return { status: 'quarantined', evidenceName, manifestName, sha256: hashed.sha256, sizeBytes: hashed.sizeBytes };
 }
 
 export { OPERATIONAL_HEALTH_FILENAME };

@@ -247,7 +247,7 @@ export async function inspectOperationalHealthFile(storeDir: string): Promise<Op
   const filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
   let stat;
   try {
-    stat = await fs.stat(filePath);
+    stat = await fs.lstat(filePath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
     return { status: 'corrupt', sizeBytes: 0, reason: 'operational health state could not be inspected' };
@@ -277,8 +277,10 @@ export async function inspectOperationalHealthFile(storeDir: string): Promise<Op
     state: parsed.state,
     failureCount: parsed.failures.length,
     crashCount: parsed.crashes.length,
-    ...(parsed.currentRun ? { currentRunStartedAt: parsed.currentRun.startedAt } : {}),
-    ...(parsed.crashes.at(-1) ? { lastCrashAt: parsed.crashes.at(-1)!.detectedAt } : {}),
+    ...(parsed.currentRun ? { currentRunStartedAt: new Date(Date.parse(parsed.currentRun.startedAt)).toISOString() } : {}),
+    ...(parsed.crashes.at(-1)
+      ? { lastCrashAt: new Date(Date.parse(parsed.crashes.at(-1)!.detectedAt)).toISOString() }
+      : {}),
   };
 }
 

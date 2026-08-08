@@ -80,7 +80,8 @@ export function resolveStoreDir(config: Pick<DaemonConfig, 'storeDir' | 'product
 /** Value following `flag` in `args` (e.g. `--config <path>`), or `undefined`. */
 export function argValue(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
-  return idx >= 0 ? args[idx + 1] : undefined;
+  const value = idx >= 0 ? args[idx + 1] : undefined;
+  return value !== undefined && !value.startsWith('--') ? value : undefined;
 }
 
 /** Whether a bare boolean flag (e.g. `--follow`, `--yes`) is present anywhere in `args`. */

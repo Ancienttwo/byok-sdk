@@ -16,6 +16,7 @@ import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 
 const execFileAsync = promisify(execFile);
+const DETECT_TIMEOUT_MS = 5_000;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -65,7 +66,7 @@ export class PiAdapter implements RuntimeAdapter {
       // STDERR, not stdout — confirmed with an explicit stdout/stderr probe,
       // not assumed. Check both so this doesn't silently regress if a future
       // pi release moves it back to stdout.
-      const { stdout, stderr } = await execFileAsync(bin.command, ['--version']);
+      const { stdout, stderr } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
       const version = stdout.trim() || stderr.trim();
       const authPresent = KNOWN_PROVIDER_ENV_VARS.some((name) => process.env[name] !== undefined);
       return { present: true, version, authPresent };
