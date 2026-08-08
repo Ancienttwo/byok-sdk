@@ -64,7 +64,9 @@ export const CORE_ERROR_CODES = {
 
   // presence + activity hints (§12.3)
   activity_capacity_invalid: 'activity_capacity_invalid',
+  activity_batch_invalid: 'activity_batch_invalid',
   hint_ttl_invalid: 'hint_ttl_invalid',
+  hint_rate_limited: 'hint_rate_limited',
 
   // object manifest (§12.7.4, §12.7.8)
   object_not_found: 'object_not_found',

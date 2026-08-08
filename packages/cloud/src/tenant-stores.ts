@@ -23,6 +23,15 @@
  */
 import {
   principalTenant,
+  type ActivityAppendInput,
+  type ActivityTail,
+  type BoardClaimInput,
+  type BoardItem,
+  type BoardItemInput,
+  type BoardListQuery,
+  type BoardPage,
+  type BoardStatusUpdateInput,
+  type BoardUnclaimInput,
   type CoreStores,
   type MailboxAdvanceCursorInput,
   type MailboxAppendInput,
@@ -31,6 +40,8 @@ import {
   type MailboxPage,
   type MailboxReadQuery,
   type Principal,
+  type PresenceHint,
+  type PresenceHintInput,
   type StorageFinalizeInput,
   type StorageFinalizeResult,
   type StorageReservation,
@@ -52,6 +63,26 @@ export interface TenantBoundMailbox {
   readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
   advanceCursor(input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
   readCursor(deviceId: string): Promise<MailboxCursorState>;
+}
+
+export interface TenantBoundBoard {
+  create(input: BoardItemInput): Promise<BoardItem>;
+  get(itemId: string): Promise<BoardItem | undefined>;
+  list(query: BoardListQuery): Promise<BoardPage>;
+  claim(input: BoardClaimInput): Promise<BoardItem>;
+  unclaim(input: BoardUnclaimInput): Promise<BoardItem>;
+  updateStatus(input: BoardStatusUpdateInput): Promise<BoardItem>;
+}
+
+export interface TenantBoundPresence {
+  publish(input: PresenceHintInput): Promise<PresenceHint>;
+  read(deviceId: string): Promise<PresenceHint | undefined>;
+  list(): Promise<readonly PresenceHint[]>;
+}
+
+export interface TenantBoundActivity {
+  append(input: ActivityAppendInput): Promise<ActivityTail>;
+  read(taskId: string): Promise<ActivityTail | undefined>;
 }
 
 export interface TenantBoundDevices {
@@ -104,6 +135,9 @@ export interface TenantStores {
   readonly tenant: TenantId;
   readonly principal: Principal;
   readonly mailbox: TenantBoundMailbox;
+  readonly board: TenantBoundBoard;
+  readonly presence: TenantBoundPresence;
+  readonly activity: TenantBoundActivity;
   readonly devices: TenantBoundDevices;
   readonly tasks: TenantBoundTaskAttempts;
   readonly dedup: TenantBoundDedup;
@@ -132,6 +166,23 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       readAfter: (query) => core.mailbox.readAfter(tenant, query),
       advanceCursor: (input) => core.mailbox.advanceCursor(tenant, input),
       readCursor: (deviceId) => core.mailbox.readCursor(tenant, deviceId),
+    },
+    board: {
+      create: (input) => core.board.create(tenant, input),
+      get: (itemId) => core.board.get(tenant, itemId),
+      list: (query) => core.board.list(tenant, query),
+      claim: (input) => core.board.claim(tenant, input),
+      unclaim: (input) => core.board.unclaim(tenant, input),
+      updateStatus: (input) => core.board.updateStatus(tenant, input),
+    },
+    presence: {
+      publish: (input) => core.presence.publish(tenant, input),
+      read: (deviceId) => core.presence.read(tenant, deviceId),
+      list: () => core.presence.list(tenant),
+    },
+    activity: {
+      append: (input) => core.activity.append(tenant, input),
+      read: (taskId) => core.activity.read(tenant, taskId),
     },
     devices: {
       get: (deviceId) => cloud.devices.get(tenant, deviceId),

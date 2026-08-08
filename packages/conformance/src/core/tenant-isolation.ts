@@ -98,6 +98,7 @@ export function runTenantIsolationConformance(factory: CoreCompositionFactory): 
           deviceId: 'device-1',
           level: 'working',
           ttlMs: 60_000,
+          minimumIntervalMs: 0,
         });
         expect(await stores.presence.read(TENANT_B, 'device-1')).toBeUndefined();
         expect(await stores.presence.list(TENANT_B)).toHaveLength(0);
@@ -108,7 +109,8 @@ export function runTenantIsolationConformance(factory: CoreCompositionFactory): 
       await withComposition(factory, async ({ stores }) => {
         await stores.activity.append(TENANT_A, {
           taskId: 'task-1',
-          detail: 'entry',
+          details: ['entry'],
+          dropped: 0,
           ttlMs: 300_000,
         });
         expect(await stores.activity.read(TENANT_B, 'task-1')).toBeUndefined();

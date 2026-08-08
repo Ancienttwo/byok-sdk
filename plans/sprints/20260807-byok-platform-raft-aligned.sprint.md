@@ -1,12 +1,12 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S4B-b 已合入 `main`；S4B-c PR #32 实现、hard dataplane gate、Claude AcceptanceReceipt 与 CI 32/32 已闭，待 merge/readback 后 S4B 收官
+> **状态**：Executing。S0–S4B 已合入 `main`；S5 实现与本地验收已绿，待 PR/CI/merge
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-08（见 D-9）
-> **仓库基线**：`Ancienttwo/byok-sdk@880e69f`（2026-08-08）
-> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）
-> **下一可执行 slice**：**S5**（S4B-c 合入后）。本刀只落 GC/retention/migration/operations，不重开 hash/finalize authority；S5 投影 board、SSE/Poll 与 Presence/Activity
+> **仓库基线**：`Ancienttwo/byok-sdk@140b109`（2026-08-09）
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）
+> **下一可执行 slice**：**S5**。入口是 `plans/plan-20260809-0148-s5-board-streams.md`；范围固定为 board、SSE/Poll 与 Presence/Activity，零 protocol/schema/migration drift
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -28,12 +28,12 @@
 
 | # | Status | Task | Mode | Acceptance | Plan |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | PR #32；Claude external pass；CI 32/32；待 merge/readback |
-| 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | 待投影 |
+| 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | PR #32；merge `140b109`；Claude external pass；CI 32/32 |
+| 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | `plans/plan-20260809-0148-s5-board-streams.md`；implementation + hard-env gates + focused Claude review green，待 receipt/PR/CI/merge |
 | 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
 | 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
 
-已交付并合入 `main` 的 S0、S1、S2、S3a、S3b、S4A 不再列入 backlog，其 merge SHA 见文首交付清单。
+已交付并合入 `main` 的 S0、S1、S2、S3a、S3b、S4A、S4B 不再列入后续 backlog；S4B-c 行仅保留本轮 merge readback 记录，其 merge SHA 见文首交付清单。
 
 ---
 
@@ -788,7 +788,7 @@ Migrations are forward-only additive in this Sprint. Rollback application code c
 > **对应**：P2（`ARCHITECTURE-PROPOSAL:695`）的容量与清理部分
 > **关键路径**：不阻塞 S5 的实现，但**是 Beta 闸的硬依赖**（见 §12）
 > **切片投影**：S4B-a 先落 finalize authority contract（删除 `StorageFinalizeInput.observedContentHash`，两 composition 的 dedupe/accounting 只读 reservation declaration）；S4B-b 落 reservation-bound cloud surface/presign；S4B-c 再以独立 migration contract 落 retention、tombstone、R2 GC/reconcile、metrics/runbook。只有 a/b/c 全闭才算 S4B 交付。
-> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b 同日完成（PR #28，merge `ae93b40`，CI 32/32）：`Idempotency-Key` 先 reserve 后签 PUT、显式 finalize、pending download fail-closed、R2 `HEAD` observation、Postgres 单 CTE 原子提交 manifest/reservation/usage、expired admission reap、client response-lost 同 key 重放，以及两 composition 的同一 conformance；`deploy/sql/**` 与 frozen protocol body/golden 零改动。独立 Claude AcceptanceReceipt 为 `external_pass`。S4B-c 2026-08-09（PR #32，CI 32/32，merge pending）：additive `0003` 落 retention policy/cleanup job/GC cursor、exact-source replay provenance 与 tombstone accounting metadata；host-owned maintenance 落 TTL/acked-mailbox retention、expired dead-letter list/replay/discard、tenant-serialized bounded GC、rotating delete retry、R2 ListObjectsV2/HEAD/DELETE、untracked-key witness+fresh grace、manifest/usage 单次 settlement、drift metrics/runbook 与 usage rebuild。real Postgres+MinIO hard gate：cloud-postgres 10 files/180 tests，全仓 typecheck/test/build 通过；独立 Claude review 修复四条 concurrency 缺陷后以 subject `sha256:07b4b25d…` external pass。
+> **交付记录**：S4B-a 2026-08-08（PR #27，merge `bf228a1`，CI 32/32）：首个实现提交 `3869230` 删除伪 `observedContentHash`，InMemory/Postgres 两套 composition 继续复用同一 quota conformance；无 runtime route/schema 或 migration 变更。S4B-b 同日完成（PR #28，merge `ae93b40`，CI 32/32）：`Idempotency-Key` 先 reserve 后签 PUT、显式 finalize、pending download fail-closed、R2 `HEAD` observation、Postgres 单 CTE 原子提交 manifest/reservation/usage、expired admission reap、client response-lost 同 key 重放，以及两 composition 的同一 conformance；`deploy/sql/**` 与 frozen protocol body/golden 零改动。独立 Claude AcceptanceReceipt 为 `external_pass`。S4B-c 2026-08-09（PR #32，merge `140b109`，CI 32/32）：additive `0003` 落 retention policy/cleanup job/GC cursor、exact-source replay provenance 与 tombstone accounting metadata；host-owned maintenance 落 TTL/acked-mailbox retention、expired dead-letter list/replay/discard、tenant-serialized bounded GC、rotating delete retry、R2 ListObjectsV2/HEAD/DELETE、untracked-key witness+fresh grace、manifest/usage 单次 settlement、drift metrics/runbook 与 usage rebuild。real Postgres+MinIO hard gate：cloud-postgres 10 files/180 tests，全仓 typecheck/test/build 通过；独立 Claude review 修复四条 concurrency 缺陷后以 subject `sha256:07b4b25d…` external pass。
 
 ### S4B.1 Stories
 
@@ -879,6 +879,7 @@ Migrations are forward-only additive. Rollback application code may leave unused
 > **对应**：P3（`ARCHITECTURE-PROPOSAL:696`）+ T4（`tenant-isolation-decision.md:255`）
 > **入口闸**：I6 在本 Sprint 补齐（S3 延后项，见 D-2）
 > **产品决策**：`closed` 继续采用“终止未验收”；admin override 单独 capability
+> **交付记录**：`codex/s5-board-streams` 已落 B-001..B-010；real Postgres 100-way claim、per-tenant sequence、concurrent activity batch，cloud poll/SSE、reconcile、revocation、abort、capability/no-downgrade 与 bounded hints 全绿。fresh hard-env workspace 为 cloud 110 / cloud-postgres 185 tests，typecheck/build 全绿，frozen protocol 与 `deploy/sql` 零 diff。聚焦 Claude review 找出并闭合三条缺陷（abort sleep、永久 4xx retry 分类、空 data board frame），复审 `No findings`；待 receipt/PR/CI/merge 后才算 S5 已交付。
 
 ### S5.1 Stories
 
@@ -934,18 +935,18 @@ Migrations are forward-only additive. Rollback application code may leave unused
 
 ### S5.5 Acceptance criteria
 
-- [ ] 100 concurrent claim -> exactly one success；
-- [ ] loser response includes holder snapshot；
-- [ ] expectedStatus conflict returns current snapshot；
-- [ ] A/B tenant streams never cross；
-- [ ] **I6 通过**（S3 延后项）；
-- [ ] SSE/poll pass same behavior suite；
-- [ ] forced dropped stream event repaired by reconciliation；
-- [ ] presence expiry removes hint；
-- [ ] activity dropped visible；
-- [ ] no RAFT-style status sniffing；
-- [ ] board status vocabulary never leaks into wire state；
-- [ ] I1 matrix auto-expands for new routes。
+- [x] 100 concurrent claim -> exactly one success（InMemory 与 real Postgres 均有 100-way race）；
+- [x] loser response includes holder snapshot；
+- [x] expectedStatus conflict returns current snapshot；
+- [x] A/B tenant streams never cross；
+- [x] **I6 通过**（per-tenant row 与 `board_seq` 双实现证据）；
+- [x] SSE/poll pass same behavior suite；
+- [x] forced dropped stream event repaired by reconciliation；
+- [x] presence expiry removes hint（shared conformance fake clock）；
+- [x] activity dropped visible（producer dropped + capacity eviction 累加）；
+- [x] no RAFT-style status sniffing（capability-only selection + 5xx no downgrade）；
+- [x] board status vocabulary never leaks into wire state（module constraint test）；
+- [x] I1 matrix auto-expands for new routes（registry/mounted 双向闭合）。
 
 ### S5.6 Rollback
 

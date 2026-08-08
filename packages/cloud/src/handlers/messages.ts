@@ -22,9 +22,12 @@
 import type { Context } from 'hono';
 import { MessagesSendRequestSchema, type MessagesSendResponse } from '@byok/protocol';
 import { handleInboundEnvelope } from '../inbound';
+import type { ActivityBounds } from '../coordination';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
 
-export type MessagesRouteDeps = DeviceRouteDeps;
+export interface MessagesRouteDeps extends DeviceRouteDeps {
+  readonly activityBounds: ActivityBounds;
+}
 
 export function messagesHandler(deps: MessagesRouteDeps) {
   return async (c: Context): Promise<Response> => {
@@ -38,7 +41,12 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     let accepted = 0;
     let rejected = 0;
     for (const envelope of parsed.data.messages) {
-      const outcome = await handleInboundEnvelope(stores, device.deviceId, envelope);
+      const outcome = await handleInboundEnvelope(
+        stores,
+        device.deviceId,
+        envelope,
+        deps.activityBounds,
+      );
       if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);
       // A duplicate is still a wire-level success (§8.2/§9's idempotency
       // window) — it just did not re-run a handler. Only a gate rejection

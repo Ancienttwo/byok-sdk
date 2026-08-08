@@ -29,6 +29,15 @@ function assertTtl(ttlMs: number): void {
   }
 }
 
+function assertMinimumInterval(minimumIntervalMs: number): void {
+  if (!Number.isFinite(minimumIntervalMs) || minimumIntervalMs < 0) {
+    throw new ByokCoreError(
+      'hint_ttl_invalid',
+      `Hint minimum interval must be a non-negative number of milliseconds, received ${String(minimumIntervalMs)}.`,
+    );
+  }
+}
+
 export class InMemoryPresenceStore implements PresenceStore {
   readonly #hints = new Map<string, PresenceHint>();
   readonly #clock: Clock;
@@ -39,7 +48,20 @@ export class InMemoryPresenceStore implements PresenceStore {
 
   async publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint> {
     assertTtl(input.ttlMs);
+    assertMinimumInterval(input.minimumIntervalMs);
     const now = this.#clock.now();
+    const key = tenantKey(tenant, input.deviceId);
+    const existing = this.#hints.get(key);
+    if (
+      existing !== undefined &&
+      now.toISOString() < existing.expiresAt &&
+      now.getTime() - Date.parse(existing.observedAt) < input.minimumIntervalMs
+    ) {
+      throw new ByokCoreError(
+        'hint_rate_limited',
+        `Presence for ${input.deviceId} was published more recently than the configured minimum interval.`,
+      );
+    }
     const hint: PresenceHint = {
       tenantId: tenant,
       deviceId: input.deviceId,
@@ -48,7 +70,7 @@ export class InMemoryPresenceStore implements PresenceStore {
       observedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + input.ttlMs).toISOString(),
     };
-    this.#hints.set(tenantKey(tenant, input.deviceId), hint);
+    this.#hints.set(key, hint);
     return hint;
   }
 
@@ -100,6 +122,12 @@ export class InMemoryActivityStore implements ActivityStore {
         `Activity capacity must be a positive integer, received ${String(capacity)}.`,
       );
     }
+    if (input.details.length === 0 || !Number.isSafeInteger(input.dropped) || input.dropped < 0) {
+      throw new ByokCoreError(
+        'activity_batch_invalid',
+        'Activity batches require at least one detail and a non-negative integer dropped count.',
+      );
+    }
 
     const now = this.#clock.now();
     const key = tenantKey(tenant, input.taskId);
@@ -107,9 +135,12 @@ export class InMemoryActivityStore implements ActivityStore {
     const live =
       existing !== undefined && now.toISOString() < existing.expiresAt ? existing : undefined;
 
-    const entry: ActivityEntry = { at: now.toISOString(), detail: input.detail };
-    const entries = [...(live?.entries ?? []), entry];
-    let dropped = live?.dropped ?? 0;
+    const appended: ActivityEntry[] = input.details.map((detail) => ({
+      at: now.toISOString(),
+      detail,
+    }));
+    const entries = [...(live?.entries ?? []), ...appended];
+    let dropped = (live?.dropped ?? 0) + input.dropped;
     while (entries.length > capacity) {
       entries.shift();
       // Lossiness is data, not an omission: a reader can tell "nothing

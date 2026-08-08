@@ -17,16 +17,35 @@
 import {
   contentHash,
   parseCapabilityDeclaration,
+  type ActivityTail,
+  type BoardItem,
+  type BoardItemInput,
+  type BoardListQuery,
+  type BoardPage,
   type CapabilityDeclaration,
   type Clock,
   type ControlPlanePrincipal,
   type CoreStores,
+  type PresenceHint,
   type TenantId,
 } from '@byok/core';
 import { createEnvelope, encodeEnvelope, type Envelope, type TaskOfferPayload } from '@byok/protocol';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
 import type { TokenSigner } from './auth/tokens';
 import { CLOUD_CAPABILITIES, declares } from './capabilities';
+import {
+  assertBoardLabels,
+  DEFAULT_ACTIVITY_CAPACITY,
+  DEFAULT_ACTIVITY_MAX_BYTES,
+  DEFAULT_ACTIVITY_MAX_EVENTS,
+  DEFAULT_ACTIVITY_TTL_MS,
+  DEFAULT_BOARD_CHANNEL_MAX_BYTES,
+  DEFAULT_BOARD_TITLE_MAX_BYTES,
+  DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
+  DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
+  DEFAULT_PRESENCE_TTL_MS,
+  type ActivityBounds,
+} from './coordination';
 import type { CloudCrypto } from './crypto/port';
 import { ByokCloudError } from './errors';
 import {
@@ -40,6 +59,18 @@ import { capabilitiesHandler } from './handlers/capabilities';
 import { challengeHandler, pairHandler, tokenHandler } from './handlers/auth';
 import { eventsHandler } from './handlers/events';
 import { messagesHandler } from './handlers/messages';
+import {
+  boardClaimHandler,
+  boardListHandler,
+  boardStatusHandler,
+  boardStreamHandler,
+  boardUnclaimHandler,
+  DEFAULT_BOARD_PAGE_LIMIT,
+  DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS,
+  DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS,
+  DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS,
+} from './handlers/board';
+import { activityAppendHandler, presencePublishHandler } from './handlers/presence';
 import { CloudRouteRegistry, type RouteDescriptor } from './router/registry';
 import { terminalReceiptKey } from './inbound';
 import type {
@@ -85,6 +116,19 @@ export interface ByokCloudOptions {
   readonly longPollIntervalMs?: number;
   readonly eventsPageLimit?: number;
   readonly accessTokenTtlSeconds?: number;
+  readonly boardPageLimit?: number;
+  readonly boardStreamQueryIntervalMs?: number;
+  readonly boardStreamHeartbeatIntervalMs?: number;
+  readonly boardStreamReconciliationIntervalMs?: number;
+  readonly boardChannelMaxBytes?: number;
+  readonly boardTitleMaxBytes?: number;
+  readonly presenceTtlMs?: number;
+  readonly presenceMinimumIntervalMs?: number;
+  readonly presenceDetailMaxBytes?: number;
+  readonly activityMaxEvents?: number;
+  readonly activityMaxBytes?: number;
+  readonly activityCapacity?: number;
+  readonly activityTtlMs?: number;
 }
 
 export interface EnqueueOfferInput {
@@ -123,6 +167,13 @@ export interface ByokCloud {
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
   revokeDevice(tenant: TenantId, deviceId: string): Promise<void>;
+  /** Host control plane: create a board row from explicit producer labels. */
+  createBoardItem(tenant: TenantId, input: BoardItemInput): Promise<BoardItem>;
+  listBoardItems(tenant: TenantId, query: BoardListQuery): Promise<BoardPage>;
+  /** Human review authority. Device routes cannot produce `done`. */
+  acceptBoardItem(tenant: TenantId, itemId: string): Promise<BoardItem>;
+  listPresence(tenant: TenantId): Promise<readonly PresenceHint[]>;
+  readActivity(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
 }
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
@@ -145,6 +196,12 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   };
 
   const registry = new CloudRouteRegistry();
+  const activityBounds: ActivityBounds = {
+    maxEvents: options.activityMaxEvents ?? DEFAULT_ACTIVITY_MAX_EVENTS,
+    maxBytes: options.activityMaxBytes ?? DEFAULT_ACTIVITY_MAX_BYTES,
+    capacity: options.activityCapacity ?? DEFAULT_ACTIVITY_CAPACITY,
+    ttlMs: options.activityTtlMs ?? DEFAULT_ACTIVITY_TTL_MS,
+  };
 
   // Auth v2 (§6) — always mounted: without pairing there is no deployment.
   registry.register({ method: 'POST', path: '/byok/pair', class: 'public' }, pairHandler({ auth }));
@@ -171,7 +228,66 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   }
 
   if (declares(declaration, CLOUD_CAPABILITIES.messagesBatch)) {
-    registry.register({ method: 'POST', path: '/byok/messages', class: 'device' }, messagesHandler(deviceRouteDeps));
+    registry.register(
+      { method: 'POST', path: '/byok/messages', class: 'device' },
+      messagesHandler({ ...deviceRouteDeps, activityBounds }),
+    );
+  }
+
+  if (declares(declaration, CLOUD_CAPABILITIES.boardCoordination)) {
+    const boardDeps = {
+      ...deviceRouteDeps,
+      pageLimit: options.boardPageLimit ?? DEFAULT_BOARD_PAGE_LIMIT,
+    };
+    registry.register({ method: 'GET', path: '/byok/board', class: 'device' }, boardListHandler(boardDeps));
+    registry.register(
+      { method: 'POST', path: '/byok/board/:id/claim', class: 'device' },
+      boardClaimHandler(deviceRouteDeps),
+    );
+    registry.register(
+      { method: 'POST', path: '/byok/board/:id/unclaim', class: 'device' },
+      boardUnclaimHandler(deviceRouteDeps),
+    );
+    registry.register(
+      { method: 'POST', path: '/byok/board/:id/status', class: 'device' },
+      boardStatusHandler(deviceRouteDeps),
+    );
+  }
+
+  if (declares(declaration, CLOUD_CAPABILITIES.boardSse)) {
+    registry.register(
+      { method: 'GET', path: '/byok/board/stream', class: 'device' },
+      boardStreamHandler({
+        ...deviceRouteDeps,
+        pageLimit: options.boardPageLimit ?? DEFAULT_BOARD_PAGE_LIMIT,
+        queryIntervalMs: options.boardStreamQueryIntervalMs ?? DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS,
+        heartbeatIntervalMs:
+          options.boardStreamHeartbeatIntervalMs ?? DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS,
+        reconciliationIntervalMs:
+          options.boardStreamReconciliationIntervalMs ??
+          DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS,
+      }),
+    );
+  }
+
+  if (declares(declaration, CLOUD_CAPABILITIES.presenceHints)) {
+    registry.register(
+      { method: 'PUT', path: '/byok/presence', class: 'device' },
+      presencePublishHandler({
+        ...deviceRouteDeps,
+        ttlMs: options.presenceTtlMs ?? DEFAULT_PRESENCE_TTL_MS,
+        minimumIntervalMs:
+          options.presenceMinimumIntervalMs ?? DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
+        detailMaxBytes: options.presenceDetailMaxBytes ?? DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
+      }),
+    );
+  }
+
+  if (declares(declaration, CLOUD_CAPABILITIES.activityTail)) {
+    registry.register(
+      { method: 'POST', path: '/byok/activity', class: 'device' },
+      activityAppendHandler({ ...deviceRouteDeps, bounds: activityBounds }),
+    );
   }
 
   if (declares(declaration, CLOUD_CAPABILITIES.blobsPresigned)) {
@@ -284,6 +400,34 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     revokeDevice(tenant, deviceId) {
       return tenantStoresFor(controlPlane(tenant), root).devices.revoke(deviceId);
     },
+
+    createBoardItem(tenant, input) {
+      assertBoardLabels(input.channel, input.title, {
+        channelMaxBytes: options.boardChannelMaxBytes ?? DEFAULT_BOARD_CHANNEL_MAX_BYTES,
+        titleMaxBytes: options.boardTitleMaxBytes ?? DEFAULT_BOARD_TITLE_MAX_BYTES,
+      });
+      return tenantStoresFor(controlPlane(tenant), root).board.create(input);
+    },
+
+    listBoardItems(tenant, query) {
+      return tenantStoresFor(controlPlane(tenant), root).board.list(query);
+    },
+
+    acceptBoardItem(tenant, itemId) {
+      return tenantStoresFor(controlPlane(tenant), root).board.updateStatus({
+        itemId,
+        expectedStatus: 'in_review',
+        status: 'done',
+      });
+    },
+
+    listPresence(tenant) {
+      return tenantStoresFor(controlPlane(tenant), root).presence.list();
+    },
+
+    readActivity(tenant, taskId) {
+      return tenantStoresFor(controlPlane(tenant), root).activity.read(taskId);
+    },
   };
 }
 
@@ -302,6 +446,15 @@ function assertNoOverDeclaration(
   declaration: CapabilityDeclaration,
   contentProxy: BlobContentProxy | undefined,
 ): void {
+  if (
+    declares(declaration, CLOUD_CAPABILITIES.boardSse) &&
+    !declares(declaration, CLOUD_CAPABILITIES.boardCoordination)
+  ) {
+    throw new ByokCloudError(
+      'capability_over_declared',
+      `${CLOUD_CAPABILITIES.boardSse} requires ${CLOUD_CAPABILITIES.boardCoordination}; without polling, reconciliation and declared fallback cannot be served.`,
+    );
+  }
   if (contentProxy !== undefined) return;
   if (!declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) return;
   throw new ByokCloudError(

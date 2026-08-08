@@ -29,6 +29,12 @@ export {
   DEFAULT_LONG_POLL_INTERVAL_MS,
   DEFAULT_MAX_BLOB_SIZE_BYTES,
 } from './cloud';
+export {
+  DEFAULT_BOARD_PAGE_LIMIT,
+  DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS,
+  DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS,
+  DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS,
+} from './handlers/board';
 export { createInMemoryByokCloud } from './composition/in-memory';
 export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory';
 
@@ -69,11 +75,14 @@ export type { InboundOutcome } from './inbound';
 // Tenant facade (layer 2 of §12.6.2)
 export { tenantStoresFor } from './tenant-stores';
 export type {
+  TenantBoundActivity,
+  TenantBoundBoard,
   CloudRootStores,
   TenantBoundBlobs,
   TenantBoundDedup,
   TenantBoundDevices,
   TenantBoundMailbox,
+  TenantBoundPresence,
   TenantBoundQuota,
   TenantBoundRateLimiter,
   TenantBoundReceipts,
@@ -81,6 +90,28 @@ export type {
   TenantBoundTaskAttempts,
   TenantStores,
 } from './tenant-stores';
+
+export {
+  DEFAULT_ACTIVITY_BOUNDS,
+  DEFAULT_ACTIVITY_CAPACITY,
+  DEFAULT_ACTIVITY_MAX_BYTES,
+  DEFAULT_ACTIVITY_MAX_EVENTS,
+  DEFAULT_ACTIVITY_TTL_MS,
+  DEFAULT_BOARD_CHANNEL_MAX_BYTES,
+  DEFAULT_BOARD_TITLE_MAX_BYTES,
+  DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
+  DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
+  DEFAULT_PRESENCE_TTL_MS,
+} from './coordination';
+export type { ActivityBounds } from './coordination';
+export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
+export type {
+  BoardFeedClientOptions,
+  BoardFeedItem,
+  BoardFeedMode,
+  BoardFeedPage,
+  BoardFeedRead,
+} from './coordination-client';
 
 // Cloud-local ports
 export { CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES } from './stores/ports';

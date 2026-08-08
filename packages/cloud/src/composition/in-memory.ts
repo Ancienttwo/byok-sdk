@@ -42,6 +42,19 @@ export interface InMemoryByokCloudOptions {
   readonly longPollIntervalMs?: number;
   readonly eventsPageLimit?: number;
   readonly accessTokenTtlSeconds?: number;
+  readonly boardPageLimit?: number;
+  readonly boardStreamQueryIntervalMs?: number;
+  readonly boardStreamHeartbeatIntervalMs?: number;
+  readonly boardStreamReconciliationIntervalMs?: number;
+  readonly boardChannelMaxBytes?: number;
+  readonly boardTitleMaxBytes?: number;
+  readonly presenceTtlMs?: number;
+  readonly presenceMinimumIntervalMs?: number;
+  readonly presenceDetailMaxBytes?: number;
+  readonly activityMaxEvents?: number;
+  readonly activityMaxBytes?: number;
+  readonly activityCapacity?: number;
+  readonly activityTtlMs?: number;
 }
 
 export interface InMemoryByokCloud {
@@ -84,6 +97,33 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     ...(options.accessTokenTtlSeconds !== undefined
       ? { accessTokenTtlSeconds: options.accessTokenTtlSeconds }
       : {}),
+    ...(options.boardPageLimit === undefined ? {} : { boardPageLimit: options.boardPageLimit }),
+    ...(options.boardStreamQueryIntervalMs === undefined
+      ? {}
+      : { boardStreamQueryIntervalMs: options.boardStreamQueryIntervalMs }),
+    ...(options.boardStreamHeartbeatIntervalMs === undefined
+      ? {}
+      : { boardStreamHeartbeatIntervalMs: options.boardStreamHeartbeatIntervalMs }),
+    ...(options.boardStreamReconciliationIntervalMs === undefined
+      ? {}
+      : { boardStreamReconciliationIntervalMs: options.boardStreamReconciliationIntervalMs }),
+    ...(options.boardChannelMaxBytes === undefined
+      ? {}
+      : { boardChannelMaxBytes: options.boardChannelMaxBytes }),
+    ...(options.boardTitleMaxBytes === undefined
+      ? {}
+      : { boardTitleMaxBytes: options.boardTitleMaxBytes }),
+    ...(options.presenceTtlMs === undefined ? {} : { presenceTtlMs: options.presenceTtlMs }),
+    ...(options.presenceMinimumIntervalMs === undefined
+      ? {}
+      : { presenceMinimumIntervalMs: options.presenceMinimumIntervalMs }),
+    ...(options.presenceDetailMaxBytes === undefined
+      ? {}
+      : { presenceDetailMaxBytes: options.presenceDetailMaxBytes }),
+    ...(options.activityMaxEvents === undefined ? {} : { activityMaxEvents: options.activityMaxEvents }),
+    ...(options.activityMaxBytes === undefined ? {} : { activityMaxBytes: options.activityMaxBytes }),
+    ...(options.activityCapacity === undefined ? {} : { activityCapacity: options.activityCapacity }),
+    ...(options.activityTtlMs === undefined ? {} : { activityTtlMs: options.activityTtlMs }),
   });
 
   return { cloud, core, stores, blobContentProxy, clock, crypto };

@@ -33,6 +33,10 @@ export const CLOUD_ERROR_CODES = {
    * deployment whose one honest interface lies.
    */
   capability_over_declared: 'capability_over_declared',
+  /** Host-supplied board labels or coordination input exceeded the explicit contract. */
+  coordination_input_invalid: 'coordination_input_invalid',
+  /** A progress/activity batch exceeded the configured event or byte ceiling. */
+  activity_batch_too_large: 'activity_batch_too_large',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

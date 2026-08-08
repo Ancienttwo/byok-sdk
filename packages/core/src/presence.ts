@@ -39,6 +39,8 @@ export interface PresenceHintInput {
   readonly detail?: string;
   /** Hint lifetime. §12.7.5 suggests 60-120s for presence. */
   readonly ttlMs: number;
+  /** Minimum time between accepted publications for this device. `0` explicitly disables throttling. */
+  readonly minimumIntervalMs: number;
 }
 
 /** One entry of a task's lossy tail. */
@@ -64,7 +66,10 @@ export interface ActivityTail {
 
 export interface ActivityAppendInput {
   readonly taskId: string;
-  readonly detail: string;
+  /** One ProgressBatcher-shaped batch. Empty batches are rejected. */
+  readonly details: readonly string[];
+  /** Events the producer dropped before this batch reached the store. */
+  readonly dropped: number;
   /** Tail lifetime. §12.7.5 suggests 5-15 minutes for activity. */
   readonly ttlMs: number;
   /** Maximum retained entries. Must be a positive integer. */
@@ -87,7 +92,8 @@ export interface PresenceStore {
  * Activity port. Tenant-first, async.
  *
  * Raises: `activity_capacity_invalid` (non-positive or non-integer capacity —
- * an unbounded tail is exactly what this contract exists to prevent).
+ * an unbounded tail is exactly what this contract exists to prevent),
+ * `activity_batch_invalid` (empty batch or invalid producer drop count).
  */
 export interface ActivityStore {
   append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
