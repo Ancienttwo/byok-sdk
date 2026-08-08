@@ -69,7 +69,7 @@ export interface ByokCloudOptions {
    * hands the device a presigned URL to the object store and never carries a
    * byte, so it has nothing to supply here. Supplying it is necessary but not
    * sufficient for the routes to exist — the deployment must also declare
-   * `blobs.contentProxy` (ADR-010).
+   * `blobs.contentproxy` (ADR-010).
    */
   readonly blobContentProxy?: BlobContentProxy;
   readonly crypto: CloudCrypto;
@@ -126,6 +126,7 @@ export interface ByokCloud {
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   const declaration = parseDeclaration(options.capabilities);
+  assertNoOverDeclaration(declaration, options.blobContentProxy);
   const root: CloudRootStores = { core: options.core, cloud: options.cloud };
   const auth: AuthPlane = createAuthPlane({
     stores: options.cloud,
@@ -182,11 +183,24 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   }
 
   // Byte proxying: BOTH conditions, and neither is inferred from the other.
-  // A deployment that declares `blobs.contentProxy` without supplying a proxy
-  // would over-declare its surface; one that supplies a proxy without
-  // declaring it would serve a route no client is allowed to learn about by
-  // any means other than probing, which is exactly what ADR-010 forbids. There
-  // is no third state: a composition either carries bytes or it does not.
+  // There is no third state: a composition either carries bytes or it does not.
+  //
+  // The two halves fail differently, and the asymmetry is the point.
+  //
+  // DECLARED WITHOUT A PROXY is fatal, above. A declaration is the ONE thing a
+  // client is entitled to trust without probing (ADR-010), so a deployment
+  // publishing `blobs.contentproxy` it cannot serve does not degrade to "two
+  // missing routes" — it tells every client something false and then answers
+  // 404 to the client that believed it. Not mounting the routes is what an
+  // honest composition does with a capability it lacks; the dishonesty is in
+  // still announcing it, and the announcement is unconditional.
+  //
+  // SUPPLIED WITHOUT A DECLARATION is not fatal, and stays a silent no-mount.
+  // The deployment's declaration is then merely narrower than its parts, which
+  // is how a capability gets rolled out or rolled back: a host with a proxy
+  // wired up but the capability withheld serves exactly what it declares. The
+  // client is told less than the truth, never more, and no route exists that a
+  // client could only discover by probing.
   const contentProxy = options.blobContentProxy;
   if (contentProxy !== undefined && declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) {
     const contentDeps = { contentProxy };
@@ -269,6 +283,29 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return tenantStoresFor(controlPlane(tenant), root).devices.revoke(deviceId);
     },
   };
+}
+
+/**
+ * Fail closed on a declaration this composition's parts cannot back.
+ *
+ * Route mounting alone cannot enforce this: `GET /byok/capabilities` serves the
+ * declaration verbatim and is mounted unconditionally, so a deployment that
+ * declares `blobs.contentproxy` without a proxy publishes the capability and
+ * 404s both routes. Refusing at construction is the only placement where the
+ * deployment cannot exist in that state — the alternative, sanitizing the
+ * declaration down to what got mounted, would make the running surface a second
+ * authority over what the host said it was deploying.
+ */
+function assertNoOverDeclaration(
+  declaration: CapabilityDeclaration,
+  contentProxy: BlobContentProxy | undefined,
+): void {
+  if (contentProxy !== undefined) return;
+  if (!declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) return;
+  throw new ByokCloudError(
+    'capability_over_declared',
+    `This deployment declares ${CLOUD_CAPABILITIES.blobsContentProxy} but was given no BlobContentProxy, so both /byok/blobs/:id/content routes would be published and unserved.`,
+  );
 }
 
 function parseDeclaration(declaration: CapabilityDeclaration): CapabilityDeclaration {

@@ -15,7 +15,7 @@
  * predicate rather than reaching for the database's `now()`.
  */
 import { describe } from 'vitest';
-import type { CloudStores } from '@byok/cloud';
+import type { BlobDeclaration, CloudStores } from '@byok/cloud';
 import { runCloudPortInventoryConformance } from './port-inventory';
 import { runPairingConformance } from './pairing';
 import { runNonceConformance } from './nonces';
@@ -78,6 +78,26 @@ export interface CloudCompositionHandle {
   now(): string;
   /** Moves the composition's clock forward. Must affect every TTL the stores observe. */
   advanceTime(ms: number): void | Promise<void>;
+  /**
+   * Redeems a grant: puts the declared bytes wherever it addresses, and leaves
+   * the store in whatever state it calls "the object is here".
+   *
+   * Part of the factory contract for the same reason `advanceTime` is. What an
+   * object store does AFTER an object exists is contract behavior — a committed
+   * object is the only thing a truth record may reference — but no composition
+   * can be driven there through {@link CloudConformanceStores} alone: the blob
+   * port mints grants and never carries a byte, which is precisely the fact
+   * that narrowed it. So the composition supplies the byte path, and the
+   * assertions stay composition-blind.
+   *
+   * @throws if the bytes did not land. A silent failure here would turn every
+   * committed-state assertion into a vacuous one.
+   */
+  landBlobBytes(input: {
+    readonly grant: { readonly blobId: string; readonly uploadUrl: string };
+    readonly declaration: BlobDeclaration;
+    readonly bytes: Uint8Array;
+  }): Promise<void>;
   /** Optional teardown for compositions holding connections. */
   dispose?(): void | Promise<void>;
 }

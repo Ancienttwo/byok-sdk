@@ -27,6 +27,11 @@
  *    type disagreeing is `storage_integrity_mismatch`, and the row stays
  *    `pending` so the S4B GC worker can reclaim it rather than a truth record
  *    pointing at bytes nobody vouched for.
+ * 4. `committed` is terminal for writes. Step 1 is re-runnable while a row is
+ *    `pending` — that is what makes a retried upload idempotent — and refused
+ *    once it is `committed`, because §12.7.4 lets truth reference a committed
+ *    manifest and the reference means nothing if the bytes can still be
+ *    replaced by a same-shaped body under a freshly signed PUT.
  *
  * **No checksum header.** `x-amz-checksum-sha256` was probed rather than
  * assumed (design §3 marked it `[unverified]`): MinIO honors it in a presigned
@@ -60,6 +65,12 @@ import { AwsClient } from 'aws4fetch';
 /** 15 minutes, matching the in-memory reference's `BLOB_URL_TTL_MS`. */
 export const DEFAULT_PRESIGN_TTL_SECONDS = 15 * 60;
 
+/** `X-Amz-Expires` floor. Below a second there is no grant, only a signature. */
+export const MIN_PRESIGN_TTL_SECONDS = 1;
+
+/** `X-Amz-Expires` ceiling: seven days, the longest lifetime R2 will honor. */
+export const MAX_PRESIGN_TTL_SECONDS = 604_800;
+
 /** Three total attempts: the first plus two retries. */
 export const DEFAULT_MAX_ATTEMPTS = 3;
 
@@ -86,6 +97,42 @@ export class ObjectStoreRequestError extends Error {
     this.name = 'ObjectStoreRequestError';
     this.attempts = attempts;
     this.status = status;
+  }
+}
+
+/**
+ * What this adapter refuses on its own account, before anything is signed.
+ *
+ * A second local class rather than more core codes, for the same reason
+ * {@link ObjectStoreRequestError} is one: core's taxonomy describes the
+ * manifest contract, and "this deployment's tenant ids cannot be key segments"
+ * or "this deployment configured a lifetime R2 will not honor" are facts about
+ * an S3 adapter's configuration and inputs, not about an object. Core's code
+ * union is closed and deliberately so; widening it from an adapter would put
+ * an adapter's vocabulary on a wire contract every composition shares.
+ *
+ * Code-based branching, matching the idiom of every other error type here.
+ */
+export const R2_BLOB_ERROR_CODES = {
+  /**
+   * A tenant id that cannot be one safe path segment. Wire-relevant: it is the
+   * only signal a control plane gets that the id it issued cannot address
+   * object storage, and it is raised BEFORE any key is built.
+   */
+  storage_tenant_key_unsafe: 'storage_tenant_key_unsafe',
+  /** A presign lifetime outside `[MIN_PRESIGN_TTL_SECONDS, MAX_PRESIGN_TTL_SECONDS]`. Construction-time only. */
+  storage_presign_ttl_invalid: 'storage_presign_ttl_invalid',
+} as const;
+
+export type R2BlobErrorCode = (typeof R2_BLOB_ERROR_CODES)[keyof typeof R2_BLOB_ERROR_CODES];
+
+export class R2BlobStoreError extends Error {
+  public readonly code: R2BlobErrorCode;
+
+  constructor(code: R2BlobErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'R2BlobStoreError';
+    this.code = code;
   }
 }
 
@@ -163,7 +210,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
     });
     this.#origin = options.endpoint.replace(/\/+$/, '');
     this.#bucket = options.bucket;
-    this.#presignTtlSeconds = options.presignTtlSeconds ?? DEFAULT_PRESIGN_TTL_SECONDS;
+    this.#presignTtlSeconds = assertPresignTtl(options.presignTtlSeconds ?? DEFAULT_PRESIGN_TTL_SECONDS);
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     this.#retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
@@ -174,10 +221,16 @@ export class R2CloudBlobStore implements CloudBlobStore {
    * key, this length, this type, and this expiry.
    *
    * `putManifest` is idempotent per (tenant, hash), so a device that declares
-   * the same content twice gets the same row and the same key — a duplicate
-   * upload is a no-op, not a second object. It is idempotent per TENANT, which
-   * is the same reason the key embeds the tenant: two tenants holding identical
-   * bytes hold two independent objects, and neither can learn of the other's.
+   * the same content twice while it is still `pending` gets the same row and
+   * the same key — an interrupted upload is retried, not duplicated. It is
+   * idempotent per TENANT, which is the same reason the key embeds the tenant:
+   * two tenants holding identical bytes hold two independent objects, and
+   * neither can learn of the other's.
+   *
+   * Idempotence stops at `committed`, and that boundary is the point: a
+   * committed object is what a truth record is allowed to reference, so it has
+   * to be immutable, and re-issuing a write grant for one is the only way this
+   * adapter could make it otherwise.
    */
   async createUpload(
     tenant: TenantId,
@@ -187,6 +240,11 @@ export class R2CloudBlobStore implements CloudBlobStore {
     // upstream of every path that could reach key construction.
     const hash = contentHash(input.contentHash);
     const byteSize = this.#declaredSize(hash, input.size);
+    // The same guard {@link #objectUrl} enforces, run before the manifest is
+    // touched. Ordering only — the authority is still the one key-construction
+    // point — but a tenant whose id can never address a key should not get to
+    // reserve a row on the way to being refused.
+    assertKeySegmentTenant(tenant);
 
     const entry = await this.#objects.putManifest(tenant, {
       hash,
@@ -202,6 +260,21 @@ export class R2CloudBlobStore implements CloudBlobStore {
       throw new ByokCoreError(
         'storage_integrity_mismatch',
         `Object ${hash} is already declared as ${String(entry.byteSize)} bytes of ${entry.contentType}; this upload declares ${String(byteSize)} bytes of ${input.contentType}.`,
+      );
+    }
+    // A committed object is immutable, so no write authorization exists to
+    // hand out for one. §12.7.4 lets a truth record reference only a committed
+    // manifest, and the attestation is worth exactly as much as the promise
+    // that the bytes under `sha256/<hex>` do not change afterwards. A fresh PUT
+    // grant would be that promise's only counterexample: the object store
+    // accepts any body matching the signed length and type, and the digest is
+    // never recomputed anywhere. `pending` stays grantable — a device retrying
+    // an interrupted upload is the case idempotence is FOR, and there is
+    // nothing yet for a replacement to invalidate.
+    if (entry.state === 'committed') {
+      throw new ByokCoreError(
+        'object_state_invalid',
+        `Object ${hash} is already committed; a committed object is immutable, so no upload grant is issued for it.`,
       );
     }
 
@@ -275,15 +348,31 @@ export class R2CloudBlobStore implements CloudBlobStore {
   }
 
   /**
-   * The ONLY place an object key is built.
+   * The ONLY place an object key is built, and therefore the only place the
+   * key's two segments have to be safe.
    *
-   * `tenantObjectKey` is core's, and it takes a `ContentHash` — a branded type
-   * with exactly one mint point that rejects anything but 64 lowercase hex.
-   * A traversal segment, an absolute path, an uppercase digest, or another
-   * tenant's prefix cannot be smuggled through a parameter that will not accept
-   * them. Nothing else in this file concatenates a path.
+   * The hash half is closed by construction: `tenantObjectKey` is core's and it
+   * takes a `ContentHash` — a branded type with exactly one mint point that
+   * rejects anything but 64 lowercase hex — so a traversal segment, an absolute
+   * path, or an uppercase digest cannot be smuggled through a parameter that
+   * will not accept them.
+   *
+   * The tenant half is NOT, and that asymmetry is why the guard below exists.
+   * `tenantId()` fails closed on empty, padded, over-long, and `NUL`-bearing
+   * values, and deliberately normalizes nothing else — normalizing would make
+   * the SDK disagree with the control plane that issued the id about its
+   * canonical form (`@byok/core`'s `tenant.ts`). So `a/../b` is a legitimate
+   * tenant id, and the line below would otherwise hand it to `new URL()`, which
+   * resolves the traversal and returns tenant `b`'s key. That is a cross-tenant
+   * alias: `a/../b` could probe, overwrite, and read what `b` owns.
+   *
+   * Refused rather than encoded. Percent-encoding the segment would keep the
+   * key distinct, and would also give every tenant id two spellings — the one
+   * the control plane issued and the one at rest in the object store — which is
+   * the second source of truth core refused to create in the first place.
    */
   #objectUrl(tenant: TenantId, hash: ContentHash): URL {
+    assertKeySegmentTenant(tenant);
     return new URL(`${this.#origin}/${this.#bucket}/${tenantObjectKey(tenant, hash)}`);
   }
 
@@ -296,7 +385,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
    */
   async #head(tenant: TenantId, hash: ContentHash): Promise<HeadResult> {
     const url = this.#objectUrl(tenant, hash);
-    const response = await this.#send(new Request(url, { method: 'HEAD' }));
+    const { response, attempts } = await this.#send(new Request(url, { method: 'HEAD' }));
 
     if (response.status === 404) {
       return { present: false, byteSize: 0n, contentType: '' };
@@ -304,7 +393,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
     if (!response.ok) {
       throw new ObjectStoreRequestError(
         `HEAD on the object store answered ${response.status}.`,
-        1,
+        attempts,
         response.status,
       );
     }
@@ -317,15 +406,24 @@ export class R2CloudBlobStore implements CloudBlobStore {
       // be inventing the observation the check exists to make.
       throw new ObjectStoreRequestError(
         `HEAD on the object store omitted content-length or content-type, so ${hash} cannot be verified.`,
-        1,
+        attempts,
         response.status,
       );
     }
     return { present: true, byteSize: BigInt(length), contentType };
   }
 
-  /** Signs, sends, and retries 5xx/429/network faults with a doubling delay. */
-  async #send(request: Request): Promise<Response> {
+  /**
+   * Signs, sends, and retries 5xx/429/network faults with a doubling delay.
+   *
+   * Returns the attempt count alongside the response because the caller is what
+   * decides the answer was a failure. A 4xx costs however many attempts the
+   * transient faults before it did, and `attempts` is the only field
+   * {@link ObjectStoreRequestError} carries that an operator can use to tell a
+   * flapping remote from a hard refusal — so it has to be counted here, where
+   * the loop is, rather than assumed to be 1 at the throw site.
+   */
+  async #send(request: Request): Promise<{ readonly response: Response; readonly attempts: number }> {
     const failures: string[] = [];
 
     for (let attempt = 1; attempt <= this.#maxAttempts; attempt += 1) {
@@ -334,7 +432,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
       });
 
       const outcome = await this.#attempt(signed);
-      if (outcome.response !== undefined) return outcome.response;
+      if (outcome.response !== undefined) return { response: outcome.response, attempts: attempt };
       failures.push(outcome.failure);
 
       if (attempt < this.#maxAttempts) {
@@ -380,4 +478,48 @@ export class R2CloudBlobStore implements CloudBlobStore {
     }
     return BigInt(size);
   }
+}
+
+/**
+ * The character set a tenant id may use once it is a KEY SEGMENT.
+ *
+ * RFC 3986's unreserved set, and nothing else: those are exactly the characters
+ * that survive `new URL()` unchanged. Anything outside it either changes the
+ * path's STRUCTURE (`/`, `\`) or changes its SPELLING (percent-encoding), and
+ * both are disqualifying for the same reason — an id with two forms is an id
+ * with two owners.
+ */
+const SAFE_TENANT_SEGMENT = /^[A-Za-z0-9._~-]+$/;
+
+/**
+ * A tenant id is usable here only if it is ONE safe path segment.
+ *
+ * Conservative on purpose: it rejects rather than repairs, and it rejects
+ * everything it is not certain survives URL resolution unchanged — separators
+ * in either direction, a leading `.` (which covers `.` and `..`), and every
+ * character that would be percent-encoded. A permissive guard that "handles"
+ * traversal by rewriting it would be a second normalization authority, and the
+ * one thing worse than a tenant id the object store cannot address is a tenant
+ * id the object store addresses under a name the control plane never issued.
+ */
+function assertKeySegmentTenant(tenant: TenantId): void {
+  if (SAFE_TENANT_SEGMENT.test(tenant) && !tenant.startsWith('.')) return;
+  throw new R2BlobStoreError(
+    'storage_tenant_key_unsafe',
+    `Tenant id ${JSON.stringify(tenant)} is not a single safe object-key segment, so no key can be built for it.`,
+  );
+}
+
+function assertPresignTtl(seconds: number): number {
+  if (
+    Number.isInteger(seconds) &&
+    seconds >= MIN_PRESIGN_TTL_SECONDS &&
+    seconds <= MAX_PRESIGN_TTL_SECONDS
+  ) {
+    return seconds;
+  }
+  throw new R2BlobStoreError(
+    'storage_presign_ttl_invalid',
+    `A presign lifetime of ${String(seconds)} is not a whole number of seconds in [${String(MIN_PRESIGN_TTL_SECONDS)}, ${String(MAX_PRESIGN_TTL_SECONDS)}], which is the range R2 will honor.`,
+  );
 }

@@ -270,7 +270,7 @@ export interface CloudBlobStore {
  * the HMAC signature over the blob id is the whole credential. They stay off
  * {@link TenantStores} for the same reason the two exceptions above do.
  *
- * A deployment supplying a proxy must also declare `blobs.contentProxy`
+ * A deployment supplying a proxy must also declare `blobs.contentproxy`
  * (ADR-010): the routes mount on proxy-presence AND declaration, never on
  * either alone.
  */

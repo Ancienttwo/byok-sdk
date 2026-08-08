@@ -42,10 +42,14 @@ export {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_PRESIGN_TTL_SECONDS,
   DEFAULT_RETRY_DELAY_MS,
+  MAX_PRESIGN_TTL_SECONDS,
+  MIN_PRESIGN_TTL_SECONDS,
   ObjectStoreRequestError,
+  R2_BLOB_ERROR_CODES,
+  R2BlobStoreError,
   R2CloudBlobStore,
 } from './stores/index';
-export type { ObjectStoreFetch, R2BlobStoreOptions } from './stores/index';
+export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
 
 // The seven core port implementations, and the composition that bundles them.
 // All seven ship together because `runCoreConformance` certifies a composition

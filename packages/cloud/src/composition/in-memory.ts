@@ -68,7 +68,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     core,
     cloud: stores,
     // This composition has nowhere else to put bytes, so it supplies the proxy
-    // and `fullCapabilityDeclaration()` declares `blobs.contentProxy`. That
+    // and `fullCapabilityDeclaration()` declares `blobs.contentproxy`. That
     // pairing is what keeps hosted-in-memory behavior identical to what it was
     // before the port narrowed.
     blobContentProxy,

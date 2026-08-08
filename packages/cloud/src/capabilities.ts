@@ -12,7 +12,7 @@
  * daemon does not consume it yet (that lands in a later slice). What it
  * already does here is drive route selection — a deployment that does not
  * declare `blobs.presigned` does not mount the grant routes at all, and one
- * that does not declare `blobs.contentProxy` does not mount the two `/content`
+ * that does not declare `blobs.contentproxy` does not mount the two `/content`
  * routes, so the declaration and the surface cannot disagree.
  */
 import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok/core';

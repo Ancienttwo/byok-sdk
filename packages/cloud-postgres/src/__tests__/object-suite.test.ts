@@ -34,6 +34,7 @@ import { migrate } from '../migrate';
 import { PostgresObjectStore } from '../stores/core/objects';
 import {
   ObjectStoreRequestError,
+  R2BlobStoreError,
   R2CloudBlobStore,
   type ObjectStoreFetch,
 } from '../stores/r2-blobs';
@@ -157,6 +158,16 @@ async function expectCoreError(promise: Promise<unknown>, code: string): Promise
   return error as ByokCoreError;
 }
 
+/** The adapter's own refusals, which are deliberately not core codes. */
+async function expectAdapterError(promise: Promise<unknown>, code: string): Promise<void> {
+  const error = await promise.then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+  expect(error, `expected ${code}`).toBeInstanceOf(R2BlobStoreError);
+  expect((error as R2BlobStoreError).code).toBe(code);
+}
+
 describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE ? ` — ${SKIP_REASON}` : ''}`, () => {
   beforeAll(() => {
     // Every assertion below leans on MinIO answering for itself. If the
@@ -165,7 +176,7 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
   });
 
   // 1 ------------------------------------------------------------------
-  it('makes a duplicate upload of the same content a no-op within a tenant', async () => {
+  it('makes a re-declared upload a retry of the same pending object, never a second one', async () => {
     await withObjects(async ({ blobs, objects, storage }) => {
       const item = await content('duplicate me');
 
@@ -174,21 +185,57 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
 
       // Same object, not a second one: the id IS the content hash, so a client
       // that re-declares the same bytes cannot create a parallel manifest row.
+      // The grant is re-issued because `pending` is the interrupted-upload
+      // state — that is what upload idempotence is for, and the only state it
+      // is for.
       expect(second.blobId).toBe(first.blobId);
+      expect(second.uploadUrl.startsWith(objectUrl(storage, TENANT_A, item.hash))).toBe(true);
       expect(await objects.list(TENANT_A, {})).toHaveLength(1);
 
       expect((await putViaGrant(first.uploadUrl, item)).status).toBe(200);
       expect(await blobs.getDownloadUrl(TENANT_A, first.blobId)).toBeDefined();
       expect((await objects.get(TENANT_A, item.hash))?.state).toBe('committed');
 
-      // And re-declaring AFTER the commit does not walk the row backwards —
-      // a retried upload must not reset a committed object to `pending` and
-      // orphan whatever already references it.
-      const third = await blobs.createUpload(TENANT_A, item.declaration);
-      expect(third.blobId).toBe(first.blobId);
+      // Re-declaring AFTER the commit is refused instead. Not because the row
+      // would move — `putManifest` leaves a committed row exactly where it is —
+      // but because the grant itself would be a fresh licence to write over
+      // bytes a truth record is entitled to reference.
+      await expectCoreError(blobs.createUpload(TENANT_A, item.declaration), 'object_state_invalid');
       expect((await objects.get(TENANT_A, item.hash))?.state).toBe('committed');
       expect(await objects.list(TENANT_A, {})).toHaveLength(1);
-      expect(third.uploadUrl.startsWith(objectUrl(storage, TENANT_A, item.hash))).toBe(true);
+      // Refusing to re-authorize a WRITE is not withdrawing the object.
+      expect(await blobs.getDownloadUrl(TENANT_A, first.blobId)).toBeDefined();
+    });
+  });
+
+  it('keeps a committed object immutable against a same-shaped replacement', async () => {
+    // Why the refusal above is a property and not bookkeeping: `Content-Length`
+    // and `Content-Type` are what a grant binds, the digest is recomputed
+    // nowhere, and so ANY body of the declared shape satisfies a PUT signed for
+    // that key. A grant issued after the commit would make `sha256/<hex>` stop
+    // meaning "the bytes here hash to <hex>" — §12.7.4's whole premise.
+    await withObjects(async ({ blobs, objects, storage }) => {
+      const item = await content('the vouched bytes');
+      const grant = await blobs.createUpload(TENANT_A, item.declaration);
+      expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
+      expect(await blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeDefined();
+      expect((await objects.get(TENANT_A, item.hash))?.state).toBe('committed');
+
+      // Same length, same type, different bytes — a grant cannot tell them apart.
+      const impostor = await content('the swapped bytes');
+      expect(impostor.bytes.length).toBe(item.bytes.length);
+      expect(impostor.declaration.contentType).toBe(item.declaration.contentType);
+      expect(impostor.hash).not.toBe(item.hash);
+
+      await expectCoreError(blobs.createUpload(TENANT_A, item.declaration), 'object_state_invalid');
+
+      // Read back out of band: the claim is about the object store's contents,
+      // not about the row this process wrote.
+      const head = await storage.client.fetch(objectUrl(storage, TENANT_A, item.hash), { method: 'HEAD' });
+      expect(head.status).toBe(200);
+      expect(head.headers.get('content-length')).toBe(String(item.declaration.size));
+      const body = await storage.client.fetch(objectUrl(storage, TENANT_A, item.hash));
+      expect(await body.text()).toBe('the vouched bytes');
     });
   });
 
@@ -424,6 +471,59 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
     );
   });
 
+  it('cannot construct a key from a tenant id that is not one safe segment', async () => {
+    const recorder = recordCalls();
+
+    await withObjects(
+      async ({ blobs, objects, storage }) => {
+        const item = await content('alias attempt');
+
+        // The alias this guard exists for. `tenantId()` accepts `a/../b` — it
+        // fails closed on empty, padded, over-long, and NUL-bearing ids and
+        // deliberately normalizes nothing else, because normalizing would put
+        // the SDK and the control plane in disagreement about an id's canonical
+        // form. URL resolution then collapses the traversal, so unguarded these
+        // two DIFFERENT tenants address ONE key.
+        const aliased = tenantId(`${TENANT_A}/../${TENANT_B}`);
+        expect(tenantObjectKey(aliased, item.hash)).not.toBe(tenantObjectKey(TENANT_B, item.hash));
+        expect(new URL(objectUrl(storage, aliased, item.hash)).pathname).toBe(
+          new URL(objectUrl(storage, TENANT_B, item.hash)).pathname,
+        );
+
+        const unsafe = [
+          aliased,
+          tenantId('..'),
+          tenantId('.hidden'),
+          tenantId('a/b'),
+          tenantId('back\\slash'),
+          tenantId('%2e%2e'),
+          tenantId('a b'),
+        ];
+
+        for (const tenant of unsafe) {
+          await expectAdapterError(blobs.createUpload(tenant, item.declaration), 'storage_tenant_key_unsafe');
+          // Refused BEFORE the manifest: an id that can never address a key
+          // does not get to reserve a row on the way to being told so.
+          expect(await objects.get(tenant, item.hash)).toBeUndefined();
+          // On the way out it is a stranger like any other.
+          expect(await blobs.getDownloadUrl(tenant, item.hash)).toBeUndefined();
+        }
+
+        // And not one of them produced a request. A cross-tenant alias the
+        // object store never hears about is one it cannot be talked into
+        // serving, whatever its own path handling does.
+        expect(recorder.attempts).toEqual([]);
+
+        // The control: the tenant the alias was aiming at is unaffected, so
+        // this passes by refusing the alias rather than by refusing everything.
+        const grant = await blobs.createUpload(TENANT_B, item.declaration);
+        expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
+        expect(await blobs.getDownloadUrl(TENANT_B, grant.blobId)).toBeDefined();
+      },
+      { fetch: recorder.fetch },
+    );
+  });
+
   // 8 ------------------------------------------------------------------
   it('gives one tenant no way to learn another holds the same content', async () => {
     await withObjects(async ({ blobs, objects, storage }) => {
@@ -492,6 +592,35 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + minio]${SKIP_DATAPLANE
         expect(await blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeDefined();
         expect(injector.attempts).toHaveLength(attemptsBefore);
         expect((await objects.get(TENANT_A, item.hash))?.updatedAt).toBe(committed?.updatedAt);
+      },
+      { fetch: injector.fetch, retryDelayMs: 1 },
+    );
+  });
+
+  it('reports how many attempts a refusal actually cost', async () => {
+    // `attempts` is the only field this error carries that separates a flapping
+    // remote from a hard refusal, and the refusal is raised at the far end of
+    // the retry loop — so the count has to come FROM the loop. Two transient
+    // faults and then a 403: three attempts were spent, and an error saying
+    // "1" would describe a request this adapter never made.
+    const injector = injectFaults([503, 'timeout', 403]);
+
+    await withObjects(
+      async ({ blobs, objects }) => {
+        const item = await content('refused after retrying');
+        const grant = await blobs.createUpload(TENANT_A, item.declaration);
+        expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
+
+        const failure = await blobs.getDownloadUrl(TENANT_A, grant.blobId).then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+        expect(failure).toBeInstanceOf(ObjectStoreRequestError);
+        expect((failure as ObjectStoreRequestError).status).toBe(403);
+        expect((failure as ObjectStoreRequestError).attempts).toBe(injector.attempts.length);
+        expect(injector.attempts).toHaveLength(3);
+
+        expect((await objects.get(TENANT_A, item.hash))?.state).toBe('pending');
       },
       { fetch: injector.fetch, retryDelayMs: 1 },
     );

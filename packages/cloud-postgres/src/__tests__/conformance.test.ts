@@ -58,6 +58,20 @@ const postgresFactory: CloudCompositionFactory = {
       advanceTime: (ms: number) => {
         clock.advance(ms);
       },
+      // A device redeems a grant by PUTting straight at the object store, and
+      // so does this: nothing in the composition is in the byte path, which is
+      // the fact the narrowed port exists to express. The signed headers must
+      // be sent verbatim or MinIO refuses the body.
+      landBlobBytes: async ({ grant, declaration, bytes }) => {
+        const response = await globalThis.fetch(grant.uploadUrl, {
+          method: 'PUT',
+          body: bytes,
+          headers: { 'content-type': declaration.contentType },
+        });
+        if (!response.ok) {
+          throw new Error(`the object store refused the upload: HTTP ${response.status} ${await response.text()}`);
+        }
+      },
       dispose: () => scope.dispose(),
     };
   },

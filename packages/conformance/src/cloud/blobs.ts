@@ -8,7 +8,8 @@
  * an object store it never reads. Nothing about ids, URL shapes, or storage is
  * assertable in common — so nothing about them is asserted. What IS common is
  * the contract that matters: a grant is minted for a declaration, a download
- * URL exists only once bytes are actually there, and every miss looks like
+ * URL exists only once bytes are actually there, no second write grant is
+ * issued for an object whose bytes already landed, and every miss looks like
  * every other miss.
  *
  * Anything sharper belongs to a composition, not here. SigV4 acceptance, HEAD
@@ -84,6 +85,39 @@ export function runBlobConformance(factory: CloudCompositionFactory): void {
 
         expect(first.blobId).not.toEqual(second.blobId);
         expect(first.uploadUrl).not.toEqual(second.uploadUrl);
+      });
+    });
+
+    it('stops authorizing writes to an object once its bytes are there', async () => {
+      // Immutability, in the form both compositions can state it. Bytes that
+      // are downloadable are bytes something is entitled to reference, and a
+      // write grant binds a length and a type while recomputing no digest — so
+      // a grant re-issued for THAT object is a licence to replace them with
+      // any same-shaped body, and the content address stops being one.
+      //
+      // How a composition satisfies it is its own business, and the two differ:
+      // one mints an opaque id per declaration and simply never re-addresses a
+      // landed object, the other addresses objects BY content hash and must
+      // therefore refuse. Both outcomes are "no second write grant for this
+      // object", which is the contract; neither shape is asserted.
+      await withCloudComposition(factory, async ({ stores, landBlobBytes }) => {
+        const text = 'vouched for';
+        const declaration = await declarationFor(text);
+        const grant = await stores.blobs.createUpload(TENANT_A, declaration);
+        await landBlobBytes({ grant, declaration, bytes: new TextEncoder().encode(text) });
+
+        // Downloadable is the only "committed" signal every composition shares.
+        expect(await stores.blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeDefined();
+
+        const reissued = await stores.blobs.createUpload(TENANT_A, declaration).then(
+          (second) => second.blobId,
+          () => undefined,
+        );
+        expect(reissued).not.toBe(grant.blobId);
+
+        // And the object stayed readable throughout: withholding a write grant
+        // is not the same as withdrawing the object.
+        expect(await stores.blobs.getDownloadUrl(TENANT_A, grant.blobId)).toBeDefined();
       });
     });
 
