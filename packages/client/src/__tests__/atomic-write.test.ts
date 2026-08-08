@@ -95,6 +95,27 @@ describe('atomicWriteFile', () => {
     expect(JSON.parse(await fs.readFile(target, 'utf8'))).toEqual({ ok: true });
   });
 
+  it('fsyncs the parent directory after publishing a crash-durable write', async () => {
+    dir = await tmpDir('byok-atomic-write-fsync-dir-');
+    const target = path.join(dir, 'operational-health.json');
+    const realOpen = fs.open.bind(fs);
+    const directorySync = vi.fn(async () => {});
+    const directoryClose = vi.fn(async () => {});
+    const openSpy = vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      if (args[0] === dir) {
+        return { sync: directorySync, close: directoryClose } as unknown as Awaited<ReturnType<typeof fs.open>>;
+      }
+      return realOpen(...args);
+    });
+
+    await atomicWriteFile(target, JSON.stringify({ currentRun: { id: 'run-1' } }), { mode: 0o600, fsync: true });
+
+    expect(openSpy.mock.calls.at(-1)?.[0]).toBe(dir);
+    expect(directorySync).toHaveBeenCalledOnce();
+    expect(directoryClose).toHaveBeenCalledOnce();
+    expect(JSON.parse(await fs.readFile(target, 'utf8'))).toEqual({ currentRun: { id: 'run-1' } });
+  });
+
   it('retries the plain rename (never unlinking the target) when fs.rename throws EPERM once (Windows: rename onto an existing, momentarily-locked target)', async () => {
     dir = await tmpDir('byok-atomic-write-eperm-');
     const target = path.join(dir, 'data.json');

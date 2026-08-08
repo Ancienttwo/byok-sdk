@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 /** Options for {@link atomicWriteFile}. */
 export interface AtomicWriteOptions {
@@ -12,12 +13,12 @@ export interface AtomicWriteOptions {
    */
   mode?: number;
   /**
-   * fsync(2) the temp file's contents before renaming it onto the target.
-   * Off by default: it only buys extra durability against a crash in the
-   * instant between the write and the rename landing (surviving a hard
-   * power loss) — it is not needed for this helper's core guarantee (a
-   * concurrent reader never observing a torn/partial file), which comes
-   * from the rename alone.
+   * fsync(2) the temp file's contents before renaming it onto the target,
+   * then fsync the parent directory after the rename. Off by default: this
+   * is the crash-durable form needed by state whose directory entry itself
+   * is load-bearing (for example the operational-health run marker). It is
+   * not needed for this helper's core guarantee (a concurrent reader never
+   * observing a torn/partial file), which comes from the rename alone.
    */
   fsync?: boolean;
 }
@@ -140,6 +141,26 @@ export async function atomicWriteFile(
     // verifiable by a test (stat the result) rather than an inference from
     // rename's documented semantics.
     await fs.chmod(filePath, options.mode);
+  }
+
+  if (options.fsync) {
+    // fsyncing only the temp file makes its bytes durable, but not the rename
+    // that publishes (or clears) a load-bearing marker. Flush the containing
+    // directory after every post-rename metadata operation so a successful
+    // return means both the file and its directory entry reached storage. The
+    // target sync also covers the defensive post-rename chmod above.
+    const target = await fs.open(filePath, 'r');
+    try {
+      await target.sync();
+    } finally {
+      await target.close();
+    }
+    const directory = await fs.open(path.dirname(filePath), 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
   }
 }
 

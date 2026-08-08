@@ -558,6 +558,7 @@ export class LocalStoragePressureEngine {
   #nextCompactionAtMs = 0;
   #timer: unknown;
   #timerIntervalMs = 0;
+  #tickInFlight: Promise<StorageTickResult> | undefined;
 
   constructor(options: LocalStoragePressureEngineOptions) {
     // Resolved unconditionally, not "resolved if it looks unresolved": an
@@ -642,7 +643,22 @@ export class LocalStoragePressureEngine {
    * measurement produced, so a device that just crossed into pressure cleans on
    * the same tick it alerts, rather than one cadence later.
    */
-  async tick(): Promise<StorageTickResult> {
+  tick(): Promise<StorageTickResult> {
+    if (this.#tickInFlight) return this.#tickInFlight;
+    const tick = this.#runTick();
+    this.#tickInFlight = tick;
+    void tick.then(
+      () => {
+        if (this.#tickInFlight === tick) this.#tickInFlight = undefined;
+      },
+      () => {
+        if (this.#tickInFlight === tick) this.#tickInFlight = undefined;
+      },
+    );
+    return tick;
+  }
+
+  async #runTick(): Promise<StorageTickResult> {
     const usage = await this.#journal.measureUsage();
     const freeBytes = await this.#freeBytesProvider();
     const measurement: StorageMeasurement = { usage, freeBytes };
@@ -686,10 +702,15 @@ export class LocalStoragePressureEngine {
     this.#arm(this.#intervalMs());
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.#timer !== undefined) this.#timers.clearInterval(this.#timer);
     this.#timer = undefined;
     this.#timerIntervalMs = 0;
+    // Clearing the cadence prevents new maintenance, but the callback may
+    // already be inside SQLite. Wait for that pass to settle before the daemon
+    // closes the owned journal. Its scheduler callback reports any failure;
+    // shutdown's responsibility here is the barrier, not reporting it twice.
+    await this.#tickInFlight?.catch(() => {});
   }
 
   #intervalMs(): number {
@@ -701,6 +722,10 @@ export class LocalStoragePressureEngine {
     if (this.#timer !== undefined) this.#timers.clearInterval(this.#timer);
     this.#timerIntervalMs = intervalMs;
     this.#timer = this.#timers.setInterval(() => {
+      // A slow checkpoint must never overlap the next cadence. Apart from
+      // duplicating maintenance work, concurrent ticks would make stop()'s
+      // single in-flight barrier incomplete.
+      if (this.#tickInFlight) return;
       // A maintenance pass that throws (an unreadable journal, a filesystem
       // that will not answer statfs) must not take the process down from a
       // timer callback with no caller to reject to. The state simply does not

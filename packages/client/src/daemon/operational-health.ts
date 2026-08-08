@@ -175,8 +175,16 @@ export class OperationalHealthTracker {
 
   #prune(now: Date): void {
     if (!this.#state) return;
-    const cutoff = now.getTime() - this.#windowMs;
-    this.#state.failures = this.#state.failures.filter((event) => Date.parse(event.at) >= cutoff);
+    const nowMs = now.getTime();
+    const cutoff = nowMs - this.#windowMs;
+    // A wall-clock rollback must not turn a bounded 60-second budget into an
+    // hour-long degradation. Events dated after the clock we are evaluating
+    // are outside this window just as surely as events older than the cutoff;
+    // discard them instead of retaining them until wall time catches up.
+    this.#state.failures = this.#state.failures.filter((event) => {
+      const eventMs = Date.parse(event.at);
+      return eventMs >= cutoff && eventMs <= nowMs;
+    });
     // Entering `recovering` already required a real successful outcome. Once
     // the failures that caused degradation leave the window, the budget is
     // healthy again even if an otherwise-idle daemon has no second outcome to

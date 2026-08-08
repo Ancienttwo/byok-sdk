@@ -34,6 +34,25 @@ describe('operational health', () => {
     expect(tracker.snapshot()).toMatchObject({ availability: 'available', state: 'healthy', failureCount: 0 });
   });
 
+  it('discards future-dated failures after a wall-clock rollback instead of extending the window', async () => {
+    const dir = await tempDir();
+    let now = new Date('2026-08-09T01:00:00.000Z');
+    const first = new OperationalHealthTracker(dir, { clock: () => now, runId: () => 'run-1', pid: 1 });
+    await first.startRun();
+    await first.recordFailure('reconnect');
+    await first.recordFailure('upload');
+    await first.recordFailure('maintenance');
+    expect(first.snapshot()).toMatchObject({ availability: 'available', state: 'degraded', failureCount: 3 });
+    await first.markCleanStop();
+
+    now = new Date('2026-08-09T00:00:00.000Z');
+    const afterRollback = new OperationalHealthTracker(dir, { clock: () => now, runId: () => 'run-2', pid: 2 });
+    await afterRollback.startRun();
+    expect(afterRollback.snapshot()).toMatchObject({ availability: 'available', state: 'degraded', failureCount: 0 });
+    await afterRollback.recordSuccess('reconnect');
+    expect(afterRollback.snapshot()).toMatchObject({ availability: 'available', state: 'healthy', failureCount: 0 });
+  });
+
   it('records an unclean previous run, but never classifies a clean stop as a crash', async () => {
     const dir = await tempDir();
     let now = new Date('2026-08-09T00:00:00.000Z');

@@ -1173,7 +1173,7 @@ export function createDaemonWithAdapters(
     // daemon constructed; an injected one belongs to its injector, exactly like
     // an injected journal is not closed here. Idempotent, like every other step
     // in this sequence.
-    ownedPressureEngine?.stop();
+    const maintenanceStopped = ownedPressureEngine?.stop();
     runner?.stopAcceptingOffers();
     const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
@@ -1185,6 +1185,11 @@ export function createDaemonWithAdapters(
     // idle — is what keeps that fail from being written into an outbox nobody
     // is draining any more. Exactly a no-op when no journal is configured.
     if (journal) await journalTerminalTail;
+    // stop() cleared the maintenance timer synchronously above. Await the pass
+    // that may already have been inside SQLite only here, immediately before
+    // closing the owned journal, so task interruption is not held behind a
+    // slow checkpoint while the journal-close race remains impossible.
+    await maintenanceStopped;
     // S3b: and only THEN release the handle — after the last terminal write
     // has actually landed, or the write it was still holding would fail
     // against a closed database. Only the journal THIS daemon constructed,
