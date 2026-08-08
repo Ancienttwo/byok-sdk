@@ -5,7 +5,7 @@
 > **Contract**: tasks/contracts/20260805-1659-byok-keys-package.contract.md
 > **Notes File**: tasks/notes/20260805-1659-byok-keys-package.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-08 22:40
+> **Last Updated**: 2026-08-08 22:58
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
@@ -20,6 +20,7 @@
 - Registry evidence: `byok-sdk@0.0.1` names `@byok-sdk/keys` as the official package; `npm org ls byok-sdk --json` returns `ancienttwo: owner`; the earlier authenticated PUT to `@byok/keys` returned E404.
 - Change surface: package metadata, package-name prose, canonical architecture/security references, and one code comment only. Runtime exports, schemas, persistence, wire bytes, and dependency graph are unchanged. No alias or dual-scope compatibility path was added.
 - Verification: fresh build passed; fresh typecheck passed after dependency dist generation; the package passed 330/330 tests; the full workspace rerun passed after one known timing-sensitive `@byok/client` flake also passed 935/935 in isolation; strict workflow passed.
+- Release readback: PR #30 merged as `a11da7f`; CI passed 32/32 jobs; `@byok-sdk/keys@0.1.0` is public with `latest=0.1.0`; clean install/import smoke passed. The npm publication half of K4 is complete.
 
 - Verdict: pass (milestone K0 only; K1-K4 remain open in the plan)
 - Change type: code-change

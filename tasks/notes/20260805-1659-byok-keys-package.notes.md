@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260805-1659-byok-keys-package.md
 > **Contract**: tasks/contracts/20260805-1659-byok-keys-package.contract.md
 > **Review**: tasks/reviews/20260805-1659-byok-keys-package.review.md
-> **Last Updated**: 2026-08-08 22:40
+> **Last Updated**: 2026-08-08 22:58
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -64,6 +64,7 @@
 - **npm identity 裁定(2026-08-08 使用者更正)**：`byok-sdk@0.0.1` 是 ancienttwo 已發布的無 scope 占位包，其 registry description 明定正式 packages 使用 `@byok-sdk` scope（例：`@byok-sdk/keys`）；`npm org ls byok-sdk --json` 讀回 `ancienttwo: owner`。`@byok/keys` 的 Web Auth/2FA 成功後 PUT 仍 E404，證明該 scope 不屬於本帳號。首發 identity 因此固定為 `@byok-sdk/keys@0.1.0`，不保留 alias 或雙 scope 路徑。
 - **發佈前置六項**(dry-run §5.2/§7.2 step 1)已另開 slice 執行:publishConfig、LICENSE、prepublishOnly、repository、README 完整模組表、errors.ts:30-36 註解修正;keys 版本 0.1.0,其餘三包不發。
 - **2026-08-08 K4 release-surface refresh**：aip 的 c1 adapter 已證明三個 c2 blocker。首發前補齊 `ByokKeysError.httpStatus`（保留 provider 回應狀態）、從 barrel export canonical HTTP guards/helpers、把 `ProviderAuthProfile.kind` 泛化為字串以承接留在 aip 的 `market_data` 分支。這三項只暴露已存在的 package authority，不加相容 fallback；首發仍為 `@byok-sdk/keys@0.1.0`。
+- **2026-08-08 npm publish readback**：PR #30（merge `a11da7f`）將 package identity 更正為 `@byok-sdk/keys`，兩個 CI run 共 32/32 jobs 通過。從 merged `main` 產生的 tarball SHA-256 為 `56b43c8acfae20c06591c177ba71605d571aa77f225edcbc04deb2edd42fbc22`；npm Web Auth 發佈成功。Registry 讀回 `latest=0.1.0`、shasum `f9da7933273522f0e70634ad7c8b8c98c4a79601`、integrity `sha512-NUYkKXMN2sywjOtsxS3Moi5Yl3+d1q+5J+0sVR4CnRxHUEUFDzS0SKcvue3O7NKeWA3RxVzIBpLORNEuANE9eg==`；乾淨目錄安裝後 ESM import 讀到 52 個 exports。AiphaBee draft PR #7 已切到正式 registry dependency；install、local-agent 166 tests、typecheck、build 與 downloadable bundle build 均通過。
 
 ## Evidence Links
 
