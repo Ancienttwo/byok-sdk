@@ -98,10 +98,7 @@ export class BoardFeedClient {
       headers: { authorization: `Bearer ${this.#accessToken}` },
       ...(signal === undefined ? {} : { signal }),
     });
-    if (response.status === 401) throw new BoardFeedStoppedError('Board credential is no longer valid.');
-    if (!response.ok) {
-      throw new BoardFeedRetryableError(`Board poll failed with HTTP ${response.status}.`);
-    }
+    assertBoardResponse(response, 'poll');
     return { type: 'poll', page: BoardFeedPageSchema.parse(await response.json()) };
   }
 
@@ -115,10 +112,7 @@ export class BoardFeedClient {
       },
       ...(signal === undefined ? {} : { signal }),
     });
-    if (response.status === 401) throw new BoardFeedStoppedError('Board credential is no longer valid.');
-    if (!response.ok) {
-      throw new BoardFeedRetryableError(`Board SSE failed with HTTP ${response.status}.`);
-    }
+    assertBoardResponse(response, 'SSE');
     if (response.body === null) throw new BoardFeedRetryableError('Board SSE response had no body.');
 
     const reader = response.body.getReader();
@@ -142,6 +136,19 @@ export class BoardFeedClient {
       await reader.cancel().catch(() => undefined);
     }
   }
+}
+
+function assertBoardResponse(response: Response, transport: 'poll' | 'SSE'): void {
+  if (response.status === 401) {
+    throw new BoardFeedStoppedError('Board credential is no longer valid.');
+  }
+  if (response.ok) return;
+  if (response.status >= 500) {
+    throw new BoardFeedRetryableError(`Board ${transport} failed with HTTP ${response.status}.`);
+  }
+  throw new BoardFeedStoppedError(
+    `Board ${transport} failed permanently with HTTP ${response.status}.`,
+  );
 }
 
 async function readWithWatchdog(
@@ -173,6 +180,7 @@ function parseSseFrame(frame: string): BoardFeedRead | undefined {
     if (line.startsWith('data:')) data.push(line.slice('data:'.length).trimStart());
   }
   if (event === 'reconcile') return { type: 'reconcile' };
-  if (event !== 'board' || data.length === 0) return undefined;
+  if (event !== 'board') return undefined;
+  if (data.length === 0) throw new SyntaxError('Board SSE board event had no data.');
   return { type: 'board', item: BoardFeedItemSchema.parse(JSON.parse(data.join('\n'))) };
 }

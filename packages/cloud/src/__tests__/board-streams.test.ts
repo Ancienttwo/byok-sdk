@@ -1,8 +1,12 @@
 import { createMutableClock } from '@byok/core';
 import { createEnvelope } from '@byok/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CLOUD_CAPABILITIES, fullCapabilityDeclaration } from '../capabilities';
-import { BoardFeedClient, BoardFeedRetryableError } from '../coordination-client';
+import {
+  BoardFeedClient,
+  BoardFeedRetryableError,
+  BoardFeedStoppedError,
+} from '../coordination-client';
 import { createHarness, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
 
 function jsonInit(device: PairedDevice, body: unknown, method = 'POST'): RequestInit {
@@ -326,6 +330,27 @@ describe('board SSE/poll parity', () => {
     expect(ended.done).toBe(true);
   });
 
+  it('cancels the pending stream poll timer immediately when the consumer closes', async () => {
+    const harness = createHarness({ boardStreamQueryIntervalMs: 60_000 });
+    const device = await harness.pairDevice(TENANT_A);
+    await createBoardFixture(harness, 'cancelled-stream');
+    vi.useFakeTimers();
+    try {
+      const response = await harness.request('/byok/board/stream', {
+        headers: device.authorization,
+      });
+      const reader = response.body!.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('cancelled-stream');
+      expect(vi.getTimerCount()).toBe(1);
+
+      await reader.cancel();
+      await Promise.resolve();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('mounts polling without SSE only by explicit declaration, never by status sniffing', () => {
     const capabilities = {
       ...fullCapabilityDeclaration(),
@@ -409,5 +434,30 @@ describe('BoardFeedClient declaration and retry behavior', () => {
     });
     await expect(client.readOnce(0)).rejects.toBeInstanceOf(BoardFeedRetryableError);
     expect(client.mode).toBe('sse');
+  });
+
+  it('stops on permanent HTTP failures instead of classifying them as retryable', async () => {
+    const client = new BoardFeedClient({
+      baseUrl: 'https://cloud.test',
+      accessToken: 'token',
+      capabilities: fullCapabilityDeclaration(),
+      fetch: (async () => new Response('forbidden', { status: 403 })) as typeof fetch,
+    });
+    const error = await client.readOnce(0).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BoardFeedStoppedError);
+    expect(error).not.toBeInstanceOf(BoardFeedRetryableError);
+  });
+
+  it('fails closed when a board SSE frame omits its data payload', async () => {
+    const client = new BoardFeedClient({
+      baseUrl: 'https://cloud.test',
+      accessToken: 'token',
+      capabilities: fullCapabilityDeclaration(),
+      fetch: (async () =>
+        new Response('event: board\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        })) as typeof fetch,
+    });
+    await expect(client.readOnce(0)).rejects.toThrow('Board SSE board event had no data.');
   });
 });

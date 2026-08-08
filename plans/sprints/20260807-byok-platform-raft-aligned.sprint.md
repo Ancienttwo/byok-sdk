@@ -1,7 +1,7 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S4B 已合入 `main`；S5 在 `codex/s5-board-streams` 执行
+> **状态**：Executing。S0–S4B 已合入 `main`；S5 实现与本地验收已绿，待 PR/CI/merge
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-08（见 D-9）
 > **仓库基线**：`Ancienttwo/byok-sdk@140b109`（2026-08-09）
@@ -29,7 +29,7 @@
 | # | Status | Task | Mode | Acceptance | Plan |
 | --- | --- | --- | --- | --- | --- |
 | 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | PR #32；merge `140b109`；Claude external pass；CI 32/32 |
-| 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | `plans/plan-20260809-0148-s5-board-streams.md`；implementation/full local gate green，待 acceptance/PR |
+| 2 | [ ] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | `plans/plan-20260809-0148-s5-board-streams.md`；implementation + hard-env gates + focused Claude review green，待 receipt/PR/CI/merge |
 | 3 | [ ] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | 待投影 |
 | 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | 待投影 |
 
@@ -879,6 +879,7 @@ Migrations are forward-only additive. Rollback application code may leave unused
 > **对应**：P3（`ARCHITECTURE-PROPOSAL:696`）+ T4（`tenant-isolation-decision.md:255`）
 > **入口闸**：I6 在本 Sprint 补齐（S3 延后项，见 D-2）
 > **产品决策**：`closed` 继续采用“终止未验收”；admin override 单独 capability
+> **交付记录**：`codex/s5-board-streams` 已落 B-001..B-010；real Postgres 100-way claim、per-tenant sequence、concurrent activity batch，cloud poll/SSE、reconcile、revocation、abort、capability/no-downgrade 与 bounded hints 全绿。fresh hard-env workspace 为 cloud 110 / cloud-postgres 185 tests，typecheck/build 全绿，frozen protocol 与 `deploy/sql` 零 diff。聚焦 Claude review 找出并闭合三条缺陷（abort sleep、永久 4xx retry 分类、空 data board frame），复审 `No findings`；待 receipt/PR/CI/merge 后才算 S5 已交付。
 
 ### S5.1 Stories
 
@@ -934,18 +935,18 @@ Migrations are forward-only additive. Rollback application code may leave unused
 
 ### S5.5 Acceptance criteria
 
-- [ ] 100 concurrent claim -> exactly one success；
-- [ ] loser response includes holder snapshot；
-- [ ] expectedStatus conflict returns current snapshot；
-- [ ] A/B tenant streams never cross；
-- [ ] **I6 通过**（S3 延后项）；
-- [ ] SSE/poll pass same behavior suite；
-- [ ] forced dropped stream event repaired by reconciliation；
-- [ ] presence expiry removes hint；
-- [ ] activity dropped visible；
-- [ ] no RAFT-style status sniffing；
-- [ ] board status vocabulary never leaks into wire state；
-- [ ] I1 matrix auto-expands for new routes。
+- [x] 100 concurrent claim -> exactly one success（InMemory 与 real Postgres 均有 100-way race）；
+- [x] loser response includes holder snapshot；
+- [x] expectedStatus conflict returns current snapshot；
+- [x] A/B tenant streams never cross；
+- [x] **I6 通过**（per-tenant row 与 `board_seq` 双实现证据）；
+- [x] SSE/poll pass same behavior suite；
+- [x] forced dropped stream event repaired by reconciliation；
+- [x] presence expiry removes hint（shared conformance fake clock）；
+- [x] activity dropped visible（producer dropped + capacity eviction 累加）；
+- [x] no RAFT-style status sniffing（capability-only selection + 5xx no downgrade）；
+- [x] board status vocabulary never leaks into wire state（module constraint test）；
+- [x] I1 matrix auto-expands for new routes（registry/mounted 双向闭合）。
 
 ### S5.6 Rollback
 

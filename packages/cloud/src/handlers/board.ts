@@ -157,11 +157,13 @@ export function boardStreamHandler(deps: BoardStreamRouteDeps) {
     }
 
     let stopped = false;
+    const stopController = new AbortController();
     const signal = c.req.raw.signal;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         const onAbort = () => {
           stopped = true;
+          stopController.abort();
           closeController(controller);
         };
         signal.addEventListener('abort', onAbort, { once: true });
@@ -171,14 +173,17 @@ export function boardStreamHandler(deps: BoardStreamRouteDeps) {
           deps,
           { ...query, afterSeq: headerSince ?? querySince },
           () => stopped || signal.aborted,
+          stopController.signal,
         ).finally(() => {
           stopped = true;
+          stopController.abort();
           signal.removeEventListener('abort', onAbort);
           closeController(controller);
         });
       },
       cancel() {
         stopped = true;
+        stopController.abort();
       },
     });
 
@@ -199,6 +204,7 @@ async function pumpBoardStream(
   deps: BoardStreamRouteDeps,
   initialQuery: BoardListQuery,
   isStopped: () => boolean,
+  stopSignal: AbortSignal,
 ): Promise<void> {
   let cursor = initialQuery.afterSeq ?? 0;
   let lastHeartbeat = performance.now();
@@ -223,7 +229,7 @@ async function pumpBoardStream(
       enqueue(controller, ': heartbeat\n\n');
       lastHeartbeat = now;
     }
-    await abortableSleep(deps.queryIntervalMs, isStopped);
+    await abortableSleep(deps.queryIntervalMs, stopSignal);
   }
 }
 
@@ -243,14 +249,18 @@ function closeController(controller: ReadableStreamDefaultController<Uint8Array>
   }
 }
 
-async function abortableSleep(ms: number, isStopped: () => boolean): Promise<void> {
-  if (isStopped()) return;
+async function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    if (isStopped()) {
-      clearTimeout(timer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
       resolve();
-    }
+    };
+    timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
+    if (signal.aborted) finish();
   });
 }
 

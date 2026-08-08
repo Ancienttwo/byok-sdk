@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-09T00:08:54+0800 -->
+<!-- updated_at: 2026-08-09T02:12:29+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-09T00:08:54+0800
-> **Source Branch**: codex/s4b-c-cloud-cleanup
-> **Source Commit**: 4aafc82
+> **Updated At**: 2026-08-09T02:12:29+0800
+> **Source Branch**: codex/s5-board-streams
+> **Source Commit**: 140b109
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: ensure-task-workflow
@@ -18,9 +18,9 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Current Focus
 
 - Status: ManualClearedWithActiveWork
-- Active Plan: plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
-- Plan Status: Approved
-- Next Task: 新增 additive `0003` 与 catalog/order invariants
+- Active Plan: plans/plan-20260809-0148-s5-board-streams.md
+- Plan Status: Executing
+- Next Task: Record S5 design/contract and update S4B merge ledger.
 - Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
@@ -31,10 +31,12 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- .: plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
-- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup
+- .: plans/plan-20260809-0148-s5-board-streams.md
+- .: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s5-board-streams
 - /Users/ancienttwo/Projects/byok-sdk: plans/plan-20260805-1659-byok-keys-package.md
 - /Users/ancienttwo/Projects/byok-sdk: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
+- /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup: plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
+- /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup
 ## Active Sprint
 
 - Sprint: (none)
@@ -51,14 +53,40 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 5 changed/untracked path(s)
+- Summary: 31 changed/untracked path(s)
 
 ```
-?? docs/researches/s4b-c-cleanup-design.md
-?? plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
-?? tasks/contracts/20260809-0001-s4b-c-cloud-cleanup.contract.md
-?? tasks/notes/20260809-0001-s4b-c-cloud-cleanup.notes.md
-?? tasks/reviews/20260809-0001-s4b-c-cloud-cleanup.review.md
+ M docs/architecture/sdk-architecture.md
+ M packages/cloud-postgres/src/stores/core/presence.ts
+ M packages/cloud/src/__tests__/constraints.test.ts
+ M packages/cloud/src/__tests__/route-inventory.test.ts
+ M packages/cloud/src/capabilities.ts
+ M packages/cloud/src/cloud.ts
+ M packages/cloud/src/composition/in-memory.ts
+ M packages/cloud/src/errors.ts
+ M packages/cloud/src/handlers/messages.ts
+ M packages/cloud/src/inbound.ts
+ M packages/cloud/src/index.ts
+ M packages/cloud/src/tenant-stores.ts
+ M packages/conformance/src/core/presence.ts
+ M packages/conformance/src/core/tenant-isolation.ts
+ M packages/core/src/errors.ts
+ M packages/core/src/in-memory/presence.ts
+ M packages/core/src/presence.ts
+ M plans/sprints/20260807-byok-platform-raft-aligned.sprint.md
+ M tasks/todos.md
+?? docs/researches/s5-board-streams-design.md
+?? packages/cloud-postgres/src/__tests__/board-concurrency.test.ts
+?? packages/cloud/src/__tests__/board-streams.test.ts
+?? packages/cloud/src/board-projection.ts
+?? packages/cloud/src/coordination-client.ts
+?? packages/cloud/src/coordination.ts
+?? packages/cloud/src/handlers/board.ts
+?? packages/cloud/src/handlers/presence.ts
+?? plans/plan-20260809-0148-s5-board-streams.md
+?? tasks/contracts/20260809-0148-s5-board-streams.contract.md
+?? tasks/notes/20260809-0148-s5-board-streams.notes.md
+?? tasks/reviews/20260809-0148-s5-board-streams.review.md
 ```
 
 ## Source Artifacts

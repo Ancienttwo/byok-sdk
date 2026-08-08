@@ -107,9 +107,9 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Record S5 design/contract and update S4B merge ledger.
-- [ ] Land bounded presence/activity contracts in InMemory and Postgres with shared conformance.
-- [ ] Land board host API, tenant facade, terminal/progress projection, and explicit capabilities.
-- [ ] Land poll/SSE routes with Last-Event-ID, heartbeat, reconciliation, abort/revocation behavior.
-- [ ] Prove I1/I6, 100-way claim, conflict snapshots, feed parity, dropped/reconcile, TTL and bounds.
-- [ ] Run fresh full gates, AcceptanceReceipt, PR CI, merge and main readback.
+- [x] Record S5 design/contract and update S4B merge ledger.
+- [x] Land bounded presence/activity contracts in InMemory and Postgres with shared conformance.
+- [x] Land board host API, tenant facade, terminal/progress projection, and explicit capabilities.
+- [x] Land poll/SSE routes with Last-Event-ID, heartbeat, reconciliation, abort/revocation behavior.
+- [x] Prove I1/I6, 100-way claim, conflict snapshots, feed parity, dropped/reconcile, TTL and bounds.
+- [ ] Record AcceptanceReceipt, land PR, pass CI, merge and read back `main`.

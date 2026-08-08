@@ -1026,7 +1026,7 @@ stateDiagram-v2
 - `task.complete` 可以把工作项推到 `in_review`，但不能自动变成 `done`——`done` 需要人工验收。
 - host 必须显式提供 bounded `channel`/`title`；cloud 不从 instruction/result 派生 label。
 - poll 与 SSE 共享 `BoardStore.list`；`board_seq` 是 per-tenant current-state cursor，不是完整事件历史。SSE 以 heartbeat 保活、以 120s `reconcile` 信号要求 full poll，且每轮 query 返回后才 sleep。
-- `BoardFeedClient` 只按 `GET /byok/capabilities` 的 `board.sse` 选择 transport；temporary 5xx/idle watchdog 是 retryable SSE failure，不会永久降级。401/revocation 则停止。
+- `BoardFeedClient` 只按 `GET /byok/capabilities` 的 `board.sse` 选择 transport；temporary 5xx/idle watchdog 是 retryable SSE failure，不会永久降级。401/revocation 与其他永久 non-5xx failure 则停止。
 
 #### presence 与 activity 规则（当前实现）
 
