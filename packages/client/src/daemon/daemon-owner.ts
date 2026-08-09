@@ -232,31 +232,47 @@ async function createLivenessListener(): Promise<LivenessListener> {
   };
 }
 
-async function probeStoreMutex(port: number): Promise<string | undefined> {
-  return new Promise<string | undefined>((resolve) => {
+type StoreMutexProbe =
+  | { kind: 'identity'; identity: string }
+  | { kind: 'foreign-or-gone' }
+  | { kind: 'uncertain' };
+
+async function probeStoreMutex(port: number): Promise<StoreMutexProbe> {
+  return new Promise<StoreMutexProbe>((resolve) => {
     const socket = createConnection({ host: '127.0.0.1', port });
     let settled = false;
     let raw = '';
-    const finish = (identity: string | undefined): void => {
+    const finish = (result: StoreMutexProbe): void => {
       if (settled) return;
       settled = true;
       socket.destroy();
-      resolve(identity);
+      resolve(result);
     };
     socket.setEncoding('utf8');
-    socket.setTimeout(STORE_MUTEX_PROBE_TIMEOUT_MS, () => finish(undefined));
+    // A conforming mutex writes its identity immediately after accept. A
+    // connection that stays open without doing so is ambiguous (including a
+    // starved conforming holder), therefore timeout remains fail-closed.
+    socket.setTimeout(STORE_MUTEX_PROBE_TIMEOUT_MS, () => finish({ kind: 'uncertain' }));
     socket.on('data', (chunk: string) => {
       raw += chunk;
-      if (raw.length > STORE_MUTEX_ID_PREFIX.length + 64 + 1) finish(undefined);
+      if (raw.length > STORE_MUTEX_ID_PREFIX.length + 64 + 1) finish({ kind: 'foreign-or-gone' });
     });
     socket.once('end', () => {
       const line = raw.trimEnd();
       const identity = line.startsWith(STORE_MUTEX_ID_PREFIX)
         ? line.slice(STORE_MUTEX_ID_PREFIX.length)
         : undefined;
-      finish(identity && /^[a-f0-9]{64}$/.test(identity) ? identity : undefined);
+      finish(
+        identity && /^[a-f0-9]{64}$/.test(identity)
+          ? { kind: 'identity', identity }
+          : { kind: 'foreign-or-gone' },
+      );
     });
-    socket.once('error', () => finish(undefined));
+    // The port disappeared between bind failure and connect, or belongs to a
+    // non-BYOK listener that reset the probe. Neither can be the current
+    // transition authority; the owner/reclaim records remain the durable
+    // second authority before any lease is returned.
+    socket.once('error', () => finish({ kind: 'foreign-or-gone' }));
   });
 }
 
@@ -275,8 +291,8 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<LivenessLis
       });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
-      const holderIdentity = await probeStoreMutex(port);
-      if (holderIdentity === identity || holderIdentity === undefined) {
+      const probe = await probeStoreMutex(port);
+      if (probe.kind === 'uncertain' || (probe.kind === 'identity' && probe.identity === identity)) {
         throw new DaemonOwnerActiveError('unknown');
       }
       continue;
