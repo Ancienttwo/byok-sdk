@@ -68,9 +68,9 @@
 | umbrella publishes missing/transitive files | Medium | High | tarball inventory + isolated install/import from exact tarballs |
 | old/new scope mixed | Medium | High | repo-wide live-surface zero-match gate；no compatibility package |
 | keys enters dispatch graph | Low | Critical | graph traversal invariant from umbrella and every dispatch package |
-| partial registry publish | Medium | High | topological order、preflight all versions/ownership、frozen tarball hashes、readback each publish before next |
+| partial registry publish | Medium | High | topological order、preflight all versions/ownership、frozen tarball SHA-256 + registry-compatible SHA-512 integrity、readback each publish before next |
 | npm auth/2FA blocks | Medium | Medium | web auth only at final publish boundary；no token logging；do not claim completion before registry readback |
-| publish artifact differs from reviewed SHA | Low | Critical | pack after code freeze；record hashes；publish those exact tarballs；tag exact merged tree |
+| publish artifact differs from reviewed SHA | Low | Critical | pack after code freeze；manifest records source Git SHA and exact tarball digests；registry `dist.integrity` must equal each frozen SHA-512 integrity；tag exact merged tree |
 
 ## Promotion Gate
 
@@ -84,7 +84,7 @@
 ## Evidence Contract
 
 - **State/progress path**: plan Task Breakdown、contract、notes、review、sprint S7/§12 checkboxes。
-- **Verification evidence**: dependency graph JSON、tarball inventory/SHA-256、Node 20/22 install imports、CI checks、npm metadata/fresh install、Git tag/release。
+- **Verification evidence**: dependency graph JSON、source Git SHA、tarball inventory/SHA-256/SHA-512 integrity、Node 20/22 install imports、CI checks、npm `dist.integrity` equality + fresh install、Git tag/release。
 - **Evaluator rubric**: no live `@byok-sdk/*` identity；all dispatch packages and umbrella are public `0.1.0`；umbrella includes all six dispatch namespaces and no keys edge；fresh exact registry installs work；tag matches merged release tree。
 - **Stop condition**: auth/ownership/version mismatch、tarball drift、graph violation、any hard gate/CI/review failure，或需要发布 compatibility shim。
 - **Rollback surface**: preserve evidence；pre-publish revert，post-publish bump/deprecate only。

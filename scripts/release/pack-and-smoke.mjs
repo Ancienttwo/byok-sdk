@@ -50,6 +50,10 @@ function sha256(filePath) {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
+function sha512Integrity(filePath) {
+  return `sha512-${createHash('sha512').update(readFileSync(filePath)).digest('base64')}`;
+}
+
 try {
   if (existsSync(outDir) && readdirSync(outDir).length > 0) {
     throw new Error(`release output directory must be empty: ${outDir}`);
@@ -65,7 +69,14 @@ try {
     const created = readdirSync(outDir).filter((entry) => entry.endsWith('.tgz') && !before.has(entry));
     if (created.length !== 1) throw new Error(`${packageName}: expected one tarball, created ${created.length}`);
     const file = created[0];
-    tarballs.push({ package: packageName, version: releaseVersion, file, sha256: sha256(path.join(outDir, file)) });
+    const tarballPath = path.join(outDir, file);
+    tarballs.push({
+      package: packageName,
+      version: releaseVersion,
+      file,
+      sha256: sha256(tarballPath),
+      sha512Integrity: sha512Integrity(tarballPath),
+    });
   }
 
   const smokeDir = mkdtempSync(path.join(os.tmpdir(), 'byok-release-install-'));
@@ -103,8 +114,9 @@ try {
   }
 
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     releaseVersion,
+    sourceGitSha: run('git', ['rev-parse', 'HEAD']),
     node: process.version,
     platform: process.platform,
     arch: process.arch,
