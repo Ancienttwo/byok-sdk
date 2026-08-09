@@ -27,10 +27,15 @@ import {
   DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
   JOURNAL_DB_FILENAME,
   JOURNAL_QUARANTINE_DIRNAME,
+  JournalHandleCleanupError,
   SqliteLocalTaskJournal,
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
-import { isSqliteAvailable, openJournalDatabase } from '../daemon/journal/sqlite-support';
+import {
+  isSqliteAvailable,
+  openJournalDatabase,
+  type JournalOpenStep,
+} from '../daemon/journal/sqlite-support';
 
 const IDENTITY: JournalIdentity = { tenantId: 'tenant-a', productId: 'test-product', deviceId: 'dev_1' };
 
@@ -76,6 +81,15 @@ function faultOnce(step: JournalFaultStep): { onStep(step: JournalFaultStep): vo
   };
 }
 
+const OPEN_STEPS: readonly JournalOpenStep[] = [
+  'after-open',
+  'after-auto-vacuum',
+  'after-wal',
+  'after-foreign-keys',
+  'after-synchronous',
+  'after-header-read',
+];
+
 describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
   const dirs: string[] = [];
   const open: SqliteLocalTaskJournal[] = [];
@@ -102,6 +116,44 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
   });
 
   describe('durability settings', () => {
+    it.each(OPEN_STEPS)('closes the native handle when initialization fails at %s', async (step) => {
+      const storeDir = await tmpStore(`byok-journal-open-fault-${step}-`);
+      expect(() =>
+        new SqliteLocalTaskJournal({
+          storeDir,
+          openFaults: {
+            onStep(current) {
+              if (current === step) throw new Error(`injected open fault at ${step}`);
+            },
+          },
+        }),
+      ).toThrow(`injected open fault at ${step}`);
+
+      // On Windows this reopen would fail if quarantine tried to rename an
+      // open DB/WAL/SHM. On every host it proves ownership was returned before
+      // the constructor published a normal JournalCorruptError path.
+      build(storeDir);
+    });
+
+    it('preserves a typed barrier failure and does not quarantine when handle cleanup cannot be proven', async () => {
+      const storeDir = await tmpStore('byok-journal-open-cleanup-failure-');
+      expect(() =>
+        new SqliteLocalTaskJournal({
+          storeDir,
+          openFaults: {
+            onStep(step) {
+              if (step === 'after-open') throw new Error('injected post-open failure');
+            },
+            close(db) {
+              db.close();
+              throw new Error('injected close-report failure');
+            },
+          },
+        }),
+      ).toThrow(JournalHandleCleanupError);
+      await expect(fs.stat(path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
     it('applies the four §12.7.2 pragmas in an order that makes each of them real', async () => {
       const storeDir = await tmpStore();
       build(storeDir);

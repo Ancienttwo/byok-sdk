@@ -22,6 +22,37 @@ import { createRequire } from 'node:module';
 import { chmodSync, existsSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 
+/** Every post-construction boundary crossed before a journal handle is returned to its owner. */
+export type JournalOpenStep =
+  | 'after-open'
+  | 'after-auto-vacuum'
+  | 'after-wal'
+  | 'after-foreign-keys'
+  | 'after-synchronous'
+  | 'after-header-read';
+
+/**
+ * Test-only fault seam for proving that every post-open initialization failure
+ * closes the native handle before control returns to the journal constructor.
+ */
+export interface JournalOpenFaultSeam {
+  onStep?(step: JournalOpenStep): void;
+  /** Test-only close override; production always calls `DatabaseSync.close()`. */
+  close?(db: DatabaseSync): void;
+}
+
+/**
+ * Initialization failed after SQLite returned a native handle, and closing
+ * that handle also failed. Callers must retain their cross-process ownership
+ * lease because the helper can no longer prove that no writer remains alive.
+ */
+export class JournalHandleCleanupError extends Error {
+  constructor(message: string, readonly failures: readonly unknown[]) {
+    super(message);
+    this.name = 'JournalHandleCleanupError';
+  }
+}
+
 /** `node:sqlite`'s minimum Node.js version (https://nodejs.org/api/sqlite.html). */
 const MIN_NODE_MAJOR = 22;
 const MIN_NODE_MINOR = 5;
@@ -122,18 +153,41 @@ const SECURE_FILE_MODE = 0o600;
  * constructor, which turns each of those into its own typed error — see
  * `sqlite-journal.ts`.
  */
-export function openJournalDatabase(path: string, busyTimeoutMs: number): DatabaseSync {
+export function openJournalDatabase(
+  path: string,
+  busyTimeoutMs: number,
+  faults?: JournalOpenFaultSeam,
+): DatabaseSync {
   const { DatabaseSync } = loadSqliteModule();
   const db = new DatabaseSync(path, { timeout: busyTimeoutMs });
-  db.exec('PRAGMA auto_vacuum = INCREMENTAL;');
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA foreign_keys = ON;');
-  db.exec('PRAGMA synchronous = FULL;');
-  // Forces a real header read: a file that is not a SQLite database (or whose
-  // header is damaged) fails HERE, at open, where the quarantine path can act
-  // on it — not later, mid-append, with a half-written transaction in flight.
-  db.prepare('SELECT count(*) AS n FROM sqlite_schema').get();
-  return db;
+  try {
+    faults?.onStep?.('after-open');
+    db.exec('PRAGMA auto_vacuum = INCREMENTAL;');
+    faults?.onStep?.('after-auto-vacuum');
+    db.exec('PRAGMA journal_mode = WAL;');
+    faults?.onStep?.('after-wal');
+    db.exec('PRAGMA foreign_keys = ON;');
+    faults?.onStep?.('after-foreign-keys');
+    db.exec('PRAGMA synchronous = FULL;');
+    faults?.onStep?.('after-synchronous');
+    // Forces a real header read: a file that is not a SQLite database (or whose
+    // header is damaged) fails HERE, at open, where the quarantine path can act
+    // on it — not later, mid-append, with a half-written transaction in flight.
+    db.prepare('SELECT count(*) AS n FROM sqlite_schema').get();
+    faults?.onStep?.('after-header-read');
+    return db;
+  } catch (err) {
+    try {
+      if (faults?.close) faults.close(db);
+      else db.close();
+    } catch (closeError) {
+      throw new JournalHandleCleanupError(
+        'local task journal initialization failed and its SQLite handle could not be closed',
+        [err, closeError],
+      );
+    }
+    throw err;
+  }
 }
 
 /**

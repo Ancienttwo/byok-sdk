@@ -1,12 +1,12 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S6 已合入 `main`；K4/K4.1 跨仓库依赖轨也已合入，当前进入 S7 operations/release RC
+> **状态**：Executing。S0–S6 与 S7-a 已合入 `main`；K4/K4.1 跨仓库依赖轨也已合入，当前进入 S7-b diagnostics/operations
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-09（见 D-10）
-> **仓库基线**：`Ancienttwo/byok-sdk@68b6020`（2026-08-09）
-> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）、S6-a（merge `3bc3e74`，PR #34）、S6-b（merge `639f2e5`，PR #35）、S6-c（merge `68b6020`，PR #36）
-> **下一可执行 slice**：S7-a deterministic fleet health，计划 `plans/plan-20260809-0520-s7a-fleet-health.md`；Claude review 按 owner 指令暂停，验收走 independent Codex exact-SHA
+> **仓库基线**：`Ancienttwo/byok-sdk@489255b`（2026-08-09）
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）、S6-a（merge `3bc3e74`，PR #34）、S6-b（merge `639f2e5`，PR #35）、S6-c（merge `68b6020`，PR #36）、S7-a（merge `489255b`，PR #38）
+> **下一可执行 slice**：S7-b diagnostics/operations 正在执行（plan `20260809-0638-s7b-diagnostics`）；Claude review 按 owner 指令暂停，验收走 independent Codex exact-SHA
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -31,7 +31,7 @@
 | 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | PR #32；merge `140b109`；Claude external pass；CI 32/32 |
 | 2 | [x] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | PR #33；merge `2a1c4a7`；CI green |
 | 3 | [x] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | PR #34/#35/#36；merge `3bc3e74`/`639f2e5`/`68b6020`；各 32/32 CI；full-stack Codex exact-SHA accepted |
-| 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | S7-a plan `20260809-0520-s7a-fleet-health` 已批准；S7-b diagnostics、S7-c package/RC 后续投影 |
+| 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | S7-a PR #38 / merge `489255b` 已完成；S7-b plan `20260809-0638-s7b-diagnostics` executing，随后 S7-c package/RC |
 
 已交付并合入 `main` 的 S0、S1、S2、S3a、S3b、S4A、S4B 不再列入后续 backlog；S4B-c 行仅保留本轮 merge readback 记录，其 merge SHA 见文首交付清单。
 
@@ -1091,13 +1091,13 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | K-402 | K4.1 aip-side settings adapter | 独立 track |
 | K-502 | default secret-store factory/data scope decisions | 中 |
 | K-503 | generic testConnection 或 host adapter定案 | 低 |
-| L-004 | deterministic reconnect jitter（S7-a 已实现，待 PR 验收） | 中 |
-| L-005 | health window + crash budget（S7-a 已实现，待 PR 验收） | 中 |
-| L-006 | local corrupt-state quarantine | 中 |
-| L-007 | doctor/status/support bundle | 中 |
-| O-013 | hosted/self-hosted runbooks | 中 |
-| O-014 | release signing/updater responsibility contract | 低 |
-| O-015 | load/reconnect/retention tests | 中 |
+| L-004 | deterministic reconnect jitter（S7-a PR #38 已合入） | 中 |
+| L-005 | health window + crash budget（S7-a PR #38 已合入） | 中 |
+| L-006 | local corrupt-state quarantine（S7-b 已实现，待 PR 验收） | 中 |
+| L-007 | doctor/status/support bundle（S7-b 已实现，待 PR 验收） | 中 |
+| O-013 | hosted/self-hosted runbooks（S7-b 已实现，待 PR 验收） | 中 |
+| O-014 | release signing/updater responsibility contract（S7-b 已实现，待 PR 验收） | 低 |
+| O-015 | load/reconnect/retention tests（S7-a fleet + S7-b bounded diagnostics 已实现，待 PR 验收） | 中 |
 | O-016 | RC security/audit review | 低 |
 
 > `@byok-sdk/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于 K 线 plan（状态以 `tasks/current.md` 为准），不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok/core` TruthStore 落地。
@@ -1145,7 +1145,9 @@ K-401/K-402/K-502/K-503 已由 D-11 收口；S7 实作从 L-004 开始。
 - `doctor --fix` requires explicit confirmation/flag；
 - no automatic destructive cleanup。
 
-> **S7-a 执行边界**：L-004/L-005 已由 `plans/plan-20260809-0520-s7a-fleet-health.md` 实现。稳定 seed 只来自已加载的 product/device identity，automatic reconnect/upload/maintenance 使用 domain-separated deterministic jitter，manual probe 即时；operational health 以 atomic run marker、60s/3-failure window、recovering transition 与 bounded crash history投影到 daemon/control/CLI。corrupt health state 只报告 `unavailable` 且原地保留。L-006/L-007 的 quarantine manifest、doctor/support bundle 与显式 `--fix` 仍留给 S7-b，不在 S7-a 偷做自动清理。
+> **S7-a 交付记录**：L-004/L-005 已由 `plans/plan-20260809-0520-s7a-fleet-health.md` 交付（PR #38，merge `489255b`，CI 32/32）。稳定 seed 只来自已加载的 product/device identity，automatic reconnect/upload/maintenance 使用 domain-separated deterministic jitter，manual probe 即时；operational health 以 atomic run marker、60s/3-failure window、recovering transition 与 bounded crash history投影到 daemon/control/CLI。corrupt health state 只报告 `unavailable` 且原地保留。L-006/L-007 的 quarantine manifest、doctor/support bundle 与显式 `--fix` 留给 S7-b，不由 S7-a 自动清理。
+
+> **S7-b 执行边界**：`plans/plan-20260809-0638-s7b-diagnostics.md` 交付一个 typed read-only collector，`doctor` plain/JSON、offline-only `doctor --fix --yes` health quarantine、exclusive atomic/bounded/allowlist `support-bundle`，以及 hosted/self-hosted/release-responsibility 三份 runbook。journal doctor 只做 read-only quick check，既有 `JournalCorruptError` quarantine 仍是唯一 production move authority；不加 rebuild、自动 cleanup 或 package/runtime fallback。load/retention falsifier以 quarantine 100-entry projection cap、10,000 scan cap、audit 256 KiB tail/200 facts 与 existing reconnect fleet simulation执行。
 
 #### Support bundle
 

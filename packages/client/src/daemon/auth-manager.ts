@@ -48,6 +48,9 @@ export class AuthManager {
   private renewing: Promise<string> | undefined;
   private proactiveTimer: ReturnType<typeof setTimeout> | undefined;
   private revoked = false;
+  private stopped = false;
+  private pairing = false;
+  private credentialMutationTail: Promise<void> = Promise.resolve();
 
   constructor(private readonly opts: AuthManagerOptions) {}
 
@@ -61,47 +64,59 @@ export class AuthManager {
 
   /** Load a previously-paired device record from disk, if any (idempotent — a second call is a no-op once loaded). */
   async loadExisting(): Promise<DeviceRecord | undefined> {
+    this.stopped = false;
     if (!this.record) {
       this.record = await this.opts.store.load();
-      if (this.record) this.scheduleProactiveRenewal();
     }
+    if (this.record) this.scheduleProactiveRenewal();
     return this.record;
   }
 
   /** `POST /byok/pair` (v2): generates a device keypair on first pair, reuses it on any subsequent (e.g. post-revocation) re-pair. */
   async pair(pairingCode: string): Promise<DeviceRecord> {
-    const existing = this.record ?? (await this.opts.store.load());
-    const keyPair = existing
-      ? { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey }
-      : generateDeviceKeyPair();
+    this.stopped = false;
+    this.pairing = true;
+    if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
+    this.proactiveTimer = undefined;
+    try {
+      return await this.runCredentialMutation(async () => {
+        const existing = this.record ?? (await this.opts.store.load());
+        const keyPair = existing
+          ? { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey }
+          : generateDeviceKeyPair();
 
-    const url = new URL('/byok/pair', toHttpBase(this.opts.serverUrl));
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        pairingCode,
-        deviceName: this.opts.deviceName ?? os.hostname(),
-        devicePublicKey: keyPair.publicKeyBase64Url,
-      }),
-    });
-    if (!res.ok) {
-      throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
+        const url = new URL('/byok/pair', toHttpBase(this.opts.serverUrl));
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            pairingCode,
+            deviceName: this.opts.deviceName ?? os.hostname(),
+            devicePublicKey: keyPair.publicKeyBase64Url,
+          }),
+        });
+        if (!res.ok) {
+          throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
+        }
+        const body = (await res.json()) as PairResponse;
+
+        const record: DeviceRecord = {
+          deviceId: body.deviceId,
+          accessToken: body.accessToken,
+          expiresAt: resolvePairExpiry(body.refreshHint),
+          devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
+          devicePublicKey: keyPair.publicKeyBase64Url,
+        };
+        await this.opts.store.save(record);
+        this.record = record;
+        this.revoked = false;
+        return record;
+      });
+    } finally {
+      this.pairing = false;
+      // Pairing is a short-lived credential mutation, not the start of the
+      // daemon lifecycle. loadExisting() is the only place that arms a timer.
     }
-    const body = (await res.json()) as PairResponse;
-
-    const record: DeviceRecord = {
-      deviceId: body.deviceId,
-      accessToken: body.accessToken,
-      expiresAt: resolvePairExpiry(body.refreshHint),
-      devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
-      devicePublicKey: keyPair.publicKeyBase64Url,
-    };
-    await this.opts.store.save(record);
-    this.record = record;
-    this.revoked = false;
-    this.scheduleProactiveRenewal();
-    return record;
   }
 
   /** The current, non-expired access token — renews first if it's expired or close to it. Throws {@link DeviceRevokedError} if the device has been revoked. */
@@ -118,13 +133,21 @@ export class AuthManager {
     return this.renew();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    this.stopped = true;
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
+    this.proactiveTimer = undefined;
+    // A timer may already have entered renew() before stop() cleared it. Its
+    // final step persists device.json, so daemon ownership cannot be released
+    // until that promise settles. Renewal failure is surfaced later by the
+    // next token consumer; shutdown only needs the writer barrier here.
+    await this.credentialMutationTail;
   }
 
   private async renew(): Promise<string> {
+    if (this.stopped) throw new Error('auth manager is stopped; load existing credentials before renewing');
     if (!this.renewing) {
-      this.renewing = this.doRenew().finally(() => {
+      this.renewing = this.runCredentialMutation(() => this.doRenew()).finally(() => {
         this.renewing = undefined;
       });
     }
@@ -178,7 +201,8 @@ export class AuthManager {
 
   private scheduleProactiveRenewal(): void {
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
-    if (!this.record || this.revoked) return;
+    this.proactiveTimer = undefined;
+    if (!this.record || this.revoked || this.stopped || this.pairing) return;
     const delay = Math.max(0, msUntilExpiry(this.record.expiresAt) - RENEW_MARGIN_MS);
     const timer = setTimeout(() => {
       this.renew().catch(() => {
@@ -189,6 +213,20 @@ export class AuthManager {
     }, delay);
     timer.unref?.();
     this.proactiveTimer = timer;
+  }
+
+  private async runCredentialMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const predecessor = this.credentialMutationTail;
+    let release!: () => void;
+    this.credentialMutationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await predecessor;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 }
 

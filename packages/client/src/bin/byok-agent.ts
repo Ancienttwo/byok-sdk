@@ -4,6 +4,7 @@ import { argValue, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from '
 import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
 import { runPairCommand } from './commands/pair';
+import { runDoctorCommand } from './commands/doctor';
 import { runRuntimesCommand } from './commands/runtimes';
 import {
   buildServiceDefinition,
@@ -15,6 +16,7 @@ import {
 } from './commands/service';
 import { runStartCommand } from './commands/start';
 import { runStatusCommand } from './commands/status';
+import { runSupportBundleCommand } from './commands/support-bundle';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runUnpairCommand } from './commands/unpair';
 import { runWorkspacesCommand } from './commands/workspaces';
@@ -109,6 +111,8 @@ function usage(): never {
       '  byok-agent pair <code> --server <url> [--config <path>]',
       '  byok-agent start [--config <path>]                        (or BYOK_CONFIG env var)',
       '  byok-agent status [--config <path>]',
+      '  byok-agent doctor [--json] [--fix --yes] [--config <path>]',
+      '  byok-agent support-bundle --output <path> [--config <path>]',
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
       '  byok-agent workspaces [--show-paths] [--config <path>]',
@@ -166,6 +170,22 @@ async function main(): Promise<void> {
   if (command === 'status') {
     const config = loadConfig(configPathFrom(rest));
     return runStatusCommand(config);
+  }
+
+  if (command === 'doctor') {
+    const config = loadConfig(configPathFrom(rest));
+    return runDoctorCommand(config, {
+      json: hasFlag(rest, '--json'),
+      fix: hasFlag(rest, '--fix'),
+      confirmed: hasFlag(rest, '--yes'),
+    });
+  }
+
+  if (command === 'support-bundle') {
+    const outputPath = argValue(rest, '--output');
+    if (!outputPath) usage();
+    const config = loadConfig(configPathFrom(rest));
+    return runSupportBundleCommand(config, { outputPath });
   }
 
   if (command === 'runtimes') {

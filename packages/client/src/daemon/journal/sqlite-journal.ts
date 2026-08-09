@@ -55,7 +55,15 @@ import {
   type ReceivedEnvelopeRecord,
   type StorageCategory,
 } from './journal';
-import { isSqliteAvailable, openJournalDatabase, secureJournalFilePermissions } from './sqlite-support';
+import {
+  isSqliteAvailable,
+  JournalHandleCleanupError,
+  openJournalDatabase,
+  secureJournalFilePermissions,
+  type JournalOpenFaultSeam,
+} from './sqlite-support';
+
+export { JournalHandleCleanupError };
 
 /** The single database file, per §12.7.2's "建议单库 `<storeDir>/daemon.db`". */
 export const JOURNAL_DB_FILENAME = 'daemon.db';
@@ -114,6 +122,8 @@ export interface SqliteLocalTaskJournalOptions {
   readonly maxRecordBytes?: number;
   /** Test seam — see {@link JournalFaultSeam}. Never supplied in production. */
   readonly faults?: JournalFaultSeam;
+  /** Test seam for post-open/pre-return SQLite initialization failures. Never supplied in production. */
+  readonly openFaults?: JournalOpenFaultSeam;
   /** Injected clock, so receipt/quarantine timestamps are deterministic under test. Defaults to the real one. */
   readonly clock?: () => Date;
 }
@@ -360,17 +370,53 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     // Open + schema are one unit for quarantine purposes: a file whose header
     // reads fine but whose schema cannot be created is just as unusable, and
     // just as much evidence, as one that fails at open.
-    let db: DatabaseSync;
+    let db: DatabaseSync | undefined;
     try {
-      db = openJournalDatabase(this.#dbPath, options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+      db = openJournalDatabase(
+        this.#dbPath,
+        options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
+        options.openFaults,
+      );
       db.exec(SCHEMA);
     } catch (err) {
+      // `openJournalDatabase` owns the handle until it returns. If that helper
+      // could not prove cleanup, this constructor has no handle to close and
+      // must preserve the typed mutation-barrier failure for the daemon rather
+      // than relabeling it as ordinary corruption and releasing the lease.
+      if (err instanceof JournalHandleCleanupError) throw err;
+      // An open handle is itself a store writer/lock authority. Close it before
+      // quarantine and before the caller can release its cross-process lease;
+      // otherwise a schema failure could leave an unreachable live SQLite
+      // handle behind while a second daemon is admitted.
+      try {
+        db?.close();
+      } catch (closeError) {
+        throw new JournalHandleCleanupError(
+          'local task journal initialization failed and its SQLite handle could not be closed',
+          [err, closeError],
+        );
+      }
       const reason = err instanceof Error ? err.message : String(err);
       const quarantinePath = quarantineDatabase(options.storeDir, this.#dbPath, reason, this.#clock());
       throw new JournalCorruptError(this.#dbPath, quarantinePath, reason, { cause: err });
     }
     this.#db = db;
-    secureJournalFilePermissions(this.#dbPath);
+    try {
+      secureJournalFilePermissions(this.#dbPath);
+    } catch (err) {
+      // Permission hardening failure is not database corruption and must not
+      // move evidence. It is still a construction failure, with the handle
+      // synchronously closed before ownership can unwind.
+      try {
+        db.close();
+      } catch (closeError) {
+        throw new JournalHandleCleanupError(
+          'local task journal permission hardening failed and its SQLite handle could not be closed',
+          [err, closeError],
+        );
+      }
+      throw err;
+    }
   }
 
   // ---------------------------------------------------------------------

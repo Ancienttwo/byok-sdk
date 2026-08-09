@@ -86,6 +86,20 @@ export function buildIcaclsArgs(dir: string, username: string): string[] {
   return [dir, '/inheritance:r', '/grant:r', `${username}:(OI)(CI)F`, '/grant', `${SYSTEM_SID}:(OI)(CI)F`, '/grant', `${ADMINISTRATORS_SID}:(OI)(CI)F`];
 }
 
+/** Restrictive ACL for one already-created file; no inheritance flags because the target cannot contain children. */
+export function buildIcaclsFileArgs(filePath: string, username: string): string[] {
+  return [
+    filePath,
+    '/inheritance:r',
+    '/grant:r',
+    `${username}:F`,
+    '/grant',
+    `${SYSTEM_SID}:F`,
+    '/grant',
+    `${ADMINISTRATORS_SID}:F`,
+  ];
+}
+
 export interface EnsureSecureDirOptions {
   /** DI for tests — see `lifecycle/exec-runner.ts`'s identical `Runner` seam. Defaults to `defaultRunner` (real `execFile`, never a shell). */
   run?: Runner;
@@ -116,6 +130,16 @@ export class SecureDirHardeningError extends Error {
       `failed to apply a restrictive Windows ACL to "${dir}": ${reason} — refusing to leave this directory unprotected (it holds device credentials and/or the control-socket token, otherwise readable by any other local user); see docs/security.md`,
     );
     this.name = 'SecureDirHardeningError';
+  }
+}
+
+export class SecureFileHardeningError extends Error {
+  constructor(
+    public readonly filePath: string,
+    reason: string,
+  ) {
+    super(`failed to apply a restrictive Windows ACL to "${filePath}": ${reason}`);
+    this.name = 'SecureFileHardeningError';
   }
 }
 
@@ -176,5 +200,23 @@ export async function ensureSecureDir(dir: string, opts: EnsureSecureDirOptions 
   }
   if (result.code !== 0) {
     throw new SecureDirHardeningError(dir, `icacls exited ${result.code}: ${(result.stderr || result.stdout).trim()}`);
+  }
+}
+
+/** Re-asserts 0600 on POSIX and a non-inherited owner/SYSTEM/Admin DACL on Windows. */
+export async function ensureSecureFile(filePath: string, opts: EnsureSecureDirOptions = {}): Promise<void> {
+  const platform = opts.platform ?? process.platform;
+  const run = opts.run ?? defaultRunner;
+  await fs.chmod(filePath, 0o600);
+  if (platform !== 'win32') return;
+  const { username } = os.userInfo();
+  let result: Awaited<ReturnType<Runner>>;
+  try {
+    result = await run('icacls', buildIcaclsFileArgs(filePath, username));
+  } catch (err) {
+    throw new SecureFileHardeningError(filePath, `could not run icacls: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (result.code !== 0) {
+    throw new SecureFileHardeningError(filePath, `icacls exited ${result.code}: ${(result.stderr || result.stdout).trim()}`);
   }
 }

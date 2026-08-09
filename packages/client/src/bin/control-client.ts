@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import net from 'node:net';
 import {
   CONTROL_PROTOCOL_VERSION,
@@ -53,8 +53,75 @@ export interface ControlClient {
 
 export type ConnectControlResult = { ok: true; client: ControlClient } | { ok: false; reason: string };
 
+const MAX_CONTROL_TOKEN_BYTES = 256;
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+/**
+ * Read the authentication token through a bounded pathname-bound handle.
+ * Diagnostics calls this client even when no daemon is expected, so a FIFO,
+ * symlink swap, or oversized local file must become an ordinary offline result
+ * rather than blocking the CLI or consuming unbounded memory.
+ */
+async function readControlToken(tokenPath: string): Promise<string | undefined> {
+  let namedBefore: import('node:fs').BigIntStats;
+  try {
+    namedBefore = await fs.lstat(tokenPath, { bigint: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+  if (!namedBefore.isFile() || namedBefore.isSymbolicLink()) {
+    throw new Error('control token is not a real regular file');
+  }
+  const handle = await fs.open(
+    tokenPath,
+    fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const opened = await handle.stat({ bigint: true });
+    const namedAfterOpen = await fs.lstat(tokenPath, { bigint: true });
+    if (
+      !opened.isFile() ||
+      !namedAfterOpen.isFile() ||
+      namedAfterOpen.isSymbolicLink() ||
+      !sameFileState(namedBefore, opened) ||
+      !sameFileState(opened, namedAfterOpen)
+    ) {
+      throw new Error('control token pathname changed before safe open');
+    }
+    if (opened.size < 0 || opened.size > BigInt(MAX_CONTROL_TOKEN_BYTES)) {
+      throw new Error('control token exceeds the bounded read limit');
+    }
+    const size = Number(opened.size);
+    const bytes = Buffer.alloc(size);
+    const { bytesRead } = await handle.read(bytes, 0, size, 0);
+    const afterRead = await handle.stat({ bigint: true });
+    const namedAfterRead = await fs.lstat(tokenPath, { bigint: true });
+    if (
+      bytesRead !== size ||
+      namedAfterRead.isSymbolicLink() ||
+      !sameFileState(opened, afterRead) ||
+      !sameFileState(afterRead, namedAfterRead)
+    ) {
+      throw new Error('control token changed during bounded read');
+    }
+    return bytes.toString('utf8').trim();
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Reads the control token, connects, and performs the handshake — see the module doc comment for why failures here collapse into `{ok:false, reason}` rather than throwing. */
@@ -62,11 +129,12 @@ export async function connectControlClient(opts: ControlClientOptions): Promise<
   const tokenPath = controlTokenPath(opts.storeDir);
   let token: string;
   try {
-    token = (await fs.readFile(tokenPath, 'utf8')).trim();
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+    const read = await readControlToken(tokenPath);
+    if (read === undefined) {
       return { ok: false, reason: 'daemon is not running (no control.token found)' };
     }
+    token = read;
+  } catch (err) {
     return { ok: false, reason: `could not read the control token: ${errorMessage(err)}` };
   }
   if (!token) {

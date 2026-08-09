@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { OperationalHealthTracker } from '../daemon/operational-health';
+import { MAX_OPERATIONAL_HEALTH_FILE_BYTES, OperationalHealthTracker } from '../daemon/operational-health';
 
 const dirs: string[] = [];
 
@@ -95,6 +95,32 @@ describe('operational health', () => {
     const persisted = JSON.parse(await fs.readFile(file, 'utf8')) as { failures: unknown[]; crashes: unknown[] };
     expect(persisted.failures).toHaveLength(3);
     expect(persisted.crashes).toHaveLength(2);
+  });
+
+  it('rejects an oversized state at the same bounded read authority doctor uses', async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, 'operational-health.json');
+    await fs.writeFile(file, JSON.stringify({ version: 1, state: 'healthy', failures: [], crashes: [] }));
+    await fs.truncate(file, MAX_OPERATIONAL_HEALTH_FILE_BYTES + 1);
+    const tracker = new OperationalHealthTracker(dir);
+    await tracker.startRun();
+    expect(tracker.snapshot()).toMatchObject({
+      availability: 'unavailable',
+      reason: 'operational health state exceeds the 1 MiB read limit; corruption is unconfirmed',
+    });
+    expect((await fs.stat(file)).size).toBe(MAX_OPERATIONAL_HEALTH_FILE_BYTES + 1);
+  });
+
+  it('rejects unknown top-level fields instead of silently treating them as canonical health state', async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, 'operational-health.json');
+    await fs.writeFile(
+      file,
+      JSON.stringify({ version: 1, state: 'healthy', failures: [], crashes: [], padding: 'not-canonical' }),
+    );
+    const tracker = new OperationalHealthTracker(dir);
+    await tracker.startRun();
+    expect(tracker.snapshot()).toEqual({ availability: 'unavailable', reason: 'operational health state has an invalid shape' });
   });
 
   it('reports corrupt state as unavailable without deleting or rebuilding it', async () => {
