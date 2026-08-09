@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-09 11:52
+> **Related Plan**: plans/archive/plan-20260809-0638-s7b-diagnostics.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260809-1152
+
 # Task Contract: s7b-diagnostics
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260809-0638-s7b-diagnostics.md
 > **Task Profile**: code-change
 > **Owner**: ancienttwo

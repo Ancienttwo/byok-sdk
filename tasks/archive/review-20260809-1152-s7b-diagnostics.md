@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-09 11:52
+> **Related Plan**: plans/archive/plan-20260809-0638-s7b-diagnostics.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260809-1152
+
 # Task Review: s7b-diagnostics
 
 > **Status**: Accepted; awaiting PR merge/readback
