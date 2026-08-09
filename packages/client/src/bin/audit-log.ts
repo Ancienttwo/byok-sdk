@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok/protocol';
+import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok-sdk/protocol';
 import { type ConnectionState, type DaemonEvent, type DaemonEventListener } from '../index';
 import { atomicWriteFile } from '../util/atomic-write';
 
@@ -13,7 +13,7 @@ import { atomicWriteFile } from '../util/atomic-write';
  *
  * Finding P1 #3 (SECURITY): a `DaemonEvent` can carry a task's raw
  * instruction-derived output — `tool_use.input`/`tool_result.output` are
- * `z.unknown()` in `@byok/protocol` (a shell command, a whole file's
+ * `z.unknown()` in `@byok-sdk/protocol` (a shell command, a whole file's
  * contents echoed back, anything), `progress`/`needs_approval`/`completed`/
  * `failed`/`cancelled` all carry free-form agent/operator text, and
  * `artifact.inline` is literally base64 file bytes. Persisting all of that
@@ -140,7 +140,7 @@ function byteSize(text: string | undefined): number | undefined {
 /**
  * Rough serialized-size estimate for an arbitrary (`unknown`) value —
  * `tool_use.input`/`tool_result.output` are typed `z.unknown()` in
- * `@byok/protocol` precisely because a tool's input/output can be anything
+ * `@byok-sdk/protocol` precisely because a tool's input/output can be anything
  * (a command string, a JSON object, a whole file's contents). `JSON.stringify`
  * can itself throw (a circular structure, a lone BigInt) — caught
  * defensively since this is only ever a size ESTIMATE for the audit trail,
@@ -540,7 +540,7 @@ export async function appendAuditEvent(storeDir: string, event: DaemonEvent): Pr
  * can reconstruct that task's final state from that ONE event alone
  * (`upsert` seeds a fresh record from whatever patch a terminal event
  * carries), so no earlier event of its needs to survive a rotation. A small
- * local set rather than importing from `@byok/protocol`/`tasks-view.ts`:
+ * local set rather than importing from `@byok-sdk/protocol`/`tasks-view.ts`:
  * those describe reducer OUTPUT states, not `DaemonEvent.kind`s, and only
  * these three kinds ever end a task (mirrors `tasks-view.ts`'s own
  * `deriveTasksFromEvents` switch).

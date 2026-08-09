@@ -1,7 +1,7 @@
 /**
- * The one error taxonomy for `@byok/cloud`.
+ * The one error taxonomy for `@byok-sdk/cloud`.
  *
- * Same idiom as `@byok/core`'s `errors.ts`: one class, code-based branching,
+ * Same idiom as `@byok-sdk/core`'s `errors.ts`: one class, code-based branching,
  * so a composition maps failures onto HTTP with a code table instead of an
  * `instanceof` chain. Cloud does not re-export core's codes — a cloud error is
  * about the hosted surface (a store contract the composition broke, a

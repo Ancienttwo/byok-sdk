@@ -5,7 +5,7 @@ import {
   tenantId,
   type BoardItem,
   type CoreConflictError,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
 import { migrate } from '../migrate';
 import { PostgresBoardStore } from '../stores/core/board';

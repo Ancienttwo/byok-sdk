@@ -28,7 +28,7 @@
  */
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { contentHash, createMutableClock, isCoreError, tenantId } from '@byok/core';
+import { contentHash, createMutableClock, isCoreError, tenantId } from '@byok-sdk/core';
 import { migrate } from '../migrate';
 import { PostgresObjectStore } from '../stores/core/objects';
 import { PostgresQuotaStore } from '../stores/core/quota';

@@ -32,7 +32,7 @@ import {
  *      `UnknownMessageTypeError`) is already pinned in `freeze-guard.test.ts`.
  *      The actual dispatch-layer behavior (what a REAL client transport does
  *      with that thrown error) lives in `packages/client` — this package has
- *      no dependency on `@byok/client` or `@byok/server` to reach it (see
+ *      no dependency on `@byok-sdk/client` or `@byok-sdk/server` to reach it (see
  *      each package's `package.json`), so per this drill's own instructions
  *      those assertions live in
  *      `packages/client/src/__tests__/unknown-message-type-tolerance.test.ts`

@@ -12,7 +12,7 @@
  * is deliberately no dual mode and no grace window — a device on the old
  * encoding re-pairs.
  *
- * The literal is byte-identical to `@byok/server`'s `NONCE_SIGNING_DOMAIN`
+ * The literal is byte-identical to `@byok-sdk/server`'s `NONCE_SIGNING_DOMAIN`
  * and to what the daemon signs (`packages/client/src/daemon/device-keys.ts`),
  * because the daemon must not be able to tell self-hosted from hosted. Parity
  * is asserted by behavior tests, never by importing the server.

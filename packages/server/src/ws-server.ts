@@ -1,6 +1,6 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { CAPABILITY_FLAGS, decodeEnvelope, PROTOCOL_VERSION, type ConnHelloPayload } from '@byok/protocol';
+import { CAPABILITY_FLAGS, decodeEnvelope, PROTOCOL_VERSION, type ConnHelloPayload } from '@byok-sdk/protocol';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { authenticateBearer, type AuthDeps, type AuthenticatedDevice } from './auth';
 import { startHeartbeat, type Heartbeat } from './heartbeat';

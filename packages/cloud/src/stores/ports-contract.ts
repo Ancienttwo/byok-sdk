@@ -1,10 +1,10 @@
 /**
  * The declared method inventory of every cloud-local port.
  *
- * The exact counterpart of `@byok/core`'s `ports-contract.ts`, and it exists
+ * The exact counterpart of `@byok-sdk/core`'s `ports-contract.ts`, and it exists
  * for the same reason: the table says what a port IS, so it has to be readable
- * by every enforcer without any of them owning it. `@byok/conformance` asserts
- * live compositions against it; a durable adapter (`@byok/cloud-postgres`) is
+ * by every enforcer without any of them owning it. `@byok-sdk/conformance` asserts
+ * live compositions against it; a durable adapter (`@byok-sdk/cloud-postgres`) is
  * written against it.
  *
  * This module adds data and nothing else. It does not re-declare, re-shape, or

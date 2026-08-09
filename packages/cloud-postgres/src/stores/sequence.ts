@@ -11,8 +11,8 @@
  * twice — which matters because the daemon's redelivery cursor IS this number,
  * and a repeat makes the cursor ambiguous and one envelope unacknowledgeable.
  */
-import type { DeviceSequenceStore } from '@byok/cloud';
-import type { TenantId } from '@byok/core';
+import type { DeviceSequenceStore } from '@byok-sdk/cloud';
+import type { TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 export class PostgresDeviceSequenceStore implements DeviceSequenceStore {

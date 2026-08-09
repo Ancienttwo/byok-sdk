@@ -2,7 +2,7 @@
  * The sprint S2.2 constraint list, made executable.
  *
  * These are the properties that are cheap to state, expensive to lose, and
- * invisible in a normal test run: a `@byok/protocol` import that quietly
+ * invisible in a normal test run: a `@byok-sdk/protocol` import that quietly
  * recreates the `keys → protocol` edge (§12.1), a `node:` import that breaks
  * the Workers composition, a port method that forgot its tenant parameter, a
  * `TenantId` cast outside the mint point. None of them would fail a behavioral
@@ -69,10 +69,10 @@ describe('dependency isolation', () => {
     ) as Record<string, unknown>;
     expect(Object.keys(manifest['dependencies'] as object)).toEqual(['zod']);
     expect(manifest['peerDependencies']).toBeUndefined();
-    expect(JSON.stringify(manifest)).not.toContain('@byok/protocol');
+    expect(JSON.stringify(manifest)).not.toContain('@byok-sdk/protocol');
   });
 
-  it('never references @byok/protocol in code', () => {
+  it('never references @byok-sdk/protocol in code', () => {
     // Not merely "no import statement": any code-level mention would be a step
     // toward one, and the whole point of §12.1 is that this edge stays absent.
     const offenders = ALL_SOURCES.filter(
@@ -127,7 +127,7 @@ describe('public API surface', () => {
     expect([...new Set(sources)].sort()).toEqual([...ALLOWED_INDEX_MODULES].sort());
   });
 
-  // S4A story O-005 answered this: the suite is the private `@byok/conformance`
+  // S4A story O-005 answered this: the suite is the private `@byok-sdk/conformance`
   // workspace package, so core ships the port CONTRACT DATA the suite reads and
   // none of the harness that reads it.
   it('exports no conformance harness', () => {

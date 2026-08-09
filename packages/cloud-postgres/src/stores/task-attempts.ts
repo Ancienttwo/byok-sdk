@@ -14,8 +14,8 @@
  * `claim` and `recordStatus` on a task this tenant never offered write nothing
  * and return `undefined`.
  */
-import type { TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '@byok/cloud';
-import type { Clock, TenantId } from '@byok/core';
+import type { TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '@byok-sdk/cloud';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 interface TaskRow {

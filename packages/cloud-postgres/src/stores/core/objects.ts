@@ -46,7 +46,7 @@ import {
   type ObjectState,
   type ObjectStore,
   type TenantId,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
 
 const DEFAULT_LIST_LIMIT = 100;

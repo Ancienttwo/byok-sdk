@@ -1,6 +1,6 @@
 {
-  "name": "@byok/client",
-  "version": "0.0.1",
+  "name": "@byok-sdk/client",
+  "version": "0.1.0",
   "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
   "type": "module",
   "license": "MIT",
@@ -32,7 +32,9 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
@@ -49,8 +51,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@byok/core": "workspace:*",
-    "@byok/protocol": "workspace:*",
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
     "ws": "^8.21.1"
   },
   "optionalDependencies": {
@@ -58,7 +60,7 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "@byok/server": "workspace:*",
+    "@byok-sdk/server": "workspace:*",
     "@hono/node-server": "^2.0.10"
   }
 }

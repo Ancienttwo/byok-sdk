@@ -1,9 +1,9 @@
-# @byok/example-basic
+# @byok-sdk/example-basic
 
 End-to-end walking-skeleton demo for the BYOK SDK (see `docs`/plan: 里程碑 M0).
-A hono server embeds `@byok/server`'s in-memory reference implementation and
+A hono server embeds `@byok-sdk/server`'s in-memory reference implementation and
 serves a single plain-HTML/JS page (no frontend build step). A separate
-`byok-agent` daemon process (from `@byok/client`) runs on "the user's
+`byok-agent` daemon process (from `@byok-sdk/client`) runs on "the user's
 machine" and drives the local `pi` coding-agent runtime.
 
 Not published — this package is `private` and lives under `examples/`.
@@ -17,7 +17,7 @@ pnpm install
 pnpm -r build
 ```
 
-`@byok/client`'s `pi` runtime is an optionalDependency
+`@byok-sdk/client`'s `pi` runtime is an optionalDependency
 (`@earendil-works/pi-coding-agent`); if it fails to install for your platform
 the daemon falls back to a `pi` binary on `PATH` (see
 `packages/client/src/adapters/pi/resolve-bin.ts`).
@@ -27,7 +27,7 @@ the daemon falls back to a `pi` binary on `PATH` (see
 **Terminal 1 — the server:**
 
 ```sh
-pnpm --filter @byok/example-basic dev
+pnpm --filter @byok-sdk/example-basic dev
 ```
 
 Starts the hono app on `http://localhost:8787` (override with `PORT`).
@@ -51,7 +51,7 @@ node packages/client/dist/bin/byok-agent.js pair <code> --server http://localhos
 node packages/client/dist/bin/byok-agent.js start --config /tmp/byok-example-config.json
 ```
 
-(Once `@byok/client` publishes its `byok-agent` bin, this is just `byok-agent
+(Once `@byok-sdk/client` publishes its `byok-agent` bin, this is just `byok-agent
 pair`/`byok-agent start` on PATH — see that package's own docs. Invoking
 `dist/bin/byok-agent.js` directly here just avoids requiring a global/linked
 install for the demo.)
@@ -100,7 +100,7 @@ Paths are hidden by default and are shown only with `--show-paths`. The private 
 
 By default this demo's task/blob state is in-memory + local-disk and is lost
 whenever the server process restarts. Set `BYOK_STORE=sqlite` to swap in
-`@byok/server`'s `node:sqlite`-backed reference stores (`SqliteTaskStore`/
+`@byok-sdk/server`'s `node:sqlite`-backed reference stores (`SqliteTaskStore`/
 `SqliteBlobStore`) instead — task **records** and blob bytes then survive a
 restart, persisted under `examples/basic/data/` (gitignored):
 
@@ -112,7 +112,7 @@ restart, persisted under `examples/basic/data/` (gitignored):
 > scope for the M3 reference stores.
 
 ```sh
-BYOK_STORE=sqlite pnpm --filter @byok/example-basic dev
+BYOK_STORE=sqlite pnpm --filter @byok-sdk/example-basic dev
 ```
 
 Requires Node.js 22.5+ (`node:sqlite`'s minimum); on an older Node this fails

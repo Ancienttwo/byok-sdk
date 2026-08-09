@@ -18,7 +18,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createEnvelope, type Envelope } from '@byok/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';

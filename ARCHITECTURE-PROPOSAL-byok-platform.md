@@ -29,18 +29,18 @@ byok-sdk monorepo
 │       安全模型：主動管理使用者的 provider API key（OS Keychain/Credential Manager）
 │
 └── C 線（agent 調度，bring-your-own-agent）
-    ├── @byok/protocol            ← 現有，wire v1 FROZEN
-    ├── @byok/core                ← 新增（P0），契約層，zod-only，protocol-free
-    ├── @byok/cloud               ← 新增（P1），無狀態 handler + SQL/R2 實現
-    ├── @byok/server              ← 現有，降級為自託管可選 coordinator
-    └── @byok/client              ← 現有，本機 daemon + RuntimeAdapter
+    ├── @byok-sdk/protocol            ← 現有，wire v1 FROZEN
+    ├── @byok-sdk/core                ← 新增（P0），契約層，zod-only，protocol-free
+    ├── @byok-sdk/cloud               ← 新增（P1），無狀態 handler + SQL/R2 實現
+    ├── @byok-sdk/server              ← 現有，降級為自託管可選 coordinator
+    └── @byok-sdk/client              ← 現有，本機 daemon + RuntimeAdapter
         安全模型：credential-isolation——絕不接觸任何憑證（M5 audit 承諾）
 ```
 
 ```
 使用者宿主機（執行權威）                        雲端（協調權威，無狀態請求/響應）
 ┌──────────────────────────────┐            ┌────────────────────────────────┐
-│ @byok/client daemon          │            │ @byok/cloud (Workers / Node)   │
+│ @byok-sdk/client daemon          │            │ @byok-sdk/cloud (Workers / Node)   │
 │  ├ 執行狀態機（wire 7 態）    │            │  ├ board  task 5 態      (SQL) │
 │  │   Offered…Running…Completed│◀─offer─────│  ├ 信箱   outbox         (SQL) │
 │  ├ 工作區 / 上下文 / 產物     │──terminal──▶│  ├ 真相層 attested_rec(SQL+R2)│
@@ -56,7 +56,7 @@ byok-sdk monorepo
 
 | | 執行狀態機（wire） | board 狀態機（協調） | presence（提示） |
 |---|---|---|---|
-| 值 | `Offered/Claimed/Running/AwaitApproval/Completed/Failed/Cancelled`（`protocol/task-state.ts`，**凍結**） | `todo/in_progress/in_review/done/closed`（`@byok/core`，新增） | `online/thinking/working/error/offline`（TTL，非狀態機） |
+| 值 | `Offered/Claimed/Running/AwaitApproval/Completed/Failed/Cancelled`（`protocol/task-state.ts`，**凍結**） | `todo/in_progress/in_review/done/closed`（`@byok-sdk/core`，新增） | `online/thinking/working/error/offline`（TTL，非狀態機） |
 | 對象 | 一次執行嘗試 | 一個工作項的人類可見生命週期 | 一台設備的在線度 |
 | 權威 | **本機 daemon** | **雲端**（人、多設備、多方都要改它，沒有任何單一 daemon 能擁有它） | 無權威，過期即不存在 |
 | 變更頻率 | 一次任務內連續變化 | 一次任務內個位數次，每次都是離散顯式 POST | 高頻，有損 |
@@ -88,11 +88,11 @@ byok-sdk monorepo
 
 | 模組 | 現狀 | v2 處置 |
 |---|---|---|
-| `@byok/protocol` | transport-agnostic，wire v1 FROZEN（`version.ts:1-25`），freeze-guard 三層網（`__tests__/freeze-guard.test.ts:47-83,180-234,239-300,259-261,518-521`） | **原樣不動**。`@byok/cloud` import 它解析 `EventsPollResponse`/`MessagesSendRequest`（`http-api.ts:115-125,147-165`） |
+| `@byok-sdk/protocol` | transport-agnostic，wire v1 FROZEN（`version.ts:1-25`），freeze-guard 三層網（`__tests__/freeze-guard.test.ts:47-83,180-234,239-300,259-261,518-521`） | **原樣不動**。`@byok-sdk/cloud` import 它解析 `EventsPollResponse`/`MessagesSendRequest`（`http-api.ts:115-125,147-165`） |
 | `TASK_TRANSITIONS` | 凍結的 7 態執行狀態機 | 原樣。board 5 態是**另一個常數、另一個包**，永不合併 |
 | `codec` | 只處理 `string \| Uint8Array` 與單行 NDJSON，無 transport-specific API（`codec.ts:9-60`） | 原樣。信箱內容物 byte-for-byte v1 envelope |
-| `TaskStore` | 介面全同步（`task-store.ts:46-94`），hub 內 29 個調用點（`grep -c "this.taskStore\." packages/server/src/hub.ts` = 29） | **不做 async 遷移**，按作用域退場，留在 `@byok/server` 自託管域，見 §3.3 |
-| `BlobStore` | 已 async、已抽象（`blob-store.ts:36-49`，註解本就把 S3/GCS/R2 presigned 當替換點 `:7-20`），凍結的 `sha256:<64hex>` | **搬進 `@byok/core`**，R2/S3 只需新實現，server 側 re-export |
+| `TaskStore` | 介面全同步（`task-store.ts:46-94`），hub 內 29 個調用點（`grep -c "this.taskStore\." packages/server/src/hub.ts` = 29） | **不做 async 遷移**，按作用域退場，留在 `@byok-sdk/server` 自託管域，見 §3.3 |
+| `BlobStore` | 已 async、已抽象（`blob-store.ts:36-49`，註解本就把 S3/GCS/R2 presigned 當替換點 `:7-20`），凍結的 `sha256:<64hex>` | **搬進 `@byok-sdk/core`**，R2/S3 只需新實現，server 側 re-export |
 | `ConnectionHub` | 1,689 行，狀態全在進程內 Map（`hub.ts:280-342`，outbox ring 500 / dedup ring 1,024，`:50-54`）；dispatch 同步建 server-side task record（`hub.ts:1335-1379`）；`pollEvents` 用 `setTimeout` 持有 50s（`hub.ts:459-476`、`index.ts:67`） | **降級為自託管可選件**，不進 core、不重寫、不分散式化 |
 | `SqliteTaskStore` | 綁 `node:sqlite` `DatabaseSync`（`sqlite-task-store.ts:157-218,251-276`），需 Node 22.5+（`sqlite-support.ts:1-30`）；只恢復 task record，明文不承諾 in-flight recovery（`:121-136`） | 留在 server，自託管專用。這證明「換 Postgres」修不了 authority mismatch |
 | `DeviceRegistry`/`PairingManager` | 進程內 Map；`DeviceRecord` 無租戶欄位（`auth.ts:76-82`）、`createPairingCode()` 不綁 subject（`pairing.ts:34-42`）、`redeemPairingCode()` 不回身分（`pairing.ts:51-63`）、pair handler 憑空 register（`http.ts:75-97,82-92`） | **T0 立即 breaking cut**，加 required `tenantId`/`productId`，見 §8 |
@@ -109,18 +109,18 @@ byok-sdk monorepo
 
 ## 3. D1 — 包拆分粒度與依賴圖
 
-**選型：新增兩包——`@byok/core`（契約層，zod-only，protocol-free）+ `@byok/cloud`（無狀態 handler + SQL/R2 實現）。共 6 個包，不做 package explosion。**
+**選型：新增兩包——`@byok-sdk/core`（契約層，zod-only，protocol-free）+ `@byok-sdk/cloud`（無狀態 handler + SQL/R2 實現）。共 6 個包，不做 package explosion。**
 
 ```
-@byok/protocol   凍結 wire（zod，neutral）           ← 無依賴
-@byok/core       儲存契約 + 確權封套 + board 狀態機   ← 只依賴 zod，且【禁止】依賴 protocol
-@byok/cloud      無狀態 handler + SQL/R2 實現         ← protocol + core + hono
-@byok/server     Node 自託管可選 coordinator          ← protocol + core（BlobStore）
-@byok/client     本機 daemon                          ← protocol + core（封套 + board）
+@byok-sdk/protocol   凍結 wire（zod，neutral）           ← 無依賴
+@byok-sdk/core       儲存契約 + 確權封套 + board 狀態機   ← 只依賴 zod，且【禁止】依賴 protocol
+@byok-sdk/cloud      無狀態 handler + SQL/R2 實現         ← protocol + core + hono
+@byok-sdk/server     Node 自託管可選 coordinator          ← protocol + core（BlobStore）
+@byok-sdk/client     本機 daemon                          ← protocol + core（封套 + board）
 @byok-sdk/keys       key 管理                             ← core（P5 起，僅契約）—— 永不碰 protocol
 ```
 
-### 3.1 `@byok/core` 的全部內容（只有契約，沒有實現）
+### 3.1 `@byok-sdk/core` 的全部內容（只有契約，沒有實現）
 
 - `attestation.ts` — `DeviceProofEnvelopeV1` schema + RFC 8785 正規化 + `verifyDeviceProof`（注入式 verifier）
 - `board.ts` — board 5 態 + 合法轉移表 + claim 衝突快照形狀
@@ -134,11 +134,11 @@ byok-sdk monorepo
 
 ### 3.2 為何 core 必須 protocol-free
 
-鐵律 1 要求 `keys` 可依賴 core（P5）。若 core 依賴 protocol，`keys → core → protocol` 會在 `pnpm why` 的安裝圖上直接違反鐵律——即使 import 圖乾淨，審計者看到的依賴圖已經髒了。core 也不需要 protocol：信箱契約把 envelope 當**不透明 bytes**加路由 metadata（byte-for-byte v1 envelope，型別驗證在 `@byok/cloud` 這個組合層做）；board 契約裡 `task_id` 只是一個 string。內容盲與 protocol-free 是同一件事的兩面。
+鐵律 1 要求 `keys` 可依賴 core（P5）。若 core 依賴 protocol，`keys → core → protocol` 會在 `pnpm why` 的安裝圖上直接違反鐵律——即使 import 圖乾淨，審計者看到的依賴圖已經髒了。core 也不需要 protocol：信箱契約把 envelope 當**不透明 bytes**加路由 metadata（byte-for-byte v1 envelope，型別驗證在 `@byok-sdk/cloud` 這個組合層做）；board 契約裡 `task_id` 只是一個 string。內容盲與 protocol-free 是同一件事的兩面。
 
 board 5 態放 core 而不放 protocol：protocol 是凍結的 wire，board 不上 wire（鐵律 4）；但 board 5 態要被 cloud（強制執行）、client（理解）、SaaS UI（渲染）三方共用，正是 core 的定位。放進去之後 core 仍然 zod-only、仍然 protocol-free。
 
-cloud 獨立成包而非 `@byok/server` 的 subpath：打包目標不同（server 根入口拖著 `node:http` 與 `node:sqlite`）、依賴集不同，決定性的是第三條——本 repo 的安全審計按包寫（`docs/security-review-m5-pilot-entry.md` 針對 M5 的 credential-isolation claim），雲端是全新的公網多租戶攻擊面，塞進已審計包等於稀釋那份審計的邊界。
+cloud 獨立成包而非 `@byok-sdk/server` 的 subpath：打包目標不同（server 根入口拖著 `node:http` 與 `node:sqlite`）、依賴集不同，決定性的是第三條——本 repo 的安全審計按包寫（`docs/security-review-m5-pilot-entry.md` 針對 M5 的 credential-isolation claim），雲端是全新的公網多租戶攻擊面，塞進已審計包等於稀釋那份審計的邊界。
 
 ### 3.3 `TaskStore` 不做 async 遷移（採 Opus 軌，Codex 軌的一次性 breaking cut 被否）
 
@@ -146,21 +146,21 @@ cloud 獨立成包而非 `@byok/server` 的 subpath：打包目標不同（serve
 
 改法是**按作用域退場**：
 
-- `TaskStore` 留在 `@byok/server`，語義從「權威」降級為「本地鏡像」（doc-level 降級 + 一條斷言「daemon 上報終態永遠覆蓋鏡像」的測試）。
+- `TaskStore` 留在 `@byok-sdk/server`，語義從「權威」降級為「本地鏡像」（doc-level 降級 + 一條斷言「daemon 上報終態永遠覆蓋鏡像」的測試）。
 - 雲端沒有 `TaskStore`。`hub.dispatch()` 的雲端對應物是「board claim 成功 → enqueue offer 進 outbox」，沒有執行態寫入。
-- 真要「Node 後端 + Postgres」，那個部署直接跑 `@byok/cloud` 的 handler。一條 async 路徑、一條 sync 路徑，服務兩種部署形態，彼此不是 fallback。
+- 真要「Node 後端 + Postgres」，那個部署直接跑 `@byok-sdk/cloud` 的 handler。一條 async 路徑、一條 sync 路徑，服務兩種部署形態，彼此不是 fallback。
 
-**Deferred（記入 §11）**：「自託管接 Postgres 時再做 `TaskStore` 的 breaking async cut」。觸發條件是有人真的要拿 `@byok/server` 接非同步 SQL；在那之前不預先付這筆傳染成本。Codex 軌對這條 cut 的切法（leaf-first、per-device FIFO promise chain 防 WS callback race、`setPendingApprovalId` 從 optional 改 required）在觸發時直接照用，不重新設計。
+**Deferred（記入 §11）**：「自託管接 Postgres 時再做 `TaskStore` 的 breaking async cut」。觸發條件是有人真的要拿 `@byok-sdk/server` 接非同步 SQL；在那之前不預先付這筆傳染成本。Codex 軌對這條 cut 的切法（leaf-first、per-device FIFO promise chain 防 WS callback race、`setPendingApprovalId` 從 optional 改 required）在觸發時直接照用，不重新設計。
 
 ### 3.4 被否選項
 
 - **`TaskStore` 全面 async（Codex D1）**：29 調用點 + 20 簽名 + 23 測試檔的傳染，換一個雲端不用的介面；改為按作用域退場 + deferred。
 - 把 protocol 併進 core：毀掉凍結包的審計鏈，且讓 keys 傳染 wire 依賴。
 - board 狀態機放 protocol：board 不上 wire，放進去等於擴大凍結面。
-- `@byok/server/cloud` subpath：把新公網攻擊面塞進已審計包內。
-- `@byok/core` 同時容納 dispatch、keys、memory、provider clients：破壞 `docs/security.md:596-610` 的雙安全模型邊界。
+- `@byok-sdk/server/cloud` subpath：把新公網攻擊面塞進已審計包內。
+- `@byok-sdk/core` 同時容納 dispatch、keys、memory、provider clients：破壞 `docs/security.md:596-610` 的雙安全模型邊界。
 - 每個 store 各一 npm package：只有兩種 deployment composition，過早拆包放大 schema migration 與 release coordination。
-- 刪除 `@byok/server`：它仍是有價值的自託管 reference 與 integration test harness；正確動作是降級定位。
+- 刪除 `@byok-sdk/server`：它仍是有價值的自託管 reference 與 integration test harness；正確動作是降級定位。
 - `T | Promise<T>` 雙形介面：永久 compatibility path 的起點，且型別上掩蓋 data race。
 
 ---
@@ -513,7 +513,7 @@ UTF8("BYOK-DEVICE-PROOF-V1\n") || RFC8785_CANONICAL_JSON(protected)
 - proof **不進** `EnvelopeSchema`，不新增 `task.*` message，不改任何 frozen payload。
 - 信箱 entry 的內層仍是 byte-for-byte v1 envelope；proof 綁定 pull/ack HTTP request，而不是重簽或改寫每個 envelope。
 - terminal write 的 body 內嵌原始 v1 terminal envelope 與 context refs；proof 的 `bodySha256` 綁定完整 body。
-- 這沿用 repo 既有 seam：auth/blob/long-poll HTTP bodies 本來就明示是 wire envelope 外的 contract（`http-api.ts:5-15`）。proof schema 放 `@byok/core`，**不加到 `@byok/protocol` frozen golden**。
+- 這沿用 repo 既有 seam：auth/blob/long-poll HTTP bodies 本來就明示是 wire envelope 外的 contract（`http-api.ts:5-15`）。proof schema 放 `@byok-sdk/core`，**不加到 `@byok-sdk/protocol` frozen golden**。
 - proof 封套自己也要凍結：P4 落地時建 `packages/core/src/__tests__/golden/device-proof-v1.golden.json`，鎖住 canonical bytes 的逐字節形狀。簽名格式一旦在生產環境簽過就不能靜默改。
 
 ### 6.3 前置修正：`signNonce` 補 domain separation（P4 必做）
@@ -548,7 +548,7 @@ UTF8("BYOK-DEVICE-PROOF-V1\n") || RFC8785_CANONICAL_JSON(protected)
 
 **衝突** — `PUT` 帶 `expectedRev`，不符回 409，daemon 重拉 manifest 後在本機重新決定。fail-closed，無伺服器端合併、無 last-write-wins。一機一租戶時幾乎撞不到，多機共用租戶時這是唯一的正確性閘門。
 
-**與本機過濾的分工** — 蒸餾/過濾歸 `@byok/client` 的新 seam（`ContextPolicy`/`MemorySelector`），不進 core、不進 cloud。雲端在整條鏈上只看見三樣東西：manifest 的 metadata、presigned body 的取放、簽名快照的落庫。
+**與本機過濾的分工** — 蒸餾/過濾歸 `@byok-sdk/client` 的新 seam（`ContextPolicy`/`MemorySelector`），不進 core、不進 cloud。雲端在整條鏈上只看見三樣東西：manifest 的 metadata、presigned body 的取放、簽名快照的落庫。
 
 **中途想看「它在幹嘛」** — 那是 `activity_tail` 與 `device_presence`，不是 memory。TTL、有損、不簽名、永不進真相層。
 
@@ -620,7 +620,7 @@ export interface DeviceRecord {
 
 驗收標準是**漏一個 handler 也洩漏不了**。逐 handler 手寫 `WHERE tenant_id=?` 是紀律不是結構——否選。
 
-1. **代碼層（主保證）**：`TenantId` 品牌型別，**鑄造點唯一**（只有 auth 層能把 string 升格）；core 所有 store port 第一參數是 `TenantId`，不存在裸鍵方法；`@byok/cloud` 的 auth middleware 驗出 principal 後構造 `TenantStores`——租戶已閉包進去的 facade，handler 只拿得到它。不是「應該檢查」，是「無法不檢查」。
+1. **代碼層（主保證）**：`TenantId` 品牌型別，**鑄造點唯一**（只有 auth 層能把 string 升格）；core 所有 store port 第一參數是 `TenantId`，不存在裸鍵方法；`@byok-sdk/cloud` 的 auth middleware 驗出 principal 後構造 `TenantStores`——租戶已閉包進去的 facade，handler 只拿得到它。不是「應該檢查」，是「無法不檢查」。
 2. **數據層**：全表 `tenant_id` 前綴複合主鍵；查找鍵要麼以 `tenant_id` 開頭，要麼本身是 ≥128-bit 服務端隨機 capability（nonce、blobId、presigned sig）且行內仍攜帶 `tenant_id`。**不建任何裸 `device_id`/`task_id` 的 unique 索引**——想繞過租戶查詢，schema 層就沒有索引可走。Postgres RLS 是 additive 硬化，**不是**被依賴的主機制（D1 無 RLS，主保證必須可移植）。
 3. **測試層**：路由註冊表窮舉矩陣，新增 handler 未入矩陣 → 測試自身失敗（I1）。
 4. **proof 閉環**：`claims.tenantId` 是**查找鍵，不是可信輸入**——`WHERE tenant_id = :claims.tenantId AND device_id = :claims.deviceId AND key_id = :proof.keyId AND status='active'`，查無此行即 401。等值檢查是查找的構造性結果，不是可漏寫的第二步。401 統一措辭，不區分 unknown/wrong-tenant/revoked，避免租戶存在性 oracle。
@@ -647,7 +647,7 @@ principal 兩型：`DevicePrincipal { tenantId, productId, deviceId }`（租戶�
 
 | 步 | 時點 | 內容 | 驗證 |
 |---|---|---|---|
-| **T0** | **即刻**，先於 P 線任何資料落庫 | `@byok/server` breaking cut：`DeviceRecord` + tenantId/productId、`PairingCodeClaims`、redeem 回傳 claims、pair handler 佈線、`AccessTokenClaims` + tenantId、`authenticateBearer` → `AuthenticatedDevice`、`index.ts` 公開 API、conn.hello productId 檢查、examples 與測試更新 | typecheck/test/build；I2/I5/I8/I9 |
+| **T0** | **即刻**，先於 P 線任何資料落庫 | `@byok-sdk/server` breaking cut：`DeviceRecord` + tenantId/productId、`PairingCodeClaims`、redeem 回傳 claims、pair handler 佈線、`AccessTokenClaims` + tenantId、`authenticateBearer` → `AuthenticatedDevice`、`index.ts` 公開 API、conn.hello productId 檢查、examples 與測試更新 | typecheck/test/build；I2/I5/I8/I9 |
 | **T1** | P0（core 契約包） | `TenantId` 品牌、Principal 型別、store port 全部 tenant-first 簽名 | I7；core 無 protocol 依賴斷言 |
 | **T2** | **P1 入口閘** | cloud auth middleware（proof + control-plane）→ `TenantStores` facade；隨第一條路由建立 I1 矩陣骨架；control-plane mint 端點 | I1/I3 |
 | **T3** | P2（SQL） | 全表 tenant 前綴 PK migration（`deploy/sql/`）；`pairing_code` 表；conformance 跨租戶不變式；Postgres RLS 作可選硬化 | I4；`check:deploy-sql` |
@@ -689,9 +689,9 @@ K2 的 `ProfileStore` 從第一版就是 async（`@byok-sdk/keys` 的 `SecretSto
 |---|---|---|---|
 | — | **T0** | 租戶 breaking cut（§8.6） | 即刻可做，先於 P 線任何資料落庫 |
 | 1 | **K2 ship** | 已過閘 | — |
-| 2 | **K3 ∥ P0** | K3 設置頁取捨 + security docs；**P0** 建 `@byok/core`（契約檔案，零實現，不改任何既有包） | P0 純加性可並行。驗證：`pnpm -r typecheck/test/build` 綠；新測試斷言 core 的 `package.json` 無 `@byok/protocol`、原始碼無 `node:` import；`golden/v1.frozen.json` 未變 |
+| 2 | **K3 ∥ P0** | K3 設置頁取捨 + security docs；**P0** 建 `@byok-sdk/core`（契約檔案，零實現，不改任何既有包） | P0 純加性可並行。驗證：`pnpm -r typecheck/test/build` 綠；新測試斷言 core 的 `package.json` 無 `@byok-sdk/protocol`、原始碼無 `node:` import；`golden/v1.frozen.json` 未變 |
 | 3 | **K4** | 回接 aip-main-open、發佈、AiphaBee swap | **獨立閉環，不綁平台線**。aip-main-open 的 `apps/local-agent/src/settings.test.ts` 原樣通過為唯一 parity authority |
-| 4 | **P1** | `@byok/cloud`：無狀態派工 handler + 信箱-journal-終態端到端 + store 的 in-memory 參考實現 | **前置閘：T0-T4 的 T0/T1/T2 + I1-I9 全綠**。關鍵測試：既有 daemon 在 long-poll 模式、`longPoll.idleDelayMs=1500` 下跑通全套整合測試，**client 零改動**。**crash drill**：在 local journal append 前／後、mailbox ack 前／後各注入 crash，證明不漏件且不需要 cloud running record |
+| 4 | **P1** | `@byok-sdk/cloud`：無狀態派工 handler + 信箱-journal-終態端到端 + store 的 in-memory 參考實現 | **前置閘：T0-T4 的 T0/T1/T2 + I1-I9 全綠**。關鍵測試：既有 daemon 在 long-poll 模式、`longPoll.idleDelayMs=1500` 下跑通全套整合測試，**client 零改動**。**crash drill**：在 local journal append 前／後、mailbox ack 前／後各注入 crash，證明不漏件且不需要 cloud running record |
 | 5 | **P2** | SQL（Postgres/Hyperdrive + D1）與 R2/S3 實現；`deploy/sql/` migration | store conformance 套件同一份測試跑四種 composition（§10）；`check:deploy-sql` 過；T3 |
 | 6 | **P3** | board 層：5 態 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/輪詢雙路徑 + 兩級提示 | claim 併發測試；SSE 與輪詢兩條路徑跑同一份行為測試；120s 對賬能修復人為製造的漏事件；T4、I6 |
 | 7 | **P4** | client 側 device proof 上行 + memory manifest/selector seam + **`signNonce` domain separation 修復** | `device-proof-v1.golden.json` 凍結 canonical bytes；pair/token 的 breaking 變更在同一 PR 內兩側同步 |
@@ -717,7 +717,7 @@ K2 的 `ProfileStore` 從第一版就是 async（`@byok-sdk/keys` 的 `SecretSto
 1. InMemory（單元測試）；
 2. Postgres + S3 fake/presigned test；
 3. D1 + R2 miniflare/Workers integration；
-4. 自託管 `@byok/server`（InMemory/SQLite）。
+4. 自託管 `@byok-sdk/server`（InMemory/SQLite）。
 
 ### 10.2 必測 invariant（8 條全收 + board 3 條）
 
@@ -745,21 +745,21 @@ pnpm -r run typecheck && pnpm -r run test && pnpm -r run build
 repo-harness run check-task-workflow --strict
 
 # 鐵律 4 的機檢（凍結指紋零漂移）
-pnpm --filter @byok/protocol test
+pnpm --filter @byok-sdk/protocol test
 git diff --exit-code packages/protocol/src/__tests__/golden/
 
 # 鐵律 1 的機檢（依賴圖）
-pnpm why @byok/protocol --filter @byok-sdk/keys    # 必須無結果
+pnpm why @byok-sdk/protocol --filter @byok-sdk/keys    # 必須無結果
 pnpm why @byok-sdk/keys                             # 不得出現在 client/server/protocol/cloud 下
 
 # P1 關鍵驗證：client 零改動跑通雲端 handler
-pnpm --filter @byok/client test -- --grep "long-poll"
+pnpm --filter @byok-sdk/client test -- --grep "long-poll"
 
 # P2 SQL 順序檢查
 pnpm run check:deploy-sql
 
 # P3 board 併發驗證
-pnpm --filter @byok/cloud test -- --grep "claim"
+pnpm --filter @byok-sdk/cloud test -- --grep "claim"
 
 # K4 parity 黃金測試（在 aip-main-open 側，唯一 parity authority）
 npx vitest run --root . apps/local-agent/src/settings.test.ts
@@ -787,7 +787,7 @@ npx vitest run --root . apps/local-agent/src/settings.test.ts
 | R14 | device proof 簽名格式在有人簽過之後才發現要改 | 中 | 高 | P4 就凍 `device-proof-v1.golden.json`；proof schema 版本獨立於 wire `v`，留乾淨的 v2 空間 |
 | R15 | pairing code 在 TTL 窗口內被截獲 = 一次受限的 join | 中 | 中 | join token 的本質，答案是縮窗（12 字/60 bits、10min TTL、一次性、率限、只存 hash）加事後可撤（join 審計事件 + `devices.revoke`），不假裝能消除 |
 | R16 | `signNonce` 的 domain separation 修復被漏做，device proof 先上線 | 中 | 中 | P4 驗收項；兩側同 PR 同步，四包未發 npm 所以 breaking 免費 |
-| **D-1** | **deferred：`TaskStore` 的 breaking async cut** | — | — | **觸發條件**：有人真的要拿自託管 `@byok/server` 接非同步 SQL（Postgres）。屆時照 Codex 軌 §4 的切法（leaf-first、per-device FIFO promise chain、`setPendingApprovalId` 改 required）一次性完成，不預先付 29 調用點 + 20 簽名 + 23 測試檔的傳染成本 |
+| **D-1** | **deferred：`TaskStore` 的 breaking async cut** | — | — | **觸發條件**：有人真的要拿自託管 `@byok-sdk/server` 接非同步 SQL（Postgres）。屆時照 Codex 軌 §4 的切法（leaf-first、per-device FIFO promise chain、`setPendingApprovalId` 改 required）一次性完成，不預先付 29 調用點 + 20 簽名 + 23 測試檔的傳染成本 |
 | **D-2** | **deferred：memory delta 鏈** | — | — | **觸發條件**（任一）：單一 memory key 快照穩定 > 1 MiB；或 `expectedRev` CAS 衝突率顯著。屆時照 Codex 軌 §7 實作，memory 契約 breaking 升版 |
 | **D-3** | **deferred：v1 的 D4（短期憑證 mint + 本地回環憑證代理）、D6（多連接三層進程樹）、D7（自建 supervisor）重評** | — | — | 需求觸發制。現狀 agent 經 stdio 與 daemon 溝通、從不持有 SaaS 憑證，安全性等價；部署單位是「一個宿主產品一個 daemon」 |
 
@@ -799,7 +799,7 @@ npx vitest run --root . apps/local-agent/src/settings.test.ts
 2. **信箱認證面**：凍結 bearer 長輪詢（P1「client 零改動」的前提）vs device proof 簽名 pull。租戶隔離保證與該選擇正交（§8.4 第一層）；P1 實作按 §4.2 端點表取捨。
 3. **board claim 是否允許人搶佔 agent 已 claim 的項目**（強制 unclaim）。影響 claim CAS 是否需要一條 admin 旁路。
 4. **`closed` 的準確語義**（終止未驗收 vs 歸檔）——本方案取前者，探針未能確認 raft 原意 [unverified]；若採後者則改為加 `archived_at` 欄位，不加第 6 態。
-5. **`@byok-sdk/keys` 與 `@byok/cloud` 的 npm 發佈形態**：公開（repo MIT）vs GitHub Packages 私有。K4 前定，兩者一起定。
+5. **`@byok-sdk/keys` 與 `@byok-sdk/cloud` 的 npm 發佈形態**：公開（repo MIT）vs GitHub Packages 私有。K4 前定，兩者一起定。
 6. **K3 設置頁 server 進包與否**（v1 遺留開放項）。
 
 ---
@@ -837,7 +837,7 @@ npx vitest run --root . apps/local-agent/src/settings.test.ts
 
 **本方案對探針的四處不照抄**：狀態碼嗅探降級改為能力宣告（repo 明禁 heuristic 路徑）；status 轉移增加 `expectedStatus` CAS（探針只在 claim 有 CAS）；本機短路 API 改掛既有 Unix socket 控制面而非 loopback HTTP 端口（byok 既有實現更嚴格）；砍掉跨網的獨立 wake-hint 通道（SSE 串流本身即該信號）。
 
-**v1 已完成的 raft 對位結論保留**：`@byok/client` 的 IPC control socket 防護比 raft 嚴（`control-server.ts:38,170,175`）；fail-closed 文化（未配對拒啟動、URL 白名單 unconditional refusal，`create-daemon.ts:178,527`）；K 線用 OS Keychain 存 key，raft 連自家 OAuth token 都存檔案；per-task Git checkpoint（workspaces）raft 沒有對應物。真缺口（doctor/upgrade/退避分級/watchdog 分級）已轉為 C1-C3 儲備里程碑（§9.2）。
+**v1 已完成的 raft 對位結論保留**：`@byok-sdk/client` 的 IPC control socket 防護比 raft 嚴（`control-server.ts:38,170,175`）；fail-closed 文化（未配對拒啟動、URL 白名單 unconditional refusal，`create-daemon.ts:178,527`）；K 線用 OS Keychain 存 key，raft 連自家 OAuth token 都存檔案；per-task Git checkpoint（workspaces）raft 沒有對應物。真缺口（doctor/upgrade/退避分級/watchdog 分級）已轉為 C1-C3 儲備里程碑（§9.2）。
 
 ### 13.5 標為 [inferred] / [unverified] 的判斷
 

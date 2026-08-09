@@ -1,5 +1,5 @@
 {
-  "name": "@byok/conformance",
+  "name": "@byok-sdk/conformance",
   "version": "0.0.0",
   "private": true,
   "description": "The composition conformance suites: one assertion source every BYOK composition must pass, never published",
@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@byok/cloud": "workspace:*",
-    "@byok/core": "workspace:*"
+    "@byok-sdk/cloud": "workspace:*",
+    "@byok-sdk/core": "workspace:*"
   }
 }

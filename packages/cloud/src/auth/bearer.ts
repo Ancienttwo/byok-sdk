@@ -14,7 +14,7 @@
  * `TenantId` — which is what makes it the only legal input to
  * `tenantStoresFor` (`../tenant-stores.ts`).
  */
-import { isTenantId, tenantId, type DevicePrincipal } from '@byok/core';
+import { isTenantId, tenantId, type DevicePrincipal } from '@byok-sdk/core';
 import type { DeviceDirectory } from '../stores/ports';
 import type { TokenSigner } from './tokens';
 

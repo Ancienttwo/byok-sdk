@@ -13,7 +13,7 @@ import {
   type MessagesSendResponse,
   type PairResponse,
   type TokenResponse,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import { authenticateBearer, mintAccessToken, verifyNonceSignature, type AuthDeps, type NonceStore } from './auth';
 import { BlobDeclarationConflictError, type BlobStore } from './blob-store';
 import type { ConnectionHub } from './hub';

@@ -1,6 +1,6 @@
 # BYOK SDK Wire Protocol
 
-Normative contract for `@byok/protocol`. This is the single source of truth for
+Normative contract for `@byok-sdk/protocol`. This is the single source of truth for
 the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
@@ -896,7 +896,7 @@ the whole thing outright — and then, if it naively retried the identical
 oversized batch unchanged, stall permanently. The reference client
 (`ConnectionManager.drainOutbox`) does this by importing the same
 `MAX_MESSAGES_PER_BATCH` constant the schema enforces (exported from
-`@byok/protocol`, not a hard-coded copy), so the two can never drift apart.
+`@byok-sdk/protocol`, not a hard-coded copy), so the two can never drift apart.
 
 ### 8.3 WS and long-poll are mutually exclusive — last transport wins (resolves a carried-forward pin)
 
@@ -1082,8 +1082,8 @@ does not fix server/client**; that is M1-2/M1-3's job against this document.
 
 This subsection is a historical migration record, not a statement of current
 build health. At the time this change landed, `pnpm -r typecheck` was run
-from the repo root: `@byok/protocol` itself was green, but both
-`@byok/client` and `@byok/server` failed to compile (verified by running
+from the repo root: `@byok-sdk/protocol` itself was green, but both
+`@byok-sdk/client` and `@byok-sdk/server` failed to compile (verified by running
 each package's `typecheck` script in isolation — the concurrent `pnpm -r`
 run's failure-abort behavior truncates one package's output when both fail
 around the same time, so isolating per-package was needed to see the full
@@ -1139,10 +1139,10 @@ break), but it also never populated the new `runtimes`/`cursor` fields — its
 own doc comment already flagged "at-least-once redelivery with cursors is
 M1," i.e. this was exactly the gap M1-3 was expected to close, not a
 regression from this change. `examples/basic` typechecked clean at the time,
-but only because it consumed `@byok/server`'s prebuilt (stale) `dist/`, not
+but only because it consumed `@byok-sdk/server`'s prebuilt (stale) `dist/`, not
 its source — it didn't construct any envelope/payload directly (it only
 touched `TaskHandle.taskId`, an unrelated server-side identifier), so it was
-expected to remain unaffected once `@byok/server` was fixed and rebuilt.
+expected to remain unaffected once `@byok-sdk/server` was fixed and rebuilt.
 M1-2, M1-3, and the subsequent examples adaptation have since landed,
 closing this out.
 

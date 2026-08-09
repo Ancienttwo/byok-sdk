@@ -19,7 +19,7 @@ export interface SqliteProviderProfileStoreOptions {
   /**
    * Database file path. `:memory:` exercises the SQLite code path without a
    * temp file, but defeats the point of this store (restart-safety) exactly as
-   * it does for `@byok/server`'s `SqliteTaskStore`.
+   * it does for `@byok-sdk/server`'s `SqliteTaskStore`.
    */
   path: string;
 }
@@ -73,7 +73,7 @@ interface ProfileRow {
 }
 
 /**
- * SQLite-backed {@link ProviderProfileStore}, following `@byok/server`'s
+ * SQLite-backed {@link ProviderProfileStore}, following `@byok-sdk/server`'s
  * `SqliteTaskStore` shape. Holds no secret: the API key lives in the injected
  * `SecretStore`, and `registry.golden.test.ts` asserts the plaintext key never
  * appears in this file's bytes.

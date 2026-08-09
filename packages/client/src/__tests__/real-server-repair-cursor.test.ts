@@ -11,7 +11,7 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 /**
- * Finding F5 (stale cursor across re-pair), against the REAL `@byok/server`
+ * Finding F5 (stale cursor across re-pair), against the REAL `@byok-sdk/server`
  * — this is deliberate, not just consistency with the F2 test: the real
  * server's `POST /byok/pair` always mints a brand new `deviceId`, even for
  * a re-pair with the identical device keypair (see
@@ -21,7 +21,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * see its own doc comment), so it can't exercise this bug at all; only the
  * real server's actual behavior can.
  */
-describe('re-pair does not inherit a stale cursor from the previous device (finding F5, real @byok/server)', () => {
+describe('re-pair does not inherit a stale cursor from the previous device (finding F5, real @byok-sdk/server)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
 

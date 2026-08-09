@@ -5,14 +5,14 @@
  * batch, a relative presigned URL — so they are asserted against the protocol
  * package's own schemas rather than by eye.
  */
-import { createMutableClock } from '@byok/core';
+import { createMutableClock } from '@byok-sdk/core';
 import {
   MAX_MESSAGES_PER_BATCH,
   MessagesSendResponseSchema,
   createEnvelope,
   type CreateBlobResponse,
   type Envelope,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { fullCapabilityDeclaration } from '../capabilities';

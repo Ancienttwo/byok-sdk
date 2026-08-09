@@ -15,8 +15,8 @@ export interface ResolvedApprovalMcpBin {
  *
  * Unlike `resolveClaudeBin` (the end user's own separately-installed,
  * separately-authenticated CLI, resolved via bare-name PATH lookup),
- * `byok-approval-mcp` is a script THIS SAME `@byok/client` package ships —
- * bare-name PATH lookup is NOT safe for it: `@byok/client` is typically a
+ * `byok-approval-mcp` is a script THIS SAME `@byok-sdk/client` package ships —
+ * bare-name PATH lookup is NOT safe for it: `@byok-sdk/client` is typically a
  * project-local dependency, so its `node_modules/.bin/byok-approval-mcp`
  * symlink is only on PATH for processes that inherit THAT project's own
  * shell/PATH, not reliably for a background OS service (launchd/systemd
@@ -34,7 +34,7 @@ export interface ResolvedApprovalMcpBin {
  *
  * The default computation is deliberately anchored to THIS module's own
  * `import.meta.url`, resolved once at the real production entry point: when
- * `@byok/client` is built (`tsup.config.ts`), this file's code ends up
+ * `@byok-sdk/client` is built (`tsup.config.ts`), this file's code ends up
  * bundled into `dist/index.js` at the package root, with `dist/bin/
  * byok-approval-mcp.js` as its direct sibling (same layout `byok-agent.js`
  * already uses) — `path.join(path.dirname(fileURLToPath(import.meta.url)),

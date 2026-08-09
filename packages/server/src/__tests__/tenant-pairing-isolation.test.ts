@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
-import { createEnvelope, PROTOCOL_VERSION } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { createByokServer, createHmacTokenSigner, type AccessTokenClaims, type ByokServer } from '../index';

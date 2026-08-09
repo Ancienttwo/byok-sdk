@@ -5,7 +5,7 @@
  * (the wire is at-least-once) must not overwrite the first one — `created:
  * false` is how the caller learns it was a replay rather than a new fact.
  */
-import { tenantKey, type Clock, type TenantId } from '@byok/core';
+import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { RequestReceipt, RequestReceiptStore } from '../ports';
 
 export class InMemoryRequestReceiptStore implements RequestReceiptStore {

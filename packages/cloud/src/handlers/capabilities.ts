@@ -7,7 +7,7 @@
  * this response for exactly that reason.
  */
 import type { Context } from 'hono';
-import type { CapabilityDeclaration } from '@byok/core';
+import type { CapabilityDeclaration } from '@byok-sdk/core';
 
 export interface CapabilitiesRouteDeps {
   readonly declaration: CapabilityDeclaration;

@@ -30,7 +30,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * idempotently (the server's record is already `Cancelled` by the time it
  * arrives — see `hub.ts`'s `onCancelled` dual-purpose doc comment).
  */
-describe('a task.cancel sent while disconnected is redelivered on reconnect and the daemon interrupts the same session (real @byok/server + real @byok/client)', () => {
+describe('a task.cancel sent while disconnected is redelivered on reconnect and the daemon interrupts the same session (real @byok-sdk/server + real @byok-sdk/client)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
 

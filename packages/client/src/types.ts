@@ -1,4 +1,4 @@
-import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok/protocol';
+import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';

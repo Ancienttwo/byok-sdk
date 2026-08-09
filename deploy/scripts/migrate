@@ -2,7 +2,7 @@
 #
 # Apply every pending migration in `deploy/sql/` to $DATABASE_URL.
 #
-# A thin invocation of the runner in `@byok/cloud-postgres`, and deliberately
+# A thin invocation of the runner in `@byok-sdk/cloud-postgres`, and deliberately
 # nothing more. The runner owns ordering, the advisory lock, per-file
 # transactions, the ledger, and the checksum check; a script that re-implemented
 # any of that would be a second source of truth about how this schema moves.

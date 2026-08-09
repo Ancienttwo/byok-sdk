@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, PROTOCOL_VERSION, type Envelope, type RuntimeCapabilities, type RuntimeId } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type Envelope, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer } from '../index';
 import type { ServerTaskEvent, TaskHandle } from '../types';

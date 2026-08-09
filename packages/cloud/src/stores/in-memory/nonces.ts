@@ -6,7 +6,7 @@
  * issued to one tenant's device is not validatable by another's even if the
  * value leaks.
  */
-import { tenantKey, type Clock, type TenantId } from '@byok/core';
+import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../../crypto/port';
 import type { NonceStore } from '../ports';
 

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { BlobRef } from '@byok/protocol';
+import type { BlobRef } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';

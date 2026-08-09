@@ -9,7 +9,7 @@
  * eleventh route added tomorrow either goes through the registry (and appears
  * in the inventory) or fails this suite.
  */
-import { createInMemoryCoreStores, createMutableClock, type CapabilityDeclaration } from '@byok/core';
+import { createInMemoryCoreStores, createMutableClock, type CapabilityDeclaration } from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
 import { createHmacTokenSigner } from '../auth/tokens';
 import { CLOUD_CAPABILITIES, fullCapabilityDeclaration, type CloudCapability } from '../capabilities';

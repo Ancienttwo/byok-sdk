@@ -3,7 +3,7 @@ import type { Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, type RuntimeCapabilities, type RuntimeId, type RuntimeInfo } from '@byok/protocol';
+import { createEnvelope, type RuntimeCapabilities, type RuntimeId, type RuntimeInfo } from '@byok-sdk/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer, SqliteTaskStore, SteerRejectedError, type ByokServer, type TaskHandle } from '../index';
 import { isSqliteAvailable } from '../sqlite-support';

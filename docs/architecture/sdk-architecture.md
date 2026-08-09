@@ -1,7 +1,7 @@
 # BYOK SDK 架构文档
 
-> 状态：基于 `main` 工作树的架构复核稿。
-> Verified against: main@880e69f（2026-08-08）
+> 状态：S7-c release candidate 架构复核稿；registry 状态仍以 publish 后 readback 为准。
+> Verified against: S7-c working tree based on main@8ad6474（2026-08-09）
 > Verification scope: CURRENT sections + package graph + completed-slice status
 > Volatile workflow status: see tasks/current.md; not duplicated here
 > 面向对象：嵌入 BYOK 能力的 SaaS 开发者、SDK 维护者、安全审计与部署人员。
@@ -21,10 +21,10 @@
 
 当前系统有两条安全模型完全不同的产品线：
 
-- Agent dispatch plane：`@byok/protocol` + `@byok/server` + `@byok/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
+- Agent dispatch plane：`@byok-sdk/protocol` + `@byok-sdk/server` + `@byok-sdk/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
 
-目标平台新增的 `@byok/core` 与 `@byok/cloud` 已落地，把可组装契约、mailbox、board、truth record 与多租户边界独立出来。`@byok/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok/cloud` 消费其 hosted contracts，S6-c 再让 `@byok/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。`@byok/cloud` 已具无状态 device surface、board/presence/activity、proof-only truth routes；本机 durable journal 位于 client，生产 durable composition 位于 `@byok/cloud-postgres`。本文在第 12 节记录执行状态。
+目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 将六个 dispatch package 统一到 `@byok-sdk/*@0.1.0`，并新增 `byok-sdk@0.1.0` namespace umbrella；`@byok-sdk/keys` 继续独立安装，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录执行状态。
 
 ## 1. P1：全局架构地图
 
@@ -45,7 +45,7 @@ flowchart LR
   subgraph SaaS["宿主 SaaS / Node 后端"]
     direction TB
     App(["产品业务逻辑"]):::server
-    Server(["@byok/server<br/>Hono + ConnectionHub"]):::server
+    Server(["@byok-sdk/server<br/>Hono + ConnectionHub"]):::server
     TaskStore[("TaskStore<br/>Memory / SQLite")]:::store
     BlobStore[("BlobStore<br/>Local disk / SQLite")]:::store
     App --> Server
@@ -55,7 +55,7 @@ flowchart LR
 
   subgraph Device["最终用户设备"]
     direction TB
-    Agent(["@byok/client daemon<br/>byok-agent"]):::client
+    Agent(["@byok-sdk/client daemon<br/>byok-agent"]):::client
     IPC(["Unix socket / named pipe<br/>HMAC control channel"]):::client
     Runtime(["RuntimeAdapter"]):::runtime
     Pi(["pi CLI"]):::runtime
@@ -93,12 +93,12 @@ flowchart LR
 | 本机 library | `createDaemon()` / `createDaemonWithAdapters()` | 配对、连接、任务执行、observer、service lifecycle |
 | 本机 CLI | `byok-agent` | pair/start/status/runtimes/tasks/workspaces/unpair/approval/service commands |
 | Approval helper | `byok-approval-mcp` | Claude confirm 模式的 stdio MCP 子进程，经 control socket 回调 daemon |
-| Wire contract | `@byok/protocol` public index | envelope、17 类消息、HTTP schema、状态机、capability flags |
+| Wire contract | `@byok-sdk/protocol` public index | envelope、17 类消息、HTTP schema、状态机、capability flags |
 | Key custody | `ProviderRegistry` | profile 与 secret 分库存储，构造 OpenAI-compatible / Anthropic client |
 
 ### 1.2 Monorepo 与依赖图
 
-仓库是 Node `>=20`、pnpm workspace。六个 package（`client`/`cloud`/`core`/`keys`/`protocol`/`server`）都可独立 build/package，但仓库本身不能证明它们已经发布到 npm。下图画 dispatch、key 与 hosted cloud 三条线；`@byok/core` 当前有 `cloud` 与 `client` 两个 runtime consumer，`server`/`keys` 的目标边见 §12.1。
+仓库是 Node `>=20`、pnpm workspace。当前有九个 workspace package：八个 public manifest（六个 dispatch package、`byok-sdk` umbrella、独立 `@byok-sdk/keys`）与一个只供测试使用的 private `@byok-sdk/conformance`。S7-c 的本地 tarball gate 已证明七个本刀 artifact 可以被隔离安装/import；这不等于 registry 已发布，npm 状态必须等 publish 后 readback。下图画实际 runtime、release 与 test-only edges。
 
 ```mermaid
 flowchart LR
@@ -108,12 +108,15 @@ flowchart LR
   classDef example fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
   classDef dev fill:#374151,stroke:#d1d5db,stroke-width:2px,color:#fff
 
-  Protocol(["@byok/protocol<br/>zod-only wire contract"]):::contract
-  Server(["@byok/server<br/>embedded coordinator"]):::runtime
-  Client(["@byok/client<br/>local daemon + CLI"]):::runtime
+  Protocol(["@byok-sdk/protocol<br/>zod-only wire contract"]):::contract
+  Server(["@byok-sdk/server<br/>embedded coordinator"]):::runtime
+  Client(["@byok-sdk/client<br/>local daemon + CLI"]):::runtime
   Keys(["@byok-sdk/keys<br/>provider credential plane"]):::key
-  Core(["@byok/core<br/>zod-only composable contracts"]):::contract
-  Cloud(["@byok/cloud<br/>stateless hosted surface"]):::runtime
+  Core(["@byok-sdk/core<br/>zod-only composable contracts"]):::contract
+  Cloud(["@byok-sdk/cloud<br/>stateless hosted surface"]):::runtime
+  CloudPg(["@byok-sdk/cloud-postgres<br/>Postgres + R2 composition"]):::runtime
+  SDK(["byok-sdk<br/>six namespace umbrella"]):::example
+  Conformance(["@byok-sdk/conformance<br/>private test authority"]):::dev
   Basic(["examples/basic<br/>E2E SaaS demo"]):::example
   Packaging(["examples/packaging<br/>single-file probe"]):::example
 
@@ -122,6 +125,16 @@ flowchart LR
   Client --> Core
   Cloud --> Core
   Cloud --> Protocol
+  CloudPg --> Cloud
+  CloudPg --> Core
+  Conformance --> Cloud
+  Conformance --> Core
+  SDK --> Protocol
+  SDK --> Server
+  SDK --> Client
+  SDK --> Core
+  SDK --> Cloud
+  SDK --> CloudPg
   Client -.->|"devDependency<br/>integration tests only"| Server
   Basic --> Server
   Packaging --> Client
@@ -139,8 +152,11 @@ flowchart LR
 | keys | 18 / 2,718 | 15 / 2,958 | 独立 key-custody 安全模型 |
 | core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
 | cloud | 42 / 5,045 | 10 / 3,003 | stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
+| cloud-postgres | 22 / 6,309 | 14 / 3,533 | production Postgres + R2 composition；事务、quota、GC 与 reconciliation authority |
+| sdk | 1 / 12 | 1 / 16 | public namespace umbrella；依赖六个 dispatch package，明确排除 keys |
+| conformance | 26 / 2,842 | 2 / 84 | private shared assertion authority；不得进入发布依赖树 |
 
-统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。六个 package 的复算命令：
+统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。各 package 的复算命令：
 
 ```bash
 SDK_SRC=packages/server/src
@@ -148,29 +164,31 @@ find "$SDK_SRC" -type f -name '*.ts' ! -name '*.test.ts' ! -name '*.spec.ts' ! -
 find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__tests__/*.ts' \) -print | sort -u
 ```
 
-对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余五个 package。
+对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余 package。
 
-强依赖是 `server → protocol`、`client → protocol/core` 与 `cloud → core/protocol`；弱依赖是 `client -dev→ server`。当前的依赖 invariant 清单：
+强依赖是 `server → protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-postgres → cloud/core` 与 `byok-sdk → 六个 dispatch package`；弱依赖是 `client -dev→ server` 与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
 
 - `core !→ protocol`、`core !→ node`：core 必须保持 protocol-free、Node-free，由包内 constraint test 执行（ADR-003）。
 - `client → core`（S6-c 当前事实）：只消费 proof canonicalizer 与 truth selector contracts，不依赖 cloud implementation。
 - `server/keys !→ core`（当前事实）：尚未接线，不是永久禁令，其目标边见 §12.1。
 - `cloud → core`、`cloud → protocol`（当前事实）：`packages/cloud/src/**` 真实 import 这两个包。
 - `keys` 与 dispatch 三包之间的零边是安全 invariant，不是尚未整理的偶然状态。
+- `byok-sdk !→ keys`：umbrella 只聚合 dispatch platform；keys 是 secret-plane package，必须由 consumer 显式单独安装。
+- `conformance` 保持 private，且只能作为 test/dev dependency；发布 tarball 的 runtime graph 不得到达它。
 
 ### 1.3 交付与非运行时表面
 
 | 位置 | 角色 | 当前状态 |
 | --- | --- | --- |
-| `examples/basic` | 嵌入 `@byok/server` 的 Hono demo + browser API/SSE UI | 已实现；可用 `BYOK_STORE=sqlite` 切换持久层 |
+| `examples/basic` | 嵌入 `@byok-sdk/server` 的 Hono demo + browser API/SSE UI | 已实现；可用 `BYOK_STORE=sqlite` 切换持久层 |
 | `examples/packaging` | 单文件打包 probe | 已实现；只做 daemon status 与 Pi detection，不 pair/start/network |
 | `templates/packaging/bun` | `bun build --compile` copy-out recipe | 已实现；含 build/smoke |
 | `templates/packaging/sea` | Node SEA + esbuild/postject recipe | 已实现；含跨平台边界说明与 smoke |
 | `templates/service` | launchd/systemd/WinSW reference recipes | 已实现；真正执行逻辑在 `packages/client/src/lifecycle/*` |
-| `deploy/` | env/release/runbook/scripts/sql/submissions 骨架 | 只有 README + 6 个 `.gitkeep`，无可部署实现 |
-| `.github/workflows/ci.yml` | Node 20/22 build/typecheck/test + 专项 smoke/audit | 已实现 |
+| `deploy/` | env/runbook/scripts/sql production composition surface | 已实现 Postgres migrations、R2/MinIO dataplane env、迁移与 hosted/self-hosted/release-responsibility runbook；host deployment 仍由集成方负责 |
+| `.github/workflows/ci.yml` | Node 20/22 build/typecheck/test + 专项 smoke/audit | 已实现；S7-c 追加 Node 20/22 × Linux/macOS/Windows tarball pack/install matrix |
 
-## 2. `@byok/protocol`：唯一 wire 契约
+## 2. `@byok-sdk/protocol`：唯一 wire 契约
 
 ### 2.1 模块与公开功能
 
@@ -267,7 +285,7 @@ stateDiagram-v2
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
 - server 支持 N 与 N-1 major。当前只有 v1，所以该能力目前是 no-op。
 
-## 3. `@byok/server`：embedded coordinator
+## 3. `@byok-sdk/server`：embedded coordinator
 
 ### 3.1 组成与所有权
 
@@ -349,7 +367,7 @@ flowchart TB
 - 快照缺失一律 fail-closed，不造默认值：pre-D-4 daemon 的 claim 不带 `capabilities`（wire 上是 additive optional 字段），S0 之前 claim 的旧 record 同样没有，两者都判为 unknown 而拒绝 steer。这是 fail-closed，不是 fallback——undefined 意为「本 server 不知道」，绝不等价于 true，也不按 runtime id 猜。
 - client 侧对仍然收到的 unsupported steer（伪造或 pre-gate 消息）记为非重试性 protocol/authority 错误并正常 ack，cursor 照常推进，不再冻结重放。
 
-## 4. `@byok/client`：本机 daemon、CLI 与 runtime boundary
+## 4. `@byok-sdk/client`：本机 daemon、CLI 与 runtime boundary
 
 ### 4.1 分层地图
 
@@ -445,7 +463,7 @@ Library exports 分成六组：
 | daemon | `start` |
 | OS service | `install`、`uninstall`、`service-start`、`service-stop`、`service-status` |
 
-`@byok/client` 的 runtime dependencies 是 `@byok/protocol`、`@byok/core` 与 `ws`；core 只提供 frozen proof bytes 与 truth contract types，client 不依赖 `@byok/cloud`。另有 optional `@earendil-works/pi-coding-agent`，并被 tsup 标记 external。Claude/Codex 永远依赖用户本机已安装且已登录的 official CLI。
+`@byok-sdk/client` 的 runtime dependencies 是 `@byok-sdk/protocol`、`@byok-sdk/core` 与 `ws`；core 只提供 frozen proof bytes 与 truth contract types，client 不依赖 `@byok-sdk/cloud`。另有 optional `@earendil-works/pi-coding-agent`，并被 tsup 标记 external。Claude/Codex 永远依赖用户本机已安装且已登录的 official CLI。
 
 ### 4.3 Daemon 模块清单
 
@@ -856,7 +874,7 @@ flowchart LR
   classDef service fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
   classDef verify fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
 
-  Client(["@byok/client dist"]):::source
+  Client(["@byok-sdk/client dist"]):::source
   Bun(["Bun compiled executable recipe"]):::package
   SEA(["Node SEA recipe"]):::package
   Product(["Host product launcher<br/>signing + distribution + update"]):::package
@@ -920,16 +938,16 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 | GAP-006 | **已收口（S3b，2026-08-08）**：hosted mailbox 的无状态 device 面与 InMemory 组合（S3a，既有 daemon long-poll 零改动跑通）＋本机 durable journal（S3b，`SqliteLocalTaskJournal` 与 append-then-ack 顺序）合并闭环 | Pri-0（平台线） | S3a + S3b |
 | GAP-008 | **已收口（S5）**：board / presence / activity 与 SSE/poll reconciliation 已实现 | Pri-1 | S5 |
 | GAP-009 | **实现已收口（S6-a/S6-b/S6-c）**：device proof row authority/verifier、proof-only truth routes、Postgres atomic commit、daemon signer 与 selector/fetch/rehash/filter 均已实现；default-on 仍受独立 security acceptance gate 约束 | Pri-1 | S6 |
-| GAP-011 | doctor / quarantine / crash budget 不完整 | Pri-1 | S7 |
+| GAP-011 | **已收口（S7-a/S7-b）**：deterministic health/crash authority、read-only doctor、evidence-preserving quarantine 与 bounded/redacted support bundle 已实现 | Pri-1 | S7 |
 | GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
 | GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
-| GAP-014 | hosted release/signing/update owner 尚未形成 production runbook | Pri-1 | S7 |
+| GAP-014 | **已收口（S7-b）**：hosted/self-hosted operations 与 host-owned signing/channel/updater/rollback responsibility runbook 已实现 | Pri-1 | S7 |
 | GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
 | GAP-016 | **已收口（S4A/S4B）**：Postgres + R2 entitlement/usage/reservation/quota/GC 与 reconciliation 已实现 | Pri-0（hosted storage） | S4A/S4B |
 
-## 12. 目标平台架构（core/cloud/Postgres+R2 与 S6 implementation 已落地，S7 仍在执行）
+## 12. 平台架构（S0–S7-b 已落地，S7-c release/registry closeout 执行中）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok/core`（S2）已实现并被 cloud/client 消费；`@byok/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7 operations/release 尚未收口，wire v1 保持冻结。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 正在完成 public identity、umbrella、跨平台 packageability、registry publish/readback 与 release tag。wire v1 保持冻结。
 
 ### 12.1 目标 package graph
 
@@ -940,33 +958,46 @@ flowchart TB
   classDef isolated fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
   classDef deploy fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
-  Protocol(["@byok/protocol<br/>existing, frozen v1"]):::existing
-  Core(["@byok/core<br/>implemented, consumed by cloud<br/>zod-only, protocol-free, Node-free"]):::existing
-  Cloud(["@byok/cloud<br/>stateless device + board + truth surface<br/>InMemory composition"]):::existing
-  Client(["@byok/client<br/>existing local authority"]):::existing
-  Server(["@byok/server<br/>existing self-hosted option"]):::existing
+  Protocol(["@byok-sdk/protocol<br/>existing, frozen v1"]):::existing
+  Core(["@byok-sdk/core<br/>implemented, consumed by cloud<br/>zod-only, protocol-free, Node-free"]):::existing
+  Cloud(["@byok-sdk/cloud<br/>stateless device + board + truth surface<br/>InMemory composition"]):::existing
+  CloudPg(["@byok-sdk/cloud-postgres<br/>Postgres + R2 production composition"]):::existing
+  Client(["@byok-sdk/client<br/>existing local authority"]):::existing
+  Server(["@byok-sdk/server<br/>existing self-hosted option"]):::existing
+  SDK(["byok-sdk<br/>six dispatch namespaces"]):::existing
+  Conformance(["@byok-sdk/conformance<br/>private test authority"]):::planned
   Keys(["@byok-sdk/keys<br/>existing isolated key plane"]):::isolated
   Node(["Node composition<br/>Postgres + R2（主生产）"]):::deploy
   Workers(["Workers composition<br/>可选 D1 compatibility adapter"]):::deploy
 
   Cloud --> Core
   Cloud --> Protocol
+  CloudPg --> Cloud
+  CloudPg --> Core
   Client --> Core
   Client --> Protocol
   Server -.-> Core
   Server --> Protocol
   Keys -.->|"P5: contracts only"| Core
-  Node --> Cloud
+  Node --> CloudPg
   Workers -.-> Cloud
+  Conformance --> Cloud
+  Conformance --> Core
+  SDK --> Protocol
+  SDK --> Server
+  SDK --> Client
+  SDK --> Core
+  SDK --> Cloud
+  SDK --> CloudPg
 ```
 
-`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge 只用于 canonical proof bytes 与 truth contracts。`server/keys → core` 仍是虚线目标边。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`CloudPostgres → Cloud/Core`、`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge只用于 canonical proof bytes 与 truth contracts。`byok-sdk` 的六条边是 S7-c release distribution edge；`server/keys → core` 仍是虚线目标边，其中 keys edge 只可能由 post-RC P5 独立计划引入。
 
-关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok/server` 留作 self-hosted embedded coordinator；`@byok/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
+关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok-sdk/server` 留作 self-hosted embedded coordinator；`@byok-sdk/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
-### 12.2 `@byok/core` 与 `@byok/cloud` 职责与状态
+### 12.2 `@byok-sdk/core` 与 `@byok-sdk/cloud` 职责与状态
 
-core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 参考实现；cloud device handlers 与 InMemory composition 已于 S3a（2026-08-07）落地，cloud 其余各行仍是目标设计。
+core 各行已于 S2（2026-08-07）落地为 `@byok-sdk/core` 的契约 + InMemory 参考实现；cloud device handlers 与 InMemory composition 已于 S3a（2026-08-07）落地，cloud 其余各行仍是目标设计。
 
 | 目标模块 | 责任 | 状态 |
 | --- | --- | --- |
@@ -978,7 +1009,7 @@ core 各行已于 S2（2026-08-07）落地为 `@byok/core` 的契约 + InMemory 
 | cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface，外加 hosted-only `GET /byok/capabilities` | **已实现（S3a）**：九条 device 路由无状态重现，既有 daemon 零改动跑通 long-poll |
 | cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | **已实现（S5）**：device bearer 只写非 `done` 协调态；host `acceptBoardItem` 独占 review acceptance |
 | cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs | **已实现（S6-b）**：proof-only routes + Postgres atomic authority；client local path 于 S6-c 实现 |
-| cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | 目标设计 |
+| cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | **已实现（S4A/S4B）**：daemon 声明 hash authority；HEAD 只观测 existence/size/type（ADR-024） |
 | cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 当前实现（S4B-c） |
 | cloud hints | device presence TTL、task activity tail + explicit dropped count | **已实现（S5）**：store-authoritative minimum interval、ProgressBatcher-shaped bounded batch、cumulative producer/capacity dropped |
 | compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | core 侧 InMemory composition 与参数化 conformance 套件**已实现（S2）**；cloud 侧 InMemory composition 与 tenant facade **已实现（S3a/S5）**；Postgres core/cloud ports 与 R2 主生产 adapter **已实现（S4A/S4B）**；D1 仍是 optional post-RC |
@@ -1011,7 +1042,7 @@ stateDiagram-v2
 
 `AwaitApproval` 是执行中暂停；`in_review` 是执行结束后人工验收。二者不能互相触发。`Running` 不得由 presence 推断；`done` 不代表某个 runtime process 仍存活。`closed` 在 final proposal 中暂取“终止未验收”，RAFT 原义仍需标为 unverified。
 
-三套状态词汇与 truth record 形状的 core 侧契约（board 5 态与合法转移、presence level、truth record 的 rev/hash 形状、以及它们与 wire execution 的隔离）连同 InMemory 参考实现已于 S2 落地（`@byok/core`），并由包内的 vocabulary-isolation 约束测试守住。board 的 Postgres 组合在 S4A 落地，S5 已补齐 hosted handler、SSE/轮询、terminal/progress 单向投影与提示限流；truth/proof endpoint 仍是 S6 目标。
+三套状态词汇与 truth record 形状的 core 侧契约（board 5 态与合法转移、presence level、truth record 的 rev/hash 形状、以及它们与 wire execution 的隔离）连同 InMemory 参考实现已于 S2 落地（`@byok-sdk/core`），并由包内的 vocabulary-isolation 约束测试守住。board 的 Postgres 组合在 S4A 落地，S5 已补齐 hosted handler、SSE/轮询、terminal/progress 单向投影与提示限流；truth/proof endpoint 仍是 S6 目标。
 
 #### wire execution 规则（当前已实现，此处只重申跨层约束）
 
@@ -1193,7 +1224,7 @@ sequenceDiagram
   C-->>D: 稳定结果
 ```
 
-canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约已于 S2 落地（`@byok/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）。S6-a 接入 Workers-safe verifier与 device row authority；S6-b 接入 record routes 与 Postgres atomic authority；S6-c 的 `StoredDeviceProofSigner` 直接消费同一个 `deviceProofSigningInput`，只补 Node Ed25519 私钥操作，不复制 canonicalizer。
+canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规化 protected 段，再前置 domain 前缀后签名。选 JCS 而非自定义固定顺序拼接，理由是 protected 段有嵌套结构且要在 Node 与 Workers 两个 runtime 产生逐字节一致的结果，JCS 的边角成本低于自定义拼接的实现分歧风险。JCS canonicalizer、`byok-device-proof-v1\n` 前缀与 `DeviceProofEnvelopeV1` 的契约已于 S2 落地（`@byok-sdk/core`，dependency-free 实现，canonical bytes 由 `packages/core/src/__tests__/golden/device-proof-v1.canonical.json` 冻结）。S6-a 接入 Workers-safe verifier与 device row authority；S6-b 接入 record routes 与 Postgres atomic authority；S6-c 的 `StoredDeviceProofSigner` 直接消费同一个 `deviceProofSigningInput`，只补 Node Ed25519 私钥操作，不复制 canonicalizer。
 
 三个 domain 前缀（取一致小写形式，与 `schema: 'byok-device-proof-v1'` 自洽；第一个已在 S1 落地并冻结，第二个的 canonical bytes 已在 S2 冻结且 verifier 于 S6-a 落地，第三个仍是目标设计、位元组形状待冻结）：
 
@@ -1241,7 +1272,7 @@ S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回
 
 ### 12.7 数据与存储架构（云端面为目标设计；本机 journal 面已实现）
 
-主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 持有按 daemon 声明的 canonical hash 命名、且由 cloud 观测 size/content-type 的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
+主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 持有按 daemon 声明的 canonical hash 命名、且由 cloud 观测 size/content-type 的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok-sdk/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
 
 #### 12.7.1 五类云端数据与一类本地连续态
 
@@ -1395,7 +1426,7 @@ sequenceDiagram
 
 #### 12.7.6 套餐 entitlement、quota 与计量边界
 
-免费/付费、价格、购买流程与套餐名称属于宿主 SaaS。SDK **不硬编码 `free`/`pro`**，只消费宿主签发的数值 entitlement。下面两个 interface 的契约（含 `bigint` 与 entitlement version CAS）与 InMemory 参考已于 S2 落地（`@byok/core` 的 `quota.ts`）；Postgres/R2 的执行面仍是目标设计：
+免费/付费、价格、购买流程与套餐名称属于宿主 SaaS。SDK **不硬编码 `free`/`pro`**，只消费宿主签发的数值 entitlement。下面两个 interface 的契约（含 `bigint` 与 entitlement version CAS）与 InMemory 参考已于 S2 落地（`@byok-sdk/core` 的 `quota.ts`）；Postgres/R2 的执行面仍是目标设计：
 
 ```ts
 interface TenantStorageEntitlement {
@@ -1431,7 +1462,7 @@ Postgres 至少新增：`storage_entitlement`、`storage_usage`、`storage_reser
 
 #### 12.7.7 Reservation/finalize：防止并发超卖
 
-reservation/finalize 的 port 契约与无超卖语义由 `@byok/core` 的 `QuotaStore` 持有。S4B-b 已把 R2 presign、显式 finalize 与 Postgres manifest/accounting transaction 接进 device surface；S4B-c 已交付 host-owned retention/dead-letter/R2 GC 与 reconciliation composition。
+reservation/finalize 的 port 契约与无超卖语义由 `@byok-sdk/core` 的 `QuotaStore` 持有。S4B-b 已把 R2 presign、显式 finalize 与 Postgres manifest/accounting transaction 接进 device surface；S4B-c 已交付 host-owned retention/dead-letter/R2 GC 与 reconciliation composition。
 
 所有直接上传 R2 的 durable write 走两阶段流程：
 
@@ -1508,8 +1539,8 @@ R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 
 | 编号 | 语义 |
 | --- | --- |
 | T0 | 租户 breaking cut；先于 P 线任何数据落库 |
-| P0 | 建 `@byok/core` 契约层，不改既有包；**已完成（S2，2026-08-07）**，交付含 InMemory 参考实现与 composition 参数化 conformance 套件 |
-| P1 | `@byok/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
+| P0 | 建 `@byok-sdk/core` 契约层，不改既有包；**已完成（S2，2026-08-07）**，交付含 InMemory 参考实现与 composition 参数化 conformance 套件 |
+| P1 | `@byok-sdk/cloud`：无状态派工 handler + mailbox/journal/terminal 端到端 + store 的 in-memory 参考实现 |
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示；**已实现（S5）** |
 | P4 | device proof + truth/memory：S6-a verifier/key/receipt、S6-b atomic truth routes、S6-c client signer/manifest selector/selected fetch/rehash/filter implementation 已交付；default-on 仍等独立 security acceptance；`signNonce` domain separation / GAP-004 已提前随 S1 交付 |
@@ -1523,12 +1554,12 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | --- | --- | --- |
 | S0 | 架构与当前缺口收口（GAP-001/002/003） | 先于 P0，不属任何 P 阶段 |
 | S1 | Tenant identity cut | T0 |
-| S2 | `@byok/core` contracts（已完成 2026-08-07） | P0 |
+| S2 | `@byok-sdk/core` contracts（已完成 2026-08-07） | P0 |
 | S3 | Cloud mailbox + 本机 SQLite journal（含磁盘水位与安全 cleanup）（已完成 2026-08-08：S3a + S3b） | P1 |
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll（已实现；PR gate 见 sprint ledger） | P3 |
 | S6 | Device proof + memory | P4 |
-| S7 | operations/release RC + keys dependency boundary（K4 parity 只对 Umbrella BYOK RC 生效） | 不对应 P5；P5 是独立 deferred plan |
+| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b 已完成，S7-c 执行中） | 不对应 P5；P5 是独立 deferred plan |
 | 并行 | K4/K4.1 aip swap | K 线，不阻塞 P0/P1 |
 | — | P5：keys profile → `TruthStore` | Deferred standalone plan，触发条件见上表 |
 
@@ -1555,16 +1586,16 @@ flowchart LR
   S4 -.->|"TruthStore production composition"| P5
 ```
 
-两个 RC profile 分开定义，避免用一条 release gate 绑死两条互不相干的线：
+两个 RC 验证 profile 分开定义，但 npm distribution 不把两种安全模型压进同一个 dependency graph：
 
 | RC profile | 范围 | 门禁 |
 | --- | --- | --- |
-| Dispatch Platform RC | `protocol` + `server` + `client` + `cloud` + `core` 的 hosted/self-hosted dispatch 面 | S7 的 operations/release 项；**不被 K4 阻塞**，keys 线的状态不进入这条 RC 的准出 |
-| Umbrella BYOK RC | 上面全部 + `@byok-sdk/keys` 一起以单一 BYOK 套件发布 | 追加要求 K4 golden parity 通过；K4/K4.1 未闭环时只能发 Dispatch Platform RC |
+| Dispatch Platform RC | 六个 dispatch packages（`protocol`、`server`、`client`、`cloud`、`core`、`cloud-postgres`）与 `byok-sdk` namespace umbrella | S7 operations/release、full compositions、packageability、registry readback；umbrella runtime graph 不得到达 keys |
+| BYOK product-suite RC | Dispatch Platform RC + 独立 `@byok-sdk/keys` 的 K4/K4.1 host integration | 追加 K4 golden parity 与 keys graph invariant；这是 product-suite 验证集合，不表示 `byok-sdk` npm umbrella 依赖或导出 keys |
 
 排序原则：
 
-- K4 是独立跨仓库闭环，不阻塞 P0/P1；
+- K4 是独立跨仓库闭环；S7-c 只消费它的 parity 证据，不改变 keys 的独立安装与安全边界；
 - tenant cut 必须在任何 hosted durable data 落库前完成；
 - core 在 cloud 之前；
 - mailbox/journal 在 board 之前；
@@ -1580,7 +1611,7 @@ flowchart LR
 | RAFT 模式 | BYOK 决定 | 原因 |
 | --- | --- | --- |
 | agent-facing CLI + injected env/API context | **评估，不直接替换** | runtime-neutral callback 能解决 Pi/Codex approval gap，但会改变 frozen wire/control architecture |
-| board 5 态、assignee/status 分离、claim conflict snapshot | **采纳语义** | 适合 `@byok/core` + cloud SQL，并与 wire execution state 分离 |
+| board 5 态、assignee/status 分离、claim conflict snapshot | **采纳语义** | 适合 `@byok-sdk/core` + cloud SQL，并与 wire execution state 分离 |
 | SSE + periodic reconciliation + poll path | **采纳，改成 capability declaration** | 不使用 404/405/501 status sniffing heuristic |
 | presence/activity + dropped count | **采纳** | 把高频有损信号与 durable truth 分开 |
 | local agent shortcut API | **采纳能力，复用 control socket** | 现有 Unix socket/named pipe 边界比新增 loopback HTTP 更一致 |
@@ -1772,15 +1803,15 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 
 | # | 测试 | 断言 | 落点 |
 | --- | --- | --- | --- |
-| I1 | 跨租户路由穷举矩阵 | 迭代 router 全部已注册路由；tenant B 的 device principal 打 tenant A 的每种资源（board list/claim/status、mailbox pull/ack、records get/put、presence、activity、blob url 签发）→ 一律 401/404、零行；存在未分类路由 → 测试自身失败 | `@byok/cloud` isolation-matrix 测试；**已于 S3a 落地**：cloud route registry 双向闭合（注册表是唯一挂载路径）+ 跨租户矩阵，board/records/presence/activity 类资源随各自 slice 并入同一矩阵 |
-| I2 | pairing 跨租户 | A 的 code 兑换 → 设备落 A 且仅 A；code 二次兑换 401；过期 401；无 claims 无法 mint（类型层拒 + runtime zod 拒） | `@byok/server` pairing 测试 |
+| I1 | 跨租户路由穷举矩阵 | 迭代 router 全部已注册路由；tenant B 的 device principal 打 tenant A 的每种资源（board list/claim/status、mailbox pull/ack、records get/put、presence、activity、blob url 签发）→ 一律 401/404、零行；存在未分类路由 → 测试自身失败 | `@byok-sdk/cloud` isolation-matrix 测试；**已于 S3a 落地**：cloud route registry 双向闭合（注册表是唯一挂载路径）+ 跨租户矩阵，board/records/presence/activity 类资源随各自 slice 并入同一矩阵 |
+| I2 | pairing 跨租户 | A 的 code 兑换 → 设备落 A 且仅 A；code 二次兑换 401；过期 401；无 claims 无法 mint（类型层拒 + runtime zod 拒） | `@byok-sdk/server` pairing 测试 |
 | I3 | proof 租户不符 | 合法签名 + `claims.tenantId = B`（设备属 A）→ 401；签后篡改 tenantId → 签名败；requestId 重放 → 幂等原结果或 409；skew > 60s → 拒 | core/cloud proof 测试 |
 | I4 | store conformance 跨租户不变式 | 每个 store port 方法：T1 写入、以 T2 读 → empty/undefined；port 不存在可变更 `tenant_id` 的方法；InMemory 与 SQL 后端跑同一份套件 | store conformance suite |
-| I5 | bearer 交叉验证 | token `claims.tenantId` 与 registry 行不符 → 401；registry 为权威 | `@byok/server` auth 测试 |
+| I5 | bearer 交叉验证 | token `claims.tenantId` 与 registry 行不符 → 401；registry 为权威 | `@byok-sdk/server` auth 测试 |
 | I6 | `board_seq` 隔离 | 并发双租户写入下，A 的 SSE/轮询流永不出现 B 的行；per-tenant 序列互不推进 | cloud board 测试（P3 并入矩阵） |
 | I7 | 铸造点唯一 | `as TenantId` 只出现在 auth 模块与测试 fixture（grep/lint 测试）；store port 签名全部 tenant-first（类型测试） | repo 级 guard |
 | I8 | golden 零漂 | `git diff --exit-code packages/protocol/src/__tests__/golden/` 加 freeze-guard 全绿——机检证明 pairing 绑定未碰 DTO | 既有机检 |
-| I9 | `productId` 等值 | `conn.hello.productId` 与 device 行不符 → 拒连 | `@byok/server` hub 测试 |
+| I9 | `productId` 等值 | `conn.hello.productId` 与 device 行不符 → 拒连 | `@byok-sdk/server` hub 测试 |
 
 ### 16.2 平台线附加验证面（目标设计）
 
@@ -1796,8 +1827,8 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | --- | --- | --- |
 | ADR-001 | 双产品面、双安全模型（dispatch plane 与 key plane） | Accepted |
 | ADR-002 | protocol v1 冻结，新能力一律走 wire 外的 HTTP 面 | Accepted |
-| ADR-003 | `@byok/core` 保持 protocol-free 且 Node-free | Accepted |
-| ADR-004 | `@byok/server` 留作 self-hosted，不演化为 hosted Hub | Accepted |
+| ADR-003 | `@byok-sdk/core` 保持 protocol-free 且 Node-free | Accepted |
+| ADR-004 | `@byok-sdk/server` 留作 self-hosted，不演化为 hosted Hub | Accepted |
 | ADR-005 | mailbox ack 之前必须先完成本机 durable append | Accepted |
 | ADR-006 | board / wire / presence 分词并分权威 | Accepted |
 | ADR-007 | tenant-first 结构性隔离（§12.6.2 六层） | Accepted |

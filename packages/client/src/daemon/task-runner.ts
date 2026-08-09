@@ -12,7 +12,7 @@ import {
   type PermissionPolicy,
   type RuntimeId,
   type TaskOfferPayload,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import { PolicyUnsupportedError, SteerUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
@@ -1891,7 +1891,7 @@ export class TaskRunner {
     // AwaitApproval, not sit buffered behind an indefinite pause.
     active.batcher.flush();
     // M5 (approval targeting): approvalId is always included — see
-    // TaskAwaitApprovalPayloadSchema's own doc comment (@byok/protocol) for
+    // TaskAwaitApprovalPayloadSchema's own doc comment (@byok-sdk/protocol) for
     // why no capability gating is needed to send it safely.
     this.deps.send(createEnvelope('task.await_approval', { summary, approvalId }, { taskId }));
 

@@ -2,7 +2,7 @@
  * The Postgres composition running the complete core conformance suite.
  *
  * A factory, and nothing else — the same shape as the cloud-local sibling next
- * to it and the in-memory entries in `@byok/conformance`. Not one assertion in
+ * to it and the in-memory entries in `@byok-sdk/conformance`. Not one assertion in
  * `runCoreConformance` knows which composition it is running against, and the
  * `packages/conformance/` tree is zero-diff in this slice by design: an
  * assertion that had to be weakened or branched for Postgres would be evidence
@@ -21,8 +21,8 @@
  */
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'vitest';
-import { createMutableClock } from '@byok/core';
-import { runCoreConformance, type CoreCompositionFactory } from '@byok/conformance';
+import { createMutableClock } from '@byok-sdk/core';
+import { runCoreConformance, type CoreCompositionFactory } from '@byok-sdk/conformance';
 import { migrate } from '../migrate';
 import { createPostgresCoreStores } from '../stores/core/index';
 import { createDataplaneScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';

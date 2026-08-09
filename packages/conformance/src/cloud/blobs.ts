@@ -19,8 +19,8 @@
  * port contract is wrong; escalate, do not branch.
  */
 import { describe, expect, it } from 'vitest';
-import type { BlobDeclaration, BlobObservation } from '@byok/cloud';
-import type { StorageReservation, TenantId } from '@byok/core';
+import type { BlobDeclaration, BlobObservation } from '@byok-sdk/cloud';
+import type { StorageReservation, TenantId } from '@byok-sdk/core';
 import { TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 

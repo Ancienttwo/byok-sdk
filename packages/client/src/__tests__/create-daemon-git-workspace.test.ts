@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonOverrides } from '../daemon/create-daemon';
 import { acquireDaemonOwner } from '../daemon/daemon-owner';
 import { GitWorkspaceManager, type GitCommandResult, type GitRunner } from '../daemon/git-workspace';

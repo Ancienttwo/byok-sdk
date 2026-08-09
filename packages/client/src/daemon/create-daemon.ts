@@ -1,6 +1,6 @@
-import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS } from '@byok/protocol';
-import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok/protocol';
-import type { PermissionPolicy } from '@byok/protocol';
+import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS } from '@byok-sdk/protocol';
+import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
+import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
@@ -338,7 +338,7 @@ export interface Daemon {
   reject(taskId: string, reason?: string): Promise<void>;
 }
 
-/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
+/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
 export interface DaemonOverrides {
   backoff?: BackoffOptions;
   batch?: ProgressBatcherOptions;
@@ -484,7 +484,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
  * own `targeted` marking (`ConnectionHub.approveTask`/`rejectTask` —
  * `packages/server/src/hub.ts`'s `getDeviceCapabilities(...).includes(
  * 'approval-targeting')` check) always saw an upgraded daemon as legacy —
- * see `CAPABILITY_FLAGS`'s own doc comment (`@byok/protocol`'s `version.ts`)
+ * see `CAPABILITY_FLAGS`'s own doc comment (`@byok-sdk/protocol`'s `version.ts`)
  * for why this flag is purely informational/observability, not a functional
  * gate, and therefore safe to advertise unconditionally the moment a daemon
  * genuinely does what it claims (as this one already does).

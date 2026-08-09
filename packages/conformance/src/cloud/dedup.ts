@@ -14,7 +14,7 @@
  * redelivered are the ones still remembered.
  */
 import { describe, expect, it } from 'vitest';
-import { DEDUP_RING_CAPACITY } from '@byok/cloud';
+import { DEDUP_RING_CAPACITY } from '@byok-sdk/cloud';
 import { TENANT_A } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 

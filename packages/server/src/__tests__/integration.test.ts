@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
-import { createEnvelope, PROTOCOL_VERSION, type RuntimeCapabilities, type RuntimeId } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createByokServer } from '../index';
@@ -676,7 +676,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   });
 });
 
-describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok/protocol agent-event.ts)', () => {
+describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protocol agent-event.ts)', () => {
   let server: HttpServer | undefined;
   let ws: WebSocket | undefined;
 

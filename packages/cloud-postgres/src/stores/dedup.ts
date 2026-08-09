@@ -12,8 +12,8 @@
  * behavior. An unbounded set would pass every duplicate assertion and still let
  * one chatty device grow this table without limit.
  */
-import { DEDUP_RING_CAPACITY, type InboundDedupStore } from '@byok/cloud';
-import type { TenantId } from '@byok/core';
+import { DEDUP_RING_CAPACITY, type InboundDedupStore } from '@byok-sdk/cloud';
+import type { TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 export class PostgresInboundDedupStore implements InboundDedupStore {

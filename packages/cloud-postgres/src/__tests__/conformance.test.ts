@@ -3,7 +3,7 @@
  *
  * This file is the entire integration between the durable implementation and
  * the suite: a factory, and nothing else — the same size as the in-memory
- * sibling in `@byok/conformance`. If it ever needs more than that, the port
+ * sibling in `@byok-sdk/conformance`. If it ever needs more than that, the port
  * contract is what needs fixing, not this file. Not one assertion in
  * `runCloudConformance` knows which composition it is running against, and any
  * that needed to would be evidence of a port-contract bug to escalate.
@@ -21,9 +21,9 @@
  */
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'vitest';
-import { createMutableClock } from '@byok/core';
-import { createWebCrypto } from '@byok/cloud';
-import { runCloudConformance, type CloudCompositionFactory } from '@byok/conformance';
+import { createMutableClock } from '@byok-sdk/core';
+import { createWebCrypto } from '@byok-sdk/cloud';
+import { runCloudConformance, type CloudCompositionFactory } from '@byok-sdk/conformance';
 import { migrate } from '../migrate';
 import { createPostgresCloudStores } from '../stores/index';
 import { createPostgresCoreStores } from '../stores/core/index';

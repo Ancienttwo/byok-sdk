@@ -9,12 +9,12 @@
  * Requests go straight through `cloud.fetch` — no HTTP server. The handlers
  * are WHATWG fetch handlers, so a `Request` in and a `Response` out is the
  * whole contract; the end-to-end proof that a REAL daemon over a REAL socket
- * cannot tell this from `@byok/server` lives in
+ * cannot tell this from `@byok-sdk/server` lives in
  * `packages/client/src/__tests__/real-cloud-longpoll.test.ts`.
  */
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { tenantId, type Clock, type TenantId } from '@byok/core';
-import type { PairResponse } from '@byok/protocol';
+import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
+import type { PairResponse } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../auth/verify';
 import { createInMemoryByokCloud, type InMemoryByokCloud, type InMemoryByokCloudOptions } from '../../composition/in-memory';
 

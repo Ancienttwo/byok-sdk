@@ -10,7 +10,7 @@ import {
   type TruthCommitResponse,
   type TruthCommitResult,
   type TruthCommitter,
-} from '@byok/cloud';
+} from '@byok-sdk/cloud';
 import {
   ByokCoreError,
   CoreConflictError,
@@ -20,7 +20,7 @@ import {
   type TruthBodyRef,
   type TruthRecord,
   type TruthRecordKind,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
 import { PostgresTruthStore } from './stores/core/truth';
 

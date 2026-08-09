@@ -5,7 +5,7 @@ import {
   deviceProofSigningInput,
   tenantId,
   type DeviceProofProtectedClaims,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS,

@@ -10,7 +10,7 @@ import {
   type DeviceProofProtectedClaims,
   type TenantId,
   type TruthRecord,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CLOUD_CAPABILITIES, fullCapabilityDeclaration } from '../capabilities';
 import { createByokCloud } from '../cloud';

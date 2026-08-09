@@ -1,12 +1,12 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
 > **Status**: Executing
-> **状态**：Executing。S0–S6 与 S7-a 已合入 `main`；K4/K4.1 跨仓库依赖轨也已合入，当前进入 S7-b diagnostics/operations
+> **状态**：Executing。S0–S6、S7-a 与 S7-b 已合入 `main`；K4/K4.1 跨仓库依赖轨也已合入，当前执行 S7-c npm release candidate
 > **创建日期**：2026-08-07
-> **最后修订**：2026-08-09（见 D-10）
-> **仓库基线**：`Ancienttwo/byok-sdk@489255b`（2026-08-09）
-> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）、S6-a（merge `3bc3e74`，PR #34）、S6-b（merge `639f2e5`，PR #35）、S6-c（merge `68b6020`，PR #36）、S7-a（merge `489255b`，PR #38）
-> **下一可执行 slice**：S7-b diagnostics/operations 正在执行（plan `20260809-0638-s7b-diagnostics`）；Claude review 按 owner 指令暂停，验收走 independent Codex exact-SHA
+> **最后修订**：2026-08-09（见 D-12）
+> **仓库基线**：`Ancienttwo/byok-sdk@8ad6474`（2026-08-09）
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）、S6-a（merge `3bc3e74`，PR #34）、S6-b（merge `639f2e5`，PR #35）、S6-c（merge `68b6020`，PR #36）、S7-a（merge `489255b`，PR #38）、S7-b（merge `8ad6474`，PR #39）
+> **下一可执行 slice**：S7-c npm release candidate 正在执行（plan `20260809-1153-s7c-npm-release`）；Claude review 按 owner 指令暂停，验收走 independent Codex exact-SHA
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -18,7 +18,7 @@
 
 ## PRD
 
-把 BYOK SDK 从「单机 keys 工具 + 原型 dispatch runtime」推进为 RAFT 对齐的多租户平台：结构化 tenant identity、`@byok/core` 契约与 conformance 套件、hosted mailbox 与本地 durable journal、Postgres + R2 数据面与配额、board/presence/SSE、device proof 与 truth write，最后收口 keys 边界与 release candidate。产品真相以 `docs/spec.md` 与 `ARCHITECTURE-PROPOSAL-byok-platform.md` 为准，本 sprint 只负责把它切成可投影、可验收的 delivery slice。
+把 BYOK SDK 从「单机 keys 工具 + 原型 dispatch runtime」推进为 RAFT 对齐的多租户平台：结构化 tenant identity、`@byok-sdk/core` 契约与 conformance 套件、hosted mailbox 与本地 durable journal、Postgres + R2 数据面与配额、board/presence/SSE、device proof 与 truth write，最后收口 keys 边界与 release candidate。产品真相以 `docs/spec.md` 与 `ARCHITECTURE-PROPOSAL-byok-platform.md` 为准，本 sprint 只负责把它切成可投影、可验收的 delivery slice。
 
 范围内：S0–S7 八个 delivery Sprint（S3 拆 S3a/S3b，S4 拆 S4A/S4B）。范围外：K4/K4.1 的跨仓库回接（独立轨道，见 `## Parallel Track K4/K4.1`）、post-RC 的 credential proxy 与 D1 optional adapter。
 
@@ -31,7 +31,7 @@
 | 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | PR #32；merge `140b109`；Claude external pass；CI 32/32 |
 | 2 | [x] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | PR #33；merge `2a1c4a7`；CI green |
 | 3 | [x] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | PR #34/#35/#36；merge `3bc3e74`/`639f2e5`/`68b6020`；各 32/32 CI；full-stack Codex exact-SHA accepted |
-| 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | S7-a PR #38 / merge `489255b` 已完成；S7-b plan `20260809-0638-s7b-diagnostics` executing，随后 S7-c package/RC |
+| 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | S7-a PR #38 / merge `489255b`、S7-b PR #39 / merge `8ad6474` 已完成；S7-c plan `20260809-1153-s7c-npm-release` executing |
 
 已交付并合入 `main` 的 S0、S1、S2、S3a、S3b、S4A、S4B 不再列入后续 backlog；S4B-c 行仅保留本轮 merge readback 记录，其 merge SHA 见文首交付清单。
 
@@ -45,8 +45,8 @@
 | --- | --- | --- | --- |
 | S0 | 不在 P 线 | — | 当前 runtime 已知缺口收口（capability honesty、task-level steer、`workspaceHint`）。P0–P5 是平台演进阶段，不覆盖既有 runtime 诚实性修复，故 S0 是 P 线之外的前置收口 |
 | S1 | 提前吸收 P4（`:697`）的 `signNonce` domain separation，见下节 | **T0**（`:251`） | 租户 breaking cut。§9.2 的 T0 行（`:690`）标注“即刻可做，先于 P 线任何资料落库” |
-| S2 | **P0**（`:692`） | **T1**（`:252`） | `@byok/core` 契约包：零 production adapter；包含 reference-only InMemory implementation 与 conformance harness、不改既有包、tenant-first port 签名 |
-| S3 | **P1**（`:694`） | **T2**（`:253`） | `@byok/cloud` 无状态 handler + mailbox + durable local journal 端到端 |
+| S2 | **P0**（`:692`） | **T1**（`:252`） | `@byok-sdk/core` 契约包：零 production adapter；包含 reference-only InMemory implementation 与 conformance harness、不改既有包、tenant-first port 签名 |
+| S3 | **P1**（`:694`） | **T2**（`:253`） | `@byok-sdk/cloud` 无状态 handler + mailbox + durable local journal 端到端 |
 | S4A / S4B | **P2**（`:695`） | **T3**（`:254`） | Postgres + R2 composition 与 `deploy/sql/` migration。S4A 落数据面 + conformance 套件，S4B 落 quota/reservation/GC（见 D-3） |
 | S5 | **P3**（`:696`） | **T4**（`:255`） | board 5 态 + claim/`expectedStatus` CAS + `board_seq` + SSE/轮询 + 两级提示 |
 | S6 | **P4**（`:697`），扣除已提前到 S1 的 `signNonce` 修复 | — | device proof 上行 + memory manifest/selector/CAS |
@@ -95,7 +95,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 ### D-5：S3 按 §1.3 拆为 S3a（cloud 无状态骨架）与 S3b（SQLite durable journal）
 
 - **原决策**：S3 作为单个 Sprint 同时交付 hosted cloud mailbox 与本机 SQLite durable journal，S3.5 的十六格一次性验收。**该范围保留**，本条只改交付与验收的切分方式。
-- **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」把 S3 拆成两刀。**S3a（本 slice，已交付 2026-08-07）**：`@byok/cloud` 无状态 device surface——九条 frozen-v1 device 路由 + hosted-only `GET /byok/capabilities`、七个 cloud-local tenant-first auth/task port 与 `TenantStores` facade 的 InMemory 组合、I1 route registry 双向闭合与跨租户矩阵，证明点是既有 daemon 生产代码零改动跑通 long-poll 全生命周期。**S3b**：本机 SQLite journal、cursor-ack-after-commit 顺序、crash 与磁盘压力矩阵。
+- **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」把 S3 拆成两刀。**S3a（本 slice，已交付 2026-08-07）**：`@byok-sdk/cloud` 无状态 device surface——九条 frozen-v1 device 路由 + hosted-only `GET /byok/capabilities`、七个 cloud-local tenant-first auth/task port 与 `TenantStores` facade 的 InMemory 组合、I1 route registry 双向闭合与跨租户矩阵，证明点是既有 daemon 生产代码零改动跑通 long-poll 全生命周期。**S3b**：本机 SQLite journal、cursor-ack-after-commit 顺序、crash 与磁盘压力矩阵。
 - **理由**：两半的失败模式不同，需要的审查深度也不同。handler parity 在 E2E 里失败得响——daemon 一旦分辨得出 cloud 与 server，测试当场红。journal durability 在 crash 窗口里失败得静——ack 早于 commit 的实现照样跑绿全部 happy path，只有在特定断电时序下丢任务，必须靠专门的 crash/磁盘矩阵逼出来。把它压在同一个 PR 里，等于让骨架 parity 的绿色替 durability 背书。
 - **影响**：S3.5 的十六格分两批验收——S3a 收 box 1/2/10/11/12/13/14/15/16（box 12 的 daemon 端消费另刀），S3b 收 box 3–9 的 journal/crash/pressure 七格；`docs/architecture/sdk-architecture.md` 的 GAP-006 落点改记为 S3b；alpha 闸要等 S3b 收口后才闭合，S3a 单独合入不构成 hosted alpha 就绪。**S3b 已交付 2026-08-08，S3.5 十六格全闭，alpha 闸条件齐备（见 §12）。**
 
@@ -110,10 +110,10 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 ### D-7：S4A 按 §1.3 拆为 S4A-a（机制与 cloud ports）、S4A-b（core 七 port + I4 SQL 侧）、S4A-c（R2 adapter + deploy）
 
 - **原决策**：S4A 作为单个 Sprint 单批交付 O-001~O-006。**该范围保留**，本条只改交付与验收的切分方式。实施设计依据 `docs/researches/s4a-dataplane-design.md`（2026-08-08）。
-- **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」切三刀。**S4A-a**：`docker-compose.test.yml`（postgres + minio）测试基建、`@byok/conformance` 私有包定型（core 维度平移 + `runCloudConformance` 新增、`CORE_PORT_*`/`CLOUD_PORT_*` 上移进 shipped source）、`@byok/cloud-postgres` 包骨架（`pg` Pool + int8 parser + 手写 ordered migrate runner）、`deploy/sql/0001` 与 cloud-local ports 的 Postgres 实现（`rateLimiter` 留 in-memory 不建表）、CI dataplane job（`BYOK_REQUIRE_DATAPLANE=1`）与钉住该 job 的 constraint 测试。**S4A-b**：`deploy/sql/0002`（core domain 表，含 D-6 的 quota 三表）、core 七 port 的 Postgres 实现、`runCoreConformance` 跑 Postgres composition、I4 SQL 侧 = 行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言（UNIQUE 首列必须 `tenant_id`，白名单仅 `device.device_id` 与 `pairing_code.code`）、mailbox retention runbook。**S4A-c**：capability 由 `blobs.presigned` 裂出 `blobs.contentProxy`、`CloudStores.blobs` 收窄为 `{createUpload, getDownloadUrl}`（content-proxy 三方法移出为可选 composition 输入）、`aws4fetch` R2 adapter（presign PUT/GET + HEAD 复核 + tenant-scoped key）、S4A.4 九项 object tests（MinIO 为独立 SigV4 验证方）、`deploy/env`/`runbooks`/`scripts` 实装。
+- **改动**：按 §1.3「高风险 Sprint 可按可独立回滚的 vertical slice 拆 PR」切三刀。**S4A-a**：`docker-compose.test.yml`（postgres + minio）测试基建、`@byok-sdk/conformance` 私有包定型（core 维度平移 + `runCloudConformance` 新增、`CORE_PORT_*`/`CLOUD_PORT_*` 上移进 shipped source）、`@byok-sdk/cloud-postgres` 包骨架（`pg` Pool + int8 parser + 手写 ordered migrate runner）、`deploy/sql/0001` 与 cloud-local ports 的 Postgres 实现（`rateLimiter` 留 in-memory 不建表）、CI dataplane job（`BYOK_REQUIRE_DATAPLANE=1`）与钉住该 job 的 constraint 测试。**S4A-b**：`deploy/sql/0002`（core domain 表，含 D-6 的 quota 三表）、core 七 port 的 Postgres 实现、`runCoreConformance` 跑 Postgres composition、I4 SQL 侧 = 行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言（UNIQUE 首列必须 `tenant_id`，白名单仅 `device.device_id` 与 `pairing_code.code`）、mailbox retention runbook。**S4A-c**：capability 由 `blobs.presigned` 裂出 `blobs.contentProxy`、`CloudStores.blobs` 收窄为 `{createUpload, getDownloadUrl}`（content-proxy 三方法移出为可选 composition 输入）、`aws4fetch` R2 adapter（presign PUT/GET + HEAD 复核 + tenant-scoped key）、S4A.4 九项 object tests（MinIO 为独立 SigV4 验证方）、`deploy/env`/`runbooks`/`scripts` 实装。
 - **理由**：core 七 port 无法再分——port-inventory 全有全无，分刀没有中间绿态，这决定了 b 刀的边界；机制刀（测试基建 + 套件形态 + 包骨架）与实现刀合并会得到审查者无法分辨「机制错了」还是「实现错了」的单个巨型 PR；c 刀的 capability 拆分与 R2 adapter 是同一个设计决策的两面，再拆会留下「capability 已裂但无实现使用」的中间态。
 - **影响**：S4A.5 分三批验收——a 收 migrations order check、fresh install + migrate-up、cloud conformance 两 composition 绿；b 收 core conformance 两 composition 绿、I4 SQL 侧、catalog 断言、retention documented；c 收九项 object tests、`deploy/` 非 `.gitkeep`、`check:deploy-sql` 实质化、secrets sample 无真实凭据。三刀各自可独立回滚（compose 文件与新包纯附加；migrations forward-only；capability 拆分回退 = 恢复五方法端口）。
-- **交付记录**：S4A-a 2026-08-08（PR #23，merge `5f399f1`）、S4A-b 同日（PR #24，merge `aff8dda`）、S4A-c 同日（PR #25，merge `e97a2db`，CI 32/32）。**S4A.5 十二格全闭，S4A 收官**：ordered migrations + 手写 runner（advisory lock / per-file tx / checksum fail-closed / 无 down）、`0001`+`0002` 十八表全 tenant-first、七个 cloud-local port 与七个 core port 的 Postgres 实现、`@byok/conformance` 单一断言源认证 in-memory 与 Postgres 两个 composition（core 56 + cloud 51）、I4 SQL 侧（行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言，白名单恰两条）、R2 object adapter 与十五项 object 测试（MinIO 作独立 SigV4 裁决方）、`deploy/` 实装。**S4A-c 走双轨验收**（gatekeeper + Codex 独立二轨），二轨额外捞出三条真缺陷并已修：tenant key alias（`..` 经 `new URL()` 正规化产生跨租户别名）、committed 对象仍被签发 PUT（可变性）、capability over-declare（宣告 `blobs.contentproxy` 而无 proxy 仍对外公布）。当时尚未闭合的 R2 hash authority 已由后继 D-9 / ADR-024 收口，S4B 可据此投影。
+- **交付记录**：S4A-a 2026-08-08（PR #23，merge `5f399f1`）、S4A-b 同日（PR #24，merge `aff8dda`）、S4A-c 同日（PR #25，merge `e97a2db`，CI 32/32）。**S4A.5 十二格全闭，S4A 收官**：ordered migrations + 手写 runner（advisory lock / per-file tx / checksum fail-closed / 无 down）、`0001`+`0002` 十八表全 tenant-first、七个 cloud-local port 与七个 core port 的 Postgres 实现、`@byok-sdk/conformance` 单一断言源认证 in-memory 与 Postgres 两个 composition（core 56 + cloud 51）、I4 SQL 侧（行为套件 + `tests/sql/control_plane_invariants.sql` catalog 断言，白名单恰两条）、R2 object adapter 与十五项 object 测试（MinIO 作独立 SigV4 裁决方）、`deploy/` 实装。**S4A-c 走双轨验收**（gatekeeper + Codex 独立二轨），二轨额外捞出三条真缺陷并已修：tenant key alias（`..` 经 `new URL()` 正规化产生跨租户别名）、committed 对象仍被签发 PUT（可变性）、capability over-declare（宣告 `blobs.contentproxy` 而无 proxy 仍对外公布）。当时尚未闭合的 R2 hash authority 已由后继 D-9 / ADR-024 收口，S4B 可据此投影。
 
 ### D-8：按外部 review 验收裁定修订本文件（2026-08-08）
 
@@ -144,6 +144,13 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **K-503 裁定**：test-before-save 保留为 AiphaBee narrative adapter，由已存在的 provider clients 执行；不向 generic `ProviderRegistry` 添加只有一个 host 需要的 convenience API。
 - **S7 影响**：K4/K4.1 前置解除。S7 的 keys 面只做 dependency-graph 与 credential isolation audit；P5 profile→TruthStore 仍是 sprint 外新 plan，不偷偷并入 RC。
 
+### D-12：public npm identity 与 umbrella 保持 dispatch/keys 双安全边界
+
+- **触发事实**：registry 中 `byok-sdk@0.0.1` 是 user-owned placeholder，`@byok-sdk/keys@0.1.0` 已发布；六个旧 identity `@byok/*` 与六个目标 dispatch identity `@byok-sdk/*` 都没有既存 public version contract。只发布 keys 不能交付整套 SDK，而把 keys 塞进 dispatch umbrella 又会破坏 ADR-012。
+- **裁定**：S7-c 一次性把六个 live dispatch package 从 `@byok/*` cut over 到 `@byok-sdk/*@0.1.0`，不发布 old-scope shim；新增 `byok-sdk@0.1.0`，以 `core`/`protocol`/`client`/`server`/`cloud`/`cloudPostgres` 六个 namespace 聚合完整 dispatch SDK。`@byok-sdk/keys` 保持独立安装，umbrella 与所有 dispatch runtime graph 都不得到达 keys；private `@byok-sdk/conformance` 不进入发布 graph。
+- **发布影响**：S7-c 本刀发布六个 scoped dispatch tarball + 一个 unscoped umbrella；已存在的 keys version 不重发。所有七个 artifact 必须来自同一个 accepted tree，以 dependency-first 顺序发布并逐个 registry readback；tag 只在完整 fresh install 后创建。
+- **supersede 条件**：只有新的安全 ADR 明确废除 dispatch/key 双模型时，才可让 umbrella 依赖 keys；不预埋 optional/peer/compatibility edge。
+
 ---
 
 ## 0. 计划目标
@@ -152,8 +159,8 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 
 1. 修复当前 capability honesty 与 task-level steer 缺口；
 2. 在 durable cloud data 出现前完成 structural tenant cut；
-3. 新建 protocol-free `@byok/core`；
-4. 新建 stateless `@byok/cloud`；
+3. 新建 protocol-free `@byok-sdk/core`；
+4. 新建 stateless `@byok-sdk/cloud`；
 5. 建立 mailbox → durable local journal → runtime → immutable truth 的可靠路径；
 6. 建立 Postgres + R2、storage entitlement/usage/reservation、quota 与 cleanup compositions；
 7. 建立 board/presence/activity；
@@ -306,7 +313,7 @@ repo-harness run verify-contract --contract <contract> --strict
 | --- | --- | --- |
 | S0 | 当前 capability 与 steer 诚实；架构/计划 canonical | Embedded hardening baseline |
 | S1 | structural tenant identity；pair/auth cut（含 nonce domain separation） | Multi-tenant identity foundation |
-| S2 | `@byok/core` contracts + conformance skeleton | Platform contract alpha |
+| S2 | `@byok-sdk/core` contracts + conformance skeleton | Platform contract alpha |
 | S3 | in-memory hosted mailbox + SQLite local journal E2E | Hosted transport alpha |
 | S4A | Postgres + R2 数据面 + 共用 conformance 套件 | Durable hosted data plane beta |
 | S4B | quota/reservation 与 cloud cleanup/GC | Durable hosted storage beta |
@@ -440,7 +447,7 @@ interface AuthenticatedDevice {
 
 `keyId` / `keyEpoch` 不进 S1 的 principal：它们是 device proof 的语义，属于 S6 的 `DeviceProofEnvelopeV1` 保护字段（见 S6.2），在 proof 面存在前放进 principal 会造成永远为空的半接线字段。
 
-在 `@byok/core` 尚未落地前，`TenantId` 用 server-local 定义；S2 再迁移到 shared contract，不允许提前让 server 依赖未存在包。
+在 `@byok-sdk/core` 尚未落地前，`TenantId` 用 server-local 定义；S2 再迁移到 shared contract，不允许提前让 server 依赖未存在包。
 
 ### S1.3 Test matrix
 
@@ -475,7 +482,7 @@ interface AuthenticatedDevice {
 
 ---
 
-## Sprint S2 — `@byok/core` 契约与 Conformance Foundation
+## Sprint S2 — `@byok-sdk/core` 契约与 Conformance Foundation
 
 > **目标**：建立 protocol-free、Node-free 的平台契约层，以及所有后续 composition 共用的行为测试。
 > **风险等级**：中；纯加性，但错误契约会向后传染
@@ -501,7 +508,7 @@ interface AuthenticatedDevice {
 
 ### S2.2 Core constraints tests
 
-- package has no `@byok/protocol` dependency；
+- package has no `@byok-sdk/protocol` dependency；
 - package has no `node:` import；
 - public API exports only contracts/schemas/errors/reference in-memory；
 - every store method tenant-first；
@@ -576,7 +583,7 @@ Delete `packages/core` and workspace entry. No existing package may depend on co
 
 | ID | Story | 相对复杂度 |
 | --- | --- | --- |
-| P-001 | scaffold `@byok/cloud` | 低 |
+| P-001 | scaffold `@byok-sdk/cloud` | 低 |
 | P-002 | auth middleware + TenantStores facade | 中 |
 | P-003 | route inventory + I1 matrix skeleton | 中 |
 | P-004 | in-memory pair/challenge/token handlers | 中 |
@@ -685,7 +692,7 @@ For each point assert no lost task, no duplicate side effect, stable recovery st
 - [x] tenant B cannot read/write tenant A fixture（S3a：租户 fixture 隔离矩阵）；
 - [x] `/capabilities` drives transport/feature selection（S3a：cloud 侧 capabilities 宣告驱动路由挂载与测试特性选择；daemon 端消费另刀）；
 - [x] 404/405/501 sniffing absent（S3a）；
-- [x] `@byok/cloud` handlers remain stateless（S3a）；
+- [x] `@byok-sdk/cloud` handlers remain stateless（S3a）；
 - [x] no cloud Running/session map（S3a）；
 - [x] client still passes self-hosted server tests（S3a）。
 
@@ -1081,7 +1088,7 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 > **风险等级**：高；跨 package、跨 repo、发布与运维
 > **依赖**：S6、S4B、K4/K4.1（均已完成）
 > **对应**：§9.2 储备行 C1–C3（`ARCHITECTURE-PROPOSAL:699`）与 K4（`:693`）。**P5（`:698`，`@byok-sdk/keys` profile 持久化接 `TruthStore`）已移出本 sprint**——见 `tasks/todos.md` deferred 项
-> **可拆**：S7A integration / S7B operations
+> **可拆**：S7-a fleet health / S7-b diagnostics+operations / S7-c npm release candidate
 
 ### S7.1 Stories
 
@@ -1093,14 +1100,14 @@ Proof-enabled write routes remain capability-gated until production review. Do n
 | K-503 | generic testConnection 或 host adapter定案 | 低 |
 | L-004 | deterministic reconnect jitter（S7-a PR #38 已合入） | 中 |
 | L-005 | health window + crash budget（S7-a PR #38 已合入） | 中 |
-| L-006 | local corrupt-state quarantine（S7-b 已实现，待 PR 验收） | 中 |
-| L-007 | doctor/status/support bundle（S7-b 已实现，待 PR 验收） | 中 |
-| O-013 | hosted/self-hosted runbooks（S7-b 已实现，待 PR 验收） | 中 |
-| O-014 | release signing/updater responsibility contract（S7-b 已实现，待 PR 验收） | 低 |
-| O-015 | load/reconnect/retention tests（S7-a fleet + S7-b bounded diagnostics 已实现，待 PR 验收） | 中 |
+| L-006 | local corrupt-state quarantine（S7-b PR #39 已合入） | 中 |
+| L-007 | doctor/status/support bundle（S7-b PR #39 已合入） | 中 |
+| O-013 | hosted/self-hosted runbooks（S7-b PR #39 已合入） | 中 |
+| O-014 | release signing/updater responsibility contract（S7-b PR #39 已合入） | 低 |
+| O-015 | load/reconnect/retention tests（S7-a fleet + S7-b bounded diagnostics 已合入） | 中 |
 | O-016 | RC security/audit review | 低 |
 
-> `@byok-sdk/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于 K 线 plan（状态以 `tasks/current.md` 为准），不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok/core` TruthStore 落地。
+> `@byok-sdk/keys` 的 profile 持久化接 `TruthStore`（原 K-501，即 `ARCHITECTURE-PROPOSAL:698` 的 P5）不在本 Sprint：它挂在 K4 之后，而 K4/K4.1 属于 K 线 plan（状态以 `tasks/current.md` 为准），不能由本 sprint 追加任务。**见 `tasks/todos.md` deferred 项**，触发条件是 K4/K4.1 收口且 `@byok-sdk/core` TruthStore 落地。
 
 K-401/K-402/K-502/K-503 已由 D-11 收口；S7 实作从 L-004 开始。
 
@@ -1147,7 +1154,7 @@ K-401/K-402/K-502/K-503 已由 D-11 收口；S7 实作从 L-004 开始。
 
 > **S7-a 交付记录**：L-004/L-005 已由 `plans/plan-20260809-0520-s7a-fleet-health.md` 交付（PR #38，merge `489255b`，CI 32/32）。稳定 seed 只来自已加载的 product/device identity，automatic reconnect/upload/maintenance 使用 domain-separated deterministic jitter，manual probe 即时；operational health 以 atomic run marker、60s/3-failure window、recovering transition 与 bounded crash history投影到 daemon/control/CLI。corrupt health state 只报告 `unavailable` 且原地保留。L-006/L-007 的 quarantine manifest、doctor/support bundle 与显式 `--fix` 留给 S7-b，不由 S7-a 自动清理。
 
-> **S7-b 执行边界**：`plans/plan-20260809-0638-s7b-diagnostics.md` 交付一个 typed read-only collector，`doctor` plain/JSON、offline-only `doctor --fix --yes` health quarantine、exclusive atomic/bounded/allowlist `support-bundle`，以及 hosted/self-hosted/release-responsibility 三份 runbook。journal doctor 只做 read-only quick check，既有 `JournalCorruptError` quarantine 仍是唯一 production move authority；不加 rebuild、自动 cleanup 或 package/runtime fallback。load/retention falsifier以 quarantine 100-entry projection cap、10,000 scan cap、audit 256 KiB tail/200 facts 与 existing reconnect fleet simulation执行。
+> **S7-b 交付边界**：归档 plan `plans/archive/plan-20260809-0638-s7b-diagnostics.md` 已由 PR #39 / merge `8ad6474` 交付 typed read-only collector，`doctor` plain/JSON、offline-only `doctor --fix --yes` health quarantine、exclusive atomic/bounded/allowlist `support-bundle`，以及 hosted/self-hosted/release-responsibility 三份 runbook。journal doctor 只做 read-only quick check，既有 `JournalCorruptError` quarantine 仍是唯一 production move authority；不加 rebuild、自动 cleanup 或 package/runtime fallback。load/retention falsifier以 quarantine 100-entry projection cap、10,000 scan cap、audit 256 KiB tail/200 facts 与 existing reconnect fleet simulation执行。exact target `96dcbab9` 经 independent Codex review accepted，PR CI 34/34 green；Claude paused/not invoked。
 
 #### Support bundle
 
@@ -1464,7 +1471,7 @@ RC 拆成两个互相独立的 profile。拆分的理由是阻塞源不同：dis
 - production runbooks；
 - no Pri-0/Pri-1 unresolved defects。
 
-#### Umbrella BYOK RC
+#### BYOK product-suite RC
 
 在 Dispatch Platform RC 全部条件之上，额外要求：
 
@@ -1472,7 +1479,7 @@ RC 拆成两个互相独立的 profile。拆分的理由是阻塞源不同：dis
 - keys golden parity（`aip` 侧 golden test 不改期望值即通过）；
 - keys 边界不变式（依赖图检查，见 S7.2）。
 
-S7.4 的 RC gate 清单同时服务两个 profile：其中 `K4 golden test in aip passes unchanged` 只属于 Umbrella BYOK RC，其余条目属于 Dispatch Platform RC。
+S7.4 的 RC gate 清单同时服务两个 profile：其中 `K4 golden test in aip passes unchanged` 只属于 BYOK product-suite RC，其余条目属于 Dispatch Platform RC。这里的 product suite 是验证集合，不表示 `byok-sdk` npm umbrella 依赖 `@byok-sdk/keys`；分发裁定见 D-12。
 
 ---
 

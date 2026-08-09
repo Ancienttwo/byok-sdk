@@ -1,7 +1,7 @@
 # Postgres row-level security — optional hardening, not relied upon
 
 > **Status**: documented, deliberately not enabled
-> **Applies to**: any hosted deployment of `deploy/sql/` + `@byok/cloud-postgres`
+> **Applies to**: any hosted deployment of `deploy/sql/` + `@byok-sdk/cloud-postgres`
 > **Sprint box**: S4A.5 "Postgres optional RLS hardening documented but not relied upon"
 
 ## The ruling

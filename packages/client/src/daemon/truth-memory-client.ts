@@ -5,8 +5,8 @@ import {
   type ContentHash,
   type TruthRecordKind,
   type TruthRecordSelector,
-} from '@byok/core';
-import type { DeviceProofEnvelopeV1 } from '@byok/core';
+} from '@byok-sdk/core';
+import type { DeviceProofEnvelopeV1 } from '@byok-sdk/core';
 import type { DeviceProofSigner } from './device-proof-signer';
 import { toHttpBase } from './url';
 

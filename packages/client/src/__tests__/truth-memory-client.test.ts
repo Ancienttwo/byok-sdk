@@ -11,7 +11,7 @@ import {
   type DeviceProofEnvelopeV1,
   type TenantId,
   type TruthRecord,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fullCapabilityDeclaration,

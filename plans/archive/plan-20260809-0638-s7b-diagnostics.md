@@ -1,6 +1,6 @@
 # Plan: S7-b Diagnostics and Operations
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260809-0638
 > **Slug**: s7b-diagnostics
 > **Artifact Level**: work-package

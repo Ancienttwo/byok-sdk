@@ -21,7 +21,7 @@
  *   instance would not see it anyway.
  */
 import type { Context } from 'hono';
-import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok/protocol';
+import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
 import { authenticateDevice, type DeviceRouteDeps } from './shared';
 
 export interface EventsRouteDeps extends DeviceRouteDeps {

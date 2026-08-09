@@ -1,5 +1,5 @@
 /**
- * The Postgres composition of the seven `@byok/core` ports.
+ * The Postgres composition of the seven `@byok-sdk/core` ports.
  *
  * All seven, or none: `runCoreConformance`'s port-inventory dimension asserts a
  * composition supplies exactly `CORE_STORE_NAMES` and exactly the methods
@@ -15,7 +15,7 @@
  * asked the database for the time would make every one of those assertions
  * either a sleep or a flake.
  */
-import type { Clock, CoreStores } from '@byok/core';
+import type { Clock, CoreStores } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 import { PostgresActivityStore, PostgresPresenceStore } from './presence';
 import { PostgresBoardStore } from './board';

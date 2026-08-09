@@ -1,7 +1,7 @@
 /**
  * The composition side of the cloud-local port method inventory.
  *
- * The table itself is contract data and lives in `@byok/cloud`'s shipped source
+ * The table itself is contract data and lives in `@byok-sdk/cloud`'s shipped source
  * (`CLOUD_PORT_METHODS`). This module asserts every composition under test
  * implements exactly those methods for every port the suite certifies — no
  * missing method, and no extra one that the contract has not pinned down and
@@ -12,7 +12,7 @@
  * satisfied without a table.
  */
 import { describe, expect, it } from 'vitest';
-import { CLOUD_PORT_METHODS } from '@byok/cloud';
+import { CLOUD_PORT_METHODS } from '@byok-sdk/cloud';
 import {
   CLOUD_CONFORMANCE_PORTS,
   withCloudComposition,

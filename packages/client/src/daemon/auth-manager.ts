@@ -1,5 +1,5 @@
 import os from 'node:os';
-import type { ChallengeResponse, PairResponse, TokenResponse } from '@byok/protocol';
+import type { ChallengeResponse, PairResponse, TokenResponse } from '@byok-sdk/protocol';
 import { DeviceStore, type DeviceRecord } from './store';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
 import { toHttpBase } from './url';

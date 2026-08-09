@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PermissionPolicy } from '@byok/protocol';
+import type { PermissionPolicy } from '@byok-sdk/protocol';
 import { mapPermissionPolicyToPiArgs } from '../adapters/pi/permission-mapping';
 
 describe('mapPermissionPolicyToPiArgs', () => {

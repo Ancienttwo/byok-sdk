@@ -174,7 +174,7 @@ Three properties are load-bearing:
   revoked device are indistinguishable in responses — same `401`, same body.
   The registry is keyed by `(tenantId, deviceId)` so a wrong-tenant lookup
   simply finds nothing, and no naked global device lookup is exported from
-  `@byok/server` at all.
+  `@byok-sdk/server` at all.
 
 ### Breaking change and migration (2026-08-07)
 
@@ -628,7 +628,7 @@ applies to filesystem confinement.
 ## Key management (`@byok-sdk/keys`) is a separate package with a separate security model
 
 Everything above describes the **agent-dispatch** side of the SDK
-(`@byok/protocol` / `@byok/server` / `@byok/client`). That side's defining
+(`@byok-sdk/protocol` / `@byok-sdk/server` / `@byok-sdk/client`). That side's defining
 security property is *credential-isolation*: the daemon dispatches tasks to
 runtime CLIs the device owner already authenticated, and it never reads,
 proxies, or forwards any credential — the M5 pilot audit
@@ -669,7 +669,7 @@ diluted by the mere presence of a key-management package in the same repo:
   `ProviderRegistry` directly — which also means the guarantee that the key
   never leaves the machine is underwritten by that host page, not by this
   package. Local control-plane traffic in this repo is not HTTP at all: it runs
-  over `@byok/client`'s Unix domain control socket
+  over `@byok-sdk/client`'s Unix domain control socket
   (`packages/client/src/daemon/control-server.ts`), whose threat model is
   section [*2. Control socket (local IPC)*](#2-control-socket-local-ipc) above.
 

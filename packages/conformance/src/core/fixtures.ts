@@ -5,7 +5,7 @@
  * leakage with the same two ids, and so a leak shows up as a concrete pair in
  * the failure output rather than an abstract "isolation broke".
  */
-import { contentHash, tenantId, type ContentHash, type TenantId } from '@byok/core';
+import { contentHash, tenantId, type ContentHash, type TenantId } from '@byok-sdk/core';
 
 export const TENANT_A: TenantId = tenantId('tenant-a');
 export const TENANT_B: TenantId = tenantId('tenant-b');

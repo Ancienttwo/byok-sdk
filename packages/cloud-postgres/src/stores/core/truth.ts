@@ -34,7 +34,7 @@ import {
   type TruthRecordKind,
   type TruthRecordSelector,
   type TruthStore,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 const DEFAULT_MANIFEST_LIMIT = 100;

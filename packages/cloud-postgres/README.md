@@ -1,7 +1,7 @@
-# @byok/cloud-postgres
+# @byok-sdk/cloud-postgres
 
 The durable data plane for the BYOK SDK's hosted device surface: Postgres
-implementations of **all ten cloud-local store ports and all seven `@byok/core`
+implementations of **all ten cloud-local store ports and all seven `@byok-sdk/core`
 ports**, the R2/S3 object adapter that backs the blob port, and the forward-only
 migration runner that creates the tables they read.
 
@@ -84,11 +84,11 @@ never deleted from a single LIST observation. See
 `deploy/runbooks/cloud-cleanup.md` for metrics, alerts, replay/discard,
 crash recovery and rollback.
 
-`@byok/cloud` is a stateless handler package — it serves the frozen v1 device
+`@byok-sdk/cloud` is a stateless handler package — it serves the frozen v1 device
 wire contract over ports and owns no storage. This package is one composition of
-those ports. It sits here rather than inside `@byok/cloud` for two reasons: a
-`hono` user should not be made to install a database driver, and `@byok/core`
-and `@byok/cloud` stay loadable on Workers precisely because `pg` never enters
+those ports. It sits here rather than inside `@byok-sdk/cloud` for two reasons: a
+`hono` user should not be made to install a database driver, and `@byok-sdk/core`
+and `@byok-sdk/cloud` stay loadable on Workers precisely because `pg` never enters
 their dependency graph.
 
 Dependency direction is one-way: `cloud-postgres → core + cloud + pg +` the
@@ -102,7 +102,7 @@ named `NNNN_description.sql`. The four-digit prefix is the only ordering
 authority — the same one `pnpm run check:deploy-sql` enforces in CI.
 
 ```ts
-import { createByokPool, migrate } from '@byok/cloud-postgres';
+import { createByokPool, migrate } from '@byok-sdk/cloud-postgres';
 
 const pool = createByokPool({ connectionString: process.env.DATABASE_URL! });
 const result = await migrate(pool, '/path/to/deploy/sql');
@@ -129,7 +129,7 @@ A consequence of per-file transactions: a statement that cannot run inside one
 ## Pool
 
 `createByokPool` exists to configure one thing that matters: `int8` columns
-decode to `bigint`, not to strings. Every byte-count contract in `@byok/core` is
+decode to `bigint`, not to strings. Every byte-count contract in `@byok-sdk/core` is
 `bigint`, and a default-configured `pg` pool would hand the stores strings —
 turning `usage.reservedBytes > limit` into a lexicographic comparison that
 answers a different question without throwing. The parser is installed on the
@@ -145,7 +145,7 @@ The suites need a real Postgres, and get one from the repository's
 docker compose -f docker-compose.test.yml up -d --wait
 export BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test
 export BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100
-pnpm --filter @byok/cloud-postgres test
+pnpm --filter @byok-sdk/cloud-postgres test
 ```
 
 Both variables, one gate: the compose file starts Postgres and MinIO together,
@@ -159,7 +159,7 @@ real `deploy/sql/` files, so "fresh install + migrate-up" is a property of each
 test rather than a step someone remembers. What runs:
 
 - `runCloudConformance('postgres', ...)` and `runCoreConformance('postgres', ...)`
-  — the same assertion source `@byok/conformance` runs against the in-memory
+  — the same assertion source `@byok-sdk/conformance` runs against the in-memory
   compositions, with that package zero-diff. An assertion that needed a
   composition-specific branch would be a port-contract bug to escalate, not a
   test to adjust.

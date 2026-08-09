@@ -69,7 +69,7 @@ export type CoreStoreName = (typeof CORE_STORE_NAMES)[number];
 
 // Layer 2 of §12.6.2 — the tenant-closed facade a handler actually receives —
 // is deliberately not here. It is shaped by how handlers are written, and the
-// first handlers land in `@byok/cloud` (S3). Defining it now would mean
+// first handlers land in `@byok-sdk/cloud` (S3). Defining it now would mean
 // guessing that shape and freezing the guess into the contract package that
 // every later sprint depends on. The tenant-first ports below are what make
 // that facade a thin binding rather than a new authority.

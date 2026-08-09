@@ -23,7 +23,7 @@ import {
   type TaskProgressPayload,
   type TaskStartedPayload,
   type TaskState,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import type { DeviceRegistry } from './auth';
 import { AsyncEventQueue } from './event-queue';
 import { generateTaskId } from './ids';

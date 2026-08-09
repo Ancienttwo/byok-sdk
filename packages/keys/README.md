@@ -12,7 +12,7 @@ landed. K3 settled the settings-page question, recorded under
 ## Security boundary
 
 `@byok-sdk/keys` is a separate package with a separate security model from
-`@byok/client` / `@byok/server` / `@byok/protocol`. Those three dispatch tasks to
+`@byok-sdk/client` / `@byok-sdk/server` / `@byok-sdk/protocol`. Those three dispatch tasks to
 agent runtimes the user already authenticated, and their credential-isolation
 rule (`packages/client/src/types.ts:120-124`, audited in
 `docs/security-review-m5-pilot-entry.md`) promises the dispatch path never

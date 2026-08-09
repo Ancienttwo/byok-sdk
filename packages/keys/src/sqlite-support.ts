@@ -25,7 +25,7 @@ interface SqliteModule {
  *
  * `node:sqlite` shipped in Node.js 22.5.0 and stays marked experimental (an
  * `ExperimentalWarning` on stderr is expected and harmless). Following
- * `@byok/server`'s `sqlite-support.ts`, the SQLite-backed store here depends on
+ * `@byok-sdk/server`'s `sqlite-support.ts`, the SQLite-backed store here depends on
  * nothing else — no `better-sqlite3`, no native module — because zero native
  * dependencies is what keeps this package trivially packageable. The tradeoff
  * is that {@link SqliteProviderProfileStore} does not work below Node 22.5, and
@@ -50,7 +50,7 @@ export function loadSqliteModule(): SqliteModule {
 /**
  * Whether `node:sqlite` can ACTUALLY be loaded right now.
  *
- * Same predicate as `@byok/server`'s `sqlite-support.ts`, and it exists for the
+ * Same predicate as `@byok-sdk/server`'s `sqlite-support.ts`, and it exists for the
  * same reason: this package's `engines.node` is `>=20` and CI runs the matrix
  * on 20 and 22, but `node:sqlite` shipped in 22.5 and stayed behind
  * `--experimental-sqlite` for part of the 22.x line. A version-number

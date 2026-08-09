@@ -20,7 +20,7 @@ import {
   type CoreConflictError,
   type CoreStores,
   type TenantStorageEntitlement,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { ENTITLEMENT, hashOf, TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 

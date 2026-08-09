@@ -17,9 +17,9 @@
  *   create a table that is always empty, and a real limiter is edge/infra work
  *   whose implementation would not be a per-request Postgres write either.
  */
-import { AllowAllRateLimiter, type CloudStores } from '@byok/cloud';
-import type { CloudCrypto } from '@byok/cloud';
-import type { Clock } from '@byok/core';
+import { AllowAllRateLimiter, type CloudStores } from '@byok-sdk/cloud';
+import type { CloudCrypto } from '@byok-sdk/cloud';
+import type { Clock } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 import { PostgresObjectStore } from './core/objects';
 import { R2CloudBlobStore, type R2BlobStoreOptions } from './r2-blobs';

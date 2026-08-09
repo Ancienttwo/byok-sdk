@@ -1,7 +1,7 @@
 {
   "schema": "byok-device-proof-v1",
   "domainPrefix": "byok-device-proof-v1\n",
-  "note": "Canonical signing bytes for byok-device-proof-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok/core test, and treat any diff as a breaking change to the signature format.",
+  "note": "Canonical signing bytes for byok-device-proof-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok-sdk/core test, and treat any diff as a breaking change to the signature format.",
   "cases": [
     {
       "name": "method and path binding, no optional claims",

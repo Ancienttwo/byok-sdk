@@ -2,8 +2,8 @@ import type {
   ProofRequestReceipt,
   ProofRequestReceiptInput,
   ProofRequestReceiptStore,
-} from '@byok/cloud';
-import type { Clock, TenantId } from '@byok/core';
+} from '@byok-sdk/cloud';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 interface ProofReceiptRow {

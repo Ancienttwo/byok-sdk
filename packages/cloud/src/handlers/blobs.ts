@@ -22,14 +22,14 @@ import {
   CreateBlobRequestSchema,
   type BlobDownloadUrlResponse,
   type CreateBlobResponse,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import {
   STORAGE_ERROR_CODES,
   STORAGE_ERROR_HTTP_STATUS,
   contentHash,
   isCoreError,
   type StorageErrorCode,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { BlobContentProxy } from '../stores/ports';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
 

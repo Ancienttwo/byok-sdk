@@ -60,7 +60,7 @@ export type KeyUsageLike = Parameters<SubtleCryptoLike['importKey']>[4][number];
 function subtle(): SubtleCryptoLike {
   const webCrypto = globalThis.crypto;
   if (webCrypto?.subtle === undefined) {
-    throw new Error('@byok/cloud requires a WebCrypto implementation on globalThis.crypto');
+    throw new Error('@byok-sdk/cloud requires a WebCrypto implementation on globalThis.crypto');
   }
   return webCrypto.subtle;
 }

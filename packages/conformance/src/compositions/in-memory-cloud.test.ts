@@ -6,8 +6,8 @@
  * — if either ever needs more than that, the port contract is what needs
  * fixing.
  */
-import { createInMemoryCoreStores, createMutableClock } from '@byok/core';
-import { createInMemoryCloudStores, createWebCrypto } from '@byok/cloud';
+import { createInMemoryCoreStores, createMutableClock } from '@byok-sdk/core';
+import { createInMemoryCloudStores, createWebCrypto } from '@byok-sdk/cloud';
 import { runCloudConformance, type CloudCompositionFactory } from '../cloud/harness';
 
 const inMemoryFactory: CloudCompositionFactory = {

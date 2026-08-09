@@ -7,7 +7,7 @@ import type {
   TruthRecord,
   TruthRecordKind,
   TruthRecordSelector,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { z } from 'zod';
 
 export const TRUTH_RECORD_CAPABILITY = 'truth.records';

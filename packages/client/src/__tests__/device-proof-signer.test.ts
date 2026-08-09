@@ -2,7 +2,7 @@ import { generateKeyPairSync, verify } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { deviceProofSigningInput, parseDeviceProofEnvelope } from '@byok/core';
+import { deviceProofSigningInput, parseDeviceProofEnvelope } from '@byok-sdk/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { StoredDeviceProofSigner } from '../daemon/device-proof-signer';
 import { exportPrivateKeyPem } from '../daemon/device-keys';

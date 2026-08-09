@@ -29,8 +29,8 @@ import {
   type ContentHash,
   type StorageReservation,
   type TenantId,
-} from '@byok/core';
-import type { BlobDeclaration } from '@byok/cloud';
+} from '@byok-sdk/core';
+import type { BlobDeclaration } from '@byok-sdk/cloud';
 import { migrate } from '../migrate';
 import { PostgresObjectStore } from '../stores/core/objects';
 import {

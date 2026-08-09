@@ -21,7 +21,7 @@ set -euo pipefail
 # own (expected, in this throwaway setup) pairing failure.
 #
 # Usage: templates/service/launchd/smoke-test.sh
-#   Requires @byok/client already built (`pnpm --filter @byok/client build`).
+#   Requires @byok-sdk/client already built (`pnpm --filter @byok-sdk/client build`).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -33,7 +33,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 if [ ! -f "$CLIENT_DIST" ]; then
-  echo "FAIL: $CLIENT_DIST not found -- run 'pnpm --filter @byok/client build' first"
+  echo "FAIL: $CLIENT_DIST not found -- run 'pnpm --filter @byok-sdk/client build' first"
   exit 1
 fi
 
@@ -146,7 +146,7 @@ echo "==> launchd service lifecycle smoke: PASS"
 # placeholder command (see the header comment) to isolate service lifecycle
 # MECHANICS from the daemon/control-socket concern -- this separate,
 # throwaway service instance runs the REAL `byok-agent start` (paired
-# against a real, ephemeral @byok/server this helper also boots) and proves
+# against a real, ephemeral @byok-sdk/server this helper also boots) and proves
 # `byok-agent status` reaches its control socket live. See
 # packages/client/scripts/control-socket-check.mjs's own header comment.
 CLIENT_SCRIPTS_DIR="$REPO_ROOT/packages/client/scripts"

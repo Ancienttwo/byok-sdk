@@ -58,7 +58,7 @@ import {
   type TenantStorageEntitlement,
   type TenantStorageEntitlementInput,
   type TenantStorageUsage,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
 
 /** Warning threshold from §12.7.8: 80% of the hard limit. */

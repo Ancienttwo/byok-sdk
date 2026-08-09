@@ -31,7 +31,7 @@ import {
   encodeEnvelope,
   type Envelope,
   type MessageType,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import {
   activityDetails,
   appendActivityEvents,

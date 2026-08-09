@@ -6,7 +6,7 @@
  * sibling file of the same size — if it ever needs more than that, the port
  * contract is what needs fixing.
  */
-import { createInMemoryCoreStores, createMutableClock } from '@byok/core';
+import { createInMemoryCoreStores, createMutableClock } from '@byok-sdk/core';
 import { runCoreConformance, type CoreCompositionFactory } from '../core/harness';
 
 const inMemoryFactory: CoreCompositionFactory = {

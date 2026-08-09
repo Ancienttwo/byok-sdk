@@ -36,7 +36,7 @@ import {
   type MailboxRetentionResult,
   type MailboxStore,
   type TenantId,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 const DEFAULT_READ_LIMIT = 50;

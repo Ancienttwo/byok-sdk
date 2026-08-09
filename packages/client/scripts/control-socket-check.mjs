@@ -12,7 +12,7 @@
 // environment/cwd".
 //
 // Lives alongside ipc-smoke.mjs (not under templates/service/) specifically
-// so `@hono/node-server`/`@byok/server` -- both @byok/client devDependencies
+// so `@hono/node-server`/`@byok-sdk/server` -- both @byok-sdk/client devDependencies
 // -- resolve normally via Node's ordinary node_modules walk; a script
 // physically under templates/ has no such node_modules chain leading to
 // them (confirmed empirically while writing this).
@@ -20,7 +20,7 @@
 // Installs ONE MORE scratch, throwaway service instance (a distinct name
 // from whatever lifecycle-mechanics service the caller is already running)
 // whose program is the REAL `byok-agent start`, paired against a real,
-// ephemeral @byok/server instance this script also boots -- same
+// ephemeral @byok-sdk/server instance this script also boots -- same
 // real-server approach as ipc-smoke.mjs, for the same reason (no
 // hand-rolled protocol stub to keep in sync). Waits for the service to
 // report running, runs `byok-agent status --config <path>` and asserts a
@@ -58,9 +58,9 @@ const winswBinFlagIndex = rest.indexOf('--winsw-bin');
 const winswBin = winswBinFlagIndex >= 0 ? rest[winswBinFlagIndex + 1] : undefined;
 
 for (const [label, file] of [
-  ['@byok/client', clientDistIndex],
-  ['@byok/client (bin)', byokAgentBin],
-  ['@byok/server', serverDistIndex],
+  ['@byok-sdk/client', clientDistIndex],
+  ['@byok-sdk/client (bin)', byokAgentBin],
+  ['@byok-sdk/server', serverDistIndex],
 ]) {
   try {
     await fs.stat(file);
@@ -98,7 +98,7 @@ try {
     });
   });
   const serverUrl = `http://127.0.0.1:${port}`;
-  console.log(`==> real @byok/server reference implementation listening at ${serverUrl}`);
+  console.log(`==> real @byok-sdk/server reference implementation listening at ${serverUrl}`);
 
   const { code: pairingCode } = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId: name });
   await fs.writeFile(

@@ -2,7 +2,7 @@
  * Layer 2 of the six-layer isolation model (§12.6.2) — the tenant-closed
  * facade a handler actually receives.
  *
- * `@byok/core`'s `stores.ts` deliberately left this undefined: it is shaped by
+ * `@byok-sdk/core`'s `stores.ts` deliberately left this undefined: it is shaped by
  * how handlers are written, and the first handlers live here. This is that
  * shape, and the two properties it exists to enforce are:
  *
@@ -47,7 +47,7 @@ import {
   type StorageReservation,
   type StorageReservationInput,
   type TenantId,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type {
   BlobObservation,
   CloudStores,

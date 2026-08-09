@@ -2,7 +2,7 @@
  * The S3a constraint list, made executable.
  *
  * These are properties that are cheap to state, expensive to lose, and
- * invisible in a normal test run: a `@byok/server` import that quietly turns
+ * invisible in a normal test run: a `@byok-sdk/server` import that quietly turns
  * the hosted surface into a wrapper around the embedded coordinator, a `node:`
  * import that breaks the Workers composition, a module-level `Map` that turns
  * a stateless handler into a single-instance one, a `TenantId` threaded
@@ -62,9 +62,9 @@ describe('dependency boundaries', () => {
     expect(ALL_SOURCES.some((file) => file.path === SCANNER)).toBe(true);
   });
 
-  it('never imports @byok/server', () => {
+  it('never imports @byok-sdk/server', () => {
     for (const file of SHIPPED) {
-      expect(code(file.text), file.path).not.toContain('@byok/server');
+      expect(code(file.text), file.path).not.toContain('@byok-sdk/server');
     }
   });
 
@@ -75,15 +75,15 @@ describe('dependency boundaries', () => {
     }
   });
 
-  it('declares only @byok/core, @byok/protocol, hono, and zod', () => {
+  it('declares only @byok-sdk/core, @byok-sdk/protocol, hono, and zod', () => {
     const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
       dependencies: Record<string, string>;
     };
-    expect(Object.keys(manifest.dependencies).sort()).toEqual(['@byok/core', '@byok/protocol', 'hono', 'zod']);
+    expect(Object.keys(manifest.dependencies).sort()).toEqual(['@byok-sdk/core', '@byok-sdk/protocol', 'hono', 'zod']);
   });
 
   it('imports nothing outside those four packages', () => {
-    const allowed = new Set(['@byok/core', '@byok/protocol', 'hono', 'zod']);
+    const allowed = new Set(['@byok-sdk/core', '@byok-sdk/protocol', 'hono', 'zod']);
     for (const file of SHIPPED) {
       for (const [, specifier] of code(file.text).matchAll(/from\s+'([^']+)'/g)) {
         if (specifier === undefined) continue;

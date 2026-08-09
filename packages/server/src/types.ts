@@ -8,7 +8,7 @@ import type {
   TaskApprovalResolvedPayload,
   TaskArtifactPayload,
   TaskState,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import type { BlobStore } from './blob-store';
 import type { RateLimiterOptions } from './rate-limiter';
 import type { TaskStore } from './task-store';
@@ -118,7 +118,7 @@ export interface TaskResult {
  * consumer only has to read one `events()` iterable per task.
  *
  * `event` is {@link AgentEventOrUnknown}, not the narrower `AgentEvent`
- * (pre-freeze tolerance, `@byok/protocol`'s `agent-event.ts`): an
+ * (pre-freeze tolerance, `@byok-sdk/protocol`'s `agent-event.ts`): an
  * unknown-type event — one a newer daemon/runtime-adapter minor version
  * produced that this build doesn't recognize — is forwarded here as-is
  * rather than dropped. It's still observability data a newer embedder UI
@@ -219,7 +219,7 @@ export interface TaskSnapshot {
   /**
    * S0/D-4 (runtime-honest control surface): the capability block the
    * CLAIMING adapter reported for itself on its own `task.claim`
-   * (`TaskClaimPayload.capabilities`, `@byok/protocol`), snapshotted at the
+   * (`TaskClaimPayload.capabilities`, `@byok-sdk/protocol`), snapshotted at the
    * exact moment of the `Offered -> Claimed` transition
    * (`ConnectionHub.onClaim`, `hub.ts`).
    *
@@ -301,7 +301,7 @@ export type ByokServerEvent =
    * `approvalId`/`decision`/`resolvedBy` the daemon reported, so an embedder
    * can render/audit exactly what was resolved and by which path, not just
    * that a resolution happened. `resolvedBy` is currently always `'local'`
-   * (`@byok/protocol`'s `TaskApprovalResolvedPayloadSchema` — a single-value
+   * (`@byok-sdk/protocol`'s `TaskApprovalResolvedPayloadSchema` — a single-value
    * enum today, future-proofed for an additional value later without a
    * version bump). Mutually exclusive with `task.approval_resolved_implicit`
    * for the same resolution: whichever mechanism the server processes first

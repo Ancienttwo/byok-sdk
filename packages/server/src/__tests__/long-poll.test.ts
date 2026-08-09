@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer } from '../index';
 import {

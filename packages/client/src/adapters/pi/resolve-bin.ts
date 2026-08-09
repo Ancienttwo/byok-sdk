@@ -41,7 +41,7 @@ function readPackageJson(dir: string): MinimalPackageJson | undefined {
 
 /**
  * Resolve the pi CLI executable. Prefers the optionalDependency installed
- * alongside @byok/client (guarantees a known-good, version-matched build);
+ * alongside @byok-sdk/client (guarantees a known-good, version-matched build);
  * falls back to whatever `pi` is on PATH so users with a pre-existing global
  * pi install still work even when the optionalDependency didn't install.
  *

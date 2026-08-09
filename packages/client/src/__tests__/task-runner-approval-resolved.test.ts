@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type AgentEvent, type Envelope, type TaskOfferPayload } from '@byok/protocol';
+import { createEnvelope, type AgentEvent, type Envelope, type TaskOfferPayload } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
@@ -28,7 +28,7 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
  * array — `getServerCapabilities` is just a stub function here, exactly like
  * every other `TaskRunnerDeps` field this file's sibling stubs.
  *
- * A full end-to-end pass (real daemon, real `@byok/server`, real capability
+ * A full end-to-end pass (real daemon, real `@byok-sdk/server`, real capability
  * negotiation over a real handshake, real local-CLI-equivalent resolve) is
  * `real-server-approval-resolved-e2e.test.ts`.
  */

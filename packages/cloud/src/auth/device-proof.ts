@@ -6,7 +6,7 @@ import {
   type Clock,
   type DevicePrincipal,
   type DeviceProofEnvelopeV1,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { CloudCrypto } from '../crypto/port';
 import type { DeviceDirectory } from '../stores/ports';
 

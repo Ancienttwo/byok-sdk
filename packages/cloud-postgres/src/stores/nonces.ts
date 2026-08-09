@@ -13,9 +13,9 @@
  * never calls a sweep on a timer, and the sweep is bounded to one (tenant,
  * device) so it stays proportional to the caller that triggered it.
  */
-import { NONCE_TTL_MS, type NonceStore } from '@byok/cloud';
-import type { Clock, TenantId } from '@byok/core';
-import type { CloudCrypto } from '@byok/cloud';
+import { NONCE_TTL_MS, type NonceStore } from '@byok-sdk/cloud';
+import type { Clock, TenantId } from '@byok-sdk/core';
+import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
 
 const NONCE_BYTES = 24;

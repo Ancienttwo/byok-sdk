@@ -8,7 +8,7 @@
  * addressable across every tenant, and "already used" versus "never existed"
  * is exactly the difference an attacker enumerating codes would pay for.
  */
-import type { Clock, TenantId } from '@byok/core';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
   PairingCodeClaims,
   PairingCodeInfo,

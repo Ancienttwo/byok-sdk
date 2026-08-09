@@ -4,7 +4,7 @@ export default defineConfig({
   entry: ['src/index.ts'],
   format: ['esm'],
   target: 'es2022',
-  // Unlike `@byok/core` and `@byok/cloud`, this package is Node-only by
+  // Unlike `@byok-sdk/core` and `@byok-sdk/cloud`, this package is Node-only by
   // construction: it drives `pg` sockets and reads migration files off disk.
   // That is exactly why it is a separate package (design §4) — the two
   // platform-neutral packages stay loadable on Workers because the database

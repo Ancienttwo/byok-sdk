@@ -1,5 +1,5 @@
-import type { ActivityTail } from '@byok/core';
-import type { AgentEventOrUnknown } from '@byok/protocol';
+import type { ActivityTail } from '@byok-sdk/core';
+import type { AgentEventOrUnknown } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
 import type { TenantBoundActivity } from './tenant-stores';
 

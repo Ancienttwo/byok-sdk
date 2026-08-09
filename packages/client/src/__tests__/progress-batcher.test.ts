@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent } from '@byok/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import { ProgressBatcher } from '../daemon/progress-batcher';
 
 describe('ProgressBatcher', () => {

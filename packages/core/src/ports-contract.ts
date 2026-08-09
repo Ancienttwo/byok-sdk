@@ -7,7 +7,7 @@
  * - `__tests__/constraints.test.ts` scans the *source interfaces* in this
  *   package and asserts each listed method exists, is async, and takes a
  *   required `TenantId` first.
- * - `@byok/conformance`'s port-inventory dimension asserts every *composition
+ * - `@byok-sdk/conformance`'s port-inventory dimension asserts every *composition
  *   under test* implements exactly these methods — no missing method, and no
  *   extra one that the contract has not pinned down and that therefore no
  *   other composition would implement.

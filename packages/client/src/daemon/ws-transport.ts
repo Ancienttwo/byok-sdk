@@ -7,7 +7,7 @@ import {
   type CapabilityFlag,
   type Envelope,
   type RuntimeInfo,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import { toWsUrl } from './url';
 
 export type ConnectionState = 'connecting' | 'open' | 'closed' | 'degraded' | 'revoked';

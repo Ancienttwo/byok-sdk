@@ -1,5 +1,5 @@
 /**
- * The one error taxonomy for `@byok/core`.
+ * The one error taxonomy for `@byok-sdk/core`.
  *
  * Two rules the rest of the package is built around:
  *

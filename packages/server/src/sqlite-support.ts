@@ -11,7 +11,7 @@ import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
  * stores in this package (`SqliteTaskStore`, `SqliteBlobStore`) deliberately
  * depend on nothing else — no `better-sqlite3` or other native module —
  * because staying at zero native dependencies is required to keep
- * `@byok/server` trivially packageable across platforms. The tradeoff is
+ * `@byok-sdk/server` trivially packageable across platforms. The tradeoff is
  * that these stores simply don't work below Node 22.5; this error says so
  * clearly and up front, instead of letting a cryptic `Cannot find module
  * 'node:sqlite'` surface from deep inside a query.

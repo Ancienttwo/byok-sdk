@@ -12,7 +12,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
 /**
  * Finding F2 (redelivery dead on reconnect), tested against the REAL
- * `@byok/server` + a REAL `@byok/client` daemon in-process (not the
+ * `@byok-sdk/server` + a REAL `@byok-sdk/client` daemon in-process (not the
  * lightweight `TestServer` stub the rest of this file's siblings use) —
  * this bug is specifically about the exact interaction between the real
  * server's `sendConnAck`-then-`redeliverAfterReconnect` sequencing (both in
@@ -29,7 +29,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * cursor, then the redelivered backlog (lower seqs, sent before the drop)
  * all look already-processed and get silently dropped.
  */
-describe('redelivery across a real reconnect (finding F2, real @byok/server + real @byok/client)', () => {
+describe('redelivery across a real reconnect (finding F2, real @byok-sdk/server + real @byok-sdk/client)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
 

@@ -7,7 +7,7 @@
  * so a revocation applied through the composite key is immediately visible to
  * `/byok/challenge` and `/byok/token` with no second copy to keep in sync.
  */
-import { tenantKey, type TenantId } from '@byok/core';
+import { tenantKey, type TenantId } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports';
 
 export class InMemoryDeviceDirectory implements DeviceDirectory {

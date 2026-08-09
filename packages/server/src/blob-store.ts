@@ -9,7 +9,7 @@ import path from 'node:path';
  * gets back a presigned upload URL; the caller `PUT`s the bytes there
  * directly (no bearer auth on that URL — the HMAC signature + expiry *is*
  * the auth); `GET /byok/blobs/:id/url` mints a presigned download URL the
- * same way. `BlobRef` itself (`@byok/protocol`'s `blob.ts`) is unchanged;
+ * same way. `BlobRef` itself (`@byok-sdk/protocol`'s `blob.ts`) is unchanged;
  * this module is what produces the URLs a `BlobRef` points at.
  *
  * `BlobStore` is interface-shaped so a SaaS can swap in a real object-store
@@ -69,7 +69,7 @@ export interface LocalDiskBlobStoreOptions {
 
 const DEFAULT_URL_TTL_MS = 15 * 60 * 1000;
 
-/** docs/protocol.md §7 now pins the canonical `contentHash` format (`sha256:<64 lowercase hex>`, finding F9 — `CONTENT_HASH_RE` in `@byok/protocol`'s `blob.ts`), enforced at the schema level on every inbound `CreateBlobRequest`/`BlobRef`. Comparison here is therefore a straight string match — no normalization, no compat shim; anything else was already rejected before reaching this store. */
+/** docs/protocol.md §7 now pins the canonical `contentHash` format (`sha256:<64 lowercase hex>`, finding F9 — `CONTENT_HASH_RE` in `@byok-sdk/protocol`'s `blob.ts`), enforced at the schema level on every inbound `CreateBlobRequest`/`BlobRef`. Comparison here is therefore a straight string match — no normalization, no compat shim; anything else was already rejected before reaching this store. */
 function sha256Hex(data: Buffer): string {
   return `sha256:${createHash('sha256').update(data).digest('hex')}`;
 }

@@ -2,20 +2,20 @@
  * The hosted capability declaration (ADR-010).
  *
  * A client learns what a deployment supports by READING a declaration, never
- * by probing an endpoint and interpreting 404/405/501. `@byok/core` owns the
+ * by probing an endpoint and interpreting 404/405/501. `@byok-sdk/core` owns the
  * declaration shape and the `hasCapability`/`assertCapability` enforcement
  * point; what lives here is the hosted vocabulary and the mapping from a
  * capability name to the routes that provide it.
  *
  * `GET /byok/capabilities` is a hosted-only route: it is not part of the
- * frozen device wire contract, `@byok/protocol` is untouched by it, and the
+ * frozen device wire contract, `@byok-sdk/protocol` is untouched by it, and the
  * daemon does not consume it yet (that lands in a later slice). What it
  * already does here is drive route selection — a deployment that does not
  * declare `blobs.presigned` does not mount the grant routes at all, and one
  * that does not declare `blobs.contentproxy` does not mount the two `/content`
  * routes, so the declaration and the surface cannot disagree.
  */
-import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok/core';
+import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok-sdk/core';
 
 /** The hosted capability vocabulary this package knows how to serve. */
 export const CLOUD_CAPABILITIES = {
