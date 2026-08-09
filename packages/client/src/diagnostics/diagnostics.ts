@@ -26,6 +26,7 @@ import {
   inspectOperationalHealthHandle,
   inspectOperationalHealthFile,
   MAX_OPERATIONAL_HEALTH_FILE_BYTES,
+  openOperationalHealthFile,
   type OperationalHealthFileInspection,
   OPERATIONAL_HEALTH_FILENAME,
 } from '../daemon/operational-health';
@@ -33,7 +34,12 @@ import { acquireDaemonOwner } from '../daemon/daemon-owner';
 import { ensureSecureDir } from '../util/secure-dir';
 
 export const MAX_QUARANTINE_ENTRIES = 100;
-export const MAX_QUARANTINE_SCAN_ENTRIES = 10_000;
+// Inventory validation is synchronous while the checked quarantine directory
+// inode is cwd-pinned. Two entries are needed for each health evidence pair;
+// bounding the scan to 2x the public 100-entry output cap keeps worst-case
+// digest work near 100 MiB instead of the former ~10.38 GiB.
+export const MAX_QUARANTINE_SCAN_ENTRIES = MAX_QUARANTINE_ENTRIES * 2;
+export const MAX_QUARANTINE_READ_BYTES = 128 * 1024 * 1024;
 export const MAX_DEVICE_RECORD_BYTES = 64 * 1024;
 export const MAX_JOURNAL_COPY_BYTES = 512 * 1024 * 1024;
 const MAX_QUARANTINE_MANIFEST_BYTES = 64 * 1024;
@@ -131,8 +137,9 @@ async function fileSize(filePath: string): Promise<number | undefined> {
 
 async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['device']> {
   const filePath = path.join(storeDir, 'device.json');
+  let pathStat: import('node:fs').Stats;
   try {
-    const pathStat = await fs.lstat(filePath);
+    pathStat = await fs.lstat(filePath);
     if (!pathStat.isFile()) return { status: 'unavailable' };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'unpaired' };
@@ -150,11 +157,41 @@ async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['dev
   }
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_DEVICE_RECORD_BYTES) return { status: 'unavailable' };
+    const namedAfterOpen = await fs.lstat(filePath);
+    if (
+      !stat.isFile() ||
+      !namedAfterOpen.isFile() ||
+      namedAfterOpen.isSymbolicLink() ||
+      stat.dev !== pathStat.dev ||
+      stat.ino !== pathStat.ino ||
+      stat.size !== pathStat.size ||
+      stat.mtimeMs !== pathStat.mtimeMs ||
+      stat.ctimeMs !== pathStat.ctimeMs ||
+      stat.dev !== namedAfterOpen.dev ||
+      stat.ino !== namedAfterOpen.ino ||
+      stat.size !== namedAfterOpen.size ||
+      stat.mtimeMs !== namedAfterOpen.mtimeMs ||
+      stat.ctimeMs !== namedAfterOpen.ctimeMs ||
+      stat.size <= 0 ||
+      stat.size > MAX_DEVICE_RECORD_BYTES
+    ) return { status: 'unavailable' };
     const bytes = Buffer.alloc(stat.size);
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
     const after = await handle.stat();
-    if (bytesRead !== bytes.length || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) {
+    const namedAfterRead = await fs.lstat(filePath);
+    if (
+      bytesRead !== bytes.length ||
+      after.dev !== stat.dev ||
+      after.ino !== stat.ino ||
+      after.size !== stat.size ||
+      after.mtimeMs !== stat.mtimeMs ||
+      after.ctimeMs !== stat.ctimeMs ||
+      namedAfterRead.dev !== stat.dev ||
+      namedAfterRead.ino !== stat.ino ||
+      namedAfterRead.size !== stat.size ||
+      namedAfterRead.mtimeMs !== stat.mtimeMs ||
+      namedAfterRead.ctimeMs !== stat.ctimeMs
+    ) {
       return { status: 'unavailable' };
     }
     const parsed = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
@@ -368,7 +405,16 @@ interface PinnedQuarantineFile {
   bytes?: Buffer;
 }
 
-function readPinnedQuarantineFile(name: string, maxBytes: number, includeBytes: boolean): PinnedQuarantineFile {
+interface QuarantineReadBudget {
+  remainingBytes: number;
+}
+
+function readPinnedQuarantineFile(
+  name: string,
+  maxBytes: number,
+  includeBytes: boolean,
+  budget: QuarantineReadBudget,
+): PinnedQuarantineFile {
   if (path.basename(name) !== name || name === '.' || name === '..') {
     throw new Error('quarantine manifest contains an invalid evidence name');
   }
@@ -384,7 +430,12 @@ function readPinnedQuarantineFile(name: string, maxBytes: number, includeBytes: 
     }
     let bytes: Buffer | undefined;
     if (includeBytes) {
-      bytes = Buffer.alloc(Number(opened.size));
+      const sizeBytes = Number(opened.size);
+      if (sizeBytes > budget.remainingBytes) {
+        throw new Error('quarantine validation exceeds the 128 MiB cumulative read limit');
+      }
+      budget.remainingBytes -= sizeBytes;
+      bytes = Buffer.alloc(sizeBytes);
       let position = 0;
       while (position < bytes.length) {
         const bytesRead = readSync(fd, bytes, position, bytes.length - position, position);
@@ -482,11 +533,12 @@ function inspectQuarantinePinned(
     }
     const evidence = new Map<string, PinnedQuarantineFile>();
     const processedManifests = new Set<string>();
+    const readBudget: QuarantineReadBudget = { remainingBytes: MAX_QUARANTINE_READ_BYTES };
 
     const processManifest = (manifestName: string): void => {
       if (processedManifests.has(manifestName)) return;
       processedManifests.add(manifestName);
-      const manifestFile = readPinnedQuarantineFile(manifestName, MAX_QUARANTINE_MANIFEST_BYTES, true);
+      const manifestFile = readPinnedQuarantineFile(manifestName, MAX_QUARANTINE_MANIFEST_BYTES, true, readBudget);
       let parsed: unknown;
       try {
         parsed = JSON.parse(manifestFile.bytes?.toString('utf8') ?? '');
@@ -497,7 +549,7 @@ function inspectQuarantinePinned(
         if (`${parsed.evidenceFile}.manifest.json` !== manifestName) {
           throw new Error('health quarantine manifest is not bound to its evidence name');
         }
-        const file = readPinnedQuarantineFile(parsed.evidenceFile, MAX_OPERATIONAL_HEALTH_FILE_BYTES, true);
+        const file = readPinnedQuarantineFile(parsed.evidenceFile, MAX_OPERATIONAL_HEALTH_FILE_BYTES, true, readBudget);
         if (
           file.sizeBytes !== parsed.sizeBytes ||
           createHash('sha256').update(file.bytes ?? Buffer.alloc(0)).digest('hex') !== parsed.sha256
@@ -521,7 +573,7 @@ function inspectQuarantinePinned(
         }
         for (const name of boundNames) {
           if (evidence.has(name)) throw new Error('quarantine evidence is referenced more than once');
-          evidence.set(name, readPinnedQuarantineFile(name, MAX_JOURNAL_COPY_BYTES, false));
+          evidence.set(name, readPinnedQuarantineFile(name, MAX_JOURNAL_COPY_BYTES, false, readBudget));
         }
         return;
       }
@@ -759,6 +811,7 @@ function publishQuarantineEvidencePinned(
   const previousCwd = process.cwd();
   let entered = false;
   let evidenceCreated = false;
+  let manifestCreated = false;
   let sourceRemoved = false;
   let evidenceTemp: string | undefined;
   let manifestTemp: string | undefined;
@@ -813,10 +866,6 @@ function publishQuarantineEvidencePinned(
     if (!sameFileState(finalOpenSource, sourceStat) || !sameFileState(finalNamedSource, sourceStat)) {
       throw new Error('operational health source changed before removal');
     }
-    unlinkSync(sourcePath);
-    sourceRemoved = true;
-    fchmodSync(sourceFd, 0o600);
-
     const manifestBody = `${JSON.stringify(
       {
         version: 1,
@@ -840,8 +889,16 @@ function publishQuarantineEvidencePinned(
       closeSync(manifestFd);
     }
     linkSync(manifestTemp, manifestName);
+    manifestCreated = true;
     unlinkSync(manifestTemp);
     manifestTemp = undefined;
+    const removalOpenSource = fstatSync(sourceFd, { bigint: true });
+    const removalNamedSource = lstatSync(sourcePath, { bigint: true });
+    if (!sameFileState(removalOpenSource, sourceStat) || !sameFileState(removalNamedSource, sourceStat)) {
+      throw new Error('operational health source changed before removal');
+    }
+    unlinkSync(sourcePath);
+    sourceRemoved = true;
     if (process.platform !== 'win32') {
       const directoryFd = openSync('.', fsConstants.O_RDONLY);
       try {
@@ -857,6 +914,9 @@ function publishQuarantineEvidencePinned(
     }
     if (manifestTemp) {
       try { unlinkSync(manifestTemp); } catch { /* best-effort removal of unpublished temp */ }
+    }
+    if (manifestCreated && !sourceRemoved) {
+      try { unlinkSync(manifestName); } catch { /* preserve the original error */ }
     }
     if (evidenceCreated && !sourceRemoved) {
       try { unlinkSync(evidenceName); } catch { /* preserve the original error */ }
@@ -879,18 +939,16 @@ export async function quarantineCorruptOperationalHealth(
   const owner = await acquireDaemonOwner(storeDir, 'doctor', options.clock);
   try {
     const sourcePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
-    let source: Awaited<ReturnType<typeof fs.open>>;
+    let opened: Awaited<ReturnType<typeof openOperationalHealthFile>>;
     try {
-      source = await fs.open(
-        sourcePath,
-        fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
-      );
+      opened = await openOperationalHealthFile(storeDir);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'not-needed', reason: 'missing' };
       throw new Error('operational health state could not be opened safely; refusing quarantine', { cause: err });
     }
+    if (!opened) return { status: 'not-needed', reason: 'missing' };
+    const source = opened.handle;
     try {
-      const inspection = await inspectOperationalHealthHandle(source);
+      const inspection = await inspectOperationalHealthHandle(source, opened.stat);
       if (inspection.status === 'valid') return { status: 'not-needed', reason: 'valid' };
       if (inspection.status === 'unavailable') {
         throw new Error(`${inspection.reason}; refusing to quarantine unconfirmed corruption`);

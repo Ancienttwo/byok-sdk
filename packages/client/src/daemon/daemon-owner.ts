@@ -9,9 +9,8 @@ const RECLAIM_FILENAME = `${DAEMON_OWNER_FILENAME}.reclaim`;
 const MAX_OWNER_BYTES = 4096;
 const RECLAIM_MALFORMED_GRACE_MS = 30_000;
 // Node exposes the current process lifetime without relying on `ps`, procps,
-// PowerShell, or another host command. Millisecond precision is sufficient for
-// comparing records created by this process; foreign live PIDs remain
-// fail-closed because portable Node has no API for their start time.
+// PowerShell, or another host command. Foreign-PID reuse is distinguished by
+// the kernel-owned liveness listener recorded alongside this timestamp.
 const SELF_PROCESS_STARTED_AT = new Date(Date.now() - process.uptime() * 1_000).toISOString();
 
 interface OwnerRecord {
@@ -61,11 +60,21 @@ function isOwnerRecord(value: unknown): value is OwnerRecord {
 }
 
 async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
+  let namedBefore: import('node:fs').BigIntStats;
+  try {
+    namedBefore = await fs.lstat(filePath, { bigint: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+  if (!namedBefore.isFile() || namedBefore.isSymbolicLink()) {
+    throw new Error('store mutation owner path is not a real regular file');
+  }
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
     handle = await fs.open(
       filePath,
-      fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0),
     );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
@@ -73,18 +82,50 @@ async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
   }
   try {
     const stat = await handle.stat({ bigint: true });
-    if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_OWNER_BYTES) return undefined;
+    const namedAfterOpen = await fs.lstat(filePath, { bigint: true });
+    if (
+      !stat.isFile() ||
+      !namedAfterOpen.isFile() ||
+      namedAfterOpen.isSymbolicLink() ||
+      stat.dev !== namedBefore.dev ||
+      stat.ino !== namedBefore.ino ||
+      stat.size !== namedBefore.size ||
+      stat.mtimeNs !== namedBefore.mtimeNs ||
+      stat.ctimeNs !== namedBefore.ctimeNs ||
+      stat.dev !== namedAfterOpen.dev ||
+      stat.ino !== namedAfterOpen.ino ||
+      stat.size !== namedAfterOpen.size ||
+      stat.mtimeNs !== namedAfterOpen.mtimeNs ||
+      stat.ctimeNs !== namedAfterOpen.ctimeNs
+    ) {
+      throw new Error('store mutation owner path changed before safe open');
+    }
+    if (stat.size <= 0 || stat.size > MAX_OWNER_BYTES) return undefined;
     const size = Number(stat.size);
     const buffer = Buffer.alloc(size);
     const { bytesRead } = await handle.read(buffer, 0, size, 0);
     const after = await handle.stat({ bigint: true });
-    if (bytesRead !== size || after.size !== stat.size || after.mtimeNs !== stat.mtimeNs || after.ctimeNs !== stat.ctimeNs) {
-      return undefined;
+    const namedAfterRead = await fs.lstat(filePath, { bigint: true });
+    if (
+      bytesRead !== size ||
+      after.dev !== stat.dev ||
+      after.ino !== stat.ino ||
+      after.size !== stat.size ||
+      after.mtimeNs !== stat.mtimeNs ||
+      after.ctimeNs !== stat.ctimeNs ||
+      namedAfterRead.dev !== stat.dev ||
+      namedAfterRead.ino !== stat.ino ||
+      namedAfterRead.size !== stat.size ||
+      namedAfterRead.mtimeNs !== stat.mtimeNs ||
+      namedAfterRead.ctimeNs !== stat.ctimeNs
+    ) {
+      throw new Error('store mutation owner path changed during inspection');
     }
     const raw = buffer.toString('utf8');
     const parsed: unknown = JSON.parse(raw);
     return isOwnerRecord(parsed) ? parsed : undefined;
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('store mutation owner path changed')) throw err;
     return undefined;
   } finally {
     await handle.close();

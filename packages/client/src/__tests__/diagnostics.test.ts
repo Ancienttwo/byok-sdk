@@ -408,7 +408,7 @@ describe('doctor explicit fix', () => {
     await expect(fs.stat(path.join(dir, OPERATIONAL_HEALTH_FILENAME))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it.skipIf(process.platform === 'win32')('refuses symlink evidence without moving it or chmodding its external target', async () => {
+  it('refuses symlink evidence without moving it or chmodding its external target', async () => {
     const dir = await tempDir();
     const outside = path.join(await tempDir(), 'outside-health');
     await fs.writeFile(outside, '{external-corrupt}', { mode: 0o644 });
@@ -508,12 +508,15 @@ describe('doctor explicit fix', () => {
     await expect(fs.stat(reclaimPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it.skipIf(process.platform === 'win32')('does not block when the owner path is a FIFO', async () => {
+  it.skipIf(process.platform === 'win32')('fails closed without blocking when the owner path is a FIFO', async () => {
     const dir = await tempDir();
-    execFileSync('mkfifo', [path.join(dir, DAEMON_OWNER_FILENAME)]);
+    const ownerPath = path.join(dir, DAEMON_OWNER_FILENAME);
+    execFileSync('mkfifo', [ownerPath]);
     const started = Date.now();
-    const lease = await acquireDaemonOwner(dir, 'doctor');
+    await expect(acquireDaemonOwner(dir, 'doctor')).rejects.toThrow(/not a real regular file/);
     expect(Date.now() - started).toBeLessThan(1_000);
+    await fs.rm(ownerPath);
+    const lease = await acquireDaemonOwner(dir, 'doctor');
     await lease.release();
   });
 

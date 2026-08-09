@@ -273,15 +273,16 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('pairing-code');
-    const originalLoad = DeviceStore.prototype.load;
-    const load = vi.spyOn(DeviceStore.prototype, 'load').mockImplementation(async function (this: DeviceStore) {
+    const originalRemove = DeviceStore.prototype.remove;
+    const remove = vi.spyOn(DeviceStore.prototype, 'remove').mockImplementation(async function (this: DeviceStore) {
       await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
-      return originalLoad.call(this);
+      return originalRemove.call(this);
     });
     try {
       await daemon.unpair();
+      expect(remove).toHaveBeenCalledOnce();
     } finally {
-      load.mockRestore();
+      remove.mockRestore();
     }
     await expect(fs.stat(path.join(storeDir, 'device.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
@@ -402,6 +403,45 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       releaseSave();
       await pairing;
       await stopping;
+      const doctor = await acquireDaemonOwner(storeDir, 'doctor');
+      await doctor.release();
+    } finally {
+      releaseSave();
+      save.mockRestore();
+    }
+  });
+
+  it('serializes unpair behind an in-flight pair and removes the replacement identity under its cleanup lease', async () => {
+    const workspaceRoot = await tmpDir('byok-client-pair-unpair-workspace-');
+    const storeDir = await tmpDir('byok-client-pair-unpair-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test', productId: 'test-pair-unpair', serverUrl: server.url, workspaceRoot, storeDir },
+      [new StubRuntimeAdapter()],
+    );
+    await daemon.pair('initial-pairing-code');
+    await daemon.start();
+    const realSave = DeviceStore.prototype.save;
+    let saveReached!: () => void;
+    const reached = new Promise<void>((resolve) => { saveReached = resolve; });
+    let releaseSave!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const save = vi.spyOn(DeviceStore.prototype, 'save').mockImplementation(async function (this: DeviceStore, record) {
+      saveReached();
+      await gate;
+      await realSave.call(this, record);
+    });
+    try {
+      const pairing = daemon.pair('replacement-pairing-code');
+      await reached;
+      let unpairSettled = false;
+      const unpairing = daemon.unpair().finally(() => { unpairSettled = true; });
+      await Promise.resolve();
+      expect(unpairSettled).toBe(false);
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      releaseSave();
+      await pairing;
+      await unpairing;
+      await expect(fs.stat(path.join(storeDir, 'device.json'))).rejects.toMatchObject({ code: 'ENOENT' });
       const doctor = await acquireDaemonOwner(storeDir, 'doctor');
       await doctor.release();
     } finally {

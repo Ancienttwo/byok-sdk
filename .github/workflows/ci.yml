@@ -210,6 +210,12 @@ jobs:
             src/__tests__/bin-workspaces.test.ts `
             src/__tests__/secure-dir.test.ts
 
+      - name: Run diagnostics and lifecycle lease safety tests on Windows
+        run: |
+          pnpm --filter @byok/client exec vitest run `
+            src/__tests__/diagnostics.test.ts `
+            src/__tests__/daemon-auth.test.ts
+
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) without
   # pi's optionalDependency resolution (packages/client/src/adapters/pi/

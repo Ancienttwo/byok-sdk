@@ -34,6 +34,67 @@ interface HealthFileV1 {
 export const OPERATIONAL_HEALTH_FILENAME = 'operational-health.json';
 export const MAX_OPERATIONAL_HEALTH_FILE_BYTES = 1024 * 1024;
 
+export interface OpenOperationalHealthFile {
+  handle: Awaited<ReturnType<typeof fs.open>>;
+  stat: import('node:fs').BigIntStats;
+}
+
+function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+/**
+ * Bind the pathname to a regular-file handle before any bytes are read.
+ * POSIX additionally gets O_NOFOLLOW/O_NONBLOCK. On Windows those flags are
+ * unavailable, so the pre-open lstat plus handle/path identity checks are the
+ * fail-closed authority: a static reparse point is rejected before open, and
+ * a raced replacement cannot match the already-observed inode/file state.
+ */
+export async function openOperationalHealthFile(
+  storeDir: string,
+): Promise<OpenOperationalHealthFile | undefined> {
+  const filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
+  let namedBefore: import('node:fs').BigIntStats;
+  try {
+    namedBefore = await fs.lstat(filePath, { bigint: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+  if (!namedBefore.isFile() || namedBefore.isSymbolicLink()) {
+    throw new Error('operational health state is not a real regular file');
+  }
+
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    handle = await fs.open(
+      filePath,
+      fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0),
+    );
+    const opened = await handle.stat({ bigint: true });
+    const namedAfter = await fs.lstat(filePath, { bigint: true });
+    if (
+      !opened.isFile() ||
+      !namedAfter.isFile() ||
+      namedAfter.isSymbolicLink() ||
+      !sameFileState(namedBefore, opened) ||
+      !sameFileState(opened, namedAfter)
+    ) {
+      throw new Error('operational health pathname changed before safe open');
+    }
+    return { handle, stat: opened };
+  } catch (err) {
+    await handle?.close().catch(() => undefined);
+    throw err;
+  }
+}
+
 export type OperationalHealthFileInspection =
   | { status: 'missing' }
   | {
@@ -181,20 +242,15 @@ export class OperationalHealthTracker {
   }
 
   async #load(): Promise<HealthFileV1> {
-    let handle: Awaited<ReturnType<typeof fs.open>>;
+    let opened: OpenOperationalHealthFile | undefined;
     try {
-      handle = await fs.open(
-        this.#filePath,
-        fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
-      );
+      opened = await openOperationalHealthFile(path.dirname(this.#filePath));
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { version: 1, state: 'healthy', failures: [], crashes: [] };
-      }
       throw new Error('operational health state could not be read');
     }
+    if (!opened) return { version: 1, state: 'healthy', failures: [], crashes: [] };
     try {
-      const inspected = await readOperationalHealthHandle(handle);
+      const inspected = await readOperationalHealthHandle(opened.handle, opened.stat);
       if (inspected.status !== 'read') throw new Error(inspected.reason);
       let parsed: unknown;
       try {
@@ -205,7 +261,7 @@ export class OperationalHealthTracker {
       if (!isHealthFile(parsed)) throw new Error('operational health state has an invalid shape');
       return parsed;
     } finally {
-      await handle.close();
+      await opened.handle.close();
     }
   }
 
@@ -255,8 +311,9 @@ export class OperationalHealthTracker {
  */
 async function inspectOperationalHealthHandle(
   handle: Awaited<ReturnType<typeof fs.open>>,
+  expected?: import('node:fs').BigIntStats,
 ): Promise<Exclude<OperationalHealthFileInspection, { status: 'missing' }>> {
-  const read = await readOperationalHealthHandle(handle);
+  const read = await readOperationalHealthHandle(handle, expected);
   if (read.status !== 'read') return read;
   const { raw, sizeBytes } = read;
   let parsed: unknown;
@@ -283,6 +340,7 @@ async function inspectOperationalHealthHandle(
 
 async function readOperationalHealthHandle(
   handle: Awaited<ReturnType<typeof fs.open>>,
+  expected?: import('node:fs').BigIntStats,
 ): Promise<
   | { status: 'read'; raw: string; sizeBytes: number }
   | Extract<OperationalHealthFileInspection, { status: 'unavailable' }>
@@ -294,6 +352,9 @@ async function readOperationalHealthHandle(
     return { status: 'unavailable', reason: 'operational health state could not be inspected' };
   }
   const sizeBytes = Number(before.size);
+  if (expected && !sameFileState(before, expected)) {
+    return { status: 'unavailable', sizeBytes, reason: 'operational health handle identity changed before inspection' };
+  }
   if (!before.isFile()) {
     return { status: 'unavailable', sizeBytes, reason: 'operational health state is not a regular file' };
   }
@@ -323,26 +384,22 @@ async function readOperationalHealthHandle(
 }
 
 /**
- * Open read-only/non-blocking/no-follow before inspecting. The flags make a
- * raced FIFO or symlink fail closed instead of hanging doctor indefinitely or
- * following bytes outside the store.
+ * Open a pathname-bound regular-file handle before inspecting. POSIX uses
+ * no-follow/non-blocking flags; Windows uses the pre-open and post-open
+ * pathname/handle identity checks in openOperationalHealthFile.
  */
 export async function inspectOperationalHealthFile(storeDir: string): Promise<OperationalHealthFileInspection> {
-  const filePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
-  let handle: Awaited<ReturnType<typeof fs.open>>;
+  let opened: OpenOperationalHealthFile | undefined;
   try {
-    handle = await fs.open(
-      filePath,
-      fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
-    );
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
+    opened = await openOperationalHealthFile(storeDir);
+  } catch {
     return { status: 'unavailable', reason: 'operational health state could not be opened safely' };
   }
+  if (!opened) return { status: 'missing' };
   try {
-    return await inspectOperationalHealthHandle(handle);
+    return await inspectOperationalHealthHandle(opened.handle, opened.stat);
   } finally {
-    await handle.close();
+    await opened.handle.close();
   }
 }
 
