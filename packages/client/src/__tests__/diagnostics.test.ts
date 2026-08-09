@@ -281,6 +281,28 @@ describe('doctor explicit fix', () => {
     }
   });
 
+  it('rejects same-inode mutation after inspection instead of publishing a stale digest manifest', async () => {
+    const dir = await tempDir();
+    const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    const quarantineDir = path.join(dir, 'quarantine');
+    await fs.writeFile(sourcePath, '{original-corrupt');
+    const original = await fs.lstat(sourcePath, { bigint: true });
+    const realChdir = process.chdir.bind(process);
+    const chdir = vi.spyOn(process, 'chdir').mockImplementation((target) => {
+      if (target === quarantineDir) writeFileSync(sourcePath, '{same-inode-mutated-corrupt');
+      realChdir(target);
+    });
+    try {
+      await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/source identity changed/);
+      const after = await fs.lstat(sourcePath, { bigint: true });
+      expect(after.ino).toBe(original.ino);
+      expect(await fs.readFile(sourcePath, 'utf8')).toBe('{same-inode-mutated-corrupt');
+      expect(await fs.readdir(quarantineDir)).toEqual([]);
+    } finally {
+      chdir.mockRestore();
+    }
+  });
+
   it('refuses a symlinked quarantine directory without touching its target', async () => {
     const dir = await tempDir();
     const outside = await tempDir();

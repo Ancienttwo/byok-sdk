@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { ensureSecureDir } from '../util/secure-dir';
 
 export const DAEMON_OWNER_FILENAME = 'daemon-owner.json';
 const RECLAIM_FILENAME = `${DAEMON_OWNER_FILENAME}.reclaim`;
 const MAX_OWNER_BYTES = 4096;
 const RECLAIM_MALFORMED_GRACE_MS = 30_000;
-const execFileAsync = promisify(execFile);
+// Node exposes the current process lifetime without relying on `ps`, procps,
+// PowerShell, or another host command. Millisecond precision is sufficient for
+// comparing records created by this process; foreign live PIDs remain
+// fail-closed because portable Node has no API for their start time.
+const SELF_PROCESS_STARTED_AT = new Date(Date.now() - process.uptime() * 1_000).toISOString();
 
 interface OwnerRecord {
   version: 1;
@@ -88,33 +90,13 @@ function pidIsAlive(pid: number): boolean {
   }
 }
 
-async function processStartedAt(pid: number): Promise<string | undefined> {
-  try {
-    if (process.platform === 'win32') {
-      const script = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`;
-      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-        timeout: 2_000,
-        maxBuffer: 16 * 1024,
-      });
-      const parsed = Date.parse(stdout.trim());
-      return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
-    }
-    const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      timeout: 2_000,
-      maxBuffer: 16 * 1024,
-      env: { ...process.env, LC_ALL: 'C' },
-    });
-    const parsed = Date.parse(stdout.trim());
-    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 async function processOwnsRecord(record: OwnerRecord): Promise<boolean> {
   if (!pidIsAlive(record.pid)) return false;
-  const observed = await processStartedAt(record.pid);
-  return observed === undefined || observed === record.processStartedAt;
+  if (record.pid === process.pid) return record.processStartedAt === SELF_PROCESS_STARTED_AT;
+  // A foreign live PID is an availability-safe authority. Portable Node
+  // cannot distinguish PID reuse without an undeclared OS command/runtime
+  // dependency, so never reclaim a possibly-live foreign owner.
+  return true;
 }
 
 async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
@@ -169,15 +151,13 @@ export async function acquireDaemonOwner(
   await ensureSecureDir(storeDir);
   const ownerPath = path.join(storeDir, DAEMON_OWNER_FILENAME);
   const reclaimPath = path.join(storeDir, RECLAIM_FILENAME);
-  const selfStartedAt = await processStartedAt(process.pid);
-  if (!selfStartedAt) throw new Error('could not establish process start identity for the store mutation lease');
   const record: OwnerRecord = {
     version: 1,
     pid: process.pid,
     nonce: randomUUID(),
     role,
     acquiredAt: clock().toISOString(),
-    processStartedAt: selfStartedAt,
+    processStartedAt: SELF_PROCESS_STARTED_AT,
   };
 
   for (;;) {

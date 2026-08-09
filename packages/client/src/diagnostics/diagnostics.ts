@@ -8,6 +8,7 @@ import {
   linkSync,
   lstatSync,
   openSync,
+  readSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -543,33 +544,17 @@ export function stableIdentifierHash(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-async function hashOpenFile(
-  handle: Awaited<ReturnType<typeof fs.open>>,
-): Promise<{ sha256: string; sizeBytes: number }> {
-  const before = await handle.stat({ bigint: true });
-  if (!before.isFile()) throw new Error('operational health state is not a regular file');
-  if (before.size > BigInt(MAX_OPERATIONAL_HEALTH_FILE_BYTES)) {
-    throw new Error('operational health state exceeds the bounded quarantine read limit');
-  }
-  const hash = createHash('sha256');
-  const buffer = Buffer.allocUnsafe(64 * 1024);
-  let position = 0;
-  while (position < Number(before.size)) {
-    const remaining = Number(before.size) - position;
-    const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, remaining), position);
-    if (bytesRead === 0) throw new Error('operational health state ended during bounded hash');
-    hash.update(buffer.subarray(0, bytesRead));
-    position += bytesRead;
-  }
-  const after = await handle.stat({ bigint: true });
-  if (after.size !== before.size || after.mtimeNs !== before.mtimeNs) {
-    throw new Error('operational health state changed during inspection');
-  }
-  return { sha256: hash.digest('hex'), sizeBytes: Number(after.size) };
-}
-
 function sameInode(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
+  return (
+    sameInode(left, right) &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
 }
 
 /**
@@ -587,12 +572,14 @@ function publishQuarantineEvidencePinned(
   sourceStat: import('node:fs').BigIntStats,
   evidenceName: string,
   manifestName: string,
-  manifestBody: string,
-): void {
+  quarantinedAt: string,
+  reason: string,
+): { sha256: string; sizeBytes: number } {
   const previousCwd = process.cwd();
   let entered = false;
   let evidenceCreated = false;
   let sourceRemoved = false;
+  let evidenceTemp: string | undefined;
   let manifestTemp: string | undefined;
   try {
     process.chdir(quarantineDir);
@@ -603,19 +590,65 @@ function publishQuarantineEvidencePinned(
     }
     const openSource = fstatSync(sourceFd, { bigint: true });
     const namedSource = lstatSync(sourcePath, { bigint: true });
-    if (!sameInode(openSource, sourceStat) || !sameInode(namedSource, sourceStat)) {
+    if (!sameFileState(openSource, sourceStat) || !sameFileState(namedSource, sourceStat)) {
       throw new Error('operational health source identity changed before quarantine');
     }
-    linkSync(sourcePath, evidenceName);
+    const sizeBytes = Number(sourceStat.size);
+    if (sizeBytes > MAX_OPERATIONAL_HEALTH_FILE_BYTES) {
+      throw new Error('operational health state exceeds the bounded quarantine read limit');
+    }
+    const bytes = Buffer.alloc(sizeBytes);
+    let position = 0;
+    while (position < sizeBytes) {
+      const bytesRead = readSync(sourceFd, bytes, position, sizeBytes - position, position);
+      if (bytesRead === 0) throw new Error('operational health state ended during bounded copy');
+      position += bytesRead;
+    }
+    const afterRead = fstatSync(sourceFd, { bigint: true });
+    if (!sameFileState(afterRead, sourceStat)) {
+      throw new Error('operational health state changed during bounded copy');
+    }
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    evidenceTemp = `.${evidenceName}.${randomUUID()}.tmp`;
+    const evidenceFd = openSync(evidenceTemp, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+    try {
+      writeFileSync(evidenceFd, bytes);
+      fchmodSync(evidenceFd, 0o600);
+      fsyncSync(evidenceFd);
+    } finally {
+      closeSync(evidenceFd);
+    }
+    linkSync(evidenceTemp, evidenceName);
     evidenceCreated = true;
     const evidence = lstatSync(evidenceName, { bigint: true });
-    if (!evidence.isFile() || !sameInode(evidence, sourceStat)) {
-      throw new Error('quarantined operational health evidence identity does not match the inspected inode');
+    const tempEvidence = lstatSync(evidenceTemp, { bigint: true });
+    if (!evidence.isFile() || !sameInode(evidence, tempEvidence) || evidence.size !== sourceStat.size) {
+      throw new Error('quarantined operational health evidence does not match the bounded copy');
+    }
+    unlinkSync(evidenceTemp);
+    evidenceTemp = undefined;
+    const finalOpenSource = fstatSync(sourceFd, { bigint: true });
+    const finalNamedSource = lstatSync(sourcePath, { bigint: true });
+    if (!sameFileState(finalOpenSource, sourceStat) || !sameFileState(finalNamedSource, sourceStat)) {
+      throw new Error('operational health source changed before removal');
     }
     unlinkSync(sourcePath);
     sourceRemoved = true;
     fchmodSync(sourceFd, 0o600);
 
+    const manifestBody = `${JSON.stringify(
+      {
+        version: 1,
+        quarantinedAt,
+        reason,
+        sourcePath,
+        evidenceFile: evidenceName,
+        sha256,
+        sizeBytes,
+      },
+      null,
+      2,
+    )}\n`;
     manifestTemp = `.${manifestName}.${randomUUID()}.tmp`;
     const manifestFd = openSync(manifestTemp, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
     try {
@@ -636,7 +669,11 @@ function publishQuarantineEvidencePinned(
         closeSync(directoryFd);
       }
     }
+    return { sha256, sizeBytes };
   } catch (err) {
+    if (evidenceTemp) {
+      try { unlinkSync(evidenceTemp); } catch { /* best-effort removal of unpublished temp */ }
+    }
     if (manifestTemp) {
       try { unlinkSync(manifestTemp); } catch { /* best-effort removal of unpublished temp */ }
     }
@@ -699,21 +736,7 @@ export async function quarantineCorruptOperationalHealth(
       const stamp = (options.clock ?? (() => new Date()))().toISOString().replace(/[:.]/g, '-');
       const evidenceName = `${stamp}-${randomUUID()}-${OPERATIONAL_HEALTH_FILENAME}`;
       const manifestName = `${evidenceName}.manifest.json`;
-      const hashed = await hashOpenFile(source);
-      const manifestBody = `${JSON.stringify(
-          {
-            version: 1,
-            quarantinedAt: (options.clock ?? (() => new Date()))().toISOString(),
-            reason: inspection.reason,
-            sourcePath,
-            evidenceFile: evidenceName,
-            sha256: hashed.sha256,
-            sizeBytes: hashed.sizeBytes,
-          },
-          null,
-          2,
-        )}\n`;
-      publishQuarantineEvidencePinned(
+      const hashed = publishQuarantineEvidencePinned(
         quarantineDir,
         securedQuarantine,
         sourcePath,
@@ -721,7 +744,8 @@ export async function quarantineCorruptOperationalHealth(
         sourceStat,
         evidenceName,
         manifestName,
-        manifestBody,
+        (options.clock ?? (() => new Date()))().toISOString(),
+        inspection.reason,
       );
       return { status: 'quarantined', evidenceName, manifestName, sha256: hashed.sha256, sizeBytes: hashed.sizeBytes };
     } finally {

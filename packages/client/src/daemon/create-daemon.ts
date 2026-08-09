@@ -776,8 +776,32 @@ export function createDaemonWithAdapters(
     }
   }
 
+  let pairMutationTail: Promise<void> = Promise.resolve();
+
+  async function runPairMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const predecessor = pairMutationTail;
+    let release!: () => void;
+    pairMutationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await predecessor;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
   async function pair(pairingCode: string): Promise<DeviceRecord> {
     checkServerUrl();
+    // Serialize the complete daemon-level operation, including ownership
+    // acquisition and release. AuthManager serializes credential writes, but
+    // its queue alone cannot keep an outer lease alive for a second pair that
+    // entered while the first one held it.
+    return runPairMutation(() => pairUnderLease(pairingCode));
+  }
+
+  async function pairUnderLease(pairingCode: string): Promise<DeviceRecord> {
     // Pairing persists device.json. It intentionally does not arm proactive
     // renewal (AuthManager.loadExisting does that under start()'s lease), so a
     // short-lived pair command can release ownership once the write lands.
@@ -1369,8 +1393,7 @@ export function createDaemonWithAdapters(
       // device and cursor mutations. A pair that wins stop()'s release gap is
       // therefore either wholly before this cleanup (and is fully removed) or
       // wholly after it; stale pre-lease identity can never drive cleanup.
-      const current = await store.load();
-      await store.clear();
+      const current = await store.remove();
       if (current) {
         await cursorStore.clear(config.serverUrl, current.deviceId);
       }

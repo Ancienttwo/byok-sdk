@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -283,6 +284,64 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       load.mockRestore();
     }
     await expect(fs.stat(path.join(storeDir, 'device.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps the ownership lease across each queued daemon-level pair mutation', async () => {
+    const workspaceRoot = await tmpDir('byok-client-pair-queue-workspace-');
+    const storeDir = await tmpDir('byok-client-pair-queue-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test', productId: 'test-pair-queue', serverUrl: server.url, workspaceRoot, storeDir },
+      [new StubRuntimeAdapter()],
+    );
+    const realSave = DeviceStore.prototype.save;
+    let saveCount = 0;
+    let secondSaveReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      secondSaveReached = resolve;
+    });
+    let releaseSecondSave!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseSecondSave = resolve;
+    });
+    const save = vi.spyOn(DeviceStore.prototype, 'save').mockImplementation(async function (this: DeviceStore, record) {
+      saveCount += 1;
+      if (saveCount === 2) {
+        secondSaveReached();
+        await gate;
+      }
+      await realSave.call(this, record);
+    });
+    try {
+      const first = daemon.pair('first-pairing-code');
+      const second = daemon.pair('second-pairing-code');
+      await first;
+      await reached;
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      releaseSecondSave();
+      await second;
+    } finally {
+      releaseSecondSave();
+      save.mockRestore();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('fails closed without blocking when unpair sees a FIFO device record', async () => {
+    const workspaceRoot = await tmpDir('byok-client-unpair-fifo-workspace-');
+    const storeDir = await tmpDir('byok-client-unpair-fifo-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test', productId: 'test-unpair-fifo', serverUrl: server.url, workspaceRoot, storeDir },
+      [new StubRuntimeAdapter()],
+    );
+    await daemon.pair('pairing-code');
+    const devicePath = path.join(storeDir, 'device.json');
+    await fs.rm(devicePath);
+    execFileSync('mkfifo', [devicePath]);
+    const started = Date.now();
+    await expect(daemon.unpair()).rejects.toThrow(/device identity/);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await fs.rm(devicePath);
+    const lease = await acquireDaemonOwner(storeDir, 'doctor');
+    await lease.release();
   });
 
   it('a revoked device surfaces status().revoked without retry-looping, then recovers via a fresh pair()', async () => {
