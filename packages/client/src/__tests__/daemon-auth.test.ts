@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -528,6 +529,24 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       await secondLease.release();
     } finally {
       await firstLease.release();
+    }
+  });
+
+  it('routes past a foreign listener that accepts but never speaks the mutex protocol', async () => {
+    const storeDir = await tmpDir('byok-owner-foreign-listener-');
+    const canonicalStoreDir = await fs.realpath(storeDir);
+    const digest = createHash('sha256').update(canonicalStoreDir).digest();
+    const firstPort = 10_000 + (digest.readUInt32BE(0) % 10_000);
+    const foreign = createServer(() => undefined);
+    await new Promise<void>((resolve, reject) => {
+      foreign.once('error', reject);
+      foreign.listen({ host: '127.0.0.1', port: firstPort, exclusive: true }, () => resolve());
+    });
+    try {
+      const lease = await acquireDaemonOwner(storeDir, 'doctor');
+      await lease.release();
+    } finally {
+      await new Promise<void>((resolve, reject) => foreign.close((err) => (err ? reject(err) : resolve())));
     }
   });
 

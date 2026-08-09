@@ -36,8 +36,9 @@ interface LivenessListener {
 // the owner/reclaim transition. The listener identifies its store hash to
 // another conforming contender: the same hash means "active"; a different
 // valid hash means an unrelated store collided on this port and both sides can
-// safely use the next deterministic candidate. An unknown/non-responsive
-// listener remains fail-closed. Keeping this mutex separate is important:
+// safely use the next deterministic candidate. A listener that does not
+// present the closed BYOK identity contract is not mutex authority and is
+// skipped; exhausting every candidate remains fail-closed. Keeping this mutex separate is important:
 // probing a stale owner's random liveness port must not observe the
 // contender's own transition listener.
 // Stay below the host ephemeral-client range used by the test/runtime HTTP and
@@ -250,8 +251,11 @@ async function probeStoreMutex(port: number): Promise<StoreMutexProbe> {
     };
     socket.setEncoding('utf8');
     // A conforming mutex writes its identity immediately after accept. A
-    // connection that stays open without doing so is ambiguous (including a
-    // starved conforming holder), therefore timeout remains fail-closed.
+    // connection that stays open without doing so has not authenticated as
+    // this store's mutex authority and is treated like any other foreign
+    // listener. Same-store contenders still follow the same deterministic
+    // candidates and a conforming holder is installed with this accept
+    // handler before listen() can succeed.
     socket.setTimeout(STORE_MUTEX_PROBE_TIMEOUT_MS, () => finish({ kind: 'uncertain' }));
     socket.on('data', (chunk: string) => {
       raw += chunk;
@@ -292,7 +296,7 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<LivenessLis
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
       const probe = await probeStoreMutex(port);
-      if (probe.kind === 'uncertain' || (probe.kind === 'identity' && probe.identity === identity)) {
+      if (probe.kind === 'identity' && probe.identity === identity) {
         throw new DaemonOwnerActiveError('unknown');
       }
       continue;
