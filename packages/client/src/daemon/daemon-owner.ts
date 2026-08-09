@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
+import { createServer, type Server } from 'node:net';
 import path from 'node:path';
 import { ensureSecureDir } from '../util/secure-dir';
 
@@ -14,16 +15,22 @@ const RECLAIM_MALFORMED_GRACE_MS = 30_000;
 const SELF_PROCESS_STARTED_AT = new Date(Date.now() - process.uptime() * 1_000).toISOString();
 
 interface OwnerRecord {
-  version: 1;
+  version: 2;
   pid: number;
   nonce: string;
   role: 'daemon' | 'doctor';
   acquiredAt: string;
   processStartedAt: string;
+  livenessPort: number;
 }
 
 export interface DaemonOwnerLease {
   release(): Promise<void>;
+}
+
+interface LivenessListener {
+  port: number;
+  close(): Promise<void>;
 }
 
 export class DaemonOwnerActiveError extends Error {
@@ -37,7 +44,7 @@ function isOwnerRecord(value: unknown): value is OwnerRecord {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<OwnerRecord>;
   return (
-    candidate.version === 1 &&
+    candidate.version === 2 &&
     Number.isSafeInteger(candidate.pid) &&
     (candidate.pid ?? 0) > 0 &&
     typeof candidate.nonce === 'string' &&
@@ -46,7 +53,10 @@ function isOwnerRecord(value: unknown): value is OwnerRecord {
     typeof candidate.acquiredAt === 'string' &&
     Number.isFinite(Date.parse(candidate.acquiredAt)) &&
     typeof candidate.processStartedAt === 'string' &&
-    Number.isFinite(Date.parse(candidate.processStartedAt))
+    Number.isFinite(Date.parse(candidate.processStartedAt)) &&
+    Number.isSafeInteger(candidate.livenessPort) &&
+    (candidate.livenessPort ?? 0) > 0 &&
+    (candidate.livenessPort ?? 0) <= 65_535
   );
 }
 
@@ -92,11 +102,65 @@ function pidIsAlive(pid: number): boolean {
 
 async function processOwnsRecord(record: OwnerRecord): Promise<boolean> {
   if (!pidIsAlive(record.pid)) return false;
-  if (record.pid === process.pid) return record.processStartedAt === SELF_PROCESS_STARTED_AT;
-  // A foreign live PID is an availability-safe authority. Portable Node
-  // cannot distinguish PID reuse without an undeclared OS command/runtime
-  // dependency, so never reclaim a possibly-live foreign owner.
-  return true;
+  if (record.pid === process.pid && record.processStartedAt !== SELF_PROCESS_STARTED_AT) return false;
+  // The listener is the kernel-owned liveness authority. A PID can be reused,
+  // but the replacement process does not inherit this bound port. Probing by
+  // attempting the same exclusive bind therefore distinguishes a real live
+  // lease from an unrelated process without `ps`, PowerShell, /proc, or a
+  // platform-specific dependency. EADDRINUSE is intentionally fail-closed:
+  // an unrelated listener collision may delay recovery, but can never admit
+  // two store writers.
+  return portIsBound(record.livenessPort);
+}
+
+async function portIsBound(port: number): Promise<boolean> {
+  const probe = createServer();
+  return new Promise<boolean>((resolve, reject) => {
+    const finish = (result: boolean): void => {
+      probe.removeAllListeners();
+      resolve(result);
+    };
+    probe.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') finish(true);
+      else reject(err);
+    });
+    probe.listen({ host: '127.0.0.1', port, exclusive: true }, () => {
+      probe.close((err) => {
+        if (err) reject(err);
+        else finish(false);
+      });
+    });
+  });
+}
+
+async function createLivenessListener(): Promise<LivenessListener> {
+  const server: Server = createServer((socket) => socket.end());
+  const port = await new Promise<number>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
+      server.removeListener('error', reject);
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('store mutation liveness listener did not expose a TCP port'));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+  server.unref();
+  let closed = false;
+  return {
+    port,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        if (closed) {
+          resolve();
+          return;
+        }
+        closed = true;
+        server.close((err) => (err ? reject(err) : resolve()));
+      }),
+  };
 }
 
 async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
@@ -149,56 +213,64 @@ export async function acquireDaemonOwner(
   clock: () => Date = () => new Date(),
 ): Promise<DaemonOwnerLease> {
   await ensureSecureDir(storeDir);
+  const liveness = await createLivenessListener();
   const ownerPath = path.join(storeDir, DAEMON_OWNER_FILENAME);
   const reclaimPath = path.join(storeDir, RECLAIM_FILENAME);
   const record: OwnerRecord = {
-    version: 1,
+    version: 2,
     pid: process.pid,
     nonce: randomUUID(),
     role,
     acquiredAt: clock().toISOString(),
     processStartedAt: SELF_PROCESS_STARTED_AT,
+    livenessPort: liveness.port,
   };
 
-  for (;;) {
-    if (await reclaimExistsAndIsActive(reclaimPath)) {
-      throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
-    }
-    await fs.rm(reclaimPath, { force: true });
-
-    if (await createOwner(ownerPath, record)) {
-      let released = false;
-      return {
-        release: async () => {
-          if (released) return;
-          released = true;
-          const current = await readOwner(ownerPath);
-          if (current?.nonce !== record.nonce) {
-            throw new Error('store mutation lease identity changed before release');
-          }
-          await fs.rm(ownerPath);
-        },
-      };
-    }
-
-    const existing = await readOwner(ownerPath);
-    if (existing && (await processOwnsRecord(existing))) throw new DaemonOwnerActiveError(existing.role);
-
-    if (!(await createOwner(reclaimPath, record))) {
-      throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
-    }
-    try {
-      const rechecked = await readOwner(ownerPath);
-      if (rechecked && (await processOwnsRecord(rechecked))) throw new DaemonOwnerActiveError(rechecked.role);
-      if (rechecked || (await fs.stat(ownerPath).then(() => true, (err: NodeJS.ErrnoException) => {
-        if (err.code === 'ENOENT') return false;
-        throw err;
-      }))) {
-        await fs.rm(ownerPath);
+  try {
+    for (;;) {
+      if (await reclaimExistsAndIsActive(reclaimPath)) {
+        throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
       }
-    } finally {
-      const currentReclaim = await readOwner(reclaimPath);
-      if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
+      await fs.rm(reclaimPath, { force: true });
+
+      if (await createOwner(ownerPath, record)) {
+        let released = false;
+        return {
+          release: async () => {
+            if (released) return;
+            const current = await readOwner(ownerPath);
+            if (current?.nonce !== record.nonce) {
+              throw new Error('store mutation lease identity changed before release');
+            }
+            await fs.rm(ownerPath);
+            released = true;
+            await liveness.close();
+          },
+        };
+      }
+
+      const existing = await readOwner(ownerPath);
+      if (existing && (await processOwnsRecord(existing))) throw new DaemonOwnerActiveError(existing.role);
+
+      if (!(await createOwner(reclaimPath, record))) {
+        throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
+      }
+      try {
+        const rechecked = await readOwner(ownerPath);
+        if (rechecked && (await processOwnsRecord(rechecked))) throw new DaemonOwnerActiveError(rechecked.role);
+        if (rechecked || (await fs.stat(ownerPath).then(() => true, (err: NodeJS.ErrnoException) => {
+          if (err.code === 'ENOENT') return false;
+          throw err;
+        }))) {
+          await fs.rm(ownerPath);
+        }
+      } finally {
+        const currentReclaim = await readOwner(reclaimPath);
+        if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
+      }
     }
+  } catch (err) {
+    await liveness.close().catch(() => undefined);
+    throw err;
   }
 }

@@ -776,12 +776,12 @@ export function createDaemonWithAdapters(
     }
   }
 
-  let pairMutationTail: Promise<void> = Promise.resolve();
+  let lifecycleMutationTail: Promise<void> = Promise.resolve();
 
-  async function runPairMutation<T>(operation: () => Promise<T>): Promise<T> {
-    const predecessor = pairMutationTail;
+  async function runLifecycleMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const predecessor = lifecycleMutationTail;
     let release!: () => void;
-    pairMutationTail = new Promise<void>((resolve) => {
+    lifecycleMutationTail = new Promise<void>((resolve) => {
       release = resolve;
     });
     await predecessor;
@@ -794,11 +794,11 @@ export function createDaemonWithAdapters(
 
   async function pair(pairingCode: string): Promise<DeviceRecord> {
     checkServerUrl();
-    // Serialize the complete daemon-level operation, including ownership
-    // acquisition and release. AuthManager serializes credential writes, but
-    // its queue alone cannot keep an outer lease alive for a second pair that
-    // entered while the first one held it.
-    return runPairMutation(() => pairUnderLease(pairingCode));
+    // Serialize every lifecycle mutation, not only pair/pair. A process-local
+    // operation may borrow the daemon's retained cross-process lease, so pair,
+    // start, stop, control shutdown and unpair must never decide independently
+    // who releases that shared lease.
+    return runLifecycleMutation(() => pairUnderLease(pairingCode));
   }
 
   async function pairUnderLease(pairingCode: string): Promise<DeviceRecord> {
@@ -837,6 +837,10 @@ export function createDaemonWithAdapters(
 
   async function start(): Promise<void> {
     checkServerUrl();
+    await runLifecycleMutation(startUnderLease);
+  }
+
+  async function startUnderLease(): Promise<void> {
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
     // Loading an existing record arms proactive token renewal, whose final
@@ -1173,7 +1177,10 @@ export function createDaemonWithAdapters(
     await connection.waitForAck();
     } catch (err) {
       try {
-        await requestShutdown('startup failed', { drainTimeoutMs: 0 });
+        // startUnderLease already owns the process-local lifecycle slot. Run
+        // teardown directly; queueing requestShutdown here would wait on this
+        // operation itself and deadlock.
+        await runShutdownSequence('startup failed', { drainTimeoutMs: 0 });
       } catch (cleanupError) {
         throw new AggregateError([err, cleanupError], 'daemon startup failed and teardown was incomplete');
       }
@@ -1359,7 +1366,7 @@ export function createDaemonWithAdapters(
 
   function requestShutdown(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
     if (shutdownPromise) return shutdownPromise;
-    const current = runShutdownSequence(reason, opts);
+    const current = runLifecycleMutation(() => runShutdownSequence(reason, opts));
     shutdownPromise = current;
     void current.finally(() => {
       if (shutdownPromise === current) shutdownPromise = undefined;
@@ -1383,7 +1390,14 @@ export function createDaemonWithAdapters(
    * in-memory record still usable.
    */
   async function unpair(): Promise<void> {
-    await stop();
+    await runLifecycleMutation(unpairUnderLease);
+  }
+
+  async function unpairUnderLease(): Promise<void> {
+    // The outer lifecycle slot prevents pair/start/control shutdown from
+    // entering while teardown and destructive credential cleanup span two
+    // cross-process lease acquisitions.
+    await runShutdownSequence('operator');
     // stop() releases only after every daemon writer settles. Reacquire before
     // destructive identity cleanup; if another daemon won the gap, fail
     // closed rather than clearing state under it.

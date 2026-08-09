@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
+import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -78,6 +79,20 @@ async function digest(filePath: string): Promise<string> {
   return createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
 }
 
+async function unusedLoopbackPort(): Promise<number> {
+  const server = createServer();
+  const port = await new Promise<number>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') reject(new Error('test listener did not expose a TCP port'));
+      else resolve(address.port);
+    });
+  });
+  await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  return port;
+}
+
 describe('diagnostics collector', () => {
   it('reports a corrupt health file without changing its bytes', async () => {
     const dir = await tempDir();
@@ -101,9 +116,23 @@ describe('diagnostics collector', () => {
     const quarantineDir = path.join(dir, 'quarantine');
     await fs.mkdir(quarantineDir);
     await Promise.all(
-      Array.from({ length: MAX_QUARANTINE_ENTRIES + 5 }, (_, index) =>
-        fs.writeFile(path.join(quarantineDir, `evidence-${String(index).padStart(3, '0')}`), 'x'),
-      ),
+      Array.from({ length: MAX_QUARANTINE_ENTRIES + 5 }, async (_, index) => {
+        const evidenceFile = `evidence-${String(index).padStart(3, '0')}`;
+        const bytes = Buffer.from('x');
+        await fs.writeFile(path.join(quarantineDir, evidenceFile), bytes);
+        await fs.writeFile(
+          path.join(quarantineDir, `${evidenceFile}.manifest.json`),
+          `${JSON.stringify({
+            version: 1,
+            quarantinedAt: '2026-08-09T00:00:00.000Z',
+            reason: 'test evidence',
+            sourcePath: path.join(dir, evidenceFile),
+            evidenceFile,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+            sizeBytes: bytes.length,
+          })}\n`,
+        );
+      }),
     );
 
     const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
@@ -112,6 +141,32 @@ describe('diagnostics collector', () => {
     expect(snapshot.quarantine.entries).toHaveLength(MAX_QUARANTINE_ENTRIES);
     expect(snapshot.quarantine.count).toBe(MAX_QUARANTINE_ENTRIES + 5);
     expect(snapshot.quarantine.truncated).toBe(true);
+  });
+
+  it('refuses a symlinked quarantine inventory without following the target', async () => {
+    const dir = await tempDir();
+    const outside = await tempDir();
+    await fs.writeFile(path.join(outside, 'secret.manifest.json'), '{not-readable-evidence');
+    await fs.symlink(outside, path.join(dir, 'quarantine'));
+
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+
+    expect(snapshot.quarantine).toMatchObject({ status: 'unavailable', count: 0 });
+    expect(snapshot.checks.find((check) => check.id === 'quarantine')?.status).toBe('fail');
+    expect(await fs.readFile(path.join(outside, 'secret.manifest.json'), 'utf8')).toBe('{not-readable-evidence');
+  });
+
+  it('fails quarantine diagnostics when a manifest is invalid or unbound', async () => {
+    const dir = await tempDir();
+    const quarantineDir = path.join(dir, 'quarantine');
+    await fs.mkdir(quarantineDir);
+    await fs.writeFile(path.join(quarantineDir, 'evidence'), 'bytes');
+    await fs.writeFile(path.join(quarantineDir, 'evidence.manifest.json'), '{invalid-json');
+
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+
+    expect(snapshot.quarantine).toMatchObject({ status: 'unavailable', count: 0 });
+    expect(snapshot.checks.find((check) => check.id === 'quarantine')?.status).toBe('fail');
   });
 
   it.skipIf(process.platform === 'win32')('classifies unreadable health as unavailable and refuses to quarantine unconfirmed corruption', async () => {
@@ -385,12 +440,13 @@ describe('doctor explicit fix', () => {
     await fs.writeFile(
       path.join(dir, DAEMON_OWNER_FILENAME),
       `${JSON.stringify({
-        version: 1,
+        version: 2,
         pid: process.pid,
         nonce: '00000000-0000-4000-8000-000000000000',
         role: 'daemon',
         acquiredAt: '2026-08-09T00:00:00.000Z',
         processStartedAt: '2000-01-01T00:00:00.000Z',
+        livenessPort: 1,
       })}\n`,
     );
     const lease = await acquireDaemonOwner(dir, 'doctor');
@@ -402,15 +458,43 @@ describe('doctor explicit fix', () => {
     await fs.writeFile(
       path.join(dir, DAEMON_OWNER_FILENAME),
       `${JSON.stringify({
-        version: 1,
+        version: 2,
         pid: process.pid,
         nonce: '00000000-0000-4000-8000-000000000000',
         role: 'daemon',
         acquiredAt: '2026-08-09T00:00:00.000Z',
+        livenessPort: 1,
       })}\n`,
     );
     const lease = await acquireDaemonOwner(dir, 'doctor');
     await lease.release();
+  });
+
+  it('reclaims an owner record after its PID was reused by an unrelated live process', async () => {
+    const dir = await tempDir();
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    if (child.pid === undefined) throw new Error('test child did not start');
+    try {
+      await fs.writeFile(
+        path.join(dir, DAEMON_OWNER_FILENAME),
+        `${JSON.stringify({
+          version: 2,
+          pid: child.pid,
+          nonce: '00000000-0000-4000-8000-000000000000',
+          role: 'daemon',
+          acquiredAt: '2026-08-09T00:00:00.000Z',
+          processStartedAt: '2000-01-01T00:00:00.000Z',
+          livenessPort: await unusedLoopbackPort(),
+        })}\n`,
+      );
+      const lease = await acquireDaemonOwner(dir, 'doctor');
+      await lease.release();
+    } finally {
+      child.kill();
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      }
+    }
   });
 
   it('recovers a stale malformed reclaim marker after its bounded grace period', async () => {

@@ -8,6 +8,7 @@ import {
   linkSync,
   lstatSync,
   openSync,
+  opendirSync,
   readSync,
   unlinkSync,
   writeFileSync,
@@ -35,6 +36,7 @@ export const MAX_QUARANTINE_ENTRIES = 100;
 export const MAX_QUARANTINE_SCAN_ENTRIES = 10_000;
 export const MAX_DEVICE_RECORD_BYTES = 64 * 1024;
 export const MAX_JOURNAL_COPY_BYTES = 512 * 1024 * 1024;
+const MAX_QUARANTINE_MANIFEST_BYTES = 64 * 1024;
 
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 
@@ -360,14 +362,211 @@ async function inspectWorkspace(workspaceRoot: string): Promise<DiagnosticsSnaps
   }
 }
 
+interface PinnedQuarantineFile {
+  sizeBytes: number;
+  modifiedAt: string;
+  bytes?: Buffer;
+}
+
+function readPinnedQuarantineFile(name: string, maxBytes: number, includeBytes: boolean): PinnedQuarantineFile {
+  if (path.basename(name) !== name || name === '.' || name === '..') {
+    throw new Error('quarantine manifest contains an invalid evidence name');
+  }
+  const namedBefore = lstatSync(name, { bigint: true });
+  if (!namedBefore.isFile() || namedBefore.isSymbolicLink()) {
+    throw new Error('quarantine entry is not a real regular file');
+  }
+  const fd = openSync(name, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = fstatSync(fd, { bigint: true });
+    if (!opened.isFile() || !sameInode(opened, namedBefore) || opened.size < 0 || opened.size > BigInt(maxBytes)) {
+      throw new Error('quarantine entry could not be opened as a bounded regular file');
+    }
+    let bytes: Buffer | undefined;
+    if (includeBytes) {
+      bytes = Buffer.alloc(Number(opened.size));
+      let position = 0;
+      while (position < bytes.length) {
+        const bytesRead = readSync(fd, bytes, position, bytes.length - position, position);
+        if (bytesRead === 0) throw new Error('quarantine entry ended during bounded read');
+        position += bytesRead;
+      }
+    }
+    const openedAfter = fstatSync(fd, { bigint: true });
+    const namedAfter = lstatSync(name, { bigint: true });
+    if (!sameFileState(openedAfter, opened) || !sameFileState(namedAfter, opened)) {
+      throw new Error('quarantine entry changed during inspection');
+    }
+    return {
+      sizeBytes: Number(opened.size),
+      modifiedAt: new Date(Number(opened.mtimeMs)).toISOString(),
+      ...(bytes === undefined ? {} : { bytes }),
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function isHealthQuarantineManifest(value: unknown): value is {
+  version: 1;
+  quarantinedAt: string;
+  reason: string;
+  sourcePath: string;
+  evidenceFile: string;
+  sha256: string;
+  sizeBytes: number;
+} {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.version === 1 &&
+    typeof candidate.quarantinedAt === 'string' &&
+    Number.isFinite(Date.parse(candidate.quarantinedAt)) &&
+    typeof candidate.reason === 'string' &&
+    typeof candidate.sourcePath === 'string' &&
+    typeof candidate.evidenceFile === 'string' &&
+    typeof candidate.sha256 === 'string' &&
+    /^[0-9a-f]{64}$/.test(candidate.sha256) &&
+    Number.isSafeInteger(candidate.sizeBytes) &&
+    (candidate.sizeBytes as number) >= 0 &&
+    (candidate.sizeBytes as number) <= MAX_OPERATIONAL_HEALTH_FILE_BYTES
+  );
+}
+
+function isJournalQuarantineManifest(value: unknown): value is {
+  quarantinedAt: string;
+  reason: string;
+  originalPath: string;
+  files: string[];
+} {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.quarantinedAt === 'string' &&
+    Number.isFinite(Date.parse(candidate.quarantinedAt)) &&
+    typeof candidate.reason === 'string' &&
+    typeof candidate.originalPath === 'string' &&
+    Array.isArray(candidate.files) &&
+    candidate.files.length > 0 &&
+    candidate.files.length <= 3 &&
+    candidate.files.every((file) => typeof file === 'string')
+  );
+}
+
+function inspectQuarantinePinned(
+  dir: string,
+  expectedDirectory: import('node:fs').BigIntStats,
+): DiagnosticsSnapshot['quarantine'] {
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    const pinned = lstatSync('.', { bigint: true });
+    if (!pinned.isDirectory() || !sameInode(pinned, expectedDirectory)) {
+      throw new Error('quarantine directory changed during inspection');
+    }
+    const selected: import('node:fs').Dirent[] = [];
+    let scanTruncated = false;
+    const directory = opendirSync('.');
+    try {
+      for (;;) {
+        const entry = directory.readSync();
+        if (!entry) break;
+        if (selected.length === MAX_QUARANTINE_SCAN_ENTRIES) {
+          scanTruncated = true;
+          break;
+        }
+        selected.push(entry);
+      }
+    } finally {
+      directory.closeSync();
+    }
+    const evidence = new Map<string, PinnedQuarantineFile>();
+    const processedManifests = new Set<string>();
+
+    const processManifest = (manifestName: string): void => {
+      if (processedManifests.has(manifestName)) return;
+      processedManifests.add(manifestName);
+      const manifestFile = readPinnedQuarantineFile(manifestName, MAX_QUARANTINE_MANIFEST_BYTES, true);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(manifestFile.bytes?.toString('utf8') ?? '');
+      } catch {
+        throw new Error('quarantine manifest is invalid JSON');
+      }
+      if (isHealthQuarantineManifest(parsed)) {
+        if (`${parsed.evidenceFile}.manifest.json` !== manifestName) {
+          throw new Error('health quarantine manifest is not bound to its evidence name');
+        }
+        const file = readPinnedQuarantineFile(parsed.evidenceFile, MAX_OPERATIONAL_HEALTH_FILE_BYTES, true);
+        if (
+          file.sizeBytes !== parsed.sizeBytes ||
+          createHash('sha256').update(file.bytes ?? Buffer.alloc(0)).digest('hex') !== parsed.sha256
+        ) {
+          throw new Error('health quarantine evidence does not match its manifest');
+        }
+        if (evidence.has(parsed.evidenceFile)) throw new Error('quarantine evidence is referenced more than once');
+        evidence.set(parsed.evidenceFile, file);
+        return;
+      }
+      if (isJournalQuarantineManifest(parsed)) {
+        const manifestBase = manifestName.slice(0, -'.manifest.json'.length);
+        const boundNames = parsed.files.map((file) => {
+          if (path.dirname(path.resolve(file)) !== path.resolve('.')) {
+            throw new Error('journal quarantine manifest points outside quarantine');
+          }
+          return path.basename(file);
+        });
+        if (!boundNames.includes(manifestBase)) {
+          throw new Error('journal quarantine manifest is not bound to its primary database evidence');
+        }
+        for (const name of boundNames) {
+          if (evidence.has(name)) throw new Error('quarantine evidence is referenced more than once');
+          evidence.set(name, readPinnedQuarantineFile(name, MAX_JOURNAL_COPY_BYTES, false));
+        }
+        return;
+      }
+      throw new Error('quarantine manifest shape is invalid');
+    };
+
+    for (const entry of selected) {
+      if (entry.name.endsWith('.manifest.json')) processManifest(entry.name);
+    }
+
+    for (const entry of selected) {
+      if (!entry.name.endsWith('.manifest.json') && !evidence.has(entry.name)) {
+        const primaryName = entry.name.endsWith('-wal') || entry.name.endsWith('-shm')
+          ? entry.name.slice(0, -4)
+          : entry.name;
+        try {
+          processManifest(`${primaryName}.manifest.json`);
+        } catch {
+          throw new Error('quarantine evidence has no valid manifest binding');
+        }
+        if (!evidence.has(entry.name)) throw new Error('quarantine evidence has no valid manifest binding');
+      }
+    }
+
+    const entries = [...evidence.entries()]
+      .slice(0, MAX_QUARANTINE_ENTRIES)
+      .map(([name, file]) => ({ nameHash: stableIdentifierHash(name), sizeBytes: file.sizeBytes, modifiedAt: file.modifiedAt }))
+      .sort((a, b) => a.nameHash.localeCompare(b.nameHash));
+    return {
+      status: 'available',
+      count: evidence.size,
+      scannedCount: selected.length,
+      truncated: scanTruncated || evidence.size > entries.length,
+      entries,
+    };
+  } finally {
+    process.chdir(previousCwd);
+  }
+}
+
 async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot['quarantine']> {
   const dir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
-  const entries: DiagnosticsSnapshot['quarantine']['entries'] = [];
-  let count = 0;
-  let scannedCount = 0;
-  let handle: Awaited<ReturnType<typeof fs.opendir>>;
+  let directory: import('node:fs').BigIntStats;
   try {
-    handle = await fs.opendir(dir);
+    directory = await fs.lstat(dir, { bigint: true });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return { status: 'missing', count: 0, scannedCount: 0, truncated: false, entries: [] };
@@ -381,32 +580,14 @@ async function inspectQuarantine(storeDir: string): Promise<DiagnosticsSnapshot[
       reason: 'quarantine directory could not be inspected',
     };
   }
-  try {
-    for await (const entry of handle) {
-      scannedCount += 1;
-      if (scannedCount > MAX_QUARANTINE_SCAN_ENTRIES) break;
-      if (!entry.isFile()) continue;
-      count += 1;
-      if (entries.length >= MAX_QUARANTINE_ENTRIES) continue;
-      try {
-        const stat = await fs.stat(path.join(dir, entry.name));
-        entries.push({ nameHash: stableIdentifierHash(entry.name), sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() });
-      } catch {
-        // A concurrent operator move can make one entry disappear between
-        // readdir and stat. The aggregate remains honest via `scannedCount`.
-      }
-    }
-  } finally {
-    await handle.close().catch(() => undefined);
+  if (!directory.isDirectory() || directory.isSymbolicLink()) {
+    return { status: 'unavailable', count: 0, scannedCount: 0, truncated: false, entries: [], reason: 'quarantine path is not a real directory' };
   }
-  entries.sort((a, b) => a.nameHash.localeCompare(b.nameHash));
-  return {
-    status: 'available',
-    count,
-    scannedCount: Math.min(scannedCount, MAX_QUARANTINE_SCAN_ENTRIES),
-    truncated: scannedCount > MAX_QUARANTINE_SCAN_ENTRIES || count > entries.length,
-    entries,
-  };
+  try {
+    return inspectQuarantinePinned(dir, directory);
+  } catch {
+    return { status: 'unavailable', count: 0, scannedCount: 0, truncated: false, entries: [], reason: 'quarantine manifest or evidence binding is invalid' };
+  }
 }
 
 function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticCheck[] {

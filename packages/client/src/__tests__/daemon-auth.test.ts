@@ -325,6 +325,91 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     }
   });
 
+  it('serializes start behind an in-flight pair instead of borrowing and outliving its lease', async () => {
+    const workspaceRoot = await tmpDir('byok-client-pair-start-workspace-');
+    const storeDir = await tmpDir('byok-client-pair-start-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test', productId: 'test-pair-start', serverUrl: server.url, workspaceRoot, storeDir },
+      [new StubRuntimeAdapter()],
+    );
+    const realSave = DeviceStore.prototype.save;
+    let saveReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      saveReached = resolve;
+    });
+    let releaseSave!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const save = vi.spyOn(DeviceStore.prototype, 'save').mockImplementation(async function (this: DeviceStore, record) {
+      saveReached();
+      await gate;
+      await realSave.call(this, record);
+    });
+    try {
+      const pairing = daemon.pair('pairing-code');
+      await reached;
+      let startSettled = false;
+      const starting = daemon.start().finally(() => {
+        startSettled = true;
+      });
+      await Promise.resolve();
+      expect(startSettled).toBe(false);
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      releaseSave();
+      await pairing;
+      await starting;
+      expect(daemon.status().connected).toBe(true);
+    } finally {
+      releaseSave();
+      save.mockRestore();
+    }
+  });
+
+  it('serializes stop behind an in-flight pair and releases only after its credential write', async () => {
+    const workspaceRoot = await tmpDir('byok-client-pair-stop-workspace-');
+    const storeDir = await tmpDir('byok-client-pair-stop-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test', productId: 'test-pair-stop', serverUrl: server.url, workspaceRoot, storeDir },
+      [new StubRuntimeAdapter()],
+    );
+    await daemon.pair('initial-pairing-code');
+    await daemon.start();
+    const realSave = DeviceStore.prototype.save;
+    let saveReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      saveReached = resolve;
+    });
+    let releaseSave!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const save = vi.spyOn(DeviceStore.prototype, 'save').mockImplementation(async function (this: DeviceStore, record) {
+      saveReached();
+      await gate;
+      await realSave.call(this, record);
+    });
+    try {
+      const pairing = daemon.pair('replacement-pairing-code');
+      await reached;
+      let stopSettled = false;
+      const stopping = daemon.stop().finally(() => {
+        stopSettled = true;
+      });
+      await Promise.resolve();
+      expect(stopSettled).toBe(false);
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      releaseSave();
+      await pairing;
+      await stopping;
+      const doctor = await acquireDaemonOwner(storeDir, 'doctor');
+      await doctor.release();
+    } finally {
+      releaseSave();
+      save.mockRestore();
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('fails closed without blocking when unpair sees a FIFO device record', async () => {
     const workspaceRoot = await tmpDir('byok-client-unpair-fifo-workspace-');
     const storeDir = await tmpDir('byok-client-unpair-fifo-store-');
