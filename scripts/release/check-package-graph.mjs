@@ -125,11 +125,12 @@ function collect(relativePath) {
   if (!existsSync(absolutePath)) return;
   const stat = statSync(absolutePath);
   if (stat.isDirectory()) {
+    const normalizedPath = relativePath.split(path.sep).join('/');
     if (
       ['node_modules', 'dist'].includes(path.basename(relativePath)) ||
-      relativePath === 'deploy/sql' ||
-      relativePath === 'docs/architecture/snapshots' ||
-      relativePath.endsWith('/src/__tests__/golden')
+      normalizedPath === 'deploy/sql' ||
+      normalizedPath === 'docs/architecture/snapshots' ||
+      normalizedPath.endsWith('/src/__tests__/golden')
     ) return;
     for (const entry of readdirSync(absolutePath)) collect(path.join(relativePath, entry));
     return;
