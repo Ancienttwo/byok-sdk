@@ -705,6 +705,8 @@ export function createDaemonWithAdapters(
   // try/catch below).
   let controlServerHandle: ControlServerHandle | undefined;
   let daemonOwnerLease: DaemonOwnerLease | undefined;
+  let shutdownPromise: Promise<void> | undefined;
+  const pendingLateMutationBarriers = new Set<Promise<void>>();
   /** M4 Phase 2: when this `start()` began — backs the control socket's `status.uptimeMs`. */
   let startedAt: number | undefined;
 
@@ -776,6 +778,11 @@ export function createDaemonWithAdapters(
 
   async function pair(pairingCode: string): Promise<DeviceRecord> {
     checkServerUrl();
+    // Pairing persists device.json. It intentionally does not arm proactive
+    // renewal (AuthManager.loadExisting does that under start()'s lease), so a
+    // short-lived pair command can release ownership once the write lands.
+    const acquiredHere = daemonOwnerLease === undefined;
+    if (acquiredHere) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     // Finding F5: capture whatever device is currently on disk for this
     // serverUrl (if any) BEFORE pairing — `auth.pair()` mints/persists a
     // brand new deviceId (the server always does, even on a same-keypair
@@ -783,23 +790,38 @@ export function createDaemonWithAdapters(
     // recover the outgoing deviceId afterward to know whose cursor to clear.
     // Reading straight from `store` (not `auth.deviceId`) works whether or
     // not `start()`/`loadExisting()` ran in this process before `pair()`.
-    const previous = await store.load();
-    const record = await auth.pair(pairingCode);
-    if (previous && previous.deviceId !== record.deviceId) {
-      await cursorStore.clear(config.serverUrl, previous.deviceId);
+    try {
+      const previous = await store.load();
+      const record = await auth.pair(pairingCode);
+      if (previous && previous.deviceId !== record.deviceId) {
+        await cursorStore.clear(config.serverUrl, previous.deviceId);
+      }
+      observer.notePaired(record.deviceId);
+      if (acquiredHere) {
+        await daemonOwnerLease?.release();
+        daemonOwnerLease = undefined;
+      }
+      return record;
+    } catch (err) {
+      if (acquiredHere) {
+        await daemonOwnerLease?.release();
+        daemonOwnerLease = undefined;
+      }
+      throw err;
     }
-    observer.notePaired(record.deviceId);
-    return record;
   }
 
   async function start(): Promise<void> {
     checkServerUrl();
+    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+    try {
+    // Loading an existing record arms proactive token renewal, whose final
+    // step writes device.json. Acquire the store mutation lease first so a
+    // rejected second daemon can never leave that timer behind as a writer.
     const record = await auth.loadExisting();
     if (!record) {
       throw new Error('device is not paired yet; call pair(pairingCode) first');
     }
-    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
-    try {
     fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
     // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own
@@ -1127,7 +1149,7 @@ export function createDaemonWithAdapters(
     await connection.waitForAck();
     } catch (err) {
       try {
-        await runShutdownSequence('startup failed', { drainTimeoutMs: 0 });
+        await requestShutdown('startup failed', { drainTimeoutMs: 0 });
       } catch (cleanupError) {
         throw new AggregateError([err, cleanupError], 'daemon startup failed and teardown was incomplete');
       }
@@ -1192,6 +1214,24 @@ export function createDaemonWithAdapters(
       }
     };
 
+    // A prior shutdown attempt may have hit its deadline while task teardown
+    // continued in the background. A retry must not release ownership merely
+    // because its own fresh runner pass is empty: the late pass is still a
+    // possible journal producer until it settles.
+    if (pendingLateMutationBarriers.size > 0) {
+      const prior = Promise.allSettled([...pendingLateMutationBarriers]);
+      let priorSettled = false;
+      void prior.then(() => {
+        priorSettled = true;
+      });
+      const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
+      await Promise.race([prior, delay(graceMs)]);
+      if (!priorSettled) {
+        mutationBarrierComplete = false;
+        errors.push(new Error('a prior active task teardown remains unsettled; ownership lease retained'));
+      }
+    }
+
     // S3b (L-003): stop the maintenance cadence first — a compaction pass
     // starting while the journal is being drained would hold the single writer
     // against the terminal writes below for no benefit. Only the engine THIS
@@ -1216,6 +1256,8 @@ export function createDaemonWithAdapters(
     if (!activeTeardownSettled) {
       mutationBarrierComplete = false;
       errors.push(new Error('active task teardown did not settle before the shutdown grace deadline'));
+      pendingLateMutationBarriers.add(observedActiveTeardown);
+      void observedActiveTeardown.finally(() => pendingLateMutationBarriers.delete(observedActiveTeardown)).catch(() => undefined);
     }
     // S3b: in hosted mode, a terminal is journaled before it is handed to the
     // outbox (see `sendEnvelope`), so a `task.fail` that `shutdownActiveTasks`
@@ -1288,7 +1330,17 @@ export function createDaemonWithAdapters(
    * below supplies its own `reason` instead of this default.
    */
   async function stop(opts: { drainTimeoutMs?: number; reason?: string } = {}): Promise<void> {
-    await runShutdownSequence(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
+    await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
+  }
+
+  function requestShutdown(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+    if (shutdownPromise) return shutdownPromise;
+    const current = runShutdownSequence(reason, opts);
+    shutdownPromise = current;
+    void current.finally(() => {
+      if (shutdownPromise === current) shutdownPromise = undefined;
+    }).catch(() => undefined);
+    return current;
   }
 
   /**
@@ -1309,9 +1361,17 @@ export function createDaemonWithAdapters(
   async function unpair(): Promise<void> {
     const current = await store.load();
     await stop();
-    await store.clear();
-    if (current) {
-      await cursorStore.clear(config.serverUrl, current.deviceId);
+    // stop() releases only after every daemon writer settles. Reacquire before
+    // destructive identity cleanup; if another daemon won the gap, fail
+    // closed rather than clearing state under it.
+    const cleanupLease = await acquireDaemonOwner(storeDir, 'daemon');
+    try {
+      await store.clear();
+      if (current) {
+        await cursorStore.clear(config.serverUrl, current.deviceId);
+      }
+    } finally {
+      await cleanupLease.release();
     }
     auth = buildAuthManager();
     observer.noteUnpaired();
@@ -1465,7 +1525,7 @@ export function createDaemonWithAdapters(
     // own caller — the `shutdown` control method's `.catch()` in
     // `controlMethods` below — afterward).
     try {
-      await runShutdownSequence(`control socket shutdown (${effectiveReason})`);
+      await requestShutdown(`control socket shutdown (${effectiveReason})`);
     } finally {
       // Finding F5(b): read AFTER runShutdownSequence() returns — 0 means
       // the drain genuinely finished in time; a positive count is an honest

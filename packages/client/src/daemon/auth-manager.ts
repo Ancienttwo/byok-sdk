@@ -48,6 +48,7 @@ export class AuthManager {
   private renewing: Promise<string> | undefined;
   private proactiveTimer: ReturnType<typeof setTimeout> | undefined;
   private revoked = false;
+  private stopped = false;
 
   constructor(private readonly opts: AuthManagerOptions) {}
 
@@ -61,15 +62,17 @@ export class AuthManager {
 
   /** Load a previously-paired device record from disk, if any (idempotent — a second call is a no-op once loaded). */
   async loadExisting(): Promise<DeviceRecord | undefined> {
+    this.stopped = false;
     if (!this.record) {
       this.record = await this.opts.store.load();
-      if (this.record) this.scheduleProactiveRenewal();
     }
+    if (this.record) this.scheduleProactiveRenewal();
     return this.record;
   }
 
   /** `POST /byok/pair` (v2): generates a device keypair on first pair, reuses it on any subsequent (e.g. post-revocation) re-pair. */
   async pair(pairingCode: string): Promise<DeviceRecord> {
+    this.stopped = false;
     const existing = this.record ?? (await this.opts.store.load());
     const keyPair = existing
       ? { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey }
@@ -100,7 +103,10 @@ export class AuthManager {
     await this.opts.store.save(record);
     this.record = record;
     this.revoked = false;
-    this.scheduleProactiveRenewal();
+    // Pairing is a short-lived credential mutation, not the start of the
+    // daemon lifecycle. loadExisting() arms proactive renewal once start()
+    // holds the store ownership lease; doing it here would leave a background
+    // device.json writer behind a completed `byok-agent pair` command.
     return record;
   }
 
@@ -118,8 +124,15 @@ export class AuthManager {
     return this.renew();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    this.stopped = true;
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
+    this.proactiveTimer = undefined;
+    // A timer may already have entered renew() before stop() cleared it. Its
+    // final step persists device.json, so daemon ownership cannot be released
+    // until that promise settles. Renewal failure is surfaced later by the
+    // next token consumer; shutdown only needs the writer barrier here.
+    await this.renewing?.catch(() => undefined);
   }
 
   private async renew(): Promise<string> {
@@ -178,7 +191,8 @@ export class AuthManager {
 
   private scheduleProactiveRenewal(): void {
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
-    if (!this.record || this.revoked) return;
+    this.proactiveTimer = undefined;
+    if (!this.record || this.revoked || this.stopped) return;
     const delay = Math.max(0, msUntilExpiry(this.record.expiresAt) - RENEW_MARGIN_MS);
     const timer = setTimeout(() => {
       this.renew().catch(() => {

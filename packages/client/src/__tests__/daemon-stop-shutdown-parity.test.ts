@@ -189,4 +189,41 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const doctorLease = await acquireDaemonOwner(storeDir, 'doctor');
     await doctorLease.release();
   });
+
+  it('single-flights concurrent stops and retains ownership until a timed-out late task writer settles', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const workspaceRoot = await tmpDir('byok-stop-concurrent-ws-');
+    const storeDir = await tmpDir('byok-stop-concurrent-store-');
+    daemon = createDaemonWithAdapters(
+      {
+        productName: 'Acme',
+        productId: 'acme-stop-concurrent',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        shutdownGraceMs: 20,
+      },
+      [adapter],
+    );
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    server.send(
+      createEnvelope('task.offer', { instruction: 'late writer', policy: { mode: 'auto' } }, { taskId: 't-late', seq: server.nextSeq() }),
+    );
+    await server.waitFor((e) => e.type === 'task.started');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const releaseClose = adapter.sessions[0]!.blockClose();
+
+    const first = daemon.stop();
+    const concurrent = daemon.stop();
+    await expect(first).rejects.toThrow(/grace deadline/);
+    await expect(concurrent).rejects.toThrow(/grace deadline/);
+    await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+
+    releaseClose();
+    await vi.waitFor(() => expect(adapter.sessions[0]!.closeCalled).toBe(true));
+    await expect(daemon.stop()).resolves.toBeUndefined();
+    const doctorLease = await acquireDaemonOwner(storeDir, 'doctor');
+    await doctorLease.release();
+  });
 });

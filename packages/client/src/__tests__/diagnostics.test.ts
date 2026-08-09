@@ -20,6 +20,7 @@ import { OPERATIONAL_HEALTH_FILENAME, OperationalHealthTracker } from '../daemon
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { loadSqliteModule } from '../daemon/journal/sqlite-support';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
+import { DAEMON_OWNER_FILENAME } from '../daemon/daemon-owner';
 import type { RuntimeAdapter } from '../types';
 
 const dirs: string[] = [];
@@ -166,6 +167,15 @@ describe('diagnostics collector', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('does not block or copy when daemon.db is a FIFO', async () => {
+    const dir = await tempDir();
+    execFileSync('mkfifo', [path.join(dir, 'daemon.db')]);
+    const started = Date.now();
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(snapshot.journal.status).toBe('unavailable');
+  });
+
   it('bounds runtime detection and oversized device input', async () => {
     const dir = await tempDir();
     await fs.writeFile(path.join(dir, 'device.json'), 'x'.repeat(70 * 1024));
@@ -230,6 +240,34 @@ describe('doctor explicit fix', () => {
     });
   });
 
+  it('rejects a raced replacement before any unconfirmed inode enters quarantine', async () => {
+    const dir = await tempDir();
+    const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    await fs.writeFile(sourcePath, '{original-corrupt');
+    const originalLink = fs.link.bind(fs);
+    vi.spyOn(fs, 'link').mockImplementation(async (from, to) => {
+      if (from === sourcePath) {
+        await fs.rename(sourcePath, `${sourcePath}.original`);
+        await fs.writeFile(sourcePath, '{replacement-corrupt');
+      }
+      await originalLink(from, to);
+    });
+
+    await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/identity does not match/);
+    expect(await fs.readFile(sourcePath, 'utf8')).toBe('{replacement-corrupt');
+    expect(await fs.readdir(path.join(dir, 'quarantine'))).toEqual([]);
+  });
+
+  it('refuses a symlinked quarantine directory without touching its target', async () => {
+    const dir = await tempDir();
+    const outside = await tempDir();
+    await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
+    await fs.symlink(outside, path.join(dir, 'quarantine'));
+    await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/not a real directory/);
+    expect(await fs.readdir(outside)).toEqual([]);
+    expect(await fs.readFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), 'utf8')).toBe('{bad');
+  });
+
   it('doctor --fix --yes reports the move and recollects missing health without rebuilding it', async () => {
     const dir = await tempDir();
     await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
@@ -270,5 +308,33 @@ describe('doctor explicit fix', () => {
     } finally {
       await lease.release();
     }
+  });
+
+  it('recovers an owner record whose live PID has a different process-start identity', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(
+      path.join(dir, DAEMON_OWNER_FILENAME),
+      `${JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        nonce: '00000000-0000-4000-8000-000000000000',
+        role: 'daemon',
+        acquiredAt: '2026-08-09T00:00:00.000Z',
+        processStartedAt: '2000-01-01T00:00:00.000Z',
+      })}\n`,
+    );
+    const lease = await acquireDaemonOwner(dir, 'doctor');
+    await lease.release();
+  });
+
+  it('recovers a stale malformed reclaim marker after its bounded grace period', async () => {
+    const dir = await tempDir();
+    const reclaimPath = path.join(dir, `${DAEMON_OWNER_FILENAME}.reclaim`);
+    await fs.writeFile(reclaimPath, '');
+    const stale = new Date(Date.now() - 60_000);
+    await fs.utimes(reclaimPath, stale, stale);
+    const lease = await acquireDaemonOwner(dir, 'doctor');
+    await lease.release();
+    await expect(fs.stat(reclaimPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

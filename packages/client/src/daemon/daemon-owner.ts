@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { ensureSecureDir } from '../util/secure-dir';
 
 export const DAEMON_OWNER_FILENAME = 'daemon-owner.json';
 const RECLAIM_FILENAME = `${DAEMON_OWNER_FILENAME}.reclaim`;
 const MAX_OWNER_BYTES = 4096;
+const RECLAIM_MALFORMED_GRACE_MS = 30_000;
+const execFileAsync = promisify(execFile);
 
 interface OwnerRecord {
   version: 1;
@@ -13,6 +17,7 @@ interface OwnerRecord {
   nonce: string;
   role: 'daemon' | 'doctor';
   acquiredAt: string;
+  processStartedAt?: string;
 }
 
 export interface DaemonOwnerLease {
@@ -37,7 +42,9 @@ function isOwnerRecord(value: unknown): value is OwnerRecord {
     candidate.nonce.length === 36 &&
     (candidate.role === 'daemon' || candidate.role === 'doctor') &&
     typeof candidate.acquiredAt === 'string' &&
-    Number.isFinite(Date.parse(candidate.acquiredAt))
+    Number.isFinite(Date.parse(candidate.acquiredAt)) &&
+    (candidate.processStartedAt === undefined ||
+      (typeof candidate.processStartedAt === 'string' && Number.isFinite(Date.parse(candidate.processStartedAt))))
   );
 }
 
@@ -62,13 +69,66 @@ async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
   }
 }
 
-function processIsAlive(pid: number): boolean {
+function pidIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+async function processStartedAt(pid: number): Promise<string | undefined> {
+  try {
+    if (process.platform === 'win32') {
+      const script = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`;
+      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        timeout: 2_000,
+        maxBuffer: 16 * 1024,
+      });
+      const parsed = Date.parse(stdout.trim());
+      return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+    }
+    const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      timeout: 2_000,
+      maxBuffer: 16 * 1024,
+      env: { ...process.env, LC_ALL: 'C' },
+    });
+    const parsed = Date.parse(stdout.trim());
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function processOwnsRecord(record: OwnerRecord): Promise<boolean> {
+  if (!pidIsAlive(record.pid)) return false;
+  // Legacy records have no process-start token. Preserve their fail-closed
+  // behavior while they are live; every newly-created record below carries
+  // the token, which lets a recycled PID be distinguished from its owner.
+  if (!record.processStartedAt) return true;
+  const observed = await processStartedAt(record.pid);
+  return observed === undefined || observed === record.processStartedAt;
+}
+
+async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
+  let stat: Awaited<ReturnType<typeof fs.stat>>;
+  try {
+    stat = await fs.lstat(reclaimPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw err;
+  }
+  if (!stat.isFile()) throw new Error('store mutation reclaim marker is not a regular file');
+  const owner = await readOwner(reclaimPath);
+  if (owner) return processOwnsRecord(owner);
+  // Old versions wrote a bare PID. Recover it safely when dead; a fresh
+  // malformed marker gets a short fail-closed grace window for an older
+  // process that crashed between create and write.
+  const raw = await fs.readFile(reclaimPath, 'utf8').catch(() => '');
+  const legacyPid = /^\s*(\d+)\s*$/.exec(raw)?.[1];
+  if (legacyPid && pidIsAlive(Number(legacyPid))) return true;
+  return Date.now() - stat.mtimeMs <= RECLAIM_MALFORMED_GRACE_MS;
 }
 
 async function createOwner(filePath: string, record: OwnerRecord): Promise<boolean> {
@@ -106,15 +166,22 @@ export async function acquireDaemonOwner(
   await ensureSecureDir(storeDir);
   const ownerPath = path.join(storeDir, DAEMON_OWNER_FILENAME);
   const reclaimPath = path.join(storeDir, RECLAIM_FILENAME);
-  const record: OwnerRecord = { version: 1, pid: process.pid, nonce: randomUUID(), role, acquiredAt: clock().toISOString() };
+  const selfStartedAt = await processStartedAt(process.pid);
+  if (!selfStartedAt) throw new Error('could not establish process start identity for the store mutation lease');
+  const record: OwnerRecord = {
+    version: 1,
+    pid: process.pid,
+    nonce: randomUUID(),
+    role,
+    acquiredAt: clock().toISOString(),
+    processStartedAt: selfStartedAt,
+  };
 
   for (;;) {
-    try {
-      await fs.access(reclaimPath);
+    if (await reclaimExistsAndIsActive(reclaimPath)) {
       throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
+    await fs.rm(reclaimPath, { force: true });
 
     if (await createOwner(ownerPath, record)) {
       let released = false;
@@ -132,22 +199,14 @@ export async function acquireDaemonOwner(
     }
 
     const existing = await readOwner(ownerPath);
-    if (existing && processIsAlive(existing.pid)) throw new DaemonOwnerActiveError(existing.role);
+    if (existing && (await processOwnsRecord(existing))) throw new DaemonOwnerActiveError(existing.role);
 
-    let reclaim: Awaited<ReturnType<typeof fs.open>>;
-    try {
-      reclaim = await fs.open(reclaimPath, 'wx', 0o600);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
-      }
-      throw err;
+    if (!(await createOwner(reclaimPath, record))) {
+      throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
     }
     try {
-      await reclaim.writeFile(`${process.pid}\n`, 'utf8');
-      await reclaim.sync();
       const rechecked = await readOwner(ownerPath);
-      if (rechecked && processIsAlive(rechecked.pid)) throw new DaemonOwnerActiveError(rechecked.role);
+      if (rechecked && (await processOwnsRecord(rechecked))) throw new DaemonOwnerActiveError(rechecked.role);
       if (rechecked || (await fs.stat(ownerPath).then(() => true, (err: NodeJS.ErrnoException) => {
         if (err.code === 'ENOENT') return false;
         throw err;
@@ -155,8 +214,8 @@ export async function acquireDaemonOwner(
         await fs.rm(ownerPath);
       }
     } finally {
-      await reclaim.close();
-      await fs.rm(reclaimPath, { force: true });
+      const currentReclaim = await readOwner(reclaimPath);
+      if (currentReclaim?.nonce === record.nonce) await fs.rm(reclaimPath, { force: true });
     }
   }
 }

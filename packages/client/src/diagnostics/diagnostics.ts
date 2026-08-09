@@ -137,7 +137,13 @@ async function inspectDevice(storeDir: string): Promise<DiagnosticsSnapshot['dev
   try {
     const stat = await handle.stat();
     if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_DEVICE_RECORD_BYTES) return { status: 'unavailable' };
-    const parsed = JSON.parse(await handle.readFile('utf8')) as Record<string, unknown>;
+    const bytes = Buffer.alloc(stat.size);
+    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+    const after = await handle.stat();
+    if (bytesRead !== bytes.length || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) {
+      return { status: 'unavailable' };
+    }
+    const parsed = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
     return typeof parsed.deviceId === 'string' && parsed.deviceId.length > 0
       ? { status: 'paired', deviceIdHash: stableIdentifierHash(parsed.deviceId) }
       : { status: 'unavailable' };
@@ -178,75 +184,148 @@ function sameIdentity(left: FileIdentity | undefined, right: FileIdentity | unde
   );
 }
 
+function identityFromBigIntStat(stat: {
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+}): FileIdentity {
+  return { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+}
+
+async function copyOpenFileBounded(
+  source: Awaited<ReturnType<typeof fs.open>>,
+  expected: FileIdentity,
+  destinationPath: string,
+): Promise<boolean> {
+  const destination = await fs.open(destinationPath, 'wx', 0o600);
+  try {
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const expectedBytes = Number(expected.size);
+    let position = 0;
+    while (position < expectedBytes) {
+      const length = Math.min(buffer.length, expectedBytes - position);
+      const { bytesRead } = await source.read(buffer, 0, length, position);
+      if (bytesRead === 0) return false;
+      let written = 0;
+      while (written < bytesRead) {
+        const result = await destination.write(buffer, written, bytesRead - written, position + written);
+        if (result.bytesWritten === 0) throw new Error('diagnostics snapshot destination stopped accepting bytes');
+        written += result.bytesWritten;
+      }
+      position += bytesRead;
+    }
+    await destination.sync();
+    return sameIdentity(expected, identityFromBigIntStat(await source.stat({ bigint: true })));
+  } finally {
+    await destination.close();
+  }
+}
+
 async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['journal']> {
   const journalPath = path.join(storeDir, JOURNAL_DB_FILENAME);
   try {
-    const sizeBytes = await fileSize(journalPath);
-    if (sizeBytes === undefined) return { status: 'missing' };
-    const walBytes = await fileSize(path.join(storeDir, `${JOURNAL_DB_FILENAME}-wal`));
+    const mainIdentity = await regularFileIdentity(journalPath);
+    if (mainIdentity === undefined) return { status: 'missing' };
+    const walIdentity = await regularFileIdentity(path.join(storeDir, `${JOURNAL_DB_FILENAME}-wal`));
+    let sizeBytes = Number(mainIdentity.size);
+    let walBytes = walIdentity === undefined ? undefined : Number(walIdentity.size);
     if (!isSqliteAvailable()) {
       return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'not-checked' };
     }
     const componentNames = [JOURNAL_DB_FILENAME, `${JOURNAL_DB_FILENAME}-wal`, `${JOURNAL_DB_FILENAME}-shm`] as const;
-    const before = new Map<string, FileIdentity | undefined>();
+    const initial = new Map<string, FileIdentity | undefined>();
+    for (const name of componentNames) initial.set(name, await regularFileIdentity(path.join(storeDir, name)));
+    const snapshotMain = initial.get(JOURNAL_DB_FILENAME);
+    if (!snapshotMain) return { status: 'unavailable', reason: 'journal changed during diagnostics snapshot' };
+    sizeBytes = Number(snapshotMain.size);
+    walBytes = initial.get(`${JOURNAL_DB_FILENAME}-wal`) === undefined
+      ? undefined
+      : Number(initial.get(`${JOURNAL_DB_FILENAME}-wal`)!.size);
+    const opened = new Map<string, { handle: Awaited<ReturnType<typeof fs.open>>; identity: FileIdentity }>();
     let totalBytes = 0n;
-    for (const name of componentNames) {
-      const identity = await regularFileIdentity(path.join(storeDir, name));
-      before.set(name, identity);
-      totalBytes += identity?.size ?? 0n;
-    }
-    if (totalBytes > BigInt(MAX_JOURNAL_COPY_BYTES)) {
-      return {
-        status: 'present',
-        sizeBytes,
-        ...(walBytes === undefined ? {} : { walBytes }),
-        integrity: 'not-checked',
-        reason: 'journal exceeds the bounded diagnostics copy limit',
-      };
-    }
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-journal-inspect-'));
-    const { DatabaseSync } = loadSqliteModule();
-    let db: InstanceType<typeof DatabaseSync> | undefined;
     try {
       for (const name of componentNames) {
-        if (before.get(name)) await fs.copyFile(path.join(storeDir, name), path.join(tempDir, name));
-      }
-      for (const name of componentNames) {
-        if (!sameIdentity(before.get(name), await regularFileIdentity(path.join(storeDir, name)))) {
-          return {
-            status: 'unavailable',
-            sizeBytes,
-            ...(walBytes === undefined ? {} : { walBytes }),
-            reason: 'journal changed during diagnostics snapshot',
-          };
+        let handle: Awaited<ReturnType<typeof fs.open>>;
+        try {
+          handle = await fs.open(
+            path.join(storeDir, name),
+            fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+          );
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT' && name !== JOURNAL_DB_FILENAME) continue;
+          throw err;
         }
+        const stat = await handle.stat({ bigint: true });
+        if (!stat.isFile()) {
+          await handle.close();
+          throw new Error('journal component is not a regular file');
+        }
+        const identity = identityFromBigIntStat(stat);
+        if (!sameIdentity(initial.get(name), identity)) {
+          await handle.close();
+          return { status: 'unavailable', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal changed during diagnostics snapshot' };
+        }
+        totalBytes += identity.size;
+        opened.set(name, { handle, identity });
       }
-      const header = Buffer.alloc(16);
-      const copiedHandle = await fs.open(path.join(tempDir, JOURNAL_DB_FILENAME), 'r');
+      if (totalBytes > BigInt(MAX_JOURNAL_COPY_BYTES)) {
+        return {
+          status: 'present',
+          sizeBytes,
+          ...(walBytes === undefined ? {} : { walBytes }),
+          integrity: 'not-checked',
+          reason: 'journal exceeds the bounded diagnostics copy limit',
+        };
+      }
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-journal-inspect-'));
+      const { DatabaseSync } = loadSqliteModule();
+      let db: InstanceType<typeof DatabaseSync> | undefined;
       try {
-        const { bytesRead } = await copiedHandle.read(header, 0, header.length, 0);
-        if (bytesRead !== 16 || header.toString('binary') !== 'SQLite format 3\u0000') {
-          return {
-            status: 'corrupt',
-            sizeBytes,
-            ...(walBytes === undefined ? {} : { walBytes }),
-            reason: 'journal has an invalid SQLite header',
-          };
+        for (const name of componentNames) {
+          const component = opened.get(name);
+          if (component && !(await copyOpenFileBounded(component.handle, component.identity, path.join(tempDir, name)))) {
+            return { status: 'unavailable', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal changed during diagnostics snapshot' };
+          }
         }
+        for (const [name, component] of opened) {
+          if (
+            !sameIdentity(component.identity, identityFromBigIntStat(await component.handle.stat({ bigint: true }))) ||
+            !sameIdentity(component.identity, await regularFileIdentity(path.join(storeDir, name)))
+          ) {
+            return { status: 'unavailable', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal changed during diagnostics snapshot' };
+          }
+        }
+        for (const name of componentNames) {
+          if (!opened.has(name) && (await regularFileIdentity(path.join(storeDir, name))) !== undefined) {
+            return { status: 'unavailable', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal changed during diagnostics snapshot' };
+          }
+        }
+        const header = Buffer.alloc(16);
+        const copiedHandle = await fs.open(path.join(tempDir, JOURNAL_DB_FILENAME), 'r');
+        try {
+          const { bytesRead } = await copiedHandle.read(header, 0, header.length, 0);
+          if (bytesRead !== 16 || header.toString('binary') !== 'SQLite format 3\u0000') {
+            return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal has an invalid SQLite header' };
+          }
+        } finally {
+          await copiedHandle.close();
+        }
+        db = new DatabaseSync(path.join(tempDir, JOURNAL_DB_FILENAME), { readOnly: true });
+        const result = db.prepare('PRAGMA quick_check(1)').get() as { quick_check?: unknown } | undefined;
+        if (result?.quick_check !== 'ok') {
+          return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal quick_check failed' };
+        }
+        return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'ok' };
+      } catch {
+        return { status: 'unavailable', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal snapshot could not be checked' };
       } finally {
-        await copiedHandle.close();
+        db?.close();
+        await fs.rm(tempDir, { recursive: true, force: true });
       }
-      db = new DatabaseSync(path.join(tempDir, JOURNAL_DB_FILENAME), { readOnly: true });
-      const result = db.prepare('PRAGMA quick_check(1)').get() as { quick_check?: unknown } | undefined;
-      if (result?.quick_check !== 'ok') {
-        return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal quick_check failed' };
-      }
-      return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'ok' };
-    } catch {
-      return { status: 'unavailable', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal snapshot could not be checked' };
     } finally {
-      db?.close();
-      await fs.rm(tempDir, { recursive: true, force: true });
+      await Promise.all([...opened.values()].map(({ handle }) => handle.close().catch(() => undefined)));
     }
   } catch {
     return { status: 'unavailable', reason: 'journal files could not be inspected' };
@@ -507,16 +586,41 @@ export async function quarantineCorruptOperationalHealth(
       if (!sourceStat.isFile()) throw new Error('operational health state is not a regular file; refusing quarantine');
 
       const quarantineDir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
+      try {
+        const existing = await fs.lstat(quarantineDir);
+        if (!existing.isDirectory() || existing.isSymbolicLink()) {
+          throw new Error('quarantine path is not a real directory; refusing quarantine');
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        await fs.mkdir(quarantineDir, { mode: 0o700 });
+      }
       await ensureSecureDir(quarantineDir);
+      const securedQuarantine = await fs.lstat(quarantineDir);
+      if (!securedQuarantine.isDirectory() || securedQuarantine.isSymbolicLink()) {
+        throw new Error('quarantine path changed during validation; refusing quarantine');
+      }
       const stamp = (options.clock ?? (() => new Date()))().toISOString().replace(/[:.]/g, '-');
       const evidenceName = `${stamp}-${randomUUID()}-${OPERATIONAL_HEALTH_FILENAME}`;
       const manifestName = `${evidenceName}.manifest.json`;
       const evidencePath = path.join(quarantineDir, evidenceName);
-      await fs.rename(sourcePath, evidencePath);
-      const movedStat = await fs.lstat(evidencePath, { bigint: true });
-      if (!movedStat.isFile() || movedStat.dev !== sourceStat.dev || movedStat.ino !== sourceStat.ino) {
+      // Publish a hard link first, then validate THAT link against the open
+      // descriptor before removing the source name. A pathname rename can
+      // move an unrelated replacement into quarantine before its post-rename
+      // inode check notices the race. Here a raced link is simply unlinked and
+      // rejected; only the already-inspected inode can become evidence.
+      await fs.link(sourcePath, evidencePath);
+      const linkedStat = await fs.lstat(evidencePath, { bigint: true });
+      if (!linkedStat.isFile() || linkedStat.dev !== sourceStat.dev || linkedStat.ino !== sourceStat.ino) {
+        await fs.rm(evidencePath, { force: true });
         throw new Error('quarantined operational health evidence identity does not match the inspected inode');
       }
+      const sourcePathStat = await fs.lstat(sourcePath, { bigint: true });
+      if (sourcePathStat.dev !== sourceStat.dev || sourcePathStat.ino !== sourceStat.ino) {
+        await fs.rm(evidencePath, { force: true });
+        throw new Error('operational health source identity changed before quarantine');
+      }
+      await fs.rm(sourcePath);
       const hashed = await hashOpenFile(source);
       await source.chmod(0o600);
       await atomicWriteFile(

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager, DeviceRevokedError } from '../daemon/auth-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
+import { DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -87,6 +88,7 @@ describe('access token renewal (protocol §6.2)', () => {
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
 
     await auth.pair('pairing-code');
+    await auth.loadExisting();
     expect(server.httpRequests.some((r) => r.pathname === '/byok/token')).toBe(false);
 
     await vi.waitFor(() => {
@@ -117,6 +119,38 @@ describe('access token renewal (protocol §6.2)', () => {
     expect(server.httpRequests.some((r) => r.pathname === '/byok/challenge')).toBe(true);
 
     auth.stop();
+  });
+
+  it('stop waits for an already-started renewal writer before it resolves', async () => {
+    server.setTokenTtlMs(60 * 60 * 1000);
+    const storeDir = await tmpDir('byok-auth-stop-barrier-');
+    const store = new DeviceStore(storeDir);
+    const auth = new AuthManager({ serverUrl: server.url, store });
+    const record = await auth.pair('pairing-code');
+    server.rotateDeviceToken(record.deviceId);
+
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const realSave = store.save.bind(store);
+    const save = vi.spyOn(store, 'save').mockImplementation(async (next) => {
+      await saveGate;
+      await realSave(next);
+    });
+    const renewal = auth.handleUnauthorized();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+
+    let stopped = false;
+    const stopping = auth.stop().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    releaseSave();
+    await expect(renewal).resolves.not.toBe(record.accessToken);
+    await stopping;
+    expect(stopped).toBe(true);
   });
 
   it('a device revoked at the server surfaces DeviceRevokedError from handleUnauthorized(), not a retryable error', async () => {
@@ -166,6 +200,26 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     });
     await vi.waitFor(() => expect(daemon?.status().connected).toBe(true), { timeout: 5000 });
     expect(daemon.status().revoked).toBe(false);
+  });
+
+  it('a rejected second daemon never arms an uncovered proactive-renewal writer', async () => {
+    server.setTokenTtlMs(60 * 60 * 1000);
+    const workspaceRoot = await tmpDir('byok-client-owner-auth-workspace-');
+    const storeDir = await tmpDir('byok-client-owner-auth-store-');
+    const config = { productName: 'Test', productId: 'test-owner-auth', serverUrl: server.url, workspaceRoot, storeDir };
+    daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    const devicePath = path.join(storeDir, 'device.json');
+    const diskRecord = JSON.parse(await fs.readFile(devicePath, 'utf8')) as Record<string, unknown>;
+    await fs.writeFile(devicePath, `${JSON.stringify({ ...diskRecord, expiresAt: new Date(Date.now() + 2_000).toISOString() })}\n`);
+    const before = server.httpRequests.filter((r) => r.pathname === '/byok/challenge').length;
+
+    const rejected = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
+    await expect(rejected.start()).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(server.httpRequests.filter((r) => r.pathname === '/byok/challenge')).toHaveLength(before);
+    await rejected.stop();
   });
 
   it('a revoked device surfaces status().revoked without retry-looping, then recovers via a fresh pair()', async () => {
