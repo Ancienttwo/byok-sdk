@@ -1,6 +1,6 @@
 # Plan: S7-c npm Release Candidate
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260809-1153
 > **Slug**: s7c-npm-release
 > **Artifact Level**: work-package

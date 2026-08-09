@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-09T11:52:33+0800 -->
+<!-- updated_at: 2026-08-09T23:10:04+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-09T11:52:33+0800
-> **Source Branch**: codex/s7c-npm-release
-> **Source Commit**: 8ad6474
+> **Updated At**: 2026-08-09T23:10:04+0800
+> **Source Branch**: codex/s7c-release-closeout
+> **Source Commit**: 116717c
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,8 +31,6 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/ancienttwo/Projects/byok-sdk: plans/plan-20260805-1659-byok-keys-package.md
-- /Users/ancienttwo/Projects/byok-sdk: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
 - /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup: plans/plan-20260809-0001-s4b-c-cloud-cleanup.md
 - /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s4b-c-cloud-cleanup
 - /Users/ancienttwo/Projects/byok-sdk-wt-s5-board-streams: plans/plan-20260809-0148-s5-board-streams.md
@@ -41,6 +39,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - /Users/ancienttwo/Projects/byok-sdk-wt-s6-device-proof-memory: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s6-device-proof-memory
 - /Users/ancienttwo/Projects/byok-sdk-wt-s6b-atomic-truth: plans/plan-20260809-0418-s6b-atomic-truth.md
 - /Users/ancienttwo/Projects/byok-sdk-wt-s6b-atomic-truth: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s6b-atomic-truth
+- /Users/ancienttwo/Projects/byok-sdk-wt-s6c-daemon-memory: plans/plan-20260809-1153-s7c-npm-release.md
+- /Users/ancienttwo/Projects/byok-sdk-wt-s6c-daemon-memory: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-s6c-daemon-memory
 ## Active Sprint
 
 - Sprint: (none)
@@ -49,7 +49,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Merge PR #39 and read back `main`。
+- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
 
 ## Checks
 
@@ -60,16 +60,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260809-0638-s7b-diagnostics.md
- D tasks/contracts/20260809-0638-s7b-diagnostics.contract.md
- D tasks/notes/20260809-0638-s7b-diagnostics.notes.md
- D tasks/reviews/20260809-0638-s7b-diagnostics.review.md
+ D plans/plan-20260809-1153-s7c-npm-release.md
+ D tasks/contracts/20260809-1153-s7c-npm-release.contract.md
+ D tasks/notes/20260809-1153-s7c-npm-release.notes.md
+ D tasks/reviews/20260809-1153-s7c-npm-release.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260809-0638-s7b-diagnostics.md
-?? tasks/archive/contract-20260809-1152-s7b-diagnostics.md
-?? tasks/archive/notes-20260809-1152-s7b-diagnostics.md
-?? tasks/archive/review-20260809-1152-s7b-diagnostics.md
-?? tasks/archive/todo-20260809-1152-s7b-diagnostics.md
+?? plans/archive/plan-20260809-1153-s7c-npm-release.md
+?? tasks/archive/contract-20260809-2310-s7c-npm-release.md
+?? tasks/archive/notes-20260809-2310-s7c-npm-release.md
+?? tasks/archive/review-20260809-2310-s7c-npm-release.md
+?? tasks/archive/todo-20260809-2310-s7c-npm-release.md
 ```
 
 ## Source Artifacts

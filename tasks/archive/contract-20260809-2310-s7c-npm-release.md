@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-09 23:10
+> **Related Plan**: plans/archive/plan-20260809-1153-s7c-npm-release.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260809-2310
+
 # Task Contract: s7c-npm-release
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260809-1153-s7c-npm-release.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->

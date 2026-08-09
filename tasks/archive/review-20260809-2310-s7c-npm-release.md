@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-09 23:10
+> **Related Plan**: plans/archive/plan-20260809-1153-s7c-npm-release.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260809-2310
+
 # Task Review: s7c-npm-release
 
 > **Status**: Accepted; release readback complete
