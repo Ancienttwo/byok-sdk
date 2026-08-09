@@ -7,6 +7,7 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../dae
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
 import { LocalStoragePressureEngine } from '../daemon/journal/storage-policy';
+import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { connectControlClient } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -161,7 +162,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     expect(allFails).toHaveLength(1);
   }, 10000);
 
-  it('retains the mutation lease when a writer teardown barrier fails, then releases it after a clean retry', async () => {
+  it.skipIf(!isSqliteAvailable())('retains the mutation lease when a writer teardown barrier fails, then releases it after a clean retry', async () => {
     const workspaceRoot = await tmpDir('byok-stop-barrier-ws-');
     const storeDir = await tmpDir('byok-stop-barrier-store-');
     const config: DaemonConfig = {

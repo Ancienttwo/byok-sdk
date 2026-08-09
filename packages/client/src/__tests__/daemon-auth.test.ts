@@ -38,7 +38,7 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
 
     const filePath = path.join(storeDir, 'device.json');
     const stat = await fs.stat(filePath);
-    expect(stat.mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(stat.mode & 0o777).toBe(0o600);
 
     const onDisk = JSON.parse(await fs.readFile(filePath, 'utf8')) as Record<string, unknown>;
     expect(onDisk.devicePrivateKeyPem).toBe(record.devicePrivateKeyPem);

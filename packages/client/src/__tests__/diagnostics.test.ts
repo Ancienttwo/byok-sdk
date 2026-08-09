@@ -139,7 +139,11 @@ describe('diagnostics collector', () => {
 
     expect(snapshot.health.status).toBe('valid');
     expect(snapshot.quarantine.entries).toHaveLength(MAX_QUARANTINE_ENTRIES);
-    expect(snapshot.quarantine.count).toBe(MAX_QUARANTINE_ENTRIES + 5);
+    // Directory enumeration order is intentionally not an authority. The
+    // bounded 200-dirent scan can validate 100-105 complete evidence pairs
+    // from this 210-dirent fixture depending on the host filesystem order.
+    expect(snapshot.quarantine.count).toBeGreaterThanOrEqual(MAX_QUARANTINE_ENTRIES);
+    expect(snapshot.quarantine.count).toBeLessThanOrEqual(MAX_QUARANTINE_ENTRIES + 5);
     expect(snapshot.quarantine.truncated).toBe(true);
   });
 
@@ -226,11 +230,9 @@ describe('diagnostics collector', () => {
     const { DatabaseSync } = loadSqliteModule();
     const db = new DatabaseSync(path.join(dir, 'daemon.db'));
     db.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE evidence(value TEXT); INSERT INTO evidence VALUES (\'x\');');
-    await fs.rm(path.join(dir, 'daemon.db-shm'), { force: true });
-    const beforeNames = (await fs.readdir(dir)).sort();
-    const before = new Map(await Promise.all(beforeNames.map(async (name) => [name, await digest(path.join(dir, name))] as const)));
-
     try {
+      const beforeNames = (await fs.readdir(dir)).sort();
+      const before = new Map(await Promise.all(beforeNames.map(async (name) => [name, await digest(path.join(dir, name))] as const)));
       await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
       const afterNames = (await fs.readdir(dir)).sort();
       expect(afterNames).toEqual(beforeNames);
@@ -419,7 +421,7 @@ describe('doctor explicit fix', () => {
     await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/opened safely|unconfirmed corruption/);
     expect(await fs.readlink(sourcePath)).toBe(outside);
     expect(await fs.readFile(outside, 'utf8')).toBe('{external-corrupt}');
-    expect((await fs.stat(outside)).mode & 0o777).toBe(0o644);
+    if (process.platform !== 'win32') expect((await fs.stat(outside)).mode & 0o777).toBe(0o644);
   });
 
   it('refuses fix while the daemon ownership lease is held', async () => {
