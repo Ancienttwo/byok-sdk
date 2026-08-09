@@ -16,9 +16,20 @@ const packages = [
   '@byok-sdk/cloud-postgres',
   'byok-sdk',
 ];
-const packageManager = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const nodeBin = process.execPath;
+const pnpmInvocation = process.platform === 'win32'
+  ? { command: nodeBin, prefix: [process.env.npm_execpath ?? ''] }
+  : { command: 'pnpm', prefix: [] };
+const npmCliPath = path.join(path.dirname(nodeBin), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+const npmInvocation = process.platform === 'win32'
+  ? { command: nodeBin, prefix: [npmCliPath] }
+  : { command: 'npm', prefix: [] };
+if (process.platform === 'win32' && !pnpmInvocation.prefix[0]) {
+  throw new Error('Windows release-pack must be launched through pnpm so npm_execpath identifies the pnpm JS entrypoint');
+}
+if (process.platform === 'win32' && !existsSync(npmCliPath)) {
+  throw new Error(`Windows npm CLI entrypoint is missing: ${npmCliPath}`);
+}
 const outArgIndex = process.argv.indexOf('--out-dir');
 const requestedOut = outArgIndex >= 0 ? process.argv[outArgIndex + 1] : undefined;
 if (outArgIndex >= 0 && (!requestedOut || requestedOut.startsWith('--'))) {
@@ -45,12 +56,12 @@ try {
   }
   mkdirSync(outDir, { recursive: true });
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
-  run(packageManager, ['-r', 'run', 'build']);
+  run(pnpmInvocation.command, [...pnpmInvocation.prefix, '-r', 'run', 'build']);
 
   const tarballs = [];
   for (const packageName of packages) {
     const before = new Set(readdirSync(outDir));
-    run(packageManager, ['--filter', packageName, 'pack', '--pack-destination', outDir]);
+    run(pnpmInvocation.command, [...pnpmInvocation.prefix, '--filter', packageName, 'pack', '--pack-destination', outDir]);
     const created = readdirSync(outDir).filter((entry) => entry.endsWith('.tgz') && !before.has(entry));
     if (created.length !== 1) throw new Error(`${packageName}: expected one tarball, created ${created.length}`);
     const file = created[0];
@@ -66,7 +77,7 @@ try {
       path.join(smokeDir, 'package.json'),
       `${JSON.stringify({ name: 'byok-release-smoke', private: true, type: 'module', dependencies }, null, 2)}\n`,
     );
-    run(npmBin, ['install', '--ignore-scripts', '--no-audit', '--no-fund'], smokeDir);
+    run(npmInvocation.command, [...npmInvocation.prefix, 'install', '--ignore-scripts', '--no-audit', '--no-fund'], smokeDir);
     writeFileSync(
       path.join(smokeDir, 'smoke.mjs'),
       `import assert from 'node:assert/strict';\n` +

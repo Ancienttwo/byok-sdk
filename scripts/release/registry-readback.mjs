@@ -13,8 +13,14 @@ const packages = [
   '@byok-sdk/cloud-postgres',
   'byok-sdk',
 ];
-const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const nodeBin = process.execPath;
+const npmCliPath = path.join(path.dirname(nodeBin), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+const npmInvocation = process.platform === 'win32'
+  ? { command: nodeBin, prefix: [npmCliPath] }
+  : { command: 'npm', prefix: [] };
+if (process.platform === 'win32' && !existsSync(npmCliPath)) {
+  throw new Error(`Windows npm CLI entrypoint is missing: ${npmCliPath}`);
+}
 
 function run(command, args, cwd = process.cwd()) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -26,7 +32,7 @@ function run(command, args, cwd = process.cwd()) {
 
 const metadata = [];
 for (const packageName of packages) {
-  const value = JSON.parse(run(npmBin, ['view', `${packageName}@${expectedVersion}`, 'name', 'version', 'maintainers', 'dist', '--json']));
+  const value = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'view', `${packageName}@${expectedVersion}`, 'name', 'version', 'maintainers', 'dist', '--json']));
   if (value.name !== packageName || value.version !== expectedVersion) throw new Error(`${packageName}: registry identity/version mismatch`);
   const maintainers = Array.isArray(value.maintainers) ? value.maintainers : [value.maintainers];
   if (!maintainers.some((entry) => String(typeof entry === 'string' ? entry : entry?.name).includes('ancienttwo'))) {
@@ -42,7 +48,7 @@ try {
     path.join(smokeDir, 'package.json'),
     `${JSON.stringify({ name: 'byok-registry-readback', private: true, type: 'module', dependencies }, null, 2)}\n`,
   );
-  run(npmBin, ['install', '--ignore-scripts', '--no-audit', '--no-fund'], smokeDir);
+  run(npmInvocation.command, [...npmInvocation.prefix, 'install', '--ignore-scripts', '--no-audit', '--no-fund'], smokeDir);
   writeFileSync(
     path.join(smokeDir, 'readback.mjs'),
     `import assert from 'node:assert/strict';\n` +
