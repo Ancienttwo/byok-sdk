@@ -1,12 +1,12 @@
 # Sprint 方案：BYOK Platform RAFT-Aligned Delivery
 
-> **Status**: Executing
-> **状态**：Executing。S0–S6、S7-a 与 S7-b 已合入 `main`；K4/K4.1 跨仓库依赖轨也已合入，当前执行 S7-c npm release candidate
+> **Status**: Done
+> **状态**：Done。S0–S7 与 K4/K4.1 跨仓库依赖轨均已交付；完整 dispatch SDK 已发布为 `byok-sdk@0.1.0`
 > **创建日期**：2026-08-07
 > **最后修订**：2026-08-09（见 D-12）
-> **仓库基线**：`Ancienttwo/byok-sdk@8ad6474`（2026-08-09）
-> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）、S6-a（merge `3bc3e74`，PR #34）、S6-b（merge `639f2e5`，PR #35）、S6-c（merge `68b6020`，PR #36）、S7-a（merge `489255b`，PR #38）、S7-b（merge `8ad6474`，PR #39）
-> **下一可执行 slice**：S7-c npm release candidate 正在执行（plan `20260809-1153-s7c-npm-release`）；Claude review 按 owner 指令暂停，验收走 independent Codex exact-SHA
+> **仓库基线**：`Ancienttwo/byok-sdk@aebe6b6`（2026-08-09，release tag `v0.1.0`）
+> **已完成 Sprint**：S0（merge `d2395d6`，PR #18）、S1（merge `50819a3`，PR #19）、S2（merge `2b8e13e`，PR #20）、S3a（merge `714f61d`，PR #21）、S3b（merge `5a03c7f`，PR #22）、S4A-a（merge `5f399f1`，PR #23）、S4A-b（merge `aff8dda`，PR #24）、S4A-c（merge `e97a2db`，PR #25）、S4B-a（merge `bf228a1`，PR #27）、S4B-b（merge `ae93b40`，PR #28）、S4B-c（merge `140b109`，PR #32）、S5（merge `2a1c4a7`，PR #33）、S6-a（merge `3bc3e74`，PR #34）、S6-b（merge `639f2e5`，PR #35）、S6-c（merge `68b6020`，PR #36）、S7-a（merge `489255b`，PR #38）、S7-b（merge `8ad6474`，PR #39）、S7-c（PR #40/#41，release tree `aebe6b6`，npm/GitHub release `v0.1.0`）
+> **下一可执行 slice**：本 Sprint 无未完成 slice；P5 仍是 Sprint 外的独立 deferred plan，不属于本次完成条件
 > **架构依据**：`docs/architecture/sdk-architecture.md`、`ARCHITECTURE-PROPOSAL-byok-platform.md` §9.2、`docs/researches/tenant-isolation-decision.md` §7
 > **RAFT 证据**：`docs/researches/raft-architecture-reference.md`
 > **当前 workflow**：当前 workflow 状态以 `tasks/current.md` 为准，本文件不再手工维护
@@ -31,7 +31,7 @@
 | 1 | [x] | S4B-c — Cloud cleanup / retention / reconcile | contract | §S4B 剩余验收项通过，GC/tombstone/dead-letter 有 real Postgres+MinIO 回归与 crash matrix | PR #32；merge `140b109`；Claude external pass；CI 32/32 |
 | 2 | [x] | S5 — Board、SSE/Poll 与 Presence/Activity | contract | §S5 全部验收项通过，reconnect 与 claim 竞态有测试覆盖 | PR #33；merge `2a1c4a7`；CI green |
 | 3 | [x] | S6 — Device Proof、Truth Write 与 Memory Manifest/CAS | contract | §S6 全部验收项通过，proof 校验失败路径 fail-closed | PR #34/#35/#36；merge `3bc3e74`/`639f2e5`/`68b6020`；各 32/32 CI；full-stack Codex exact-SHA accepted |
-| 4 | [ ] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | S7-a PR #38 / merge `489255b`、S7-b PR #39 / merge `8ad6474` 已完成；S7-c plan `20260809-1153-s7c-npm-release` executing |
+| 4 | [x] | S7 — Keys 边界、Operations 与 Release Candidate | contract | §S7 全部验收项通过，§12 program release gates 全部满足 | S7-a PR #38 / merge `489255b`、S7-b PR #39 / merge `8ad6474`、S7-c PR #40/#41 / release tree `aebe6b6`；七个 npm artifacts、fresh registry install、`v0.1.0` tag/Release 均完成 readback |
 
 已交付并合入 `main` 的 S0、S1、S2、S3a、S3b、S4A、S4B 不再列入后续 backlog；S4B-c 行仅保留本轮 merge readback 记录，其 merge SHA 见文首交付清单。
 
@@ -149,6 +149,7 @@ T 线与 P 线的耦合点保持 §7 原样：T1 挂 P0、T2 挂 P1、T3 挂 P2�
 - **触发事实**：registry 中 `byok-sdk@0.0.1` 是 user-owned placeholder，`@byok-sdk/keys@0.1.0` 已发布；六个旧 identity `@byok/*` 与六个目标 dispatch identity `@byok-sdk/*` 都没有既存 public version contract。只发布 keys 不能交付整套 SDK，而把 keys 塞进 dispatch umbrella 又会破坏 ADR-012。
 - **裁定**：S7-c 一次性把六个 live dispatch package 从 `@byok/*` cut over 到 `@byok-sdk/*@0.1.0`，不发布 old-scope shim；新增 `byok-sdk@0.1.0`，以 `core`/`protocol`/`client`/`server`/`cloud`/`cloudPostgres` 六个 namespace 聚合完整 dispatch SDK。`@byok-sdk/keys` 保持独立安装，umbrella 与所有 dispatch runtime graph 都不得到达 keys；private `@byok-sdk/conformance` 不进入发布 graph。
 - **发布影响**：S7-c 本刀发布六个 scoped dispatch tarball + 一个 unscoped umbrella；已存在的 keys version 不重发。所有七个 artifact 必须来自同一个 accepted tree，以 dependency-first 顺序发布并逐个 registry readback；tag 只在完整 fresh install 后创建。
+- **交付事实**：PR #40 交付 identity cutover、umbrella 与 release gates；PR #41 修复 persistent `--out-dir` 的跨平台 artifact path，并在 Linux/macOS/Windows、Node 20/22 全绿。七个 `0.1.0` artifact 均由 release tree `aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b` 冻结并发布；registry `dist.integrity` 与 frozen manifest 的 SHA-512 对每包逐一相等，fresh exact install/import 通过。annotated tag `v0.1.0` 解引用到同一 tree，GitHub Release 已 read back；`@byok-sdk/keys` 未重发且不在安装图中。
 - **supersede 条件**：只有新的安全 ADR 明确废除 dispatch/key 双模型时，才可让 umbrella 依赖 keys；不预埋 optional/peer/compatibility edge。
 
 ---
@@ -1156,6 +1157,8 @@ K-401/K-402/K-502/K-503 已由 D-11 收口；S7 实作从 L-004 开始。
 
 > **S7-b 交付边界**：归档 plan `plans/archive/plan-20260809-0638-s7b-diagnostics.md` 已由 PR #39 / merge `8ad6474` 交付 typed read-only collector，`doctor` plain/JSON、offline-only `doctor --fix --yes` health quarantine、exclusive atomic/bounded/allowlist `support-bundle`，以及 hosted/self-hosted/release-responsibility 三份 runbook。journal doctor 只做 read-only quick check，既有 `JournalCorruptError` quarantine 仍是唯一 production move authority；不加 rebuild、自动 cleanup 或 package/runtime fallback。load/retention falsifier以 quarantine 100-entry projection cap、10,000 scan cap、audit 256 KiB tail/200 facts 与 existing reconnect fleet simulation执行。exact target `96dcbab9` 经 independent Codex review accepted，PR CI 34/34 green；Claude paused/not invoked。
 
+> **S7-c 交付边界**：PR #40 / merge `705a956` 完成 public identity、六 namespace umbrella、release graph 与 frozen artifact integrity authority；PR #41 / merge `aebe6b6` 修复跨平台 persistent output path 并由 Linux/macOS/Windows Node 20/22 CI 证明。`@byok-sdk/{core,protocol,server,cloud,client,cloud-postgres}@0.1.0` 与 `byok-sdk@0.1.0` 已按 dependency-first 顺序发布，registry integrity 和 fresh exact install/import readback 通过。tag/Release `v0.1.0` 指向 `aebe6b6`；keys 保持独立且未重发。Claude review 按 owner 指令暂停，验收采用 independent Codex exact-SHA。
+
 #### Support bundle
 
 - config summary
@@ -1169,20 +1172,22 @@ K-401/K-402/K-502/K-503 已由 D-11 收口；S7 实作从 L-004 开始。
 
 ### S7.4 Release candidate gates
 
-- [ ] K4 golden test in aip passes unchanged；
-- [ ] 包依赖图 obeys dependency rules；
-- [ ] all shipped compositions pass conformance（InMemory、Postgres + R2、self-hosted；optional D1 adapter 若已发布也在内）；
-- [ ] **I1–I9 全部通过**——D-2 的分期到此闭合，RC 闸不接受任何延后项；
-- [ ] crash drills pass；
-- [ ] reconnect fleet simulation has bounded peak；
-- [ ] credential-isolation audit passes；
-- [ ] proof security review pass；
-- [ ] production migration/runbook pass；
-- [ ] support bundle redaction review；
-- [ ] packageability/service smoke on macOS/Linux/Windows；
-- [ ] protocol golden 双门禁通过：wire corpus 零变化；schema fingerprint 自 `ac92acb` 之后无未批准变更；
-- [ ] changelog explains self-hosted/hosted semantic differences；
-- [ ] architecture status updated to CURRENT/TARGET accurately。
+- [x] K4 golden test in aip passes unchanged（AiphaBee PR #7，CI run `31278628304` green，merge `390307a`）；
+- [x] 包依赖图 obeys dependency rules（release graph + registry fresh-install graph；keys/conformance 均不可达）；
+- [x] all shipped compositions pass conformance（InMemory、Postgres + R2、self-hosted；D1 未发布且不在 RC）；
+- [x] **I1–I9 全部通过**——D-2 的分期到此闭合，RC 闸没有延后项；
+- [x] crash drills pass；
+- [x] reconnect fleet simulation has bounded peak；
+- [x] credential-isolation audit passes；
+- [x] proof security review pass；
+- [x] production migration/runbook pass；
+- [x] support bundle redaction review；
+- [x] packageability/service smoke on macOS/Linux/Windows；
+- [x] protocol golden 双门禁通过：wire corpus 零变化；schema fingerprint 自 `ac92acb` 之后无未批准变更；
+- [x] changelog explains self-hosted/hosted semantic differences；
+- [x] architecture status updated to CURRENT/TARGET accurately。
+
+> **RC closeout evidence**：PR #40 46/46 CI，PR #41 的 push/PR matrices 全绿；frozen manifest 绑定 source `aebe6b6` 与七个 tarball SHA-256/SHA-512，registry readback 对每个 `dist.integrity` 做 exact equality，并从 registry fresh install/import 六 namespace 与六 direct packages。`v0.1.0^{}` = `aebe6b6`，GitHub Release 为非 draft、非 prerelease。
 
 ### S7.5 Rollback
 
@@ -1459,7 +1464,7 @@ RC 拆成两个互相独立的 profile。拆分的理由是阻塞源不同：dis
 
 #### Dispatch Platform RC（S3b–S6 + operations gates）
 
-**不被 K4 阻塞。** 要求：
+**完成。** 不被 K4 阻塞；以下要求全部由 S7.4 与各 slice 的 exact evidence 收口：
 
 - device proof；
 - immutable truth/memory CAS；
@@ -1473,7 +1478,7 @@ RC 拆成两个互相独立的 profile。拆分的理由是阻塞源不同：dis
 
 #### BYOK product-suite RC
 
-在 Dispatch Platform RC 全部条件之上，额外要求：
+**完成。** 在 Dispatch Platform RC 全部条件之上，额外要求：
 
 - K4/K4.1 完成；
 - keys golden parity（`aip` 侧 golden test 不改期望值即通过）；

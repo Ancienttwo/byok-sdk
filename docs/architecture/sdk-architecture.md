@@ -1,7 +1,7 @@
 # BYOK SDK 架构文档
 
-> 状态：S7-c release candidate 架构复核稿；registry 状态仍以 publish 后 readback 为准。
-> Verified against: S7-c working tree based on main@8ad6474（2026-08-09）
+> 状态：CURRENT；S0–S7 与 `byok-sdk@0.1.0` registry release 已完成。
+> Verified against: main@aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b + npm/GitHub release `v0.1.0` readback（2026-08-09）
 > Verification scope: CURRENT sections + package graph + completed-slice status
 > Volatile workflow status: see tasks/current.md; not duplicated here
 > 面向对象：嵌入 BYOK 能力的 SaaS 开发者、SDK 维护者、安全审计与部署人员。
@@ -24,7 +24,7 @@
 - Agent dispatch plane：`@byok-sdk/protocol` + `@byok-sdk/server` + `@byok-sdk/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
 
-目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 将六个 dispatch package 统一到 `@byok-sdk/*@0.1.0`，并新增 `byok-sdk@0.1.0` namespace umbrella；`@byok-sdk/keys` 继续独立安装，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录执行状态。
+目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 已将六个 dispatch package 统一发布为 `@byok-sdk/*@0.1.0`，并发布 `byok-sdk@0.1.0` namespace umbrella；`@byok-sdk/keys` 继续独立安装，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录最终执行状态。
 
 ## 1. P1：全局架构地图
 
@@ -98,7 +98,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库是 Node `>=20`、pnpm workspace。当前有九个 workspace package：八个 public manifest（六个 dispatch package、`byok-sdk` umbrella、独立 `@byok-sdk/keys`）与一个只供测试使用的 private `@byok-sdk/conformance`。S7-c 的本地 tarball gate 已证明七个本刀 artifact 可以被隔离安装/import；这不等于 registry 已发布，npm 状态必须等 publish 后 readback。下图画实际 runtime、release 与 test-only edges。
+仓库是 Node `>=20`、pnpm workspace。当前有九个 workspace package：八个 public manifest（六个 dispatch package、`byok-sdk` umbrella、独立 `@byok-sdk/keys`）与一个只供测试使用的 private `@byok-sdk/conformance`。S7-c 的七个 dispatch artifacts 已从同一 source tree `aebe6b6` 发布；registry `dist.integrity` 与 frozen manifest 的 SHA-512 逐包一致，fresh exact install/import 已证明 umbrella 六 namespace 与六个 direct packages 可用，且安装图不含 keys。下图画实际 runtime、release 与 test-only edges。
 
 ```mermaid
 flowchart LR
@@ -945,9 +945,9 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 | GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
 | GAP-016 | **已收口（S4A/S4B）**：Postgres + R2 entitlement/usage/reservation/quota/GC 与 reconciliation 已实现 | Pri-0（hosted storage） | S4A/S4B |
 
-## 12. 平台架构（S0–S7-b 已落地，S7-c release/registry closeout 执行中）
+## 12. 平台架构（S0–S7 与 release/registry closeout 已落地）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 正在完成 public identity、umbrella、跨平台 packageability、registry publish/readback 与 release tag。wire v1 保持冻结。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability、registry publish/readback 与 `v0.1.0` tag/Release。wire v1 保持冻结。
 
 ### 12.1 目标 package graph
 
@@ -1559,7 +1559,7 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll（已实现；PR gate 见 sprint ledger） | P3 |
 | S6 | Device proof + memory | P4 |
-| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b 已完成，S7-c 执行中） | 不对应 P5；P5 是独立 deferred plan |
+| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b/S7-c 与 `v0.1.0` release 已完成） | 不对应 P5；P5 是独立 deferred plan |
 | 并行 | K4/K4.1 aip swap | K 线，不阻塞 P0/P1 |
 | — | P5：keys profile → `TruthStore` | Deferred standalone plan，触发条件见上表 |
 
