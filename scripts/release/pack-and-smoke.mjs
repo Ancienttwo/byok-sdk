@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -81,8 +81,13 @@ try {
 
   const smokeDir = mkdtempSync(path.join(os.tmpdir(), 'byok-release-install-'));
   try {
+    const smokeArtifactsDir = path.join(smokeDir, 'artifacts');
+    mkdirSync(smokeArtifactsDir);
+    for (const entry of tarballs) {
+      copyFileSync(path.join(outDir, entry.file), path.join(smokeArtifactsDir, entry.file));
+    }
     const dependencies = Object.fromEntries(
-      tarballs.map((entry) => [entry.package, `file:${path.relative(smokeDir, path.join(outDir, entry.file)).split(path.sep).join('/')}`]),
+      tarballs.map((entry) => [entry.package, `file:./artifacts/${entry.file}`]),
     );
     writeFileSync(
       path.join(smokeDir, 'package.json'),
