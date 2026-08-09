@@ -321,7 +321,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check graph, pack exact tarballs, and import from an isolated npm install
-        run: pnpm run check:release-pack
+        run: pnpm run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
   # M3-4 Windows Service guarantee: proves the generated WinSW service
   # descriptor (packages/client/src/lifecycle/winsw.ts) actually installs,
