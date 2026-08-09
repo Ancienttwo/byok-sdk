@@ -35,7 +35,7 @@ import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
 import { JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
-import { isSqliteAvailable } from './journal/sqlite-support';
+import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
 import {
   createFilesystemCleanupExecutor,
   createStatfsFreeBytesProvider,
@@ -385,6 +385,8 @@ export interface DaemonOverrides {
    */
   hostedJournal?: {
     journal?: LocalTaskJournal;
+    /** Test-only post-open SQLite initialization fault seam. */
+    openFaults?: JournalOpenFaultSeam;
     /**
      * S3b (L-003): injection seam for the storage pressure engine, same rule
      * as `journal` above — used only when `config.hostedJournal` is set, and
@@ -631,6 +633,7 @@ export function createDaemonWithAdapters(
           storeDir,
           ...(config.hostedJournal.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: config.hostedJournal.busyTimeoutMs }),
           ...(config.hostedJournal.maxRecordBytes === undefined ? {} : { maxRecordBytes: config.hostedJournal.maxRecordBytes }),
+          ...(overrides.hostedJournal?.openFaults === undefined ? {} : { openFaults: overrides.hostedJournal.openFaults }),
         });
       } catch (err) {
         if (err instanceof JournalHandleCleanupError) hostedStorageInitializationBarrierComplete = false;

@@ -55,7 +55,15 @@ import {
   type ReceivedEnvelopeRecord,
   type StorageCategory,
 } from './journal';
-import { isSqliteAvailable, openJournalDatabase, secureJournalFilePermissions } from './sqlite-support';
+import {
+  isSqliteAvailable,
+  JournalHandleCleanupError,
+  openJournalDatabase,
+  secureJournalFilePermissions,
+  type JournalOpenFaultSeam,
+} from './sqlite-support';
+
+export { JournalHandleCleanupError };
 
 /** The single database file, per §12.7.2's "建议单库 `<storeDir>/daemon.db`". */
 export const JOURNAL_DB_FILENAME = 'daemon.db';
@@ -114,20 +122,10 @@ export interface SqliteLocalTaskJournalOptions {
   readonly maxRecordBytes?: number;
   /** Test seam — see {@link JournalFaultSeam}. Never supplied in production. */
   readonly faults?: JournalFaultSeam;
+  /** Test seam for post-open/pre-return SQLite initialization failures. Never supplied in production. */
+  readonly openFaults?: JournalOpenFaultSeam;
   /** Injected clock, so receipt/quarantine timestamps are deterministic under test. Defaults to the real one. */
   readonly clock?: () => Date;
-}
-
-/**
- * Initialization failed and the just-opened SQLite handle could not be proven
- * closed. The daemon treats this as an incomplete mutation barrier and keeps
- * its cross-process store lease fail-closed instead of admitting a contender.
- */
-export class JournalHandleCleanupError extends Error {
-  constructor(message: string, readonly failures: readonly unknown[]) {
-    super(message);
-    this.name = 'JournalHandleCleanupError';
-  }
 }
 
 /**
@@ -374,9 +372,18 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     // just as much evidence, as one that fails at open.
     let db: DatabaseSync | undefined;
     try {
-      db = openJournalDatabase(this.#dbPath, options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+      db = openJournalDatabase(
+        this.#dbPath,
+        options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
+        options.openFaults,
+      );
       db.exec(SCHEMA);
     } catch (err) {
+      // `openJournalDatabase` owns the handle until it returns. If that helper
+      // could not prove cleanup, this constructor has no handle to close and
+      // must preserve the typed mutation-barrier failure for the daemon rather
+      // than relabeling it as ordinary corruption and releasing the lease.
+      if (err instanceof JournalHandleCleanupError) throw err;
       // An open handle is itself a store writer/lock authority. Close it before
       // quarantine and before the caller can release its cross-process lease;
       // otherwise a schema failure could leave an unreachable live SQLite

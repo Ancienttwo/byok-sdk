@@ -371,6 +371,82 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     await recovered.release();
   }, 20_000);
 
+  it.skipIf(!isSqliteAvailable())('retains the lease in a real process when a post-open SQLite fault cannot prove handle cleanup', async () => {
+    const workspaceRoot = await tmpDir('byok-client-open-cleanup-workspace-');
+    const storeDir = await tmpDir('byok-client-open-cleanup-store-');
+    const config = {
+      productName: 'Test',
+      productId: 'test-open-cleanup-owner',
+      serverUrl: server.url,
+      workspaceRoot,
+      storeDir,
+      hostedJournal: { mode: 'sqlite' as const, tenantId: 'tenant-open-cleanup-test' },
+    };
+    const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
+    await pairer.pair('pairing-code');
+
+    const distEntry = new URL('../../dist/index.js', import.meta.url).href;
+    const childSource = `
+      const { createDaemonWithAdapters } = await import(process.argv[1]);
+      const config = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
+      const adapter = {
+        id: 'pi',
+        detect: async () => ({ present: true, version: 'test', authPresent: true }),
+        capabilities: () => ({ steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'confirm', 'deny'] }),
+        environmentRequirements: () => ({ credentialNames: [] }),
+        start: async () => { throw new Error('not used'); },
+      };
+      const daemon = createDaemonWithAdapters(config, [adapter], {
+        hostedJournal: {
+          openFaults: {
+            onStep(step) {
+              if (step === 'after-open') throw new Error('injected post-open failure');
+            },
+            close(db) {
+              db.close();
+              throw new Error('injected close-report failure');
+            },
+          },
+        },
+      });
+      try {
+        await daemon.start();
+        process.send?.({ kind: 'unexpected-start' });
+      } catch {
+        process.send?.({ kind: 'failed-with-retained-lease' });
+        setInterval(() => undefined, 1_000);
+      }
+    `;
+    const child = spawn(
+      process.execPath,
+      ['-e', childSource, distEntry, Buffer.from(JSON.stringify(config)).toString('base64url')],
+      { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
+    );
+    let childStderr = '';
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => { childStderr += chunk; });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', (code, signal) => reject(new Error(`cleanup-fault child exited early (${code ?? signal}): ${childStderr}`)));
+        child.on('message', (message: unknown) => {
+          const shaped = message as { kind?: string };
+          if (shaped.kind === 'failed-with-retained-lease') resolve();
+          if (shaped.kind === 'unexpected-start') reject(new Error('cleanup-fault daemon unexpectedly started'));
+        });
+      });
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+    } finally {
+      child.kill('SIGKILL');
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      }
+    }
+
+    const recovered = await acquireDaemonOwner(storeDir, 'doctor');
+    await recovered.release();
+  }, 20_000);
+
   it('reads the identity to remove only after unpair reacquires the mutation lease', async () => {
     const workspaceRoot = await tmpDir('byok-client-unpair-lease-workspace-');
     const storeDir = await tmpDir('byok-client-unpair-lease-store-');
