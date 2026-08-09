@@ -486,6 +486,24 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     await lease.release();
   });
 
+  it('maps a store directory alias to the same cross-process mutation mutex', async () => {
+    const parent = await tmpDir('byok-owner-alias-parent-');
+    const storeDir = path.join(parent, 'real-store');
+    const aliasDir = path.join(parent, 'store-alias');
+    await fs.mkdir(storeDir);
+    await fs.symlink(storeDir, aliasDir, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const lease = await acquireDaemonOwner(storeDir, 'doctor');
+    try {
+      await expect(acquireDaemonOwner(aliasDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+    } finally {
+      await lease.release();
+    }
+
+    const aliasLease = await acquireDaemonOwner(aliasDir, 'doctor');
+    await aliasLease.release();
+  });
+
   it('a revoked device surfaces status().revoked without retry-looping, then recovers via a fresh pair()', async () => {
     const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');

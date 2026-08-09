@@ -41,8 +41,8 @@ interface LivenessListener {
 const STORE_MUTEX_PORT_BASE = 10_000;
 const STORE_MUTEX_PORT_COUNT = 10_000;
 
-function storeMutexPort(storeDir: string): number {
-  const digest = createHash('sha256').update(path.resolve(storeDir)).digest();
+function storeMutexPort(canonicalStoreDir: string): number {
+  const digest = createHash('sha256').update(canonicalStoreDir).digest();
   return STORE_MUTEX_PORT_BASE + (digest.readUInt32BE(0) % STORE_MUTEX_PORT_COUNT);
 }
 
@@ -301,11 +301,17 @@ export async function acquireDaemonOwner(
   clock: () => Date = () => new Date(),
 ): Promise<DaemonOwnerLease> {
   await ensureSecureDir(storeDir);
+  // Resolve aliases before deriving the kernel mutex identity. `ownerPath`
+  // may still be reached through the operator-supplied spelling below, but a
+  // symlink/junction alias and the canonical directory must contend for the
+  // same transition mutex or they could otherwise run two stale-owner
+  // reclaim sequences against the same underlying pathnames.
+  const canonicalStoreDir = await fs.realpath(storeDir);
   // The mutex closes the stale-owner/reclaim TOCTOU: only one conforming
   // process can inspect, remove and republish these pathnames at a time. It is
   // retained for the full lease so another process cannot pass the pathname
   // checks during the small owner-file publication/release windows.
-  const mutex = await acquireStoreMutex(storeDir);
+  const mutex = await acquireStoreMutex(canonicalStoreDir);
   let liveness: LivenessListener | undefined;
   try {
     liveness = await createLivenessListener();
