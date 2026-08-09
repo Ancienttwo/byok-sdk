@@ -920,9 +920,9 @@ CI 验证层次：
 | GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | 原证据：`auth.ts` 发裸 `randomBytes(24)`，`http.ts` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | **已修复（S1）**：修复形状是单一域常数 `NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n'`（`auth.ts`），server 侧只有 `verifyNonceSignature` 一个 nonce 签名检查点、前缀在函数内部施加，client `device-keys.ts` 的 `signNonce` 签同一字面量；裸签名 401，无双模、无 flag、无过渡窗口，两端同批交付 | 已收口 | S1（已交付） |
 | GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | 原证据：`auth.ts` 的 `DeviceRecord` 只有 `deviceId/deviceName/devicePublicKey/revoked` | **已修复（S1）**：修复形状是 required tenant——`DeviceRecord` 增加 required `tenantId`/`productId`（无 optional、无默认值），值只来自 server 铸造的 pairing claims；`DeviceRegistry` 按 `(tenantId, deviceId)` 复合键查找且公开面 tenant-first（`get`/`revoke` 均带 tenantId），naked deviceId 查找不从包入口导出 | 已收口 | S1（已交付） |
 | GAP-007 | **已收口（S4A/S4B）**：`deploy/sql` forward-only migrations、Postgres+R2 composition、compose substrate 与 hosted env/runbook 已落地 | 平台设计已有 real Postgres+MinIO 实证 | §12.7 | 保留 SQL order/checksum、hard env 与 deploy runbook gate | 已收口 | S4 |
-| GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | `ws-transport.ts:248-254` 已有 `delay * (0.8 + Math.random() * 0.4)`，即 ±20% random jitter | 已有 random jitter，缺的是 device-id 派生的确定性种子；不要描述成"无 jitter" | Pri-1 | S7 |
+| GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | S7-a 已新增 `daemon/deterministic-jitter.ts`，以 product/device identity、domain 与 sequence 派生稳定 delay；`deterministic-jitter.test.ts` 覆盖 domain separation、bounds、fleet peak 与真实 WS retry 接线 | **已收口（S7-a）**：automatic reconnect/upload/maintenance 使用 domain-separated deterministic jitter；operator immediate retry 不加 jitter | 已收口 | S7 |
 
-GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4A/S4B 已收口；这些行保留在表内是为了留下修复轨迹，不再是待办。GAP-010 仍未修。
+GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4A/S4B 已收口，GAP-010 在 S7-a 已收口；这些行保留在表内是为了留下修复轨迹，不再是待办。
 
 以下两条列在缺口表里是历史记法，实为**已公开的设计约束**，不是待关闭的缺陷：
 
@@ -931,16 +931,16 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 | `@byok-sdk/keys` 零主链 import | key custody 与 dispatch 尚未组合 | 标为“已实现、隔离”，不是 placeholder，也不是 daemon secret source；这条零边是安全 invariant（§1.2、§14.3） |
 | embedded SQLite 不恢复 in-flight | record persistence 不等于 runtime recovery | 只承诺 task/blob record 跨重启，不承诺 live handle/session；应作为 self-hosted 的公开契约而非隐藏实现细节 |
 
-### 11.2 目标平台缺口（尚未实现，非当前缺陷）
+### 11.2 目标平台缺口与收口轨迹
 
 | ID | 缺口 | 优先级 | 落点 |
 | --- | --- | --- | --- |
 | GAP-006 | **已收口（S3b，2026-08-08）**：hosted mailbox 的无状态 device 面与 InMemory 组合（S3a，既有 daemon long-poll 零改动跑通）＋本机 durable journal（S3b，`SqliteLocalTaskJournal` 与 append-then-ack 顺序）合并闭环 | Pri-0（平台线） | S3a + S3b |
 | GAP-008 | **已收口（S5）**：board / presence / activity 与 SSE/poll reconciliation 已实现 | Pri-1 | S5 |
-| GAP-009 | **实现已收口（S6-a/S6-b/S6-c）**：device proof row authority/verifier、proof-only truth routes、Postgres atomic commit、daemon signer 与 selector/fetch/rehash/filter 均已实现；default-on 仍受独立 security acceptance gate 约束 | Pri-1 | S6 |
+| GAP-009 | **已收口（S6-a/S6-b/S6-c + S7 RC）**：device proof row authority/verifier、proof-only truth routes、Postgres atomic commit、daemon signer 与 selector/fetch/rehash/filter 均已实现；独立 security acceptance 与 RC gate 已通过 | 已收口 | S6/S7 |
 | GAP-011 | **已收口（S7-a/S7-b）**：deterministic health/crash authority、read-only doctor、evidence-preserving quarantine 与 bounded/redacted support bundle 已实现 | Pri-1 | S7 |
-| GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
-| GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
+| GAP-012 | **已收口（K4/K4.1）**：AiphaBee 已切到 registry `@byok-sdk/keys@0.1.0`，golden expectations unchanged，PR #7 merge `390307a` | 已收口 | K4/K4.1 |
+| GAP-013 | **已裁定并收口（K4/K4.1）**：platform-selecting secret-store factory 与 data-scope manifest 归 host；narrative `testConnection()` 留在 AiphaBee adapter，不扩 generic registry API | 已收口 | K4/K4.1 |
 | GAP-014 | **已收口（S7-b）**：hosted/self-hosted operations 与 host-owned signing/channel/updater/rollback responsibility runbook 已实现 | Pri-1 | S7 |
 | GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
 | GAP-016 | **已收口（S4A/S4B）**：Postgres + R2 entitlement/usage/reservation/quota/GC 与 reconciliation 已实现 | Pri-0（hosted storage） | S4A/S4B |
