@@ -92,4 +92,5 @@
 - [x] Implement explicit health-state quarantine fix with digest-bearing manifest and no deletion。
 - [x] Implement bounded/redacted support bundle and sentinel/load/retention tests。
 - [x] Add hosted/self-hosted/release-responsibility runbooks and architecture sync。
-- [ ] Run hard gates、independent Codex acceptance、PR CI and merge/readback。
+- [x] Run hard gates、independent Codex acceptance and PR CI；exact target `96dcbab9`、subject `sha256:2dd7a3b1aee322318384f9dd78a20c6fbd5599930d383e215dc9dae99ec96f0b`、PR #39 34/34 green。
+- [ ] Merge PR #39 and read back `main`。
