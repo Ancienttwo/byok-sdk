@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
@@ -502,6 +503,32 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
 
     const aliasLease = await acquireDaemonOwner(aliasDir, 'doctor');
     await aliasLease.release();
+  });
+
+  it('routes unrelated stores past a deterministic mutex-port collision', async () => {
+    const parent = await tmpDir('byok-owner-port-collision-');
+    const firstByPort = new Map<number, string>();
+    let collision: [string, string] | undefined;
+    for (let index = 0; index < 2_000 && !collision; index += 1) {
+      const candidate = path.join(parent, `store-${index}`);
+      const digest = createHash('sha256').update(candidate).digest();
+      const port = 10_000 + (digest.readUInt32BE(0) % 10_000);
+      const first = firstByPort.get(port);
+      if (first) collision = [first, candidate];
+      else firstByPort.set(port, candidate);
+    }
+    expect(collision).toBeDefined();
+    const [firstDir, secondDir] = collision!;
+    await fs.mkdir(firstDir);
+    await fs.mkdir(secondDir);
+
+    const firstLease = await acquireDaemonOwner(firstDir, 'doctor');
+    try {
+      const secondLease = await acquireDaemonOwner(secondDir, 'doctor');
+      await secondLease.release();
+    } finally {
+      await firstLease.release();
+    }
   });
 
   it('a revoked device surfaces status().revoked without retry-looping, then recovers via a fresh pair()', async () => {

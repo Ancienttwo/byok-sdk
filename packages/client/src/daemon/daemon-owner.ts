@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
-import { createServer, type Server } from 'node:net';
+import { createConnection, createServer, type Server } from 'node:net';
 import path from 'node:path';
 import { ensureSecureDir } from '../util/secure-dir';
 
@@ -32,18 +32,32 @@ interface LivenessListener {
   close(): Promise<void>;
 }
 
-// A pathname-derived loopback port is a conservative cross-process mutex for
-// the short owner/reclaim-file transition. The durable owner record keeps its
-// separate random liveness listener. A hash collision only fails closed by
-// rejecting an unrelated concurrent store mutation; it can never admit two
-// writers. Keeping the mutex separate is important: probing a stale owner's
-// recorded liveness port must not observe the contender's own mutex listener.
+// A canonical-path-derived loopback listener is the cross-process mutex for
+// the owner/reclaim transition. The listener identifies its store hash to
+// another conforming contender: the same hash means "active"; a different
+// valid hash means an unrelated store collided on this port and both sides can
+// safely use the next deterministic candidate. An unknown/non-responsive
+// listener remains fail-closed. Keeping this mutex separate is important:
+// probing a stale owner's random liveness port must not observe the
+// contender's own transition listener.
+// Stay below the host ephemeral-client range used by the test/runtime HTTP and
+// WebSocket connections. Candidate negotiation handles collisions between
+// BYOK stores inside this reserved deterministic window.
 const STORE_MUTEX_PORT_BASE = 10_000;
 const STORE_MUTEX_PORT_COUNT = 10_000;
+const STORE_MUTEX_PORT_CANDIDATES = 32;
+const STORE_MUTEX_ID_PREFIX = 'byok-store-mutex-v1:';
+const STORE_MUTEX_PROBE_TIMEOUT_MS = 1_000;
 
-function storeMutexPort(canonicalStoreDir: string): number {
-  const digest = createHash('sha256').update(canonicalStoreDir).digest();
-  return STORE_MUTEX_PORT_BASE + (digest.readUInt32BE(0) % STORE_MUTEX_PORT_COUNT);
+function storeMutexIdentity(canonicalStoreDir: string): string {
+  return createHash('sha256').update(canonicalStoreDir).digest('hex');
+}
+
+function storeMutexPort(identity: string, attempt: number): number {
+  const digest = Buffer.from(identity, 'hex');
+  const start = digest.readUInt32BE(0) % STORE_MUTEX_PORT_COUNT;
+  const step = 1 + (digest.readUInt32BE(4) % (STORE_MUTEX_PORT_COUNT - 1));
+  return STORE_MUTEX_PORT_BASE + ((start + attempt * step) % STORE_MUTEX_PORT_COUNT);
 }
 
 export class DaemonOwnerActiveError extends Error {
@@ -218,37 +232,71 @@ async function createLivenessListener(): Promise<LivenessListener> {
   };
 }
 
-async function acquireStoreMutex(storeDir: string): Promise<LivenessListener> {
-  const server: Server = createServer((socket) => socket.end());
-  const port = storeMutexPort(storeDir);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen({ host: '127.0.0.1', port, exclusive: true }, () => {
-        server.removeListener('error', reject);
-        resolve();
-      });
+async function probeStoreMutex(port: number): Promise<string | undefined> {
+  return new Promise<string | undefined>((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    let settled = false;
+    let raw = '';
+    const finish = (identity: string | undefined): void => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(identity);
+    };
+    socket.setEncoding('utf8');
+    socket.setTimeout(STORE_MUTEX_PROBE_TIMEOUT_MS, () => finish(undefined));
+    socket.on('data', (chunk: string) => {
+      raw += chunk;
+      if (raw.length > STORE_MUTEX_ID_PREFIX.length + 64 + 1) finish(undefined);
     });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-      throw new DaemonOwnerActiveError('unknown');
-    }
-    throw err;
-  }
-  server.unref();
-  let closed = false;
-  return {
-    port,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        if (closed) {
+    socket.once('end', () => {
+      const line = raw.trimEnd();
+      const identity = line.startsWith(STORE_MUTEX_ID_PREFIX)
+        ? line.slice(STORE_MUTEX_ID_PREFIX.length)
+        : undefined;
+      finish(identity && /^[a-f0-9]{64}$/.test(identity) ? identity : undefined);
+    });
+    socket.once('error', () => finish(undefined));
+  });
+}
+
+async function acquireStoreMutex(canonicalStoreDir: string): Promise<LivenessListener> {
+  const identity = storeMutexIdentity(canonicalStoreDir);
+  for (let attempt = 0; attempt < STORE_MUTEX_PORT_CANDIDATES; attempt += 1) {
+    const server: Server = createServer((socket) => socket.end(`${STORE_MUTEX_ID_PREFIX}${identity}\n`));
+    const port = storeMutexPort(identity, attempt);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen({ host: '127.0.0.1', port, exclusive: true }, () => {
+          server.removeListener('error', reject);
           resolve();
-          return;
-        }
-        closed = true;
-        server.close((err) => (err ? reject(err) : resolve()));
-      }),
-  };
+        });
+      });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
+      const holderIdentity = await probeStoreMutex(port);
+      if (holderIdentity === identity || holderIdentity === undefined) {
+        throw new DaemonOwnerActiveError('unknown');
+      }
+      continue;
+    }
+    server.unref();
+    let closed = false;
+    return {
+      port,
+      close: () =>
+        new Promise<void>((resolve, reject) => {
+          if (closed) {
+            resolve();
+            return;
+          }
+          closed = true;
+          server.close((err) => (err ? reject(err) : resolve()));
+        }),
+    };
+  }
+  throw new DaemonOwnerActiveError('unknown');
 }
 
 async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
