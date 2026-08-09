@@ -1359,13 +1359,17 @@ export function createDaemonWithAdapters(
    * in-memory record still usable.
    */
   async function unpair(): Promise<void> {
-    const current = await store.load();
     await stop();
     // stop() releases only after every daemon writer settles. Reacquire before
     // destructive identity cleanup; if another daemon won the gap, fail
     // closed rather than clearing state under it.
     const cleanupLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
+      // The identity being removed is read under the same lease as both the
+      // device and cursor mutations. A pair that wins stop()'s release gap is
+      // therefore either wholly before this cleanup (and is fully removed) or
+      // wholly after it; stale pre-lease identity can never drive cleanup.
+      const current = await store.load();
       await store.clear();
       if (current) {
         await cursorStore.clear(config.serverUrl, current.deviceId);

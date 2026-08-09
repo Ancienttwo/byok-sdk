@@ -19,7 +19,7 @@
 - Routing reason: 本刀涉及 local evidence preservation 与 support-bundle privacy；以 independent Codex exact-SHA review 验收。
 - Due diligence:
   - P1 map: operator 入口是 `packages/client/src/bin/byok-agent.ts`；live truth 经 authenticated control socket，persisted truth 来自 `device.json`、redacted `audit.jsonl`、`operational-health.json`、`daemon.db` 与 `quarantine/`。runtime probe 已由 `bin/runtime-probe.ts` 单一实现；journal corruption 已有 `JournalCorruptError` 与 timestamped quarantine，但 health corruption 只投影 unavailable。
-  - P2 trace: config → storeDir → read-only doctor collectors（config/runtime/control/files/health/quarantine）→ plain/JSON report；SQLite 从 bounded no-follow open handles 复制 temp snapshot；`support-bundle` 只消费同一 typed diagnostics snapshot + closed bounded audit projection并 atomic write；pair/start/auth shutdown/unpair 与 `doctor --fix --yes` 争用同一 ownership lease，fix 先 hard-link 并验证实际 inode、移除原名，再 hash/manifest，绝不删除 quarantine evidence。
+  - P2 trace: config → storeDir → read-only doctor collectors（config/runtime/control/files/health/quarantine）→ plain/JSON report；SQLite 从 bounded no-follow open handles 复制 temp snapshot；`support-bundle` 只消费同一 typed diagnostics snapshot + closed bounded audit projection并 atomic write；pair/start/auth shutdown/unpair 与 `doctor --fix --yes` 争用同一 ownership lease，pair/renew 再经同一进程内 mutation queue；fix 对 ≤1 MiB 的 confirmed-corrupt open inode 先 bounded hash，再以 cwd-pinned quarantine directory inode 同步完成 hard-link/source-unlink/manifest publication，绝不删除 quarantine evidence。
   - P3 decision rationale: doctor 与 bundle 共用一个 typed collector，避免两套诊断真相；fix 是窄而显式的 evidence-preserving operation，不修数据库、不重建 state。host updater/signing 继续留在 host，SDK 只写 responsibility/runbook contract。
 
 ## Workflow Inventory
@@ -57,7 +57,7 @@
 
 ### Data Flow
 
-`config + storeDir artifacts + bounded runtime probe + optional live control` → typed diagnostics snapshot（SQLite 仅从 bounded open handles temp-copy quick_check）→ `doctor` renderer or bounded/closed support-bundle projection → atomic output。`doctor --fix --yes` additionally performs `exclusive daemon-owner lease → reject symlink → hard-link + verify corrupt health inode → remove source name → SHA-256 + manifest`。
+`config + storeDir artifacts + bounded runtime probe + optional live control` → typed diagnostics snapshot（SQLite 仅从 bounded open handles temp-copy quick_check）→ `doctor` renderer or bounded/closed support-bundle projection → atomic output。`doctor --fix --yes` additionally performs `exclusive daemon-owner lease → bounded no-follow health inspection/hash → pin checked quarantine directory inode → hard-link + verify corrupt health inode → remove source name → exclusive digest manifest`。
 
 ## Risk Assessment
 
@@ -65,7 +65,7 @@
 | --- | --- | --- | --- |
 | bundle leaks secrets/prompts/paths | Medium | High | allowlist projection only；redaction manifest；fixture with sentinel secrets must be absent byte-for-byte |
 | doctor mutates during report | Medium | High | SQLite source is opened read-only/no-follow/non-blocking and copied by bounded positional reads；temp snapshot source identities are rechecked；fix dependency constructed only for `--fix --yes` |
-| fix destroys or misattributes corruption evidence | Low | High | daemon/doctor cross-process owner lease；no-follow regular-file gate；same-filesystem hard link is inode-verified before source unlink；no quarantine delete/rebuild |
+| fix destroys or misattributes corruption evidence | Low | High | daemon/doctor cross-process owner lease；no-follow regular-file/size gate；cwd-pinned checked directory inode；same-filesystem hard link is inode-verified before source unlink；no quarantine delete/rebuild |
 | large audit/quarantine makes command unbounded | Medium | Medium | count/byte caps and truncation counters；load test at cap+1 |
 | runbook implies SDK updater ownership | Low | High | explicit host-owned signing/channel/updater/rollback boundary |
 

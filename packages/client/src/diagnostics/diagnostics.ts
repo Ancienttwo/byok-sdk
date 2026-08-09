@@ -1,5 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
+import {
+  closeSync,
+  constants as fsConstants,
+  fchmodSync,
+  fsyncSync,
+  fstatSync,
+  linkSync,
+  lstatSync,
+  openSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,11 +23,11 @@ import { isSqliteAvailable, loadSqliteModule } from '../daemon/journal/sqlite-su
 import {
   inspectOperationalHealthHandle,
   inspectOperationalHealthFile,
+  MAX_OPERATIONAL_HEALTH_FILE_BYTES,
   type OperationalHealthFileInspection,
   OPERATIONAL_HEALTH_FILENAME,
 } from '../daemon/operational-health';
 import { acquireDaemonOwner } from '../daemon/daemon-owner';
-import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir } from '../util/secure-dir';
 
 export const MAX_QUARANTINE_ENTRIES = 100;
@@ -537,12 +548,16 @@ async function hashOpenFile(
 ): Promise<{ sha256: string; sizeBytes: number }> {
   const before = await handle.stat({ bigint: true });
   if (!before.isFile()) throw new Error('operational health state is not a regular file');
+  if (before.size > BigInt(MAX_OPERATIONAL_HEALTH_FILE_BYTES)) {
+    throw new Error('operational health state exceeds the bounded quarantine read limit');
+  }
   const hash = createHash('sha256');
   const buffer = Buffer.allocUnsafe(64 * 1024);
   let position = 0;
-  for (;;) {
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
-    if (bytesRead === 0) break;
+  while (position < Number(before.size)) {
+    const remaining = Number(before.size) - position;
+    const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, remaining), position);
+    if (bytesRead === 0) throw new Error('operational health state ended during bounded hash');
     hash.update(buffer.subarray(0, bytesRead));
     position += bytesRead;
   }
@@ -551,6 +566,87 @@ async function hashOpenFile(
     throw new Error('operational health state changed during inspection');
   }
   return { sha256: hash.digest('hex'), sizeBytes: Number(after.size) };
+}
+
+function sameInode(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+/**
+ * Run the destructive publication against a cwd-pinned directory inode. Node
+ * does not expose openat/linkat; a checked `process.chdir()` plus a fully
+ * synchronous callback is the only cross-platform way to prevent the known
+ * `quarantine/` pathname from being swapped to a symlink between validation
+ * and link creation. No event-loop callback can observe the temporary cwd.
+ */
+function publishQuarantineEvidencePinned(
+  quarantineDir: string,
+  expectedDirectory: import('node:fs').BigIntStats,
+  sourcePath: string,
+  sourceFd: number,
+  sourceStat: import('node:fs').BigIntStats,
+  evidenceName: string,
+  manifestName: string,
+  manifestBody: string,
+): void {
+  const previousCwd = process.cwd();
+  let entered = false;
+  let evidenceCreated = false;
+  let sourceRemoved = false;
+  let manifestTemp: string | undefined;
+  try {
+    process.chdir(quarantineDir);
+    entered = true;
+    const pinned = lstatSync('.', { bigint: true });
+    if (!pinned.isDirectory() || !sameInode(pinned, expectedDirectory)) {
+      throw new Error('quarantine path changed before publication; refusing quarantine');
+    }
+    const openSource = fstatSync(sourceFd, { bigint: true });
+    const namedSource = lstatSync(sourcePath, { bigint: true });
+    if (!sameInode(openSource, sourceStat) || !sameInode(namedSource, sourceStat)) {
+      throw new Error('operational health source identity changed before quarantine');
+    }
+    linkSync(sourcePath, evidenceName);
+    evidenceCreated = true;
+    const evidence = lstatSync(evidenceName, { bigint: true });
+    if (!evidence.isFile() || !sameInode(evidence, sourceStat)) {
+      throw new Error('quarantined operational health evidence identity does not match the inspected inode');
+    }
+    unlinkSync(sourcePath);
+    sourceRemoved = true;
+    fchmodSync(sourceFd, 0o600);
+
+    manifestTemp = `.${manifestName}.${randomUUID()}.tmp`;
+    const manifestFd = openSync(manifestTemp, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+    try {
+      writeFileSync(manifestFd, manifestBody, 'utf8');
+      fchmodSync(manifestFd, 0o600);
+      fsyncSync(manifestFd);
+    } finally {
+      closeSync(manifestFd);
+    }
+    linkSync(manifestTemp, manifestName);
+    unlinkSync(manifestTemp);
+    manifestTemp = undefined;
+    if (process.platform !== 'win32') {
+      const directoryFd = openSync('.', fsConstants.O_RDONLY);
+      try {
+        fsyncSync(directoryFd);
+      } finally {
+        closeSync(directoryFd);
+      }
+    }
+  } catch (err) {
+    if (manifestTemp) {
+      try { unlinkSync(manifestTemp); } catch { /* best-effort removal of unpublished temp */ }
+    }
+    if (evidenceCreated && !sourceRemoved) {
+      try { unlinkSync(evidenceName); } catch { /* preserve the original error */ }
+    }
+    throw err;
+  } finally {
+    if (entered) process.chdir(previousCwd);
+  }
 }
 
 /**
@@ -596,36 +692,15 @@ export async function quarantineCorruptOperationalHealth(
         await fs.mkdir(quarantineDir, { mode: 0o700 });
       }
       await ensureSecureDir(quarantineDir);
-      const securedQuarantine = await fs.lstat(quarantineDir);
+      const securedQuarantine = await fs.lstat(quarantineDir, { bigint: true });
       if (!securedQuarantine.isDirectory() || securedQuarantine.isSymbolicLink()) {
         throw new Error('quarantine path changed during validation; refusing quarantine');
       }
       const stamp = (options.clock ?? (() => new Date()))().toISOString().replace(/[:.]/g, '-');
       const evidenceName = `${stamp}-${randomUUID()}-${OPERATIONAL_HEALTH_FILENAME}`;
       const manifestName = `${evidenceName}.manifest.json`;
-      const evidencePath = path.join(quarantineDir, evidenceName);
-      // Publish a hard link first, then validate THAT link against the open
-      // descriptor before removing the source name. A pathname rename can
-      // move an unrelated replacement into quarantine before its post-rename
-      // inode check notices the race. Here a raced link is simply unlinked and
-      // rejected; only the already-inspected inode can become evidence.
-      await fs.link(sourcePath, evidencePath);
-      const linkedStat = await fs.lstat(evidencePath, { bigint: true });
-      if (!linkedStat.isFile() || linkedStat.dev !== sourceStat.dev || linkedStat.ino !== sourceStat.ino) {
-        await fs.rm(evidencePath, { force: true });
-        throw new Error('quarantined operational health evidence identity does not match the inspected inode');
-      }
-      const sourcePathStat = await fs.lstat(sourcePath, { bigint: true });
-      if (sourcePathStat.dev !== sourceStat.dev || sourcePathStat.ino !== sourceStat.ino) {
-        await fs.rm(evidencePath, { force: true });
-        throw new Error('operational health source identity changed before quarantine');
-      }
-      await fs.rm(sourcePath);
       const hashed = await hashOpenFile(source);
-      await source.chmod(0o600);
-      await atomicWriteFile(
-        path.join(quarantineDir, manifestName),
-        `${JSON.stringify(
+      const manifestBody = `${JSON.stringify(
           {
             version: 1,
             quarantinedAt: (options.clock ?? (() => new Date()))().toISOString(),
@@ -637,8 +712,16 @@ export async function quarantineCorruptOperationalHealth(
           },
           null,
           2,
-        )}\n`,
-        { mode: 0o600, fsync: true },
+        )}\n`;
+      publishQuarantineEvidencePinned(
+        quarantineDir,
+        securedQuarantine,
+        sourcePath,
+        source.fd,
+        sourceStat,
+        evidenceName,
+        manifestName,
+        manifestBody,
       );
       return { status: 'quarantined', evidenceName, manifestName, sha256: hashed.sha256, sizeBytes: hashed.sizeBytes };
     } finally {

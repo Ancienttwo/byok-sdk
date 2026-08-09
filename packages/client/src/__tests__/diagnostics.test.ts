@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,11 @@ import {
   MAX_QUARANTINE_ENTRIES,
   quarantineCorruptOperationalHealth,
 } from '../diagnostics/diagnostics';
-import { OPERATIONAL_HEALTH_FILENAME, OperationalHealthTracker } from '../daemon/operational-health';
+import {
+  MAX_OPERATIONAL_HEALTH_FILE_BYTES,
+  OPERATIONAL_HEALTH_FILENAME,
+  OperationalHealthTracker,
+} from '../daemon/operational-health';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { loadSqliteModule } from '../daemon/journal/sqlite-support';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
@@ -126,6 +131,19 @@ describe('diagnostics collector', () => {
       await fs.chmod(healthPath, 0o600);
     }
     expect(await digest(healthPath)).toBe(before);
+  });
+
+  it('classifies an oversized health file as unavailable and refuses an unbounded quarantine read', async () => {
+    const dir = await tempDir();
+    const healthPath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    await fs.writeFile(healthPath, JSON.stringify({ version: 1, state: 'healthy', failures: [], crashes: [] }));
+    await fs.truncate(healthPath, MAX_OPERATIONAL_HEALTH_FILE_BYTES + 1);
+
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(snapshot.health).toMatchObject({ status: 'unavailable', sizeBytes: MAX_OPERATIONAL_HEALTH_FILE_BYTES + 1 });
+    await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/unconfirmed corruption/);
+    expect((await fs.stat(healthPath)).size).toBe(MAX_OPERATIONAL_HEALTH_FILE_BYTES + 1);
+    await expect(fs.stat(path.join(dir, 'quarantine'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it.skipIf(process.platform === 'win32')('does not block when device.json is a FIFO', async () => {
@@ -244,18 +262,23 @@ describe('doctor explicit fix', () => {
     const dir = await tempDir();
     const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
     await fs.writeFile(sourcePath, '{original-corrupt');
-    const originalLink = fs.link.bind(fs);
-    vi.spyOn(fs, 'link').mockImplementation(async (from, to) => {
-      if (from === sourcePath) {
-        await fs.rename(sourcePath, `${sourcePath}.original`);
-        await fs.writeFile(sourcePath, '{replacement-corrupt');
+    const quarantineDir = path.join(dir, 'quarantine');
+    const realChdir = process.chdir.bind(process);
+    const chdir = vi.spyOn(process, 'chdir').mockImplementation((target) => {
+      if (target === quarantineDir) {
+        renameSync(sourcePath, `${sourcePath}.original`);
+        writeFileSync(sourcePath, '{replacement-corrupt');
       }
-      await originalLink(from, to);
+      realChdir(target);
     });
 
-    await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/identity does not match/);
-    expect(await fs.readFile(sourcePath, 'utf8')).toBe('{replacement-corrupt');
-    expect(await fs.readdir(path.join(dir, 'quarantine'))).toEqual([]);
+    try {
+      await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/source identity changed/);
+      expect(await fs.readFile(sourcePath, 'utf8')).toBe('{replacement-corrupt');
+      expect(await fs.readdir(quarantineDir)).toEqual([]);
+    } finally {
+      chdir.mockRestore();
+    }
   });
 
   it('refuses a symlinked quarantine directory without touching its target', async () => {
@@ -266,6 +289,31 @@ describe('doctor explicit fix', () => {
     await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/not a real directory/);
     expect(await fs.readdir(outside)).toEqual([]);
     expect(await fs.readFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), 'utf8')).toBe('{bad');
+  });
+
+  it('pins the checked quarantine directory inode and refuses a raced symlink before writing evidence', async () => {
+    const dir = await tempDir();
+    const outside = await tempDir();
+    const quarantineDir = path.join(dir, 'quarantine');
+    const movedQuarantine = path.join(dir, 'quarantine-original');
+    await fs.writeFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), '{bad');
+    await fs.mkdir(quarantineDir);
+    const realChdir = process.chdir.bind(process);
+    const chdir = vi.spyOn(process, 'chdir').mockImplementation((target) => {
+      if (target === quarantineDir) {
+        renameSync(quarantineDir, movedQuarantine);
+        symlinkSync(outside, quarantineDir);
+      }
+      realChdir(target);
+    });
+    try {
+      await expect(quarantineCorruptOperationalHealth(dir)).rejects.toThrow(/quarantine path changed/);
+      expect(await fs.readdir(outside)).toEqual([]);
+      expect(await fs.readdir(movedQuarantine)).toEqual([]);
+      expect(await fs.readFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), 'utf8')).toBe('{bad');
+    } finally {
+      chdir.mockRestore();
+    }
   });
 
   it('doctor --fix --yes reports the move and recollects missing health without rebuilding it', async () => {
@@ -327,10 +375,46 @@ describe('doctor explicit fix', () => {
     await lease.release();
   });
 
+  it('does not accept an owner record without process-start identity as a compatibility authority', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(
+      path.join(dir, DAEMON_OWNER_FILENAME),
+      `${JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        nonce: '00000000-0000-4000-8000-000000000000',
+        role: 'daemon',
+        acquiredAt: '2026-08-09T00:00:00.000Z',
+      })}\n`,
+    );
+    const lease = await acquireDaemonOwner(dir, 'doctor');
+    await lease.release();
+  });
+
   it('recovers a stale malformed reclaim marker after its bounded grace period', async () => {
     const dir = await tempDir();
     const reclaimPath = path.join(dir, `${DAEMON_OWNER_FILENAME}.reclaim`);
     await fs.writeFile(reclaimPath, '');
+    const stale = new Date(Date.now() - 60_000);
+    await fs.utimes(reclaimPath, stale, stale);
+    const lease = await acquireDaemonOwner(dir, 'doctor');
+    await lease.release();
+    await expect(fs.stat(reclaimPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.skipIf(process.platform === 'win32')('does not block when the owner path is a FIFO', async () => {
+    const dir = await tempDir();
+    execFileSync('mkfifo', [path.join(dir, DAEMON_OWNER_FILENAME)]);
+    const started = Date.now();
+    const lease = await acquireDaemonOwner(dir, 'doctor');
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await lease.release();
+  });
+
+  it('does not treat a stale bare-PID reclaim marker as an alternate live-owner authority', async () => {
+    const dir = await tempDir();
+    const reclaimPath = path.join(dir, `${DAEMON_OWNER_FILENAME}.reclaim`);
+    await fs.writeFile(reclaimPath, `${process.pid}\n`);
     const stale = new Date(Date.now() - 60_000);
     await fs.utimes(reclaimPath, stale, stale);
     const lease = await acquireDaemonOwner(dir, 'doctor');

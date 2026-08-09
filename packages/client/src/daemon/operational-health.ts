@@ -181,23 +181,32 @@ export class OperationalHealthTracker {
   }
 
   async #load(): Promise<HealthFileV1> {
-    let raw: string;
+    let handle: Awaited<ReturnType<typeof fs.open>>;
     try {
-      raw = await fs.readFile(this.#filePath, 'utf8');
+      handle = await fs.open(
+        this.#filePath,
+        fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+      );
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         return { version: 1, state: 'healthy', failures: [], crashes: [] };
       }
       throw new Error('operational health state could not be read');
     }
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new Error('operational health state is corrupt JSON');
+      const inspected = await readOperationalHealthHandle(handle);
+      if (inspected.status !== 'read') throw new Error(inspected.reason);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(inspected.raw);
+      } catch {
+        throw new Error('operational health state is corrupt JSON');
+      }
+      if (!isHealthFile(parsed)) throw new Error('operational health state has an invalid shape');
+      return parsed;
+    } finally {
+      await handle.close();
     }
-    if (!isHealthFile(parsed)) throw new Error('operational health state has an invalid shape');
-    return parsed;
   }
 
   #prune(now: Date): void {
@@ -247,36 +256,9 @@ export class OperationalHealthTracker {
 async function inspectOperationalHealthHandle(
   handle: Awaited<ReturnType<typeof fs.open>>,
 ): Promise<Exclude<OperationalHealthFileInspection, { status: 'missing' }>> {
-  let before: import('node:fs').BigIntStats;
-  try {
-    before = await handle.stat({ bigint: true });
-  } catch {
-    return { status: 'unavailable', reason: 'operational health state could not be inspected' };
-  }
-  const sizeBytes = Number(before.size);
-  if (!before.isFile()) {
-    return { status: 'unavailable', sizeBytes, reason: 'operational health state is not a regular file' };
-  }
-  if (sizeBytes > MAX_OPERATIONAL_HEALTH_FILE_BYTES) {
-    return { status: 'corrupt', sizeBytes, reason: 'operational health state exceeds the 1 MiB inspection limit' };
-  }
-  let raw: string;
-  try {
-    const buffer = Buffer.alloc(sizeBytes);
-    const { bytesRead } = await handle.read(buffer, 0, sizeBytes, 0);
-    const after = await handle.stat({ bigint: true });
-    if (
-      bytesRead !== sizeBytes ||
-      after.size !== before.size ||
-      after.mtimeNs !== before.mtimeNs ||
-      after.ctimeNs !== before.ctimeNs
-    ) {
-      return { status: 'unavailable', sizeBytes: Number(after.size), reason: 'operational health state changed during inspection' };
-    }
-    raw = buffer.toString('utf8');
-  } catch {
-    return { status: 'unavailable', sizeBytes, reason: 'operational health state could not be read' };
-  }
+  const read = await readOperationalHealthHandle(handle);
+  if (read.status !== 'read') return read;
+  const { raw, sizeBytes } = read;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -297,6 +279,47 @@ async function inspectOperationalHealthHandle(
       ? { lastCrashAt: new Date(Date.parse(parsed.crashes.at(-1)!.detectedAt)).toISOString() }
       : {}),
   };
+}
+
+async function readOperationalHealthHandle(
+  handle: Awaited<ReturnType<typeof fs.open>>,
+): Promise<
+  | { status: 'read'; raw: string; sizeBytes: number }
+  | Extract<OperationalHealthFileInspection, { status: 'unavailable' }>
+> {
+  let before: import('node:fs').BigIntStats;
+  try {
+    before = await handle.stat({ bigint: true });
+  } catch {
+    return { status: 'unavailable', reason: 'operational health state could not be inspected' };
+  }
+  const sizeBytes = Number(before.size);
+  if (!before.isFile()) {
+    return { status: 'unavailable', sizeBytes, reason: 'operational health state is not a regular file' };
+  }
+  if (sizeBytes > MAX_OPERATIONAL_HEALTH_FILE_BYTES) {
+    return {
+      status: 'unavailable',
+      sizeBytes,
+      reason: 'operational health state exceeds the 1 MiB read limit; corruption is unconfirmed',
+    };
+  }
+  try {
+    const buffer = Buffer.alloc(sizeBytes);
+    const { bytesRead } = await handle.read(buffer, 0, sizeBytes, 0);
+    const after = await handle.stat({ bigint: true });
+    if (
+      bytesRead !== sizeBytes ||
+      after.size !== before.size ||
+      after.mtimeNs !== before.mtimeNs ||
+      after.ctimeNs !== before.ctimeNs
+    ) {
+      return { status: 'unavailable', sizeBytes: Number(after.size), reason: 'operational health state changed during inspection' };
+    }
+    return { status: 'read', raw: buffer.toString('utf8'), sizeBytes };
+  } catch {
+    return { status: 'unavailable', sizeBytes, reason: 'operational health state could not be read' };
+  }
 }
 
 /**
@@ -328,6 +351,8 @@ export { inspectOperationalHealthHandle };
 function isHealthFile(value: unknown): value is HealthFileV1 {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<HealthFileV1>;
+  const keys = Object.keys(candidate);
+  if (keys.some((key) => !['version', 'state', 'failures', 'crashes', 'currentRun'].includes(key))) return false;
   if (candidate.version !== 1 || !['healthy', 'degraded', 'recovering'].includes(String(candidate.state))) return false;
   if (!Array.isArray(candidate.failures) || !candidate.failures.every(isFailureEvent)) return false;
   if (!Array.isArray(candidate.crashes) || !candidate.crashes.every(isCrashRecord)) return false;
@@ -338,17 +363,35 @@ function isHealthFile(value: unknown): value is HealthFileV1 {
 function isFailureEvent(value: unknown): value is FailureEvent {
   if (typeof value !== 'object' || value === null) return false;
   const event = value as Partial<FailureEvent>;
-  return typeof event.at === 'string' && Number.isFinite(Date.parse(event.at)) && ['reconnect', 'upload', 'maintenance', 'lifecycle'].includes(String(event.source));
+  return (
+    Object.keys(event).every((key) => ['at', 'source'].includes(key)) &&
+    typeof event.at === 'string' &&
+    Number.isFinite(Date.parse(event.at)) &&
+    ['reconnect', 'upload', 'maintenance', 'lifecycle'].includes(String(event.source))
+  );
 }
 
 function isCrashRecord(value: unknown): value is OperationalCrashRecord {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Partial<OperationalCrashRecord>;
-  return typeof record.detectedAt === 'string' && Number.isFinite(Date.parse(record.detectedAt)) && typeof record.previousRunStartedAt === 'string' && Number.isFinite(Date.parse(record.previousRunStartedAt));
+  return (
+    Object.keys(record).every((key) => ['detectedAt', 'previousRunStartedAt'].includes(key)) &&
+    typeof record.detectedAt === 'string' &&
+    Number.isFinite(Date.parse(record.detectedAt)) &&
+    typeof record.previousRunStartedAt === 'string' &&
+    Number.isFinite(Date.parse(record.previousRunStartedAt))
+  );
 }
 
 function isRunMarker(value: unknown): value is RunMarker {
   if (typeof value !== 'object' || value === null) return false;
   const marker = value as Partial<RunMarker>;
-  return typeof marker.id === 'string' && typeof marker.startedAt === 'string' && Number.isFinite(Date.parse(marker.startedAt)) && typeof marker.pid === 'number' && Number.isSafeInteger(marker.pid);
+  return (
+    Object.keys(marker).every((key) => ['id', 'startedAt', 'pid'].includes(key)) &&
+    typeof marker.id === 'string' &&
+    typeof marker.startedAt === 'string' &&
+    Number.isFinite(Date.parse(marker.startedAt)) &&
+    typeof marker.pid === 'number' &&
+    Number.isSafeInteger(marker.pid)
+  );
 }

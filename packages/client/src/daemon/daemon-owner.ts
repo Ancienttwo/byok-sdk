@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { ensureSecureDir } from '../util/secure-dir';
@@ -17,7 +17,7 @@ interface OwnerRecord {
   nonce: string;
   role: 'daemon' | 'doctor';
   acquiredAt: string;
-  processStartedAt?: string;
+  processStartedAt: string;
 }
 
 export interface DaemonOwnerLease {
@@ -43,23 +43,33 @@ function isOwnerRecord(value: unknown): value is OwnerRecord {
     (candidate.role === 'daemon' || candidate.role === 'doctor') &&
     typeof candidate.acquiredAt === 'string' &&
     Number.isFinite(Date.parse(candidate.acquiredAt)) &&
-    (candidate.processStartedAt === undefined ||
-      (typeof candidate.processStartedAt === 'string' && Number.isFinite(Date.parse(candidate.processStartedAt))))
+    typeof candidate.processStartedAt === 'string' &&
+    Number.isFinite(Date.parse(candidate.processStartedAt))
   );
 }
 
 async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
-    handle = await fs.open(filePath, 'r');
+    handle = await fs.open(
+      filePath,
+      fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+    );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw err;
   }
   try {
-    const stat = await handle.stat();
+    const stat = await handle.stat({ bigint: true });
     if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_OWNER_BYTES) return undefined;
-    const raw = await handle.readFile('utf8');
+    const size = Number(stat.size);
+    const buffer = Buffer.alloc(size);
+    const { bytesRead } = await handle.read(buffer, 0, size, 0);
+    const after = await handle.stat({ bigint: true });
+    if (bytesRead !== size || after.size !== stat.size || after.mtimeNs !== stat.mtimeNs || after.ctimeNs !== stat.ctimeNs) {
+      return undefined;
+    }
+    const raw = buffer.toString('utf8');
     const parsed: unknown = JSON.parse(raw);
     return isOwnerRecord(parsed) ? parsed : undefined;
   } catch {
@@ -103,10 +113,6 @@ async function processStartedAt(pid: number): Promise<string | undefined> {
 
 async function processOwnsRecord(record: OwnerRecord): Promise<boolean> {
   if (!pidIsAlive(record.pid)) return false;
-  // Legacy records have no process-start token. Preserve their fail-closed
-  // behavior while they are live; every newly-created record below carries
-  // the token, which lets a recycled PID be distinguished from its owner.
-  if (!record.processStartedAt) return true;
   const observed = await processStartedAt(record.pid);
   return observed === undefined || observed === record.processStartedAt;
 }
@@ -122,12 +128,9 @@ async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
   if (!stat.isFile()) throw new Error('store mutation reclaim marker is not a regular file');
   const owner = await readOwner(reclaimPath);
   if (owner) return processOwnsRecord(owner);
-  // Old versions wrote a bare PID. Recover it safely when dead; a fresh
-  // malformed marker gets a short fail-closed grace window for an older
-  // process that crashed between create and write.
-  const raw = await fs.readFile(reclaimPath, 'utf8').catch(() => '');
-  const legacyPid = /^\s*(\d+)\s*$/.exec(raw)?.[1];
-  if (legacyPid && pidIsAlive(Number(legacyPid))) return true;
+  // A marker without the complete PID + process-start identity contract is
+  // malformed, never an alternate compatibility authority. Keep only a short
+  // fail-closed grace for a creator that may have crashed mid-publication.
   return Date.now() - stat.mtimeMs <= RECLAIM_MALFORMED_GRACE_MS;
 }
 

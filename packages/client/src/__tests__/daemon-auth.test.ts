@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager, DeviceRevokedError } from '../daemon/auth-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
-import { DaemonOwnerActiveError } from '../daemon/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -153,6 +153,48 @@ describe('access token renewal (protocol §6.2)', () => {
     expect(stopped).toBe(true);
   });
 
+  it('serializes pair behind an in-flight renewal so the old identity cannot overwrite the new pair', async () => {
+    server.setTokenTtlMs(60 * 60 * 1000);
+    const storeDir = await tmpDir('byok-auth-pair-renewal-race-');
+    const store = new DeviceStore(storeDir);
+    const auth = new AuthManager({ serverUrl: server.url, store });
+    const first = await auth.pair('pairing-code');
+    server.rotateDeviceToken(first.deviceId);
+
+    let renewalSaveReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      renewalSaveReached = resolve;
+    });
+    let releaseRenewalSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => {
+      releaseRenewalSave = resolve;
+    });
+    const realSave = store.save.bind(store);
+    vi.spyOn(store, 'save').mockImplementation(async (record) => {
+      if (record.deviceId === first.deviceId && record.accessToken !== first.accessToken) {
+        renewalSaveReached();
+        await saveGate;
+      }
+      await realSave(record);
+    });
+
+    const renewal = auth.handleUnauthorized();
+    await reached;
+    let pairSettled = false;
+    const pairing = auth.pair('replacement-pairing-code').then((record) => {
+      pairSettled = true;
+      return record;
+    });
+    await Promise.resolve();
+    expect(pairSettled).toBe(false);
+    releaseRenewalSave();
+    const renewedToken = await renewal;
+    const replacement = await pairing;
+    expect(replacement.accessToken).not.toBe(renewedToken);
+    expect(await store.load()).toMatchObject({ deviceId: replacement.deviceId, accessToken: replacement.accessToken });
+    await auth.stop();
+  });
+
   it('a device revoked at the server surfaces DeviceRevokedError from handleUnauthorized(), not a retryable error', async () => {
     const storeDir = await tmpDir('byok-auth-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
@@ -220,6 +262,27 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(server.httpRequests.filter((r) => r.pathname === '/byok/challenge')).toHaveLength(before);
     await rejected.stop();
+  });
+
+  it('reads the identity to remove only after unpair reacquires the mutation lease', async () => {
+    const workspaceRoot = await tmpDir('byok-client-unpair-lease-workspace-');
+    const storeDir = await tmpDir('byok-client-unpair-lease-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test', productId: 'test-unpair-lease', serverUrl: server.url, workspaceRoot, storeDir },
+      [new StubRuntimeAdapter()],
+    );
+    await daemon.pair('pairing-code');
+    const originalLoad = DeviceStore.prototype.load;
+    const load = vi.spyOn(DeviceStore.prototype, 'load').mockImplementation(async function (this: DeviceStore) {
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      return originalLoad.call(this);
+    });
+    try {
+      await daemon.unpair();
+    } finally {
+      load.mockRestore();
+    }
+    await expect(fs.stat(path.join(storeDir, 'device.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('a revoked device surfaces status().revoked without retry-looping, then recovers via a fresh pair()', async () => {
