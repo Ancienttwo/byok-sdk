@@ -33,8 +33,9 @@ import { SessionWorkspaceStore } from './session-workspace-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
-import { journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
-import { SqliteLocalTaskJournal } from './journal/sqlite-journal';
+import { JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
+import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
+import { isSqliteAvailable } from './journal/sqlite-support';
 import {
   createFilesystemCleanupExecutor,
   createStatfsFreeBytesProvider,
@@ -563,7 +564,7 @@ export function createDaemonWithAdapters(
     );
   }
 
-  const storeDir = config.storeDir ?? DeviceStore.defaultDir(config.productId);
+  const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
   const store = new DeviceStore(storeDir);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   let fleetJitter: FleetJitter | undefined;
@@ -604,75 +605,76 @@ export function createDaemonWithAdapters(
       resolvedStoragePolicy = resolveLocalStoragePolicy(config.hostedJournal.storagePolicy);
     }
   }
-  // Split from `journal` below only so the storage engine can reach the
-  // CONCRETE journal's `pruneConfirmedJournalTask` (§12.7.2.1 cleanup step 3),
-  // which is not on the port — a host injecting its own backend supplies its
-  // own cleanup executor along with it. `undefined` whenever a journal was
-  // injected, so exactly one journal is still ever constructed.
-  const ownedJournal =
-    config.hostedJournal && overrides.hostedJournal?.journal === undefined
-      ? new SqliteLocalTaskJournal({
+  // Capability detection is side-effect-free and therefore remains a
+  // construction-time failure. Opening/schema-initializing/quarantining the
+  // SQLite file is intentionally deferred until `startUnderLease` owns the
+  // cross-process store lease; a rejected second daemon must not touch the
+  // active daemon's DB/WAL/SHM before discovering that it is rejected.
+  if (config.hostedJournal && overrides.hostedJournal?.journal === undefined && !isSqliteAvailable()) {
+    throw new JournalUnavailableError(`node:sqlite could not be loaded on Node ${process.versions.node}`);
+  }
+
+  let ownedJournal: SqliteLocalTaskJournal | undefined;
+  let journal: LocalTaskJournal | undefined = config.hostedJournal ? overrides.hostedJournal?.journal : undefined;
+  let ownedPressureEngine: LocalStoragePressureEngine | undefined;
+  let hostedStorageInitializationBarrierComplete = true;
+  let pressureEngine: LocalStoragePressureEngine | undefined = config.hostedJournal
+    ? overrides.hostedJournal?.pressureEngine
+    : undefined;
+
+  /** Construct every daemon-owned hosted writer only after ownership exists. */
+  function initializeOwnedHostedStorage(): void {
+    if (!config.hostedJournal) return;
+    if (!journal) {
+      try {
+        ownedJournal = new SqliteLocalTaskJournal({
           storeDir,
           ...(config.hostedJournal.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: config.hostedJournal.busyTimeoutMs }),
           ...(config.hostedJournal.maxRecordBytes === undefined ? {} : { maxRecordBytes: config.hostedJournal.maxRecordBytes }),
-        })
-      : undefined;
-  const journal: LocalTaskJournal | undefined = config.hostedJournal
-    ? overrides.hostedJournal?.journal ?? ownedJournal
-    : undefined;
-  /**
-   * S3b (L-003): the watermark/GC engine, third instance of the same
-   * three-part idiom — optional config field, conditional construction,
-   * override seam. Constructed only when hosted journal mode is on AND a
-   * storage policy was supplied: pressure gating without a durable journal
-   * would be declining tasks to protect a database that does not exist.
-   *
-   * The policy itself was already resolved (and rejected, loudly) above, in
-   * the same pure-config block as `hostedJournal.tenantId`, for the same
-   * reason `maxTaskOutputBytes` is — see `LocalStoragePolicyError`.
-   */
-  const ownedPressureEngine =
-    resolvedStoragePolicy && journal && overrides.hostedJournal?.pressureEngine === undefined
-      ? new LocalStoragePressureEngine({
-          policy: resolvedStoragePolicy,
-          journal,
-          freeBytesProvider: createStatfsFreeBytesProvider(storeDir),
-          executor: createFilesystemCleanupExecutor(
-            ownedJournal ? { pruneJournalTask: (taskId) => ownedJournal.pruneConfirmedJournalTask(taskId) } : {},
-          ),
-          timers: {
-            setInterval: (handler, baseMs) => {
-              if (!fleetJitter) throw new Error('maintenance scheduler started before device identity was loaded');
-              const timer = setInterval(handler, fleetJitter.delay('maintenance', maintenanceSequence++, baseMs));
-              timer.unref?.();
-              return timer;
-            },
-            clearInterval: (handle) => clearInterval(handle as NodeJS.Timeout),
+        });
+      } catch (err) {
+        if (err instanceof JournalHandleCleanupError) hostedStorageInitializationBarrierComplete = false;
+        throw err;
+      }
+      journal = ownedJournal;
+    }
+    if (resolvedStoragePolicy && !pressureEngine) {
+      const activeJournal = journal;
+      const cleanupJournal = ownedJournal;
+      ownedPressureEngine = new LocalStoragePressureEngine({
+        policy: resolvedStoragePolicy,
+        journal: activeJournal,
+        freeBytesProvider: createStatfsFreeBytesProvider(storeDir),
+        executor: createFilesystemCleanupExecutor(
+          cleanupJournal ? { pruneJournalTask: (taskId) => cleanupJournal.pruneConfirmedJournalTask(taskId) } : {},
+        ),
+        timers: {
+          setInterval: (handler, baseMs) => {
+            if (!fleetJitter) throw new Error('maintenance scheduler started before device identity was loaded');
+            const timer = setInterval(handler, fleetJitter.delay('maintenance', maintenanceSequence++, baseMs));
+            timer.unref?.();
+            return timer;
           },
-          onMaintenanceOutcome: (outcome) => {
-            const write = outcome === 'success'
-              ? operationalHealth.recordSuccess('maintenance')
-              : operationalHealth.recordFailure('maintenance');
-            void write.catch((err: unknown) => {
-              console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
-            });
-          },
-          onEvent: (event) => {
-            if (event.kind !== 'state-changed') return;
-            // §12.7.2.1's "发出告警", on the operator-facing channel this file
-            // already uses for its other non-fatal warnings. Every transition
-            // is reported, including recovery back down to `normal` — an alert
-            // that only ever fires upward leaves an operator guessing whether
-            // the thing they fixed actually took.
-            console.warn(
-              `[byok/client] local storage pressure: ${event.from} -> ${event.to} (used ${event.snapshot.usedBytes} of ${event.snapshot.budgetBytes} budget bytes, ${event.snapshot.freeBytes} free)`,
-            );
-          },
-        })
-      : undefined;
-  const pressureEngine = config.hostedJournal
-    ? overrides.hostedJournal?.pressureEngine ?? ownedPressureEngine
-    : undefined;
+          clearInterval: (handle) => clearInterval(handle as NodeJS.Timeout),
+        },
+        onMaintenanceOutcome: (outcome) => {
+          const write = outcome === 'success'
+            ? operationalHealth.recordSuccess('maintenance')
+            : operationalHealth.recordFailure('maintenance');
+          void write.catch((err: unknown) => {
+            console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        },
+        onEvent: (event) => {
+          if (event.kind !== 'state-changed') return;
+          console.warn(
+            `[byok/client] local storage pressure: ${event.from} -> ${event.to} (used ${event.snapshot.usedBytes} of ${event.snapshot.budgetBytes} budget bytes, ${event.snapshot.freeBytes} free)`,
+          );
+        },
+      });
+      pressureEngine = ownedPressureEngine;
+    }
+  }
   /**
    * S3b: serializes terminal journal writes against the outbound send that
    * follows each one, and gives `runShutdownSequence` something to await.
@@ -843,6 +845,14 @@ export function createDaemonWithAdapters(
   async function startUnderLease(): Promise<void> {
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
+    // This is the first point at which daemon-owned hosted storage may touch
+    // the filesystem. The lease was acquired above, so SQLite open/schema/
+    // quarantine and every pressure-engine writer are inside the same
+    // authority boundary as auth renewal and the rest of daemon lifecycle.
+    initializeOwnedHostedStorage();
+    const activeJournal = journal;
+    const activePressureEngine = pressureEngine;
+    const activeOwnedPressureEngine = ownedPressureEngine;
     // Loading an existing record arms proactive token renewal, whose final
     // step writes device.json. Acquire the store mutation lease first so a
     // rejected second daemon can never leave that timer behind as a writer.
@@ -882,10 +892,10 @@ export function createDaemonWithAdapters(
     // Not wrapped in a try/catch: a journal that cannot be read is not a
     // degraded mode to carry on in. Hosted mode was configured explicitly, so
     // failing `start()` is the fail-closed behaviour §12.7.2 asks for.
-    if (journal) {
-      const recoverable = await journal.listRecoverable();
+    if (activeJournal) {
+      const recoverable = await activeJournal.listRecoverable();
       for (const task of recoverable) {
-        await journal.markRecovered(task.taskId, {
+        await activeJournal.markRecovered(task.taskId, {
           disposition: 'interrupted',
           reason: `daemon restarted while this task was in local state "${task.localState}"; local runtime sessions do not survive the process`,
         });
@@ -907,9 +917,9 @@ export function createDaemonWithAdapters(
     // policy is an explicit request to gate on local storage, and a daemon that
     // cannot measure it cannot honour that (§12.7.2's fail-closed posture).
     // An INJECTED engine is left alone — its owner drives its cadence.
-    if (ownedPressureEngine) {
-      await ownedPressureEngine.tick();
-      ownedPressureEngine.start();
+    if (activeOwnedPressureEngine) {
+      await activeOwnedPressureEngine.tick();
+      activeOwnedPressureEngine.start();
     }
 
     startedAt = Date.now();
@@ -983,7 +993,7 @@ export function createDaemonWithAdapters(
      * outcome than a missing local row.
      */
     const sendEnvelope: TaskRunnerDeps['send'] =
-      journal && journalIdentity
+      activeJournal && journalIdentity
         ? (envelope) => {
             observer.handleOutboundEnvelope(envelope);
             const terminalKind = terminalKindOf(envelope.type);
@@ -995,7 +1005,7 @@ export function createDaemonWithAdapters(
             const payloadHash = journalHash(encodeEnvelope(envelope));
             journalTerminalTail = journalTerminalTail
               .then(() =>
-                journal.recordTerminal({
+                activeJournal.recordTerminal({
                   taskId,
                   terminalType: terminalKind,
                   payloadHash,
@@ -1095,7 +1105,7 @@ export function createDaemonWithAdapters(
       // on the offer path), and is absent entirely when no storage policy is
       // configured, which is what keeps `handleOffer` byte-identical for every
       // daemon that does not opt in.
-      ...(pressureEngine ? { admissionGuard: () => pressureEngine.admissionGuard() } : {}),
+      ...(activePressureEngine ? { admissionGuard: () => activePressureEngine.admissionGuard() } : {}),
     };
     runner = new TaskRunner(deps);
 
@@ -1135,7 +1145,7 @@ export function createDaemonWithAdapters(
       //
       // The no-journal branch is the ORIGINAL closure, unchanged.
       onEnvelope:
-        journal && journalIdentity
+        activeJournal && journalIdentity
           ? async (envelope) => {
               observer.handleInboundEnvelope(envelope);
               // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
@@ -1145,8 +1155,8 @@ export function createDaemonWithAdapters(
               // so the mailbox keeps the row and redelivers it later. The task
               // is not lost; it is left in the one place that still has room
               // for it. Nothing is deleted to make space.
-              pressureEngine?.assertAckCriticalAllowed();
-              await journal.appendEnvelope(toJournalEnvelopeRecord(envelope, journalIdentity));
+              activePressureEngine?.assertAckCriticalAllowed();
+              await activeJournal.appendEnvelope(toJournalEnvelopeRecord(envelope, journalIdentity));
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();
             }
           : (envelope) => {
@@ -1233,7 +1243,10 @@ export function createDaemonWithAdapters(
    */
   async function runShutdownSequence(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
     const errors: unknown[] = [];
-    let mutationBarrierComplete = true;
+    let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
+    if (!hostedStorageInitializationBarrierComplete) {
+      errors.push(new Error('hosted storage initialization left an unclosed SQLite handle; ownership lease retained'));
+    }
     const attempt = async (operation: () => void | Promise<void>, mutationBarrier: boolean): Promise<boolean> => {
       try {
         await operation();
@@ -1269,7 +1282,9 @@ export function createDaemonWithAdapters(
     // daemon constructed; an injected one belongs to its injector, exactly like
     // an injected journal is not closed here. Idempotent, like every other step
     // in this sequence.
-    const maintenanceStopped = ownedPressureEngine?.stop() ?? Promise.resolve();
+    const stoppingOwnedPressureEngine = ownedPressureEngine;
+    const stoppingOwnedJournal = ownedJournal;
+    const maintenanceStopped = stoppingOwnedPressureEngine?.stop() ?? Promise.resolve();
     await attempt(() => runner?.stopAcceptingOffers(), true);
     const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
@@ -1317,8 +1332,14 @@ export function createDaemonWithAdapters(
     // earlier would let a failed/slow connection shutdown append into a closed
     // database after this function released the store lease.
     if (activeTeardownSettled && journalTailSettled && maintenanceSettled && connectionStopped) {
-      await attempt(() => ownedJournal?.close(), true);
-    } else if (ownedJournal) {
+      const journalClosed = await attempt(() => stoppingOwnedJournal?.close(), true);
+      if (journalClosed) {
+        if (journal === stoppingOwnedJournal) journal = undefined;
+        if (ownedJournal === stoppingOwnedJournal) ownedJournal = undefined;
+        if (pressureEngine === stoppingOwnedPressureEngine) pressureEngine = undefined;
+        if (ownedPressureEngine === stoppingOwnedPressureEngine) ownedPressureEngine = undefined;
+      }
+    } else if (stoppingOwnedJournal) {
       mutationBarrierComplete = false;
     }
     await attempt(() => auth.stop(), true);

@@ -7,6 +7,7 @@ Status: CURRENT for the Postgres + R2 hosted composition.
 - Postgres owns tenant/device identity, mailbox, board/truth state, quota, reservation, object manifest and cleanup state.
 - R2 owns object bytes. A committed manifest means existence plus observed size/content-type and committed accounting; it does not mean cloud-verified SHA-256. The authenticated daemon declaration remains hash authority (ADR-024).
 - Each device owns its SQLite journal and operational-health state. Cloud presence/activity is lossy observability, never recovery truth.
+- The daemon's cross-process store lease encloses the entire owned SQLite writer lifetime: DB open, PRAGMA/schema setup, corruption quarantine, maintenance, terminal drain and close. A rejected contender must not open or alter DB/WAL/SHM before learning that another process owns the store.
 
 ## Routine checks
 

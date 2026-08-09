@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,8 @@ import { AuthManager, DeviceRevokedError } from '../daemon/auth-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
+import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
+import { quarantineCorruptOperationalHealth } from '../diagnostics/diagnostics';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -284,6 +286,91 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     await rejected.stop();
   });
 
+  it.skipIf(!isSqliteAvailable())('a separate hosted daemon owns SQLite before any contender can open or quarantine it', async () => {
+    const workspaceRoot = await tmpDir('byok-client-hosted-owner-workspace-');
+    const storeDir = await tmpDir('byok-client-hosted-owner-store-');
+    const config = {
+      productName: 'Test',
+      productId: 'test-hosted-owner',
+      serverUrl: server.url,
+      workspaceRoot,
+      storeDir,
+      hostedJournal: { mode: 'sqlite' as const, tenantId: 'tenant-owner-test' },
+    };
+    const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
+    await pairer.pair('pairing-code');
+
+    const distEntry = new URL('../../dist/index.js', import.meta.url).href;
+    const childSource = `
+      const { createDaemonWithAdapters } = await import(process.argv[1]);
+      const config = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
+      const adapter = {
+        id: 'pi',
+        detect: async () => ({ present: true, version: 'test', authPresent: true }),
+        capabilities: () => ({ steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'confirm', 'deny'] }),
+        environmentRequirements: () => ({ credentialNames: [] }),
+        start: async () => { throw new Error('not used'); },
+      };
+      const daemon = createDaemonWithAdapters(config, [adapter]);
+      try {
+        await daemon.start();
+        process.send?.({ kind: 'started' });
+      } catch (error) {
+        process.send?.({ kind: 'error', message: error instanceof Error ? error.stack : String(error) });
+      }
+    `;
+    const child = spawn(
+      process.execPath,
+      ['-e', childSource, distEntry, Buffer.from(JSON.stringify(config)).toString('base64url')],
+      { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
+    );
+    let childStderr = '';
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => { childStderr += chunk; });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', (code, signal) => reject(new Error(`hosted owner child exited early (${code ?? signal}): ${childStderr}`)));
+        child.on('message', (message: unknown) => {
+          const shaped = message as { kind?: string; message?: string };
+          if (shaped.kind === 'started') resolve();
+          if (shaped.kind === 'error') reject(new Error(`hosted owner child failed: ${shaped.message ?? childStderr}`));
+        });
+      });
+
+      const journalFiles = ['daemon.db', 'daemon.db-wal', 'daemon.db-shm'];
+      const snapshot = async (): Promise<Record<string, string>> => {
+        const result: Record<string, string> = {};
+        for (const name of journalFiles) {
+          const filePath = path.join(storeDir, name);
+          const bytes = await fs.readFile(filePath).catch((err: NodeJS.ErrnoException) => {
+            if (err.code === 'ENOENT') return undefined;
+            throw err;
+          });
+          result[name] = bytes === undefined ? 'missing' : createHash('sha256').update(bytes).digest('hex');
+        }
+        return result;
+      };
+      const before = await snapshot();
+
+      daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
+      await expect(daemon.start()).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      await expect(quarantineCorruptOperationalHealth(storeDir)).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      expect(await snapshot()).toEqual(before);
+    } finally {
+      child.kill('SIGKILL');
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      }
+    }
+
+    // The dead child's owner record carries its PID/start identity and closed
+    // liveness port. A real second process crash must therefore be reclaimable,
+    // while the live-child phase above stayed strictly fail-closed.
+    const recovered = await acquireDaemonOwner(storeDir, 'doctor');
+    await recovered.release();
+  }, 20_000);
+
   it('reads the identity to remove only after unpair reacquires the mutation lease', async () => {
     const workspaceRoot = await tmpDir('byok-client-unpair-lease-workspace-');
     const storeDir = await tmpDir('byok-client-unpair-lease-store-');
@@ -513,7 +600,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     for (let index = 0; index < 2_000 && !collision; index += 1) {
       const candidate = path.join(parent, `store-${index}`);
       const digest = createHash('sha256').update(candidate).digest();
-      const port = 10_000 + (digest.readUInt32BE(0) % 10_000);
+      const port = 10_000 + (digest.readUInt32BE(0) % 20_000);
       const first = firstByPort.get(port);
       if (first) collision = [first, candidate];
       else firstByPort.set(port, candidate);
@@ -532,19 +619,18 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     }
   });
 
-  it('routes past a foreign listener that accepts but never speaks the mutex protocol', async () => {
+  it('fails closed on a listener that accepts but never proves a different mutex identity', async () => {
     const storeDir = await tmpDir('byok-owner-foreign-listener-');
     const canonicalStoreDir = await fs.realpath(storeDir);
     const digest = createHash('sha256').update(canonicalStoreDir).digest();
-    const firstPort = 10_000 + (digest.readUInt32BE(0) % 10_000);
+    const firstPort = 10_000 + (digest.readUInt32BE(0) % 20_000);
     const foreign = createServer(() => undefined);
     await new Promise<void>((resolve, reject) => {
       foreign.once('error', reject);
       foreign.listen({ host: '127.0.0.1', port: firstPort, exclusive: true }, () => resolve());
     });
     try {
-      const lease = await acquireDaemonOwner(storeDir, 'doctor');
-      await lease.release();
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
     } finally {
       await new Promise<void>((resolve, reject) => foreign.close((err) => (err ? reject(err) : resolve())));
     }

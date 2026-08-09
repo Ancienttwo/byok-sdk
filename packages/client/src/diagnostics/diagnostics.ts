@@ -707,16 +707,17 @@ export async function collectDiagnostics(
   storeDir: string,
   options: CollectDiagnosticsOptions = {},
 ): Promise<DiagnosticsSnapshot> {
+  const resolvedStoreDir = path.resolve(storeDir);
   const adapters = options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
   const connectControl = options.connectControl ?? connectControlClient;
   const [device, probedRuntimes, health, journal, workspace, quarantine, controlConnection] = await Promise.all([
-    inspectDevice(storeDir),
+    inspectDevice(resolvedStoreDir),
     probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs }),
-    inspectOperationalHealthFile(storeDir),
-    inspectJournal(storeDir),
+    inspectOperationalHealthFile(resolvedStoreDir),
+    inspectJournal(resolvedStoreDir),
     inspectWorkspace(config.workspaceRoot),
-    inspectQuarantine(storeDir),
-    connectControl({ storeDir, productId: config.productId }),
+    inspectQuarantine(resolvedStoreDir),
+    connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
   ]);
   const runtimes: DiagnosticsSnapshot['runtimes'] = probedRuntimes.map((runtime) => ({
     idHash: stableIdentifierHash(runtime.id),
@@ -949,12 +950,13 @@ export async function quarantineCorruptOperationalHealth(
   storeDir: string,
   options: { clock?: () => Date } = {},
 ): Promise<OperationalHealthFixResult> {
-  const owner = await acquireDaemonOwner(storeDir, 'doctor', options.clock);
+  const resolvedStoreDir = path.resolve(storeDir);
+  const owner = await acquireDaemonOwner(resolvedStoreDir, 'doctor', options.clock);
   try {
-    const sourcePath = path.join(storeDir, OPERATIONAL_HEALTH_FILENAME);
+    const sourcePath = path.join(resolvedStoreDir, OPERATIONAL_HEALTH_FILENAME);
     let opened: Awaited<ReturnType<typeof openOperationalHealthFile>>;
     try {
-      opened = await openOperationalHealthFile(storeDir);
+      opened = await openOperationalHealthFile(resolvedStoreDir);
     } catch (err) {
       throw new Error('operational health state could not be opened safely; refusing quarantine', { cause: err });
     }
@@ -970,7 +972,7 @@ export async function quarantineCorruptOperationalHealth(
       const sourceStat = await source.stat({ bigint: true });
       if (!sourceStat.isFile()) throw new Error('operational health state is not a regular file; refusing quarantine');
 
-      const quarantineDir = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME);
+      const quarantineDir = path.join(resolvedStoreDir, JOURNAL_QUARANTINE_DIRNAME);
       try {
         const existing = await fs.lstat(quarantineDir);
         if (!existing.isDirectory() || existing.isSymbolicLink()) {

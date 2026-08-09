@@ -171,8 +171,12 @@ jobs:
   # are redirected to a path containing spaces and non-ASCII characters so the
   # real init/status and ledger file operations cross that boundary on Windows.
   windows-git-workspace:
-    name: Windows Git workspace, store, and security tests
+    name: Windows Git workspace, store, and security tests (Node ${{ matrix.node-version }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
     defaults:
       run:
         shell: pwsh
@@ -183,10 +187,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22
+      - name: Setup Node ${{ matrix.node-version }}
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
 
       - name: Install dependencies

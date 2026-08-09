@@ -96,6 +96,16 @@ export class DeviceStore {
     return path.join(os.homedir(), '.byok', productId);
   }
 
+  /**
+   * Resolve the one store pathname every daemon/CLI component must share.
+   * A configured relative path is anchored once at process entry rather than
+   * being reinterpreted after a diagnostics operation temporarily changes
+   * cwd to pin a quarantine directory inode.
+   */
+  static resolveDir(productId: string, configured?: string): string {
+    return path.resolve(configured ?? DeviceStore.defaultDir(productId));
+  }
+
   async load(): Promise<DeviceRecord | undefined> {
     const opened = await this.openBounded();
     if (!opened) return undefined;

@@ -214,6 +214,26 @@ describe('diagnostics collector', () => {
     expect(snapshot.device.status).toBe('unavailable');
   });
 
+  it('keeps the default control probe bounded when control.token is oversized', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(path.join(dir, 'control.token'), 'x'.repeat(257));
+
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [] });
+
+    expect(snapshot.control).toMatchObject({ status: 'offline' });
+  });
+
+  it.skipIf(process.platform === 'win32')('does not block when the default control probe sees a FIFO token', async () => {
+    const dir = await tempDir();
+    execFileSync('mkfifo', [path.join(dir, 'control.token')]);
+
+    const started = Date.now();
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [] });
+
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(snapshot.control).toMatchObject({ status: 'offline' });
+  });
+
   it.skipIf(!isSqliteAvailable())('detects a corrupt journal through a read-only quick_check without moving it', async () => {
     const dir = await tempDir();
     const journalPath = path.join(dir, 'daemon.db');
@@ -313,6 +333,23 @@ describe('doctor explicit fix', () => {
       sizeBytes: bytes.length,
       reason: 'operational health state is corrupt JSON',
     });
+  });
+
+  it('anchors a relative storeDir before pinning quarantine as the process cwd', async () => {
+    const dir = await tempDir();
+    const relativeStoreDir = path.relative(process.cwd(), dir);
+    const sourcePath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);
+    await fs.writeFile(sourcePath, '{relative-store-corrupt');
+
+    const result = await quarantineCorruptOperationalHealth(relativeStoreDir);
+
+    expect(result.status).toBe('quarantined');
+    if (result.status !== 'quarantined') throw new Error('expected quarantine result');
+    await expect(fs.stat(sourcePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(dir, 'quarantine', result.manifestName), 'utf8'),
+    ) as { sourcePath: string };
+    expect(manifest.sourcePath).toBe(sourcePath);
   });
 
   it('rejects a raced replacement before any unconfirmed inode enters quarantine', async () => {

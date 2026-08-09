@@ -74,7 +74,7 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Da
  * `createDaemonWithAdapters` would persist to.
  */
 export function resolveStoreDir(config: Pick<DaemonConfig, 'storeDir' | 'productId'>): string {
-  return config.storeDir ?? DeviceStore.defaultDir(config.productId);
+  return DeviceStore.resolveDir(config.productId, config.storeDir);
 }
 
 /** Value following `flag` in `args` (e.g. `--config <path>`), or `undefined`. */

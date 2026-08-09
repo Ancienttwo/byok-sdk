@@ -119,6 +119,18 @@ export interface SqliteLocalTaskJournalOptions {
 }
 
 /**
+ * Initialization failed and the just-opened SQLite handle could not be proven
+ * closed. The daemon treats this as an incomplete mutation barrier and keeps
+ * its cross-process store lease fail-closed instead of admitting a contender.
+ */
+export class JournalHandleCleanupError extends Error {
+  constructor(message: string, readonly failures: readonly unknown[]) {
+    super(message);
+    this.name = 'JournalHandleCleanupError';
+  }
+}
+
+/**
  * The eight tables of §12.7.2, verbatim in purpose:
  *
  * - `journal_envelope` — tenant/product/device, seq, envelope id, task id, raw
@@ -360,17 +372,44 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     // Open + schema are one unit for quarantine purposes: a file whose header
     // reads fine but whose schema cannot be created is just as unusable, and
     // just as much evidence, as one that fails at open.
-    let db: DatabaseSync;
+    let db: DatabaseSync | undefined;
     try {
       db = openJournalDatabase(this.#dbPath, options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
       db.exec(SCHEMA);
     } catch (err) {
+      // An open handle is itself a store writer/lock authority. Close it before
+      // quarantine and before the caller can release its cross-process lease;
+      // otherwise a schema failure could leave an unreachable live SQLite
+      // handle behind while a second daemon is admitted.
+      try {
+        db?.close();
+      } catch (closeError) {
+        throw new JournalHandleCleanupError(
+          'local task journal initialization failed and its SQLite handle could not be closed',
+          [err, closeError],
+        );
+      }
       const reason = err instanceof Error ? err.message : String(err);
       const quarantinePath = quarantineDatabase(options.storeDir, this.#dbPath, reason, this.#clock());
       throw new JournalCorruptError(this.#dbPath, quarantinePath, reason, { cause: err });
     }
     this.#db = db;
-    secureJournalFilePermissions(this.#dbPath);
+    try {
+      secureJournalFilePermissions(this.#dbPath);
+    } catch (err) {
+      // Permission hardening failure is not database corruption and must not
+      // move evidence. It is still a construction failure, with the handle
+      // synchronously closed before ownership can unwind.
+      try {
+        db.close();
+      } catch (closeError) {
+        throw new JournalHandleCleanupError(
+          'local task journal permission hardening failed and its SQLite handle could not be closed',
+          [err, closeError],
+        );
+      }
+      throw err;
+    }
   }
 
   // ---------------------------------------------------------------------
