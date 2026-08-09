@@ -1,4 +1,4 @@
-import { MAX_MESSAGES_PER_BATCH, type CapabilityFlag, type Envelope, type RuntimeInfo } from '@byok/protocol';
+import { MAX_MESSAGES_PER_BATCH, type CapabilityFlag, type Envelope, type RuntimeInfo } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';

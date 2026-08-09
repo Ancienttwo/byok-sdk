@@ -6,7 +6,7 @@
  * chatty device grow memory without limit. Check-and-record is one call, so a
  * composition cannot accidentally split it into a racy read-then-write.
  */
-import { tenantKey, type TenantId } from '@byok/core';
+import { tenantKey, type TenantId } from '@byok-sdk/core';
 import type { InboundDedupStore } from '../ports';
 
 /** Ids retained per device. Same order of magnitude as the reference server's ring. */

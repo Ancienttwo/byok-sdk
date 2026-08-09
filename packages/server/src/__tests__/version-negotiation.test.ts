@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, PROTOCOL_VERSION, type ConnAckPayload } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type ConnAckPayload } from '@byok-sdk/protocol';
 import { WebSocket } from 'ws';
 import { createByokServer } from '../index';
 import { nextEnvelope, pairFakeDaemon, send, startServer, stopServer, testPairingClaims } from './test-support';

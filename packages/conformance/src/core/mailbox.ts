@@ -7,7 +7,7 @@
  * on is gone, and it goes silently — the happy path still looks fine.
  */
 import { describe, expect, it } from 'vitest';
-import { isCoreConflictError, type CoreConflictError, type MailboxCursorState } from '@byok/core';
+import { isCoreConflictError, type CoreConflictError, type MailboxCursorState } from '@byok-sdk/core';
 import { hashOf, TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 

@@ -1,7 +1,7 @@
 /**
  * The composition side of the port method inventory (sprint I7).
  *
- * The table itself is contract data and lives in `@byok/core`'s shipped source
+ * The table itself is contract data and lives in `@byok-sdk/core`'s shipped source
  * (`CORE_PORT_METHODS`), because it is enforced from two directions that must
  * read the same list:
  *
@@ -15,7 +15,7 @@
  * grows by contract, not by whichever composition needed something.
  */
 import { describe, expect, it } from 'vitest';
-import { CORE_PORT_METHODS, CORE_STORE_NAMES } from '@byok/core';
+import { CORE_PORT_METHODS, CORE_STORE_NAMES } from '@byok-sdk/core';
 import { withComposition, type CoreCompositionFactory } from './harness';
 
 function methodNames(store: object): string[] {

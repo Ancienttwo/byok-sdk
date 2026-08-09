@@ -4,7 +4,7 @@ import {
   createWebCrypto,
   type PreparedTruthWrite,
   type TruthCommitInput,
-} from '@byok/cloud';
+} from '@byok-sdk/cloud';
 import {
   contentHash,
   createMutableClock,
@@ -12,7 +12,7 @@ import {
   isCoreError,
   tenantId,
   type ContentHash,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
 import { migrate } from '../migrate';
 import { PostgresObjectStore } from '../stores/core/objects';

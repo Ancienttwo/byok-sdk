@@ -28,8 +28,8 @@ import {
   type CoreStores,
   type PresenceHint,
   type TenantId,
-} from '@byok/core';
-import { createEnvelope, encodeEnvelope, type Envelope, type TaskOfferPayload } from '@byok/protocol';
+} from '@byok-sdk/core';
+import { createEnvelope, encodeEnvelope, type Envelope, type TaskOfferPayload } from '@byok-sdk/protocol';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
 import type { TokenSigner } from './auth/tokens';
 import { CLOUD_CAPABILITIES, declares } from './capabilities';

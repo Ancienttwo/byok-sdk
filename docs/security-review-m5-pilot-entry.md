@@ -27,9 +27,9 @@ Run from the repository root with the frozen dependency graph:
 pnpm install --frozen-lockfile
 pnpm -r build
 pnpm -r typecheck
-pnpm --filter @byok/client run test
-pnpm --filter @byok/client exec vitest run src/__tests__/credential-audit-core.test.mjs
-pnpm --filter @byok/client run smoke:adapters
+pnpm --filter @byok-sdk/client run test
+pnpm --filter @byok-sdk/client exec vitest run src/__tests__/credential-audit-core.test.mjs
+pnpm --filter @byok-sdk/client run smoke:adapters
 ```
 
 The adapter smoke must run with a disposable fake home containing three
@@ -45,7 +45,7 @@ mkdir -p "$FAKE_HOME/.claude" "$FAKE_HOME/.codex" "$FAKE_HOME/.pi"
     printf 'pi-canary\n' > "$FAKE_HOME/.pi/byok-sdk-audit-canary"
 
 HOME="$FAKE_HOME" \
-  pnpm --filter @byok/client run smoke:adapters
+  pnpm --filter @byok-sdk/client run smoke:adapters
 ```
 
 The positive control deliberately opens all three canaries under the same
@@ -72,7 +72,7 @@ script owns the trace setup, parser, and result normalization:
 ```sh
 AUDIT_ROOT="$(pwd)/.ci-artifacts/credential-isolation"
 mkdir -p "$AUDIT_ROOT/raw"
-pnpm --filter @byok/client run audit:credentials -- \
+pnpm --filter @byok-sdk/client run audit:credentials -- \
   --trace-dir "$AUDIT_ROOT/raw" \
   --summary "$AUDIT_ROOT/summary.json"
 ```
@@ -130,10 +130,10 @@ verifiable evidence for the pilot entry:
 |---|---|---|
 | Build | `pnpm -r build` | **PASS**, exit 0 |
 | Typecheck | `pnpm -r typecheck` | **PASS**, exit 0 |
-| Client tests | `pnpm --filter @byok/client run test` | **PASS**, 83 test files / 831 tests |
-| Credential-trace parser | `pnpm --filter @byok/client exec vitest run src/__tests__/credential-audit-core.test.mjs` | **PASS**, 12/12 |
-| Concrete adapter smoke | `pnpm --filter @byok/client run smoke:adapters` | **PASS**, all 3 adapters |
-| Credential audit on macOS | `pnpm --filter @byok/client run audit:credentials -- --trace-dir .ci-artifacts/credential-isolation/raw --summary .ci-artifacts/credential-isolation/summary.json` | **UNSUPPORTED**, exit 2 as required for non-Linux |
+| Client tests | `pnpm --filter @byok-sdk/client run test` | **PASS**, 83 test files / 831 tests |
+| Credential-trace parser | `pnpm --filter @byok-sdk/client exec vitest run src/__tests__/credential-audit-core.test.mjs` | **PASS**, 12/12 |
+| Concrete adapter smoke | `pnpm --filter @byok-sdk/client run smoke:adapters` | **PASS**, all 3 adapters |
+| Credential audit on macOS | `pnpm --filter @byok-sdk/client run audit:credentials -- --trace-dir .ci-artifacts/credential-isolation/raw --summary .ci-artifacts/credential-isolation/summary.json` | **UNSUPPORTED**, exit 2 as required for non-Linux |
 
 The Ubuntu kernel-trace result is **PENDING CI**. No Linux `strace` run has been
 completed in this ledger, so this document makes no claim that Linux tracing

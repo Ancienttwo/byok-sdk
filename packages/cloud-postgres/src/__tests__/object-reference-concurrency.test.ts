@@ -34,7 +34,7 @@ import {
   isCoreError,
   tenantId,
   type ContentHash,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { migrate } from '../migrate';
 import { PostgresObjectStore } from '../stores/core/objects';
 import { createDataplaneScope, SKIP_DATAPLANE, type DataplaneScope } from './support/dataplane';

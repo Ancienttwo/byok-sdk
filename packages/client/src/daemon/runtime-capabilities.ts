@@ -1,11 +1,11 @@
-import type { RuntimeCapabilities as ProtocolRuntimeCapabilities } from '@byok/protocol';
+import type { RuntimeCapabilities as ProtocolRuntimeCapabilities } from '@byok-sdk/protocol';
 import type { RuntimeCapabilities } from '../types';
 
 /**
  * Maps a `RuntimeAdapter`'s own internal `capabilities()` result
  * (`../types.ts`'s `RuntimeCapabilities` — `{steer, resume,
  * approvalInteractive, permissionModes}`, always-required fields) onto the
- * wire's `RuntimeCapabilities` shape (`@byok/protocol` — the same field names,
+ * wire's `RuntimeCapabilities` shape (`@byok-sdk/protocol` — the same field names,
  * but all-optional).
  *
  * Every field, `approvalInteractive` included, is a pure passthrough of the
@@ -30,7 +30,7 @@ import type { RuntimeCapabilities } from '../types';
  * place both can reach.
  *
  * The connection-level `interactive-approval` flag (`CAPABILITY_FLAGS`,
- * `@byok/protocol`) is a separate, connection-scoped signal and is NOT derived
+ * `@byok-sdk/protocol`) is a separate, connection-scoped signal and is NOT derived
  * from this: `create-daemon.ts`'s `computeCapabilities` keeps its own
  * semantics.
  */

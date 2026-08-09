@@ -6,7 +6,7 @@
  * `TenantStores` and a `DevicePrincipal` and never sees a `TenantId` again.
  */
 import type { Context } from 'hono';
-import type { DevicePrincipal } from '@byok/core';
+import type { DevicePrincipal } from '@byok-sdk/core';
 import { authenticateBearer, type BearerAuthDeps } from '../auth/bearer';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from '../tenant-stores';
 

@@ -10,7 +10,7 @@
  * the database answer `now()`.
  */
 import { describe, expect, it } from 'vitest';
-import { NONCE_TTL_MS } from '@byok/cloud';
+import { NONCE_TTL_MS } from '@byok-sdk/cloud';
 import { TENANT_A } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 

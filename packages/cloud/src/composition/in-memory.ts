@@ -4,10 +4,10 @@
  *
  * This is what the handler suites and the client-side end-to-end test run
  * against, and it is the honest demonstration of the S3 claim — the daemon
- * cannot tell this from `@byok/server`, and nothing in the path needs a
+ * cannot tell this from `@byok-sdk/server`, and nothing in the path needs a
  * database to prove it.
  */
-import { createInMemoryCoreStores, type Clock, type CapabilityDeclaration, type CoreStores } from '@byok/core';
+import { createInMemoryCoreStores, type Clock, type CapabilityDeclaration, type CoreStores } from '@byok-sdk/core';
 import { createHmacTokenSigner, type TokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { createWebCrypto } from '../crypto/web-crypto';

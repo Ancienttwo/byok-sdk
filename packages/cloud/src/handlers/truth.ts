@@ -11,7 +11,7 @@ import {
   type TruthManifestQuery,
   type TruthRecord,
   type TruthRecordKind,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Context } from 'hono';
 import { authenticateDeviceProof, type DeviceProofAuthDeps } from '../auth/device-proof';
 import {

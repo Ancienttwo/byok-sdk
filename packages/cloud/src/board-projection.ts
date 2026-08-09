@@ -1,4 +1,4 @@
-import { isCoreConflictError } from '@byok/core';
+import { isCoreConflictError } from '@byok-sdk/core';
 import type { TenantBoundBoard } from './tenant-stores';
 
 /**

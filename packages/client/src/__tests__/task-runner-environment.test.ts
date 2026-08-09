@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { createEnvelope, type Envelope, type RuntimeId } from '@byok/protocol';
+import { createEnvelope, type Envelope, type RuntimeId } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { SpawnFn as PiSpawnFn } from '../adapters/pi/rpc-client';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';

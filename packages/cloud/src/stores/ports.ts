@@ -1,7 +1,7 @@
 /**
  * The cloud-local store ports.
  *
- * `@byok/core` owns the platform ports every composition shares (mailbox,
+ * `@byok-sdk/core` owns the platform ports every composition shares (mailbox,
  * board, truth, objects, quota). These are the ones only a HOSTED device
  * surface needs — the auth plane and the task-attempt bookkeeping the device
  * routes read. S2 deliberately kept them out of core: they are hosted-surface
@@ -34,7 +34,7 @@
  * because a composition backed by object storage physically cannot proxy
  * bytes (see the blobs section below).
  */
-import type { StorageReservation, TenantId } from '@byok/core';
+import type { StorageReservation, TenantId } from '@byok-sdk/core';
 
 // ---------------------------------------------------------------------------
 // Device directory (S1's `DeviceRegistry`, tenant-first)

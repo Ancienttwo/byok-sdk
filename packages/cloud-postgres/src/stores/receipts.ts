@@ -8,8 +8,8 @@
  * a way no naive "record it twice" test would catch — it would pass, while
  * silently rewriting history and restamping `recorded_at`.
  */
-import type { RequestReceipt, RequestReceiptStore } from '@byok/cloud';
-import type { Clock, TenantId } from '@byok/core';
+import type { RequestReceipt, RequestReceiptStore } from '@byok-sdk/cloud';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 interface ReceiptRow {

@@ -7,13 +7,13 @@
  * the ROW's identity. A token missing a leg is not a partially usable token;
  * it is not a token this deployment minted.
  *
- * {@link TokenSigner} is a port for the same reason `@byok/server` made it
+ * {@link TokenSigner} is a port for the same reason `@byok-sdk/server` made it
  * one: a SaaS with an org-wide asymmetric signer or a KMS swaps its own in.
  * The reference implementation below is HS256 over a caller-supplied secret,
  * built on WebCrypto so the package stays runtime-neutral (no `jose`, no
  * `node:crypto`).
  */
-import type { Clock } from '@byok/core';
+import type { Clock } from '@byok-sdk/core';
 import {
   base64UrlDecode,
   base64UrlEncode,

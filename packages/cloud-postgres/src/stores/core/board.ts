@@ -39,7 +39,7 @@ import {
   type BoardUnclaimInput,
   type Clock,
   type TenantId,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 const DEFAULT_LIST_LIMIT = 50;

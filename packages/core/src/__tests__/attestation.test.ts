@@ -10,7 +10,7 @@
  *    verifying in production. It lives here, not in the protocol golden: the
  *    proof envelope is not part of the frozen v1 wire.
  *    Regenerate deliberately with
- *    `BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok/core test`, and treat any
+ *    `BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok-sdk/core test`, and treat any
  *    resulting diff as a breaking change to the signing format.
  * 2. **Insertion-order permutation** — the same claims built in scrambled key
  *    order must produce byte-identical output. This is the falsifier the plan
@@ -130,7 +130,7 @@ function buildGolden(): GoldenFile {
   return {
     schema: DEVICE_PROOF_SCHEMA_ID,
     domainPrefix: DEVICE_PROOF_DOMAIN_PREFIX,
-    note: 'Canonical signing bytes for byok-device-proof-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok/core test, and treat any diff as a breaking change to the signature format.',
+    note: 'Canonical signing bytes for byok-device-proof-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok-sdk/core test, and treat any diff as a breaking change to the signature format.',
     cases: GOLDEN_INPUTS.map((input) => {
       const claims = parseClaims(input.claims);
       const bytes = deviceProofSigningInput(claims);

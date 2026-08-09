@@ -13,7 +13,7 @@ import {
   type MailboxMessage,
   type MailboxMessageState,
   type TenantId,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
 import {
   R2ObjectMaintenanceStore,

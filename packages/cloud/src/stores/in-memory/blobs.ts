@@ -10,7 +10,7 @@
  * was before the split.
  *
  * They cannot be one object: the port's method inventory is contract data
- * (`CLOUD_PORT_METHODS`) and `@byok/conformance` asserts a composition's blob
+ * (`CLOUD_PORT_METHODS`) and `@byok-sdk/conformance` asserts a composition's blob
  * store implements EXACTLY the two declared methods. An object carrying all
  * six would fail that assertion, which is the point — the suite is what keeps
  * the narrowed port narrow.
@@ -26,7 +26,7 @@
  * have no principal at all — the signature over the blob id IS the credential
  * (same posture as the reference server, §7).
  */
-import { ByokCoreError, type Clock, type ContentHash, type ObjectStore, type StorageReservation, type TenantId } from '@byok/core';
+import { ByokCoreError, type Clock, type ContentHash, type ObjectStore, type StorageReservation, type TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../../crypto/port';
 import type {
   BlobContent,

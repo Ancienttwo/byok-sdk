@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';

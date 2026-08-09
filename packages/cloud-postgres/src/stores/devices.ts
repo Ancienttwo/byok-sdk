@@ -9,8 +9,8 @@
  * guessed. One row, two access paths, never two copies to keep in sync — a
  * stale pre-tenant index would be a revoked device that can still get a token.
  */
-import type { TenantId } from '@byok/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok/cloud';
+import type { TenantId } from '@byok-sdk/core';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
 
 interface DeviceRow {

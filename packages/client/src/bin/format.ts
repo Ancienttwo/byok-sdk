@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@byok/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo } from '../index';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ProbedRuntime } from './runtime-probe';

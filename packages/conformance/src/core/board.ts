@@ -8,7 +8,7 @@
  * overwrites the winner.
  */
 import { describe, expect, it } from 'vitest';
-import { isCoreConflictError, type BoardItem, type CoreConflictError } from '@byok/core';
+import { isCoreConflictError, type BoardItem, type CoreConflictError } from '@byok-sdk/core';
 import { TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 

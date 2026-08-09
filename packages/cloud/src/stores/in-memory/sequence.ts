@@ -3,7 +3,7 @@
  * delivery counter starting at 1, matching what a mailbox numbers its first
  * row.
  */
-import { tenantKey, type TenantId } from '@byok/core';
+import { tenantKey, type TenantId } from '@byok-sdk/core';
 import type { DeviceSequenceStore } from '../ports';
 
 export class InMemoryDeviceSequenceStore implements DeviceSequenceStore {

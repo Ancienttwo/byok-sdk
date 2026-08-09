@@ -5,7 +5,7 @@ import {
   type BoardItem,
   type BoardListQuery,
   type BoardPage,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';

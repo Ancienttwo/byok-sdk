@@ -3,7 +3,7 @@ import {
   assertCapability,
   hasCapability,
   type CapabilityDeclaration,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { z } from 'zod';
 import { CLOUD_CAPABILITIES } from './capabilities';
 

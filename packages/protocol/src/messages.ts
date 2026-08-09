@@ -474,7 +474,7 @@ export const SERVER_TO_DAEMON_TYPES = [
  * only ever valid as the first frame of a WS handshake (`ws-server.ts`), not
  * as ongoing inbound traffic through `ConnectionHub.handleInbound`.
  *
- * Used by `handleInbound` (`@byok/server`'s `hub.ts`) as the type-allow gate
+ * Used by `handleInbound` (`@byok-sdk/server`'s `hub.ts`) as the type-allow gate
  * for every inbound envelope, WS and `POST /byok/messages` alike (finding
  * P2): a `type` outside this set — a server -> daemon type arriving inbound,
  * or anything unrecognized — is rejected before it's dispatched to any

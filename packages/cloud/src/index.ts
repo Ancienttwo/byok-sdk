@@ -1,24 +1,24 @@
 /**
- * `@byok/cloud` — the hosted device surface.
+ * `@byok-sdk/cloud` — the hosted device surface.
  *
- * Cloud sits BESIDE `@byok/server`, not above it (§12.1): `cloud → core +
+ * Cloud sits BESIDE `@byok-sdk/server`, not above it (§12.1): `cloud → core +
  * protocol`, and never `cloud → server`. The self-hosted embedded coordinator
  * stays the self-hosted option; this package serves the same frozen v1 device
- * wire contract statelessly, over `@byok/core` ports plus the cloud-local auth
+ * wire contract statelessly, over `@byok-sdk/core` ports plus the cloud-local auth
  * and task ports in `stores/ports.ts`.
  *
  * `src/__tests__/constraints.test.ts` asserts the properties this export list
- * implies: no `@byok/server` import, no `node:` import, no module-level
+ * implies: no `@byok-sdk/server` import, no `node:` import, no module-level
  * mutable state, no session/Running map, and no route mounted outside the I1
  * registry.
  */
 
-// Tenant identity. RE-exported from `@byok/core`, never redefined: core owns
+// Tenant identity. RE-exported from `@byok-sdk/core`, never redefined: core owns
 // the single mint point, and every control-plane function on this package's
 // own API takes a `TenantId` first, so a host composing cloud has to be able
 // to mint one without reasoning about which package's brand it got.
-export { isTenantId, tenantId } from '@byok/core';
-export type { TenantId } from '@byok/core';
+export { isTenantId, tenantId } from '@byok-sdk/core';
+export type { TenantId } from '@byok-sdk/core';
 
 // The composition entry points
 export { createByokCloud } from './cloud';
@@ -171,7 +171,7 @@ export type { TruthCommitErrorCode } from './truth/errors';
 
 // Cloud-local ports
 export { CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES } from './stores/ports';
-// The port method inventory. Contract data, shipped so `@byok/conformance` and
+// The port method inventory. Contract data, shipped so `@byok-sdk/conformance` and
 // durable adapters read the same table; `ports.ts` itself is untouched.
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
 export type {

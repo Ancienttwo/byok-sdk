@@ -1,9 +1,9 @@
 /**
- * `@byok/core` — platform contracts.
+ * `@byok-sdk/core` — platform contracts.
  *
  * What this package exports is deliberately narrow: contracts, schemas, errors,
  * and one in-memory reference implementation. No HTTP, no crypto, no SQL, no
- * `@byok/protocol` (that edge would make a future `keys → core` dependency drag
+ * `@byok-sdk/protocol` (that edge would make a future `keys → core` dependency drag
  * the wire protocol along with it, §12.1), and no `node:` import (a Workers
  * composition has to be able to load this).
  *
@@ -165,7 +165,7 @@ export { CORE_STORE_NAMES } from './stores';
 export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
 
 // The port method inventory (I7). Contract data, shipped rather than test-only,
-// so `@byok/conformance` can assert compositions against the same table
+// so `@byok-sdk/conformance` can assert compositions against the same table
 // `__tests__/constraints.test.ts` asserts the source interfaces against —
 // without a `core → conformance` cycle.
 export { CORE_PORT_INTERFACES, CORE_PORT_METHODS } from './ports-contract';

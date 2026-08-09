@@ -30,7 +30,7 @@ import {
   type PresenceLevel,
   type PresenceStore,
   type TenantId,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 const PRESENCE_COLUMNS = 'tenant_id, device_id, level, detail, observed_at, expires_at';

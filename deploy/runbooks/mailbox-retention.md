@@ -41,8 +41,8 @@ sweeps on large tenants.
 
 ## Who runs it
 
-**The SDK ships no scheduler.** Nothing in `@byok/core`, `@byok/cloud` or
-`@byok/cloud-postgres` starts a timer, and nothing calls `collectRetired` on its
+**The SDK ships no scheduler.** Nothing in `@byok-sdk/core`, `@byok-sdk/cloud` or
+`@byok-sdk/cloud-postgres` starts a timer, and nothing calls `collectRetired` on its
 own. The host runs it: a cron job, a queue consumer, a Cloudflare cron trigger,
 a Kubernetes CronJob — whatever the deployment already has. Two consequences
 worth stating plainly:

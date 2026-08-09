@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type TaskState } from '@byok/protocol';
+import { createEnvelope, type TaskState } from '@byok-sdk/protocol';
 import type { WebSocket } from 'ws';
 import { DeviceRegistry } from '../auth';
 // S1: `StaleApprovalError` re-exported from the package's own public entry

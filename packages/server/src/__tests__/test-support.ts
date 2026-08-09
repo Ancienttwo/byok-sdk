@@ -11,7 +11,7 @@ import {
   type RuntimeCapabilities,
   type RuntimeId,
   type RuntimeInfo,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import { WebSocket, type RawData } from 'ws';
 import { NONCE_SIGNING_DOMAIN } from '../auth';
 import type { ByokServer, ByokServerEvent, PairingCodeClaims, ServerTaskEvent, TaskHandle } from '../index';

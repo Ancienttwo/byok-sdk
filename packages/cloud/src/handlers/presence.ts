@@ -1,5 +1,5 @@
-import { isCoreError, PRESENCE_LEVELS } from '@byok/core';
-import { AgentEventOrUnknownSchema } from '@byok/protocol';
+import { isCoreError, PRESENCE_LEVELS } from '@byok-sdk/core';
+import { AgentEventOrUnknownSchema } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { appendActivityEvents, type ActivityBounds } from '../coordination';

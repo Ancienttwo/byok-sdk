@@ -1,4 +1,4 @@
-import type { PermissionPolicy } from '@byok/protocol';
+import type { PermissionPolicy } from '@byok-sdk/protocol';
 
 export interface ClaudePermissionMapping {
   ok: boolean;

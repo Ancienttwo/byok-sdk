@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonEventListener } from '../daemon/observer';
 import { readAuditEvents } from '../bin/audit-log';

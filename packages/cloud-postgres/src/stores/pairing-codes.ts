@@ -15,13 +15,13 @@
  * every tenant, and "already used" versus "never existed" is precisely the
  * difference an attacker enumerating codes would pay for.
  */
-import type { Clock, TenantId } from '@byok/core';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
   PairingCodeClaims,
   PairingCodeInfo,
   PairingCodeIssueInput,
   PairingCodeStore,
-} from '@byok/cloud';
+} from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
 
 export class PostgresPairingCodeStore implements PairingCodeStore {

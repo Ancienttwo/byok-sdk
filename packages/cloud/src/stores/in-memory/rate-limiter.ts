@@ -6,7 +6,7 @@
  * lives at its edge; when it arrives it plugs in here and the gate order does
  * not move.
  */
-import type { TenantId } from '@byok/core';
+import type { TenantId } from '@byok-sdk/core';
 import type { InboundRateLimiter } from '../ports';
 
 export class AllowAllRateLimiter implements InboundRateLimiter {

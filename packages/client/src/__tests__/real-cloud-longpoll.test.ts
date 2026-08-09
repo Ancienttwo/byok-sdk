@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decodeEnvelope } from '@byok/protocol';
+import { decodeEnvelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -13,7 +13,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
 /**
  * Sprint S3's falsifier, run: the daemon must not be able to tell the hosted
- * `@byok/cloud` surface from the self-hosted `@byok/server` one.
+ * `@byok-sdk/cloud` surface from the self-hosted `@byok-sdk/server` one.
  *
  * This is deliberately the SAME shape as
  * `real-server-longpoll-only.test.ts` — same daemon construction, same
@@ -29,7 +29,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * offer goes in through `enqueueOffer` and the result comes back out of the
  * task-attempt store and the terminal receipt.
  */
-describe('a full task lifecycle over long-poll only, against the real @byok/cloud', () => {
+describe('a full task lifecycle over long-poll only, against the real @byok-sdk/cloud', () => {
   let cloud: RealCloudHandle;
   let daemon: Daemon | undefined;
 

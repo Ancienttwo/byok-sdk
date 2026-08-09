@@ -15,7 +15,7 @@
  * the one operation that would make the gate's cross-device assertion
  * unfalsifiable.
  */
-import { tenantKey, type Clock, type TenantId } from '@byok/core';
+import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '../ports';
 
 export class InMemoryTaskAttemptStore implements TaskAttemptStore {

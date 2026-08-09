@@ -36,7 +36,7 @@ const profile = (
 
 /**
  * Both implementations answer to one contract, so the suite runs twice — the
- * same shape `@byok/server` uses to keep `InMemoryTaskStore` and
+ * same shape `@byok-sdk/server` uses to keep `InMemoryTaskStore` and
  * `SqliteTaskStore` honest against each other. SQLite runs `:memory:` here;
  * on-disk behaviour (file mode, no plaintext key in the file) is
  * `sqlite-profile-store.test.ts`.

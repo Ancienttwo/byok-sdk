@@ -7,7 +7,7 @@
  * slow enough that nothing expires during the test.
  */
 import { describe, expect, it } from 'vitest';
-import { isCoreError } from '@byok/core';
+import { isCoreError } from '@byok-sdk/core';
 import { TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 

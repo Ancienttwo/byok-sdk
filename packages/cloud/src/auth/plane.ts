@@ -16,7 +16,7 @@
  * - nonce issue/validate/consume and token minting take that ROW, so the
  *   tenant they act on is the row's, by construction.
  */
-import type { Clock, TenantId } from '@byok/core';
+import type { Clock, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../crypto/port';
 import type { CloudStores, DeviceRecord, PairingCodeInfo } from '../stores/ports';
 import { ACCESS_TOKEN_TTL_SECONDS, type TokenSigner } from './tokens';

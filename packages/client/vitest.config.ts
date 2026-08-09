@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 
-// @byok/client is the only package whose suite drives real operating-system
+// @byok-sdk/client is the only package whose suite drives real operating-system
 // resources: it spawns the real `byok-agent` CLI as a child process, binds real
 // Unix domain sockets / named pipes, and probes the real `pi` optionalDependency
 // binary. Those tests are wall-clock sensitive in a way pure in-process tests

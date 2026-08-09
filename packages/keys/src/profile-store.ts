@@ -9,7 +9,7 @@ import {
  * Storage contract for provider profiles — everything needed to address a
  * provider except the API key, which lives in a {@link SecretStore}.
  *
- * Shaped after `@byok/server`'s `TaskStore` (`packages/server/src/task-store.ts`)
+ * Shaped after `@byok-sdk/server`'s `TaskStore` (`packages/server/src/task-store.ts`)
  * as a *pattern*, not a dependency: `keys` must not import `server`, and
  * `server` must not import `keys` (the plan's Security Boundary keeps the
  * agent-dispatch packages free of any credential-adjacent code).
@@ -59,7 +59,7 @@ export function providerNotConfigured(
  * Profile store held in process memory: the default, and the one every test
  * that does not specifically exercise SQLite should use.
  *
- * Mirrors `InMemoryTaskStore`'s role in `@byok/server` — a real implementation
+ * Mirrors `InMemoryTaskStore`'s role in `@byok-sdk/server` — a real implementation
  * of the contract, not a stub, so behaviour proven here is the behaviour the
  * SQLite store must match (`profile-store.test.ts` runs one suite against both).
  */

@@ -1,4 +1,4 @@
-import { MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok/protocol';
+import { MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';

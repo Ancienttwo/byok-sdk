@@ -1,7 +1,7 @@
 /**
  * The crypto seam.
  *
- * `@byok/server` reaches straight for `node:crypto`. Cloud cannot: a hosted
+ * `@byok-sdk/server` reaches straight for `node:crypto`. Cloud cannot: a hosted
  * composition has to load on Workers and Deno too, and `src/__tests__/
  * constraints.test.ts` asserts this package never imports a `node:` module.
  * So every primitive the device surface needs — random identifiers, Ed25519

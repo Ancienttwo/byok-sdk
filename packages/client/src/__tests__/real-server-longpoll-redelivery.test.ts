@@ -24,7 +24,7 @@ async function tmpDir(prefix: string): Promise<string> {
  *
  * This is the direct long-poll analog of
  * `connection-manager-redelivery.test.ts`'s F3 test, but run end-to-end
- * against the REAL `@byok/server` + a REAL client daemon forced into
+ * against the REAL `@byok-sdk/server` + a REAL client daemon forced into
  * long-poll-only mode (`startRealServerWithoutWebSocket`) — proving the two
  * transports now share the identical deliver()/process()/advanceCursor path
  * documented in `connection-manager.ts`, not just that the WS-specific unit
@@ -36,7 +36,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * call and report a terminal message instead) — see `StubSession.steerError`'s
  * own doc comment.
  */
-describe('long-poll cursor is not advanced before the handler succeeds (Design A, real @byok/server, long-poll only)', () => {
+describe('long-poll cursor is not advanced before the handler succeeds (Design A, real @byok-sdk/server, long-poll only)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
 

@@ -20,7 +20,7 @@
  * `duplicate` for whatever already landed.
  */
 import type { Context } from 'hono';
-import { MessagesSendRequestSchema, type MessagesSendResponse } from '@byok/protocol';
+import { MessagesSendRequestSchema, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../inbound';
 import type { ActivityBounds } from '../coordination';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';

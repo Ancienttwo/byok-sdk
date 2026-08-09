@@ -25,7 +25,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * `enterLongPoll`, and `exitLongPoll` — a switch just changes which
  * transport the NEXT drain iteration routes through.
  *
- * Forces the scenario deterministically against the REAL `@byok/server`:
+ * Forces the scenario deterministically against the REAL `@byok-sdk/server`:
  * start long-poll-only (`startRealServerWithDeferredWebSocket`, WS upgrade
  * not yet wired up — a genuine WS failure, not simulated), block EVERY
  * `POST /byok/messages` at the fetch layer so the daemon's outbound
@@ -38,7 +38,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * envelope reached the server too, it would be silently absorbed as a
  * duplicate rather than corrupting task state).
  */
-describe('outbound envelopes queued while long-polling are not stranded when WS recovers mid-flight (Design B, finding N4, real @byok/server)', () => {
+describe('outbound envelopes queued while long-polling are not stranded when WS recovers mid-flight (Design B, finding N4, real @byok-sdk/server)', () => {
   let real: DeferredWebSocketServerHandle;
   let daemon: Daemon | undefined;
   let originalFetch: typeof globalThis.fetch;

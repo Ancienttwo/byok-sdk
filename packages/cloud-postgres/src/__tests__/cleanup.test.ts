@@ -6,8 +6,8 @@ import {
   type Clock,
   type ContentHash,
   type TenantId,
-} from '@byok/core';
-import type { BlobObservation } from '@byok/cloud';
+} from '@byok-sdk/core';
+import type { BlobObservation } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
 import { PostgresCloudCleanup } from '../cleanup';
 import { migrate } from '../migrate';

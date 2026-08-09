@@ -21,14 +21,14 @@
  *   and check". Every step is either awaited or gated.
  *
  * Points 5 and 6 straddle the cloud boundary, so they run against the real
- * `@byok/cloud` composition over a real socket (the S3a fixture) rather than
+ * `@byok-sdk/cloud` composition over a real socket (the S3a fixture) rather than
  * a double — the claim being made is about the CLOUD's idempotency absorbing
  * a local retry, and a fake cloud would be asserting the test's own beliefs.
  */
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { decodeEnvelope, encodeEnvelope, type Envelope } from '@byok/protocol';
+import { decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';

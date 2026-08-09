@@ -8,8 +8,8 @@
  * self-hosted one against the same attack — which is exactly the failure this
  * slice exists to make impossible.
  */
-import { createMutableClock, tenantId, type Clock } from '@byok/core';
-import type { ChallengeResponse, TokenResponse } from '@byok/protocol';
+import { createMutableClock, tenantId, type Clock } from '@byok-sdk/core';
+import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from '../auth/tokens';
 import { NONCE_TTL_MS } from '../stores/in-memory/nonces';

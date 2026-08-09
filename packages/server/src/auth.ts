@@ -43,7 +43,7 @@ export const NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n';
 
 /**
  * S1: server-local tenant identifier. A plain string alias for now — S2 moves
- * the branded/shared form into `@byok/core`, which does not exist yet, and
+ * the branded/shared form into `@byok-sdk/core`, which does not exist yet, and
  * depending on an unbuilt package would be worse than naming the concept
  * here. What matters at this stage is that every identity-carrying shape in
  * this package names the tenant explicitly and required, never optional.

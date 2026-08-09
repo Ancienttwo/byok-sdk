@@ -1,6 +1,6 @@
 {
-  "name": "@byok/server",
-  "version": "0.0.1",
+  "name": "@byok-sdk/server",
+  "version": "0.1.0",
   "description": "BYOK SDK server: in-memory M0 reference implementation of the SaaS-side coordinator",
   "type": "module",
   "license": "MIT",
@@ -28,7 +28,9 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
@@ -42,7 +44,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@byok/protocol": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
     "@hono/node-server": "^2.0.10",
     "hono": "^4.12.30",
     "jose": "^6.2.3",

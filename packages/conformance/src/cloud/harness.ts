@@ -15,8 +15,8 @@
  * predicate rather than reaching for the database's `now()`.
  */
 import { describe } from 'vitest';
-import type { BlobDeclaration, BlobObservation, CloudStores } from '@byok/cloud';
-import type { StorageReservation, TenantId } from '@byok/core';
+import type { BlobDeclaration, BlobObservation, CloudStores } from '@byok-sdk/cloud';
+import type { StorageReservation, TenantId } from '@byok-sdk/core';
 import { runCloudPortInventoryConformance } from './port-inventory';
 import { runPairingConformance } from './pairing';
 import { runNonceConformance } from './nonces';

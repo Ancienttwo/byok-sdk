@@ -3,7 +3,7 @@
  *
  * One thing here is load-bearing and easy to get wrong: **int8 parsing**.
  * `pg` decodes `bigint` columns as strings by default, because a 64-bit value
- * does not fit a JS `number`. Every byte-count contract in `@byok/core` is
+ * does not fit a JS `number`. Every byte-count contract in `@byok-sdk/core` is
  * declared `bigint` (`byteSize`, `releasedBytes`, the whole quota surface), so
  * a default-configured pool would hand the stores strings, and
  * `usage.reservedBytes > limit` would silently become a lexicographic string

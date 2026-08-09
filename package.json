@@ -1,5 +1,5 @@
 {
-  "name": "byok-sdk",
+  "name": "byok-sdk-workspace",
   "version": "0.0.0",
   "private": true,
   "description": "BYOK SDK monorepo — bring-your-own-agent task dispatch for SaaS products",
@@ -18,6 +18,8 @@
     "check:context-files": "repo-harness run check-context-files",
     "check:deploy-sql": "repo-harness run check-deploy-sql-order",
     "check:architecture-sync": "repo-harness run check-architecture-sync",
+    "check:release-graph": "node scripts/release/check-package-graph.mjs",
+    "check:release-pack": "node scripts/release/pack-and-smoke.mjs",
     "check:task-sync": "repo-harness run check-task-sync",
     "check:task-workflow": "repo-harness run check-task-workflow --strict",
     "sync:brain-docs": "repo-harness run sync-brain-docs --all"

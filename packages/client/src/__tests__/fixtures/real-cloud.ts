@@ -2,7 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { serve } from '@hono/node-server';
 // This import reaches across the workspace by RELATIVE PATH on purpose.
 //
-// `@byok/client` must not gain a package dependency on the hosted surface —
+// `@byok-sdk/client` must not gain a package dependency on the hosted surface —
 // not even a dev one. The whole claim this fixture exists to prove is that the
 // daemon transport is unchanged and unaware of which server implementation is on the
 // other end; a `client -> cloud` edge in `package.json` would be the first
@@ -23,7 +23,7 @@ import {
 } from '../../../../cloud/src/index';
 
 /**
- * Boots the REAL `@byok/cloud` in-memory composition on an ephemeral loopback
+ * Boots the REAL `@byok-sdk/cloud` in-memory composition on an ephemeral loopback
  * port, for the end-to-end test that drives the unchanged daemon against it.
  *
  * There is no WebSocket half at all — cloud is a stateless HTTP surface by

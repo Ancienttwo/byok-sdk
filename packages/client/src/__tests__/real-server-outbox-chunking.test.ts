@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, MAX_MESSAGES_PER_BATCH } from '@byok/protocol';
+import { createEnvelope, MAX_MESSAGES_PER_BATCH } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
@@ -18,21 +18,21 @@ async function tmpDir(prefix: string): Promise<string> {
  * used to `splice(0)` the ENTIRE outbox and POST it in a single
  * `/byok/messages` call — the server hard-caps a single batch at
  * `MAX_MESSAGES_PER_BATCH` (protocol §8.2, `MessagesSendRequestSchema`, now
- * exported from `@byok/protocol` so the client references the exact same
+ * exported from `@byok-sdk/protocol` so the client references the exact same
  * number rather than a driftable hard-coded copy). More than that queued
  * during a transport outage made the server 400 the WHOLE oversized batch;
  * the client then re-queued and retried the identical oversize batch,
  * unchanged — a permanent stall in long-poll-only mode, since nothing ever
  * got small enough to be accepted.
  *
- * Run against the REAL `@byok/server` (not the lightweight `TestServer`
+ * Run against the REAL `@byok-sdk/server` (not the lightweight `TestServer`
  * stub) so the cap is genuinely schema-enforced — the stub's
  * `handleMessagesSend` doesn't validate batch size at all, so it wouldn't
  * reproduce the 400. `ConnectionManager` is exercised directly (bypassing
  * `TaskRunner`/`Daemon`) so the test can cheaply queue many synthetic
  * outbound envelopes without spinning up 257+ real adapter sessions.
  */
-describe('drainOutbox chunks outbound sends to the server batch cap (finding P1, real @byok/server)', () => {
+describe('drainOutbox chunks outbound sends to the server batch cap (finding P1, real @byok-sdk/server)', () => {
   let real: RealServerHandle;
   let connection: ConnectionManager | undefined;
   let originalFetch: typeof globalThis.fetch;

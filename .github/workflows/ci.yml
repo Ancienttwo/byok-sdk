@@ -3,12 +3,12 @@ name: CI
 # First CI workflow for this repo. Runs the same three commands a local
 # `pnpm install && pnpm -r build && pnpm -r typecheck && pnpm -r test` would —
 # no separate lint/format job exists yet. `pnpm -r build` MUST run before
-# typecheck/test: @byok/protocol's package.json `exports` point at its built
-# `dist/`, not `src/`, so @byok/server and @byok/client can't even resolve
-# `@byok/protocol` (let alone typecheck or test against it) until it's been
+# typecheck/test: @byok-sdk/protocol's package.json `exports` point at its built
+# `dist/`, not `src/`, so @byok-sdk/server and @byok-sdk/client can't even resolve
+# `@byok-sdk/protocol` (let alone typecheck or test against it) until it's been
 # built at least once in this checkout (empirically confirmed while wiring up
 # this workflow — deleting every package's `dist/` breaks
-# `pnpm -r typecheck` with "Cannot find module '@byok/protocol'").
+# `pnpm -r typecheck` with "Cannot find module '@byok-sdk/protocol'").
 #
 # The freeze-guard test (packages/protocol/src/__tests__/freeze-guard.test.ts)
 # runs as an ordinary part of `pnpm -r test` — no separate step for it.
@@ -140,13 +140,13 @@ jobs:
       # The migrate runner's fault suite plus the Postgres composition running
       # the cloud conformance suite.
       - name: Dataplane suites (Postgres composition + migrate runner)
-        run: pnpm --filter @byok/cloud-postgres test
+        run: pnpm --filter @byok-sdk/cloud-postgres test
 
       # The same assertion source against the in-memory composition. Running
       # both in one job is what makes a divergence a failure here rather than a
       # discrepancy someone notices later.
       - name: Conformance suites (in-memory compositions)
-        run: pnpm --filter @byok/conformance test
+        run: pnpm --filter @byok-sdk/conformance test
 
       # repo-harness is a bun-only tool (`engines.bun`, a bare-`.ts` bin, an
       # `exec bun` shim) — Node cannot run it, and declaring it as a workspace
@@ -208,7 +208,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $specialTemp | Out-Null
           $env:TEMP = $specialTemp
           $env:TMP = $specialTemp
-          pnpm --filter @byok/client exec vitest run `
+          pnpm --filter @byok-sdk/client exec vitest run `
             src/__tests__/git-workspace.test.ts `
             src/__tests__/git-workspace-store.test.ts `
             src/__tests__/bin-workspaces.test.ts `
@@ -216,7 +216,7 @@ jobs:
 
       - name: Run diagnostics and lifecycle lease safety tests on Windows
         run: |
-          pnpm --filter @byok/client exec vitest run `
+          pnpm --filter @byok-sdk/client exec vitest run `
             src/__tests__/diagnostics.test.ts `
             src/__tests__/support-bundle.test.ts `
             src/__tests__/daemon-auth.test.ts `
@@ -277,7 +277,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build (needed so @byok/client has a dist/ to bundle)
+      - name: Build (needed so @byok-sdk/client has a dist/ to bundle)
         run: pnpm -r build
 
       # Only the bun recipe's legs need this -- GitHub-hosted runners don't
@@ -289,6 +289,39 @@ jobs:
 
       - name: Run packaging smoke
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
+
+  # S7-c public npm guarantee: pack every dispatch package plus the umbrella,
+  # install the exact tarballs into a clean npm project, import every direct
+  # package and all umbrella namespaces, and prove keys did not enter the
+  # installed graph. This is distinct from the SEA/bun binary recipes above:
+  # those prove the host can bundle the daemon; this proves registry consumers
+  # can install the library graph itself.
+  npm-release-pack:
+    name: npm release pack/install (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [20, 22]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check graph, pack exact tarballs, and import from an isolated npm install
+        run: pnpm run check:release-pack
 
   # M3-4 Windows Service guarantee: proves the generated WinSW service
   # descriptor (packages/client/src/lifecycle/winsw.ts) actually installs,
@@ -331,7 +364,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build (needed for @byok/client's dist/index.js the smoke script imports)
+      - name: Build (needed for @byok-sdk/client's dist/index.js the smoke script imports)
         run: pnpm -r build
 
       - name: Download WinSW (pinned version + checksum-verified)
@@ -360,7 +393,7 @@ jobs:
   # OSes -- not just the in-process unit/integration tests already covered
   # by `pnpm -r test` above (packages/client/src/__tests__/control-*.test.ts,
   # daemon-control-socket.test.ts). Starts a real `byok-agent start` child
-  # process (paired against a real, ephemeral `@byok/server` this script
+  # process (paired against a real, ephemeral `@byok-sdk/server` this script
   # also boots), reaches it live via a SEPARATE `byok-agent status`
   # invocation, then performs a real live `byok-agent unpair --yes` and
   # confirms the daemon process actually exits on its own -- the exact
@@ -396,7 +429,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build (needed for @byok/client + @byok/server dist/ this script drives)
+      - name: Build (needed for @byok-sdk/client + @byok-sdk/server dist/ this script drives)
         run: pnpm -r build
 
       - name: Run the IPC control socket smoke
@@ -439,7 +472,7 @@ jobs:
       - name: Run credential-isolation audit
         run: |
           mkdir -p "$AUDIT_ROOT/raw"
-          pnpm --filter @byok/client run audit:credentials -- \
+          pnpm --filter @byok-sdk/client run audit:credentials -- \
             --trace-dir "$AUDIT_ROOT/raw" \
             --summary "$AUDIT_ROOT/summary.json"
 

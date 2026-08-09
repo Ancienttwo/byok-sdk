@@ -2,7 +2,7 @@
  * Auth v2 (docs/protocol.md §6): pair, challenge, token.
  *
  * Byte-for-byte the same request/response DTOs the daemon already speaks,
- * because they come from `@byok/protocol` rather than from a hosted copy of
+ * because they come from `@byok-sdk/protocol` rather than from a hosted copy of
  * them. The behavior differences a hosted surface DOES make are two, both
  * narrowing:
  *
@@ -19,7 +19,7 @@ import {
   type ChallengeResponse,
   type PairResponse,
   type TokenResponse,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import type { AuthPlane } from '../auth/plane';
 import { readJsonBody } from './shared';
 

@@ -1,12 +1,12 @@
 /**
  * The in-memory reference implementation of every cloud-local port.
  *
- * Same posture as `@byok/core`'s: a reference, not a production store. What it
+ * Same posture as `@byok-sdk/core`'s: a reference, not a production store. What it
  * guarantees is that the behavior the handler suites assert is achievable
  * without a database — which is what makes those same assertions meaningful
  * when a durable composition (S3b's journal, S4A's schema) runs them later.
  */
-import type { Clock, ObjectStore } from '@byok/core';
+import type { Clock, ObjectStore } from '@byok-sdk/core';
 import type { CloudCrypto } from '../../crypto/port';
 import type { BlobContentProxy, CloudStores } from '../ports';
 import { AllowAllRateLimiter } from './rate-limiter';

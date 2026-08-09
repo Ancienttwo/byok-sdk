@@ -23,7 +23,7 @@ importers:
 
   examples/basic:
     dependencies:
-      '@byok/server':
+      '@byok-sdk/server':
         specifier: workspace:*
         version: link:../../packages/server
       '@hono/node-server':
@@ -45,7 +45,7 @@ importers:
 
   examples/packaging:
     dependencies:
-      '@byok/client':
+      '@byok-sdk/client':
         specifier: workspace:*
         version: link:../../packages/client
     devDependencies:
@@ -64,17 +64,17 @@ importers:
 
   packages/client:
     dependencies:
-      '@byok/core':
+      '@byok-sdk/core':
         specifier: workspace:*
         version: link:../core
-      '@byok/protocol':
+      '@byok-sdk/protocol':
         specifier: workspace:*
         version: link:../protocol
       ws:
         specifier: ^8.21.1
         version: 8.21.1
     devDependencies:
-      '@byok/server':
+      '@byok-sdk/server':
         specifier: workspace:*
         version: link:../server
       '@hono/node-server':
@@ -90,10 +90,10 @@ importers:
 
   packages/cloud:
     dependencies:
-      '@byok/core':
+      '@byok-sdk/core':
         specifier: workspace:*
         version: link:../core
-      '@byok/protocol':
+      '@byok-sdk/protocol':
         specifier: workspace:*
         version: link:../protocol
       hono:
@@ -105,10 +105,10 @@ importers:
 
   packages/cloud-postgres:
     dependencies:
-      '@byok/cloud':
+      '@byok-sdk/cloud':
         specifier: workspace:*
         version: link:../cloud
-      '@byok/core':
+      '@byok-sdk/core':
         specifier: workspace:*
         version: link:../core
       aws4fetch:
@@ -121,7 +121,7 @@ importers:
         specifier: ^8.22.0
         version: 8.22.0
     devDependencies:
-      '@byok/conformance':
+      '@byok-sdk/conformance':
         specifier: workspace:*
         version: link:../conformance
       '@types/pg':
@@ -130,10 +130,10 @@ importers:
 
   packages/conformance:
     dependencies:
-      '@byok/cloud':
+      '@byok-sdk/cloud':
         specifier: workspace:*
         version: link:../cloud
-      '@byok/core':
+      '@byok-sdk/core':
         specifier: workspace:*
         version: link:../core
 
@@ -155,9 +155,30 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
+  packages/sdk:
+    dependencies:
+      '@byok-sdk/client':
+        specifier: workspace:*
+        version: link:../client
+      '@byok-sdk/cloud':
+        specifier: workspace:*
+        version: link:../cloud
+      '@byok-sdk/cloud-postgres':
+        specifier: workspace:*
+        version: link:../cloud-postgres
+      '@byok-sdk/core':
+        specifier: workspace:*
+        version: link:../core
+      '@byok-sdk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@byok-sdk/server':
+        specifier: workspace:*
+        version: link:../server
+
   packages/server:
     dependencies:
-      '@byok/protocol':
+      '@byok-sdk/protocol':
         specifier: workspace:*
         version: link:../protocol
       '@hono/node-server':

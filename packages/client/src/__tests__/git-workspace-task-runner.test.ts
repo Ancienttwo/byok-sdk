@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { GitWorkspaceManager, type GitWorkspaceObservation, type GitWorkspaceLease } from '../daemon/git-workspace';

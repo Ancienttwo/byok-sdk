@@ -7,7 +7,7 @@
  * committed, and an unreadable database is preserved rather than replaced.
  *
  * Skipped wholesale on a runtime without `node:sqlite` (the `isSqliteAvailable`
- * idiom `@byok/server`'s own SQLite suites use). The fail-closed CONSTRUCTION
+ * idiom `@byok-sdk/server`'s own SQLite suites use). The fail-closed CONSTRUCTION
  * behaviour that matters on those runtimes is covered by
  * `journal-unavailable.test.ts`, which does not skip.
  */

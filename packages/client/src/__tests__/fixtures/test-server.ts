@@ -9,7 +9,7 @@ import {
   parseMessage,
   PROTOCOL_VERSION,
   type Envelope,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../daemon/device-keys';
 
 interface Waiter {
@@ -124,7 +124,7 @@ export class TestServer {
     this.rejectWs = reject;
   }
 
-  /** Finding R2: capabilities to advertise in every SUBSEQUENT `conn.ack` (default `[]`, matching the wire's real "additive-minor, absent means not understood" convention) — used to test capability-gated client behavior (e.g. `approval_resolved`) without needing the real `@byok/server`. */
+  /** Finding R2: capabilities to advertise in every SUBSEQUENT `conn.ack` (default `[]`, matching the wire's real "additive-minor, absent means not understood" convention) — used to test capability-gated client behavior (e.g. `approval_resolved`) without needing the real `@byok-sdk/server`. */
   setAckCapabilities(capabilities: string[]): void {
     this.ackCapabilities = capabilities;
   }
@@ -173,7 +173,7 @@ export class TestServer {
    * M4 Phase 4 (version-negotiation drill): queue a RAW, untyped value into
    * the next long-poll response's `events` array — bypassing `Envelope`'s
    * type checking entirely. `pushLongPollEvent` above can't express a wire
-   * payload the current `@byok/protocol` package doesn't recognize at all
+   * payload the current `@byok-sdk/protocol` package doesn't recognize at all
    * (e.g. a hypothetical future minor server's new message type) since its
    * parameter is typed as the real, frozen `Envelope` union; this is the
    * escape hatch for simulating exactly that scenario against the client's

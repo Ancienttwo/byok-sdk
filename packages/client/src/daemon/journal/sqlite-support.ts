@@ -3,7 +3,7 @@
  * durable local journal.
  *
  * This deliberately MIRRORS `packages/server/src/sqlite-support.ts` in shape
- * rather than importing it. `@byok/client` has no dependency on `@byok/server`
+ * rather than importing it. `@byok-sdk/client` has no dependency on `@byok-sdk/server`
  * outside its own dev/test tree, and it must not gain one: the daemon ships to
  * an end user's machine and the reference server does not. The two files are
  * therefore the same idea applied twice on purpose — the server's module is
@@ -104,7 +104,7 @@ export function loadSqliteModule(): typeof import('node:sqlite') {
 /**
  * Whether `node:sqlite` can ACTUALLY be loaded right now. This is what the
  * journal's own test suites use for `describe.skipIf(!isSqliteAvailable())`
- * (the same idiom `@byok/server`'s SQLite suites already use), and what
+ * (the same idiom `@byok-sdk/server`'s SQLite suites already use), and what
  * `createDaemonWithAdapters` calls before constructing a hosted journal so
  * the refusal is a typed, up-front error instead of a cryptic
  * `Cannot find module 'node:sqlite'` from deep inside the first append.

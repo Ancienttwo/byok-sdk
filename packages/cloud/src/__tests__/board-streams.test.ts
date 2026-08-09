@@ -1,5 +1,5 @@
-import { createMutableClock } from '@byok/core';
-import { createEnvelope } from '@byok/protocol';
+import { createMutableClock } from '@byok-sdk/core';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { CLOUD_CAPABILITIES, fullCapabilityDeclaration } from '../capabilities';
 import {

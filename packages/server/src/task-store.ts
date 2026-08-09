@@ -1,4 +1,4 @@
-import { canTransition, type PermissionPolicy, type RuntimeId, type TaskState } from '@byok/protocol';
+import { canTransition, type PermissionPolicy, type RuntimeId, type TaskState } from '@byok-sdk/protocol';
 import type { TaskSnapshot } from './types';
 
 /** Thrown by a {@link TaskStore}'s `transition` when `from -> to` is not in TASK_TRANSITIONS. Every implementation (in-memory, SQLite, or otherwise) must throw this rather than silently applying an invalid move. */
@@ -62,7 +62,7 @@ export interface TaskStore {
   /**
    * M5 (approval targeting): update `taskId`'s `pendingApprovalId` WITHOUT a
    * state transition. Needed because `AwaitApproval -> AwaitApproval` is
-   * deliberately not a legal `TASK_TRANSITIONS` edge (`@byok/protocol`'s
+   * deliberately not a legal `TASK_TRANSITIONS` edge (`@byok-sdk/protocol`'s
    * `task-state.ts`) — self-transitions aren't part of the frozen wire state
    * machine, so `transition` above cannot be used to update this field while
    * the record STAYS in `AwaitApproval` — yet a re-sent/updated

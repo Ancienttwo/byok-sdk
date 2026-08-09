@@ -85,8 +85,8 @@ describe('the CI dataplane job', () => {
   it('runs BOTH compositions of the cloud conformance suite', () => {
     // One assertion source, two compositions, one job: a divergence between
     // them has to be a failure here, not a discrepancy discovered later.
-    expect(workflow).toContain('pnpm --filter @byok/cloud-postgres test');
-    expect(workflow).toContain('pnpm --filter @byok/conformance test');
+    expect(workflow).toContain('pnpm --filter @byok-sdk/cloud-postgres test');
+    expect(workflow).toContain('pnpm --filter @byok-sdk/conformance test');
   });
 
   it('covers both supported Node majors', () => {
@@ -216,8 +216,8 @@ describe('dependency boundaries', () => {
     // dedicated XML dependency keeps pagination fail-closed without replacing
     // the signer or importing the AWS SDK credential-provider graph.
     const allowed = new Set([
-      '@byok/core',
-      '@byok/cloud',
+      '@byok-sdk/core',
+      '@byok-sdk/cloud',
       'pg',
       'aws4fetch',
       'fast-xml-parser',
@@ -232,7 +232,7 @@ describe('dependency boundaries', () => {
   });
 
   it('keeps the pg dependency out of the platform-neutral packages', () => {
-    // `@byok/core` and `@byok/cloud` have to stay loadable on Workers, which is
+    // `@byok-sdk/core` and `@byok-sdk/cloud` have to stay loadable on Workers, which is
     // the entire reason this package exists as a separate one.
     for (const manifest of ['packages/core/package.json', 'packages/cloud/package.json']) {
       expect(repoFile(manifest), manifest).not.toContain('"pg"');

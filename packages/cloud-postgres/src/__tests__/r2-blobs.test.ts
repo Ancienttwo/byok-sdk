@@ -9,7 +9,7 @@
  * says nothing about which option was wrong.
  */
 import { describe, expect, it } from 'vitest';
-import { contentHash, tenantId, type Clock, type ObjectStore } from '@byok/core';
+import { contentHash, tenantId, type Clock, type ObjectStore } from '@byok-sdk/core';
 import {
   MAX_PRESIGN_TTL_SECONDS,
   MIN_PRESIGN_TTL_SECONDS,

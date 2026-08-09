@@ -6,7 +6,7 @@ import {
   tenantId,
   type DeviceProofEnvelopeV1,
   type DeviceProofProtectedClaims,
-} from '@byok/core';
+} from '@byok-sdk/core';
 import { importPrivateKeyPem } from './device-keys';
 import type { DeviceStore } from './store';
 
@@ -43,7 +43,7 @@ export interface StoredDeviceProofSignerOptions {
  *
  * The store is read for every signature rather than cached: clearing the paired
  * record immediately removes local signing authority. Canonicalization is
- * imported from `@byok/core`, the one frozen byte authority; this module only
+ * imported from `@byok-sdk/core`, the one frozen byte authority; this module only
  * supplies the Node Ed25519 operation.
  */
 export class StoredDeviceProofSigner implements DeviceProofSigner {

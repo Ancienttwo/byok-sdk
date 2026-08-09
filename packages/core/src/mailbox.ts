@@ -11,7 +11,7 @@
  * The mailbox transports opaque envelope bytes and is **not** an
  * execution-state authority. `body` is a string here rather than a parsed
  * message because core is protocol-free: the frozen v1 shape lives in
- * `@byok/protocol`, and core must not grow an edge to it (§12.1 invariant).
+ * `@byok-sdk/protocol`, and core must not grow an edge to it (§12.1 invariant).
  */
 import type { ContentHash } from './blob';
 import type { TenantId } from './tenant';

@@ -1,4 +1,4 @@
-import { canTransition, type TaskState } from '@byok/protocol';
+import { canTransition, type TaskState } from '@byok-sdk/protocol';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { openSqliteDatabase, secureSqliteFilePermissions } from './sqlite-support';
 import { IllegalTaskTransitionError, type CreateTaskInput, type TaskRecord, type TaskStore } from './task-store';

@@ -27,7 +27,7 @@
 import { promises as fs, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectControlClient } from '../bin/control-client';
 import { formatLiveStatusLines } from '../bin/format';

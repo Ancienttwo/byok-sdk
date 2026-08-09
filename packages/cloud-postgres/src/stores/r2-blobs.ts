@@ -7,7 +7,7 @@
  * object store directly. What it mints is a presigned URL; what the device does
  * with it is between the device and R2. That is why this composition supplies
  * no `BlobContentProxy` — there is no byte path here to proxy, and the absence
- * is the honest declaration (`@byok/cloud`'s `ports.ts`, design §6).
+ * is the honest declaration (`@byok-sdk/cloud`'s `ports.ts`, design §6).
  *
  * Manifest and bytes are one transaction authority split across two systems
  * with no shared transaction, so the protocol is reserve/verify rather than
@@ -58,8 +58,8 @@ import {
   type ObjectStore,
   type StorageReservation,
   type TenantId,
-} from '@byok/core';
-import type { BlobObservation, CloudBlobStore } from '@byok/cloud';
+} from '@byok-sdk/core';
+import type { BlobObservation, CloudBlobStore } from '@byok-sdk/cloud';
 import { AwsClient } from 'aws4fetch';
 import { XMLParser } from 'fast-xml-parser';
 
@@ -404,7 +404,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
    * `tenantId()` fails closed on empty, padded, over-long, and `NUL`-bearing
    * values, and deliberately normalizes nothing else — normalizing would make
    * the SDK disagree with the control plane that issued the id about its
-   * canonical form (`@byok/core`'s `tenant.ts`). So `a/../b` is a legitimate
+   * canonical form (`@byok-sdk/core`'s `tenant.ts`). So `a/../b` is a legitimate
    * tenant id, and the line below would otherwise hand it to `new URL()`, which
    * resolves the traversal and returns tenant `b`'s key. That is a cross-tenant
    * alias: `a/../b` could probe, overwrite, and read what `b` owns.

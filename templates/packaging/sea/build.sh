@@ -17,7 +17,7 @@ set -euo pipefail
 #
 # Produces "<output-dir>/launcher-sea" (or "launcher-sea.exe" on Windows).
 #
-# Why bundle to CommonJS first: @byok/client ships ESM ("type": "module"),
+# Why bundle to CommonJS first: @byok-sdk/client ships ESM ("type": "module"),
 # and its pi adapter's resolve-bin.ts calls `import.meta.resolve(...)` at
 # runtime (packages/client/src/adapters/pi/resolve-bin.ts). A Node SEA's
 # injected main script must be a single, fully self-contained file --

@@ -16,7 +16,7 @@ set -euo pipefail
 #
 # Requires `bun` on PATH (or $BUN_BIN pointing at it). No other bundling
 # step is needed -- unlike the Node SEA recipe, bun's --compile already
-# understands ESM + `import.meta.resolve` natively, so @byok/client's dist
+# understands ESM + `import.meta.resolve` natively, so @byok-sdk/client's dist
 # (ESM, "type": "module") is compiled as-is.
 
 ENTRY="${1:?usage: build.sh <entry.ts> <output-dir>}"

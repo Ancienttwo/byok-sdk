@@ -2,7 +2,7 @@
 
 Compile a BYOK SDK-based launcher into a single native executable with
 [`bun build --compile`](https://bun.com/docs/bundler/executables). This is a
-**reference recipe**, not a shipped artifact: `@byok/client` is an npm
+**reference recipe**, not a shipped artifact: `@byok-sdk/client` is an npm
 library (Decision-6 boundary — see the repo root docs), and the SDK itself
 never produces, signs, or distributes a binary. Copy this folder into your
 own product's repo and adapt it to your own entry point, icon, signing, and
@@ -12,7 +12,7 @@ release pipeline.
 
 - [bun](https://bun.com) installed (`curl -fsSL https://bun.com/install | bash`,
   or see bun's own install docs for your platform).
-- Your product's launcher entry point built against `@byok/client` (see
+- Your product's launcher entry point built against `@byok-sdk/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
   it constructs a daemon, calls `.status()`, and probes runtime detection
   with no network I/O).
@@ -23,7 +23,7 @@ release pipeline.
 bun build ./launcher.ts --compile --outfile my-product
 ```
 
-That's the whole recipe — `bun build --compile` bundles `@byok/client` (ESM)
+That's the whole recipe — `bun build --compile` bundles `@byok-sdk/client` (ESM)
 and everything it imports into one native executable for the host platform.
 No separate transpile/bundle step is needed first, unlike the Node SEA
 recipe (`../sea/`): bun's bundler already understands ESM and
@@ -43,7 +43,7 @@ SDK has exactly **one** hazardous resolution path: the pi adapter's
 `resolvePiBin()` (`packages/client/src/adapters/pi/resolve-bin.ts`) calls
 `import.meta.resolve('@earendil-works/pi-coding-agent')` to find pi's
 optionalDependency install. That package is deliberately marked `external`
-by `@byok/client`'s own tsup build (never bundled into the SDK's dist), so
+by `@byok-sdk/client`'s own tsup build (never bundled into the SDK's dist), so
 it is never actually reachable from inside a compiled single-file binary.
 The existing source already wraps that call in a try/catch that falls back
 to a bare `pi` on PATH, whose `detect()` then reports `present: false` if

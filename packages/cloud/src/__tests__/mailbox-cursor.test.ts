@@ -7,8 +7,8 @@
  * correct in every happy-path test and would silently drop work the instant a
  * daemon crashed between receiving an envelope and journaling it.
  */
-import { createMutableClock, isCoreConflictError, type CoreStores } from '@byok/core';
-import { decodeEnvelope, type EventsPollResponse } from '@byok/protocol';
+import { createMutableClock, isCoreConflictError, type CoreStores } from '@byok-sdk/core';
+import { decodeEnvelope, type EventsPollResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createHmacTokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';

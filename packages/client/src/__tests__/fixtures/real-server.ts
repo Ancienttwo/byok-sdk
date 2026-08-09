@@ -7,10 +7,10 @@ import {
   type PairingCodeInfo,
   type ServerTaskEvent,
   type TaskHandle,
-} from '@byok/server';
+} from '@byok-sdk/server';
 
 /**
- * Boots the REAL `@byok/server` reference implementation (not the
+ * Boots the REAL `@byok-sdk/server` reference implementation (not the
  * lightweight `TestServer` stub the rest of this package's tests use) on an
  * ephemeral loopback port, for the small set of tests that specifically
  * need genuine cross-package client<->server behavior rather than a

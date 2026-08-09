@@ -1,7 +1,7 @@
 {
-  "name": "@byok/cloud",
+  "name": "@byok-sdk/cloud",
   "version": "0.1.0",
-  "description": "BYOK SDK hosted device surface: stateless frozen-v1 HTTP handlers over tenant-first @byok/core ports",
+  "description": "BYOK SDK hosted device surface: stateless frozen-v1 HTTP handlers over tenant-first @byok-sdk/core ports",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -28,7 +28,9 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
@@ -42,8 +44,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@byok/core": "workspace:*",
-    "@byok/protocol": "workspace:*",
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
     "hono": "^4.12.30",
     "zod": "^4.4.3"
   }

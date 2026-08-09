@@ -1,4 +1,4 @@
-import { tenantKey, type Clock, type TenantId } from '@byok/core';
+import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type {
   ProofRequestReceipt,
   ProofRequestReceiptInput,

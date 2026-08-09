@@ -7,7 +7,7 @@
  * be refused with that fact attached — never overwritten, never merged.
  */
 import { describe, expect, it } from 'vitest';
-import { isCoreConflictError, type CoreConflictError, type TruthRecord } from '@byok/core';
+import { isCoreConflictError, type CoreConflictError, type TruthRecord } from '@byok-sdk/core';
 import { hashOf, TENANT_A } from './fixtures';
 import { withComposition, type CoreCompositionFactory } from './harness';
 
