@@ -1,7 +1,7 @@
 # BYOK SDK 架构文档
 
-> 状态：S7-c release candidate 架构复核稿；registry 状态仍以 publish 后 readback 为准。
-> Verified against: S7-c working tree based on main@8ad6474（2026-08-09）
+> 状态：CURRENT；S0–S7 与 `byok-sdk@0.1.0` registry release 已完成。
+> Verified against: main@aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b + npm/GitHub release `v0.1.0` readback（2026-08-09）
 > Verification scope: CURRENT sections + package graph + completed-slice status
 > Volatile workflow status: see tasks/current.md; not duplicated here
 > 面向对象：嵌入 BYOK 能力的 SaaS 开发者、SDK 维护者、安全审计与部署人员。
@@ -24,7 +24,7 @@
 - Agent dispatch plane：`@byok-sdk/protocol` + `@byok-sdk/server` + `@byok-sdk/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
 
-目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 将六个 dispatch package 统一到 `@byok-sdk/*@0.1.0`，并新增 `byok-sdk@0.1.0` namespace umbrella；`@byok-sdk/keys` 继续独立安装，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录执行状态。
+目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 已将六个 dispatch package 统一发布为 `@byok-sdk/*@0.1.0`，并发布 `byok-sdk@0.1.0` namespace umbrella；`@byok-sdk/keys` 继续独立安装，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录最终执行状态。
 
 ## 1. P1：全局架构地图
 
@@ -98,7 +98,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库是 Node `>=20`、pnpm workspace。当前有九个 workspace package：八个 public manifest（六个 dispatch package、`byok-sdk` umbrella、独立 `@byok-sdk/keys`）与一个只供测试使用的 private `@byok-sdk/conformance`。S7-c 的本地 tarball gate 已证明七个本刀 artifact 可以被隔离安装/import；这不等于 registry 已发布，npm 状态必须等 publish 后 readback。下图画实际 runtime、release 与 test-only edges。
+仓库是 Node `>=20`、pnpm workspace。当前有九个 workspace package：八个 public manifest（六个 dispatch package、`byok-sdk` umbrella、独立 `@byok-sdk/keys`）与一个只供测试使用的 private `@byok-sdk/conformance`。S7-c 的七个 dispatch artifacts 已从同一 source tree `aebe6b6` 发布；registry `dist.integrity` 与 frozen manifest 的 SHA-512 逐包一致，fresh exact install/import 已证明 umbrella 六 namespace 与六个 direct packages 可用，且安装图不含 keys。下图画实际 runtime、release 与 test-only edges。
 
 ```mermaid
 flowchart LR
@@ -920,9 +920,9 @@ CI 验证层次：
 | GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | 原证据：`auth.ts` 发裸 `randomBytes(24)`，`http.ts` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | **已修复（S1）**：修复形状是单一域常数 `NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n'`（`auth.ts`），server 侧只有 `verifyNonceSignature` 一个 nonce 签名检查点、前缀在函数内部施加，client `device-keys.ts` 的 `signNonce` 签同一字面量；裸签名 401，无双模、无 flag、无过渡窗口，两端同批交付 | 已收口 | S1（已交付） |
 | GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | 原证据：`auth.ts` 的 `DeviceRecord` 只有 `deviceId/deviceName/devicePublicKey/revoked` | **已修复（S1）**：修复形状是 required tenant——`DeviceRecord` 增加 required `tenantId`/`productId`（无 optional、无默认值），值只来自 server 铸造的 pairing claims；`DeviceRegistry` 按 `(tenantId, deviceId)` 复合键查找且公开面 tenant-first（`get`/`revoke` 均带 tenantId），naked deviceId 查找不从包入口导出 | 已收口 | S1（已交付） |
 | GAP-007 | **已收口（S4A/S4B）**：`deploy/sql` forward-only migrations、Postgres+R2 composition、compose substrate 与 hosted env/runbook 已落地 | 平台设计已有 real Postgres+MinIO 实证 | §12.7 | 保留 SQL order/checksum、hard env 与 deploy runbook gate | 已收口 | S4 |
-| GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | `ws-transport.ts:248-254` 已有 `delay * (0.8 + Math.random() * 0.4)`，即 ±20% random jitter | 已有 random jitter，缺的是 device-id 派生的确定性种子；不要描述成"无 jitter" | Pri-1 | S7 |
+| GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | S7-a 已新增 `daemon/deterministic-jitter.ts`，以 product/device identity、domain 与 sequence 派生稳定 delay；`deterministic-jitter.test.ts` 覆盖 domain separation、bounds、fleet peak 与真实 WS retry 接线 | **已收口（S7-a）**：automatic reconnect/upload/maintenance 使用 domain-separated deterministic jitter；operator immediate retry 不加 jitter | 已收口 | S7 |
 
-GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4A/S4B 已收口；这些行保留在表内是为了留下修复轨迹，不再是待办。GAP-010 仍未修。
+GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4A/S4B 已收口，GAP-010 在 S7-a 已收口；这些行保留在表内是为了留下修复轨迹，不再是待办。
 
 以下两条列在缺口表里是历史记法，实为**已公开的设计约束**，不是待关闭的缺陷：
 
@@ -931,23 +931,23 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 | `@byok-sdk/keys` 零主链 import | key custody 与 dispatch 尚未组合 | 标为“已实现、隔离”，不是 placeholder，也不是 daemon secret source；这条零边是安全 invariant（§1.2、§14.3） |
 | embedded SQLite 不恢复 in-flight | record persistence 不等于 runtime recovery | 只承诺 task/blob record 跨重启，不承诺 live handle/session；应作为 self-hosted 的公开契约而非隐藏实现细节 |
 
-### 11.2 目标平台缺口（尚未实现，非当前缺陷）
+### 11.2 目标平台缺口与收口轨迹
 
 | ID | 缺口 | 优先级 | 落点 |
 | --- | --- | --- | --- |
 | GAP-006 | **已收口（S3b，2026-08-08）**：hosted mailbox 的无状态 device 面与 InMemory 组合（S3a，既有 daemon long-poll 零改动跑通）＋本机 durable journal（S3b，`SqliteLocalTaskJournal` 与 append-then-ack 顺序）合并闭环 | Pri-0（平台线） | S3a + S3b |
 | GAP-008 | **已收口（S5）**：board / presence / activity 与 SSE/poll reconciliation 已实现 | Pri-1 | S5 |
-| GAP-009 | **实现已收口（S6-a/S6-b/S6-c）**：device proof row authority/verifier、proof-only truth routes、Postgres atomic commit、daemon signer 与 selector/fetch/rehash/filter 均已实现；default-on 仍受独立 security acceptance gate 约束 | Pri-1 | S6 |
+| GAP-009 | **已收口（S6-a/S6-b/S6-c + S7 RC）**：device proof row authority/verifier、proof-only truth routes、Postgres atomic commit、daemon signer 与 selector/fetch/rehash/filter 均已实现；独立 security acceptance 与 RC gate 已通过 | 已收口 | S6/S7 |
 | GAP-011 | **已收口（S7-a/S7-b）**：deterministic health/crash authority、read-only doctor、evidence-preserving quarantine 与 bounded/redacted support bundle 已实现 | Pri-1 | S7 |
-| GAP-012 | K4/K4.1 跨仓库 swap 未完成 | Pri-0（key 线） | 并行，不阻塞平台线 |
-| GAP-013 | 默认 secret-store factory、data-scope manifest、`testConnection` 三项 deferred | Pri-1（key UX） | K4/K4.1 |
+| GAP-012 | **已收口（K4/K4.1）**：AiphaBee 已切到 registry `@byok-sdk/keys@0.1.0`，golden expectations unchanged，PR #7 merge `390307a` | 已收口 | K4/K4.1 |
+| GAP-013 | **已裁定并收口（K4/K4.1）**：platform-selecting secret-store factory 与 data-scope manifest 归 host；narrative `testConnection()` 留在 AiphaBee adapter，不扩 generic registry API | 已收口 | K4/K4.1 |
 | GAP-014 | **已收口（S7-b）**：hosted/self-hosted operations 与 host-owned signing/channel/updater/rollback responsibility runbook 已实现 | Pri-1 | S7 |
 | GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
 | GAP-016 | **已收口（S4A/S4B）**：Postgres + R2 entitlement/usage/reservation/quota/GC 与 reconciliation 已实现 | Pri-0（hosted storage） | S4A/S4B |
 
-## 12. 平台架构（S0–S7-b 已落地，S7-c release/registry closeout 执行中）
+## 12. 平台架构（S0–S7 与 release/registry closeout 已落地）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 正在完成 public identity、umbrella、跨平台 packageability、registry publish/readback 与 release tag。wire v1 保持冻结。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability、registry publish/readback 与 `v0.1.0` tag/Release。wire v1 保持冻结。
 
 ### 12.1 目标 package graph
 
@@ -1559,7 +1559,7 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll（已实现；PR gate 见 sprint ledger） | P3 |
 | S6 | Device proof + memory | P4 |
-| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b 已完成，S7-c 执行中） | 不对应 P5；P5 是独立 deferred plan |
+| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b/S7-c 与 `v0.1.0` release 已完成） | 不对应 P5；P5 是独立 deferred plan |
 | 并行 | K4/K4.1 aip swap | K 线，不阻塞 P0/P1 |
 | — | P5：keys profile → `TruthStore` | Deferred standalone plan，触发条件见上表 |
 

@@ -1,6 +1,6 @@
 # Plan: S7-c npm Release Candidate
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260809-1153
 > **Slug**: s7c-npm-release
 > **Artifact Level**: work-package
@@ -94,5 +94,5 @@
 - [x] Cut over live package identities to `@byok-sdk/*` and add complete public metadata/docs。
 - [x] Add `byok-sdk@0.1.0` umbrella with all dispatch namespaces and an executable no-keys graph invariant。
 - [x] Add deterministic pack/install/registry tooling、changelog and cross-platform RC CI。
-- [ ] Run hard-env full gates、S7.4/§12 audits and independent Codex exact-SHA acceptance；merge and read back `main`。
-- [ ] Authenticate through npm web auth，publish exact frozen tarballs in dependency order，verify fresh installs，create/read back release tag and GitHub release。
+- [x] Run hard-env full gates、S7.4/§12 audits and independent Codex exact-SHA acceptance；merge and read back `main`。
+- [x] Authenticate through npm web auth，publish exact frozen tarballs in dependency order，verify fresh installs，create/read back release tag and GitHub release。

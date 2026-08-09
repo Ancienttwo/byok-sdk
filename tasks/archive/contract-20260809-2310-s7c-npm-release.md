@@ -1,12 +1,18 @@
+> **Archived**: 2026-08-09 23:10
+> **Related Plan**: plans/archive/plan-20260809-1153-s7c-npm-release.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260809-2310
+
 # Task Contract: s7c-npm-release
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260809-1153-s7c-npm-release.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: ancienttwo
 > **Capability ID**: root
-> **Last Updated**: 2026-08-09 11:55
+> **Last Updated**: 2026-08-09 22:47
 > **Review File**: `tasks/reviews/20260809-1153-s7c-npm-release.review.md`
 > **Notes File**: `tasks/notes/20260809-1153-s7c-npm-release.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -179,6 +185,13 @@ exit_criteria:
 - Functional behavior: `byok-sdk` exposes core/protocol/client/server/cloud/cloudPostgres namespaces from exact public dependencies；each individual package remains directly installable。
 - Edge cases: no live old-scope reference、no keys dependency path、all files promised by manifests are packed、fresh tarball and registry installs run without workspace links。
 - Regression risks: immutable partial npm release、mixed versions/scopes、reviewed-vs-published artifact drift、protocol or migration semantic drift。
+
+## Completion Evidence
+
+- PR #40 merged as `705a956` after exact-SHA acceptance and 46/46 CI；PR #41 merged as release tree `aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b` after Linux/macOS/Windows Node 20/22 persistent-output pack/install CI。
+- The frozen schema-v2 manifest binds that source SHA to seven tarballs with SHA-256 and registry-compatible SHA-512 integrity；published registry `dist.integrity` matched each frozen SHA-512 exactly。
+- Fresh registry install/import loaded the six direct dispatch packages and the `byok-sdk` umbrella's exact `client/cloud/cloudPostgres/core/protocol/server` namespaces；the installed graph had no `@byok-sdk/keys` edge。
+- Annotated tag `v0.1.0` dereferences to `aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b`；the non-draft, non-prerelease GitHub Release is `https://github.com/Ancienttwo/byok-sdk/releases/tag/v0.1.0`。
 
 ## Rollback Point
 
