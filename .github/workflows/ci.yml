@@ -214,7 +214,9 @@ jobs:
         run: |
           pnpm --filter @byok/client exec vitest run `
             src/__tests__/diagnostics.test.ts `
-            src/__tests__/daemon-auth.test.ts
+            src/__tests__/support-bundle.test.ts `
+            src/__tests__/daemon-auth.test.ts `
+            src/__tests__/daemon-stop-shutdown-parity.test.ts
 
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) without

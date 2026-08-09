@@ -508,6 +508,35 @@ describe('doctor explicit fix', () => {
     await expect(fs.stat(reclaimPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('admits only one concurrent stale-owner reclaimer', async () => {
+    const dir = await tempDir();
+    await fs.writeFile(
+      path.join(dir, DAEMON_OWNER_FILENAME),
+      `${JSON.stringify({
+        version: 2,
+        pid: 999_999_999,
+        nonce: '00000000-0000-4000-8000-000000000000',
+        role: 'daemon',
+        acquiredAt: '2026-08-09T00:00:00.000Z',
+        processStartedAt: '2000-01-01T00:00:00.000Z',
+        livenessPort: 1,
+      })}\n`,
+    );
+
+    const contenders = await Promise.allSettled([
+      acquireDaemonOwner(dir, 'doctor'),
+      acquireDaemonOwner(dir, 'doctor'),
+    ]);
+    const winners = contenders.filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof acquireDaemonOwner>>> => result.status === 'fulfilled',
+    );
+    const losers = contenders.filter((result) => result.status === 'rejected');
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    expect((losers[0] as PromiseRejectedResult).reason).toBeInstanceOf(DaemonOwnerActiveError);
+    await winners[0]!.value.release();
+  });
+
   it.skipIf(process.platform === 'win32')('fails closed without blocking when the owner path is a FIFO', async () => {
     const dir = await tempDir();
     const ownerPath = path.join(dir, DAEMON_OWNER_FILENAME);

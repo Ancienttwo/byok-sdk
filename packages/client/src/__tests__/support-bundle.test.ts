@@ -145,6 +145,19 @@ describe('support bundle privacy and bounds', () => {
     expect(bundle.recentEvents.sourceTruncated).toBe(true);
   });
 
+  it('refuses an audit.jsonl symlink instead of reading the external target', async () => {
+    const dir = await tempDir();
+    const outsideDir = await tempDir();
+    const outside = path.join(outsideDir, 'external-audit.jsonl');
+    await fs.writeFile(outside, `${JSON.stringify({ kind: 'progress', ts: '2026-08-09T00:00:01.000Z' })}\n`);
+    await fs.symlink(outside, auditLogPath(dir));
+
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
+
+    expect(bundle.recentEvents).toMatchObject({ status: 'unavailable', included: 0, facts: [] });
+    expect(await fs.readFile(outside, 'utf8')).toContain('progress');
+  });
+
   it.skipIf(process.platform === 'win32')('does not block when audit.jsonl is a FIFO', async () => {
     const dir = await tempDir();
     execFileSync('mkfifo', [auditLogPath(dir)]);

@@ -99,11 +99,22 @@ function isAuditKind(value: unknown): value is DaemonEvent['kind'] {
   return typeof value === 'string' && AUDIT_KINDS.has(value as DaemonEvent['kind']);
 }
 
+function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
 async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recentEvents']> {
   const filePath = auditLogPath(storeDir);
+  let pathStat: import('node:fs').BigIntStats;
   try {
-    const pathStat = await fs.lstat(filePath);
-    if (!pathStat.isFile()) {
+    pathStat = await fs.lstat(filePath, { bigint: true });
+    if (!pathStat.isFile() || pathStat.isSymbolicLink()) {
       return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
     }
   } catch (err) {
@@ -125,14 +136,32 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
     return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
   }
   try {
-    const stat = await handle.stat();
-    if (!stat.isFile()) {
+    const stat = await handle.stat({ bigint: true });
+    const namedAfterOpen = await fs.lstat(filePath, { bigint: true });
+    if (
+      !stat.isFile() ||
+      !namedAfterOpen.isFile() ||
+      namedAfterOpen.isSymbolicLink() ||
+      !sameFileState(pathStat, stat) ||
+      !sameFileState(stat, namedAfterOpen)
+    ) {
       return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
     }
-    const length = Math.min(stat.size, MAX_SUPPORT_AUDIT_TAIL_BYTES);
-    const start = Math.max(0, stat.size - length);
+    const sourceSize = Number(stat.size);
+    const length = Math.min(sourceSize, MAX_SUPPORT_AUDIT_TAIL_BYTES);
+    const start = Math.max(0, sourceSize - length);
     const buffer = Buffer.alloc(length);
     const { bytesRead } = await handle.read(buffer, 0, length, start);
+    const afterRead = await handle.stat({ bigint: true });
+    const namedAfterRead = await fs.lstat(filePath, { bigint: true });
+    if (
+      bytesRead !== length ||
+      namedAfterRead.isSymbolicLink() ||
+      !sameFileState(stat, afterRead) ||
+      !sameFileState(afterRead, namedAfterRead)
+    ) {
+      return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
+    }
     let text = buffer.subarray(0, bytesRead).toString('utf8');
     if (start > 0) text = text.slice(Math.max(0, text.indexOf('\n') + 1));
     const lines = text.split('\n').filter(Boolean).slice(-MAX_SUPPORT_AUDIT_FACTS);
@@ -148,7 +177,9 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
         // included count; raw bytes are never copied into the bundle.
       }
     }
-    return { status: 'available', included: facts.length, sourceBytesRead: bytesRead, sourceTruncated: stat.size > bytesRead, facts };
+    return { status: 'available', included: facts.length, sourceBytesRead: bytesRead, sourceTruncated: sourceSize > bytesRead, facts };
+  } catch {
+    return { status: 'unavailable', included: 0, sourceBytesRead: 0, sourceTruncated: false, facts: [] };
   } finally {
     await handle.close();
   }

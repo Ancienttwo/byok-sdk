@@ -892,6 +892,19 @@ function publishQuarantineEvidencePinned(
     manifestCreated = true;
     unlinkSync(manifestTemp);
     manifestTemp = undefined;
+    // The copied bytes were fsynced before publication. On POSIX, also make
+    // both evidence directory entries durable before removing the only source
+    // pathname; otherwise a power loss could persist the unlink while losing
+    // the newly-linked names. Node/libuv exposes no Windows directory fsync,
+    // so Windows retains the strongest platform-native file flush + link order.
+    if (process.platform !== 'win32') {
+      const quarantineDirectoryFd = openSync('.', fsConstants.O_RDONLY);
+      try {
+        fsyncSync(quarantineDirectoryFd);
+      } finally {
+        closeSync(quarantineDirectoryFd);
+      }
+    }
     const removalOpenSource = fstatSync(sourceFd, { bigint: true });
     const removalNamedSource = lstatSync(sourcePath, { bigint: true });
     if (!sameFileState(removalOpenSource, sourceStat) || !sameFileState(removalNamedSource, sourceStat)) {
@@ -900,7 +913,7 @@ function publishQuarantineEvidencePinned(
     unlinkSync(sourcePath);
     sourceRemoved = true;
     if (process.platform !== 'win32') {
-      const directoryFd = openSync('.', fsConstants.O_RDONLY);
+      const directoryFd = openSync(path.dirname(sourcePath), fsConstants.O_RDONLY);
       try {
         fsyncSync(directoryFd);
       } finally {

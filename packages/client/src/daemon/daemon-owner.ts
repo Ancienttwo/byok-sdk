@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import path from 'node:path';
@@ -30,6 +30,20 @@ export interface DaemonOwnerLease {
 interface LivenessListener {
   port: number;
   close(): Promise<void>;
+}
+
+// A pathname-derived loopback port is a conservative cross-process mutex for
+// the short owner/reclaim-file transition. The durable owner record keeps its
+// separate random liveness listener. A hash collision only fails closed by
+// rejecting an unrelated concurrent store mutation; it can never admit two
+// writers. Keeping the mutex separate is important: probing a stale owner's
+// recorded liveness port must not observe the contender's own mutex listener.
+const STORE_MUTEX_PORT_BASE = 10_000;
+const STORE_MUTEX_PORT_COUNT = 10_000;
+
+function storeMutexPort(storeDir: string): number {
+  const digest = createHash('sha256').update(path.resolve(storeDir)).digest();
+  return STORE_MUTEX_PORT_BASE + (digest.readUInt32BE(0) % STORE_MUTEX_PORT_COUNT);
 }
 
 export class DaemonOwnerActiveError extends Error {
@@ -204,6 +218,39 @@ async function createLivenessListener(): Promise<LivenessListener> {
   };
 }
 
+async function acquireStoreMutex(storeDir: string): Promise<LivenessListener> {
+  const server: Server = createServer((socket) => socket.end());
+  const port = storeMutexPort(storeDir);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen({ host: '127.0.0.1', port, exclusive: true }, () => {
+        server.removeListener('error', reject);
+        resolve();
+      });
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      throw new DaemonOwnerActiveError('unknown');
+    }
+    throw err;
+  }
+  server.unref();
+  let closed = false;
+  return {
+    port,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        if (closed) {
+          resolve();
+          return;
+        }
+        closed = true;
+        server.close((err) => (err ? reject(err) : resolve()));
+      }),
+  };
+}
+
 async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
   let stat: Awaited<ReturnType<typeof fs.stat>>;
   try {
@@ -254,7 +301,18 @@ export async function acquireDaemonOwner(
   clock: () => Date = () => new Date(),
 ): Promise<DaemonOwnerLease> {
   await ensureSecureDir(storeDir);
-  const liveness = await createLivenessListener();
+  // The mutex closes the stale-owner/reclaim TOCTOU: only one conforming
+  // process can inspect, remove and republish these pathnames at a time. It is
+  // retained for the full lease so another process cannot pass the pathname
+  // checks during the small owner-file publication/release windows.
+  const mutex = await acquireStoreMutex(storeDir);
+  let liveness: LivenessListener | undefined;
+  try {
+    liveness = await createLivenessListener();
+  } catch (err) {
+    await mutex.close().catch(() => undefined);
+    throw err;
+  }
   const ownerPath = path.join(storeDir, DAEMON_OWNER_FILENAME);
   const reclaimPath = path.join(storeDir, RECLAIM_FILENAME);
   const record: OwnerRecord = {
@@ -285,7 +343,11 @@ export async function acquireDaemonOwner(
             }
             await fs.rm(ownerPath);
             released = true;
-            await liveness.close();
+            try {
+              await liveness.close();
+            } finally {
+              await mutex.close();
+            }
           },
         };
       }
@@ -312,6 +374,7 @@ export async function acquireDaemonOwner(
     }
   } catch (err) {
     await liveness.close().catch(() => undefined);
+    await mutex.close().catch(() => undefined);
     throw err;
   }
 }

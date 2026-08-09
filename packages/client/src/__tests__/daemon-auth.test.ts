@@ -46,6 +46,23 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
     auth.stop();
   });
 
+  it('refuses a device.json symlink before reading its external target', async () => {
+    const storeDir = await tmpDir('byok-auth-symlink-store-');
+    const outsideDir = await tmpDir('byok-auth-symlink-outside-');
+    const outside = path.join(outsideDir, 'external-device.json');
+    await fs.writeFile(outside, JSON.stringify({
+      deviceId: 'external-device',
+      accessToken: 'external-token',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      devicePrivateKeyPem: 'external-private-key',
+      devicePublicKey: 'external-public-key',
+    }));
+    await fs.symlink(outside, path.join(storeDir, 'device.json'));
+
+    await expect(new DeviceStore(storeDir).load()).rejects.toThrow(/not a real regular file|opened safely/);
+    expect(JSON.parse(await fs.readFile(outside, 'utf8'))).toMatchObject({ accessToken: 'external-token' });
+  });
+
   it('sends the public key base64url-encoded in the pair request', async () => {
     const storeDir = await tmpDir('byok-auth-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });

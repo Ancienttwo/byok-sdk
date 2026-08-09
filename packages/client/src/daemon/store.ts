@@ -171,6 +171,16 @@ export class DeviceStore {
     raw: string;
     stat: import('node:fs').BigIntStats;
   } | undefined> {
+    let namedBefore: import('node:fs').BigIntStats;
+    try {
+      namedBefore = await fs.lstat(this.filePath, { bigint: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw new Error('device identity could not be inspected safely', { cause: err });
+    }
+    if (!namedBefore.isFile() || namedBefore.isSymbolicLink()) {
+      throw new Error('device identity is not a real regular file');
+    }
     let handle: Awaited<ReturnType<typeof fs.open>>;
     try {
       handle = await fs.open(
@@ -183,7 +193,16 @@ export class DeviceStore {
     }
     try {
       const before = await handle.stat({ bigint: true });
-      if (!before.isFile()) throw new Error('device identity is not a regular file');
+      const namedAfterOpen = await fs.lstat(this.filePath, { bigint: true });
+      if (
+        !before.isFile() ||
+        !namedAfterOpen.isFile() ||
+        namedAfterOpen.isSymbolicLink() ||
+        !sameFileState(namedBefore, before) ||
+        !sameFileState(before, namedAfterOpen)
+      ) {
+        throw new Error('device identity pathname changed before safe open');
+      }
       if (before.size <= 0 || before.size > BigInt(MAX_DEVICE_RECORD_BYTES)) {
         throw new Error('device identity exceeds the bounded read limit');
       }
@@ -191,7 +210,13 @@ export class DeviceStore {
       const buffer = Buffer.alloc(size);
       const { bytesRead } = await handle.read(buffer, 0, size, 0);
       const after = await handle.stat({ bigint: true });
-      if (bytesRead !== size || !sameFileState(before, after)) {
+      const namedAfterRead = await fs.lstat(this.filePath, { bigint: true });
+      if (
+        bytesRead !== size ||
+        !sameFileState(before, after) ||
+        !sameFileState(after, namedAfterRead) ||
+        namedAfterRead.isSymbolicLink()
+      ) {
         throw new Error('device identity changed during bounded read');
       }
       return { handle, raw: buffer.toString('utf8'), stat: after };
