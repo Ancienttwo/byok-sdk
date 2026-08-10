@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-10 15:36
+> **Related Plan**: plans/archive/plan-20260810-1514-adr-025-device-agent-identity.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260810-1536
+
 # Implementation Notes: adr-025-device-agent-identity
 
 > **Status**: Active
@@ -52,6 +58,10 @@
   `/Users/ancienttwo/.local/share/reverse-skill/work/20260810-raft-multi-computer-agents/report/`.
 - Contract verification: 8/8 passed; no Mermaid fence was added or changed, so
   diagram rendering was not an applicable delta gate.
+- Exact-subject acceptance: user-waiver receipt binds ADR-only subject
+  `sha256:672c05ca02c825ed111cd96115b07a30b0a6b86974f2f071953c7295e1c9d09c`
+  to `main@9d02167335d4b4434632b05acc79028f67fd6fe0`; reviewed paths are exactly
+  the ADR, canonical architecture, and research index.
 
 ## Promotion Filter
 

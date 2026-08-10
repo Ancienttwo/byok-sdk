@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-10 15:36
+> **Related Plan**: plans/archive/plan-20260810-1514-adr-025-device-agent-identity.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260810-1536
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-10 15:16
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

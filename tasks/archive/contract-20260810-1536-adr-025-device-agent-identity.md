@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-10 15:36
+> **Related Plan**: plans/archive/plan-20260810-1514-adr-025-device-agent-identity.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260810-1536
+
 # Task Contract: adr-025-device-agent-identity
 
 > **Status**: Fulfilled

@@ -1,6 +1,6 @@
 # Plan: ADR-025 device and agent identity placement
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260810-1514
 > **Slug**: adr-025-device-agent-identity
 > **Artifact Level**: work-package
