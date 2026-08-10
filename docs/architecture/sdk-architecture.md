@@ -1270,6 +1270,25 @@ S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回
 - 同一 store contract suite 跑 InMemory、Postgres + R2（主生产）与 self-hosted server 三种 composition；可选 D1 adapter 若启用，用同一份套件另跑一次，断言零改动。
 - `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传 R2 的 durable write 先经 reservation（§12.7.7）。
 
+#### 12.6.7 Device、Agent、placement 与 runtime session
+
+当前 BYOK 是 **multi-device + multi-runtime + task session**，足以支撑
+AiphaBee Local Agent CLI；它尚未实现 first-class multi-Agent fleet。下面四个
+概念不得互换：
+
+| 概念 | Authority | 当前状态 |
+| --- | --- | --- |
+| `Device` | tenant/product 下已配对的物理机或 VM 执行宿主、device key、presence 与 runtime capability | **已实现** |
+| `Agent` | 可命名、持久、可独立启停并可重新 placement 的逻辑资源 | **目标设计，未实现** |
+| `AgentPlacement` | control plane 对 `agentId → deviceId + generation + lease` 的唯一 assignment authority；observation 不得反向覆盖它 | **目标设计，未实现** |
+| `RuntimeSession` | Device 上临时 runtime process、session 与 workspace；服务 task 或 Agent generation，但不是稳定 Agent identity | **task path 已实现；Agent path 未实现** |
+
+未来 fleet slice 必须另设 `AgentObservation` 作为非权威运行态投影，并以
+generation/lease 拒绝 stale lifecycle command。显式 placement 不可用时禁止
+回退到 `pickFirstConnectedDevice()`；runtime discovery 也不得创建或迁移
+Agent。Protocol v1 保持冻结，Agent lifecycle 只能进入新 control-plane/API
+或明确批准的 versioned surface。完整裁定见 ADR-025。
+
 ### 12.7 数据与存储架构（云端面为目标设计；本机 journal 面已实现）
 
 主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 持有按 daemon 声明的 canonical hash 命名、且由 cloud 观测 size/content-type 的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok-sdk/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
@@ -1849,3 +1868,4 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-022 | quota 满不自动删除 durable user truth；先拒绝新写，并保留删除/导出/扩容路径 | Accepted |
 | ADR-023 | `workspaceHint` 维持 reserved，接线需另立 ADR 与明确 resolver 设计 | Accepted |
 | ADR-024 | R2 object 的 canonical SHA-256 以通过认证的 daemon 声明为权威；cloud `HEAD` 只观测存在性与 size/type | Accepted |
+| ADR-025 | Device、Agent、placement 与 runtime session 分权；fleet 不得复用 runtime/task identity | Accepted；仅由明确 multi-Agent 产品 slice 触发实现 |
