@@ -17,10 +17,10 @@ pnpm install
 pnpm -r build
 ```
 
-`@byok-sdk/client`'s `pi` runtime is an optionalDependency
-(`@earendil-works/pi-coding-agent`); if it fails to install for your platform
-the daemon falls back to a `pi` binary on `PATH` (see
-`packages/client/src/adapters/pi/resolve-bin.ts`).
+Install and authenticate `@earendil-works/pi-coding-agent` separately, then
+ensure its `pi` executable is on `PATH`. The SDK does not install runtime CLIs
+or own their credentials. `BYOK_PI_BIN` is the explicit override for a custom
+executable location or test fixture.
 
 ## Run it
 
@@ -136,9 +136,7 @@ needing a real key.
 
 ## Testing with z.ai GLM
 
-`pi` (the `@earendil-works/pi-coding-agent@^0.74.2`, `legacy-node20`-dist-tag
-version this SDK's optionalDependency pins — see
-`packages/client/src/adapters/pi/resolve-bin.ts`) already ships a **built-in**
+`pi` (`@earendil-works/pi-coding-agent`) already ships a **built-in**
 `zai` provider — no extension, no `models.json`, no code change anywhere in
 this SDK is needed. Empirically confirmed (2026-07-16) against the actually
 installed 0.74.2, and cross-checked against the current `latest` (0.80.7,
@@ -204,9 +202,8 @@ once, rather than something byok selects per task:
    `HOME=/tmp/byok-glm-home node packages/client/dist/bin/byok-agent.js start ...`,
    and put `.pi/agent/settings.json` under that scratch `HOME` instead.)
 
-3. **Do not set `BYOK_PI_BIN`** for this — that env var swaps in the
-   fake-pi test fixture; leave it unset so `resolvePiBin()` resolves the real
-   installed `@earendil-works/pi-coding-agent` optionalDependency.
+3. **Do not set `BYOK_PI_BIN`** for this — leave it unset so
+   `resolvePiBin()` selects the real user-installed `pi` executable on PATH.
 
 4. Run the daemon exactly as in "Run it" above (`pair` then `start`) with
    `ZAI_API_KEY` exported and the settings file in place, then dispatch:

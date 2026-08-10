@@ -106,25 +106,17 @@ binary (or a wrapper around it) happens to be a `.cmd`/`.bat` on Windows.
 
 ## What this actually guarantees (and what it doesn't)
 
-Bundling a Node.js daemon into one file is not automatically safe. This
-SDK has exactly **one** hazardous resolution path: the pi adapter's
-`resolvePiBin()` (`packages/client/src/adapters/pi/resolve-bin.ts`) calls
-`import.meta.resolve('@earendil-works/pi-coding-agent')` to find pi's
-optionalDependency install. The existing source already wraps that call in
-a try/catch that falls back to a bare `pi` on PATH, whose `detect()` then
-reports `present: false` if that also fails — **this recipe's
-`smoke-test.sh` exists to prove that fallback actually holds under a real
-Node SEA binary**, not just in ordinary `node` execution.
+Bundling a Node.js daemon into one file is not automatically safe. Runtime
+CLIs remain external, user-installed executables. The pi adapter resolves only
+`BYOK_PI_BIN` or a bare `pi` on PATH, whose `detect()` reports
+`present: false` if unavailable. This recipe's `smoke-test.sh` proves both
+absence and explicit pickup under a real Node SEA binary.
 
 Empirically confirmed while building this recipe (see `smoke-test.sh`'s two
 assertions):
 
-- **pi absent** (no `BYOK_PI_BIN`, pi unreachable from the compiled binary):
-  esbuild's CJS conversion rewrites `import.meta` into a plain object with
-  no `.resolve()` method; calling it throws an ordinary catchable
-  `TypeError`, which resolve-bin.ts's existing try/catch already handles
-  identically to "package not installed." `PiAdapter.detect()` reports
-  `{ present: false }` cleanly. No crash, exit 0.
+- **pi absent** (no `BYOK_PI_BIN`, no `pi` on PATH): `PiAdapter.detect()`
+  reports `{ present: false }` cleanly. No crash, exit 0.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
   real pi binary at that path is detected correctly (`present: true`) even

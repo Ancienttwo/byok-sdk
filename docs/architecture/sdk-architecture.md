@@ -463,7 +463,7 @@ Library exports 分成六组：
 | daemon | `start` |
 | OS service | `install`、`uninstall`、`service-start`、`service-stop`、`service-status` |
 
-`@byok-sdk/client` 的 runtime dependencies 是 `@byok-sdk/protocol`、`@byok-sdk/core` 与 `ws`；core 只提供 frozen proof bytes 与 truth contract types，client 不依赖 `@byok-sdk/cloud`。另有 optional `@earendil-works/pi-coding-agent`，并被 tsup 标记 external。Claude/Codex 永远依赖用户本机已安装且已登录的 official CLI。
+`@byok-sdk/client` 的 runtime dependencies 是 `@byok-sdk/protocol`、`@byok-sdk/core` 与 `ws`；core 只提供 frozen proof bytes 与 truth contract types，client 不依赖 `@byok-sdk/cloud`。Pi、Claude Code、Codex 均依赖用户本机独立安装且已登录的 CLI；client 不再安装 Node-22-only Pi optional dependency。`@byok-sdk/client/adapters` 提供不引入 daemon transport 的 adapter-only build/import surface。
 
 ### 4.3 Daemon 模块清单
 

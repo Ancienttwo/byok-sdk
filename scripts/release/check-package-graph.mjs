@@ -3,7 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const releaseVersion = '0.1.0';
+const releaseVersion = '0.1.1';
+const keysVersion = '0.1.0';
 const dispatchPackages = [
   ['packages/core', '@byok-sdk/core'],
   ['packages/protocol', '@byok-sdk/protocol'],
@@ -28,7 +29,8 @@ for (const [directory, expectedName] of publicPackages) {
   const manifest = readJson(manifestPath);
   manifests.set(manifest.name, manifest);
   if (manifest.name !== expectedName) errors.push(`${manifestPath}: expected name ${expectedName}, got ${manifest.name}`);
-  if (manifest.version !== releaseVersion) errors.push(`${manifestPath}: expected version ${releaseVersion}, got ${manifest.version}`);
+  const expectedVersion = expectedName === keys[1] ? keysVersion : releaseVersion;
+  if (manifest.version !== expectedVersion) errors.push(`${manifestPath}: expected version ${expectedVersion}, got ${manifest.version}`);
   if (manifest.license !== 'MIT') errors.push(`${manifestPath}: license must be MIT`);
   if (manifest.publishConfig?.access !== 'public') errors.push(`${manifestPath}: publishConfig.access must be public`);
   if (manifest.engines?.node !== '>=20') errors.push(`${manifestPath}: engines.node must be >=20`);
@@ -89,6 +91,17 @@ for (const field of [...runtimeFields, 'devDependencies']) {
       errors.push(`packages/keys/package.json: ${field} crosses into dispatch package ${dependency}`);
     }
   }
+}
+
+const clientManifest = manifests.get('@byok-sdk/client');
+if (clientManifest?.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
+  errors.push('packages/client/package.json: client must not install a Node-22-only pi runtime into the Node-20 SDK graph');
+}
+if (
+  clientManifest?.exports?.['./adapters']?.import !== './dist/adapters/index.js' ||
+  clientManifest?.exports?.['./adapters']?.types !== './dist/adapters/index.d.ts'
+) {
+  errors.push('packages/client/package.json: adapter-only import/types exports are incomplete');
 }
 
 const umbrellaSource = readFileSync(path.join(repoRoot, 'packages/sdk/src/index.ts'), 'utf8');
@@ -156,4 +169,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`[release-graph] OK: ${publicPackages.length} public manifests at ${releaseVersion}; umbrella has ${dispatchPackages.length} dispatch namespaces and no keys edge`);
+console.log(`[release-graph] OK: ${dispatchPackages.length + 1} dispatch manifests at ${releaseVersion}, keys at ${keysVersion}; umbrella has ${dispatchPackages.length} dispatch namespaces and no keys edge`);

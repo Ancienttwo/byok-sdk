@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/bin/byok-agent.ts', 'src/bin/byok-approval-mcp.ts'],
+  entry: ['src/index.ts', 'src/adapters/index.ts', 'src/bin/byok-agent.ts', 'src/bin/byok-approval-mcp.ts'],
   format: ['esm'],
   target: 'es2022',
   platform: 'node',
@@ -10,6 +10,4 @@ export default defineConfig({
   clean: true,
   splitting: false,
   treeshake: true,
-  // The pi adapter lazy-imports this optionalDependency at runtime; never bundle it.
-  external: ['@earendil-works/pi-coding-agent'],
 });

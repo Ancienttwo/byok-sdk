@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const releaseVersion = '0.1.0';
+const releaseVersion = '0.1.1';
 const packages = [
   '@byok-sdk/core',
   '@byok-sdk/protocol',
@@ -103,7 +103,7 @@ try {
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-postgres']) await import(name);\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-postgres']) await import(name);\n` +
         `for (const name of ['byok-sdk','@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-postgres']) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, '${releaseVersion}', name);\n` +
@@ -113,6 +113,10 @@ try {
     run(nodeBin, ['smoke.mjs'], smokeDir);
     if (existsSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys'))) {
       throw new Error('isolated umbrella install unexpectedly contains @byok-sdk/keys');
+    }
+    const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
+    if (clientManifest.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
+      throw new Error('isolated client install still contains the removed Pi optional dependency');
     }
   } finally {
     rmSync(smokeDir, { recursive: true, force: true });

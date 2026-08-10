@@ -184,7 +184,7 @@ probe's zero-`HIT` result.
   runtime) but neither is a kernel-truth guarantee against, say, a native
   addon bypassing the JS `fs` surface entirely. Checked the shipped
   packages' own runtime `dependencies` (`zod`, `hono`/`@hono/node-server`,
-  `jose`, `ws`, plus the optional bundled `@earendil-works/pi-coding-agent`)
+  `jose` and `ws`; runtime CLIs are user-installed and external)
   — none are native addons themselves; `.node` binaries do exist elsewhere
   in this repo's installed `node_modules` (e.g. `lightningcss`, `fsevents`,
   `rolldown`/`rollup`, `koffi`), but those trace to build-time/dev tooling
@@ -196,7 +196,7 @@ probe's zero-`HIT` result.
   special privilege escalation dance the way SIP-protected macOS does.
 - **The real `claude`/`codex` binaries' own internal behavior.** The
   runtime probe's `NODE_OPTIONS`-based instrumentation reached every
-  Node.js process in the tree, including the bundled `pi-coding-agent`
+  Node.js process in the tree, including any user-installed `pi` runtime
   subprocess — but it did **not** produce an "instrumentation loaded" line
   for the real `claude`/`codex` binary invocations that `detect()`
   genuinely executed (confirmed present via `status`'s own output). Whether

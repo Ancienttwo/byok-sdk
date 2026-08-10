@@ -226,7 +226,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
   });
 });
 
-describe('PiAdapter against the real installed optionalDependency (no network/API key required)', () => {
+describe('PiAdapter against the user-installed runtime (no network/API key required)', () => {
   it('detect() returns a well-formed result whether or not pi is actually installed here', async () => {
     const adapter = new PiAdapter();
     const result = await adapter.detect();
