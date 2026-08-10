@@ -1,6 +1,6 @@
 # Implementation Notes: client-adapters-0.1.1
 
-> **Status**: In Progress
+> **Status**: Completed
 > **Last Updated**: 2026-08-10
 > **Lifecycle**: notes
 
@@ -70,8 +70,21 @@ and transport coupling.
 - Isolated client/core/protocol tarball install: zero production audit
   vulnerabilities; no Pi optional dependency; adapter subpath present.
 
-## Release Gates Remaining
+## Release Closeout
 
-- PR exact-head CI and acceptance.
-- Post-merge frozen tarballs, dependency-first npm publish, registry integrity
-  equality, fresh install/import, annotated tag and GitHub Release readback.
+- PR #44 merged to `main` as
+  `44a3669646d06a78519c4aa169a09f5b151f040d`; all duplicate push/PR CI jobs
+  passed. The external Claude review was unavailable because its weekly quota
+  was exhausted, so no acceptance receipt was claimed.
+- Frozen artifacts were generated from that exact merged SHA. All seven
+  dispatch packages published dependency-first at `0.1.1`; registry
+  `dist.integrity` matched the frozen manifest for every package and fresh
+  exact-version install/import passed.
+- `@byok-sdk/client@0.1.1` registry integrity is
+  `sha512-tbOOkDk9hyb1w1DioVyOhcBk93Z66iZiUSCiJtThpeRxyMvX2qHUdK3w4LjEbpvZu9rMCFHRLUPiibfzIvWoIg==`
+  with shasum `3d992963e8c484876990f7668d9837ac6b386c5c`.
+- `byok-sdk@0.1.1` registry integrity is
+  `sha512-wKXdIiTpCLQmjG1IVuYvxzMR28eD/avlzPjaAObYfSFIW7xbib7kAIAofX9ISSqNHsQvM2xIno1NSKagKJMmzA==`
+  with shasum `194045ec542b0f170c4405af27d497478db16731`.
+- Annotated tag `v0.1.1` dereferences to the merged source SHA. GitHub Release
+  `v0.1.1` is published, non-draft and non-prerelease.

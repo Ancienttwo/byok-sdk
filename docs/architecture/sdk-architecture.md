@@ -1,7 +1,7 @@
 # BYOK SDK 架构文档
 
-> 状态：CURRENT；S0–S7 与 `byok-sdk@0.1.0` registry release 已完成。
-> Verified against: main@aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b + npm/GitHub release `v0.1.0` readback（2026-08-09）
+> 状态：CURRENT；S0–S7 与 `byok-sdk@0.1.1` registry release 已完成。
+> Verified against: main@44a3669646d06a78519c4aa169a09f5b151f040d + npm/GitHub release `v0.1.1` readback（2026-08-10）
 > Verification scope: CURRENT sections + package graph + completed-slice status
 > Volatile workflow status: see tasks/current.md; not duplicated here
 > 面向对象：嵌入 BYOK 能力的 SaaS 开发者、SDK 维护者、安全审计与部署人员。
