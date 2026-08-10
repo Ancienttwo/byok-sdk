@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/cloud-postgres",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "BYOK SDK durable data plane: Postgres implementations of the cloud-local store ports, plus the forward-only migrate runner",
   "type": "module",
   "license": "MIT",

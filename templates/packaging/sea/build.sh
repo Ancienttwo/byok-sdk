@@ -18,17 +18,8 @@ set -euo pipefail
 # Produces "<output-dir>/launcher-sea" (or "launcher-sea.exe" on Windows).
 #
 # Why bundle to CommonJS first: @byok-sdk/client ships ESM ("type": "module"),
-# and its pi adapter's resolve-bin.ts calls `import.meta.resolve(...)` at
-# runtime (packages/client/src/adapters/pi/resolve-bin.ts). A Node SEA's
-# injected main script must be a single, fully self-contained file --
-# module loading does not read from the filesystem at SEA runtime (only
-# Node builtins resolve), so every dependency has to already be inlined.
-# esbuild's CJS output rewrites `import.meta` into a plain `{}` with no
-# `.resolve()` method; calling it then throws an ordinary catchable
-# TypeError, which resolve-bin.ts's existing try/catch already treats as
-# "resolution failed, fall back to PATH" -- empirically confirmed (see the
-# README) to degrade exactly like a genuinely-absent optionalDependency
-# would. Node also has a native `"mainFormat": "module"` SEA config for an
+# while a Node SEA's injected main script must be a single, fully
+# self-contained file. Node also has a native `"mainFormat": "module"` SEA config for an
 # ESM main script, preserving real `import.meta.resolve` semantics, but it
 # was NOT reliably functional on Node 22.22.3 (the version this was built
 # against) as of this writing -- see the README's "why CJS, not ESM" note.

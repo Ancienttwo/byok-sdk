@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const expectedVersion = '0.1.0';
+const expectedVersion = '0.1.1';
 const packages = [
   '@byok-sdk/core',
   '@byok-sdk/protocol',
@@ -78,12 +78,17 @@ try {
       `const sdk = await import('byok-sdk');\n` +
       `assert.deepEqual(Object.keys(sdk).sort(), ['client','cloud','cloudPostgres','core','protocol','server']);\n` +
       `assert.equal('keys' in sdk, false);\n` +
+      `await import('@byok-sdk/client/adapters');\n` +
       `for (const name of ${JSON.stringify(packages.slice(0, -1))}) await import(name);\n` +
       `console.log('[registry-readback] exact registry imports OK');\n`,
   );
   run(nodeBin, ['readback.mjs'], smokeDir);
   if (existsSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys'))) {
     throw new Error('registry umbrella install unexpectedly contains @byok-sdk/keys');
+  }
+  const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
+  if (clientManifest.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
+    throw new Error('registry client still installs the removed Pi optional dependency');
   }
 } finally {
   rmSync(smokeDir, { recursive: true, force: true });

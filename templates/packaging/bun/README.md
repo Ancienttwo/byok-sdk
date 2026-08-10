@@ -38,28 +38,17 @@ templates/packaging/bun/build.sh <entry.ts> <output-dir>
 
 ## What this actually guarantees (and what it doesn't)
 
-Bundling a Node.js daemon into one file is not automatically safe. This
-SDK has exactly **one** hazardous resolution path: the pi adapter's
-`resolvePiBin()` (`packages/client/src/adapters/pi/resolve-bin.ts`) calls
-`import.meta.resolve('@earendil-works/pi-coding-agent')` to find pi's
-optionalDependency install. That package is deliberately marked `external`
-by `@byok-sdk/client`'s own tsup build (never bundled into the SDK's dist), so
-it is never actually reachable from inside a compiled single-file binary.
-The existing source already wraps that call in a try/catch that falls back
-to a bare `pi` on PATH, whose `detect()` then reports `present: false` if
-that also fails — **this recipe's `smoke-test.sh` exists to prove that
-fallback actually holds under a real compiled bun binary**, not just in
-ordinary `node` execution.
+Bundling a Node.js daemon into one file is not automatically safe. Runtime
+CLIs remain external, user-installed executables. The pi adapter resolves only
+`BYOK_PI_BIN` or a bare `pi` on PATH, whose `detect()` reports
+`present: false` if unavailable. This recipe's `smoke-test.sh` proves both
+absence and explicit pickup under a real compiled bun binary.
 
 Empirically confirmed while building this recipe (see
 `smoke-test.sh`'s two assertions):
 
-- **pi absent** (no `BYOK_PI_BIN`, pi unreachable from the compiled binary):
-  `bun build --compile` embeds the module graph such that a non-bundled,
-  external specifier like pi's package name simply isn't resolvable at
-  runtime — `import.meta.resolve` fails, the existing try/catch in
-  resolve-bin.ts catches it, and `PiAdapter.detect()` reports
-  `{ present: false }` cleanly. No crash, exit 0.
+- **pi absent** (no `BYOK_PI_BIN`, no `pi` on PATH): `PiAdapter.detect()`
+  reports `{ present: false }` cleanly. No crash, exit 0.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
   real pi binary at that path is detected correctly (`present: true`) even

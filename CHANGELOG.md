@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 — 2026-08-10
+
+Security and packageability patch for local runtime adapters.
+
+- Removed the bundled Pi optional dependency. Security-fixed Pi releases
+  require Node 22.19+, while the SDK continues to support Node 20; users now
+  install and authenticate their chosen runtime CLI independently.
+- Added `@byok-sdk/client/adapters`, a transport-free entrypoint for Pi,
+  Claude Code and Codex capability detection and host-owned composition.
+- Preserved the existing BYOK daemon, wire v1, runtime adapter and credential
+  authority contracts. No compatibility fallback or protocol change was added.
+
 ## 0.1.0 — 2026-08-09
 
 First release candidate of the complete BYOK dispatch SDK.

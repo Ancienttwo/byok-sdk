@@ -223,12 +223,10 @@ jobs:
             src/__tests__/daemon-stop-shutdown-parity.test.ts
 
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
-  # into a single-file executable (bun build --compile / Node SEA) without
-  # pi's optionalDependency resolution (packages/client/src/adapters/pi/
-  # resolve-bin.ts's `import.meta.resolve`) crashing the process when pi
-  # isn't reachable from inside the bundle -- it must degrade to
-  # `present: false`, same as it already does for a plain `node` run with
-  # the optionalDependency missing. See templates/packaging/{bun,sea} for
+  # into a single-file executable (bun build --compile / Node SEA) while
+  # runtime CLIs remain external. An unavailable user-installed pi must
+  # report `present: false`, while BYOK_PI_BIN must remain detectable. See
+  # templates/packaging/{bun,sea} for
   # the full recipes + empirically-confirmed rationale (including a macOS
   # postject gotcha that silently segfaults without one extra flag), and
   # examples/packaging/launcher.ts for the entry point both recipes compile.
