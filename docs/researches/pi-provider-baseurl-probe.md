@@ -13,14 +13,16 @@ the sole provider catalog, transport, and agent-loop authority. A direct
 
 The adapter change implied by the evidence is:
 
-1. `PiAdapter.environmentRequirements()` declares
-   `baseNames: ['PI_CODING_AGENT_DIR']`; a product may already forward this
-   through `runtimeEnvironment.pi.allow`, but the built-in projection path must
-   not require an operator escape hatch.
+1. `PiAdapter` does not inherit a caller-supplied `PI_CODING_AGENT_DIR` for an
+   authoritative BYOK selection. The separate launcher creates the private
+   directory and sets the variable directly on its Pi child, so ambient config
+   cannot compete with the projection.
 2. `PiAdapter.start()` receives an authoritative provider/model selection and
-   launches the pinned CLI with `--provider <id> --model <id>`. Missing or
-   unknown values fail before the initial prompt and before any provider
-   request.
+   launches the credential-custody process with those non-secret ids. The
+   launcher maps the configured provider to a disjoint
+   `byok-sdk-<provider-id>` projection id and launches pinned Pi with
+   `--provider <projected-id> --model <id>`. Missing or unknown values fail
+   before the initial prompt and before any provider request.
 3. The projected `models.json` contains an environment-variable reference for
    the API key, never a literal secret and never a `!command` credential
    resolver.
@@ -219,14 +221,28 @@ Evidence that would reopen the decision later:
 - concurrent session-scoped projections cannot avoid config races; or
 - Pi accepts the selected model but sends the request to a different target.
 
-## Residual boundary to resolve before M3
+## Credential-custody decision
 
-This probe does not prove the PRD's credential-custody bridge. An environment
-variable injected into Pi necessarily exists transiently in whichever process
-constructs the child environment. Therefore "dispatch layer zero credential
-contact" cannot literally mean zero in-memory access if that same process
-performs `spawn(env)`. It must mean no credential source-of-truth, persistence,
-logging, or vendor credential-file access; otherwise M3 requires a separate
-credential broker/launcher process. That wording and process boundary need an
-explicit decision before implementation, but they do not invalidate the Pi
-projection result.
+An environment variable injected into Pi necessarily exists transiently in
+whichever process constructs the child environment. The existing canonical
+security contract is stricter than "no persistence": `client`, `server`, and
+`protocol` must never touch the credential and must retain a zero dependency
+edge to `@byok-sdk/keys`.
+
+M3 therefore uses a separate credential-custody launcher process. The client
+passes only the selected provider/model, the pinned Pi binary path, and local
+non-secret storage locations. The launcher alone reads the provider profile
+from an existing database opened read-only and, when the profile requires
+authentication, the OS credential store. An `auth_mode: none` profile never
+constructs a keychain backend. The launcher writes an immutable process-scoped
+`models.json`, reconstructs the Pi child environment from a closed
+platform/proxy baseline plus the exact key, appends the exact projected
+provider and model to Pi argv, and transparently relays Pi RPC
+stdin/stdout/stderr. It opens no listener. The projection id is namespaced
+rather than reusing a Pi
+built-in id: Pi's provider composer retains a built-in provider when an overlay
+composition fails, which would otherwise make a malformed `openai` overlay
+capable of silently reaching Pi's built-in OpenAI target. A disjoint id has no
+built-in to fall back to and therefore fails closed. The dispatch process never
+receives the key, and `@byok-sdk/keys` remains outside the dispatch dependency
+graph.

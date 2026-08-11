@@ -153,6 +153,10 @@ let prompt;
 for (let i = 0; i < rest.length; i++) {
   const arg = rest[i];
   if (arg === '--json' || arg === '--skip-git-repo-check') continue;
+  if (arg === '--model') {
+    i += 1;
+    continue;
+  }
   if (arg === '-c') {
     const value = rest[++i];
     const eq = typeof value === 'string' ? value.indexOf('=') : -1;

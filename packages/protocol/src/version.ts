@@ -67,12 +67,21 @@ export const PROTOCOL_VERSION = 1;
  * participate in targeting at all -- the same N/N-1-safe shape as every
  * other flag here, just consumed for observability instead of gating.
  */
+/**
+ * `dispatch-selection` (additive-minor) is a correctness gate for the
+ * optional `task.offer.dispatchSelection` control field. An older v1 daemon
+ * legally strips unknown optional fields, so a server must never send an
+ * authoritative provider/model selection unless the target connection
+ * advertises this flag. Absence means reject before task creation, not send
+ * a legacy runtime-only offer that could reach a different provider.
+ */
 export const CAPABILITY_FLAGS = [
   'steer',
   'blob-upload',
   'interactive-approval',
   'approval_resolved',
   'approval-targeting',
+  'dispatch-selection',
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

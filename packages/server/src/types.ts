@@ -1,6 +1,7 @@
 import type {
   AgentEventOrUnknown,
   BlobRef,
+  DispatchSelection,
   PermissionPolicy,
   RuntimeCapabilities,
   RuntimeId,
@@ -96,6 +97,11 @@ export interface CreateByokServerOptions {
 /** Input to {@link ByokServer.dispatch}. */
 export interface DispatchInput {
   instruction: string;
+  /**
+   * Authoritative web-selected target. When present, `runtime` is derived
+   * from `runtimeId`; supplying a different legacy `runtime` is rejected.
+   */
+  dispatchSelection?: DispatchSelection;
   runtime?: RuntimeId;
   policy?: PermissionPolicy;
   deviceId?: string;

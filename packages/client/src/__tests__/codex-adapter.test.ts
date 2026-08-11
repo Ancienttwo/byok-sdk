@@ -14,9 +14,13 @@ function fakeCodexAdapter(): CodexAdapter {
   return new CodexAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }) });
 }
 
-function capturingSpawn(captured: string[][]): never {
+function capturingSpawn(
+  captured: string[][],
+  capturedEnvs?: NodeJS.ProcessEnv[],
+): never {
   return ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
     captured.push([...args]);
+    capturedEnvs?.push(options?.env ?? {});
     return spawn(command, args, options);
   }) as never;
 }
@@ -137,6 +141,62 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       'approval_policy=never',
       'say hi',
     ]);
+  });
+
+  it('passes the subscription selection model to Codex on the exact turn argv', async () => {
+    const captured: string[][] = [];
+    const capturedEnvs: NodeJS.ProcessEnv[] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: capturingSpawn(captured, capturedEnvs),
+    });
+    const session = await adapter.start(
+      {
+        ...baseTask,
+        dispatchSelection: {
+          lane: 'subscription',
+          runtimeId: 'codex',
+          providerId: null,
+          modelId: 'gpt-5.6-sol',
+        },
+      },
+      await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
+    );
+    openSessions.push(session);
+    await takeEvents(session, 7);
+    expect(captured[0]?.slice(0, 5)).toEqual([
+      'exec',
+      '--json',
+      '--model',
+      'gpt-5.6-sol',
+      '--skip-git-repo-check',
+    ]);
+    expect(capturedEnvs[0]?.OPENAI_API_KEY).toBeUndefined();
+
+    await session.followUp({ instruction: 'same model', policy: { mode: 'auto' } });
+    await takeEvents(session, 7);
+    expect(captured[1]?.slice(0, 8)).toEqual([
+      'exec',
+      'resume',
+      'fake-thread-1',
+      '--json',
+      '--model',
+      'gpt-5.6-sol',
+      '--skip-git-repo-check',
+      '-c',
+    ]);
+
+    await expect(session.followUp({
+      instruction: 'different model',
+      policy: { mode: 'auto' },
+      dispatchSelection: {
+        lane: 'subscription',
+        runtimeId: 'codex',
+        providerId: null,
+        modelId: 'gpt-other',
+      },
+    })).rejects.toThrow(/persistent session cannot change model/);
+    expect(captured).toHaveLength(2);
   });
 
   it('omits only --skip-git-repo-check for a prepared Git workspace on fresh and resume turns', async () => {

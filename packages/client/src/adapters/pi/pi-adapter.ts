@@ -14,6 +14,10 @@ import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
+import {
+  PROVIDER_CREDENTIAL_ENV_NAMES,
+  withoutProviderCredentials,
+} from '../provider-credential-environment';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5_000;
@@ -29,33 +33,31 @@ function errorMessage(err: unknown): string {
  * (`~/.pi/...`) or any file contents. Not exhaustive (pi supports ~30
  * providers); covers the common ones for a useful `authPresent` signal.
  */
-const KNOWN_PROVIDER_ENV_VARS = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_OAUTH_TOKEN',
-  'OPENAI_API_KEY',
-  'GEMINI_API_KEY',
-  'AZURE_OPENAI_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'GROQ_API_KEY',
-  'MISTRAL_API_KEY',
-  'OPENROUTER_API_KEY',
-  'XAI_API_KEY',
-  // Confirmed against the installed pi's own docs/providers.md ("ZAI |
-  // `ZAI_API_KEY` | `zai`") and exercised live against real GLM traffic
-  // during this task's acceptance run — omitting it made `authPresent`
-  // silently false for a perfectly valid, working z.ai/GLM setup.
-  'ZAI_API_KEY',
-] as const;
-
 export interface PiAdapterOptions {
   /** Override bin resolution — tests substitute the fake-pi fixture script. */
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
   spawnFn?: SpawnFn;
+  /**
+   * Separate-process BYOK credential boundary. The launcher receives only
+   * non-secret selection/config paths, resolves the OS credential itself,
+   * and transparently proxies the pinned Pi RPC process.
+   */
+  byokLauncher?: PiByokLauncherConfig;
+}
+
+export interface PiByokLauncherConfig {
+  command: string;
+  /** Optional fixed launcher arguments, before BYOK's required arguments. */
+  args?: string[];
+  profileDbPath: string;
+  sessionDir: string;
+  secretServicePrefix?: string;
 }
 
 export class PiAdapter implements RuntimeAdapter {
   readonly id = 'pi';
+  readonly supportsDispatchSelection = true;
 
   constructor(private readonly options: PiAdapterOptions = {}) {}
 
@@ -66,7 +68,7 @@ export class PiAdapter implements RuntimeAdapter {
       // so detection remains accurate if a future pinned release moves it.
       const { stdout, stderr } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
       const version = stdout.trim() || stderr.trim();
-      const authPresent = KNOWN_PROVIDER_ENV_VARS.some((name) => process.env[name] !== undefined);
+      const authPresent = PROVIDER_CREDENTIAL_ENV_NAMES.some((name) => process.env[name] !== undefined);
       return { present: true, version, authPresent };
     } catch {
       return { present: false };
@@ -89,7 +91,7 @@ export class PiAdapter implements RuntimeAdapter {
    * variable beyond the platform baseline (`daemon/environment.ts`).
    */
   environmentRequirements(): RuntimeEnvironmentRequirements {
-    return { credentialNames: KNOWN_PROVIDER_ENV_VARS };
+    return { credentialNames: PROVIDER_CREDENTIAL_ENV_NAMES };
   }
 
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
@@ -130,13 +132,48 @@ export class PiAdapter implements RuntimeAdapter {
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
     const resumeSessionId = task.sessionRef;
-    const args = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
+    const piArgs = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
+    const selection = task.dispatchSelection;
+    let command = bin.command;
+    let args = piArgs;
+    if (selection !== undefined) {
+      if (selection.lane !== 'byok' || selection.runtimeId !== 'pi') {
+        throw new PolicyUnsupportedError(
+          `pi adapter cannot execute ${selection.lane} selection for runtime ${selection.runtimeId}`,
+        );
+      }
+      const launcher = this.options.byokLauncher;
+      if (launcher === undefined) {
+        throw new PolicyUnsupportedError(
+          'pi BYOK selection requires a configured credential-custody launcher',
+        );
+      }
+      command = launcher.command;
+      args = [
+        ...(launcher.args ?? []),
+        '--pi-bin',
+        bin.command,
+        '--profile-db',
+        launcher.profileDbPath,
+        '--session-dir',
+        launcher.sessionDir,
+        ...(launcher.secretServicePrefix
+          ? ['--secret-service-prefix', launcher.secretServicePrefix]
+          : []),
+        '--provider',
+        selection.providerId,
+        '--model',
+        selection.modelId,
+        '--',
+        ...piArgs,
+      ];
+    }
 
     const rpc = new PiRpcClient({
-      command: bin.command,
+      command,
       args,
       cwd: ctx.workspaceDir,
-      env: ctx.env,
+      env: selection === undefined ? ctx.env : withoutProviderCredentials(ctx.env),
       spawnFn: this.options.spawnFn,
     });
 
@@ -161,7 +198,7 @@ export class PiAdapter implements RuntimeAdapter {
         throw err;
       }
     }
-    return new PiSession(sessionRef, rpc);
+    return new PiSession(sessionRef, rpc, selection);
   }
 
   private resolveBin(): ResolvedBin {
@@ -218,6 +255,7 @@ class PiSession implements Session {
   constructor(
     public readonly sessionRef: string,
     private readonly rpc: PiRpcClient,
+    private readonly selection: TaskOfferPayload['dispatchSelection'],
   ) {}
 
   get events(): AsyncIterable<AgentEvent> {
@@ -254,6 +292,18 @@ class PiSession implements Session {
   async followUp(task: TaskOfferPayload): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('pi adapter only supports string instructions in M0 (no blob-ref fetch yet)');
+    }
+    const requestedSelection = task.dispatchSelection;
+    if (requestedSelection !== undefined && (
+      this.selection?.lane !== 'byok' ||
+      requestedSelection.lane !== 'byok' ||
+      requestedSelection.runtimeId !== 'pi' ||
+      requestedSelection.providerId !== this.selection.providerId ||
+      requestedSelection.modelId !== this.selection.modelId
+    )) {
+      throw new PolicyUnsupportedError(
+        'pi persistent session cannot change its authoritative BYOK provider/model selection',
+      );
     }
     await this.rpc.send({ type: 'prompt', message: task.instruction, streamingBehavior: 'followUp' });
   }

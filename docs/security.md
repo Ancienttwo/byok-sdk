@@ -87,6 +87,7 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
+| BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only the separate `byok-pi-provider-launcher` reads it. The launcher opens the non-secret profile database read-only, writes a credential-blind process-scoped Pi projection, and injects the key into the Pi child environment; `auth_mode: none` never constructs a keychain backend. `protocol`, `server`, and the client daemon never receive the value |
 | The daemon's own ambient environment (`process.env` — may hold secrets unrelated to any runtime: `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc., set for the daemon's own deployment) | Whatever process/container/service manager launched the daemon | **M5: no longer forwarded to a spawned agent in full.** `task-runner.ts` builds each task's child-process environment from a per-runtime allowlist (`daemon/environment.ts`'s `buildRuntimeEnv`) instead of handing over `process.env` verbatim — see the env-allowlist paragraph below |
 
 The audit log is itself worth calling out as a defended asset, not just a
@@ -99,10 +100,27 @@ without redaction, "helpful audit trail" becomes "durable secret/credential/
 source leak" the moment anything else on the machine can read the file.
 
 **Credential-isolation rule** (`packages/client/src/types.ts`'s
-`RuntimeAdapter` doc comment): an adapter spawns only the runtime's official
-binary, and never reads, proxies, or forwards that runtime's own credential
-storage. Presence checks are limited to non-secret signals the CLI itself
-reports — `claude auth status --json`'s `loggedIn` field
+`RuntimeAdapter` doc comment): subscription adapters spawn only the runtime's
+official binary and never read, proxy, or forward that runtime's own credential
+storage. The BYOK Pi adapter may instead spawn the separately installed
+`@byok-sdk/keys` launcher, but passes it only non-secret provider/model ids and
+local paths; the launcher, not the daemon, owns the keychain read and Pi child.
+The launcher opens an already-provisioned profile database read-only: a missing
+database/profile/model is an error and is never created or repaired on the
+dispatch path. The profile's `enabled` bit selects the registry default; an
+explicit dispatch may select any configured exact profile and never rewrites
+that default.
+The launcher also reconstructs the Pi child environment from a closed
+platform/proxy baseline and the single resolved projection key; it does not
+copy its own ambient environment. Direct launcher use therefore cannot leak
+an unrelated cloud/provider credential into Pi merely because the parent
+process had one.
+The stable Pi session path is host configuration: the launcher creates a
+missing directory owner-only, but never changes permissions on an existing
+directory, so a mistaken path cannot become a chmod sink. On POSIX, an
+existing directory that is not already owner-only is rejected.
+Presence checks remain limited to non-secret signals the CLI itself reports —
+`claude auth status --json`'s `loggedIn` field
 (`adapters/claude/claude-adapter.ts`), `codex login status`'s human-readable
 report (`adapters/codex/codex-adapter.ts`), and pi's env-var-name-only check
 — never a file read of `~/.claude`, `~/.codex`, or `~/.pi`.
@@ -120,8 +138,10 @@ regardless of which runtime ran it. `daemon/environment.ts`'s
 a small always-included platform baseline (`PATH`/`HOME`/locale/etc), plus
 whichever credential/config variable names the SPECIFIC selected runtime
 adapter declares it actually needs (`RuntimeAdapter.environmentRequirements()`
-— e.g. pi's `KNOWN_PROVIDER_ENV_VARS`, since pi authenticates via provider
-env vars; claude and codex declare none, since both authenticate via their
+— e.g. the legacy direct-Pi path's provider credential names, since Pi can
+authenticate via provider env vars; an authoritative BYOK selection strips
+those ambient names before invoking the credential launcher. Claude and Codex
+declare none and also strip those names at their spawn boundary, since both authenticate via their
 own CLI-managed OAuth session, not an env var — env-based API-key
 passthrough for those two remains a separate, pending product decision),
 plus an optional per-device local override (`DaemonConfig.runtimeEnvironment`).
@@ -630,16 +650,17 @@ applies to filesystem confinement.
 Everything above describes the **agent-dispatch** side of the SDK
 (`@byok-sdk/protocol` / `@byok-sdk/server` / `@byok-sdk/client`). That side's defining
 security property is *credential-isolation*: the daemon dispatches tasks to
-runtime CLIs the device owner already authenticated, and it never reads,
-proxies, or forwards any credential — the M5 pilot audit
+runtime CLIs the device owner already authenticated, or to a credential-custody
+launcher through a credential-blind process boundary. The daemon itself never
+reads, proxies, or forwards any credential — the M5 pilot audit
 ([`docs/security-review-m5-pilot-entry.md`](security-review-m5-pilot-entry.md),
 rule at `packages/client/src/types.ts:120-124`) is the evidence ledger for
 exactly that claim.
 
 `@byok-sdk/keys` sits on the **other** side of that line. Its whole job *is* to
 hold a provider API key: it stores the user's own key in the OS credential
-store and calls the LLM provider directly on the user's behalf (key-based
-BYOK, ported from the AiphaBee local-agent implementation). It is therefore a
+store and either calls the provider through its explicit client APIs or launches
+the pinned Pi runtime through `byok-pi-provider-launcher`. It is therefore a
 distinct package with a distinct threat model — a key custodian, not a task
 dispatcher — and the two are deliberately not merged.
 
@@ -659,8 +680,9 @@ diluted by the mere presence of a key-management package in the same repo:
   weakening, and does not fall under, the M5 credential-isolation guarantee,
   which speaks only for `client`/`server`/`protocol`.
 - **The key custodian opens no listening port.** `@byok-sdk/keys` binds no socket
-  and serves no HTTP: it is a library the host calls, so its only outbound
-  network use is the provider request itself. The upstream implementation
+  and serves no HTTP: it is a library or stdio-inheriting launcher the host
+  invokes. Network use belongs either to its explicit provider client or to the
+  Pi child it launches; the custody process itself exposes no network API. The upstream implementation
   shipped a local settings-page HTTP server alongside the key store; that
   server was deliberately not ported (milestone K3, recorded in
   [`packages/keys/README.md`](../packages/keys/README.md) under *Not in this

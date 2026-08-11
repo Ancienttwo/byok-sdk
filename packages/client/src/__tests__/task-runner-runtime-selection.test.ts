@@ -204,4 +204,63 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       expect(pi.startCalls).toHaveLength(0);
     });
   });
+
+  describe('dispatchSelection authority', () => {
+    it('selects the adapter from dispatchSelection when the legacy runtime field is absent', async () => {
+      const pi = new StubRuntimeAdapter('pi');
+      const claude = new StubRuntimeAdapter('claude');
+      await setup([claude, pi]);
+
+      const dispatchSelection = {
+        lane: 'byok' as const,
+        runtimeId: 'pi' as const,
+        providerId: 'openai',
+        modelId: 'gpt-5.2',
+      };
+      server.send(
+        createEnvelope(
+          'task.offer',
+          { instruction: 'x', policy: { mode: 'auto' }, dispatchSelection },
+          { taskId: 'task-selection-1', seq: server.nextSeq() },
+        ),
+      );
+
+      const claim = await server.waitFor((e) => e.type === 'task.claim');
+      expect(claim.payload).toMatchObject({ runtime: 'pi' });
+      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-selection-1');
+      expect(pi.startCalls[0]?.task.dispatchSelection).toEqual(dispatchSelection);
+      expect(claude.startCalls).toHaveLength(0);
+    });
+
+    it('declines a contradictory legacy runtime before claim or adapter start', async () => {
+      const pi = new StubRuntimeAdapter('pi');
+      const claude = new StubRuntimeAdapter('claude');
+      await setup([claude, pi]);
+
+      server.send(
+        createEnvelope(
+          'task.offer',
+          {
+            instruction: 'x',
+            policy: { mode: 'auto' },
+            runtime: 'claude',
+            dispatchSelection: {
+              lane: 'byok',
+              runtimeId: 'pi',
+              providerId: 'openai',
+              modelId: 'gpt-5.2',
+            },
+          },
+          { taskId: 'task-selection-2', seq: server.nextSeq() },
+        ),
+      );
+
+      const decline = await server.waitFor((e) => e.type === 'task.decline');
+      expect(decline.payload).toMatchObject({ retryable: false });
+      expect((decline.payload as { reason: string }).reason).toMatch(/does not match dispatchSelection/);
+      expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-selection-2')).toBe(false);
+      expect(pi.startCalls).toHaveLength(0);
+      expect(claude.startCalls).toHaveLength(0);
+    });
+  });
 });

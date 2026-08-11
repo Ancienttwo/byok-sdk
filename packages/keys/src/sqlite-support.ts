@@ -80,14 +80,15 @@ export function openSqliteDatabase(
   options?: DatabaseSyncOptions,
 ): DatabaseSync {
   const { DatabaseSync } = loadSqliteModule();
-  if (path !== ':memory:') {
+  const readOnly = options?.readOnly === true;
+  if (path !== ':memory:' && !readOnly) {
     mkdirSync(dirname(path), { mode: SECURE_DIR_MODE, recursive: true });
   }
   const database = new DatabaseSync(path, {
     timeout: DEFAULT_BUSY_TIMEOUT_MS,
     ...options,
   });
-  if (path !== ':memory:') {
+  if (path !== ':memory:' && !readOnly) {
     database.exec('PRAGMA journal_mode = WAL');
     database.exec('PRAGMA synchronous = FULL');
   }

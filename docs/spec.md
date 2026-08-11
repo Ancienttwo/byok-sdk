@@ -4,6 +4,21 @@
 
 Describe the product intent, users, workflows, acceptance scenarios, and constraints before implementation.
 
+## Canonical Terms
+
+- **subscription lane** — a dispatch through the user's existing Claude Code
+  or Codex CLI login. The vendor CLI owns authentication; BYOK selects only
+  the runtime and model and never reads or forwards provider credentials.
+- **BYOK lane** — a Pi dispatch using a host-configured provider profile. When
+  that profile requires authentication, its user-supplied key is held in the
+  operating-system credential store. A credential-custody launcher, isolated
+  from the dispatch process, projects the selected provider/model to Pi and
+  injects only the required key into the Pi child environment.
+- **provider projection** — the deterministic, credential-blind `models.json`
+  representation of one selected BYOK provider/model. Pi remains the sole
+  provider registry, transport, and agent-loop authority; the projection is
+  immutable for one process and failures never fall back to another target.
+
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
@@ -12,7 +27,10 @@ unversioned global `pi` on `PATH` as an implicit substitute. All workspace
 dispatch packages and private conformance tests require Node.js `>=22.19.0`,
 matching pi's published engine floor. The independent
 `@byok-sdk/keys@0.1.0` package remains outside the dispatch graph and retains
-its Node.js 20 floor.
+its Node.js 20 floor. A host that enables the BYOK lane installs its
+`byok-pi-provider-launcher` binary separately and gives the client only the
+launcher command plus non-secret profile/session paths; this executable
+process boundary does not create a package dependency edge.
 The coding-agent package owns and installs its non-optional `pi-agent-core`,
 `pi-ai`, `pi-client`, `pi-protocol`, and `pi-tui` dependencies. BYOK does not
 declare or import those packages separately because the CLI/RPC boundary is
