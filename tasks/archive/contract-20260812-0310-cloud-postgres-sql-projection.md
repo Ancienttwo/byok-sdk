@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-12 03:10
+> **Related Plan**: plans/archive/plan-20260812-0201-cloud-postgres-sql-projection.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260812-0310
+
 # Task Contract: cloud-postgres-sql-projection
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260812-0201-cloud-postgres-sql-projection.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
