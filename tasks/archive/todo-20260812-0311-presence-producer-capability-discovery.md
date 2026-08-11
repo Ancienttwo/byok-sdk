@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-12 03:11
+> **Related Plan**: plans/archive/plan-20260812-0201-presence-producer-capability-discovery.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260812-0311
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-12 02:07
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

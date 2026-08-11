@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-12 03:11
+> **Related Plan**: plans/archive/plan-20260812-0201-presence-producer-capability-discovery.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260812-0311
+
 # Task Contract: presence-producer-capability-discovery
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260812-0201-presence-producer-capability-discovery.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict

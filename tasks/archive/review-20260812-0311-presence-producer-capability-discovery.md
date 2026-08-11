@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-12 03:11
+> **Related Plan**: plans/archive/plan-20260812-0201-presence-producer-capability-discovery.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260812-0311
+
 # Task Review: presence-producer-capability-discovery
 
 > **Status**: Pending

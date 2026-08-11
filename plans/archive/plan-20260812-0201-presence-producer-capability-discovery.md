@@ -1,6 +1,6 @@
 # Plan: Presence Producer + Hosted Capability Discovery
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260812-0201
 > **Slug**: presence-producer-capability-discovery
 > **Artifact Level**: work-package
