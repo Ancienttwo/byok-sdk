@@ -49,18 +49,18 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:bc556210992ce1fe908d71e2aca636142fe57eca4e253fbdb95a6e10f29d0fec
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 3d66543c504f2aa3c6517e34e57c4c2a745232dd
+> **Verification Evidence SHA256**: sha256:f02b41624cb47b71cecb7a982043c700d3093ac43c6ad13f21e0a990d675d758
+> **Issued At**: 2026-08-11T20:32:06.545Z
 
-- Summary: No AcceptanceReceipt has been recorded.
-- Findings: none
+- Summary: Gatekeeper PASS: single-authority nonce domain verified (hex-frozen, repo-wide grep, scan test proven falsifiable via double-quoted shadow probe); simulator drives real routes only; four negatives red-capable with pinned status strings; publishable shape field-aligned with cloud-postgres; two LOW folds applied (regex widening + testkit test in machine gate); all suites green
+- Findings: P3: golden fingerprint renders refine-carried cap semantics as {} — known freeze-guard blind spot, covered by constant assertion tests (noted on result-document slice too); P3: testkit not in release train by design — owner decision after salesko dogfood round
 
 ## Behavior Diff Notes
 
