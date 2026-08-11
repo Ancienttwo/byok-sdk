@@ -123,6 +123,10 @@ export class AuthManager {
   async getValidAccessToken(): Promise<string> {
     if (!this.record) throw new Error('device is not paired yet; call pair(pairingCode) first');
     if (this.revoked) throw new DeviceRevokedError();
+    // A reactive 401 renewal is already the authority for the next token.
+    // Returning the still-long-lived cached token here lets WS reconnect race
+    // that renewal and present the same rejected bearer again.
+    if (this.renewing) return this.renewing;
     if (msUntilExpiry(this.record.expiresAt) > RENEW_MARGIN_MS) return this.record.accessToken;
     return this.renew();
   }
