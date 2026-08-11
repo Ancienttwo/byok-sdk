@@ -1,6 +1,6 @@
 # Plan: cloud-postgres SQL Build Projection + Two-Tier Release Smoke
 
-> **Status**: Draft
+> **Status**: Approved
 > **Created**: 20260812-0201
 > **Slug**: cloud-postgres-sql-projection
 > **Artifact Level**: work-package
@@ -105,7 +105,8 @@
 - **Rollback surface**: revert 本 slice commits；无数据迁移回滚。
 
 ## Annotations
-<!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
+
+- 已解决：下游消费方（salesko）书面确认 build projection 方案优于搬目录；落地发版后 salesko 删 vendored SQL + sha256 表改用 `migrationsDir()`（已记入其待办，等 tarball 版本号）。owner 批准与 Row 1 并行执行，无遗留注释。
 
 ## Task Breakdown
 - [ ] build 确定性复制 `deploy/sql` → `dist/sql`（先清后拷）

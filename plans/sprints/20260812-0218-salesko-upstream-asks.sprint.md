@@ -1,6 +1,6 @@
 # Sprint: Salesko Handoff Upstream Program
 
-> **Status**: Draft
+> **Status**: Approved
 > **Slug**: salesko-upstream-asks
 > **Created**: 2026-08-12 02:18
 > **Updated**: 2026-08-12 02:18
