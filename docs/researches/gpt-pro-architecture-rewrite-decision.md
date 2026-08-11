@@ -20,11 +20,13 @@
 | E2 | control socket RPC 虛構 `workspaces`、`unpair` 方法 | `create-daemon.ts:979-1038` 只有 6 個方法;`bin/commands/workspaces.ts` 不走 control client;unpair 走 `shutdown` |
 | E3 | Codex network 策略方向寫反(`enforce network:false | no`) | `adapters/codex/permission-mapping.ts:118-125`:fail-closed 在 `network === true` 方向 |
 | E4 | presence 五級詞彙錯誤歸因給 RAFT | `raft-architecture-reference.md` 全文 presence 零命中;真實來源 `proposal-byok-platform-v2-opus.md:205` |
-| E5 | RAFT board 轉移圖丟 `[unverified]` hedge,還加了證據裡沒有的邊 | `raft-architecture-reference.md:1064` 明標 unverified |
+| E5 | RAFT board 轉移圖丟 `[unverified]` hedge,還加了證據裡沒有的邊 | `raft-architecture-reference.md:1068` 明標 unverified |
 | E6 | P0-P5 編號三重語義衝突(階段 vs 優先級 vs dangling P5) | `ARCHITECTURE-PROPOSAL-byok-platform.md:33-34,692-698` 是權威編號 |
 | E7 | 兩張 mermaid 與源碼失配(Blob factory 邊被刪、errors.ts 節點消失) | `packages/server/src/index.ts:143,157`;`packages/protocol/src/errors.ts` |
 | E8 | 「reconnect 無 jitter」誤導 | `ws-transport.ts:248-254` 已有 ±20% random jitter,缺的是確定性種子 |
 | E9 | 漏 `GET /byok/records/:kind/:key`;丟 RFC 8785 規範號;三個 domain 前綴大小寫不一致 | `ARCHITECTURE-PROPOSAL:195`;`tenant-isolation-decision.md:204` |
+
+> **2026-08-10 evidence correction**：E4 已被 hash-matched RAFT 1.0.15 bundle 推翻。五个值确实存在于 `AGENT_ACTIVITIES`；需要保留的 hedge 是「RAFT 称 activity，BYOK 自有 presence 抽象与 authority」，而不是「词汇不是 RAFT 的」。校正证据见 `2026-08-10_research-raft-cli-dynamic-report.md` F-006。E4 作为历史裁定保留，但不再作为 canonical 依据。
 
 ## 併入清單(全部掛「目標設計」標記)
 

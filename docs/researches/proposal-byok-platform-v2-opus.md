@@ -3,7 +3,7 @@
 RECOMMENDATION: 新增 protocol-free 的 `@byok/core` 契約包與無狀態 `@byok/cloud`，雲端持有「board 協調層（5 態）+ 確權真相層 + 兩級 ephemeral 提示」而執行態仍全在本機；board 以 per-subject 單調游標的 SSE/輪詢同步、claim 走 holder-snapshot 衝突、status 走 expectedStatus CAS；wire v1 與 client 的派工路徑一行不改，TaskStore 不做 async 遷移而隨 ConnectionHub 降級為自託管本地鏡像 — confidence: HIGH
 
 > 狀態：待審批。與 v1（`ARCHITECTURE-PROPOSAL-byok-platform.md`）的關係：v1 的兩線定位與 K 線里程碑全部保留，v2 補「C 線雲端側形態」，新增 P 線里程碑。
-> 依據：byok-sdk 工作樹實地複核（2026-08-05，本文所有 `file:line` 均當場讀過）+ Cloudflare 官方文件實查 + raft-computer v1.0.15 task board 探針實測（調度方提供，證據等級見 §11）。
+> 依據：byok-sdk 工作樹實地複核（2026-08-05，本文所有 `file:line` 均當場讀過）+ Cloudflare 官方文件實查 + raft-computer v1.0.15 hash-bound 靜態拆解；2026-08-10 受限動態驗證只校正 client/local control flow，server-side board semantics 仍未驗證（證據等級見 §11）。
 
 ---
 
@@ -134,7 +134,7 @@ task board 這條輸入進來之後，原六條共識裡有兩條的**措辭**�
 
 board 層唯一注入派工層的動作是**把一個 offer 塞進某設備的 outbox**。claim 成功之後，剩下的全走凍結的 wire（`task.offer` → `task.claim` → `task.started` → … → 終態），一個 message type 都不新增。這條分界同時解決了「為何 board 有權威但執行態沒有」：board 是多方會合點（人在手機上要能看要能改，daemon 離線時也要能改），執行態是單機事實。
 
-沿用探針的第一條原則並翻譯成 byok 的說法：**board 行是派工記錄的元數據，不是第二個真相源。** `task` 表只存 status／assignee／channel／標題／指標；指令正文在 outbox envelope 或 blob 裡，執行結果在 `attested_record` 裡。board 表不複製其中任何一份。
+本方案的第一條 BYOK 原則是：**board 行是派工記錄的元數據，不是第二個真相源。** `task` 表只存 status／assignee／channel／標題／指標；指令正文在 outbox envelope 或 blob 裡，執行結果在 `attested_record` 裡。board 表不複製其中任何一份。
 
 ### 4.1 board 狀態機：保留 5 態，但每一態都要說清楚憑什麼留
 
@@ -157,11 +157,11 @@ todo ──claim──▶ in_progress ──terminal──▶ in_review ──ac
 
 **`closed` 的語義由本方案定義為「終止未驗收」**，可從任何非 `done` 態進入。理由是產品需要「任意時點放棄」，且它天然對位執行層既有的 `Completed` vs `Failed/Cancelled` 終態二分。探針未能確認 raft 的 `closed` 究竟是這個意思還是「done 之後的歸檔」——標為 [unverified]；若後續證實是歸檔語義，那是命名差異不是結構差異，補一個 `archived_at` 時間戳即可，不加第 6 態。
 
-**claim 是併發鎖不是所有權，沿用探針結論。** 衝突回 409 + 當前占有者快照（`assignee`/`assignedAt`/`observedAt`），不回 412。理由：ETag/version 是給**內容**衝突用的（兩個寫者改同一份正文），claim 是排他指派的 CAS，輸的一方需要知道的是「誰佔著、那是什麼時候觀察到的」，據此決定等、搶還是換路——這比一個裸的 412 有用。SQL 上就是 `UPDATE task SET assignee=?, status='in_progress' … WHERE assignee IS NULL RETURNING *`，rowcount 0 就去 SELECT 占有者。不需要 version 欄位。
+**claim 是併發鎖不是所有權，是 BYOK 自有 contract。** 衝突回 409 + 當前占有者快照（`assignee`/`assignedAt`/`observedAt`），不回 412。理由：ETag/version 是給**內容**衝突用的（兩個寫者改同一份正文），claim 是排他指派的 CAS，輸的一方需要知道的是「誰佔著、那是什麼時候觀察到的」，據此決定等、搶還是換路——這比一個裸的 412 有用。SQL 上就是 `UPDATE task SET assignee=?, status='in_progress' … WHERE assignee IS NULL RETURNING *`，rowcount 0 就去 SELECT 占有者。不需要 version 欄位。
 
-**但 status 轉移要加 `expectedStatus` 前提，這是本方案在探針之上的增補。** claim 的 CAS 前提天然是 `assignee IS NULL`，status 轉移沒有這種天然前提；而 board 上人和 daemon 會同時推同一個項目（人打回 `in_progress` 的同時 daemon 剛好報完終態要推 `in_review`）。裸的 last-write-wins 在這裡會靜默吃掉一次人工決策。`expectedStatus` 不符回 409 + 現況快照，與真相層的 `expectedRev` 同一種 fail-closed 慣用法。
+**status 轉移要加 `expectedStatus` 前提，這也是 BYOK 自有 contract。** claim 的 CAS 前提天然是 `assignee IS NULL`，status 轉移沒有這種天然前提；而 board 上人和 daemon 會同時推同一個項目（人打回 `in_progress` 的同時 daemon 剛好報完終態要推 `in_review`）。裸的 last-write-wins 在這裡會靜默吃掉一次人工決策。`expectedStatus` 不符回 409 + 現況快照，與真相層的 `expectedRev` 同一種 fail-closed 慣用法。
 
-`assignee` 與 `status` 解耦（沿用探針）：`done`/`closed` 之外任意態可 claim/unclaim。
+`assignee` 與 `status` 解耦：`done`/`closed` 之外任意態可 claim/unclaim。
 
 ### 4.2 同步機制：SSE 優先 + 輪詢兜底，在無 DO 的 Workers 上怎麼落
 
@@ -177,7 +177,7 @@ GET /byok/board/stream?since=<board_seq>     Accept: text/event-stream
    ※ 每次查詢各自取用/歸還 DB 連線，禁止跨 sleep 持有 transaction
 ```
 
-參數（5s 常規、120s 全量對賬、3s 喚醒後快速追趕、每輪 limit 50）直接沿用探針實測值——那是生產調過的量級，沒有理由重新猜。
+5s query、120s 全量對賬、15s heartbeat 與每輪 limit 50 是 BYOK 可配置的初始運營預設，不是已驗證的 RAFT board production tuning。hash-matched bundle 中相似的 `5s/120s/3s/limit 50` tuple 屬 agent bridge wake-hint handler。當前值因已由 BYOK SSE/poll/reconcile tests 覆蓋而保留；後續只按 BYOK 的 latency、DB QPS、repair 與 timeout 指標調整。
 
 **為何 SSE 在這裡划算，而 50s long-poll hold 在派工路徑上不划算。** 兩件事的成本結構不同，不是前後矛盾：
 
@@ -190,11 +190,11 @@ GET /byok/board/stream?since=<board_seq>     Accept: text/event-stream
 
 Workers 的 HTTP 請求沒有 wall-time 上限（官方文件實查），等待 I/O 不計 CPU time，所以持有串流本身可行；runtime 每週更新數次、in-flight 請求只有 30 秒寬限期這件事，對 SSE 是常態重連，對 50s hold 是靜默截斷。
 
-**降級必須是宣告式能力，不是狀態碼嗅探。** 探針顯示 raft 在收到 404/405/501 時降級輪詢。本 repo 的規則禁止 heuristic/best-effort 路徑，所以照抄嗅探會直接違規。改法：雲端在 `GET /byok/capabilities`（或部署配置）明確宣告 `board.sse`，daemon 只在宣告時用 SSE，否則走 `GET /byok/board?since=` 的 5s 輪詢。兩條路徑都是一等公民、都有測試，而不是一條主路加一條猜出來的備胎。
+**降級必須是宣告式能力，不是狀態碼嗅探。** RAFT board transport 與 fallback 的 server/runtime 行為未驗證，不作設計 authority；本 repo 的規則也禁止 heuristic/best-effort 路徑。雲端在 `GET /byok/capabilities`（或部署配置）明確宣告 `board.sse`，daemon 只在宣告時用 SSE，否則走 `GET /byok/board?since=` 的 5s 輪詢。兩條路徑都是一等公民、都有測試，而不是一條主路加一條猜出來的備胎。
 
-**board 的增量流不另建事件表。** 每個 `task` 行帶一個 per-subject 單調的 `board_seq`，每次更新重新分配；增量查詢就是 `WHERE subject_id=? AND board_seq > ?`。這樣 board 表本身就是事件源，不存在「日誌與狀態兩份真相」的漂移——這恰好是探針第一條原則（task 不是獨立真相源）在儲存層的同一個道理。代價是同一行在兩次輪詢之間被改兩次時只看得到最新值，而 120s 全量對賬正是補這個洞的網。
+**board 的增量流不另建事件表。** 每個 `task` 行帶一個 per-subject 單調的 `board_seq`，每次更新重新分配；增量查詢就是 `WHERE subject_id=? AND board_seq > ?`。這樣 board current row 是唯一協調 authority，不會形成「日誌與狀態兩份真相」的漂移。代價是同一行在兩次輪詢之間被改兩次時只看得到最新值，而 120s 全量對賬正是補這個洞的網。
 
-**wake-hint 通道砍掉。** 探針裡的 wake hint 是「有變化，快去拉」的廉價信號。無 DO 就無法推送，而 SSE 串流本身就是那個信號，輪詢模式下 5s 也已經夠短。本機唯讀 peek 保留（見 4.5），跨網的獨立 wake 通道刪除。
+**wake-hint 通道砍掉。** hash-matched RAFT bundle 的 agent bridge 使用「有變化，快去拉」的 wake hint；這只作外部 reference。BYOK 在無 DO 時不另建該通道：SSE 串流本身就是信號，輪詢模式下也已有 bounded query interval。本機 peek 保留（見 4.5），跨網的獨立 wake 通道刪除。
 
 ### 4.3 提示分兩級，不是一級也不是三級
 
@@ -248,7 +248,7 @@ board status 是 subject-authed 的普通寫入，**不走確權簽名**——�
 
 ### 4.5 本機唯讀短路：加在既有控制面，不開新端口
 
-探針的 `/internal/agent-api`（GET /inbox、GET /wake-hints peek、POST /activity 轉發）採納**能力**、否決**傳輸**：byok 已有硬化過的 Unix socket 控制面（symlink/uid 檢查、拒二重 daemon，`control-server.ts:38,170,175`），比 loopback HTTP 端口嚴格。新增三個唯讀/轉發 RPC 到 `control-protocol.ts` 即可，不開監聽端口。
+RAFT static bundle 的 `/internal/agent-api`（GET /inbox、GET /wake-hints peek、POST /activity 轉發）只作 capability reference，不作 transport authority：byok 已有硬化過的 Unix socket 控制面（symlink/uid 檢查、拒二重 daemon，`control-server.ts:38,170,175`），比 loopback HTTP 端口嚴格。新增三個唯讀/轉發 RPC 到 `control-protocol.ts` 即可，不開監聽端口。
 
 ### 4.6 表結構草案（落 `deploy/sql/`，走既有 `check:deploy-sql` 順序檢查）
 
@@ -369,7 +369,7 @@ CREATE TABLE activity_tail (
 **被否選項**
 
 - 雲端保留執行狀態機：製造第二個執行權威，且違反鐵律 3。
-- board 增量另建事件表：日誌與狀態兩份真相，正是探針第一條原則反對的形狀。
+- board 增量另建事件表：會形成日誌與狀態兩份 truth authority，違反 BYOK 的 current-row invariant。
 - 提示合併成一級：設備級與任務級基數不同，過期與查詢策略會擰巴。
 - 狀態碼嗅探降級：本 repo 明禁 heuristic 路徑，改為能力宣告。
 - 派工路徑也改 SSE：那是凍結契約，動不了；而且它替換的輪詢密度低，攤不回來。
@@ -552,10 +552,10 @@ pnpm --filter @byok/cloud test -- --grep "claim"
 - Workers `ratelimit` binding **2025-09-19 GA**，不需要 Durable Objects（`/workers/runtime-apis/bindings/rate-limit/`）
 - 本地開發限制：Hyperdrive 遠端資源不支援、`ratelimit` 不與部署共享限額（`/workers/local-development/`）
 
-**raft-computer v1.0.15 task board 探針（調度方提供，本次未獨立複核）**
+**raft-computer v1.0.15 靜態參考（2026-08-10 由 hash-matched dynamic research 校正）**
 
-task = message + 元數據非獨立真相源；board 是按 channel 過濾的扁平清單；5 態 todo/in_progress/in_review/done/closed；assignee 與 status 解耦；claim 是併發鎖、衝突回占有者快照帶 `observedAt`、task 層無 version/etag（同 binary 的 Wiki 有 ETag，是刻意的不同選擇）；SSE 優先 + 404/405/501 降級輪詢，參數 5s／120s／3s／limit 50；本地→雲端狀態變更是離散顯式 POST；agent 活躍度 5 級逐事件推 + 60s 心跳；活動軌跡走獨立批量通道帶 `dropped`；本機 `/internal/agent-api` 唯讀短路。
+client bundle 暴露 5 態 todo/in_progress/in_review/done/closed、assignee/status 欄位、`task create --assignee`、current-agent `task claim`，以及 `online/thinking/working/error/offline` 五個 agent activity 值。server-side transition、claim CAS/conflict response、board SSE/poll 與 task truth ownership仍未驗證。相似的 5s／120s／3s／limit 50 tuple 屬 agent bridge wake-hint defaults，不是 board production tuning；完整校正與動態邊界見 [RAFT Computer CLI dynamic research](./2026-08-10_research-raft-cli-dynamic-report.md)。
 
-**本方案對探針的三處不照抄**（理由見 §4）：狀態碼嗅探降級改為能力宣告（repo 明禁 heuristic 路徑）；status 轉移增加 `expectedStatus` CAS（探針只在 claim 有 CAS）；本機短路 API 改掛既有 Unix socket 控制面而非 loopback HTTP 端口（byok 既有實現更嚴格）。另外砍掉跨網的獨立 wake-hint 通道（SSE 串流本身即該信號）。
+**本方案的 BYOK-specific 選擇**（理由見 §4）：transport 只按 capability declaration 選擇；status 轉移使用 `expectedStatus` CAS；本機 API 掛既有 Unix socket 控制面而非 loopback HTTP 端口；不設跨網獨立 wake-hint 通道（SSE 串流本身即該信號）。這些由本倉庫 contract/tests 背書，不宣稱來自已驗證的 RAFT server 行為。
 
 **標為 [inferred] / [unverified] 的判斷**：無 DO 時 stateless Worker 無跨 isolate 喚醒原語（由「Workers 無共享記憶體、無內建 pub/sub 原語」推得，非官方明文）[inferred]；`crypto.subtle` 的 Ed25519 在 Node 20 的穩定性——因此 `verifyAttestation` 設計為注入式 verifier（照 repo 既有的 `TokenSigner`/`fetchImpl` 慣用法）[unverified]；raft 的 `closed` 究竟是「終止未驗收」還是「done 後歸檔」[unverified]。

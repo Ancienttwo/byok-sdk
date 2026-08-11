@@ -1059,7 +1059,7 @@ stateDiagram-v2
 - `closed` 暂定义为“终止、未验收”；未来若改为归档语义，用 `archived_at` 字段表达，**不新增第六个状态**。
 - `task.complete` 可以把工作项推到 `in_review`，但不能自动变成 `done`——`done` 需要人工验收。
 - host 必须显式提供 bounded `channel`/`title`；cloud 不从 instruction/result 派生 label。
-- poll 与 SSE 共享 `BoardStore.list`；`board_seq` 是 per-tenant current-state cursor，不是完整事件历史。SSE 以 heartbeat 保活、以 120s `reconcile` 信号要求 full poll，且每轮 query 返回后才 sleep。
+- poll 与 SSE 共享 `BoardStore.list`；`board_seq` 是 per-tenant current-state cursor，不是完整事件历史。SSE 以 heartbeat 保活、以默认 120s（可由 `ByokCloudOptions` 注入）的 `reconcile` 信号要求 full poll，且每轮 query 返回后才 sleep。该数值是 BYOK 已测试的初始运营默认值，不是 RAFT production tuning 证据。
 - `BoardFeedClient` 只按 `GET /byok/capabilities` 的 `board.sse` 选择 transport；temporary 5xx/idle watchdog 是 retryable SSE failure，不会永久降级。401/revocation 与其他永久 non-5xx failure 则停止。
 
 #### presence 与 activity 规则（当前实现）
@@ -1625,12 +1625,12 @@ flowchart LR
 
 ## 13. RAFT 受限参考
 
-完整证据与版本拓扑放在 `docs/researches/raft-architecture-reference.md`。SDK 架构只保留决策映射：
+完整静态证据与版本拓扑放在 `docs/researches/raft-architecture-reference.md`，本机动态边界与归因校正放在 `docs/researches/2026-08-10_research-raft-cli-dynamic-report.md`。SDK 架构只保留决策映射：
 
 | RAFT 模式 | BYOK 决定 | 原因 |
 | --- | --- | --- |
 | agent-facing CLI + injected env/API context | **评估，不直接替换** | runtime-neutral callback 能解决 Pi/Codex approval gap，但会改变 frozen wire/control architecture |
-| board 5 态、assignee/status 分离、claim conflict snapshot | **采纳语义** | 适合 `@byok-sdk/core` + cloud SQL，并与 wire execution state 分离 |
+| board 5 态、assignee/status 分离 | **采纳词汇与分权威** | client shape 可参考；BYOK 的 transition、CAS 与 conflict snapshot 由本仓库 contract/tests 自证 |
 | SSE + periodic reconciliation + poll path | **采纳，改成 capability declaration** | 不使用 404/405/501 status sniffing heuristic |
 | presence/activity + dropped count | **采纳** | 把高频有损信号与 durable truth 分开 |
 | local agent shortcut API | **采纳能力，复用 control socket** | 现有 Unix socket/named pipe 边界比新增 loopback HTTP 更一致 |
@@ -1640,10 +1640,11 @@ flowchart LR
 | hash-only updater trust | **拒绝照抄** | upgrade manifest 与 binary 同源不能形成独立签名信任根 |
 | runtime bypass/yolo flags | **拒绝** | 会推翻 BYOK fail-closed PermissionPolicy 约束 |
 
-两处归因必须写清，否则这张表会把外部证据的强度说高：
+三处 authority 必须写清，否则这张表会把外部证据的强度说高：
 
-- **presence 五级词汇不是 RAFT 的。** `online/thinking/working/error/offline` 的来源是 `docs/researches/proposal-byok-platform-v2-opus.md:205`；`docs/researches/raft-architecture-reference.md` 全文 `presence` 零命中。上表"presence/activity + dropped"一行采纳的是 RAFT 的**有损提示带 dropped 计数**这个机制，五级词汇本身是本仓库提案的产物。
-- **board 转移在 RAFT 侧是 `[unverified]`。** `raft-architecture-reference.md:1064` 原文明确：状态转移的约束在 server 侧 `[unverified]`，其转移图是依 status 语义绘制的合理路径，不是从实作提取的转移表。因此 §12.3 采纳的是 5 态**词汇与分权威**，不是一份已验证的转移表；`closed` 的原义同样仍标 unverified。
+- **五个 activity 值存在于 RAFT，但 `presence` authority 属于 BYOK。** hash-matched bundle 定义 `AGENT_ACTIVITIES = online/thinking/working/error/offline`；RAFT 将其称为 agent activity。BYOK 自己拥有 device-level `presence` 抽象、TTL/non-authoritative 语义，以及它与 task activity、wire execution、billing、recovery 的隔离。共享词汇不构成 authority transfer。
+- **board 转移在 RAFT 侧是 `[unverified]`。** `raft-architecture-reference.md:1068` 原文明确：状态转移的约束在 server 侧 `[unverified]`，其转移图是依 status 语义绘制的合理路径，不是从实作提取的转移表。因此 §12.3 采纳的是 5 态**词汇与分权威**，不是一份已验证的转移表；`closed` 的原义同样仍标 unverified。
+- **assignment capability 不等于 BYOK invariant。** RAFT client 的 `task create --assignee` 支持 create-time assignment，而 `task claim` 仍代表 current-agent self-claim。BYOK 当前保持 authenticated device-derived claim 与 host-only review acceptance；是否新增 host assignment 必须另立 product contract，不能由外部 CLI surface 推导。
 
 RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组合的 SDK。可参考其填满的 operational semantics，不能把产品所有权边界一起搬进 SDK。
 
