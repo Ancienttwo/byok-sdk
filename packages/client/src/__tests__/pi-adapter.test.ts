@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { Session, TaskContext } from '../types';
 
@@ -214,7 +214,14 @@ describe('PiAdapter against the fake-pi fixture', () => {
 
   it('capabilities() advertises exactly what the adapter can express', () => {
     const adapter = fakePiAdapter();
-    expect(adapter.capabilities()).toEqual({ steer: true, resume: true, permissionModes: ['auto', 'readonly'] });
+    expect(adapter.capabilities()).toEqual({
+      steer: true,
+      resume: true,
+      // S0/H-002: pi has no needs_approval notion at all
+      // (`PiSession.resolveApproval` throws unconditionally).
+      approvalInteractive: false,
+      permissionModes: ['auto', 'readonly'],
+    });
   });
 
   it('environmentRequirements() declares the known provider credential env vars (M5) — the same single source of truth detect()\'s own authPresent probe uses', () => {
@@ -237,8 +244,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
   });
 });
 
-describe('PiAdapter against the exact required dependency (no network/API key required)', () => {
-  it('detect() resolves and launches pi 0.84.1 from the package install', async () => {
+describe('PiAdapter against the user-installed runtime (no network/API key required)', () => {
+  it('detect() returns a well-formed result whether or not pi is actually installed here', async () => {
     const adapter = new PiAdapter();
     const result = await adapter.detect();
     expect(result).toMatchObject({ present: true, version: '0.84.1' });

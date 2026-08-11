@@ -10,6 +10,7 @@ import {
   type Envelope,
   type MessageType,
   type PermissionPolicy,
+  type RuntimeId,
   type RuntimeInfo,
   type TaskApprovalResolvedPayload,
   type TaskArtifactPayload,
@@ -22,7 +23,7 @@ import {
   type TaskProgressPayload,
   type TaskStartedPayload,
   type TaskState,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import type { DeviceRegistry } from './auth';
 import { AsyncEventQueue } from './event-queue';
 import { generateTaskId } from './ids';
@@ -142,7 +143,12 @@ interface TaskRuntime {
 }
 
 /** Fields hub.ts ever patches alongside a state transition. */
-type TaskPatch = Partial<Pick<TaskSnapshot, 'deviceId' | 'sessionRef' | 'result' | 'pendingApprovalId' | 'claimedRuntime'>>;
+type TaskPatch = Partial<
+  Pick<
+    TaskSnapshot,
+    'deviceId' | 'sessionRef' | 'result' | 'pendingApprovalId' | 'claimedRuntime' | 'claimedRuntimeCapabilities'
+  >
+>;
 
 /**
  * The connection hub: tracks each device's live transport (WS or long-poll —
@@ -274,6 +280,99 @@ export class StaleApprovalError extends Error {
       }`,
     );
     this.name = 'StaleApprovalError';
+  }
+}
+
+/**
+ * S0 (GAP-002): why {@link ConnectionHub.steerTask} refused. Stable strings —
+ * a caller (an embedder's operator UI, an HTTP surface mapping this to a
+ * status code) switches on these rather than matching error text.
+ *
+ * - `task_terminal` — the task already reached `Complete`/`Failed`/
+ *   `Cancelled`. Checked FIRST, so a terminal task that is also (obviously)
+ *   not `Running` reports the more specific truth, and a steer racing a
+ *   terminal transition always resolves terminal-first.
+ * - `task_not_running` — the task exists and is live, but is `Offered`/
+ *   `Claimed`/`AwaitApproval`; there is no running turn to steer yet.
+ * - `steer_unsupported_runtime` — the runtime that CLAIMED this task cannot
+ *   be steered, per the claim-time capability snapshot
+ *   (`TaskSnapshot.claimedRuntimeCapabilities`, sourced from the claiming
+ *   adapter's own `task.claim.capabilities`). Fail-closed: a MISSING snapshot
+ *   rejects under this same code, because "unknown" is not "supported" (see
+ *   {@link SteerRejectedError}'s own doc comment).
+ */
+export type SteerRejectionCode = 'steer_unsupported_runtime' | 'task_not_running' | 'task_terminal';
+
+function steerRejectionMessage(
+  taskId: string,
+  code: SteerRejectionCode,
+  state: TaskState,
+  runtime: RuntimeId | undefined,
+): string {
+  switch (code) {
+    case 'task_terminal':
+      return `cannot steer task ${taskId}: task is already terminal (state ${state})`;
+    case 'task_not_running':
+      // Byte-for-byte the pre-S0 message for this case — only the error's
+      // TYPE changed here, mirroring how M4 typed `approveTask`'s failures.
+      return `cannot steer task ${taskId}: not running (state ${state})`;
+    case 'steer_unsupported_runtime':
+      return `cannot steer task ${taskId}: claimed runtime ${runtime ?? '(unknown)'} does not support steering`;
+  }
+}
+
+/**
+ * S0 (GAP-002): thrown by {@link ConnectionHub.steerTask} instead of the
+ * pre-S0 generic `Error`, so a caller can tell WHY a steer was refused
+ * without matching on message text — same typed-error idiom as
+ * {@link UnknownTaskError}/{@link TaskNotAwaitingApprovalError}/
+ * {@link StaleApprovalError} above.
+ *
+ * The gap this closes: pre-S0 `steerTask` sent `task.steer` to ANY `Running`
+ * task, but only pi's adapter implements steering — Claude's and Codex's
+ * throw on receipt (`claude-adapter.ts`, `codex-adapter.ts`), which stalls
+ * the client's redelivery cursor at that seq and loops forever. So the
+ * decision has to be made server-side, from per-runtime truth, BEFORE an
+ * envelope exists.
+ *
+ * Fail-closed on unknown, deliberately: `steer_unsupported_runtime` covers
+ * both "the claiming adapter reported `steer: false`" and "this server has no
+ * capability snapshot for this task at all" (a pre-D-4 daemon whose claim
+ * carried no `capabilities`, a task record predating S0). Refusing an unknown
+ * is a recoverable operator-visible error; guessing "supported" reintroduces
+ * the exact permanent cursor stall this gate exists to prevent.
+ *
+ * Thrown before any state change and before any wire message is built — a
+ * rejected steer has zero side effects, same as every other validation
+ * failure in this file.
+ *
+ * SINGLE SOURCE, deliberately: the gate reads the claim payload and NOTHING
+ * from the connection layer — not {@link getDeviceCapabilities} (the
+ * CONNECTION-level `conn.hello` flag list) and not `ConnectionState.runtimes`.
+ * Two reasons, either sufficient. First, scope: connection-level data is
+ * discovery describing a daemon BUILD, not the per-runtime, per-task,
+ * claim-time truth this gate needs — conflating the two is the original bug.
+ * Second, reach: `conn.hello` is transport-shaped. A long-poll-only daemon
+ * never sends one (sole sender: `ws-transport.ts:192`, `packages/client`), so
+ * a connection-sourced snapshot is permanently `undefined` for an entire
+ * transport and a fail-closed gate reading it disables steer across that whole
+ * deployment surface — a regression, not a safety property. The claim, by
+ * contrast, is the message that establishes the task↔runtime binding on every
+ * transport, so the gate's input now shares a lifecycle with the thing it
+ * judges. Adding a connection-level fallback here would restore both defects
+ * at once and is what this design exists to forbid.
+ */
+export class SteerRejectedError extends Error {
+  constructor(
+    public readonly taskId: string,
+    public readonly code: SteerRejectionCode,
+    /** The task's state at the moment the steer was refused. */
+    public readonly state: TaskState,
+    /** `TaskSnapshot.claimedRuntime` — `undefined` when nothing was ever recorded (which is itself a reason `steer_unsupported_runtime` can fire). */
+    public readonly runtime: RuntimeId | undefined,
+  ) {
+    super(steerRejectionMessage(taskId, code, state, runtime));
+    this.name = 'SteerRejectedError';
   }
 }
 
@@ -754,6 +853,20 @@ export class ConnectionHub {
    * the task, so a redelivered/retried `task.claim` can never overwrite an
    * already-recorded `claimedRuntime` — including with a stale or absent
    * value from an out-of-order retry.
+   *
+   * S0/D-4 (claim-time capability snapshot): `payload.capabilities` — the
+   * claiming adapter's OWN self-report, carried on this same `task.claim`
+   * (docs/protocol.md §2.4) — supplies
+   * `TaskSnapshot.claimedRuntimeCapabilities`, written in the same patch and
+   * therefore under the same write-exactly-once property as `claimedRuntime`.
+   *
+   * Taken from the payload and from nowhere else. This hub deliberately does
+   * NOT consult connection state (`conn.hello.runtimes[]`) for it — see
+   * {@link SteerRejectedError} for why that source is structurally wrong for a
+   * control decision, and that field's own doc comment (`types.ts`) for why
+   * this is snapshotted rather than read live at steer time. A claim that
+   * carries no `capabilities` (a pre-D-4 daemon) records `undefined`, which
+   * the gate reads as "unknown" and refuses.
    */
   private onClaim(deviceId: string, taskId: string, payload: TaskClaimPayload): void {
     const record = this.taskStore.get(taskId);
@@ -763,7 +876,11 @@ export class ConnectionHub {
     // effect land before retrying) is a no-op, not an illegal-transition
     // failure.
     if (record.state === 'Claimed' || record.state === 'Running') return;
-    this.applyOrFail(taskId, 'Claimed', { deviceId, claimedRuntime: payload.runtime });
+    this.applyOrFail(taskId, 'Claimed', {
+      deviceId,
+      claimedRuntime: payload.runtime,
+      claimedRuntimeCapabilities: payload.capabilities,
+    });
     // NOTE (M1 gap #2): claiming no longer implies Running — the daemon
     // reports that explicitly via task.started (see onStarted) once its
     // runtime session actually starts.
@@ -1490,11 +1607,44 @@ export class ConnectionHub {
     }
   }
 
+  /**
+   * S0 (GAP-002): a task-level gate, evaluated in full before any envelope is
+   * built — see {@link SteerRejectedError} for the gap this closes and why an
+   * unknown capability must refuse rather than proceed. Order matters:
+   *
+   *   1. unknown task — unchanged pre-S0 `Error` (this is not a steer-policy
+   *      decision, and `TaskHandle.steer` can only be reached with a taskId
+   *      this hub minted, so it's a programming error, not an operator one);
+   *   2. terminal (`Complete`/`Failed`/`Cancelled`) -> `task_terminal`,
+   *      checked BEFORE the `Running` check so a steer racing a terminal
+   *      transition always resolves terminal-first;
+   *   3. not `Running` (`Offered`/`Claimed`/`AwaitApproval`) ->
+   *      `task_not_running`;
+   *   4. the claim-time snapshot does not positively say `steer: true` ->
+   *      `steer_unsupported_runtime`, including when there is no snapshot at
+   *      all (fail-closed);
+   *   5. only then, the pre-existing device-liveness check and the send.
+   *
+   * Step 4 reads `TaskSnapshot.claimedRuntimeCapabilities` — the per-runtime,
+   * per-task value frozen at claim time from the claiming adapter's own
+   * `task.claim.capabilities` — and reads NO connection state whatsoever:
+   * not {@link getDeviceCapabilities}, not `ConnectionState.runtimes`, and
+   * with no fallback to either when the snapshot is absent. See
+   * {@link SteerRejectedError} for why a connection-sourced input is wrong
+   * both in scope (describes a daemon build, not this task's runtime) and in
+   * reach (absent entirely on long-poll-only daemons).
+   */
   private async steerTask(taskId: string, text: string): Promise<void> {
     const record = this.taskStore.get(taskId);
     if (!record) throw new Error(`unknown taskId: ${taskId}`);
+    if (isTerminal(record.state)) {
+      throw new SteerRejectedError(taskId, 'task_terminal', record.state, record.claimedRuntime);
+    }
     if (record.state !== 'Running') {
-      throw new Error(`cannot steer task ${taskId}: not running (state ${record.state})`);
+      throw new SteerRejectedError(taskId, 'task_not_running', record.state, record.claimedRuntime);
+    }
+    if (record.claimedRuntimeCapabilities?.steer !== true) {
+      throw new SteerRejectedError(taskId, 'steer_unsupported_runtime', record.state, record.claimedRuntime);
     }
     if (!record.deviceId || !this.connections.get(record.deviceId)?.connected) {
       throw new Error(`device for task ${taskId} is not connected`);
@@ -1615,11 +1765,11 @@ export class ConnectionHub {
   // ---------------------------------------------------------------------
 
   listMachines(): MachineInfo[] {
-    return this.devices.listIds().map((deviceId) => {
+    return this.devices.list().map(({ deviceId, deviceName }) => {
       const conn = this.connections.get(deviceId);
       return {
         deviceId,
-        deviceName: this.devices.getName(deviceId) ?? '(unknown)',
+        deviceName,
         connected: conn?.connected ?? false,
         lastSeen: conn?.lastSeen,
         runtimes: conn?.runtimes,

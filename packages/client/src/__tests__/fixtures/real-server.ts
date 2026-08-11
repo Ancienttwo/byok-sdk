@@ -4,12 +4,13 @@ import {
   createByokServer,
   type ByokServer,
   type CreateByokServerOptions,
+  type PairingCodeInfo,
   type ServerTaskEvent,
   type TaskHandle,
-} from '@byok/server';
+} from '@byok-sdk/server';
 
 /**
- * Boots the REAL `@byok/server` reference implementation (not the
+ * Boots the REAL `@byok-sdk/server` reference implementation (not the
  * lightweight `TestServer` stub the rest of this package's tests use) on an
  * ephemeral loopback port, for the small set of tests that specifically
  * need genuine cross-package client<->server behavior rather than a
@@ -19,10 +20,36 @@ import {
  * server's actual behavior, which the client-side `TestServer` stub
  * deliberately does not reproduce — see its own doc comment).
  */
+/**
+ * The one address these fixtures both bind and dial. Passing it as `hostname`
+ * matters: without it Node binds the IPv6 wildcard `::`, which coexists with a
+ * foreign process already holding the more specific `127.0.0.1:<port>`, so the
+ * drawn ephemeral port can be answered by that stranger instead of by byok.
+ * Binding the address we dial turns a collision into a loud `EADDRINUSE`. See
+ * `packages/server/src/__tests__/port-shadowing.test.ts`.
+ */
+const LOOPBACK = '127.0.0.1';
+
+/**
+ * S1: the tenant every device paired through these fixtures lands in. The
+ * client-side tests are not about isolation — they are about real
+ * client<->server behavior — so they all share one tenant; what matters here
+ * is that a pairing code cannot be minted without naming one at all.
+ */
+export const TEST_TENANT_ID = 'tenant-test';
+
 export interface RealServerHandle {
   byok: ByokServer;
   httpServer: HttpServer;
   url: string;
+  /**
+   * Mint a pairing code carrying {@link TEST_TENANT_ID} and the SAME
+   * `productId` this server instance was started with (S1). Bound to the
+   * handle rather than left to each call site so a test can't accidentally
+   * pair a device into a product its own `conn.hello` then contradicts — the
+   * server's hello gate compares the announced product against the device row.
+   */
+  createPairingCode(): PairingCodeInfo;
   close(): Promise<void>;
 }
 
@@ -47,12 +74,14 @@ function closeServer(httpServer: HttpServer): Promise<void> {
 export async function startRealServer(opts: CreateByokServerOptions): Promise<RealServerHandle> {
   const byok = createByokServer(opts);
   return new Promise((resolve) => {
-    const httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+    const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
       byok.attachWebSocket(httpServer as HttpServer);
       resolve({
         byok,
         httpServer: httpServer as HttpServer,
-        url: `http://127.0.0.1:${info.port}`,
+        url: `http://${LOOPBACK}:${info.port}`,
+        createPairingCode: () =>
+          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
         close: () => closeServer(httpServer as HttpServer),
       });
     });
@@ -71,11 +100,13 @@ export async function startRealServer(opts: CreateByokServerOptions): Promise<Re
 export async function startRealServerWithoutWebSocket(opts: CreateByokServerOptions): Promise<RealServerHandle> {
   const byok = createByokServer(opts);
   return new Promise((resolve) => {
-    const httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+    const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
       resolve({
         byok,
         httpServer: httpServer as HttpServer,
-        url: `http://127.0.0.1:${info.port}`,
+        url: `http://${LOOPBACK}:${info.port}`,
+        createPairingCode: () =>
+          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
         close: () => closeServer(httpServer as HttpServer),
       });
     });
@@ -112,11 +143,13 @@ export async function startRealServerWithDeferredWebSocket(
 ): Promise<DeferredWebSocketServerHandle> {
   const byok = createByokServer(opts);
   return new Promise((resolve) => {
-    const httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+    const httpServer = serve({ fetch: byok.hono.fetch, port: 0, hostname: LOOPBACK }, (info) => {
       resolve({
         byok,
         httpServer: httpServer as HttpServer,
-        url: `http://127.0.0.1:${info.port}`,
+        url: `http://${LOOPBACK}:${info.port}`,
+        createPairingCode: () =>
+          byok.pairing.createPairingCode({ tenantId: TEST_TENANT_ID, productId: opts.productId }),
         close: () => closeServer(httpServer as HttpServer),
         enableWebSocket: () => byok.attachWebSocket(httpServer as HttpServer),
       });

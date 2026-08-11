@@ -2,8 +2,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok/protocol';
-import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
 import { connectControlClient } from '../bin/control-client';
 import type { ApprovalsListResult, ApprovalsRequestResult, ControlStatusResult } from '../daemon/control-protocol';
@@ -85,7 +85,7 @@ class ApprovalAwareAdapter implements RuntimeAdapter {
     return { present: true, version: '0.0.0' };
   }
   capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, permissionModes: ['confirm'] };
+    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] };
   }
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
     const session = new ApprovalAwareSession(task.sessionRef ?? `session-${this.sessions.length + 1}`, ctx.approvalChannel);

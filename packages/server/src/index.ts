@@ -1,10 +1,10 @@
 import type { Server as HttpServer } from 'node:http';
 import type { Hono } from 'hono';
-import { createHmacTokenSigner, DeviceRegistry, NonceStore } from './auth';
+import { createHmacTokenSigner, DeviceRegistry, NonceStore, type TenantId } from './auth';
 import { LocalDiskBlobStore } from './blob-store';
 import { buildHonoApp } from './http';
 import { ConnectionHub } from './hub';
-import { PairingManager, type PairingCodeInfo } from './pairing';
+import { PairingManager, type PairingCodeClaims, type PairingCodeInfo } from './pairing';
 import { RateLimiter } from './rate-limiter';
 import { InMemoryTaskStore } from './task-store';
 import { attachWebSocket as attachWsUpgrade } from './ws-server';
@@ -40,13 +40,33 @@ export { IllegalTaskTransitionError, InMemoryTaskStore } from './task-store';
  * staleness semantics.
  */
 export { StaleApprovalError } from './hub';
+/**
+ * S0 (GAP-002): `TaskHandle.steer` (`types.ts`) throws this when the runtime
+ * that claimed the task cannot be steered, when the task isn't running, or
+ * when it's already terminal — a caller needs the class to `instanceof`-check
+ * it and the code union to switch on. See `hub.ts`'s own doc comments for the
+ * full gate order and the fail-closed-on-unknown rationale.
+ */
+export { SteerRejectedError } from './hub';
+export type { SteerRejectionCode } from './hub';
 export { PairingCodeInvalidError } from './pairing';
+export type { PairingCodeClaims, PairingCodeInfo } from './pairing';
 export type {
   AccessTokenClaims,
+  AuthenticatedDevice,
   DeviceRecord,
+  TenantId,
   TokenSigner,
 } from './auth';
-export { createHmacTokenSigner, DeviceRegistry } from './auth';
+/**
+ * S1: `DeviceRegistry` itself is deliberately NOT exported. Its
+ * tenant-scoped surface is reachable through `ByokServer.devices` (below),
+ * and the one method that resolves a device without a tenant in scope
+ * (`resolveByDeviceId`, for the two pre-tenant wire endpoints) exists only
+ * inside this package — exporting the class would hand every embedder a
+ * cross-tenant device oracle for free.
+ */
+export { createHmacTokenSigner } from './auth';
 export type {
   BlobStore,
   CreateUploadInput,
@@ -82,7 +102,13 @@ export interface ByokServer {
   /** Wire up the `GET /byok/ws` upgrade on the raw Node HTTP server serving `hono`. */
   attachWebSocket(server: HttpServer): void;
   pairing: {
-    createPairingCode(): PairingCodeInfo;
+    /**
+     * S1: minting a code REQUIRES the tenant and product the redeeming
+     * device will be paired into (docs/protocol.md §6.1) — the SaaS's own
+     * auth/device-flow UI is the only party that knows them, and the device
+     * never gets to name its own. There is no claimless overload.
+     */
+    createPairingCode(claims: PairingCodeClaims): PairingCodeInfo;
   };
   dispatch(input: DispatchInput): Promise<TaskHandle>;
   tasks: {
@@ -99,9 +125,13 @@ export interface ByokServer {
    * Device revocation (§6.3) — server-side only, no wire message. Revoking a
    * device makes its next `/byok/challenge`, `/byok/token`, WSS connect, or
    * authed HTTP call get a 401; its only recourse is to re-run `/byok/pair`.
+   *
+   * S1: tenant-first, and a tenant can only revoke a device it owns — a
+   * `(tenantId, deviceId)` pair belonging to someone else resolves to
+   * nothing and this is a silent no-op rather than a cross-tenant write.
    */
   devices: {
-    revoke(deviceId: string): void;
+    revoke(tenantId: TenantId, deviceId: string): void;
   };
   /**
    * Stop background timers owned by this server instance — currently just
@@ -173,7 +203,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       });
     },
     pairing: {
-      createPairingCode: () => pairing.createPairingCode(),
+      createPairingCode: (claims: PairingCodeClaims) => pairing.createPairingCode(claims),
     },
     dispatch: (input: DispatchInput) => hub.dispatch(input),
     tasks: {
@@ -187,7 +217,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       subscribe: () => hub.subscribeServerEvents(),
     },
     devices: {
-      revoke: (deviceId: string) => devices.revoke(deviceId),
+      revoke: (tenantId: TenantId, deviceId: string) => devices.revoke(tenantId, deviceId),
     },
     stop(): void {
       hub.stopLeaseReaper();

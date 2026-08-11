@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# Apply every pending migration in `deploy/sql/` to $DATABASE_URL.
+#
+# A thin invocation of the runner in `@byok-sdk/cloud-postgres`, and deliberately
+# nothing more. The runner owns ordering, the advisory lock, per-file
+# transactions, the ledger, and the checksum check; a script that re-implemented
+# any of that would be a second source of truth about how this schema moves.
+#
+# Forward-only. There is no `down` here because there is none in the runner:
+# rollback is "revert the application, leave the tables" (sprint S4A.6). A
+# destructive path that exists is a destructive path that eventually runs.
+#
+# Idempotent: applying an already-applied file is a no-op, so re-running after a
+# partial deploy is the recovery procedure rather than a risk.
+#
+#   DATABASE_URL=postgres://... deploy/scripts/migrate
+#
+# Exits non-zero on a checksum mismatch, which is a published file having been
+# edited after it was applied. The fix is a NEW migration file, never an edit.
+
+set -euo pipefail
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "migrate: DATABASE_URL is not set." >&2
+  echo "  DATABASE_URL=postgres://user:password@host:5432/database $0" >&2
+  exit 2
+fi
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+adapter="$repo_root/packages/cloud-postgres/dist/index.js"
+
+if [ ! -f "$adapter" ]; then
+  # Built output, not source: this script is meant to run in a deployment image
+  # as readily as in a checkout, and neither should need a TypeScript loader.
+  echo "migrate: $adapter is missing. Run 'pnpm -r build' first." >&2
+  exit 2
+fi
+
+DATABASE_URL="$DATABASE_URL" MIGRATE_ADAPTER="$adapter" MIGRATE_SQL_DIR="$repo_root/deploy/sql" \
+  node --input-type=module -e '
+    const { createByokPool, migrate } = await import(process.env.MIGRATE_ADAPTER);
+
+    const pool = createByokPool({ connectionString: process.env.DATABASE_URL, max: 1 });
+    try {
+      const result = await migrate(pool, process.env.MIGRATE_SQL_DIR);
+      for (const version of result.alreadyApplied) console.log(`[migrate] already applied ${version}`);
+      for (const version of result.applied) console.log(`[migrate] applied ${version}`);
+      console.log(`[migrate] OK (${result.applied.length} applied, ${result.alreadyApplied.length} already present)`);
+    } finally {
+      await pool.end();
+    }
+  '

@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { DeviceRegistry } from '../auth';
@@ -7,7 +7,15 @@ import { ConnectionHub } from '../hub';
 import { createByokServer } from '../index';
 import { InMemoryTaskStore } from '../task-store';
 import type { TaskHandle } from '../types';
-import { connectFakeDaemon, nextEnvelope, send, startServer, stopServer, waitForTaskEvent } from './test-support';
+import {
+  connectFakeDaemon,
+  nextEnvelope,
+  send,
+  startServer,
+  stopServer,
+  testPairingClaims,
+  waitForTaskEvent,
+} from './test-support';
 
 /**
  * A `ConnectionHub`'s `taskActivity` map is a private implementation detail
@@ -67,7 +75,7 @@ describe('task lease reaper (M2): Claimed/Running/AwaitApproval -> Failed(retrya
     const byok = createByokServer({ productId: PRODUCT_ID, taskLeaseMs: SHORT_LEASE_MS });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -97,7 +105,7 @@ describe('task lease reaper (M2): Claimed/Running/AwaitApproval -> Failed(retrya
     const byok = createByokServer({ productId: PRODUCT_ID, taskLeaseMs: SHORT_LEASE_MS });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -136,7 +144,7 @@ describe('task lease reaper (M2): Claimed/Running/AwaitApproval -> Failed(retrya
     const byok = createByokServer({ productId: PRODUCT_ID, taskLeaseMs: SHORT_LEASE_MS });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 

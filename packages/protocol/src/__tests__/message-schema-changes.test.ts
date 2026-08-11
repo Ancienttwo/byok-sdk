@@ -167,6 +167,103 @@ describe('runtimes[].capabilities: per-runtime feature flags (pre-freeze additio
   });
 });
 
+/**
+ * S0/D-4 (additive-minor): `task.claim.capabilities` — the claiming adapter's
+ * own capability self-report, carried on the same message that establishes the
+ * task↔runtime binding a server-side control gate keys off (see `messages.ts`'s
+ * doc comment on `TaskClaimPayloadSchema`). Additive-only: one new optional
+ * field reusing `RuntimeCapabilitiesSchema`, no `PROTOCOL_VERSION` bump
+ * (docs/protocol.md §2.4 / "Freeze rule").
+ */
+describe('task.claim.capabilities (additive-minor optional field)', () => {
+  it('accepts a claim carrying a fully-populated capabilities block', () => {
+    const result = TaskClaimPayloadSchema.safeParse({
+      deviceId: 'device-1',
+      runtime: 'pi',
+      capabilities: {
+        steer: true,
+        resume: true,
+        approvalInteractive: false,
+        permissionModes: ['auto', 'confirm'],
+      },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    expect(result.data.capabilities).toEqual({
+      steer: true,
+      resume: true,
+      approvalInteractive: false,
+      permissionModes: ['auto', 'confirm'],
+    });
+  });
+
+  it('accepts a claim carrying a partially-populated capabilities block', () => {
+    const result = TaskClaimPayloadSchema.safeParse({
+      deviceId: 'device-1',
+      runtime: 'claude',
+      capabilities: { steer: false },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    expect(result.data.capabilities).toEqual({ steer: false });
+  });
+
+  it('accepts a claim with capabilities omitted entirely (older daemon shape) and leaves the key absent, not defaulted', () => {
+    // The absence must stay observable as absence: a consumer gating a control
+    // decision on `capabilities.steer` has to be able to tell "not reported"
+    // apart from "reported false", and fail closed on the former by its own
+    // rule rather than by a schema-invented default.
+    const result = TaskClaimPayloadSchema.safeParse({ deviceId: 'device-1', runtime: 'pi' });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    expect('capabilities' in result.data).toBe(false);
+    expect(result.data.capabilities).toBeUndefined();
+  });
+
+  it('is the same shape as runtimes[].capabilities — an unknown flag inside it is stripped, not passed through', () => {
+    const result = TaskClaimPayloadSchema.safeParse({
+      deviceId: 'device-1',
+      capabilities: { steer: true, futureFlag: 'from a newer daemon' },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    expect(result.data.capabilities).toEqual({ steer: true });
+  });
+
+  it('rejects a non-boolean steer (control-relevant field keeps its type, no coercion)', () => {
+    const result = TaskClaimPayloadSchema.safeParse({
+      deviceId: 'device-1',
+      capabilities: { steer: 'true' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-object capabilities value outright', () => {
+    const result = TaskClaimPayloadSchema.safeParse({ deviceId: 'device-1', capabilities: true });
+    expect(result.success).toBe(false);
+  });
+
+  it('round-trips through the real wire entrypoint with capabilities intact', () => {
+    const envelope = createEnvelope(
+      'task.claim',
+      { deviceId: 'device-1', runtime: 'pi', capabilities: { steer: true, resume: true } },
+      { taskId: 'task-1' },
+    );
+    const decoded = decodeEnvelope(`${JSON.stringify(envelope)}\n`);
+    expect(decoded).toEqual(envelope);
+    if (decoded.type !== 'task.claim') throw new Error('unreachable');
+    expect(decoded.payload.capabilities).toEqual({ steer: true, resume: true });
+  });
+
+  it('a pre-S0 claim envelope (no capabilities) still validates — the field is additive, never required', () => {
+    const envelope = createEnvelope('task.claim', { deviceId: 'device-1', runtime: 'pi' }, { taskId: 'task-1' });
+    expect(EnvelopeSchema.safeParse(envelope).success).toBe(true);
+    const decoded = decodeEnvelope(`${JSON.stringify(envelope)}\n`);
+    if (decoded.type !== 'task.claim') throw new Error('unreachable');
+    expect(decoded.payload.capabilities).toBeUndefined();
+  });
+});
+
 describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)', () => {
   it('task.offer payload no longer has a taskId field (stripped if present)', () => {
     const result = TaskOfferPayloadSchema.safeParse({

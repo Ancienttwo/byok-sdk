@@ -3,12 +3,12 @@ name: CI
 # First CI workflow for this repo. Runs the same three commands a local
 # `pnpm install && pnpm -r build && pnpm -r typecheck && pnpm -r test` would —
 # no separate lint/format job exists yet. `pnpm -r build` MUST run before
-# typecheck/test: @byok/protocol's package.json `exports` point at its built
-# `dist/`, not `src/`, so @byok/server and @byok/client can't even resolve
-# `@byok/protocol` (let alone typecheck or test against it) until it's been
+# typecheck/test: @byok-sdk/protocol's package.json `exports` point at its built
+# `dist/`, not `src/`, so @byok-sdk/server and @byok-sdk/client can't even resolve
+# `@byok-sdk/protocol` (let alone typecheck or test against it) until it's been
 # built at least once in this checkout (empirically confirmed while wiring up
 # this workflow — deleting every package's `dist/` breaks
-# `pnpm -r typecheck` with "Cannot find module '@byok/protocol'").
+# `pnpm -r typecheck` with "Cannot find module '@byok-sdk/protocol'").
 #
 # The freeze-guard test (packages/protocol/src/__tests__/freeze-guard.test.ts)
 # runs as an ordinary part of `pnpm -r test` — no separate step for it.
@@ -70,14 +70,113 @@ jobs:
       - name: Test
         run: pnpm -r test
 
+  # S4A dataplane guarantee: runs the suites that need a REAL Postgres, against
+  # the same `docker-compose.test.yml` a developer starts locally. This job is
+  # the only authority for the dataplane assertions -- `build-test` above also
+  # runs these packages' tests, but without BYOK_TEST_POSTGRES_URL they skip
+  # themselves, which is correct there and would be a silent hole here.
+  #
+  # BYOK_REQUIRE_DATAPLANE=1 is what closes that hole: with it set, a missing
+  # BYOK_TEST_POSTGRES_URL is a hard failure instead of a skip
+  # (packages/cloud-postgres/src/__tests__/support/dataplane.ts throws at import
+  # time). `process.env.CI` deliberately is NOT the gate -- `pnpm -r test` in
+  # build-test already runs with CI=true where these services do not exist, so
+  # keying off it would turn that job red.
+  #
+  # This job's existence is itself pinned by a source-scan constraint test
+  # (packages/cloud-postgres/src/__tests__/constraints.test.ts), the same idiom
+  # the core/cloud packages already use: deleting or renaming the job below
+  # turns that test red rather than silently dropping dataplane coverage.
+  #
+  # A compose file rather than GitHub `services:` containers because a service
+  # container cannot override CMD, and MinIO (needed from S4A-c) does not start
+  # without `server`. One file therefore defines the substrate for CI and for a
+  # laptop, which is the point.
+  #
+  # Deliberately independent of build-test (no `needs:`): its own install +
+  # build, so a docker flake here cannot mask unit coverage there.
+  dataplane:
+    name: dataplane suites against real Postgres (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    env:
+      BYOK_REQUIRE_DATAPLANE: '1'
+      BYOK_TEST_POSTGRES_URL: postgres://byok:byok@127.0.0.1:5433/byok_test
+      # Both halves of the substrate, one gate: from S4A-c the blob port is
+      # part of the conformance scope, and its Postgres composition writes a
+      # manifest row and signs against MinIO in the same call. A missing
+      # endpoint is a hard failure here for exactly the same reason a missing
+      # database URL is.
+      BYOK_TEST_S3_ENDPOINT: http://127.0.0.1:9100
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `--wait` blocks until every service reports healthy, so the suites below
+      # never race startup. The database starts EMPTY on every run, which makes
+      # "fresh install + migrate-up" (sprint S4A.5) a property of the job rather
+      # than a step someone remembers.
+      - name: Start the dataplane substrate
+        run: docker compose -f docker-compose.test.yml up -d --wait
+
+      - name: Build (required before typecheck/test — see note above)
+        run: pnpm -r build
+
+      # The migrate runner's fault suite plus the Postgres composition running
+      # the cloud conformance suite.
+      - name: Dataplane suites (Postgres composition + migrate runner)
+        run: pnpm --filter @byok-sdk/cloud-postgres test
+
+      # The same assertion source against the in-memory composition. Running
+      # both in one job is what makes a divergence a failure here rather than a
+      # discrepancy someone notices later.
+      - name: Conformance suites (in-memory compositions)
+        run: pnpm --filter @byok-sdk/conformance test
+
+      # repo-harness is a bun-only tool (`engines.bun`, a bare-`.ts` bin, an
+      # `exec bun` shim) — Node cannot run it, and declaring it as a workspace
+      # dependency drags in transitive packages that require Node >= 22.12 and
+      # so break the Node 20 leg at install time. It therefore stays OUT of the
+      # dependency tree entirely and is fetched by `bunx` at a pinned version
+      # only for this one step. The root `check:deploy-sql` script remains the
+      # local-workflow entrypoint for the same check.
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Migration ordering check
+        run: bunx repo-harness@0.13.2 run check-deploy-sql-order
+
+      - name: Tear down the dataplane substrate
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+
   # Windows Git workspace guarantee: runs the real Git executable through the
   # client workspace manager and exercises the secure recovery ledger/privacy
   # surfaces without duplicating the full cross-platform suite above. TEMP/TMP
   # are redirected to a path containing spaces and non-ASCII characters so the
   # real init/status and ledger file operations cross that boundary on Windows.
   windows-git-workspace:
-    name: Windows Git workspace, store, and security tests
+    name: Windows Git workspace, store, and security tests (Node ${{ matrix.node-version }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
     defaults:
       run:
         shell: pwsh
@@ -88,10 +187,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22.19
+      - name: Setup Node ${{ matrix.node-version }}
         uses: actions/setup-node@v7
         with:
-          node-version: 22.19.0
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
 
       - name: Install dependencies
@@ -109,18 +208,25 @@ jobs:
           New-Item -ItemType Directory -Force -Path $specialTemp | Out-Null
           $env:TEMP = $specialTemp
           $env:TMP = $specialTemp
-          pnpm --filter @byok/client exec vitest run `
+          pnpm --filter @byok-sdk/client exec vitest run `
             src/__tests__/git-workspace.test.ts `
             src/__tests__/git-workspace-store.test.ts `
             src/__tests__/bin-workspaces.test.ts `
             src/__tests__/secure-dir.test.ts
 
+      - name: Run diagnostics and lifecycle lease safety tests on Windows
+        run: |
+          pnpm --filter @byok-sdk/client exec vitest run `
+            src/__tests__/diagnostics.test.ts `
+            src/__tests__/support-bundle.test.ts `
+            src/__tests__/daemon-auth.test.ts `
+            src/__tests__/daemon-stop-shutdown-parity.test.ts
+
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
-  # into a single-file executable (bun build --compile / Node SEA) without
-  # pi's required external package resolution (packages/client/src/adapters/
-  # pi/resolve-bin.ts's `import.meta.resolve`) crashing the probe when pi is
-  # not embedded in the bundle. Production bundles supply the required pi
-  # Node sidecar explicitly via BYOK_PI_BIN. See templates/packaging/{bun,sea} for
+  # into a single-file executable (bun build --compile / Node SEA) while
+  # runtime CLIs remain external. An unavailable user-installed pi must
+  # report `present: false`, while BYOK_PI_BIN must remain detectable. See
+  # templates/packaging/{bun,sea} for
   # the full recipes + empirically-confirmed rationale (including a macOS
   # postject gotcha that silently segfaults without one extra flag), and
   # examples/packaging/launcher.ts for the entry point both recipes compile.
@@ -169,7 +275,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build (needed so @byok/client has a dist/ to bundle)
+      - name: Build (needed so @byok-sdk/client has a dist/ to bundle)
         run: pnpm -r build
 
       # Only the bun recipe's legs need this -- GitHub-hosted runners don't
@@ -181,6 +287,39 @@ jobs:
 
       - name: Run packaging smoke
         run: templates/packaging/${{ matrix.recipe }}/smoke-test.sh
+
+  # S7-c public npm guarantee: pack every dispatch package plus the umbrella,
+  # install the exact tarballs into a clean npm project, import every direct
+  # package and all umbrella namespaces, and prove keys did not enter the
+  # installed graph. This is distinct from the SEA/bun binary recipes above:
+  # those prove the host can bundle the daemon; this proves registry consumers
+  # can install the library graph itself.
+  npm-release-pack:
+    name: npm release pack/install (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [20, 22]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check graph, pack exact tarballs, and import from an isolated npm install
+        run: pnpm run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
   # M3-4 Windows Service guarantee: proves the generated WinSW service
   # descriptor (packages/client/src/lifecycle/winsw.ts) actually installs,
@@ -223,7 +362,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build (needed for @byok/client's dist/index.js the smoke script imports)
+      - name: Build (needed for @byok-sdk/client's dist/index.js the smoke script imports)
         run: pnpm -r build
 
       - name: Download WinSW (pinned version + checksum-verified)
@@ -252,7 +391,7 @@ jobs:
   # OSes -- not just the in-process unit/integration tests already covered
   # by `pnpm -r test` above (packages/client/src/__tests__/control-*.test.ts,
   # daemon-control-socket.test.ts). Starts a real `byok-agent start` child
-  # process (paired against a real, ephemeral `@byok/server` this script
+  # process (paired against a real, ephemeral `@byok-sdk/server` this script
   # also boots), reaches it live via a SEPARATE `byok-agent status`
   # invocation, then performs a real live `byok-agent unpair --yes` and
   # confirms the daemon process actually exits on its own -- the exact
@@ -288,7 +427,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build (needed for @byok/client + @byok/server dist/ this script drives)
+      - name: Build (needed for @byok-sdk/client + @byok-sdk/server dist/ this script drives)
         run: pnpm -r build
 
       - name: Run the IPC control socket smoke
@@ -331,7 +470,7 @@ jobs:
       - name: Run credential-isolation audit
         run: |
           mkdir -p "$AUDIT_ROOT/raw"
-          pnpm --filter @byok/client run audit:credentials -- \
+          pnpm --filter @byok-sdk/client run audit:credentials -- \
             --trace-dir "$AUDIT_ROOT/raw" \
             --summary "$AUDIT_ROOT/summary.json"
 

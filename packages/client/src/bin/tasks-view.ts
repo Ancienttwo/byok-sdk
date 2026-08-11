@@ -1,4 +1,4 @@
-import { TASK_STATES, type TaskState } from '@byok/protocol';
+import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
 import { type ConnectionState, type DaemonEvent, type DaemonTaskInfo } from '../index';
 
 export interface TaskGitStatus {

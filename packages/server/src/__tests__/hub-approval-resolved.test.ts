@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import type { WebSocket } from 'ws';
 import { DeviceRegistry } from '../auth';
 import { ConnectionHub } from '../hub';
@@ -13,6 +13,7 @@ import {
   send,
   startServer,
   stopServer,
+  testPairingClaims,
   waitForServerEvent,
   waitForTaskEvent,
 } from './test-support';
@@ -44,7 +45,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -55,7 +56,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -107,7 +108,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -139,7 +140,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -182,7 +183,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -221,7 +222,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -249,7 +250,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -300,7 +301,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -337,7 +338,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 

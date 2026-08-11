@@ -6,15 +6,14 @@ export interface ResolvedBin {
 /**
  * Resolve the codex CLI executable.
  *
- * Unlike pi (an exact required npm dependency — see
- * `../pi/resolve-bin.ts`), the real OpenAI Codex CLI (empirically `codex-cli
+ * Like pi and Claude Code, the real OpenAI Codex CLI (empirically `codex-cli
  * 0.144.5` on the machine this adapter was built/verified against, installed
  * at a plain PATH location — not inside this repo's `node_modules`) is not
  * published as an npm package this SDK could sensibly depend on: it's a
  * standalone global install (native installer / `npm i -g @openai/codex` /
  * homebrew, depending on platform and version). There is no package-relative
- * resolution to attempt, so this is simpler than pi's version: an explicit
- * override for tests, else a bare PATH lookup.
+ * resolution to attempt: use an explicit override for tests, else a bare
+ * PATH lookup.
  *
  * `BYOK_CODEX_BIN` overrides PATH lookup — substituting the fake-codex test
  * fixture, exactly like `BYOK_PI_BIN` does for pi. The `byok-agent` CLI bin

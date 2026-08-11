@@ -8,17 +8,30 @@ import {
   PROTOCOL_VERSION,
   type ConnAckPayload,
   type Envelope,
+  type RuntimeCapabilities,
+  type RuntimeId,
   type RuntimeInfo,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import { WebSocket, type RawData } from 'ws';
-import type { ByokServer, ByokServerEvent, ServerTaskEvent, TaskHandle } from '../index';
+import { NONCE_SIGNING_DOMAIN } from '../auth';
+import type { ByokServer, ByokServerEvent, PairingCodeClaims, ServerTaskEvent, TaskHandle } from '../index';
 
-/** Start `byok.hono` on an ephemeral port and wire up its WS upgrade. */
+/**
+ * Start `byok.hono` on an ephemeral port and wire up its WS upgrade.
+ *
+ * `hostname` is pinned to the same `127.0.0.1` the returned `baseUrl` (and
+ * every WS url below) dials. Without it Node binds the IPv6 wildcard `::`,
+ * which coexists with a foreign process already holding the more specific
+ * `127.0.0.1:<port>` — so the drawn port can be answered by that stranger and
+ * tests fail with whatever it replies (an intermittent
+ * `pairing failed: 401 Unauthorized`). Binding the address we dial turns a
+ * collision into a loud `EADDRINUSE`. See `port-shadowing.test.ts`.
+ */
 export async function startServer(
   byok: ByokServer,
 ): Promise<{ server: HttpServer; port: number; baseUrl: string }> {
   return new Promise((resolve) => {
-    const server = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => {
+    const server = serve({ fetch: byok.hono.fetch, port: 0, hostname: '127.0.0.1' }, (info) => {
       byok.attachWebSocket(server as HttpServer);
       resolve({ server: server as HttpServer, port: info.port, baseUrl: `http://127.0.0.1:${info.port}` });
     });
@@ -111,18 +124,79 @@ export function send(ws: WebSocket, envelope: Envelope): void {
   ws.send(encodeEnvelope(envelope));
 }
 
+/**
+ * S0 (GAP-002): honest `conn.hello` runtime fixtures — each block is exactly
+ * what the corresponding real adapter's `capabilities()` returns
+ * (`packages/client/src/adapters/{pi,claude,codex}`), so a server test
+ * describes a device that could actually exist rather than a convenient one.
+ *
+ * The asymmetry these encode is the whole reason the server's steer gate
+ * exists: only pi implements steering. Claude's and Codex's adapters throw on
+ * an inbound `task.steer`, so a server that sends them one stalls the client's
+ * redelivery cursor forever. Any test needing a steerable task must claim
+ * `pi`; anything else is expected to be refused server-side.
+ */
+export const PI_RUNTIME_INFO: RuntimeInfo = {
+  id: 'pi',
+  capabilities: { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
+};
+
+export const CLAUDE_RUNTIME_INFO: RuntimeInfo = {
+  id: 'claude',
+  capabilities: {
+    steer: false,
+    resume: true,
+    approvalInteractive: true,
+    permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+  },
+};
+
+export const CODEX_RUNTIME_INFO: RuntimeInfo = {
+  id: 'codex',
+  capabilities: { steer: false, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
+};
+
+/**
+ * S1: the tenant every fixture-paired device lands in unless a test names its
+ * own. Tests that care about isolation (`tenant-pairing-isolation.test.ts`)
+ * mint their own claims for a SECOND tenant; everything else just needs a
+ * device to exist somewhere, and this is that somewhere.
+ */
+export const TEST_TENANT_ID = 'tenant-test';
+
+/**
+ * The claims a fixture-minted pairing code carries. `productId` is a
+ * parameter rather than a constant because it must agree with the server
+ * instance under test (`createByokServer({ productId })`) AND with the
+ * `conn.hello.productId` the fake daemon announces — the S1 hello gate
+ * compares the announced product against the DEVICE ROW, so a fixture that
+ * quietly defaulted it would make every hello a coin flip.
+ */
+export function testPairingClaims(productId: string): PairingCodeClaims {
+  return { tenantId: TEST_TENANT_ID, productId };
+}
+
 /** A fake device's Ed25519 identity (Auth v2, §6) — the private key never leaves this helper, mirroring the real daemon. */
 export interface FakeDeviceIdentity {
   publicKeyBase64Url: string;
+  /**
+   * Sign arbitrary bytes with no domain tag. Real daemons never do this — it
+   * exists so a test can produce the pre-S1 raw-nonce signature the server
+   * must now reject (`tenant-pairing-isolation.test.ts`).
+   */
   sign(message: string): string;
+  /** What a real daemon does (S1): sign `byok-nonce-v1\n` + nonce — see `packages/client/src/daemon/device-keys.ts`. */
+  signNonce(nonce: string): string;
 }
 
 export function generateFakeDeviceIdentity(): FakeDeviceIdentity {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const jwk = publicKey.export({ format: 'jwk' }) as { x: string };
+  const sign = (message: string) => signEd25519(null, Buffer.from(message, 'utf8'), privateKey).toString('base64url');
   return {
     publicKeyBase64Url: jwk.x,
-    sign: (message: string) => signEd25519(null, Buffer.from(message, 'utf8'), privateKey).toString('base64url'),
+    sign,
+    signNonce: (nonce: string) => sign(NONCE_SIGNING_DOMAIN + nonce),
   };
 }
 
@@ -264,9 +338,29 @@ export async function waitForServerEvent(
   throw new Error('server event stream ended before a matching event was seen');
 }
 
-/** Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running) and wait for the Running event. Shared by every hub-level test that needs a task actually running before driving it further (approve/reject, implicit-approval-resume, etc). */
-export async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId }, { taskId: handle.taskId }));
+/**
+ * Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running)
+ * and wait for the Running event. Shared by every hub-level test that needs a
+ * task actually running before driving it further (approve/reject,
+ * implicit-approval-resume, etc).
+ *
+ * `runtime` (S0, GAP-002): the ACTUAL adapter this claim reports.
+ * `capabilities` (S0/D-4): that adapter's own capability self-report, which is
+ * the ONLY input the server's steer gate reads — the connection's `conn.hello`
+ * runtimes are discovery and feed nothing here. Both omitted matches a legacy
+ * daemon's `task.claim` — which is exactly what every pre-S0 call site here
+ * already did, so their behavior is unchanged. Pass them (see
+ * {@link PI_RUNTIME_INFO}'s `capabilities`) when the test needs the server to
+ * have a claim-time capability snapshot to gate on.
+ */
+export async function claimAndStart(
+  ws: WebSocket,
+  deviceId: string,
+  handle: TaskHandle,
+  runtime?: RuntimeId,
+  capabilities?: RuntimeCapabilities,
+): Promise<void> {
+  send(ws, createEnvelope('task.claim', { deviceId, runtime, capabilities }, { taskId: handle.taskId }));
   send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }

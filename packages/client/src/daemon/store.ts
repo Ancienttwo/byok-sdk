@@ -1,4 +1,12 @@
-import { promises as fs } from 'node:fs';
+import {
+  constants as fsConstants,
+  fstatSync,
+  linkSync,
+  lstatSync,
+  unlinkSync,
+  promises as fs,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
@@ -14,6 +22,45 @@ export interface DeviceRecord {
   devicePrivateKeyPem: string;
   /** Ed25519 public key, base64url — re-sent verbatim on a post-revocation re-pair (protocol §6.3). */
   devicePublicKey: string;
+}
+
+const MAX_DEVICE_RECORD_BYTES = 256 * 1024;
+
+function sameInode(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
+  return (
+    sameInode(left, right) &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function sameContentState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
+  return sameInode(left, right) && left.size === right.size && left.mtimeNs === right.mtimeNs;
+}
+
+function parseDeviceRecord(raw: string): DeviceRecord | undefined {
+  const parsed = JSON.parse(raw) as Partial<DeviceRecord>;
+  if (
+    typeof parsed.deviceId === 'string' &&
+    typeof parsed.accessToken === 'string' &&
+    typeof parsed.expiresAt === 'string' &&
+    typeof parsed.devicePrivateKeyPem === 'string' &&
+    typeof parsed.devicePublicKey === 'string'
+  ) {
+    return {
+      deviceId: parsed.deviceId,
+      accessToken: parsed.accessToken,
+      expiresAt: parsed.expiresAt,
+      devicePrivateKeyPem: parsed.devicePrivateKeyPem,
+      devicePublicKey: parsed.devicePublicKey,
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -49,31 +96,54 @@ export class DeviceStore {
     return path.join(os.homedir(), '.byok', productId);
   }
 
+  /**
+   * Resolve the one store pathname every daemon/CLI component must share.
+   * A configured relative path is anchored once at process entry rather than
+   * being reinterpreted after a diagnostics operation temporarily changes
+   * cwd to pin a quarantine directory inode.
+   */
+  static resolveDir(productId: string, configured?: string): string {
+    return path.resolve(configured ?? DeviceStore.defaultDir(productId));
+  }
+
   async load(): Promise<DeviceRecord | undefined> {
-    let raw: string;
+    const opened = await this.openBounded();
+    if (!opened) return undefined;
     try {
-      raw = await fs.readFile(this.filePath, 'utf8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw err;
+      return parseDeviceRecord(opened.raw);
+    } finally {
+      await opened.handle.close();
     }
-    const parsed = JSON.parse(raw) as Partial<DeviceRecord>;
-    if (
-      typeof parsed.deviceId === 'string' &&
-      typeof parsed.accessToken === 'string' &&
-      typeof parsed.expiresAt === 'string' &&
-      typeof parsed.devicePrivateKeyPem === 'string' &&
-      typeof parsed.devicePublicKey === 'string'
-    ) {
-      return {
-        deviceId: parsed.deviceId,
-        accessToken: parsed.accessToken,
-        expiresAt: parsed.expiresAt,
-        devicePrivateKeyPem: parsed.devicePrivateKeyPem,
-        devicePublicKey: parsed.devicePublicKey,
-      };
+  }
+
+  /**
+   * Read and remove the exact bounded, no-follow device record under the
+   * caller's mutation lease. The hard-link guard keeps the inspected inode
+   * identifiable until the synchronous pathname check and unlink complete.
+   */
+  async remove(): Promise<DeviceRecord | undefined> {
+    const opened = await this.openBounded();
+    if (!opened) return undefined;
+    const guardPath = `${this.filePath}.${process.pid}.${randomUUID()}.remove`;
+    try {
+      const record = parseDeviceRecord(opened.raw);
+      linkSync(this.filePath, guardPath);
+      const openStat = fstatSync(opened.handle.fd, { bigint: true });
+      const guarded = lstatSync(guardPath, { bigint: true });
+      const named = lstatSync(this.filePath, { bigint: true });
+      // Creating the guard hard-link legitimately changes ctime/link count on
+      // the inode, so the post-link check compares identity + content-bearing
+      // size/mtime. The bounded read already compared ctime before publication.
+      if (!sameContentState(openStat, opened.stat) || !sameInode(guarded, opened.stat) || !sameContentState(named, opened.stat)) {
+        throw new Error('device identity changed before removal');
+      }
+      unlinkSync(this.filePath);
+      unlinkSync(guardPath);
+      return record;
+    } finally {
+      try { unlinkSync(guardPath); } catch { /* unpublished guard may not exist */ }
+      await opened.handle.close();
     }
-    return undefined;
   }
 
   async save(record: DeviceRecord): Promise<void> {
@@ -104,5 +174,65 @@ export class DeviceStore {
 
   async clear(): Promise<void> {
     await fs.rm(this.filePath, { force: true });
+  }
+
+  private async openBounded(): Promise<{
+    handle: Awaited<ReturnType<typeof fs.open>>;
+    raw: string;
+    stat: import('node:fs').BigIntStats;
+  } | undefined> {
+    let namedBefore: import('node:fs').BigIntStats;
+    try {
+      namedBefore = await fs.lstat(this.filePath, { bigint: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw new Error('device identity could not be inspected safely', { cause: err });
+    }
+    if (!namedBefore.isFile() || namedBefore.isSymbolicLink()) {
+      throw new Error('device identity is not a real regular file');
+    }
+    let handle: Awaited<ReturnType<typeof fs.open>>;
+    try {
+      handle = await fs.open(
+        this.filePath,
+        fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+      );
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw new Error('device identity could not be opened safely', { cause: err });
+    }
+    try {
+      const before = await handle.stat({ bigint: true });
+      const namedAfterOpen = await fs.lstat(this.filePath, { bigint: true });
+      if (
+        !before.isFile() ||
+        !namedAfterOpen.isFile() ||
+        namedAfterOpen.isSymbolicLink() ||
+        !sameFileState(namedBefore, before) ||
+        !sameFileState(before, namedAfterOpen)
+      ) {
+        throw new Error('device identity pathname changed before safe open');
+      }
+      if (before.size <= 0 || before.size > BigInt(MAX_DEVICE_RECORD_BYTES)) {
+        throw new Error('device identity exceeds the bounded read limit');
+      }
+      const size = Number(before.size);
+      const buffer = Buffer.alloc(size);
+      const { bytesRead } = await handle.read(buffer, 0, size, 0);
+      const after = await handle.stat({ bigint: true });
+      const namedAfterRead = await fs.lstat(this.filePath, { bigint: true });
+      if (
+        bytesRead !== size ||
+        !sameFileState(before, after) ||
+        !sameFileState(after, namedAfterRead) ||
+        namedAfterRead.isSymbolicLink()
+      ) {
+        throw new Error('device identity changed during bounded read');
+      }
+      return { handle, raw: buffer.toString('utf8'), stat: after };
+    } catch (err) {
+      await handle.close();
+      throw err;
+    }
   }
 }

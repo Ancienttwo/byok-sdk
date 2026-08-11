@@ -3,7 +3,7 @@
 Run a BYOK SDK-based daemon as a background macOS service using a per-user
 [launchd](https://www.launchd.info) **LaunchAgent** — the OS restarts it on
 crash, starts it at login, and gives you `launchctl print`/log files for
-observability. This is a **reference recipe**: `@byok/client` is an npm
+observability. This is a **reference recipe**: `@byok-sdk/client` is an npm
 library (Decision-6 boundary — see the repo root docs), and the SDK itself
 never installs a service on your behalf outside of what `byok-agent install`
 does when you run it.
@@ -124,7 +124,7 @@ it, and asserts it's really gone — then cleans up unconditionally (even on
 failure). This is the same script used to verify this recipe on a real
 macOS machine during M3-4's own development. It then additionally installs
 a SECOND scratch LaunchAgent running the real `byok-agent start` (paired
-against a real, ephemeral `@byok/server`) and confirms `byok-agent status`
+against a real, ephemeral `@byok-sdk/server`) and confirms `byok-agent status`
 reaches its control socket live (M4 Phase 2 — see
 `packages/client/scripts/control-socket-check.mjs`), before uninstalling
 that one too.

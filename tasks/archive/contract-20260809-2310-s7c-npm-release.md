@@ -1,0 +1,199 @@
+> **Archived**: 2026-08-09 23:10
+> **Related Plan**: plans/archive/plan-20260809-1153-s7c-npm-release.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260809-2310
+
+# Task Contract: s7c-npm-release
+
+> **Status**: Fulfilled
+> **Plan**: plans/plan-20260809-1153-s7c-npm-release.md
+> **Task Profile**: code-change
+> <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
+> **Owner**: ancienttwo
+> **Capability ID**: root
+> **Last Updated**: 2026-08-09 22:47
+> **Review File**: `tasks/reviews/20260809-1153-s7c-npm-release.review.md`
+> **Notes File**: `tasks/notes/20260809-1153-s7c-npm-release.notes.md`
+> **Exemplar**: `docs/reference-configs/contract-brief-example.md`
+
+## Why
+
+The dispatch platform is implemented but its live package identity still points at unpublished `@byok/*` names and the user-facing `byok-sdk` registry package is only a `0.0.1` placeholder. Publishing a partial or mixed-scope graph would create immutable broken registry state. This contract binds the one-time identity cutover, umbrella package, packageability evidence, exact artifact review and registry readback while preserving the separate keys security boundary.
+
+## Goal
+
+Publish an installable `byok-sdk@0.1.0` umbrella and its six `@byok-sdk/*@0.1.0` dispatch dependencies from one reviewed release tree, with `@byok-sdk/keys` remaining an independent package outside the umbrella graph. Prove local tarballs, Node 20/22 imports, cross-platform CI, full workspace/conformance/dataplane gates, exact artifact hashes, npm registry metadata/fresh installs and the matching GitHub release tag.
+
+## Scope
+
+- In scope: one-way rename `@byok/*` → `@byok-sdk/*` on live source/test/CI/package surfaces；public metadata/docs for all dispatch packages；new `packages/sdk` umbrella；graph/pack/install/registry tooling；S7 RC changelog/architecture/sprint closeout；npm publish/readback and GitHub tag/release。
+- Out of scope: `@byok-sdk/keys` feature/API changes、P5 TruthStore integration、runtime/schema/migration/protocol semantic changes、legacy-scope compatibility packages、deploying hosted infrastructure。
+- Taste constraints: namespace exports at the umbrella boundary；no compatibility fallback or old-scope alias；fail closed on graph/artifact/version drift；keys never becomes an umbrella dependency。
+
+## Stop Conditions
+
+- Stop and hand back to the parent if the change would require editing a path outside Allowed Paths.
+- Stop if an Exit Criteria command cannot be run in this environment.
+- Stop if Goal, Scope, or Exit Criteria are internally contradictory.
+- Stop before any npm write if web auth identity is not `ancienttwo`, a target version already exists, a tarball hash differs from reviewed evidence, or exact-SHA acceptance/CI is not green.
+- Stop after a partial publish rather than rebuilding or overwriting artifacts；record exact registry state and continue only with the same frozen tarballs where the version is still absent.
+
+## Falsifier
+
+Cheapest proof: build the namespace umbrella against renamed workspace packages and traverse its dependency graph. If exports collide, any dispatch package requires keys, or isolated tarball install cannot load all six namespaces, the umbrella design is wrong and no registry write is allowed.
+
+## Root Cause Evidence
+
+Required when Task Profile is `bugfix`; leave as-is otherwise.
+
+- root_cause: one sentence naming file:line/condition (testable, not "a state issue").
+- repro: the command or UI path that reproduces the symptom.
+- regression_guard: path to a test that fails on the unfixed code and passes after the fix (must also appear under exit_criteria.tests_pass).
+- pre_fix_failure_artifact: path to a captured run of regression_guard on the UNFIXED code. Capture with `bun test <regression_guard> > <artifact> 2>&1; echo "PRE_FIX_EXIT=$?" >> <artifact>` (no pipes — pipes swallow the exit status). The gate requires a non-zero `PRE_FIX_EXIT=` line plus the regression_guard path string in the artifact (see the Root Cause Evidence Gate section in docs/reference-configs/sprint-contracts.md).
+
+## Workflow Inventory
+
+- Source plan: `plans/plan-20260809-1153-s7c-npm-release.md`
+- Deferred-goal ledger: `tasks/todos.md`
+- Review file: `tasks/reviews/20260809-1153-s7c-npm-release.review.md`
+- Notes file: `tasks/notes/20260809-1153-s7c-npm-release.notes.md`
+- Checks file: `.ai/harness/checks/latest.json`
+- Run snapshots: `.ai/harness/runs/`
+- Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
+- Completion gate: run `verify-sprint --prepare-acceptance`, record one typed AcceptanceReceipt under the frozen policy below, then run `verify-sprint`; review Markdown is projection only.
+
+## Acceptance Policy
+
+```json
+{"protocol":1,"reviewer":"Codex","user_waiver":"allowed"}
+```
+
+## Allowed Paths
+
+```yaml
+allowed_paths:
+  - docs/spec.md
+  - docs/architecture/sdk-architecture.md
+  - docs/architecture/requests/
+  - docs/protocol.md
+  - docs/security.md
+  - docs/security-review-m5-pilot-entry.md
+  - ARCHITECTURE-PROPOSAL-byok-platform.md
+  - plans/
+  - tasks/current.md
+  - tasks/todos.md
+  - tasks/contracts/20260809-1153-s7c-npm-release.contract.md
+  - tasks/reviews/20260809-1153-s7c-npm-release.review.md
+  - tasks/notes/20260809-1153-s7c-npm-release.notes.md
+  - tasks/archive/contract-20260809-1152-s7b-diagnostics.md
+  - tasks/archive/notes-20260809-1152-s7b-diagnostics.md
+  - tasks/archive/review-20260809-1152-s7b-diagnostics.md
+  - tasks/archive/todo-20260809-1152-s7b-diagnostics.md
+  - .ai/context/capabilities.json
+  - .claude/templates/
+  - .github/workflows/ci.yml
+  - package.json
+  - pnpm-lock.yaml
+  - pnpm-workspace.yaml
+  - README.md
+  - CHANGELOG.md
+  - LICENSE
+  - packages/
+  - scripts/
+  - deploy/env/
+  - deploy/runbooks/
+  - deploy/scripts/
+  - examples/
+  - templates/
+```
+
+## Evidence Requirements
+
+```yaml
+evidence_requirements:
+  # Set benchmark to required when this contract consumes the harness profile benchmark matrix.
+  benchmark: not_applicable
+```
+
+## Delegation Contract
+
+```yaml
+delegation:
+  budget:
+    tokens: null
+    runner_invocations: null
+    wall_time_minutes: null
+  permission_scope:
+    mode: inherit_allowed_paths
+    writable_paths: []
+    network: inherited
+  roles:
+    parent:
+      mode: narrate_and_gatekeep
+      purpose: approval_checkpoint_owner
+    explorer:
+      mode: read_only
+      purpose: codebase_research
+    worker:
+      mode: edit_within_allowed_paths
+      purpose: implementation
+    verifier:
+      mode: read_only
+      purpose: exit_criteria_review
+  runner:
+    preferred:
+      - subagent
+      - codex-exec
+      - main-thread
+    fallback: main-thread
+    brief_is_authoritative: true
+```
+
+## Exit Criteria (Machine Verifiable)
+
+```yaml
+exit_criteria:
+  files_exist:
+    - README.md
+    - CHANGELOG.md
+    - packages/sdk/package.json
+    - packages/sdk/src/index.ts
+    - packages/sdk/README.md
+    - packages/sdk/LICENSE
+    - scripts/release/check-package-graph.mjs
+    - scripts/release/pack-and-smoke.mjs
+    - scripts/release/registry-readback.mjs
+  artifacts_exist:
+    - .ai/harness/checks/latest.json
+    - tasks/notes/20260809-1153-s7c-npm-release.notes.md
+  tests_pass:
+    - path: packages/sdk/src/index.test.ts
+  commands_succeed:
+    - pnpm run check:release-graph
+    - pnpm run check:release-pack
+    - pnpm -r run typecheck
+    - BYOK_REQUIRE_DATAPLANE=1 BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100 pnpm -r run test
+    - pnpm -r run build
+    - pnpm run check:deploy-sql
+    - repo-harness run check-task-workflow --strict
+    - git diff --exit-code origin/main -- deploy/sql
+```
+
+## Acceptance Notes (Human Review)
+
+- Functional behavior: `byok-sdk` exposes core/protocol/client/server/cloud/cloudPostgres namespaces from exact public dependencies；each individual package remains directly installable。
+- Edge cases: no live old-scope reference、no keys dependency path、all files promised by manifests are packed、fresh tarball and registry installs run without workspace links。
+- Regression risks: immutable partial npm release、mixed versions/scopes、reviewed-vs-published artifact drift、protocol or migration semantic drift。
+
+## Completion Evidence
+
+- PR #40 merged as `705a956` after exact-SHA acceptance and 46/46 CI；PR #41 merged as release tree `aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b` after Linux/macOS/Windows Node 20/22 persistent-output pack/install CI。
+- The frozen schema-v2 manifest binds that source SHA to seven tarballs with SHA-256 and registry-compatible SHA-512 integrity；published registry `dist.integrity` matched each frozen SHA-512 exactly。
+- Fresh registry install/import loaded the six direct dispatch packages and the `byok-sdk` umbrella's exact `client/cloud/cloudPostgres/core/protocol/server` namespaces；the installed graph had no `@byok-sdk/keys` edge。
+- Annotated tag `v0.1.0` dereferences to `aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b`；the non-draft, non-prerelease GitHub Release is `https://github.com/Ancienttwo/byok-sdk/releases/tag/v0.1.0`。
+
+## Rollback Point
+
+- Commit / checkpoint: exact accepted release SHA plus frozen tarball SHA-256 list in implementation notes。
+- Revert strategy: before publish revert the S7-c PR；after publish never overwrite—deprecate/bump only, using the recorded artifact and registry readback to identify the affected versions。

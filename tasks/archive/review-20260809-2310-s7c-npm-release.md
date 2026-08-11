@@ -1,0 +1,99 @@
+> **Archived**: 2026-08-09 23:10
+> **Related Plan**: plans/archive/plan-20260809-1153-s7c-npm-release.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260809-2310
+
+# Task Review: s7c-npm-release
+
+> **Status**: Accepted; release readback complete
+> **Plan**: plans/plan-20260809-1153-s7c-npm-release.md
+> **Contract**: tasks/contracts/20260809-1153-s7c-npm-release.contract.md
+> **Notes File**: tasks/notes/20260809-1153-s7c-npm-release.notes.md
+> **Checks File**: .ai/harness/checks/latest.json
+> **Last Updated**: 2026-08-09 22:47
+> **Recommendation**: pass
+> **Review Rubric Version**: 2
+> **Reviewed Subject SHA256**: sha256:83121065e3d969fe736a51462191342264e84db4f1bd05f45204ff3c0d50ff69
+> **Reviewed Subject Scope**: normalized-final-content
+> **Reviewed Target Revision**: 8ad6474ec32bdcb9448709c880150ad93a9bdf27
+
+## Human Review Card
+
+- Verdict: pass；Codex exact-SHA acceptance on `8426690` has zero HIGH/MEDIUM findings
+- Change type: code-change + immutable external release
+- Intended files changed: contract allowed paths；runtime semantics/protocol/migrations remain unchanged apart from package import identity
+- Actual files changed: one-way package identity cutover、six dispatch manifests、new umbrella、release scripts/CI/docs and S7 workflow artifacts；`deploy/sql/**` and protocol golden are zero-diff
+- Commands passed: all 22 preparation gates；hard-env workspace test；release graph/pack-install；typecheck/build/deploy-SQL/strict workflow；PR #40 CI 46/46；PR #41 Linux/macOS/Windows Node 20/22 release-pack CI；post-publish registry readback/fresh install/import
+- Residual risks: no unresolved S7 release risk；future versions remain append-only because npm versions cannot be overwritten
+- Reviewer action required: none；published bytes, tag and Release have been read back against the frozen manifest/tree
+- Rollback: revert PR before publish；after publish, never overwrite—deprecate/bump only
+
+## Mode Evidence
+
+- Selected route: main-thread implementation + independent Codex exact-SHA acceptance；Claude paused/not invoked
+- P1/P2/P3 evidence: plan Agentic Routing and exact package/registry preflight
+- Root cause or plan evidence: sprint S7.2/S7.4、§12 and user-confirmed `byok-sdk` registry authority
+
+## Verification Evidence
+
+- Waza `/check` run: not invoked；owner paused Claude review and contract selects Codex
+- Commands run: contract `commands_succeed` and umbrella test all passed in the bound run snapshot
+- Manual checks: exact SHA/base、package manifests/exports、mechanical 236-file rename proof、keys/conformance isolation、Windows shell-free CLI path、registry SRI binding
+- Supporting artifacts: AcceptanceReceipt projection below；PR #40 checks 46/46；PR #41 all checks green；frozen manifest and registry readback；`v0.1.0` Release
+- Implementation notes reviewed: yes
+- Run snapshot: `.ai/harness/runs/run-20260809T125832-36620-20260809-1153-s7c-npm-release.json`
+
+## Manual Check Evidence
+
+- No `manual_checks` block is declared by this contract；the human observations are recorded in the review card and exact-SHA Codex report.
+
+## Acceptance Receipt Projection
+
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
+> **Actor**: not-applicable
+> **Reviewed Subject SHA256**: sha256:8609707c5698ac416fd859fa6b0f5dfbc35fa7b11410dab97241ca8085cac7d1
+> **Reviewed Subject Scope**: normalized-final-content
+> **Reviewed Target Revision**: aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b
+> **Verification Evidence SHA256**: sha256:eec9b3907b4631eb4abb361098e82f0871ad134e40de9fb0780e8520a7ed2b09
+> **Issued At**: 2026-08-09T15:09:35.564Z
+
+- Summary: Independent Codex accepted commit 08a637c and normalized subject sha256:8609707c5698ac416fd859fa6b0f5dfbc35fa7b11410dab97241ca8085cac7d1 with zero HIGH/MEDIUM findings; two complete 22/22 hard-env runs passed and packages/client plus deploy/sql are zero diff.
+- Findings: none
+
+## Behavior Diff Notes
+
+- Public imports move once from unpublished `@byok/*` names to `@byok-sdk/*` at `0.1.0`；no alias or compatibility package exists.
+- `byok-sdk` exposes six namespace owners；`@byok-sdk/keys` stays a separately installed security plane and is not republished.
+- Registry readback requires the frozen manifest and exact npm `dist.integrity` equality for every artifact before fresh-install acceptance.
+- The seven `0.1.0` artifacts were published from source `aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b`；fresh registry installation exposes all six umbrella namespaces and direct packages without keys。
+- Annotated tag and GitHub Release `v0.1.0` bind the public release record to the same source commit。
+
+## Residual Risks / Follow-ups
+
+- A prior preparation rerun hit the recorded daemon-owner process-lock flake and its exact 6-test file passed；the closeout verification separately hit `bin-start-command.test.ts` with the same `DaemonOwnerActiveError`, then the exact file passed 4/4 and the subsequent complete 22/22 gate rerun passed。`packages/client/**` is zero-diff and no source/timeout change was made。
+- npm publish is immutable；any future defect must use deprecate/bump rather than overwrite。No current registry/tree mismatch remains。
+
+## Scorecard
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| Functionality | 10/10 | umbrella and six direct packages pack/install/import as one graph |
+| Product depth | 10/10 | hosted/self-hosted/daemon surfaces ship together while keys remains explicit |
+| Design quality | 10/10 | namespace ownership and security-plane separation are executable invariants |
+| Code quality | 10/10 | full local gates、cross-platform CI and exact artifact integrity binding pass |
+
+## Failing Items
+
+- None.
+
+## Retest Steps
+
+- Re-run: `node scripts/release/registry-readback.mjs --manifest _ops/releases/byok-sdk-0.1.0/release-manifest.json` and `repo-harness run verify-sprint`
+- Re-check: `v0.1.0^{}` equals `aebe6b6eec54ab0ce3e67d1cb3f04e07ee1be13b`、GitHub Release published、zero SQL/protocol-golden diff
+
+## Summary
+
+- PR #40 and the path-correction PR #41 are merged；the exact frozen seven-package graph is published and registry-integrity-bound，fresh-install accepted，and tag/GitHub Release `v0.1.0` read back to the same source tree。S7-c release obligations are complete。

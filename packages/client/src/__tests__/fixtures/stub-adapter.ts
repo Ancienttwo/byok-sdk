@@ -1,4 +1,4 @@
-import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeCapabilities, RuntimeDetectResult, Session, TaskContext } from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
 
@@ -142,6 +142,7 @@ export class StubSession implements Session {
 const DEFAULT_STUB_CAPABILITIES: RuntimeCapabilities = {
   steer: true,
   resume: true,
+  approvalInteractive: true,
   permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
 };
 

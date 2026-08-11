@@ -1,9 +1,9 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, PROTOCOL_VERSION, type ConnAckPayload } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type ConnAckPayload } from '@byok-sdk/protocol';
 import { WebSocket } from 'ws';
 import { createByokServer } from '../index';
-import { nextEnvelope, pairFakeDaemon, send, startServer, stopServer } from './test-support';
+import { nextEnvelope, pairFakeDaemon, send, startServer, stopServer, testPairingClaims } from './test-support';
 
 const PRODUCT_ID = 'acme';
 
@@ -63,7 +63,7 @@ describe('M4 Phase 4 version-negotiation drill, item 4 (behavioral): real WS han
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     ws = await openAuthedSocket(started.port, accessToken);
@@ -96,7 +96,7 @@ describe('M4 Phase 4 version-negotiation drill, item 4 (behavioral): real WS han
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     ws = await openAuthedSocket(started.port, accessToken);

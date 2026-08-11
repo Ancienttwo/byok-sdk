@@ -9,7 +9,7 @@ import {
   isKnownAgentEvent,
   partitionAgentEvents,
   type Envelope,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
@@ -43,7 +43,7 @@ const unusedBlobClient: BlobResolver = {
  * pipeline never THROWS on such an envelope, even though it does nothing
  * with it — both layers a real inbound frame would pass through:
  *
- * 1. Decode: `decodeEnvelope` (re-exported from `@byok/protocol`, the same
+ * 1. Decode: `decodeEnvelope` (re-exported from `@byok-sdk/protocol`, the same
  *    function `ws-transport.ts`'s WS `message` handler and (transitively,
  *    via `EventsPollResponseSchema`) `long-poll-transport.ts` both use) —
  *    already unknown-tolerant for free, purely by virtue of the client

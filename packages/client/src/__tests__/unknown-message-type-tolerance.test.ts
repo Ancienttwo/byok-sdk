@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
@@ -26,7 +26,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * package) reasons about `ws-transport.ts`'s WS handler from reading its
  * source rather than exercising it; this file drives the REAL transports
  * (`ConnectionManager`/`WsTransport`/`LongPollClient`) against a fake server
- * that can emit a wire payload no CURRENT `@byok/protocol` build recognizes
+ * that can emit a wire payload no CURRENT `@byok-sdk/protocol` build recognizes
  * — simulating a hypothetical future minor server's new message type —
  * because `createEnvelope` (the frozen, validated constructor) would itself
  * reject any attempt to build one. `TestServer.sendRaw`/
@@ -449,7 +449,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
   });
 
   it('long-poll (c, was: documents the stall — now: asserts the fix): a persistently-redelivered unrecognized-type envelope never blocks forward progress — the cursor keeps advancing through it, and a concurrent known envelope is delivered immediately, no grace period needed', async () => {
-    // Mirrors the REAL @byok/server's outbox semantics (hub.ts's
+    // Mirrors the REAL @byok-sdk/server's outbox semantics (hub.ts's
     // collectRelevant): an un-ack'd envelope is RETAINED and redelivered on
     // every subsequent poll until the client's cursor advances past it — it
     // is NOT drained after one delivery attempt regardless of whether the

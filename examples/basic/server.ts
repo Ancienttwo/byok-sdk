@@ -1,4 +1,4 @@
-// BYOK SDK example: a hono server embedding `@byok/server`'s in-memory M0
+// BYOK SDK example: a hono server embedding `@byok-sdk/server`'s in-memory M0
 // reference implementation, plus a plain HTML/JS demo UI (no frontend build
 // step — the page is served as a static file with inline <script>).
 //
@@ -22,7 +22,7 @@ import {
   type DispatchInput,
   type TaskHandle,
   type TaskStore,
-} from '@byok/server';
+} from '@byok-sdk/server';
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,11 +32,18 @@ const PORT = Number(process.env.PORT ?? 8787);
 // config uses.
 const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 
-// `RuntimeId` from @byok/protocol is 'pi' | 'claude' | 'codex'; M0 only ships
+// S1: every pairing code — and therefore every device row it creates — is
+// minted for an explicit tenant. A real product resolves this from whoever is
+// logged into the page that clicked "pair"; this demo has no accounts, so it
+// pins one demo tenant and revokes within it (see `/api/machines/:deviceId/revoke`
+// below). There is deliberately no "no tenant" path to fall back to.
+const DEMO_TENANT_ID = process.env.BYOK_EXAMPLE_TENANT_ID ?? 'tenant-demo';
+
+// `RuntimeId` from @byok-sdk/protocol is 'pi' | 'claude' | 'codex'; M0 only ships
 // the pi adapter (see plan: 里程碑 M0), but the wire/select still names all
 // three so the demo is representative of the full protocol shape. Mirrors
 // the same literal allowlist `packages/server/src/hub.ts` keeps locally
-// rather than pulling in @byok/protocol just for this one array.
+// rather than pulling in @byok-sdk/protocol just for this one array.
 const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
 
 // Constructing our own `blobStore` (rather than letting `createByokServer`
@@ -49,7 +56,7 @@ const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
 //
 // Storage mode (M3): `BYOK_STORE=sqlite` swaps both reference stores for
 // their `node:sqlite`-backed persistent counterparts (`SqliteTaskStore`/
-// `SqliteBlobStore`, from `@byok/server`) so task RECORDS and blob bytes
+// `SqliteBlobStore`, from `@byok-sdk/server`) so task RECORDS and blob bytes
 // survive a restart of this demo process (record persistence only — an
 // in-flight task is not resumed/reconnected; see the README) — data lands
 // under `examples/basic/data/`
@@ -92,7 +99,9 @@ app.route('/', byok.hono);
 
 app.get('/', (c) => c.html(indexHtml));
 
-app.post('/api/pair', (c) => c.json(byok.pairing.createPairingCode()));
+app.post('/api/pair', (c) =>
+  c.json(byok.pairing.createPairingCode({ tenantId: DEMO_TENANT_ID, productId: PRODUCT_ID })),
+);
 
 app.get('/api/machines', (c) => c.json(byok.machines.list()));
 
@@ -101,7 +110,7 @@ app.get('/api/machines', (c) => c.json(byok.machines.list()));
 // re-pair. Nothing else to await here; the effect shows up next time the
 // device tries to renew or reconnect (see public/index.html's revoke button).
 app.post('/api/machines/:deviceId/revoke', (c) => {
-  byok.devices.revoke(c.req.param('deviceId'));
+  byok.devices.revoke(DEMO_TENANT_ID, c.req.param('deviceId'));
   return c.json({ ok: true });
 });
 
@@ -184,7 +193,7 @@ app.get('/api/tasks/:taskId/events', (c) => {
 // M5 (approval targeting): an optional `approvalId` in the request body
 // targets one specific pending approval rather than "whichever one is
 // currently pending" (the untargeted default when omitted, unchanged from
-// pre-M5) — see `TaskHandle.approve`'s own doc comment (`@byok/server`'s
+// pre-M5) — see `TaskHandle.approve`'s own doc comment (`@byok-sdk/server`'s
 // `types.ts`). A caller that already knows the approvalId it's acting on
 // (e.g. an operator UI rendering `TaskSnapshot.pendingApprovalId`, or
 // reacting to a `task.await_approval` ServerTaskEvent) passes it through

@@ -85,8 +85,8 @@ let originalEnvironment;
 const suppliedHome = process.env.BYOK_SMOKE_HOME;
 
 try {
-  await assertFile(clientDistIndex, '@byok/client dist');
-  await assertFile(serverDistIndex, '@byok/server dist');
+  await assertFile(clientDistIndex, '@byok-sdk/client dist');
+  await assertFile(serverDistIndex, '@byok-sdk/server dist');
   for (const runtime of runtimes) {
     await assertFile(path.join(fixtureDir, `fake-${runtime}.mjs`), `${runtime} fixture`);
   }
@@ -132,7 +132,7 @@ try {
     });
   });
   const serverUrl = `http://127.0.0.1:${listening.port}`;
-  console.log(`real @byok/server listening at ${serverUrl}`);
+  console.log(`real @byok-sdk/server listening at ${serverUrl}`);
 
   const fake = (runtime) => path.join(fixtureDir, `fake-${runtime}.mjs`);
   const adapters = [
@@ -141,7 +141,7 @@ try {
     new client.PiAdapter({ resolveBin: () => ({ command: fake('pi'), source: 'path' }) }),
   ];
 
-  const pairingCode = byok.pairing.createPairingCode().code;
+  const pairingCode = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId }).code;
   daemon = client.createDaemonWithAdapters(
     {
       productName: 'Adapter Task Smoke',

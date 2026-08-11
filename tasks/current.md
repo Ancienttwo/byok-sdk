@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-07-24T11:24:55+0800 -->
+<!-- updated_at: 2026-08-10T15:36:57+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Idle
-> **Updated At**: 2026-07-24T11:24:55+0800
-> **Source Branch**: codex/local-git-task-workspaces
-> **Source Commit**: c9acd53
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-10T15:36:57+0800
+> **Source Branch**: codex/adr-025-device-agent-identity
+> **Source Commit**: 34c72e8
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -17,11 +17,11 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Current Focus
 
-- Status: Idle
+- Status: ManualClearedWithActiveWork
 - Active Plan: (none)
 - Plan Status: (none)
-- Next Task: (none)
-- Clear Note: (none)
+- Next Task: inspect active worktree marker(s)
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,7 +31,10 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- (none)
+- /Users/ancienttwo/Projects/byok-sdk: stale active-plan marker -> plans/plan-20260810-1408-client-adapter-only-security.md
+- /Users/ancienttwo/Projects/byok-sdk: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk
+- /Users/ancienttwo/Projects/byok-sdk-wt-client-adapter-only-security: plans/plan-20260810-1408-client-adapter-only-security.md
+- /Users/ancienttwo/Projects/byok-sdk-wt-client-adapter-only-security: active-worktree owner -> /Users/ancienttwo/Projects/byok-sdk-wt-client-adapter-only-security
 ## Active Sprint
 
 - Sprint: (none)
@@ -40,7 +43,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Execute captured plan: Local Git Task Workspaces
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Record review evidence and close the docs-only workflow without publishing or merging.
 
 ## Checks
 
@@ -48,16 +51,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 7 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260724-0138-local-git-task-workspaces.md
- D tasks/contracts/20260724-0138-local-git-task-workspaces.contract.md
- D tasks/notes/20260724-0138-local-git-task-workspaces.notes.md
- D tasks/reviews/20260724-0138-local-git-task-workspaces.review.md
+ D plans/plan-20260810-1514-adr-025-device-agent-identity.md
+ D tasks/contracts/20260810-1514-adr-025-device-agent-identity.contract.md
+ D tasks/notes/20260810-1514-adr-025-device-agent-identity.notes.md
+ D tasks/reviews/20260810-1514-adr-025-device-agent-identity.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260724-0138-local-git-task-workspaces.md
-?? tasks/archive/
+?? plans/archive/plan-20260810-1514-adr-025-device-agent-identity.md
+?? tasks/archive/contract-20260810-1536-adr-025-device-agent-identity.md
+?? tasks/archive/notes-20260810-1536-adr-025-device-agent-identity.md
+?? tasks/archive/review-20260810-1536-adr-025-device-agent-identity.md
+?? tasks/archive/todo-20260810-1536-adr-025-device-agent-identity.md
 ```
 
 ## Source Artifacts

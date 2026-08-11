@@ -1,6 +1,6 @@
 import type { WebSocket } from 'ws';
 import { describe, expect, it } from 'vitest';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { DeviceRegistry } from '../auth';
 import { ConnectionHub } from '../hub';
 import { RateLimiter } from '../rate-limiter';

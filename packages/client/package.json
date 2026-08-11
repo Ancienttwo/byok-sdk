@@ -1,9 +1,18 @@
 {
-  "name": "@byok/client",
-  "version": "0.0.1",
+  "name": "@byok-sdk/client",
+  "version": "0.1.1",
   "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ancienttwo/byok-sdk.git",
+    "directory": "packages/client"
+  },
+  "bugs": {
+    "url": "https://github.com/Ancienttwo/byok-sdk/issues"
+  },
+  "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
     "node": ">=22.19.0"
   },
@@ -20,13 +29,22 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json",
+    "build": "tsup && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -37,13 +55,13 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@byok/protocol": "workspace:*",
-    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
     "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "@byok/server": "workspace:*",
+    "@byok-sdk/server": "workspace:*",
     "@hono/node-server": "^2.0.10"
   }
 }

@@ -1,6 +1,6 @@
 # Running the agent daemon as a background service
 
-The `@byok/client` lifecycle API (`createServiceLifecycle`) installs the daemon
+The `@byok-sdk/client` lifecycle API (`createServiceLifecycle`) installs the daemon
 as a real OS-supervised background service. Copy the platform recipe that fits
 your target:
 

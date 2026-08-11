@@ -28,14 +28,14 @@ async function tmpDir(prefix: string): Promise<string> {
  * otherwise let the task limp into an inconsistent state instead of a clean
  * `AwaitApproval -> Running -> Complete` progression.
  *
- * Run against the REAL `@byok/server`, forced long-poll-only
+ * Run against the REAL `@byok-sdk/server`, forced long-poll-only
  * (`startRealServerWithoutWebSocket`) so every daemon->server envelope
  * genuinely travels over `POST /byok/messages`. The "lost response" is
  * simulated by monkey-patching `globalThis.fetch` to fail exactly the first
  * POST whose body contains a `task.await_approval` envelope, then
  * delegating to the real fetch for everything else (including the retry).
  */
-describe('a lost/failed long-poll POST is retried with the identical batch, exactly-once server-side (Design B, real @byok/server, long-poll only)', () => {
+describe('a lost/failed long-poll POST is retried with the identical batch, exactly-once server-side (Design B, real @byok-sdk/server, long-poll only)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
   let originalFetch: typeof globalThis.fetch;
@@ -62,7 +62,7 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     expect(daemon.status().degraded).toBe(true);

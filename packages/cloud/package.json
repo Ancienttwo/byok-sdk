@@ -1,0 +1,52 @@
+{
+  "name": "@byok-sdk/cloud",
+  "version": "0.1.1",
+  "description": "BYOK SDK hosted device surface: stateless frozen-v1 HTTP handlers over tenant-first @byok-sdk/core ports",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ancienttwo/byok-sdk.git",
+    "directory": "packages/cloud"
+  },
+  "bugs": {
+    "url": "https://github.com/Ancienttwo/byok-sdk/issues"
+  },
+  "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@byok-sdk/core": "workspace:*",
+    "@byok-sdk/protocol": "workspace:*",
+    "hono": "^4.12.30",
+    "zod": "^4.4.3"
+  }
+}

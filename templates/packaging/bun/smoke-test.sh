@@ -9,21 +9,16 @@ set -euo pipefail
 # node_modules of its own (simulating "shipped to an end user's machine") --
 #
 #   1. with pi genuinely unreachable and no BYOK_PI_BIN set -- must exit 0
-#      and report piDetect.present === false. This is the missing-sidecar
-#      half of the guarantee: pi's required external package resolution
-#      (packages/client/src/adapters/pi/resolve-bin.ts) must fail catchably
-#      under a real single-file bundle, not crash the process.
+#      and report piDetect.present === false. This proves the external runtime
+#      lookup remains fail-closed under a real single-file bundle.
 #   2. with BYOK_PI_BIN pointing at a stub pi script -- must exit 0 and
 #      report piDetect.present === true. This proves the override seam still
 #      works correctly once bundled (pi is "picked up" when actually there).
 #
 # A crash on run 1 (any nonzero exit, or no BYOK_PACKAGING_PROBE marker line
 # printed at all) is the CRITICAL escalation this recipe exists to catch --
-# see examples/packaging/launcher.ts's header and
-# packages/client/src/adapters/pi/resolve-bin.ts's doc comment for the
-# hazard being proven against. It would mean the SDK's single hazardous
-# resolution path (pi's) does not actually degrade the way the source
-# already claims it does, once real bundling is involved.
+# see examples/packaging/launcher.ts and
+# packages/client/src/adapters/pi/resolve-bin.ts for the boundary being proven.
 #
 # Usage: templates/packaging/bun/smoke-test.sh
 #   (no args -- LAUNCHER_ENTRY / BUN_BIN env vars override the defaults)
@@ -54,8 +49,8 @@ else
 fi
 
 # Isolated run directory: copy the standalone executable out to a location
-# with no node_modules of its own in its ancestor chain, so the external
-# required package can't be found by accident via disk resolution.
+# with no node_modules of its own in its ancestor chain, matching a shipped
+# product binary whose runtime CLIs must come from the user's PATH.
 ISOLATED_DIR="$WORK_DIR/isolated-run"
 mkdir -p "$ISOLATED_DIR"
 RUN_BIN="$ISOLATED_DIR/$(basename "$BIN")"

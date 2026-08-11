@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -129,5 +130,40 @@ describe('control-client: hardening against a misbehaving/hostile control server
     // request frame; the pending call must reject (connection destroyed —
     // see `createControlClient`'s 'close' handler), never hang.
     await expect(result.client.request('status')).rejects.toThrow();
+  });
+
+  it('refuses an oversized control token before allocating or connecting', async () => {
+    const storeDir = await tmpDir('byok-ctl-client-oversized-token-');
+    await fs.writeFile(controlTokenPath(storeDir), 'x'.repeat(257));
+
+    const result = await connectControlClient({ storeDir, productId: 'acme' });
+    expect(result).toMatchObject({ ok: false });
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toMatch(/bounded read limit/);
+  });
+
+  it('refuses a control token symlink without reading its target', async () => {
+    const storeDir = await tmpDir('byok-ctl-client-symlink-token-');
+    const outside = path.join(await tmpDir('byok-ctl-client-symlink-outside-'), 'token');
+    await fs.writeFile(outside, 'c'.repeat(64));
+    await fs.symlink(outside, controlTokenPath(storeDir));
+
+    const result = await connectControlClient({ storeDir, productId: 'acme' });
+    expect(result).toMatchObject({ ok: false });
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toMatch(/not a real regular file|safe open/);
+    expect(await fs.readFile(outside, 'utf8')).toBe('c'.repeat(64));
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a control token FIFO without blocking', async () => {
+    const storeDir = await tmpDir('byok-ctl-client-fifo-token-');
+    execFileSync('mkfifo', [controlTokenPath(storeDir)]);
+
+    const started = Date.now();
+    const result = await connectControlClient({ storeDir, productId: 'acme' });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(result).toMatchObject({ ok: false });
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toMatch(/not a real regular file|safe open/);
   });
 });

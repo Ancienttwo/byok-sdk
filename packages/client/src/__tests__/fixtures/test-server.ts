@@ -9,7 +9,8 @@ import {
   parseMessage,
   PROTOCOL_VERSION,
   type Envelope,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
+import { NONCE_SIGNING_DOMAIN } from '../../daemon/device-keys';
 
 interface Waiter {
   predicate: (envelope: Envelope) => boolean;
@@ -55,6 +56,7 @@ export class TestServer {
   private readonly devicesById = new Map<string, DeviceAuthState>();
   private readonly pendingNonces = new Map<string, string>(); // nonce -> deviceId
   private readonly blobs = new Map<string, StoredBlob>();
+  private readonly blobReservations = new Map<string, string>();
   /**
    * M4 Phase 4 (version-negotiation drill): ONE ordered queue for the next
    * long-poll response's `events` array — typed pushes (`pushLongPollEvent`)
@@ -75,6 +77,7 @@ export class TestServer {
   private tokenTtlMs = 60 * 60 * 1000;
   private rejectWs = false;
   private failBlobUploads = false;
+  private dropNextBlobFinalizeResponse = false;
   /** Finding R2: capabilities advertised in every subsequent `conn.ack` — see `setAckCapabilities`. */
   private ackCapabilities: string[] = [];
 
@@ -121,7 +124,7 @@ export class TestServer {
     this.rejectWs = reject;
   }
 
-  /** Finding R2: capabilities to advertise in every SUBSEQUENT `conn.ack` (default `[]`, matching the wire's real "additive-minor, absent means not understood" convention) — used to test capability-gated client behavior (e.g. `approval_resolved`) without needing the real `@byok/server`. */
+  /** Finding R2: capabilities to advertise in every SUBSEQUENT `conn.ack` (default `[]`, matching the wire's real "additive-minor, absent means not understood" convention) — used to test capability-gated client behavior (e.g. `approval_resolved`) without needing the real `@byok-sdk/server`. */
   setAckCapabilities(capabilities: string[]): void {
     this.ackCapabilities = capabilities;
   }
@@ -129,6 +132,11 @@ export class TestServer {
   /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
   setFailBlobUploads(fail: boolean): void {
     this.failBlobUploads = fail;
+  }
+
+  /** Commit finalize, then drop the first response to exercise same-key replay. */
+  dropNextFinalizeResponse(): void {
+    this.dropNextBlobFinalizeResponse = true;
   }
 
   /** Mark a device revoked: its next `/byok/challenge`, `/byok/token`, or WS connect gets a 401 (protocol §6.3). */
@@ -165,7 +173,7 @@ export class TestServer {
    * M4 Phase 4 (version-negotiation drill): queue a RAW, untyped value into
    * the next long-poll response's `events` array — bypassing `Envelope`'s
    * type checking entirely. `pushLongPollEvent` above can't express a wire
-   * payload the current `@byok/protocol` package doesn't recognize at all
+   * payload the current `@byok-sdk/protocol` package doesn't recognize at all
    * (e.g. a hypothetical future minor server's new message type) since its
    * parameter is typed as the real, frozen `Envelope` union; this is the
    * escape hatch for simulating exactly that scenario against the client's
@@ -305,6 +313,9 @@ export class TestServer {
       if (method === 'POST' && url.pathname === '/byok/challenge') return void (await this.handleChallenge(req, res));
       if (method === 'POST' && url.pathname === '/byok/token') return void (await this.handleToken(req, res));
       if (method === 'POST' && url.pathname === '/byok/blobs') return void (await this.handleCreateBlob(req, res));
+      if (method === 'POST' && /^\/byok\/blobs\/[^/]+\/finalize$/.test(url.pathname)) {
+        return void this.handleFinalizeBlob(req, res, url.pathname.split('/')[3] ?? '');
+      }
       if (method === 'GET' && /^\/byok\/blobs\/[^/]+\/url$/.test(url.pathname)) {
         return void this.handleBlobUrl(req, res, url.pathname.split('/')[3] ?? '');
       }
@@ -385,7 +396,16 @@ export class TestServer {
   private verifySignature(device: DeviceAuthState, nonce: string, signatureBase64Url: string): boolean {
     try {
       const publicKey = createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: device.publicKeyBase64Url }, format: 'jwk' });
-      return edVerify(null, Buffer.from(nonce, 'utf8'), publicKey, Buffer.from(signatureBase64Url, 'base64url'));
+      // S1 (GAP-004): domain-separated, exactly like the real server — this
+      // stub enforces the same contract rather than accepting whatever the
+      // daemon happens to send, so a client that dropped the prefix fails
+      // here too instead of passing against a lenient fake.
+      return edVerify(
+        null,
+        Buffer.from(NONCE_SIGNING_DOMAIN + nonce, 'utf8'),
+        publicKey,
+        Buffer.from(signatureBase64Url, 'base64url'),
+      );
     } catch {
       return false;
     }
@@ -393,10 +413,24 @@ export class TestServer {
 
   private async handleCreateBlob(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.requireBearer(req, res)) return;
+    const reservationId = req.headers['idempotency-key'];
+    if (typeof reservationId !== 'string' || reservationId.length === 0) {
+      respondJson(res, 400, { error: 'Idempotency-Key header is required' });
+      return;
+    }
     const body = (await readJsonBody(req)) as { size: number; contentType: string; contentHash: string };
+    const existingBlobId = this.blobReservations.get(reservationId);
+    if (existingBlobId !== undefined) {
+      respondJson(res, 200, {
+        blobId: existingBlobId,
+        uploadUrl: `/_test/blob-upload/${existingBlobId}`,
+      });
+      return;
+    }
     this.blobSeq += 1;
     const blobId = `blob-${this.blobSeq}`;
     this.blobs.set(blobId, { blobId, contentType: body.contentType, contentHash: body.contentHash, size: body.size });
+    this.blobReservations.set(reservationId, blobId);
     // Origin-relative, deliberately NOT `${this.url}/...` — matches the real
     // reference `LocalDiskBlobStore` (packages/server/src/blob-store.ts),
     // which mints relative content URLs. An M1-4 e2e run against a real
@@ -407,6 +441,25 @@ export class TestServer {
     // the blob just never actually uploaded. Kept absolute here would mask
     // that class of bug again.
     respondJson(res, 200, { blobId, uploadUrl: `/_test/blob-upload/${blobId}` });
+  }
+
+  private handleFinalizeBlob(req: IncomingMessage, res: ServerResponse, blobId: string): void {
+    if (!this.requireBearer(req, res)) return;
+    const reservationId = req.headers['idempotency-key'];
+    if (
+      typeof reservationId !== 'string' ||
+      this.blobReservations.get(reservationId) !== blobId ||
+      this.blobs.get(blobId)?.bytes === undefined
+    ) {
+      respondJson(res, 422, { error: 'storage_integrity_mismatch' });
+      return;
+    }
+    if (this.dropNextBlobFinalizeResponse) {
+      this.dropNextBlobFinalizeResponse = false;
+      req.socket.destroy();
+      return;
+    }
+    res.writeHead(204).end();
   }
 
   private handleBlobUrl(req: IncomingMessage, res: ServerResponse, blobId: string): void {

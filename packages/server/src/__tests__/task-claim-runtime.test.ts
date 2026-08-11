@@ -1,9 +1,17 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer } from '../index';
-import { connectFakeDaemon, send, startServer, stopServer, waitForServerEvent, waitForTaskEvent } from './test-support';
+import {
+  connectFakeDaemon,
+  send,
+  startServer,
+  stopServer,
+  testPairingClaims,
+  waitForServerEvent,
+  waitForTaskEvent,
+} from './test-support';
 
 const PRODUCT_ID = 'acme';
 
@@ -30,7 +38,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -49,7 +57,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -68,7 +76,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -87,7 +95,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 

@@ -4,10 +4,10 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
-import type { Session, TaskContext } from '../types';
+import { SteerUnsupportedError, type Session, type TaskContext } from '../types';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -95,7 +95,15 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
   it('capabilities() advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm mode included as of M4 Phase 3)', () => {
     const adapter = fakeClaudeAdapter();
-    expect(adapter.capabilities()).toEqual({ steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] });
+    expect(adapter.capabilities()).toEqual({
+      steer: false,
+      resume: true,
+      // S0/H-002: the confirm path is genuinely wired (permission-prompt-tool
+      // → approval MCP server → control socket), so this adapter is the one
+      // bundled runtime that honestly reports interactive approval.
+      approvalInteractive: true,
+      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+    });
   });
 
   it('environmentRequirements() declares no credential env vars (M5 — deliberate ToS posture: env-based API key passthrough for claude is a separate, pending product decision)', () => {
@@ -408,12 +416,16 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(session.resolveApproval(true)).rejects.toThrow(/no approval channel for this session/);
   });
 
-  it('steer() throws a descriptive not-supported error (mid-turn stdin writes were empirically found to queue, not redirect)', async () => {
+  it('steer() throws a typed SteerUnsupportedError (mid-turn stdin writes were empirically found to queue, not redirect)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
     const session = await adapter.start(baseTask, ctx);
     openSessions.push(session);
+    // Typed, not string-matched: the daemon classifies this as permanently
+    // unsupported (non-retryable) rather than a transient handler failure.
+    await expect(session.steer('change course')).rejects.toBeInstanceOf(SteerUnsupportedError);
     await expect(session.steer('change course')).rejects.toThrow(/does not support mid-turn steering/);
+    await expect(session.steer('change course')).rejects.toMatchObject({ runtimeId: 'claude' });
   });
 
   it('records an unmapped top-level frame type once, and still processes the rest of the turn normally', async () => {

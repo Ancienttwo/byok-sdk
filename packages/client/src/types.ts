@@ -1,4 +1,4 @@
-import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok/protocol';
+import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
@@ -23,6 +23,20 @@ export interface RuntimeDetectResult {
 export interface RuntimeCapabilities {
   steer: boolean;
   resume: boolean;
+  /**
+   * Whether this adapter can genuinely pause a running session on
+   * `needs_approval` and resume it from an out-of-band decision — i.e.
+   * whether {@link Session.resolveApproval} really resolves rather than
+   * throwing. This is the ONLY source of truth for the wire's
+   * `RuntimeInfo.capabilities.approvalInteractive` (`daemon/
+   * create-daemon.ts`'s `toRuntimeInfoCapabilities`); the daemon no longer
+   * hardcodes a value.
+   *
+   * Required, deliberately: a new adapter (or a test fake) that forgets to
+   * declare it fails to compile rather than silently defaulting to a claim
+   * it cannot back.
+   */
+  approvalInteractive: boolean;
   /** Subset of {@link PermissionPolicy}'s `mode` values this adapter can express without widening. */
   permissionModes: string[];
 }
@@ -158,5 +172,25 @@ export class PolicyUnsupportedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PolicyUnsupportedError';
+  }
+}
+
+/**
+ * Thrown by {@link Session.steer} on an adapter whose runtime has no
+ * mid-turn steering channel at all (`capabilities().steer === false`) — a
+ * permanent property of the runtime, never a transient failure. Typed
+ * rather than a bare `Error` so the daemon can classify an inbound
+ * `task.steer` for such a runtime as non-retryable (record + ack, cursor
+ * advances) instead of stalling the cursor on it forever, without matching
+ * on message strings.
+ */
+export class SteerUnsupportedError extends Error {
+  /** The `RuntimeAdapter.id` that cannot steer (e.g. `claude`, `codex`). */
+  readonly runtimeId: string;
+
+  constructor(runtimeId: string, message: string) {
+    super(message);
+    this.name = 'SteerUnsupportedError';
+    this.runtimeId = runtimeId;
   }
 }

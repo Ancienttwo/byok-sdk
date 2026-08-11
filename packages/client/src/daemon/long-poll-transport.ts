@@ -1,4 +1,4 @@
-import { MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok/protocol';
+import { MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
@@ -82,6 +82,9 @@ export interface LongPollClientOptions {
   isStalled?: () => boolean;
   /** Backoff between failed poll attempts (network/HTTP errors), AND between cycles that made no cursor progress while stalled (finding P2/Fix 2a — see {@link isStalled}). The reference server holds each successful, non-stalled request open ~50s itself (protocol §8), so this only matters when a request errors outright or is stalled. Default 2s. */
   retryDelayMs?: number;
+  /** Deterministic delay authority for automatic failed/stalled cycles. */
+  retryDelayForAttempt?: (attempt: number, baseDelayMs: number) => number;
+  onOperationalOutcome?: (outcome: 'success' | 'failure') => void;
   /**
    * Minimum delay before the next request when a poll comes back with zero
    * events. The reference server holds each request open ~50s waiting for
@@ -233,6 +236,7 @@ export class LongPollClient {
   }
 
   private async loop(): Promise<void> {
+    let retryAttempt = 0;
     while (this.running) {
       try {
         const base = toHttpBase(this.opts.serverUrl);
@@ -242,7 +246,9 @@ export class LongPollClient {
 
         const res = await authedFetch(url, { method: 'GET' }, this.opts.auth);
         if (!res.ok) {
-          await sleep(this.opts.retryDelayMs ?? 2000);
+          this.opts.onOperationalOutcome?.('failure');
+          const baseMs = this.opts.retryDelayMs ?? 2000;
+          await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs);
           continue;
         }
 
@@ -339,6 +345,8 @@ export class LongPollClient {
         }
 
         if (parsed.events.length === 0) {
+          retryAttempt = 0;
+          this.opts.onOperationalOutcome?.('success');
           await sleep(this.opts.idleDelayMs ?? 250);
         } else if (this.opts.isStalled?.() || hadValidationFailureThisBatch) {
           // Finding P2 (Fix 2a) / R1: a non-empty batch while stalled (or
@@ -347,7 +355,12 @@ export class LongPollClient {
           // local flag is needed on top of `isStalled()`) means this cycle
           // made no real cursor progress — apply the same backoff a failed
           // HTTP attempt gets, instead of looping back immediately at RTT.
-          await sleep(this.opts.retryDelayMs ?? 2000);
+          this.opts.onOperationalOutcome?.('failure');
+          const baseMs = this.opts.retryDelayMs ?? 2000;
+          await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs);
+        } else {
+          retryAttempt = 0;
+          this.opts.onOperationalOutcome?.('success');
         }
       } catch (err) {
         if (err instanceof DeviceRevokedError) {
@@ -356,7 +369,9 @@ export class LongPollClient {
           return;
         }
         if (!this.running) return;
-        await sleep(this.opts.retryDelayMs ?? 2000);
+        this.opts.onOperationalOutcome?.('failure');
+        const baseMs = this.opts.retryDelayMs ?? 2000;
+        await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs);
       }
     }
   }

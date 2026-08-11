@@ -6,7 +6,7 @@ import {
   type Envelope,
   type RuntimeInfo,
   type TaskState,
-} from '@byok/protocol';
+} from '@byok-sdk/protocol';
 import type { ConnectionState } from './ws-transport';
 
 /**
@@ -67,7 +67,7 @@ export type DaemonEvent =
    * Covers BOTH a post-claim `task.fail` and a pre-claim `task.decline` —
    * `preClaim` distinguishes the two. This mirrors the protocol's own
    * `Offered -> Failed` convention (docs/protocol.md "Declined vs. Failed";
-   * `TASK_TRANSITIONS`, `@byok/protocol`): a decline and a failure are the
+   * `TASK_TRANSITIONS`, `@byok-sdk/protocol`): a decline and a failure are the
    * same outcome from a dispatcher's point of view, so this module doesn't
    * invent a parallel `declined` kind the wire model itself doesn't have.
    */
@@ -255,7 +255,7 @@ export class DaemonObserver {
       case 'task.progress': {
         const taskId = envelope.task_id;
         this.upsertTask(taskId, { state: 'Running' });
-        // `known`-only (`partitionAgentEvents`, `@byok/protocol`): an
+        // `known`-only (`partitionAgentEvents`, `@byok-sdk/protocol`): an
         // unrecognized-type event is an opaque forward-compat placeholder
         // (agent-event.ts) this daemon can't meaningfully normalize locally
         // either — skip it here the same way `TaskRunner`'s own consumers

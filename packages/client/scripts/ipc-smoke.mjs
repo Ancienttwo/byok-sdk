@@ -30,16 +30,16 @@
 //      guarantee M4 Phase 2 calls for.
 //   5. The control socket/pipe and its token file are gone afterward.
 //
-// Uses the REAL `@byok/server` reference implementation (not a hand-rolled
+// Uses the REAL `@byok-sdk/server` reference implementation (not a hand-rolled
 // stub) to give the daemon something genuine to pair/connect against — both
-// `@byok/server` and `@hono/node-server` are already `@byok/client`
+// `@byok-sdk/server` and `@hono/node-server` are already `@byok-sdk/client`
 // devDependencies (see `src/__tests__/fixtures/real-server.ts`, which this
 // mirrors) and are built by the same `pnpm -r build` this script requires
 // first.
 //
 // Usage: node packages/client/scripts/ipc-smoke.mjs
-//   Requires @byok/client and @byok/server already built
-//   (`pnpm -r build` — @byok/protocol too, transitively).
+//   Requires @byok-sdk/client and @byok-sdk/server already built
+//   (`pnpm -r build` — @byok-sdk/protocol too, transitively).
 
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -57,8 +57,8 @@ const serverDistIndex = path.join(clientDir, '..', 'server', 'dist', 'index.js')
 const honoNodeServerSpecifier = '@hono/node-server';
 
 for (const [label, file] of [
-  ['@byok/client', byokAgentBin],
-  ['@byok/server', serverDistIndex],
+  ['@byok-sdk/client', byokAgentBin],
+  ['@byok-sdk/server', serverDistIndex],
 ]) {
   try {
     await fs.stat(file);
@@ -139,9 +139,9 @@ try {
     });
   });
   const serverUrl = `http://127.0.0.1:${port}`;
-  log(`==> real @byok/server reference implementation listening at ${serverUrl}`);
+  log(`==> real @byok-sdk/server reference implementation listening at ${serverUrl}`);
 
-  const { code: pairingCode } = byok.pairing.createPairingCode();
+  const { code: pairingCode } = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId });
 
   await fs.writeFile(
     configPath,

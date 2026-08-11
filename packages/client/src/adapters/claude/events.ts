@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent } from '@byok/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 
 /**
  * A raw parsed line from `claude --output-format stream-json`. Shapes vary

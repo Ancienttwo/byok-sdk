@@ -1,9 +1,9 @@
-# @byok/example-basic
+# @byok-sdk/example-basic
 
 End-to-end walking-skeleton demo for the BYOK SDK (see `docs`/plan: 里程碑 M0).
-A hono server embeds `@byok/server`'s in-memory reference implementation and
+A hono server embeds `@byok-sdk/server`'s in-memory reference implementation and
 serves a single plain-HTML/JS page (no frontend build step). A separate
-`byok-agent` daemon process (from `@byok/client`) runs on "the user's
+`byok-agent` daemon process (from `@byok-sdk/client`) runs on "the user's
 machine" and drives the local `pi` coding-agent runtime.
 
 Not published — this package is `private` and lives under `examples/`.
@@ -19,17 +19,17 @@ pnpm install
 pnpm -r build
 ```
 
-`@byok/client` carries `@earendil-works/pi-coding-agent@0.84.1` as an exact
-required dependency. pnpm installs the ordinary npm artifact into its isolated
-layout and the adapter resolves that package directly; it does not silently
-substitute an unrelated global `pi` from `PATH`.
+Install and authenticate `@earendil-works/pi-coding-agent` separately, then
+ensure its `pi` executable is on `PATH`. The SDK does not install runtime CLIs
+or own their credentials. `BYOK_PI_BIN` is the explicit override for a custom
+executable location or test fixture.
 
 ## Run it
 
 **Terminal 1 — the server:**
 
 ```sh
-pnpm --filter @byok/example-basic dev
+pnpm --filter @byok-sdk/example-basic dev
 ```
 
 Starts the hono app on `http://localhost:8787` (override with `PORT`).
@@ -53,7 +53,7 @@ node packages/client/dist/bin/byok-agent.js pair <code> --server http://localhos
 node packages/client/dist/bin/byok-agent.js start --config /tmp/byok-example-config.json
 ```
 
-(Once `@byok/client` publishes its `byok-agent` bin, this is just `byok-agent
+(Once `@byok-sdk/client` publishes its `byok-agent` bin, this is just `byok-agent
 pair`/`byok-agent start` on PATH — see that package's own docs. Invoking
 `dist/bin/byok-agent.js` directly here just avoids requiring a global/linked
 install for the demo.)
@@ -102,7 +102,7 @@ Paths are hidden by default and are shown only with `--show-paths`. The private 
 
 By default this demo's task/blob state is in-memory + local-disk and is lost
 whenever the server process restarts. Set `BYOK_STORE=sqlite` to swap in
-`@byok/server`'s `node:sqlite`-backed reference stores (`SqliteTaskStore`/
+`@byok-sdk/server`'s `node:sqlite`-backed reference stores (`SqliteTaskStore`/
 `SqliteBlobStore`) instead — task **records** and blob bytes then survive a
 restart, persisted under `examples/basic/data/` (gitignored):
 
@@ -114,7 +114,7 @@ restart, persisted under `examples/basic/data/` (gitignored):
 > scope for the M3 reference stores.
 
 ```sh
-BYOK_STORE=sqlite pnpm --filter @byok/example-basic dev
+BYOK_STORE=sqlite pnpm --filter @byok-sdk/example-basic dev
 ```
 
 The repository's Node.js 22.19+ baseline includes `node:sqlite`; unsupported
@@ -138,8 +138,7 @@ needing a real key.
 
 ## Testing with z.ai GLM
 
-`pi` (`@earendil-works/pi-coding-agent@0.84.1`, pinned exactly by this SDK)
-ships a **built-in**
+`pi` (`@earendil-works/pi-coding-agent`) already ships a **built-in**
 `zai` provider — no extension, no `models.json`, no code change anywhere in
 this SDK is needed. The installed 0.84.1 registry defines it as:
 
@@ -195,10 +194,8 @@ once, rather than something byok selects per task:
    `HOME=/tmp/byok-glm-home node packages/client/dist/bin/byok-agent.js start ...`,
    and put `.pi/agent/settings.json` under that scratch `HOME` instead.)
 
-3. **Leave `BYOK_PI_BIN` unset** for the normal npm-package deployment so
-   `resolvePiBin()` resolves the pinned required dependency. The override is
-   reserved for tests and packaged products that explicitly inject their
-   version-matched Node sidecar.
+3. **Do not set `BYOK_PI_BIN`** for this — leave it unset so
+   `resolvePiBin()` selects the real user-installed `pi` executable on PATH.
 
 4. Run the daemon exactly as in "Run it" above (`pair` then `start`) with
    `ZAI_API_KEY` exported and the settings file in place, then dispatch:

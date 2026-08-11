@@ -40,8 +40,28 @@ export function importPrivateKeyPem(pem: string): KeyObject {
   return createPrivateKey(pem);
 }
 
-/** Sign `nonce` (UTF-8) with the device private key; returns the raw 64-byte signature, base64url-encoded (protocol §6.2). */
+/**
+ * S1 (GAP-004): the domain-separation prefix this device signs along with a
+ * challenge nonce, byte-identical to the server's own
+ * `NONCE_SIGNING_DOMAIN` (`packages/server/src/auth.ts`). The device key is a
+ * long-lived identity key that later planes will also sign structured
+ * messages with; tagging the domain is what stops a signature made for one of
+ * those from being replayable as a token-renewal credential.
+ *
+ * Not shared through a package: the two ends agree on a wire constant, and
+ * inventing a dependency between server and client to hold one string literal
+ * would couple them far harder than the literal does.
+ */
+export const NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n';
+
+/**
+ * Sign a challenge nonce with the device private key: the signed message is
+ * {@link NONCE_SIGNING_DOMAIN} followed by `nonce` (UTF-8), and the result is
+ * the raw 64-byte Ed25519 signature, base64url-encoded (protocol §6.2). A
+ * server on the domain-separated contract rejects the undomained form, so
+ * there is no variant of this that omits the prefix.
+ */
 export function signNonce(privateKey: KeyObject, nonce: string): string {
-  const signature = edSign(null, Buffer.from(nonce, 'utf8'), privateKey);
+  const signature = edSign(null, Buffer.from(NONCE_SIGNING_DOMAIN + nonce, 'utf8'), privateKey);
   return signature.toString('base64url');
 }

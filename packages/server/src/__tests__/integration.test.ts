@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
-import { createEnvelope, PROTOCOL_VERSION } from '@byok/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createByokServer } from '../index';
@@ -9,17 +9,32 @@ import {
   connectFakeDaemonWs,
   nextEnvelope,
   pairFakeDaemon,
+  PI_RUNTIME_INFO,
   send,
   startServer,
   stopServer,
+  testPairingClaims,
   waitForTaskEvent,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
 
-/** Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running) and wait for the Running event. */
-async function claimAndStart(ws: WebSocket, deviceId: string, handle: TaskHandle): Promise<void> {
-  send(ws, createEnvelope('task.claim', { deviceId }, { taskId: handle.taskId }));
+/**
+ * Claim + start a dispatched task over `ws` (Offered -> Claimed -> Running)
+ * and wait for the Running event. `runtime` (S0) is the actual adapter this
+ * claim reports and `capabilities` (S0/D-4) is that adapter's own self-report,
+ * which is the ONLY thing the server's steer gate reads; both omitted matches
+ * a legacy `task.claim`, which is what every call site here but the steer test
+ * wants.
+ */
+async function claimAndStart(
+  ws: WebSocket,
+  deviceId: string,
+  handle: TaskHandle,
+  runtime?: RuntimeId,
+  capabilities?: RuntimeCapabilities,
+): Promise<void> {
+  send(ws, createEnvelope('task.claim', { deviceId, runtime, capabilities }, { taskId: handle.taskId }));
   send(ws, createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -40,7 +55,7 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
     const started = await startServer(byok);
     server = started.server;
 
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -120,7 +135,7 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
     const started = await startServer(byok);
     server = started.server;
 
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -165,7 +180,7 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
     const started = await startServer(byok);
     server = started.server;
 
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -193,7 +208,7 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
     const started = await startServer(byok);
     server = started.server;
 
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -260,7 +275,7 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
     const started = await startServer(byok);
     server = started.server;
 
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -338,7 +353,7 @@ describe('WS handshake rejection gates close with code 1002 (M0 gatekeeper findi
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     ws = await openAuthedSocket(started.port, accessToken);
@@ -362,7 +377,7 @@ describe('WS handshake rejection gates close with code 1002 (M0 gatekeeper findi
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     ws = await openAuthedSocket(started.port, accessToken);
@@ -386,7 +401,7 @@ describe('WS handshake rejection gates close with code 1002 (M0 gatekeeper findi
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
     ws = await openAuthedSocket(started.port, accessToken);
@@ -423,8 +438,15 @@ describe('redelivery after reconnect (§9)', () => {
     const started = await startServer(byok);
     server = started.server;
 
-    const { code } = byok.pairing.createPairingCode();
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    // S0: this device must advertise a runtime that can actually be steered
+    // (pi) and claim task1 as that runtime — the server's steer gate reads
+    // the claim-time capability snapshot, so a runtime-less claim here would
+    // (correctly) be refused before any envelope existed to redeliver.
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      runtimes: [PI_RUNTIME_INFO],
+    });
     ws = daemon.ws;
 
     // task1 stays Running — steer() below produces an envelope the daemon
@@ -434,7 +456,7 @@ describe('redelivery after reconnect (§9)', () => {
     if (offer1.type !== 'task.offer') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
 
-    await claimAndStart(ws, daemon.deviceId, handle1);
+    await claimAndStart(ws, daemon.deviceId, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
     await handle1.steer('keep going'); // assigns the next seq; deliberately never read off `ws`
 
     // task2 is cancelled before reconnect — terminal by the time redelivery
@@ -498,7 +520,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -518,7 +540,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -542,7 +564,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -559,7 +581,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -579,7 +601,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -619,7 +641,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 
@@ -654,7 +676,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   });
 });
 
-describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok/protocol agent-event.ts)', () => {
+describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protocol agent-event.ts)', () => {
   let server: HttpServer | undefined;
   let ws: WebSocket | undefined;
 
@@ -669,7 +691,7 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok/protocol ag
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
-    const { code } = byok.pairing.createPairingCode();
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
     ws = daemon.ws;
 

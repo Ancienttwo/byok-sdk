@@ -5,7 +5,7 @@ Node's own built-in
 [Single Executable Applications](https://nodejs.org/api/single-executable-applications.html)
 feature — no third-party bundler runtime needed at execution time (only at
 build time, to flatten the module graph). This is a **reference recipe**,
-not a shipped artifact: `@byok/client` is an npm library (Decision-6
+not a shipped artifact: `@byok-sdk/client` is an npm library (Decision-6
 boundary — see the repo root docs), and the SDK itself never produces,
 signs, or distributes a binary. Copy this folder into your own product's
 repo and adapt it to your own entry point, signing, and release pipeline.
@@ -25,7 +25,7 @@ repo and adapt it to your own entry point, signing, and release pipeline.
 - [`postject`](https://www.npmjs.com/package/postject) to inject the
   generated blob (`npx postject` works with no separate install; pin it as
   a devDependency instead if you want hermetic/offline builds).
-- Your product's launcher entry point built against `@byok/client` (see
+- Your product's launcher entry point built against `@byok-sdk/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
   it constructs a daemon, calls `.status()`, and probes runtime detection
   with no network I/O).
@@ -71,7 +71,7 @@ matches Node's own documented macOS injection command exactly —
 
 ### Why bundle to CommonJS first, not ESM
 
-`@byok/client` ships ESM (`"type": "module"`), and its pi adapter's
+`@byok-sdk/client` ships ESM (`"type": "module"`), and its pi adapter's
 `resolve-bin.ts` calls `import.meta.resolve(...)` at runtime — see "What
 this actually guarantees" below. Node SEA's injected main script must be a
 single, fully self-contained file (module loading does not read from the
@@ -107,25 +107,17 @@ binary (or a wrapper around it) happens to be a `.cmd`/`.bat` on Windows.
 
 ## What this actually guarantees (and what it doesn't)
 
-Bundling a Node.js daemon into one file is not automatically safe. This
-SDK has exactly **one** hazardous resolution path: the pi adapter's
-`resolvePiBin()` (`packages/client/src/adapters/pi/resolve-bin.ts`) calls
-`import.meta.resolve('@earendil-works/pi-coding-agent')` to find pi's
-required package install. A SEA cannot embed that external CLI package, and
-there is no automatic global-PATH fallback because that would replace the
-versioned core dependency with an unrelated executable. Production SEA
-deployments must supply the version-matched Node pi sidecar with
-`BYOK_PI_BIN`; this recipe proves the missing/configured states are observable.
+Bundling a Node.js daemon into one file is not automatically safe. Runtime
+CLIs remain external, user-installed executables. The pi adapter resolves only
+`BYOK_PI_BIN` or a bare `pi` on PATH, whose `detect()` reports
+`present: false` if unavailable. This recipe's `smoke-test.sh` proves both
+absence and explicit pickup under a real Node SEA binary.
 
 Empirically confirmed while building this recipe (see `smoke-test.sh`'s two
 assertions):
 
-- **pi sidecar absent** (no `BYOK_PI_BIN`, pi unreachable from the compiled binary):
-  esbuild's CJS conversion rewrites `import.meta` into a plain object with
-  no `.resolve()` method; calling it throws an ordinary catchable
-  `TypeError`, which becomes a required-package resolution failure.
-  `PiAdapter.detect()` reports `{ present: false }` cleanly; a product treats
-  this as a missing core runtime deployment dependency.
+- **pi absent** (no `BYOK_PI_BIN`, no `pi` on PATH): `PiAdapter.detect()`
+  reports `{ present: false }` cleanly. No crash, exit 0.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
   version-matched Node 22.19+ pi binary at that path is detected correctly

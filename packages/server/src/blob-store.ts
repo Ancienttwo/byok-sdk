@@ -9,7 +9,7 @@ import path from 'node:path';
  * gets back a presigned upload URL; the caller `PUT`s the bytes there
  * directly (no bearer auth on that URL — the HMAC signature + expiry *is*
  * the auth); `GET /byok/blobs/:id/url` mints a presigned download URL the
- * same way. `BlobRef` itself (`@byok/protocol`'s `blob.ts`) is unchanged;
+ * same way. `BlobRef` itself (`@byok-sdk/protocol`'s `blob.ts`) is unchanged;
  * this module is what produces the URLs a `BlobRef` points at.
  *
  * `BlobStore` is interface-shaped so a SaaS can swap in a real object-store
@@ -33,9 +33,16 @@ export interface ReadContentResult {
   contentType: string;
 }
 
+export class BlobDeclarationConflictError extends Error {
+  constructor(blobId: string) {
+    super(`Blob ${blobId} already binds a different declaration.`);
+    this.name = 'BlobDeclarationConflictError';
+  }
+}
+
 export interface BlobStore {
-  /** Declare a blob before upload; returns its id + a presigned PUT URL. */
-  createUpload(input: CreateUploadInput): Promise<{ blobId: string; uploadUrl: string }>;
+  /** Declare a blob before upload; an explicit id makes the declaration idempotent across host restart. */
+  createUpload(input: CreateUploadInput, blobId?: string): Promise<{ blobId: string; uploadUrl: string }>;
   /** A presigned GET URL for a blob that has finished uploading, or `undefined` if unknown/not yet uploaded. */
   getDownloadUrl(blobId: string): Promise<string | undefined>;
   /** Whether `blobId` is known *and* has finished uploading. */
@@ -62,7 +69,7 @@ export interface LocalDiskBlobStoreOptions {
 
 const DEFAULT_URL_TTL_MS = 15 * 60 * 1000;
 
-/** docs/protocol.md §7 now pins the canonical `contentHash` format (`sha256:<64 lowercase hex>`, finding F9 — `CONTENT_HASH_RE` in `@byok/protocol`'s `blob.ts`), enforced at the schema level on every inbound `CreateBlobRequest`/`BlobRef`. Comparison here is therefore a straight string match — no normalization, no compat shim; anything else was already rejected before reaching this store. */
+/** docs/protocol.md §7 now pins the canonical `contentHash` format (`sha256:<64 lowercase hex>`, finding F9 — `CONTENT_HASH_RE` in `@byok-sdk/protocol`'s `blob.ts`), enforced at the schema level on every inbound `CreateBlobRequest`/`BlobRef`. Comparison here is therefore a straight string match — no normalization, no compat shim; anything else was already rejected before reaching this store. */
 function sha256Hex(data: Buffer): string {
   return `sha256:${createHash('sha256').update(data).digest('hex')}`;
 }
@@ -81,9 +88,20 @@ export class LocalDiskBlobStore implements BlobStore {
     this.ready = mkdir(this.directory, { recursive: true }).then(() => undefined);
   }
 
-  async createUpload(input: CreateUploadInput): Promise<{ blobId: string; uploadUrl: string }> {
+  async createUpload(input: CreateUploadInput, requestedBlobId?: string): Promise<{ blobId: string; uploadUrl: string }> {
     await this.ready;
-    const blobId = `blob_${randomUUID()}`;
+    const blobId = requestedBlobId ?? `blob_${randomUUID()}`;
+    const existing = this.blobs.get(blobId);
+    if (existing !== undefined) {
+      if (
+        existing.meta.size !== input.size ||
+        existing.meta.contentType !== input.contentType ||
+        existing.meta.contentHash !== input.contentHash
+      ) {
+        throw new BlobDeclarationConflictError(blobId);
+      }
+      return { blobId, uploadUrl: this.signUrl(blobId, 'put') };
+    }
     this.blobs.set(blobId, { meta: input, uploaded: false });
     return { blobId, uploadUrl: this.signUrl(blobId, 'put') };
   }
@@ -111,6 +129,7 @@ export class LocalDiskBlobStore implements BlobStore {
     await this.ready;
     const record = this.blobs.get(blobId);
     if (!record) return { ok: false, reason: 'unknown blobId' };
+    if (record.uploaded) return { ok: false, reason: 'blob already uploaded' };
     if (data.length !== record.meta.size) {
       return { ok: false, reason: `size mismatch: declared ${record.meta.size}, received ${data.length}` };
     }

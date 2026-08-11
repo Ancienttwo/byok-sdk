@@ -5,7 +5,7 @@ Run a BYOK SDK-based daemon as a background Linux service using a
 **user unit** (`~/.config/systemd/user/`) — no root required, matching
 macOS's per-user LaunchAgent and Windows' per-machine Windows Service each
 doing the idiomatic "run this in the background for me" thing for their own
-platform. This is a **reference recipe**: `@byok/client` is an npm library
+platform. This is a **reference recipe**: `@byok-sdk/client` is an npm library
 (Decision-6 boundary — see the repo root docs).
 
 ## Quick start

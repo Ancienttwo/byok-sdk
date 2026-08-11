@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   type RuntimeAdapter,
@@ -16,6 +16,7 @@ import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 
 const execFileAsync = promisify(execFile);
+const DETECT_TIMEOUT_MS = 5_000;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -60,15 +61,11 @@ export class PiAdapter implements RuntimeAdapter {
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const bin = this.resolveBin();
-      // Empirically, pi 0.84.1 prints `--version` output to STDOUT —
-      // re-probed against the pinned 0.84.1 build through this exact
-      // `execFileAsync` path (`{stdout:"0.84.1\n", stderr:""}`), not carried
-      // over from an earlier pin. The stream is NOT stable across pi
-      // versions: the previously pinned 0.74.2/0.80.7 builds were recorded
-      // here as printing it to stderr instead. Both are checked for exactly
-      // that reason, and this claim must be re-probed on every pi bump.
-      const { stdout, stderr } = await execFileAsync(bin.command, ['--version']);
+      // Empirically, pi (0.74.2 and 0.80.7) prints `--version` output to
+      // STDERR, not stdout — confirmed with an explicit stdout/stderr probe,
+      // not assumed. Check both so this doesn't silently regress if a future
+      // pi release moves it back to stdout.
+      const { stdout, stderr } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
       const version = stdout.trim() || stderr.trim();
       const authPresent = KNOWN_PROVIDER_ENV_VARS.some((name) => process.env[name] !== undefined);
       return { present: true, version, authPresent };
@@ -78,7 +75,9 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   capabilities(): RuntimeCapabilities {
-    return { steer: true, resume: true, permissionModes: ['auto', 'readonly'] };
+    // `approvalInteractive: false` — `PiSession.resolveApproval` throws
+    // unconditionally: pi has no `needs_approval` notion to resume from.
+    return { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] };
   }
 
   /**

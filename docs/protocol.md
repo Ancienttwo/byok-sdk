@@ -1,6 +1,6 @@
 # BYOK SDK Wire Protocol
 
-Normative contract for `@byok/protocol`. This is the single source of truth for
+Normative contract for `@byok-sdk/protocol`. This is the single source of truth for
 the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
@@ -210,7 +210,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
 | `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
-| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `runtime?` (M5, additive — §3.1) | Daemon accepts an offer (idempotent CAS) |
+| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
 | `task.started` | D→S | **required** | optional | `{}` | Daemon actually starts the runtime session — `Claimed → Running` |
 | `task.decline` | D→S | **required** | optional | `reason`, `retryable?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
@@ -232,6 +232,17 @@ first place. Do not rely on it to influence workspace selection — a real
 implementation (what it should override or merely suggest, relative to the
 existing `sessionRef`-keyed workspace mapping) is an undesigned follow-on
 task, not something already wired up behind this field.
+
+**Decision (S0): `workspaceHint` stays reserved.** Leaving the field on the
+wire costs nothing (an ignored optional payload key) and removing it would be
+a breaking wire-v1 change, so it is kept as declared-but-unconsumed rather
+than either wired up opportunistically or deleted. The rule that follows from
+that: no public documentation, SDK surface, or UI may present this field as a
+workspace-selection capability, and no code may start reading it as a
+side effect of unrelated work. Wiring it later requires its own ADR that
+first settles the resolver design — precedence against the `sessionRef`-keyed
+mapping, path validation and confinement, and what a device does with a hint
+it cannot honor. See `docs/architecture/sdk-architecture.md` ADR-023.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
@@ -427,22 +438,18 @@ without a wire change — and a server MUST NOT assume pi or codex will ever
 pause a task in `AwaitApproval` on their own initiative; claude now can, under
 `policy.mode: 'confirm'` specifically.
 
-**The `interactive-approval` capability flag stays RESERVED — it is NOT the
-routing signal to use.** `CAPABILITY_FLAGS` (`version.ts`) includes
-`interactive-approval`; every bundled adapter, including claude, still
-reports `approvalInteractive: false` (§11.2's footnote) — this flag was never
-wired to a per-adapter signal and M4 Phase 3 deliberately does not repurpose
-it as a side effect of adding real `confirm` support. **The actual, accurate,
-per-runtime signal for whether a device can honor `confirm` is
-`RuntimeInfo.capabilities.permissionModes.includes('confirm')`** (already
-current: `true` for a claude-capable device, `false` for pi/codex-only). A
-server dispatching `policy.mode: 'confirm'` should check THAT field, not
-`approvalInteractive` — this is a known, intentional gap between two
-capability signals that should eventually converge (a future wave giving
-`interactive-approval`/`approvalInteractive` real per-adapter meaning), not
-an oversight; until then, `permissionModes` is authoritative and
-`interactive-approval` remains exactly as unreliable a signal as it always
-was.
+**The connection-level `interactive-approval` capability flag stays RESERVED
+— it is NOT the routing signal to use.** `CAPABILITY_FLAGS` (`version.ts`)
+includes `interactive-approval`, but no daemon advertises it and no server
+behavior keys off it; it was never wired to a per-adapter signal and nothing
+since has repurposed it. **The accurate per-runtime signals live on
+`RuntimeInfo.capabilities` (§11.4): `permissionModes.includes('confirm')` for
+whether a runtime can honor `policy.mode: 'confirm'`, and
+`approvalInteractive` for whether it pauses on a real interactive approval.**
+Both are generated from the adapter's own `capabilities()` and agree by
+construction (claude: `confirm` present and `approvalInteractive: true`; pi
+and codex: neither). A server dispatching `policy.mode: 'confirm'` checks
+those fields, never the connection-level flag.
 
 ### 5.2 `task.approval_resolved` — explicit local-resolution report (additive minor)
 
@@ -646,6 +653,20 @@ Response (PairResponseSchema): { deviceId, accessToken, refreshHint? }
   a schema change: `refreshHint` was always allowed to contain this value,
   and always will be.
 
+**Claims flow (S1, 2026-08-07).** A pairing code is not an anonymous ticket:
+the server mints it already bound to a `{tenantId, productId}` pair
+(`createPairingCode({tenantId, productId})` in the reference server's
+`pairing.ts`), and redeeming it returns exactly those claims. `PairRequest` is
+unchanged and deliberately carries neither field — a device cannot name, hint
+at, or influence the tenant it lands in; the only way tenant identity enters
+the system is the code the SaaS minted out of band. On redemption the claims
+are written into the device row (`DeviceRecord.tenantId` / `.productId`, both
+required), and the first access token is minted from that same pair. Redeem
+and row-write happen in one step, and the code's single-use semantics are what
+make it exclusive: a second redeem is rejected before any row is written.
+From that point the device row — not any token payload — is the authority on
+which tenant and product a device belongs to.
+
 ### 6.2 Token renewal — `POST /byok/challenge` + `POST /byok/token`
 
 The access token from pairing expires in ~1h. Renewing it does not require
@@ -664,16 +685,42 @@ POST /byok/token
   Response (TokenResponseSchema): { accessToken, expiresAt }
 ```
 
-`signature` is the Ed25519 signature over `nonce`, base64url-encoded. **Pinned
-encoding (resolves a carried-forward pin): `nonce` is signed/verified as its
-raw UTF-8 bytes** — both the reference client
-(`signNonce`: `crypto.sign(null, Buffer.from(nonce, 'utf8'), privateKey)`) and
-the reference server (`verifyEd25519Signature`:
-`verify(null, Buffer.from(message, 'utf8'), ...)`) encode the nonce string
-this way before signing/verifying; a client using any other encoding (e.g.
-base64url-decoding the nonce string before signing its bytes) will produce a
-signature the reference server rejects. A nonce is single-use; the server
-must reject a replayed nonce.
+`signature` is the Ed25519 signature over the **domain-separated** nonce,
+base64url-encoded. **Pinned encoding (changed 2026-08-07, S1 — this replaces
+the previous raw-nonce pin and is a breaking change): the signed message is
+the UTF-8 bytes of the domain prefix `byok-nonce-v1\n` followed by the UTF-8
+bytes of the `nonce` string**, i.e. `sign("byok-nonce-v1\n" + nonce)`. Both
+ends apply the same literal: the reference client (`signNonce`:
+`crypto.sign(null, Buffer.from(NONCE_SIGNING_DOMAIN + nonce, 'utf8'), privateKey)`)
+and the reference server (`verifyNonceSignature`, which applies the prefix
+internally so no route can be written that checks an undomained message).
+
+A signature over the bare nonce — the pre-S1 encoding — is rejected with
+`401`. There is no dual mode: no flag, fallback, negotiated version, or grace
+window makes the old encoding acceptable, and the server holds exactly one
+nonce-signature check. Any other encoding (e.g. base64url-decoding the nonce
+before signing its bytes, or omitting the trailing newline of the prefix) is
+likewise rejected.
+
+Why the break: the device key is a long-lived identity key that later planes
+(S6 device proof) will also use to sign structured messages. Without a domain
+tag, a signature produced for one purpose is a valid signature for another —
+an attacker who can induce a device to sign anything nonce-shaped would hold
+a token-renewal credential. Domain-separating now, before any second signing
+purpose exists, is what keeps that cross-protocol reuse door closed. Since
+the packages carry no published compatibility contract yet, the recovery path
+for a device on the old encoding is a re-pair, not a server-side shim.
+
+A nonce is single-use; the server must reject a replayed nonce. The nonce is
+consumed only on a fully-verified success, so a bad signature does not burn
+the legitimate device's outstanding nonce.
+
+The renewed token, like the one from pairing, carries the identity triple
+`{tenantId, productId, deviceId}`. Those claims are lookup keys, not
+assertions: the server resolves the device row by them and the row is the
+authority. `/byok/challenge` and `/byok/token` are pre-tenant by construction
+— their pinned request shapes carry only a `deviceId` — so the row is what
+tells the server which tenant and product the renewed token gets bound to.
 
 ### 6.3 Revocation
 
@@ -684,20 +731,48 @@ device's next `/byok/challenge`, `/byok/token`, or WSS connect attempt gets a
 fresh device keypair is not required, but re-registering the existing public
 key is the simplest implementation and is an acceptable choice for M1).
 
+The revocation surface is tenant-first (S1): the reference server's public
+action is `devices.revoke(tenantId, deviceId)`, and the tenant is part of the
+lookup rather than a check applied afterward — a caller holding one tenant's
+credentials cannot revoke, or even confirm the existence of, another tenant's
+device. Revoking a device that the named tenant does not own is silently
+indistinguishable from revoking one that does not exist at all.
+
 ## 7. Blob flows
 
-`BlobRef` (`src/blob.ts`) is unchanged. These are the two HTTP calls that
-produce the presigned URLs a `BlobRef` points at; both require a valid bearer
-access token.
+`BlobRef` (`src/blob.ts`) is unchanged. These are the three bearer-authenticated
+metadata calls around the presigned byte transfer. `Idempotency-Key` is the
+reservation/request id: create and finalize for one upload use the exact same
+non-empty value. It is a load-bearing header, not a request-body field, so the
+frozen `CreateBlobRequest`/`CreateBlobResponse` bodies remain unchanged.
 
 ```
 POST /byok/blobs
+  Header: Idempotency-Key: <reservation-id>
   Request  (CreateBlobRequestSchema):    { size, contentType, contentHash }
   Response (CreateBlobResponseSchema):   { blobId, uploadUrl }
+
+POST /byok/blobs/:id/finalize
+  Header: Idempotency-Key: <same reservation-id>
+  Response: 204 No Content
 
 GET /byok/blobs/:id/url
   Response (BlobDownloadUrlResponseSchema): { downloadUrl }
 ```
+
+The lifecycle is `POST create → presigned PUT → POST finalize → GET url`.
+Create reserves quota before minting the PUT. Finalize binds tenant, blob
+resource, and reservation; hosted object storage observes only existence,
+size, and content type, then commits manifest/reservation/usage atomically.
+Before finalize, `GET .../url` returns 404 even when bytes already landed.
+Replaying finalize after its response was lost returns the same 204 without
+double-accounting. Reusing one key for a different declaration or blob is a
+422 `storage_integrity_mismatch`; an unknown key is 404. Hosted create also
+requires the tenant's host-issued storage entitlement to exist; otherwise it
+returns 409 `storage_entitlement_missing` before minting any upload grant.
+Because cloud does not rehash R2 bytes (ADR-024), a consumer claiming download
+integrity must hash the downloaded bytes itself; `BlobClient` compares both
+SHA-256 and byte length against `BlobRef` before returning instruction text.
 
 ### 7.1 Content transfer — signed-URL-only, not bearer (resolves a carried-forward pin)
 
@@ -712,8 +787,8 @@ GET /byok/blobs/:id/content?sig=...&exp=...   — fetch the blob's bytes
 **These two `/content` routes are authenticated ENTIRELY differently from
 every other route in this document: signed-URL-only (an HMAC `sig` +
 expiry `exp` query pair), never a bearer token.** The bearer
-`Authorization` header is what gates the two metadata calls above (`POST
-/byok/blobs`, `GET /byok/blobs/:id/url`) — the URLs those calls hand back
+`Authorization` header is what gates the three metadata calls above (`POST
+/byok/blobs`, `POST /byok/blobs/:id/finalize`, `GET /byok/blobs/:id/url`) — the URLs those calls hand back
 already encode their own short-lived authorization, precisely so the content
 itself can be `PUT`/`GET` directly (e.g. from a browser, or any HTTP client
 that never sees the device's JWT) without needing to attach or even possess
@@ -759,9 +834,14 @@ Authed (bearer access token); holds the request open for ~50 seconds waiting
 for new events before returning an empty `events` array. Same cursor
 semantics as the WSS path (§9) — `cursor` in the query is "last seq I've
 seen," `cursor` in the response is "resume from here next time." A client
-using long-poll instead of WSS still sends `conn.hello` semantics implicitly
-by however the reference server's HTTP layer establishes the equivalent
-per-device session; the event *shapes* returned are identical `Envelope`
+using long-poll instead of WSS establishes its per-device session through the
+HTTP layer's own auth rather than through a `conn.hello` frame: it sends NO
+`conn.hello` at all (`conn.hello` is a WSS-only frame — see
+`DAEMON_TO_SERVER_TYPES`, which deliberately excludes it from the inbound
+message gate). Anything a server needs for a per-task decision must therefore
+travel on a `task.*` message, not be inferred from connection state — this is
+exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
+`conn.hello.runtimes[]`. The event *shapes* returned are identical `Envelope`
 values regardless of transport.
 
 ### 8.2 Send — `POST /byok/messages`
@@ -816,7 +896,7 @@ the whole thing outright — and then, if it naively retried the identical
 oversized batch unchanged, stall permanently. The reference client
 (`ConnectionManager.drainOutbox`) does this by importing the same
 `MAX_MESSAGES_PER_BATCH` constant the schema enforces (exported from
-`@byok/protocol`, not a hard-coded copy), so the two can never drift apart.
+`@byok-sdk/protocol`, not a hard-coded copy), so the two can never drift apart.
 
 ### 8.3 WS and long-poll are mutually exclusive — last transport wins (resolves a carried-forward pin)
 
@@ -1002,8 +1082,8 @@ does not fix server/client**; that is M1-2/M1-3's job against this document.
 
 This subsection is a historical migration record, not a statement of current
 build health. At the time this change landed, `pnpm -r typecheck` was run
-from the repo root: `@byok/protocol` itself was green, but both
-`@byok/client` and `@byok/server` failed to compile (verified by running
+from the repo root: `@byok-sdk/protocol` itself was green, but both
+`@byok-sdk/client` and `@byok-sdk/server` failed to compile (verified by running
 each package's `typecheck` script in isolation — the concurrent `pnpm -r`
 run's failure-abort behavior truncates one package's output when both fail
 around the same time, so isolating per-package was needed to see the full
@@ -1059,10 +1139,10 @@ break), but it also never populated the new `runtimes`/`cursor` fields — its
 own doc comment already flagged "at-least-once redelivery with cursors is
 M1," i.e. this was exactly the gap M1-3 was expected to close, not a
 regression from this change. `examples/basic` typechecked clean at the time,
-but only because it consumed `@byok/server`'s prebuilt (stale) `dist/`, not
+but only because it consumed `@byok-sdk/server`'s prebuilt (stale) `dist/`, not
 its source — it didn't construct any envelope/payload directly (it only
 touched `TaskHandle.taskId`, an unrelated server-side identifier), so it was
-expected to remain unaffected once `@byok/server` was fixed and rebuilt.
+expected to remain unaffected once `@byok-sdk/server` was fixed and rebuilt.
 M1-2, M1-3, and the subsequent examples adaptation have since landed,
 closing this out.
 
@@ -1176,15 +1256,14 @@ answers within its own configured ceiling. Unlike `plan` mode's residual
 above, this has no known workspace-confinement gap: the whole mechanism is
 daemon-mediated, not a claude-internal side effect.
 
-¹ `RuntimeInfo.capabilities.approvalInteractive` (§11.4) stays hardcoded
-`false` for every adapter, including claude, even after this — it was never
-wired to a per-adapter signal (`create-daemon.ts`'s `toRuntimeInfoCapabilities`
-predates any adapter actually supporting interactive approval) and this v1
-deliberately doesn't change that wire-visible flag's meaning as a side effect
-of adding `confirm` to claude's `permissionModes`. `permissionModes` already
-carries the precise, up-to-date signal (`'confirm'` present/absent);
-`approvalInteractive` remains reserved for a future wave that gives it real
-per-adapter meaning.
+¹ This row is the CONNECTION-level `interactive-approval` capability flag
+(§5.1), which stays reserved — no daemon advertises it and no server behavior
+keys off it. The per-runtime `RuntimeInfo.capabilities.approvalInteractive`
+field (§11.4) is a different thing and is no longer hardcoded: each adapter
+declares it itself, and claude declares `true` because the confirm path above
+is genuinely wired end to end (pi and codex declare `false`). `permissionModes`
+still carries the finer signal (`'confirm'` present/absent); the two agree by
+construction, since both come from the same adapter `capabilities()` call.
 
 **Connection-level `steer` capability = logical OR across every configured
 adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
@@ -1195,6 +1274,29 @@ pi is one of the daemon's configured adapters (pi: `steer: true`; claude and
 codex: `steer: false`) — a daemon running only claude and/or codex, with no
 pi adapter configured, does not advertise the connection-level `steer` flag
 at all.
+
+**The connection-level `steer` flag is discovery-only; steer authority is
+decided per task, from the claim.** At claim time the server snapshots
+`task.claim.capabilities` (§11.5) — the claiming adapter's own self-report —
+onto the task record, and `steerTask()` rejects with a typed
+`steer_unsupported_runtime` error before any envelope is built whenever that
+snapshot does not say `steer: true`. A `task.steer` envelope therefore never
+reaches the wire for a runtime that cannot honor it. On the receiving side a
+daemon that is still handed an unsupported steer (a forged or pre-gate
+message) records it as a non-retryable protocol error and acks it: the
+envelope is consumed, the cursor advances, and redelivery does not loop.
+
+**That snapshot has exactly one source, and no fallback.** The server reads
+the claim payload and nothing else: not the connection-level flag list, not
+`conn.hello.runtimes[].capabilities`, and not either of them as a backstop for
+a claim that carried no `capabilities`. Connection-level data is discovery —
+it describes a DEVICE rather than a task, and `conn.hello` is transport-shaped
+(a long-poll-only daemon never sends one at all), so a gate reading it is
+structurally blind across an entire transport. A claim without `capabilities`
+(a daemon predating that field) records nothing and is refused. That is
+fail-closed, not a compatibility path: `undefined` means "this server does not
+know", never "supported", and the server never infers a capability from a
+runtime id.
 
 ### 11.3 `usage` AgentEvent — token accounting (additive)
 
@@ -1252,10 +1354,44 @@ fields round-trip.
 This is populated from the exact same adapter `capabilities()` call §11.2's
 matrix and the connection-level `steer` OR (§11.2, last paragraph) are both
 derived from — see `create-daemon.ts`'s `detectRuntimes`/
-`toRuntimeInfoCapabilities`. `approvalInteractive` is hardcoded `false` for
-all three bundled adapters (§5.1) — there is no signal on `RuntimeAdapter`
-this could be derived from instead, since none of the three has any notion of
-pausing for interactive approval to report in the first place.
+`toRuntimeInfoCapabilities`, which is now a pure passthrough of the adapter's
+own declaration and synthesizes no value of its own. `approvalInteractive` is
+therefore per-adapter truth: `true` for claude (the `--permission-prompt-tool`
+confirm path, §11.2), `false` for pi and codex. It is unrelated to the
+reserved connection-level `interactive-approval` flag (§5.1).
+
+`RuntimeInfo.capabilities` here is CONNECTION-level discovery data: it
+answers "what could this device run", for a client picking where to dispatch.
+It is deliberately NOT what any server-side control decision reads — per-task
+steer gating (§11.2) reads `task.claim.capabilities` (§11.5) instead.
+
+### 11.5 Claim-carried capabilities (`task.claim.capabilities`, additive)
+
+`TaskClaimPayload` optionally carries a `capabilities` object — the same
+`RuntimeCapabilitiesSchema` shape as §11.4, reusing it rather than defining a
+second capability vocabulary, and populated from the same adapter
+`capabilities()` call (`task-runner.ts`'s claim path, via the shared
+`toRuntimeInfoCapabilities`).
+
+Same source of truth as §11.4, different SCOPE. §11.4 is connection-level:
+what a device could run, discovered once per connection. This field is
+task-level: what the adapter that actually took THIS task reported about
+itself at the moment it took it. That distinction is what makes it usable as a
+control-gate input — it shares a lifecycle with the task↔runtime binding the
+claim itself establishes, so it stays correct across reconnects, adapter-set
+changes, and transports, whereas connection-level data is re-derived on every
+connection and absent entirely on a transport that sends no `conn.hello`.
+
+Additive-minor, exactly like `runtime` (§3.1): a plain optional field on an
+already-tolerant payload schema, no `PROTOCOL_VERSION` bump, no emission
+gating — a new daemon sends it unconditionally regardless of the connected
+server's age, and an old server simply never reads it. A new server reading an
+old daemon's claim finds nothing and fails closed (§11.2), which is a refusal,
+not a fallback. Unlike `runtime`, it is sent even by an adapter whose id is
+outside the `RuntimeId` enum: `runtime` is a closed enum a custom adapter has
+no member of, but capabilities are a self-report any adapter can make
+honestly, and gating them would leave a custom steer-capable adapter
+permanently un-steerable.
 
 ## 12. Task lease (M2)
 

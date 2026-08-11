@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ByokServerEvent } from '@byok/server';
+import type { ByokServerEvent } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { connectControlClient } from '../bin/control-client';
 import type { ApprovalsListResult, ApprovalsRequestResult } from '../daemon/control-protocol';
@@ -25,7 +25,7 @@ async function waitForServerEvent(
 
 /**
  * M4 (additive-minor, `task.approval_resolved`): the full end-to-end pass —
- * a REAL `@byok/server` and a REAL `@byok/client` daemon, wired together over
+ * a REAL `@byok-sdk/server` and a REAL `@byok-sdk/client` daemon, wired together over
  * a real WS connection (not the lightweight `TestServer`/hand-rolled fake
  * this package's other approval tests use, and not a manually-crafted
  * server-side envelope the way `hub-approval-resolved.test.ts` exercises the
@@ -62,7 +62,7 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
       [adapter],
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     await daemon.pair(pairing.code);
     await daemon.start();
     expect(daemon.status().connected).toBe(true);

@@ -338,6 +338,14 @@ describe('bin/format: formatLiveStatusLines', () => {
       queueWatermarks: [],
       approvals: [],
       approvalsPending: 0,
+      operationalHealth: {
+        availability: 'available',
+        state: 'healthy',
+        failureCount: 0,
+        failureThreshold: 3,
+        windowMs: 60_000,
+        crashCount: 0,
+      },
       ...overrides,
     };
   }
@@ -347,6 +355,29 @@ describe('bin/format: formatLiveStatusLines', () => {
     expect(lines).toContain('live: pid=123 uptimeMs=4567 transport=open');
     expect(lines).toContain('live-paired: yes deviceId=dev-1');
     expect(lines).toContain('live-runtimes: pi,claude');
+  });
+
+  it('renders operational health without event details or payloads', () => {
+    const lines = formatLiveStatusLines(baseLive({
+      operationalHealth: {
+        availability: 'available',
+        state: 'degraded',
+        failureCount: 3,
+        failureThreshold: 3,
+        windowMs: 60_000,
+        crashCount: 2,
+        lastCrashAt: '2026-08-09T00:00:00.000Z',
+      },
+    }));
+    expect(lines).toContain('live-operational-health: state=degraded failures=3/3 windowMs=60000 crashes=2 lastCrashAt=2026-08-09T00:00:00.000Z');
+    expect(lines.join('\n')).not.toMatch(/prompt|secret|token/);
+  });
+
+  it('renders corrupt health state as explicitly unavailable', () => {
+    const lines = formatLiveStatusLines(baseLive({
+      operationalHealth: { availability: 'unavailable', reason: 'operational health state is corrupt JSON' },
+    }));
+    expect(lines).toContain('live-operational-health: unavailable reason="operational health state is corrupt JSON"');
   });
 
   it('shows a placeholder for no active tasks, and one line per active task otherwise', () => {

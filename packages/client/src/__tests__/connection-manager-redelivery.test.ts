@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
@@ -26,7 +26,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * second — this gives precise, deterministic control over "the handler
  * fails once" without depending on some real handler's internals
  * happening to fail on cue. Uses the lightweight `TestServer` stub (not the
- * real `@byok/server`, unlike the sibling F2 test) since nothing here
+ * real `@byok-sdk/server`, unlike the sibling F2 test) since nothing here
  * depends on the real server's own redelivery timing — the stub's
  * `server.send(...)` after a reconnect is this suite's established way to
  * simulate "the server just redelivered this" (see `daemon-reconnect.test.ts`).

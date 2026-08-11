@@ -12,13 +12,14 @@ import {
   type PermissionPolicy,
   type RuntimeId,
   type TaskOfferPayload,
-} from '@byok/protocol';
-import { PolicyUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
+} from '@byok-sdk/protocol';
+import { PolicyUnsupportedError, SteerUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
+import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { ProgressBatcher, type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
 import type { GitWorkspaceManager, GitWorkspaceLease, GitWorkspaceObservation, GitWorkspaceError, GitErrorCategory } from './git-workspace';
@@ -248,7 +249,35 @@ export interface TaskRunnerDeps {
    * about this gate isn't forced to supply one — see `sendApprovalResolved`.
    */
   getServerCapabilities?: () => readonly string[];
+  /**
+   * S3b (L-002): a pre-claim veto on new offers, consulted once per offer
+   * immediately after the redelivery-dedup check and ahead of every other
+   * admission check in `handleOffer`.
+   *
+   * It exists for local storage pressure (architecture §12.7.2.1's hard
+   * watermark: "停止接收新的普通 task；仍允许 terminal/truth flush、删除、导出、
+   * doctor 与恢复操作"). Placing it here rather than deeper in `handleOffer`
+   * is what makes that split real: an offer never reaches adapter selection,
+   * workspace creation, or `task.claim`, so declining costs nothing on disk —
+   * while every path that FINISHES existing work runs through code this seam
+   * is not on, and keeps working.
+   *
+   * Synchronous, matching every other single-purpose callback on this
+   * interface. A decline is `retryable` by the guard's own decision — pressure
+   * is a property of THIS device at THIS moment, so a dispatcher re-routing
+   * the task elsewhere genuinely helps; a guard declining for a reason that
+   * will not change says so.
+   *
+   * Optional and absent by default: with no guard supplied, `handleOffer`
+   * behaves exactly as it did before this seam existed.
+   */
+  admissionGuard?: (offer: { readonly taskId: string; readonly payload: TaskOfferPayload }) => AdmissionGuardDecision;
 }
+
+/** See {@link TaskRunnerDeps.admissionGuard}. */
+export type AdmissionGuardDecision =
+  | { readonly admit: true }
+  | { readonly admit: false; readonly reason: string; readonly retryable: boolean };
 
 interface ActiveTask {
   taskId: string;
@@ -937,6 +966,19 @@ export class TaskRunner {
       return;
     }
 
+    // S3b (L-002): the pre-claim admission veto — see
+    // `TaskRunnerDeps.admissionGuard`'s own doc comment. Consulted here,
+    // AFTER the dedup check above (a redelivery of an offer this device
+    // already accepted is not a new admission, and must stay a silent no-op
+    // rather than becoming a decline) and BEFORE everything below, so a
+    // declined offer never touches an adapter, a workspace, or the wire
+    // beyond its own `task.decline`.
+    const guarded = this.deps.admissionGuard?.({ taskId, payload });
+    if (guarded !== undefined && !guarded.admit) {
+      this.decline(taskId, guarded.reason, guarded.retryable);
+      return;
+    }
+
     // M4 Phase 2: the control socket's `shutdown` RPC flips this before
     // tearing down active tasks (see `stopAcceptingOffers`'s own doc
     // comment) — any offer arriving after that point is declined outright,
@@ -1104,6 +1146,23 @@ export class TaskRunner {
             // where an auto-selected task left the server never learning
             // which runtime actually ran.
             runtime: isKnownRuntimeId(pick.adapter.id) ? pick.adapter.id : undefined,
+            // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
+            // selected adapter's own capability self-report, carried on the
+            // same message that establishes the task↔runtime binding. The
+            // server gates control messages (`task.steer`) on this and only
+            // this — connection-level `conn.hello.runtimes[].capabilities`
+            // stays discovery, because it is transport-shaped (a long-poll-only
+            // daemon never sends `conn.hello`) and describes a device rather
+            // than a task.
+            //
+            // Sent UNCONDITIONALLY, deliberately NOT gated on
+            // `isKnownRuntimeId` the way `runtime` above is: `runtime` is a
+            // closed protocol enum a custom adapter has no member of, but
+            // capabilities are a self-report every adapter can make honestly.
+            // Gating them would silently strip a custom steer-capable
+            // adapter's own truth and leave the server fail-closing on it
+            // forever.
+            capabilities: toRuntimeInfoCapabilities(pick.adapter.capabilities()),
           },
           { taskId },
         ),
@@ -1654,10 +1713,41 @@ export class TaskRunner {
     );
   }
 
+  /**
+   * S0/H-006: an inbound `task.steer` is normally impossible for a runtime
+   * that cannot steer — the hub gates it at claim-time capability
+   * (`steer_unsupported_runtime`) and never sends the envelope. If one
+   * arrives anyway (a forged sender, a pre-gate server, a device whose
+   * adapter set changed), the session throws {@link SteerUnsupportedError},
+   * which is a PERMANENT property of that runtime, not a transient failure.
+   *
+   * Rethrowing it would hand it to `ConnectionManager.process()`
+   * (`connection-manager.ts` `stalledAtSeq`), which freezes the cursor at
+   * that seq and redelivers the same envelope forever — every retry
+   * guaranteed to fail identically, and every later envelope for every
+   * other task blocked behind it. So this is classified as a
+   * non-retryable protocol/authority error: record it and return normally,
+   * which acks the envelope and lets the cursor advance. Nothing is
+   * swallowed — the steer simply has no reachable success state, and the
+   * honest terminal action is to log it and move on.
+   *
+   * Every OTHER error stays transient and is rethrown untouched, preserving
+   * the existing stall/redelivery semantics exactly.
+   */
   private async handleSteer(taskId: string, text: string): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
-    await active.session.steer(text);
+    try {
+      await active.session.steer(text);
+    } catch (err) {
+      if (err instanceof SteerUnsupportedError) {
+        console.error(
+          `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`,
+        );
+        return;
+      }
+      throw err;
+    }
   }
 
   /**
@@ -1801,7 +1891,7 @@ export class TaskRunner {
     // AwaitApproval, not sit buffered behind an indefinite pause.
     active.batcher.flush();
     // M5 (approval targeting): approvalId is always included — see
-    // TaskAwaitApprovalPayloadSchema's own doc comment (@byok/protocol) for
+    // TaskAwaitApprovalPayloadSchema's own doc comment (@byok-sdk/protocol) for
     // why no capability gating is needed to send it safely.
     this.deps.send(createEnvelope('task.await_approval', { summary, approvalId }, { taskId }));
 

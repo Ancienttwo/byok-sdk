@@ -1,0 +1,155 @@
+> **Archived**: 2026-08-08 14:46
+> **Related Plan**: plans/archive/plan-20260808-1303-s4a-c-r2-deploy.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260808-1446
+
+# Implementation Notes: s4a-c-r2-deploy
+
+> **Status**: Active
+> **Plan**: plans/plan-20260808-1303-s4a-c-r2-deploy.md
+> **Contract**: tasks/contracts/20260808-1303-s4a-c-r2-deploy.contract.md
+> **Review**: tasks/reviews/20260808-1303-s4a-c-r2-deploy.review.md
+> **Last Updated**: 2026-08-08 13:40
+> **Lifecycle**: notes
+
+## Design Decisions
+
+### The checksum header: probed, and the answer is no
+
+Design §3 marked `x-amz-checksum-sha256` `[unverified]` and required a probe before adopting it.
+Both sides were checked and they disagree, so it is **not signed**:
+
+- **MinIO supports it.** A presigned PUT carrying `x-amz-checksum-sha256` in the signed headers is
+  honored: matching bytes return `200`, mismatched bytes return `400 XAmzContentChecksumMismatch`,
+  and omitting the signed header returns `400 AccessDenied` ("There were headers present in the
+  request which were not signed"). Probed against the compose MinIO
+  (`RELEASE.2025-04-22T22-12-26Z`) with the same `aws4fetch@1.0.20` the adapter uses.
+- **R2 does not.** The S3 compatibility page's Checksum Types table lists SHA-256 as `COMPOSITE` ✅ /
+  `FULL_OBJECT` ❌, and `FULL_OBJECT` is the type a single-shot `PutObject` produces. R2's own
+  `PutObject` feature row names no `x-amz-checksum-*` header at all — only `Content-MD5` under
+  System Metadata. Source: `https://developers.cloudflare.com/r2/api/s3/api/` (page dated
+  2026-07-31, fetched 2026-08-08).
+
+Signing it would mint URLs that pass against the test substrate and fail in production — the
+MinIO/R2 divergence the design's risk row named. The `HEAD` re-verification was never conditional
+on it and remains unconditional.
+
+**What is signed instead:** `Content-Length` and `Content-Type`, both ✅ on R2's `PutObject` row and
+both empirically enforced by MinIO (a body of the wrong length or type returns `403
+SignatureDoesNotMatch`). `aws4fetch` treats both as unsignable by default, so `allHeaders: true` is
+load-bearing rather than decorative. Falsified: removing it turns
+`object-suite.test.ts > lets the object store refuse a body that is not the declared length or type`
+red.
+
+### SigV4 timestamps come from a separate wall clock
+
+Discovered by a failing run, not by reasoning: the cloud conformance harness injects
+`createMutableClock()`, frozen at `2026-01-01T00:00:00.000Z`. Signing `X-Amz-Date` off the
+composition's clock produced `403` on every request, because MinIO adjudicates freshness against
+its own clock.
+
+The generalisation matters more than the fix. Every other instant in this program comes from an
+injected clock so TTLs are assertable without sleeping, and a store reaching for wall time is a
+bug. A request signature is the exception, and not a soft one: its validity window belongs to the
+remote party. `R2BlobStoreOptions.signingClock` is therefore separate and required — a choice
+someone makes rather than one they inherit — and backdating it is also how the expiry assertion
+avoids sleeping.
+
+### MinIO / R2 behavioural deltas observed
+
+| Behaviour | MinIO (compose) | R2 (docs) | What the adapter does |
+| --- | --- | --- | --- |
+| `x-amz-checksum-sha256` on PutObject | honored, enforced | SHA-256 FULL_OBJECT ❌ | not signed |
+| `Content-Length` / `Content-Type` signed | enforced (403 on mismatch) | ✅ on PutObject | signed via `allHeaders` |
+| Region | answers to `us-east-1` | `auto` (aliases `""`/`us-east-1`) | required option, no default |
+| Expired presign | `403 AccessDenied` / "Request has expired" | same S3 semantics | not our check to make |
+| `HEAD` on a missing key | `404` | same | `undefined`, not an error |
+
+### `blobId` is the content hash
+
+The R2 adapter mints the `ContentHash` itself as the blob id. That is what makes S4A.5's "no naked
+object index" constructive rather than disciplinary: there is no surrogate id, every read is
+`(tenant, hash)` against the manifest primary key, and the single key-construction point takes a
+branded `ContentHash` whose only mint point rejects anything but 64 lowercase hex. A traversal
+string cannot become one, so it never reaches key construction — asserted as "zero requests were
+issued", not as "the object store refused it".
+
+### Capability name spelling
+
+The vocabulary entry is `blobs.contentproxy`, not `blobs.contentProxy` as the plan and design text
+write it. Core's `CapabilityDeclarationSchema` pins names to `/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/`, the
+same constraint that makes its sibling `events.longpoll`. The TypeScript key stays
+`CLOUD_CAPABILITIES.blobsContentProxy`.
+
+### One gate for both halves of the substrate
+
+`SKIP_DATAPLANE` now requires `BYOK_TEST_POSTGRES_URL` **and** `BYOK_TEST_S3_ENDPOINT`, and
+`BYOK_REQUIRE_DATAPLANE=1` hard-fails on either. One compose file starts both services and the blob
+port touches both in one call; two gates would let a half-configured environment report a pass on
+the half it could reach. CI's `dataplane` job carries the second variable and the constraint test
+pins it. This is the one `ci.yml` diff in the slice.
+
+Bucket isolation is per test scope, like the Postgres schema: MinIO's `/data` is a tmpfs the stack
+wipes on `down`, but within one run a leftover object at a key a later test declares would make a
+`pending` manifest look uploaded, and object keys embed tenants that repeat across tests. Buckets
+are not reclaimed — that needs `ListObjectsV2`, which is S4B's XML-paging cost.
+
+## Deviations From Plan Or Spec
+
+- **Commit order 2 and 3 swapped.** The plan sequenced the conformance scope growth (8→9) before
+  the R2 adapter. That ordering has no green intermediate: growing `CLOUD_CONFORMANCE_PORTS`
+  requires the Postgres composition to supply a `blobs` port, which is the adapter. Landed as
+  split → adapter → conformance instead. Same deliverables, same PR, every commit whole-repo green.
+- **`blobs.contentproxy` spelling** — see above; forced by core's declaration schema.
+- **`R2BlobStoreOptions.signingClock`** is an option the plan did not name. See above; the
+  alternative was signed requests that only work when logical time happens to equal wall time.
+- **`createInMemoryCloudStores` returns `{ stores, blobContentProxy }`** rather than a bare
+  `CloudStores`, mirroring `createInMemoryCoreStores`'s existing `{ stores, clock }` shape. The
+  proxy has to come from the same record map as the store and is not a port, so it could not be a
+  tenth key on the bundle.
+- **`createPostgresCloudStores` requires `objectStorage`.** A composition that cannot say where its
+  objects live cannot honestly claim the `blobs` port, and the suite certifies compositions whole.
+
+## Tradeoffs Considered
+
+| Option | Decision | Reason |
+| --- | --- | --- |
+| Sign `x-amz-checksum-sha256` because MinIO honors it | Rejected | R2 does not implement SHA-256 `FULL_OBJECT`; a URL that works only against the test substrate is worse than no header |
+| Sign `X-Amz-Date` from the composition clock | Rejected | The remote party adjudicates freshness; a frozen logical clock produced 403 on every request |
+| Keep the five-method port and have R2 throw | Rejected (design §6) | Forces the suite into a subset waiver or a vacuous rejection assertion |
+| Share one `PostgresObjectStore` between the core and cloud factories | Rejected | It is a stateless wrapper over the pool; requiring the caller to build the core composition first is an ordering dependency bought for nothing |
+| Delete test buckets on dispose | Rejected | Needs `ListObjectsV2` (S4B's cost); the tmpfs already reclaims on `down` |
+| Two skip gates, one per service | Rejected | A half-configured environment would report a pass on the half it could reach |
+| RLS as an enforcement layer | Rejected | A second authority the in-memory composition cannot hold makes the shared suite test a different isolation model than production uses |
+
+## Open Questions
+
+- **R2 hash authority remains an open ADR.** The sprint's own projection precondition (§10) names
+  it, and this slice did not close it. `HEAD` verifies observed size and content-type against the
+  declaration, which is exactly §12.7.7 step 4 — but nothing re-hashes the bytes, so "the object at
+  `sha256/<hex>` really hashes to `<hex>`" rests on the uploading client. The `Content-Length` and
+  `Content-Type` bindings plus the tenant-scoped key bound the damage to the declaring tenant's own
+  key space; they do not make the digest authoritative. Closing it means either a read-back
+  verification pass (a byte cost this design deliberately avoids) or an object-store checksum
+  feature R2 does not currently implement for SHA-256. Ledgered rather than invented.
+
+## Evidence Links
+
+- Checks: `.ai/harness/checks/latest.json`
+- Run snapshots: `.ai/harness/runs/`
+- R2 S3 compatibility: `https://developers.cloudflare.com/r2/api/s3/api/` (2026-07-31)
+
+## Promotion Filter
+
+Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset files only when all three hold: hard to reverse, surprising without local context, and a real trade-off existed. If any one is missing, keep it in this notes file instead.
+
+## Promotion Candidates
+
+- **The signing-clock rule** is a candidate for `tasks/lessons.md` if it recurs: "an injected clock
+  governs our own TTLs; a credential validated by a remote party must be signed from wall time."
+  Hard to reverse (it is a 403 at upload time, from a decision made at composition time), surprising
+  without local context, and a real trade-off existed. Holding it here until a second occurrence,
+  per the promotion filter's repeated-pattern rule.
+- The MinIO/R2 delta table is a candidate for `docs/researches/s4a-dataplane-design.md` §3 when S4B
+  revisits the SDK choice; it is currently one slice's evidence, not durable repo knowledge.

@@ -469,6 +469,27 @@
             "claude",
             "codex"
           ]
+        },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "steer": {
+              "type": "boolean"
+            },
+            "resume": {
+              "type": "boolean"
+            },
+            "approvalInteractive": {
+              "type": "boolean"
+            },
+            "permissionModes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -1520,6 +1541,27 @@
                   "claude",
                   "codex"
                 ]
+              },
+              "capabilities": {
+                "type": "object",
+                "properties": {
+                  "steer": {
+                    "type": "boolean"
+                  },
+                  "resume": {
+                    "type": "boolean"
+                  },
+                  "approvalInteractive": {
+                    "type": "boolean"
+                  },
+                  "permissionModes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "required": [
@@ -3570,6 +3612,27 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "capabilities": {
+                        "type": "object",
+                        "properties": {
+                          "steer": {
+                            "type": "boolean"
+                          },
+                          "resume": {
+                            "type": "boolean"
+                          },
+                          "approvalInteractive": {
+                            "type": "boolean"
+                          },
+                          "permissionModes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -5048,6 +5111,27 @@
                           "claude",
                           "codex"
                         ]
+                      },
+                      "capabilities": {
+                        "type": "object",
+                        "properties": {
+                          "steer": {
+                            "type": "boolean"
+                          },
+                          "resume": {
+                            "type": "boolean"
+                          },
+                          "approvalInteractive": {
+                            "type": "boolean"
+                          },
+                          "permissionModes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "required": [

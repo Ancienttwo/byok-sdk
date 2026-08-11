@@ -1,9 +1,9 @@
 # examples/packaging
 
 M3-K packageability guarantee smoke: `launcher.ts` is a trivial entry point
-that forces a single-file bundler to pull in `@byok/client`'s daemon +
-adapter-resolution code paths, then exercises pi's required external-sidecar
-boundary at runtime — see the file's own header comment for the full
+that forces a single-file bundler to pull in `@byok-sdk/client`'s daemon +
+adapter-resolution code paths, then exercises pi's `import.meta.resolve`
+degrade path at runtime — see the file's own header comment for the full
 rationale, and `packages/client/src/adapters/pi/resolve-bin.ts` for the
 hazard being proven against.
 

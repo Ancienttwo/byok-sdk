@@ -1,8 +1,8 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { CAPABILITY_FLAGS, decodeEnvelope, PROTOCOL_VERSION, type ConnHelloPayload } from '@byok/protocol';
+import { CAPABILITY_FLAGS, decodeEnvelope, PROTOCOL_VERSION, type ConnHelloPayload } from '@byok-sdk/protocol';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { authenticateBearer, type AuthDeps } from './auth';
+import { authenticateBearer, type AuthDeps, type AuthenticatedDevice } from './auth';
 import { startHeartbeat, type Heartbeat } from './heartbeat';
 import type { ConnectionHub } from './hub';
 
@@ -70,19 +70,20 @@ export function attachWebSocket(server: HttpServer, deps: AttachDeps): void {
     if (!matchesWsPath(req.url ?? '')) return; // not ours; leave it for any other listener
 
     void (async () => {
-      const deviceId = await authenticateBearer(req.headers.authorization, deps);
-      if (!deviceId) {
+      const principal = await authenticateBearer(req.headers.authorization, deps);
+      if (!principal) {
         rejectUpgrade(socket, 401, 'Unauthorized');
         return;
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
-        handleConnection(ws, deviceId, deps);
+        handleConnection(ws, principal, deps);
       });
     })();
   });
 }
 
-function handleConnection(ws: WebSocket, deviceId: string, deps: AttachDeps): void {
+function handleConnection(ws: WebSocket, principal: AuthenticatedDevice, deps: AttachDeps): void {
+  const { deviceId } = principal;
   let helloReceived = false;
   let heartbeat: Heartbeat | undefined;
 
@@ -109,6 +110,16 @@ function handleConnection(ws: WebSocket, deviceId: string, deps: AttachDeps): vo
     // different embedding SaaS than this server instance serves.
     if (payload.productId !== deps.productId) {
       ws.close(1002, 'productId mismatch');
+      return;
+    }
+    // S1: the instance check above says "this server serves that product";
+    // this one says "the DEVICE was paired into that product". They are
+    // different facts — a device paired under one product's claims must not
+    // register a connection as another, even on a server instance that
+    // happens to serve the announced one. Checked here, before
+    // `registerConnection`, so a mismatched daemon never reaches the hub.
+    if (payload.productId !== principal.productId) {
+      ws.close(1002, 'productId does not match the device record');
       return;
     }
     if (payload.deviceId !== deviceId) {

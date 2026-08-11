@@ -17,18 +17,9 @@ set -euo pipefail
 #
 # Produces "<output-dir>/launcher-sea" (or "launcher-sea.exe" on Windows).
 #
-# Why bundle to CommonJS first: @byok/client ships ESM ("type": "module"),
-# and its pi adapter's resolve-bin.ts calls `import.meta.resolve(...)` at
-# runtime (packages/client/src/adapters/pi/resolve-bin.ts). A Node SEA's
-# injected main script must be a single, fully self-contained file --
-# module loading does not read from the filesystem at SEA runtime (only
-# Node builtins resolve), so every dependency has to already be inlined.
-# esbuild's CJS output rewrites `import.meta` into a plain `{}` with no
-# `.resolve()` method; calling it then throws an ordinary catchable
-# TypeError, which resolve-bin.ts turns into a required-package resolution
-# error. PiAdapter.detect() reports that as `present: false`; production SEA
-# deployments provide the Node pi sidecar explicitly with BYOK_PI_BIN. Node
-# also has a native `"mainFormat": "module"` SEA config for an
+# Why bundle to CommonJS first: @byok-sdk/client ships ESM ("type": "module"),
+# while a Node SEA's injected main script must be a single, fully
+# self-contained file. Node also has a native `"mainFormat": "module"` SEA config for an
 # ESM main script, preserving real `import.meta.resolve` semantics, but it
 # was NOT reliably functional on Node 22.22.3 (the version this was built
 # against) as of this writing -- see the README's "why CJS, not ESM" note.

@@ -1,7 +1,7 @@
-import { createEnvelope, TASK_TRANSITIONS } from '@byok/protocol';
-import type { CapabilityFlag, RuntimeCapabilities as ProtocolRuntimeCapabilities, RuntimeId, RuntimeInfo } from '@byok/protocol';
-import type { PermissionPolicy } from '@byok/protocol';
-import type { RuntimeAdapter, RuntimeCapabilities, GitWorkspaceConfig } from '../types';
+import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS } from '@byok-sdk/protocol';
+import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
+import type { PermissionPolicy } from '@byok-sdk/protocol';
+import type { RuntimeAdapter, GitWorkspaceConfig } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -19,15 +19,31 @@ import {
   parseShutdownParams,
   type ControlActiveTask,
   type ControlStatusResult,
+  type ControlStorageStatus,
   type ShutdownReason,
 } from './control-protocol';
 import { ConnectionManager } from './connection-manager';
+import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
+import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
+import { acquireDaemonOwner, type DaemonOwnerLease } from './daemon-owner';
+import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { SessionWorkspaceStore } from './session-workspace-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
+import { JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
+import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
+import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
+import {
+  createFilesystemCleanupExecutor,
+  createStatfsFreeBytesProvider,
+  LocalStoragePressureEngine,
+  resolveLocalStoragePolicy,
+  type LocalStoragePolicy,
+  type LocalStoragePolicyInput,
+} from './journal/storage-policy';
 import { DEFAULT_MAX_TASK_OUTPUT_BYTES, TaskRunner, type TaskRunnerDeps } from './task-runner';
 import type { ProgressBatcherOptions } from './progress-batcher';
 
@@ -71,6 +87,60 @@ export interface DaemonBranding {
   accent?: string;
 }
 
+/**
+ * S3b (L-002): opt-in durable local journal for hosted deployments
+ * (architecture §12.7.2).
+ *
+ * Explicit and off by default, because it changes what an ack MEANS. With no
+ * journal configured (the self-hosted default this SDK has always shipped),
+ * the daemon's redelivery cursor advances on handler success exactly as
+ * before. With one configured, every inbound envelope is committed and fsynced
+ * to `<storeDir>/daemon.db` BEFORE the handler resolves — and since
+ * `ConnectionManager` only advances the cursor once the handler resolves
+ * (`connection-manager.ts`), acking before committing stops being something
+ * this daemon can express, rather than something it is careful not to do.
+ *
+ * Turning this on when the runtime has no working `node:sqlite` is a typed
+ * construction failure, not a downgrade to a file journal — see
+ * `JournalUnavailableError`. That refusal is the point (§12.7.2): a journal
+ * that does not fsync loses tasks only under power-cut timings, so it passes
+ * every test anyone will ever run against it.
+ */
+export interface HostedJournalConfig {
+  /**
+   * The backend. Only `sqlite` today, and spelled out rather than implied by
+   * the section's presence so adding a second one later is an additive change
+   * to a closed set instead of a re-interpretation of an existing config.
+   */
+  mode: 'sqlite';
+  /**
+   * The tenant every journal row on this device is scoped to (§12.7.2's
+   * minimum fact set opens with tenant/product/device). Required: a hosted
+   * daemon that cannot say which tenant its durable evidence belongs to has
+   * evidence nobody can act on.
+   */
+  tenantId: string;
+  /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
+  busyTimeoutMs?: number;
+  /** Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated. */
+  maxRecordBytes?: number;
+  /**
+   * S3b (L-003): opt-in local storage policy — §12.7.2.1's watermarks,
+   * classified GC, and bounded WAL compaction. See `LocalStoragePolicyInput`
+   * (`journal/storage-policy.ts`); `maxStoreBytes` and `minFreeBytes` are the
+   * only two a host must supply.
+   *
+   * Optional WITHIN hosted journal mode, and off by default there too: a
+   * journal without a policy is a daemon that records durably and never
+   * declines, which is exactly the right behaviour on a host that manages its
+   * own disk. Setting it is what turns local storage into an admission-control
+   * input — hard pressure declines new offers (retryably) while terminal
+   * flush, delete, export and recovery keep running, and `emergency` refuses
+   * to ack at all rather than acking a row it cannot durably record.
+   */
+  storagePolicy?: LocalStoragePolicyInput;
+}
+
 export interface DaemonConfig {
   productName: string;
   productId: string;
@@ -79,6 +149,8 @@ export interface DaemonConfig {
   workspaceRoot: string;
   /** Disabled by default. Enables local-only Git checkpoint repositories. */
   gitWorkspace?: GitWorkspaceConfig;
+  /** Disabled by default. Enables the durable local task journal — see {@link HostedJournalConfig}. */
+  hostedJournal?: HostedJournalConfig;
   /**
    * Restricts which runtimes this daemon will ever use — enforced in two
    * places that must stay consistent: `createDaemon` (this file) builds its
@@ -220,6 +292,8 @@ export interface DaemonStatus {
   activeTaskCount: number;
   /** Passthrough of `DaemonConfig.branding` — `undefined` when the product configured none. See `DaemonBranding`. */
   branding?: DaemonBranding;
+  /** Local lifecycle/retry budget, separate from transport fallback state. */
+  operationalHealth: OperationalHealthSnapshot;
 }
 
 export interface Daemon {
@@ -264,7 +338,7 @@ export interface Daemon {
   reject(taskId: string, reason?: string): Promise<void>;
 }
 
-/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
+/** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
 export interface DaemonOverrides {
   backoff?: BackoffOptions;
   batch?: ProgressBatcherOptions;
@@ -297,46 +371,81 @@ export interface DaemonOverrides {
     manager?: GitWorkspaceManager;
     store?: GitWorkspaceStore;
   };
+  /**
+   * S3b: injection seam for the durable local journal, mirroring
+   * `gitWorkspace` above — used only when `config.hostedJournal` is set, so an
+   * absent journal config cannot accidentally activate a supplied object. Also
+   * the host-injected-implementation path §12.7.2 allows: a backend other than
+   * `SqliteLocalTaskJournal` is acceptable if it meets the same durability
+   * contract (a resolved `appendEnvelope` means fsynced), and unacceptable
+   * otherwise — this seam does not verify that, the host asserting it does.
+   *
+   * A journal supplied here is NOT closed by `stop()`; whoever injected it
+   * owns its lifetime.
+   */
+  hostedJournal?: {
+    journal?: LocalTaskJournal;
+    /** Test-only post-open SQLite initialization fault seam. */
+    openFaults?: JournalOpenFaultSeam;
+    /**
+     * S3b (L-003): injection seam for the storage pressure engine, same rule
+     * as `journal` above — used only when `config.hostedJournal` is set, and
+     * NOT started or stopped by this daemon. Whoever injects one owns its
+     * cadence, which is what lets the disk-pressure matrix drive `tick()` by
+     * hand with fake usage/free providers and no timer at all.
+     *
+     * An injected engine still answers both questions the daemon asks it
+     * (admission under hard pressure, ack-critical refusal under emergency)
+     * and still backs the `storage` section of the control-socket status.
+     */
+    pressureEngine?: LocalStoragePressureEngine;
+  };
+}
+
+/**
+ * The outbound envelope types that carry a task's terminal, matching the set
+ * the cloud records a terminal receipt for (`cloud/src/inbound.ts`'s
+ * `applyLifecycle`). `task.decline` is deliberately NOT here: declining is
+ * refusing to take a task, not producing a result for one.
+ *
+ * `task.complete`/`task.fail`/`task.cancelled` -> the terminal kind recorded locally.
+ */
+function terminalKindOf(type: string): 'complete' | 'failed' | 'cancelled' | undefined {
+  if (type === 'task.complete') return 'complete';
+  if (type === 'task.fail') return 'failed';
+  if (type === 'task.cancelled') return 'cancelled';
+  return undefined;
+}
+
+/**
+ * One inbound envelope, as the journal wants it.
+ *
+ * `bytes` is the CANONICAL v1 encoding of the envelope this daemon parsed, not
+ * the socket's original byte sequence — the frozen codec's round-trip
+ * guarantee is what makes that a faithful record, and it is the same choice
+ * the cloud's own terminal receipt makes.
+ *
+ * `opensTask` is decided here, from the envelope's own type, rather than
+ * inside the journal: `task.offer` is the one inbound type that brings a task
+ * into existence on this device, and that is protocol knowledge this file
+ * already has and the journal should not acquire a second copy of.
+ */
+function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity): ReceivedEnvelopeRecord {
+  const bytes = encodeEnvelope(envelope);
+  return {
+    identity,
+    envelopeId: envelope.id,
+    ...(envelope.task_id === undefined ? {} : { taskId: envelope.task_id }),
+    seq: envelope.seq ?? 0,
+    bytes,
+    bytesHash: journalHash(bytes),
+    receivedAt: new Date().toISOString(),
+    opensTask: envelope.type === 'task.offer',
+  };
 }
 
 function isRuntimeId(id: string): id is RuntimeId {
   return id === 'pi' || id === 'claude' || id === 'codex';
-}
-
-/**
- * Maps a `RuntimeAdapter`'s own internal `capabilities()` result
- * (`../types.ts`'s `RuntimeCapabilities` — `{steer, resume,
- * permissionModes}`, always-required fields) onto the wire's
- * `RuntimeInfo.capabilities` shape (`@byok/protocol`'s `RuntimeCapabilities`
- * — the same field names, but all-optional, plus `approvalInteractive`).
- *
- * `approvalInteractive` is hardcoded `false` regardless of adapter — this is
- * now stale as a "no adapter supports it" claim: as of M4 Phase 3, claude
- * genuinely does support interactive approval, via `--permission-prompt-tool`
- * routing `ClaudeSession.resolveApproval` into the local out-of-process MCP
- * approval channel (`bin/byok-approval-mcp.ts`) under `policy.mode:
- * 'confirm'` — see docs/protocol.md §5.1/§11.2 for the full mechanism. pi and
- * codex are unchanged: neither has any notion of pausing for approval
- * (`resolveApproval()` throws unconditionally for both — see `../types.ts`'s
- * `Session.resolveApproval` doc comment for why that's the correct contract
- * for an adapter with no `needs_approval` notion).
- *
- * This flag is still reported `false` here regardless, pending a later
- * capability-honesty pass that gives `approvalInteractive`/
- * `interactive-approval` (`CAPABILITY_FLAGS`, `@byok/protocol`) real
- * per-adapter meaning — docs/protocol.md §5.1 tracks this as a known,
- * intentional gap between two capability signals, not an oversight. Until
- * that pass lands, `RuntimeInfo.capabilities.permissionModes` is the only
- * accurate signal for whether a device can honor `confirm`: a server should
- * check `permissionModes.includes('confirm')`, not this field.
- */
-function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRuntimeCapabilities {
-  return {
-    steer: caps.steer,
-    resume: caps.resume,
-    approvalInteractive: false,
-    permissionModes: caps.permissionModes,
-  };
 }
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
@@ -375,7 +484,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
  * own `targeted` marking (`ConnectionHub.approveTask`/`rejectTask` —
  * `packages/server/src/hub.ts`'s `getDeviceCapabilities(...).includes(
  * 'approval-targeting')` check) always saw an upgraded daemon as legacy —
- * see `CAPABILITY_FLAGS`'s own doc comment (`@byok/protocol`'s `version.ts`)
+ * see `CAPABILITY_FLAGS`'s own doc comment (`@byok-sdk/protocol`'s `version.ts`)
  * for why this flag is purely informational/observability, not a functional
  * gate, and therefore safe to advertise unconditionally the moment a daemon
  * genuinely does what it claims (as this one already does).
@@ -457,12 +566,130 @@ export function createDaemonWithAdapters(
     );
   }
 
-  const storeDir = config.storeDir ?? DeviceStore.defaultDir(config.productId);
+  const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
   const store = new DeviceStore(storeDir);
+  const operationalHealth = new OperationalHealthTracker(storeDir);
+  let fleetJitter: FleetJitter | undefined;
+  let maintenanceSequence = 0;
   const cursorStore = new CursorStore(storeDir);
   const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
+  // S3b (L-002), same three-part shape as `gitWorkspace` above: optional
+  // config field, conditional construction, override seam. An absent
+  // `hostedJournal` constructs NOTHING — no database file, no directory, no
+  // reference — which is what keeps the default self-hosted path identical to
+  // what it was before this slice.
+  //
+  // Fail-closed on a runtime without `node:sqlite` needs no check here: this
+  // is the constructor that refuses (`JournalUnavailableError`), before any
+  // filesystem work, and it propagates straight out of `createDaemon`.
+  let resolvedStoragePolicy: LocalStoragePolicy | undefined;
+  if (config.hostedJournal) {
+    // Validated synchronously and up front, the same way `maxTaskOutputBytes`
+    // is above — a misconfigured durability section must fail at
+    // construction, not at the first envelope that needed it.
+    if (config.hostedJournal.mode !== 'sqlite') {
+      throw new Error(`DaemonConfig.hostedJournal.mode must be "sqlite" — got ${JSON.stringify(config.hostedJournal.mode)}`);
+    }
+    if (typeof config.hostedJournal.tenantId !== 'string' || config.hostedJournal.tenantId.trim() === '') {
+      throw new Error(
+        'DaemonConfig.hostedJournal.tenantId must be a non-empty tenant id — a hosted journal row with no tenant is durable evidence nobody can act on',
+      );
+    }
+    // Resolved HERE, in the same pure-config block, and deliberately BEFORE
+    // any journal is constructed: rejecting a malformed storage policy must
+    // not depend on this runtime having `node:sqlite`, or the same bad config
+    // would surface as `JournalUnavailableError` on Node 20 and
+    // `LocalStoragePolicyError` on Node 22. Config errors are config errors on
+    // every runtime.
+    if (config.hostedJournal.storagePolicy) {
+      resolvedStoragePolicy = resolveLocalStoragePolicy(config.hostedJournal.storagePolicy);
+    }
+  }
+  // Capability detection is side-effect-free and therefore remains a
+  // construction-time failure. Opening/schema-initializing/quarantining the
+  // SQLite file is intentionally deferred until `startUnderLease` owns the
+  // cross-process store lease; a rejected second daemon must not touch the
+  // active daemon's DB/WAL/SHM before discovering that it is rejected.
+  if (config.hostedJournal && overrides.hostedJournal?.journal === undefined && !isSqliteAvailable()) {
+    throw new JournalUnavailableError(`node:sqlite could not be loaded on Node ${process.versions.node}`);
+  }
+
+  let ownedJournal: SqliteLocalTaskJournal | undefined;
+  let journal: LocalTaskJournal | undefined = config.hostedJournal ? overrides.hostedJournal?.journal : undefined;
+  let ownedPressureEngine: LocalStoragePressureEngine | undefined;
+  let hostedStorageInitializationBarrierComplete = true;
+  let pressureEngine: LocalStoragePressureEngine | undefined = config.hostedJournal
+    ? overrides.hostedJournal?.pressureEngine
+    : undefined;
+
+  /** Construct every daemon-owned hosted writer only after ownership exists. */
+  function initializeOwnedHostedStorage(): void {
+    if (!config.hostedJournal) return;
+    if (!journal) {
+      try {
+        ownedJournal = new SqliteLocalTaskJournal({
+          storeDir,
+          ...(config.hostedJournal.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: config.hostedJournal.busyTimeoutMs }),
+          ...(config.hostedJournal.maxRecordBytes === undefined ? {} : { maxRecordBytes: config.hostedJournal.maxRecordBytes }),
+          ...(overrides.hostedJournal?.openFaults === undefined ? {} : { openFaults: overrides.hostedJournal.openFaults }),
+        });
+      } catch (err) {
+        if (err instanceof JournalHandleCleanupError) hostedStorageInitializationBarrierComplete = false;
+        throw err;
+      }
+      journal = ownedJournal;
+    }
+    if (resolvedStoragePolicy && !pressureEngine) {
+      const activeJournal = journal;
+      const cleanupJournal = ownedJournal;
+      ownedPressureEngine = new LocalStoragePressureEngine({
+        policy: resolvedStoragePolicy,
+        journal: activeJournal,
+        freeBytesProvider: createStatfsFreeBytesProvider(storeDir),
+        executor: createFilesystemCleanupExecutor(
+          cleanupJournal ? { pruneJournalTask: (taskId) => cleanupJournal.pruneConfirmedJournalTask(taskId) } : {},
+        ),
+        timers: {
+          setInterval: (handler, baseMs) => {
+            if (!fleetJitter) throw new Error('maintenance scheduler started before device identity was loaded');
+            const timer = setInterval(handler, fleetJitter.delay('maintenance', maintenanceSequence++, baseMs));
+            timer.unref?.();
+            return timer;
+          },
+          clearInterval: (handle) => clearInterval(handle as NodeJS.Timeout),
+        },
+        onMaintenanceOutcome: (outcome) => {
+          const write = outcome === 'success'
+            ? operationalHealth.recordSuccess('maintenance')
+            : operationalHealth.recordFailure('maintenance');
+          void write.catch((err: unknown) => {
+            console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        },
+        onEvent: (event) => {
+          if (event.kind !== 'state-changed') return;
+          console.warn(
+            `[byok/client] local storage pressure: ${event.from} -> ${event.to} (used ${event.snapshot.usedBytes} of ${event.snapshot.budgetBytes} budget bytes, ${event.snapshot.freeBytes} free)`,
+          );
+        },
+      });
+      pressureEngine = ownedPressureEngine;
+    }
+  }
+  /**
+   * S3b: serializes terminal journal writes against the outbound send that
+   * follows each one, and gives `runShutdownSequence` something to await.
+   *
+   * `TaskRunnerDeps.send` is synchronous by contract, so the journal write
+   * cannot simply be awaited inline. Chaining instead keeps the ordering
+   * (journal committed, THEN the terminal goes on the wire) without changing
+   * that contract — and the shutdown sequence awaits this tail before the
+   * outbox drain, so a `task.fail` produced during teardown can never be left
+   * mid-chain while the connection closes out from under it.
+   */
+  let journalTerminalTail: Promise<void> = Promise.resolve();
   // M3-2a: local observability — constructed once per daemon instance (not
   // per `start()`) so `subscribe()`/`tasks()` work immediately after
   // `createDaemonWithAdapters()` returns and keep accumulating across an
@@ -482,6 +709,9 @@ export function createDaemonWithAdapters(
   // running, or when binding it failed non-fatally (see `start()`'s own
   // try/catch below).
   let controlServerHandle: ControlServerHandle | undefined;
+  let daemonOwnerLease: DaemonOwnerLease | undefined;
+  let shutdownPromise: Promise<void> | undefined;
+  const pendingLateMutationBarriers = new Set<Promise<void>>();
   /** M4 Phase 2: when this `start()` began — backs the control socket's `status.uptimeMs`. */
   let startedAt: number | undefined;
 
@@ -551,8 +781,37 @@ export function createDaemonWithAdapters(
     }
   }
 
+  let lifecycleMutationTail: Promise<void> = Promise.resolve();
+
+  async function runLifecycleMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const predecessor = lifecycleMutationTail;
+    let release!: () => void;
+    lifecycleMutationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await predecessor;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
   async function pair(pairingCode: string): Promise<DeviceRecord> {
     checkServerUrl();
+    // Serialize every lifecycle mutation, not only pair/pair. A process-local
+    // operation may borrow the daemon's retained cross-process lease, so pair,
+    // start, stop, control shutdown and unpair must never decide independently
+    // who releases that shared lease.
+    return runLifecycleMutation(() => pairUnderLease(pairingCode));
+  }
+
+  async function pairUnderLease(pairingCode: string): Promise<DeviceRecord> {
+    // Pairing persists device.json. It intentionally does not arm proactive
+    // renewal (AuthManager.loadExisting does that under start()'s lease), so a
+    // short-lived pair command can release ownership once the write lands.
+    const acquiredHere = daemonOwnerLease === undefined;
+    if (acquiredHere) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     // Finding F5: capture whatever device is currently on disk for this
     // serverUrl (if any) BEFORE pairing — `auth.pair()` mints/persists a
     // brand new deviceId (the server always does, even on a same-keypair
@@ -560,21 +819,51 @@ export function createDaemonWithAdapters(
     // recover the outgoing deviceId afterward to know whose cursor to clear.
     // Reading straight from `store` (not `auth.deviceId`) works whether or
     // not `start()`/`loadExisting()` ran in this process before `pair()`.
-    const previous = await store.load();
-    const record = await auth.pair(pairingCode);
-    if (previous && previous.deviceId !== record.deviceId) {
-      await cursorStore.clear(config.serverUrl, previous.deviceId);
+    try {
+      const previous = await store.load();
+      const record = await auth.pair(pairingCode);
+      if (previous && previous.deviceId !== record.deviceId) {
+        await cursorStore.clear(config.serverUrl, previous.deviceId);
+      }
+      observer.notePaired(record.deviceId);
+      if (acquiredHere) {
+        await daemonOwnerLease?.release();
+        daemonOwnerLease = undefined;
+      }
+      return record;
+    } catch (err) {
+      if (acquiredHere) {
+        await daemonOwnerLease?.release();
+        daemonOwnerLease = undefined;
+      }
+      throw err;
     }
-    observer.notePaired(record.deviceId);
-    return record;
   }
 
   async function start(): Promise<void> {
     checkServerUrl();
+    await runLifecycleMutation(startUnderLease);
+  }
+
+  async function startUnderLease(): Promise<void> {
+    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+    try {
+    // This is the first point at which daemon-owned hosted storage may touch
+    // the filesystem. The lease was acquired above, so SQLite open/schema/
+    // quarantine and every pressure-engine writer are inside the same
+    // authority boundary as auth renewal and the rest of daemon lifecycle.
+    initializeOwnedHostedStorage();
+    const activeJournal = journal;
+    const activePressureEngine = pressureEngine;
+    const activeOwnedPressureEngine = ownedPressureEngine;
+    // Loading an existing record arms proactive token renewal, whose final
+    // step writes device.json. Acquire the store mutation lease first so a
+    // rejected second daemon can never leave that timer behind as a writer.
     const record = await auth.loadExisting();
     if (!record) {
       throw new Error('device is not paired yet; call pair(pairingCode) first');
     }
+    fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
     // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own
     // doc comment above — a configured ceiling `workspaceRoot` is merged
@@ -589,6 +878,51 @@ export function createDaemonWithAdapters(
       console.warn(
         `[byok/client] WARNING: permissionDefaults.workspaceRoot ("${config.permissionDefaults.workspaceRoot}") is configured, but no bundled runtime adapter (pi/claude/codex) enforces PermissionPolicy.workspaceRoot — every adapter confines a task to ctx.workspaceDir instead. This ceiling value has no enforcement effect; see docs/security.md's "Workspace confinement is a convention, not a sandbox" section.`,
       );
+    }
+
+    // S3b (L-002): the recovery scan, before anything can accept new work.
+    //
+    // Every task the journal still has open is one this daemon was in the
+    // middle of when it last stopped. Local runtime sessions do not survive
+    // the process, so each is marked `interrupted` rather than pretended back
+    // into life — the same honest semantics `GitWorkspaceStore.reconcile()`
+    // already applies to a lease whose owner is gone, and the same one
+    // `SqliteTaskStore` documents on the server side ("record persistence, not
+    // live task reconnection"). Marking never deletes: a recovery-marked row
+    // is on §12.7.2.1's never-auto-delete list precisely so the evidence
+    // outlives the restart.
+    //
+    // Not wrapped in a try/catch: a journal that cannot be read is not a
+    // degraded mode to carry on in. Hosted mode was configured explicitly, so
+    // failing `start()` is the fail-closed behaviour §12.7.2 asks for.
+    if (activeJournal) {
+      const recoverable = await activeJournal.listRecoverable();
+      for (const task of recoverable) {
+        await activeJournal.markRecovered(task.taskId, {
+          disposition: 'interrupted',
+          reason: `daemon restarted while this task was in local state "${task.localState}"; local runtime sessions do not survive the process`,
+        });
+      }
+      if (recoverable.length > 0) {
+        console.warn(
+          `[byok/client] local journal recovery: ${recoverable.length} task(s) were interrupted by the previous shutdown and have been marked (not resumed, not deleted): ${recoverable
+            .map((task) => task.taskId)
+            .join(', ')}`,
+        );
+      }
+    }
+
+    // S3b (L-003): one measurement before this daemon can accept anything, so
+    // the admission guard's first answer comes from a real reading rather than
+    // the optimistic `normal` a fresh engine starts in — a device that booted
+    // already over its hard watermark must decline the first offer, not the
+    // second. Awaited, and deliberately not caught: hosted mode plus a storage
+    // policy is an explicit request to gate on local storage, and a daemon that
+    // cannot measure it cannot honour that (§12.7.2's fail-closed posture).
+    // An INJECTED engine is left alone — its owner drives its cadence.
+    if (activeOwnedPressureEngine) {
+      await activeOwnedPressureEngine.tick();
+      activeOwnedPressureEngine.start();
     }
 
     startedAt = Date.now();
@@ -618,6 +952,11 @@ export function createDaemonWithAdapters(
       );
       controlServerHandle = undefined;
     }
+    // The run marker begins only after this process has passed the daemon's
+    // existing single-owner bind check. Writing it before that check would let
+    // a rejected second process overwrite the live daemon's marker and create
+    // a false crash record on the next restart.
+    await operationalHealth.startRun();
 
     if (gitWorkspaceManager) {
       await gitWorkspaceManager.preflight();
@@ -634,6 +973,63 @@ export function createDaemonWithAdapters(
     // own doc comment on why this isn't re-probed on every reconnect).
     observer.noteRuntimesDetected(runtimes);
     const capabilities = computeCapabilities(adapters);
+
+    // S3b: this daemon's journal identity — only knowable here, after
+    // `auth.loadExisting()` has resolved the deviceId.
+    const journalIdentity: JournalIdentity | undefined = config.hostedJournal
+      ? { tenantId: config.hostedJournal.tenantId, productId: config.productId, deviceId: record.deviceId }
+      : undefined;
+
+    /**
+     * S3b: outbound send.
+     *
+     * The no-journal branch is the ORIGINAL closure, character for character —
+     * the default path must not gain so much as an extra `await`, or the
+     * "opt-in, byte-equivalent by default" claim is only approximately true.
+     *
+     * The journal branch records a terminal BEFORE it goes on the wire, so a
+     * crash in that window leaves the terminal hash locally (to be retried)
+     * rather than only in the cloud (§12.7.3's "terminal 生成后、truth 写入前"
+     * row). A journal write that FAILS still sends: §12.7.2.1 keeps terminal
+     * flush running even under hard pressure, and stranding a finished task on
+     * the cloud side because the local bookkeeping hiccupped would be a worse
+     * outcome than a missing local row.
+     */
+    const sendEnvelope: TaskRunnerDeps['send'] =
+      activeJournal && journalIdentity
+        ? (envelope) => {
+            observer.handleOutboundEnvelope(envelope);
+            const terminalKind = terminalKindOf(envelope.type);
+            const taskId = envelope.task_id;
+            if (terminalKind === undefined || taskId === undefined) {
+              connection?.send(envelope);
+              return;
+            }
+            const payloadHash = journalHash(encodeEnvelope(envelope));
+            journalTerminalTail = journalTerminalTail
+              .then(() =>
+                activeJournal.recordTerminal({
+                  taskId,
+                  terminalType: terminalKind,
+                  payloadHash,
+                  truthState: 'pending',
+                  attempt: 1,
+                  recordedAt: new Date().toISOString(),
+                }),
+              )
+              .catch((err: unknown) => {
+                console.warn(
+                  `[byok/client] could not record task ${taskId}'s terminal in the local journal (sending it anyway): ${err instanceof Error ? err.message : String(err)}`,
+                );
+              })
+              .then(() => {
+                connection?.send(envelope);
+              });
+          }
+        : (envelope) => {
+            observer.handleOutboundEnvelope(envelope);
+            connection?.send(envelope);
+          };
 
     const deps: TaskRunnerDeps = {
       adapters,
@@ -653,10 +1049,7 @@ export function createDaemonWithAdapters(
       // first (never throws — see `observer.ts`) and then sending exactly as
       // before is the entire integration; `task-runner.ts` itself is
       // untouched. See `observer.ts`'s module doc comment.
-      send: (envelope) => {
-        observer.handleOutboundEnvelope(envelope);
-        connection?.send(envelope);
-      },
+      send: sendEnvelope,
       blobClient,
       batcherOptions: overrides.batch,
       sessionWorkspaces,
@@ -710,6 +1103,12 @@ export function createDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
+      // S3b (L-003): the production admission guard — §12.7.2.1's hard-pressure
+      // row. Reads the state the last maintenance tick computed (no disk work
+      // on the offer path), and is absent entirely when no storage policy is
+      // configured, which is what keeps `handleOffer` byte-identical for every
+      // daemon that does not opt in.
+      ...(activePressureEngine ? { admissionGuard: () => activePressureEngine.admissionGuard() } : {}),
     };
     runner = new TaskRunner(deps);
 
@@ -728,10 +1127,45 @@ export function createDaemonWithAdapters(
       // semantics above — `handleInboundEnvelope` only ever looks at
       // `task.offer` (the one event with no corresponding outbound envelope
       // of its own) and never throws, so it can't affect cursor advancement.
-      onEnvelope: (envelope) => {
-        observer.handleInboundEnvelope(envelope);
-        return runner?.handleEnvelope(envelope) ?? Promise.resolve();
-      },
+      // S3b (L-002): where "ack after durable commit" stops being a
+      // discipline and becomes the only expressible behaviour.
+      //
+      // `ConnectionManager.process` advances (and persists) the redelivery
+      // cursor ONLY when this handler resolves, and merely records a stall
+      // when it throws (`connection-manager.ts`) — that was already true, and
+      // is not changed by this slice. Putting the journal transaction INSIDE
+      // this handler therefore makes the ordering structural: the cursor
+      // cannot move past a seq whose envelope is not yet committed, because
+      // the only thing that moves the cursor is this function resolving, and
+      // this function does not resolve until the commit does. There is no
+      // second path to the cursor to keep in step, and the transport is
+      // untouched.
+      //
+      // Placed after the observer (which never throws and owns no durable
+      // state) and before the runner, so the bytes are on disk before any
+      // work is scheduled off them. A redelivered envelope is absorbed by the
+      // journal's own receipt and costs one no-op transaction.
+      //
+      // The no-journal branch is the ORIGINAL closure, unchanged.
+      onEnvelope:
+        activeJournal && journalIdentity
+          ? async (envelope) => {
+              observer.handleInboundEnvelope(envelope);
+              // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
+              // 新 mailbox row；保留现有 recovery evidence". Throwing HERE, ahead
+              // of the append, reuses the ordering the journal branch already
+              // established: the handler rejects, so the cursor does not move,
+              // so the mailbox keeps the row and redelivers it later. The task
+              // is not lost; it is left in the one place that still has room
+              // for it. Nothing is deleted to make space.
+              activePressureEngine?.assertAckCriticalAllowed();
+              await activeJournal.appendEnvelope(toJournalEnvelopeRecord(envelope, journalIdentity));
+              return runner?.handleEnvelope(envelope) ?? Promise.resolve();
+            }
+          : (envelope) => {
+              observer.handleInboundEnvelope(envelope);
+              return runner?.handleEnvelope(envelope) ?? Promise.resolve();
+            },
       onStateChange: (state) => {
         connectionState = state;
         observer.noteConnectionState(state);
@@ -742,9 +1176,29 @@ export function createDaemonWithAdapters(
       wsRetryIntervalMs: overrides.longPoll?.wsRetryIntervalMs,
       longPollRetryDelayMs: overrides.longPoll?.retryDelayMs,
       longPollIdleDelayMs: overrides.longPoll?.idleDelayMs,
+      fleetJitter,
+      onOperationalOutcome: (outcome, source) => {
+        const write = outcome === 'success'
+          ? operationalHealth.recordSuccess(source)
+          : operationalHealth.recordFailure(source);
+        void write.catch((err: unknown) => {
+          console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      },
     });
     await connection.start();
     await connection.waitForAck();
+    } catch (err) {
+      try {
+        // startUnderLease already owns the process-local lifecycle slot. Run
+        // teardown directly; queueing requestShutdown here would wait on this
+        // operation itself and deadlock.
+        await runShutdownSequence('startup failed', { drainTimeoutMs: 0 });
+      } catch (cleanupError) {
+        throw new AggregateError([err, cleanupError], 'daemon startup failed and teardown was incomplete');
+      }
+      throw err;
+    }
   }
 
   /**
@@ -791,10 +1245,81 @@ export function createDaemonWithAdapters(
    * `daemon.stop()`), which must neither double-fail a task nor throw.
    */
   async function runShutdownSequence(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
-    runner?.stopAcceptingOffers();
+    const errors: unknown[] = [];
+    let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
+    if (!hostedStorageInitializationBarrierComplete) {
+      errors.push(new Error('hosted storage initialization left an unclosed SQLite handle; ownership lease retained'));
+    }
+    const attempt = async (operation: () => void | Promise<void>, mutationBarrier: boolean): Promise<boolean> => {
+      try {
+        await operation();
+        return true;
+      } catch (err) {
+        errors.push(err);
+        if (mutationBarrier) mutationBarrierComplete = false;
+        return false;
+      }
+    };
+
+    // A prior shutdown attempt may have hit its deadline while task teardown
+    // continued in the background. A retry must not release ownership merely
+    // because its own fresh runner pass is empty: the late pass is still a
+    // possible journal producer until it settles.
+    if (pendingLateMutationBarriers.size > 0) {
+      const prior = Promise.allSettled([...pendingLateMutationBarriers]);
+      let priorSettled = false;
+      void prior.then(() => {
+        priorSettled = true;
+      });
+      const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
+      await Promise.race([prior, delay(graceMs)]);
+      if (!priorSettled) {
+        mutationBarrierComplete = false;
+        errors.push(new Error('a prior active task teardown remains unsettled; ownership lease retained'));
+      }
+    }
+
+    // S3b (L-003): stop the maintenance cadence first — a compaction pass
+    // starting while the journal is being drained would hold the single writer
+    // against the terminal writes below for no benefit. Only the engine THIS
+    // daemon constructed; an injected one belongs to its injector, exactly like
+    // an injected journal is not closed here. Idempotent, like every other step
+    // in this sequence.
+    const stoppingOwnedPressureEngine = ownedPressureEngine;
+    const stoppingOwnedJournal = ownedJournal;
+    const maintenanceStopped = stoppingOwnedPressureEngine?.stop() ?? Promise.resolve();
+    await attempt(() => runner?.stopAcceptingOffers(), true);
     const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
-    await Promise.race([activeTeardown, delay(graceMs)]);
+    let activeTeardownSettled = false;
+    const observedActiveTeardown = activeTeardown.then(
+      () => {
+        activeTeardownSettled = true;
+      },
+      (err: unknown) => {
+        activeTeardownSettled = true;
+        throw err;
+      },
+    );
+    await attempt(() => Promise.race([observedActiveTeardown, delay(graceMs)]), true);
+    if (!activeTeardownSettled) {
+      mutationBarrierComplete = false;
+      errors.push(new Error('active task teardown did not settle before the shutdown grace deadline'));
+      pendingLateMutationBarriers.add(observedActiveTeardown);
+      void observedActiveTeardown.finally(() => pendingLateMutationBarriers.delete(observedActiveTeardown)).catch(() => undefined);
+    }
+    // S3b: in hosted mode, a terminal is journaled before it is handed to the
+    // outbox (see `sendEnvelope`), so a `task.fail` that `shutdownActiveTasks`
+    // just produced may still be mid-chain right now. Awaiting the chain here
+    // — before the drain wait below, which is what decides the connection is
+    // idle — is what keeps that fail from being written into an outbox nobody
+    // is draining any more. Exactly a no-op when no journal is configured.
+    const journalTailSettled = journal ? await attempt(() => journalTerminalTail, true) : true;
+    // stop() cleared the maintenance timer synchronously above. Await the pass
+    // that may already have been inside SQLite only here, immediately before
+    // closing the owned journal, so task interruption is not held behind a
+    // slow checkpoint while the journal-close race remains impossible.
+    const maintenanceSettled = await attempt(() => maintenanceStopped, true);
     // Finding F5(b): bounded wait for the outbox (e.g. the task.fail(s)
     // shutdownActiveTasks just enqueued) to actually drain before closing
     // the connection out from under it — see ConnectionManager.stop's own
@@ -803,16 +1328,51 @@ export function createDaemonWithAdapters(
     // comment for the honest-audit read a caller may take afterward.
     const drainTimeoutMs =
       opts.drainTimeoutMs ?? overrides.shutdown?.outboxDrainTimeoutMs ?? DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS;
-    await connection?.stop(drainTimeoutMs);
-    auth.stop();
+    const connectionStopped = await attempt(() => connection?.stop(drainTimeoutMs), true);
+    // Close the owned journal only after every producer has stopped: active
+    // task teardown and its terminal tail settled, maintenance settled, and
+    // the connection can no longer deliver a new inbound envelope. Closing it
+    // earlier would let a failed/slow connection shutdown append into a closed
+    // database after this function released the store lease.
+    if (activeTeardownSettled && journalTailSettled && maintenanceSettled && connectionStopped) {
+      const journalClosed = await attempt(() => stoppingOwnedJournal?.close(), true);
+      if (journalClosed) {
+        if (journal === stoppingOwnedJournal) journal = undefined;
+        if (ownedJournal === stoppingOwnedJournal) ownedJournal = undefined;
+        if (pressureEngine === stoppingOwnedPressureEngine) pressureEngine = undefined;
+        if (ownedPressureEngine === stoppingOwnedPressureEngine) ownedPressureEngine = undefined;
+      }
+    } else if (stoppingOwnedJournal) {
+      mutationBarrierComplete = false;
+    }
+    await attempt(() => auth.stop(), true);
     connectionState = 'closed';
     // M4 Phase 2: stop the control socket in every shutdown path — this is
     // the single lifecycle choke point every caller (a foreground abort via
     // `bin/commands/start.ts`, `unpair()` below, and the control socket's
     // OWN `shutdown` RPC — see `performControlShutdown`) already funnels
     // through, so nothing else needs its own control-socket teardown logic.
-    await controlServerHandle?.close();
-    controlServerHandle = undefined;
+    await attempt(async () => {
+      await controlServerHandle?.close();
+      controlServerHandle = undefined;
+    }, true);
+    if (mutationBarrierComplete && daemonOwnerLease) {
+      await attempt(() => operationalHealth.markCleanStop(), false);
+      await attempt(async () => {
+        await daemonOwnerLease?.release();
+        daemonOwnerLease = undefined;
+      }, false);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'daemon shutdown completed with errors');
+    }
+    if (!mutationBarrierComplete) {
+      // Defensive invariant: every mutation-barrier failure is recorded above.
+      // Keep the lease if that invariant is ever violated rather than allowing
+      // doctor or a second daemon to overlap a residual writer.
+      throw new Error('daemon shutdown mutation barrier is incomplete; ownership lease retained');
+    }
   }
 
   /**
@@ -825,7 +1385,17 @@ export function createDaemonWithAdapters(
    * below supplies its own `reason` instead of this default.
    */
   async function stop(opts: { drainTimeoutMs?: number; reason?: string } = {}): Promise<void> {
-    await runShutdownSequence(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
+    await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
+  }
+
+  function requestShutdown(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+    if (shutdownPromise) return shutdownPromise;
+    const current = runLifecycleMutation(() => runShutdownSequence(reason, opts));
+    shutdownPromise = current;
+    void current.finally(() => {
+      if (shutdownPromise === current) shutdownPromise = undefined;
+    }).catch(() => undefined);
+    return current;
   }
 
   /**
@@ -844,11 +1414,29 @@ export function createDaemonWithAdapters(
    * in-memory record still usable.
    */
   async function unpair(): Promise<void> {
-    const current = await store.load();
-    await stop();
-    await store.clear();
-    if (current) {
-      await cursorStore.clear(config.serverUrl, current.deviceId);
+    await runLifecycleMutation(unpairUnderLease);
+  }
+
+  async function unpairUnderLease(): Promise<void> {
+    // The outer lifecycle slot prevents pair/start/control shutdown from
+    // entering while teardown and destructive credential cleanup span two
+    // cross-process lease acquisitions.
+    await runShutdownSequence('operator');
+    // stop() releases only after every daemon writer settles. Reacquire before
+    // destructive identity cleanup; if another daemon won the gap, fail
+    // closed rather than clearing state under it.
+    const cleanupLease = await acquireDaemonOwner(storeDir, 'daemon');
+    try {
+      // The identity being removed is read under the same lease as both the
+      // device and cursor mutations. A pair that wins stop()'s release gap is
+      // therefore either wholly before this cleanup (and is fully removed) or
+      // wholly after it; stale pre-lease identity can never drive cleanup.
+      const current = await store.remove();
+      if (current) {
+        await cursorStore.clear(config.serverUrl, current.deviceId);
+      }
+    } finally {
+      await cleanupLease.release();
     }
     auth = buildAuthManager();
     observer.noteUnpaired();
@@ -887,6 +1475,35 @@ export function createDaemonWithAdapters(
   // -------------------------------------------------------------------------
 
   function buildControlStatus(): ControlStatusResult {
+    const snapshot = pressureEngine?.snapshot();
+    const storageStatus: ControlStorageStatus | undefined =
+      snapshot === undefined
+        ? undefined
+        : {
+            pressureState: snapshot.state,
+            budgetBytes: snapshot.budgetBytes,
+            usedBytes: snapshot.usedBytes,
+            freeBytes: snapshot.freeBytes,
+            measuredAt: snapshot.measuredAt,
+            categories: (Object.keys(snapshot.categories) as StorageCategory[])
+              .sort()
+              .map((category) => ({
+                category,
+                bytes: snapshot.categories[category].bytes,
+                approximate: snapshot.categories[category].approximate,
+              })),
+            ...(snapshot.lastCompaction
+              ? {
+                  lastCompaction: {
+                    checkpointed: snapshot.lastCompaction.checkpointed,
+                    walFramesRemaining: snapshot.lastCompaction.walFramesRemaining,
+                    pagesVacuumed: snapshot.lastCompaction.pagesVacuumed,
+                    durationMs: snapshot.lastCompaction.durationMs,
+                    at: snapshot.lastCompaction.at,
+                  },
+                }
+              : {}),
+          };
     const activeTasks: ControlActiveTask[] = observer
       .tasks()
       .filter((task) => TASK_TRANSITIONS[task.state].length > 0) // non-terminal only — see the `status` method's own doc comment (control-protocol.ts)
@@ -913,6 +1530,14 @@ export function createDaemonWithAdapters(
       queueWatermarks: runner?.getQueueWatermarks() ?? [],
       approvals: pendingApprovals,
       approvalsPending: pendingApprovals.length,
+      // S3b (L-003): the storage section, present only when a policy is
+      // configured AND a measurement has actually happened. An engine that has
+      // never ticked reports nothing rather than a zeroed snapshot — "not
+      // measured" and "measured, and empty" are different facts, and a status
+      // surface that conflates them is how an operator concludes a full disk is
+      // fine.
+      ...(storageStatus === undefined ? {} : { storage: storageStatus }),
+      operationalHealth: operationalHealth.snapshot(),
     };
   }
 
@@ -965,7 +1590,7 @@ export function createDaemonWithAdapters(
     // own caller — the `shutdown` control method's `.catch()` in
     // `controlMethods` below — afterward).
     try {
-      await runShutdownSequence(`control socket shutdown (${effectiveReason})`);
+      await requestShutdown(`control socket shutdown (${effectiveReason})`);
     } finally {
       // Finding F5(b): read AFTER runShutdownSequence() returns — 0 means
       // the drain genuinely finished in time; a positive count is an honest
@@ -1054,6 +1679,7 @@ export function createDaemonWithAdapters(
       deviceId: auth.deviceId,
       activeTaskCount: runner?.activeTaskCount ?? 0,
       branding: config.branding,
+      operationalHealth: operationalHealth.snapshot(),
     };
   }
 

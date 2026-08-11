@@ -1,4 +1,4 @@
-import type { PermissionMode, PermissionPolicy } from '@byok/protocol';
+import type { PermissionMode, PermissionPolicy } from '@byok-sdk/protocol';
 
 /**
  * Permissiveness ranking used only to compare an offered policy against the

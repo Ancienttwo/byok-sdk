@@ -6,7 +6,7 @@ Windows Service on its own. This recipe uses
 [WinSW](https://github.com/winsw/winsw) — the standard, widely-used .NET
 service wrapper that runs any exe/command as a genuine Windows Service, with
 full SCM integration: crash-restart, logging, boot autostart, `sc.exe`
-queryability. This is a **reference recipe**: `@byok/client` is an npm
+queryability. This is a **reference recipe**: `@byok-sdk/client` is an npm
 library (Decision-6 boundary — see the repo root docs).
 
 ## Decision-6 boundary: you bundle WinSW, the SDK generates the config
@@ -150,7 +150,7 @@ job) on a real `windows-latest` runner — this SDK's own macOS/Linux
 development machines cannot execute WinSW at all, so that CI job (not a
 local run) is the real proof this recipe works. It then additionally
 installs a SECOND scratch service running the real `byok-agent start`
-(paired against a real, ephemeral `@byok/server`) and confirms `byok-agent
+(paired against a real, ephemeral `@byok-sdk/server`) and confirms `byok-agent
 status` reaches its control socket live over a Windows named pipe (M4
 Phase 2 — see `packages/client/scripts/control-socket-check.mjs`), before
 uninstalling that one too.

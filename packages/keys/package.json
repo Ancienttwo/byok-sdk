@@ -1,0 +1,50 @@
+{
+  "name": "@byok-sdk/keys",
+  "version": "0.1.0",
+  "description": "BYOK SDK key management: provider profiles, credential-backed auth headers, and direct provider transports",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ancienttwo/byok-sdk.git",
+    "directory": "packages/keys"
+  },
+  "bugs": {
+    "url": "https://github.com/Ancienttwo/byok-sdk/issues"
+  },
+  "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "pnpm run build",
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}

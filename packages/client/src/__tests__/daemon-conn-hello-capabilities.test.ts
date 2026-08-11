@@ -28,8 +28,9 @@ async function tmpDir(prefix: string): Promise<string> {
  * so the truthful per-runtime matrix asserted below is exactly what a real
  * `conn.hello` on the wire would contain: each adapter's own already-tested
  * `capabilities()` (see `pi-adapter.test.ts`/`claude-adapter.test.ts`/
- * `codex-adapter.test.ts`, all unchanged by this addition) plus
- * `approvalInteractive: false` layered on by `toRuntimeInfoCapabilities`.
+ * `codex-adapter.test.ts`) — including `approvalInteractive`, which S0
+ * (H-002/H-003) turned into a pure passthrough of adapter truth instead of
+ * the hardcoded `false` `toRuntimeInfoCapabilities` used to layer on.
  */
 describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilities addition)', () => {
   let server: TestServer;
@@ -76,13 +77,15 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     // claude: no mid-turn steer (writes queue as a follow-up turn instead —
     // see claude-adapter.ts), but does support the extra `plan` permission
     // mode, and (M4 Phase 3) `confirm` via --permission-prompt-tool.
-    // `approvalInteractive` stays `false` regardless — see
-    // `toRuntimeInfoCapabilities`'s own doc comment in create-daemon.ts:
-    // that flag is hardcoded, not derived from `capabilities().permissionModes`.
+    // GAP-001/H-003: `approvalInteractive` is now `true` here — it comes
+    // straight from `ClaudeAdapter.capabilities()`, whose confirm path is
+    // genuinely wired (permission-prompt-tool → approval MCP → control
+    // socket), rather than the hardcoded `false` the daemon used to stamp
+    // on every runtime.
     expect(byId.get('claude')).toEqual({
       steer: false,
       resume: true,
-      approvalInteractive: false,
+      approvalInteractive: true,
       permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     });
 
@@ -95,11 +98,13 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       permissionModes: ['auto', 'readonly'],
     });
 
-    // None of the three bundled runtimes has interactive approval — verified
-    // per-adapter (each one's resolveApproval() throws rather than pausing).
-    for (const caps of byId.values()) {
-      expect(caps?.approvalInteractive).toBe(false);
-    }
+    // The wire value is adapter-generated, never a constant: the three
+    // bundled runtimes must NOT all report the same thing. pi and codex have
+    // no `needs_approval` notion at all (`resolveApproval()` throws), claude
+    // does.
+    expect(byId.get('pi')?.approvalInteractive).toBe(false);
+    expect(byId.get('claude')?.approvalInteractive).toBe(true);
+    expect(byId.get('codex')?.approvalInteractive).toBe(false);
   });
 });
 

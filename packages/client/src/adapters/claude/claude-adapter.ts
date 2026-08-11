@@ -3,9 +3,10 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskOfferPayload } from '@byok/protocol';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
+  SteerUnsupportedError,
   type ApprovalChannel,
   type RuntimeAdapter,
   type RuntimeCapabilities,
@@ -172,7 +173,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // M4 Phase 3: 'confirm' added — see permission-mapping.ts's confirm-mode
     // doc comment for the empirical basis (`--permission-prompt-tool`,
     // live-verified against the real installed binary).
-    return { steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] };
+    // `approvalInteractive: true` — the confirm path is genuinely wired end
+    // to end: `--permission-prompt-tool` → the out-of-process approval MCP
+    // server (`bin/byok-approval-mcp.ts`) → this daemon's control socket →
+    // `ClaudeSession.resolveApproval` really resuming the paused turn.
+    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] };
   }
 
   /**
@@ -456,7 +461,8 @@ class ClaudeSession implements Session {
    * `steer()` name, which would promise live redirection it cannot deliver.
    */
   async steer(): Promise<void> {
-    throw new Error(
+    throw new SteerUnsupportedError(
+      'claude',
       'claude adapter does not support mid-turn steering: writing to claude\'s stdin while a turn is in flight queues as a separate subsequent turn rather than redirecting the running one (empirically confirmed) — see capabilities().steer',
     );
   }

@@ -15,7 +15,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * `dedupWatermark()` collapses to the frozen durable cursor, so every
  * long-poll cycle re-pulls the WHOLE post-cursor backlog from the real
  * server — not just the stalled envelope. Three compounding bugs this
- * exercises against the REAL `@byok/server` (the lightweight `TestServer`
+ * exercises against the REAL `@byok-sdk/server` (the lightweight `TestServer`
  * stub doesn't implement cursor-based redelivery on repeat polls at all, so
  * it can't reproduce any of this):
  *
@@ -41,7 +41,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * memory so a redelivered offer for an already-active/finished task is a
  * no-op.
  */
-describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2, real @byok/server)', () => {
+describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2, real @byok-sdk/server)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
 
@@ -67,7 +67,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     await vi.waitFor(() => {
@@ -120,7 +120,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     await vi.waitFor(() => {
@@ -194,7 +194,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
     await vi.waitFor(() => {

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type AgentEvent, type Envelope, type TaskOfferPayload } from '@byok/protocol';
+import { createEnvelope, type AgentEvent, type Envelope, type TaskOfferPayload } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
@@ -120,7 +120,7 @@ class ChannelRoutingAdapter implements RuntimeAdapter {
     return { present: true, version: '0.0.0' };
   }
   capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, permissionModes: ['confirm'] };
+    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] };
   }
   async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
     const session = new ChannelRoutingSession(

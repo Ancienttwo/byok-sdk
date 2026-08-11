@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createEnvelope } from '@byok/protocol';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeCapabilities } from '../types';
 import { TestServer } from './fixtures/test-server';
@@ -30,9 +30,9 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
  */
 
 /** pi/codex-like: cannot express `confirm`/`plan` — mirrors their real declared `permissionModes` (`pi-adapter.ts`/`codex-adapter.ts`). */
-const NO_CONFIRM: RuntimeCapabilities = { steer: true, resume: true, permissionModes: ['auto', 'readonly'] };
+const NO_CONFIRM: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] };
 /** claude-like: the one bundled adapter that declares `confirm` support (`claude-adapter.ts`). */
-const CONFIRM_CAPABLE: RuntimeCapabilities = { steer: false, resume: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] };
+const CONFIRM_CAPABLE: RuntimeCapabilities = { steer: false, resume: true, approvalInteractive: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));

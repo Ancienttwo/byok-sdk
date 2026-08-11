@@ -1,8 +1,8 @@
 {
-  "name": "@byok/example-basic",
+  "name": "@byok-sdk/example-basic",
   "version": "0.0.1",
   "private": true,
-  "description": "BYOK SDK end-to-end example: a hono server embedding @byok/server plus a plain-HTML demo UI, driven by a byok-agent daemon running the pi runtime",
+  "description": "BYOK SDK end-to-end example: a hono server embedding @byok-sdk/server plus a plain-HTML demo UI, driven by a byok-agent daemon running the pi runtime",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@byok/server": "workspace:*",
+    "@byok-sdk/server": "workspace:*",
     "@hono/node-server": "^2.0.10",
     "hono": "^4.12.30"
   },

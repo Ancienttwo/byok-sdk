@@ -14,7 +14,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * Finding F6 (long-poll can receive but never send): a full task lifecycle
  * — offer, claim, started, progress, complete — carried entirely over
  * `GET /byok/events` (receive) + `POST /byok/messages` (send), with the WS
- * transport never once connecting. Run against the REAL `@byok/server`
+ * transport never once connecting. Run against the REAL `@byok-sdk/server`
  * (not the client's own `TestServer` stub) via
  * `startRealServerWithoutWebSocket`, which genuinely never wires up the WS
  * upgrade at all — a real WS failure, not a simulated one — so the
@@ -22,7 +22,7 @@ async function tmpDir(prefix: string): Promise<string> {
  * mode exactly as it would against a real deployment with no reachable WS
  * endpoint.
  */
-describe('a full task lifecycle over long-poll only, WS never connects (finding F6, real @byok/server)', () => {
+describe('a full task lifecycle over long-poll only, WS never connects (finding F6, real @byok-sdk/server)', () => {
   let real: RealServerHandle;
   let daemon: Daemon | undefined;
 
@@ -53,7 +53,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
       },
     );
 
-    const pairing = real.byok.pairing.createPairingCode();
+    const pairing = real.createPairingCode();
     const record = await daemon.pair(pairing.code);
     await daemon.start();
 

@@ -2,7 +2,7 @@
 
 Compile a BYOK SDK-based launcher into a single native executable with
 [`bun build --compile`](https://bun.com/docs/bundler/executables). This is a
-**reference recipe**, not a shipped artifact: `@byok/client` is an npm
+**reference recipe**, not a shipped artifact: `@byok-sdk/client` is an npm
 library (Decision-6 boundary — see the repo root docs), and the SDK itself
 never produces, signs, or distributes a binary. Copy this folder into your
 own product's repo and adapt it to your own entry point, icon, signing, and
@@ -12,9 +12,7 @@ release pipeline.
 
 - [bun](https://bun.com) installed (`curl -fsSL https://bun.com/install | bash`,
   or see bun's own install docs for your platform).
-- Node.js 22.19.0 or newer for the external pi CLI sidecar. `bun install`
-  may install the npm graph, but pi's supported production runtime is Node.
-- Your product's launcher entry point built against `@byok/client` (see
+- Your product's launcher entry point built against `@byok-sdk/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
   it constructs a daemon, calls `.status()`, and probes runtime detection
   with no network I/O).
@@ -25,7 +23,7 @@ release pipeline.
 bun build ./launcher.ts --compile --outfile my-product
 ```
 
-That's the whole recipe — `bun build --compile` bundles `@byok/client` (ESM)
+That's the whole recipe — `bun build --compile` bundles `@byok-sdk/client` (ESM)
 and everything it imports into one native executable for the host platform.
 No separate transpile/bundle step is needed first, unlike the Node SEA
 recipe (`../sea/`): bun's bundler already understands ESM and
@@ -46,27 +44,17 @@ templates/packaging/bun/build.sh <entry.ts> <output-dir>
 
 ## What this actually guarantees (and what it doesn't)
 
-Bundling a Node.js daemon into one file is not automatically safe. This
-SDK has exactly **one** hazardous resolution path: the pi adapter's
-`resolvePiBin()` (`packages/client/src/adapters/pi/resolve-bin.ts`) calls
-`import.meta.resolve('@earendil-works/pi-coding-agent')` to find pi's
-required package install. That package is deliberately marked `external`
-by `@byok/client`'s own tsup build (never bundled into the SDK's dist), so
-it is never actually reachable from inside a compiled single-file binary.
-There is no automatic global-PATH fallback because that would replace the
-versioned core dependency with an unrelated executable. **This recipe's
-`smoke-test.sh` proves that a missing explicit sidecar is observable and that
-the configured sidecar is reachable under a real compiled Bun binary.**
+Bundling a Node.js daemon into one file is not automatically safe. Runtime
+CLIs remain external, user-installed executables. The pi adapter resolves only
+`BYOK_PI_BIN` or a bare `pi` on PATH, whose `detect()` reports
+`present: false` if unavailable. This recipe's `smoke-test.sh` proves both
+absence and explicit pickup under a real compiled bun binary.
 
 Empirically confirmed while building this recipe (see
 `smoke-test.sh`'s two assertions):
 
-- **pi sidecar absent** (no `BYOK_PI_BIN`, pi unreachable from the compiled binary):
-  `bun build --compile` embeds the module graph such that a non-bundled,
-  external specifier like pi's package name simply isn't resolvable at
-  runtime. `resolvePiBin()` fails closed and `PiAdapter.detect()` reports
-  `{ present: false }` cleanly. A product must treat this as a missing core
-  runtime deployment dependency, not as a supported steady state.
+- **pi absent** (no `BYOK_PI_BIN`, no `pi` on PATH): `PiAdapter.detect()`
+  reports `{ present: false }` cleanly. No crash, exit 0.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
   the version-matched Node 22.19+ pi binary at that path is detected correctly

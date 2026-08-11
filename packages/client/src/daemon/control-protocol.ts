@@ -1,8 +1,11 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import type { TaskState } from '@byok/protocol';
+import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
+import type { StorageCategory } from './journal/journal';
+import type { StoragePressureState } from './journal/storage-policy';
+import type { OperationalHealthSnapshot } from './operational-health';
 
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
@@ -341,6 +344,51 @@ export interface TaskQueueWatermark {
   pendingApprovals: number;
 }
 
+/**
+ * S3b (L-003): local storage usage and pressure, as the `status` method
+ * reports them (architecture §12.7.2.1).
+ *
+ * Named `storage*` throughout, NOT `watermark*`: {@link TaskQueueWatermark}
+ * above is a per-task progress-buffer depth and has nothing to do with disk.
+ * Two unrelated concepts sharing a name on one status result is how an
+ * operator reads the wrong number during an incident.
+ *
+ * Present only when a daemon actually runs a storage policy
+ * (`DaemonConfig.hostedJournal.storagePolicy`). Absent means "not measured",
+ * which is a different statement from "measured, and fine" — so it is an
+ * absent field rather than a zeroed one.
+ */
+export interface ControlStorageStatus {
+  /** §12.7.2.1's four states. `hard-pressure` declines new offers; `emergency` refuses to ack at all. */
+  pressureState: StoragePressureState;
+  /** `maxStoreBytes` — the budget `usedBytes` is measured against. */
+  budgetBytes: number;
+  /** Total across every category below, as of `measuredAt`. */
+  usedBytes: number;
+  /** Bytes available to this daemon on the store's filesystem — the free-space axis of the watermark, independent of the budget. */
+  freeBytes: number;
+  measuredAt: string;
+  /** The five §12.7.2.1 categories, always reported separately — a single total cannot drive a category-scoped cleanup order or a category-scoped never-delete list. */
+  categories: ControlStorageCategoryUsage[];
+  /** The most recent bounded WAL checkpoint + incremental vacuum, if one has run in this daemon's lifetime. */
+  lastCompaction?: ControlStorageCompaction;
+}
+
+export interface ControlStorageCategoryUsage {
+  category: StorageCategory;
+  bytes: number;
+  /** `true` when this is a host-reported or sampled figure rather than one measured off the filesystem. */
+  approximate: boolean;
+}
+
+export interface ControlStorageCompaction {
+  checkpointed: boolean;
+  walFramesRemaining: number;
+  pagesVacuumed: number;
+  durationMs: number;
+  at: string;
+}
+
 /** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
 export interface ControlStatusResult {
   pid: number;
@@ -365,6 +413,10 @@ export interface ControlStatusResult {
   approvals: PendingApproval[];
   /** M4 Phase 4 (part B.3): total approvals currently DISPATCHED (registered) across the whole daemon — the same count `approvals.list` returns, surfaced here too for a one-call status view. */
   approvalsPending: number;
+  /** S3b (L-003): local storage usage + pressure — see {@link ControlStorageStatus}. Absent unless a storage policy is configured. */
+  storage?: ControlStorageStatus;
+  /** Local lifecycle/retry budget. This is not the transport state above. */
+  operationalHealth: OperationalHealthSnapshot;
 }
 
 export interface ApprovalsListResult {

@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@byok/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import type { PiRpcMessage } from './rpc-client';
 
 /**
