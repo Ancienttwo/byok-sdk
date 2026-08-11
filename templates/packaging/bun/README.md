@@ -12,6 +12,8 @@ release pipeline.
 
 - [bun](https://bun.com) installed (`curl -fsSL https://bun.com/install | bash`,
   or see bun's own install docs for your platform).
+- Node.js 22.19.0 or newer for the external pi CLI sidecar. `bun install`
+  may install the npm graph, but pi's supported production runtime is Node.
 - Your product's launcher entry point built against `@byok/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
   it constructs a daemon, calls `.status()`, and probes runtime detection
@@ -29,6 +31,12 @@ No separate transpile/bundle step is needed first, unlike the Node SEA
 recipe (`../sea/`): bun's bundler already understands ESM and
 `import.meta.resolve` natively.
 
+This is a packageability smoke, not a declaration that the complete BYOK
+daemon is supported under Bun's JavaScript runtime. Downstream projects may
+use `bun install`; production BYOK/pi execution remains on Node 22.19+, and a
+Bun-compiled launcher must inject that Node-executed sidecar with
+`BYOK_PI_BIN`.
+
 `build.sh` in this folder is the same command, parameterized for this repo's
 own CI smoke:
 
@@ -42,28 +50,27 @@ Bundling a Node.js daemon into one file is not automatically safe. This
 SDK has exactly **one** hazardous resolution path: the pi adapter's
 `resolvePiBin()` (`packages/client/src/adapters/pi/resolve-bin.ts`) calls
 `import.meta.resolve('@earendil-works/pi-coding-agent')` to find pi's
-optionalDependency install. That package is deliberately marked `external`
+required package install. That package is deliberately marked `external`
 by `@byok/client`'s own tsup build (never bundled into the SDK's dist), so
 it is never actually reachable from inside a compiled single-file binary.
-The existing source already wraps that call in a try/catch that falls back
-to a bare `pi` on PATH, whose `detect()` then reports `present: false` if
-that also fails — **this recipe's `smoke-test.sh` exists to prove that
-fallback actually holds under a real compiled bun binary**, not just in
-ordinary `node` execution.
+There is no automatic global-PATH fallback because that would replace the
+versioned core dependency with an unrelated executable. **This recipe's
+`smoke-test.sh` proves that a missing explicit sidecar is observable and that
+the configured sidecar is reachable under a real compiled Bun binary.**
 
 Empirically confirmed while building this recipe (see
 `smoke-test.sh`'s two assertions):
 
-- **pi absent** (no `BYOK_PI_BIN`, pi unreachable from the compiled binary):
+- **pi sidecar absent** (no `BYOK_PI_BIN`, pi unreachable from the compiled binary):
   `bun build --compile` embeds the module graph such that a non-bundled,
   external specifier like pi's package name simply isn't resolvable at
-  runtime — `import.meta.resolve` fails, the existing try/catch in
-  resolve-bin.ts catches it, and `PiAdapter.detect()` reports
-  `{ present: false }` cleanly. No crash, exit 0.
+  runtime. `resolvePiBin()` fails closed and `PiAdapter.detect()` reports
+  `{ present: false }` cleanly. A product must treat this as a missing core
+  runtime deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
-  real pi binary at that path is detected correctly (`present: true`) even
-  inside the compiled executable.
+  the version-matched Node 22.19+ pi binary at that path is detected correctly
+  (`present: true`) even inside the compiled executable.
 
 **claude and codex are never a hazard here.** Both adapters'
 `resolve-bin.ts` (`packages/client/src/adapters/{claude,codex}/`) only ever
@@ -94,6 +101,6 @@ templates/packaging/bun/smoke-test.sh
 
 Builds the launcher, runs it from an isolated directory (no `node_modules`
 of its own) with and without a stub `pi` on `BYOK_PI_BIN`, and asserts both
-the degrade-holds and pickup-works cases. This is exactly what CI runs on
+the missing-sidecar and pickup-works cases. This is exactly what CI runs on
 every push (`.github/workflows/ci.yml`, `packageability-smoke` job) across
 Linux, macOS, and Windows.

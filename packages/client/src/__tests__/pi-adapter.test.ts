@@ -10,7 +10,7 @@ import type { Session, TaskContext } from '../types';
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 
 function fakePiAdapter(): PiAdapter {
-  return new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }) });
+  return new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }) });
 }
 
 async function takeEvents(session: Session, count: number): Promise<AgentEvent[]> {
@@ -44,6 +44,24 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const result = await adapter.detect();
     expect(result.present).toBe(true);
     expect(result.version).toBe('0.0.0-fake');
+  });
+
+  it('detect() reports absent when a bundle cannot resolve its required external pi sidecar', async () => {
+    const adapter = new PiAdapter({
+      resolveBin: () => {
+        throw new Error('required pi sidecar is not embedded');
+      },
+    });
+    await expect(adapter.detect()).resolves.toEqual({ present: false });
+  });
+
+  it('start() fails closed when the required package or explicit sidecar cannot resolve', async () => {
+    const adapter = new PiAdapter({
+      resolveBin: () => {
+        throw new Error('required pi runtime is unavailable');
+      },
+    });
+    await expect(adapter.start(baseTask, await makeCtx())).rejects.toThrow(/required pi runtime is unavailable/);
   });
 
   it('start() drives the canned prompt sequence into normalized AgentEvents', async () => {
@@ -219,14 +237,10 @@ describe('PiAdapter against the fake-pi fixture', () => {
   });
 });
 
-describe('PiAdapter against the real installed optionalDependency (no network/API key required)', () => {
-  it('detect() returns a well-formed result whether or not pi is actually installed here', async () => {
+describe('PiAdapter against the exact required dependency (no network/API key required)', () => {
+  it('detect() resolves and launches pi 0.84.1 from the package install', async () => {
     const adapter = new PiAdapter();
     const result = await adapter.detect();
-    expect(typeof result.present).toBe('boolean');
-    if (result.present) {
-      expect(typeof result.version).toBe('string');
-      expect(result.version?.length).toBeGreaterThan(0);
-    }
+    expect(result).toMatchObject({ present: true, version: '0.84.1' });
   });
 });

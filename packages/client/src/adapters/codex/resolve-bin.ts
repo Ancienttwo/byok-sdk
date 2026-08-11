@@ -6,7 +6,7 @@ export interface ResolvedBin {
 /**
  * Resolve the codex CLI executable.
  *
- * Unlike pi (bundled as an npm optionalDependency — see
+ * Unlike pi (an exact required npm dependency — see
  * `../pi/resolve-bin.ts`), the real OpenAI Codex CLI (empirically `codex-cli
  * 0.144.5` on the machine this adapter was built/verified against, installed
  * at a plain PATH location — not inside this repo's `node_modules`) is not

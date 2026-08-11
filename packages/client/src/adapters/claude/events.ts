@@ -313,7 +313,7 @@ function tryRealpath(candidate: string): string | undefined {
 
 /**
  * `result` is claude's real "whole run settled" signal (the direct
- * counterpart to pi's `agent_end` — see `../pi/events.ts`'s doc comment on
+ * counterpart to pi's `agent_settled` — see `../pi/events.ts`'s doc comment on
  * why that distinction mattered there). Confirmed live: it is always the
  * LAST frame of a turn, whether the turn succeeded (`is_error:false`,
  * `subtype:"success"`) or failed before ever reaching the model (e.g. an

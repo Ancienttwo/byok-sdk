@@ -45,7 +45,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
   });
 
   it('advertises truthful, per-runtime capabilities for all three bundled runtimes', async () => {
-    const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'path' }) });
+    const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }) });
     const claude = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
     const codex = new CodexAdapter({ resolveBin: () => ({ command: CODEX_FIXTURE, source: 'path' }) });
 
@@ -128,7 +128,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
   });
 
   it('advertises approval-targeting unconditionally, alongside the pre-existing steer/blob-upload flags', async () => {
-    const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'path' }) });
+    const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }) });
 
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-store-');

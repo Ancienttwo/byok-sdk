@@ -7,7 +7,7 @@ export interface ResolvedBin {
  * Resolve the `claude` (Claude Code) CLI executable.
  *
  * Unlike pi (`../pi/resolve-bin.ts`), this package does NOT bundle a
- * matched `claude` build as an optionalDependency. Claude Code is the end
+ * matched `claude` build as a dependency. Claude Code is the end
  * user's own globally-installed, individually-authenticated CLI (`claude
  * auth login`, tied to their Anthropic/claude.ai account) — there is
  * nothing useful to vendor: a bundled copy could never carry the user's own
@@ -23,7 +23,7 @@ export interface ResolvedBin {
  * `fake-claude.mjs` fixture ahead of a real claude install, exactly as pi's
  * own override does), otherwise this falls back to the literal command name
  * `claude`, resolved via the child process's own PATH lookup — there is no
- * optionalDependency tier in between.
+ * package-resolution tier in between.
  */
 export function resolveClaudeBin(): ResolvedBin {
   const override = process.env.BYOK_CLAUDE_BIN;

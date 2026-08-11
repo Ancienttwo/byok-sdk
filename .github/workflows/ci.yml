@@ -13,9 +13,9 @@ name: CI
 # The freeze-guard test (packages/protocol/src/__tests__/freeze-guard.test.ts)
 # runs as an ordinary part of `pnpm -r test` — no separate step for it.
 #
-# Node matrix: `engines.node` in package.json pins a >=20 floor; this matrix
-# covers both that floor (20) and the version this repo is actually developed
-# against (22) so a floor regression doesn't hide behind a newer local Node.
+# Node matrix: `engines.node` pins a >=22.19.0 floor because the required pi
+# runtime has the same floor. The matrix covers that exact minimum and Node 24
+# so a floor regression cannot hide behind a newer local runtime.
 #
 # Note for anyone debugging a LOCAL sandbox run of this same test suite (not
 # a concern for these hosted runners): a couple of integration tests
@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: ['22.19.0', 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -88,10 +88,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies
@@ -117,11 +117,10 @@ jobs:
 
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) without
-  # pi's optionalDependency resolution (packages/client/src/adapters/pi/
-  # resolve-bin.ts's `import.meta.resolve`) crashing the process when pi
-  # isn't reachable from inside the bundle -- it must degrade to
-  # `present: false`, same as it already does for a plain `node` run with
-  # the optionalDependency missing. See templates/packaging/{bun,sea} for
+  # pi's required external package resolution (packages/client/src/adapters/
+  # pi/resolve-bin.ts's `import.meta.resolve`) crashing the probe when pi is
+  # not embedded in the bundle. Production bundles supply the required pi
+  # Node sidecar explicitly via BYOK_PI_BIN. See templates/packaging/{bun,sea} for
   # the full recipes + empirically-confirmed rationale (including a macOS
   # postject gotcha that silently segfaults without one extra flag), and
   # examples/packaging/launcher.ts for the entry point both recipes compile.
@@ -161,10 +160,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies
@@ -215,10 +214,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies
@@ -280,10 +279,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies
@@ -314,10 +313,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 20
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies

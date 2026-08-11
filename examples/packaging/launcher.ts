@@ -9,12 +9,11 @@
 // asserted in prose.
 //
 // The hazard: `packages/client/src/adapters/pi/resolve-bin.ts` calls
-// `import.meta.resolve(PI_PACKAGE_NAME)` to find pi's optionalDependency
+// `import.meta.resolve(PI_PACKAGE_NAME)` to find pi's required package
 // install. tsup marks that package `external` (never bundled into
-// @byok/client's own dist), and resolve-bin.ts already wraps the call in a
-// try/catch that falls back to a bare `pi` on PATH, whose `detect()` then
-// reports `present: false` when that also fails. That fallback is exercised
-// and passing in this repo's ordinary Node test suite -- what's NOT
+// @byok/client's own dist), so a single-file product must inject its required
+// Node 22.19+ pi sidecar with BYOK_PI_BIN. `detect()` reports `present: false`
+// when neither the package nor that explicit sidecar is reachable. What's NOT
 // exercised anywhere else is whether `import.meta.resolve` still behaves
 // (throws catchably, degrades) once @byok/client's own code is itself
 // flattened into a single-file compiled binary, run somewhere with no
@@ -38,7 +37,7 @@
 //     path (see resolve-bin.ts) -- so running this SAME compiled binary
 //     twice, once with pi genuinely unreachable and once with `BYOK_PI_BIN`
 //     pointing at a stub script, proves both halves of the guarantee:
-//     graceful degrade when absent, and correct pickup when present.
+//     observable missing-sidecar detection and correct pickup when present.
 //
 // Output contract: exactly one line to stdout on success, prefixed with
 // `BYOK_PACKAGING_PROBE ` and followed by a JSON object -- this is what the

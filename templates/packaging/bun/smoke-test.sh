@@ -9,8 +9,8 @@ set -euo pipefail
 # node_modules of its own (simulating "shipped to an end user's machine") --
 #
 #   1. with pi genuinely unreachable and no BYOK_PI_BIN set -- must exit 0
-#      and report piDetect.present === false. This is the graceful-degrade
-#      half of the guarantee: pi's optionalDependency import.meta.resolve
+#      and report piDetect.present === false. This is the missing-sidecar
+#      half of the guarantee: pi's required external package resolution
 #      (packages/client/src/adapters/pi/resolve-bin.ts) must fail catchably
 #      under a real single-file bundle, not crash the process.
 #   2. with BYOK_PI_BIN pointing at a stub pi script -- must exit 0 and
@@ -54,8 +54,8 @@ else
 fi
 
 # Isolated run directory: copy the standalone executable out to a location
-# with no node_modules of its own in its ancestor chain, so a genuinely
-# absent optionalDependency can't be found by accident via disk resolution.
+# with no node_modules of its own in its ancestor chain, so the external
+# required package can't be found by accident via disk resolution.
 ISOLATED_DIR="$WORK_DIR/isolated-run"
 mkdir -p "$ISOLATED_DIR"
 RUN_BIN="$ISOLATED_DIR/$(basename "$BIN")"
@@ -113,7 +113,7 @@ echo "==> scenario 1: pi absent (isolated dir, no BYOK_PI_BIN)"
 OUT1="$WORK_DIR/out1.log"
 EXIT1=0
 ( cd "$ISOLATED_DIR" && "./$(basename "$RUN_BIN")" ) >"$OUT1" 2>&1 || EXIT1=$?
-assert_probe "pi-absent-degrades" "false" "$OUT1" "$EXIT1"
+assert_probe "pi-sidecar-missing" "false" "$OUT1" "$EXIT1"
 
 echo "==> scenario 2: BYOK_PI_BIN stub (pi picked up)"
 OUT2="$WORK_DIR/out2.log"

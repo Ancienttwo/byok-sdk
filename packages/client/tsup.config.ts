@@ -10,6 +10,7 @@ export default defineConfig({
   clean: true,
   splitting: false,
   treeshake: true,
-  // The pi adapter lazy-imports this optionalDependency at runtime; never bundle it.
+  // Pi is a required runtime dependency, but its CLI stays external because the
+  // adapter launches it as a version-pinned Node subprocess.
   external: ['@earendil-works/pi-coding-agent'],
 });

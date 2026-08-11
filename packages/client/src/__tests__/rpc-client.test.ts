@@ -63,7 +63,7 @@ describe('PiRpcClient observability (stderr ring buffer, extension_ui_request, u
     const response = await client.send({ type: 'prompt', message: 'hi' });
     expect(response.success).toBe(true);
 
-    const events = await collectUntil(client, (e) => e.type === 'agent_end');
+    const events = await collectUntil(client, (e) => e.type === 'agent_settled');
 
     // Never forwarded as an event — PiRpcClient answers it itself.
     expect(events.some((e) => e.type === 'extension_ui_request')).toBe(false);
@@ -79,6 +79,7 @@ describe('PiRpcClient observability (stderr ring buffer, extension_ui_request, u
     expect(finalText).toContain('"cancelled":true');
     expect(finalText).not.toContain('"confirmed"');
     expect(events.some((e) => e.type === 'agent_end')).toBe(true);
+    expect(events.some((e) => e.type === 'agent_settled')).toBe(true);
   });
 
   it('answers a select-style dialog request the same fail-closed way', async () => {
@@ -87,9 +88,10 @@ describe('PiRpcClient observability (stderr ring buffer, extension_ui_request, u
     openClients.push(client);
 
     await client.send({ type: 'prompt', message: 'hi' });
-    const events = await collectUntil(client, (e) => e.type === 'agent_end');
+    const events = await collectUntil(client, (e) => e.type === 'agent_settled');
     expect(events.some((e) => e.type === 'extension_ui_request')).toBe(false);
     expect(events.some((e) => e.type === 'agent_end')).toBe(true);
+    expect(events.some((e) => e.type === 'agent_settled')).toBe(true);
   });
 
   it('logs an unmapped frame type once per type, not once per occurrence', async () => {

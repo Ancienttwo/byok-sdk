@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -38,10 +38,8 @@
   },
   "dependencies": {
     "@byok/protocol": "workspace:*",
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "ws": "^8.21.1"
-  },
-  "optionalDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.74.2"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

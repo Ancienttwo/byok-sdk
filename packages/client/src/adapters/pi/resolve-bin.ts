@@ -9,19 +9,16 @@ import { fileURLToPath } from 'node:url';
  * `@mariozechner/pi` — the identifier this task was originally briefed with —
  * is NOT the coding agent. On npm it resolves to an unrelated "CLI tool for
  * managing vLLM deployments on GPU pods" (bin: `pi-pods`). The real coding
- * agent was `@mariozechner/pi-coding-agent`, which is now itself deprecated
- * in favor of this package (same maintainers: badlogic, mitsuhiko), as of
- * literally the day before this was written. `package.json` pins the
- * `legacy-node20` dist-tag (0.74.2) rather than `latest` (0.80.7), because
- * `latest` requires Node >=22.19 while this SDK's baseline is Node >=20;
- * both versions were empirically confirmed to speak the identical RPC-mode
- * frame shapes this adapter depends on.
+ * agent was `@mariozechner/pi-coding-agent`, which is now deprecated in
+ * favor of this package. `package.json` carries the exact supported version
+ * as a required dependency; pi is a core BYOK capability, not an optional
+ * enhancement or an unversioned global executable.
  */
 export const PI_PACKAGE_NAME = '@earendil-works/pi-coding-agent';
 
 export interface ResolvedBin {
   command: string;
-  source: 'package' | 'path';
+  source: 'package' | 'env';
 }
 
 interface MinimalPackageJson {
@@ -40,16 +37,16 @@ function readPackageJson(dir: string): MinimalPackageJson | undefined {
 }
 
 /**
- * Resolve the pi CLI executable. Prefers the optionalDependency installed
- * alongside @byok/client (guarantees a known-good, version-matched build);
- * falls back to whatever `pi` is on PATH so users with a pre-existing global
- * pi install still work even when the optionalDependency didn't install.
+ * Resolve the pi CLI executable from the required package installed alongside
+ * `@byok/client`. There is intentionally no automatic PATH fallback: a global
+ * `pi` would create a second, unversioned authority for this core contract.
  *
- * `BYOK_PI_BIN` overrides both of the above when set: `PiAdapterOptions.resolveBin`
+ * `BYOK_PI_BIN` explicitly overrides the package when set: `PiAdapterOptions.resolveBin`
  * is the injectable seam for in-process tests, but the `byok-agent` CLI bin
  * only ever constructs `new PiAdapter()` with no options (see `createDaemon`),
  * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
- * in the fake-pi fixture ahead of a real pi install) has no other seam to use.
+ * in the fake-pi fixture, or a single-file product injecting its required
+ * Node 22.19+ pi sidecar) has no other seam to use.
  *
  * Deliberately does NOT use `createRequire(...).resolve()`: this package is
  * pure ESM with no `require` export condition (`exports["."]` only offers
@@ -65,7 +62,7 @@ function readPackageJson(dir: string): MinimalPackageJson | undefined {
 export function resolvePiBin(): ResolvedBin {
   const override = process.env.BYOK_PI_BIN;
   if (override) {
-    return { command: override, source: 'path' };
+    return { command: override, source: 'env' };
   }
   try {
     const mainEntryUrl = import.meta.resolve(PI_PACKAGE_NAME);
@@ -83,8 +80,13 @@ export function resolvePiBin(): ResolvedBin {
       if (parent === dir) break;
       dir = parent;
     }
-  } catch {
-    // optionalDependency not installed, or resolution failed — fall through to PATH.
+  } catch (cause) {
+    throw new Error(
+      `Required ${PI_PACKAGE_NAME} could not be resolved; install @byok/client dependencies or set BYOK_PI_BIN to a Node 22.19+ pi sidecar`,
+      { cause },
+    );
   }
-  return { command: 'pi', source: 'path' };
+  throw new Error(
+    `Required ${PI_PACKAGE_NAME} does not expose the pi CLI; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 22.19+ pi sidecar`,
+  );
 }

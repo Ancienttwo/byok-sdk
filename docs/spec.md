@@ -4,6 +4,32 @@
 
 Describe the product intent, users, workflows, acceptance scenarios, and constraints before implementation.
 
+## Core pi runtime contract
+
+Pi is a required BYOK capability. `@byok/client` depends on the exact npm
+artifact `@earendil-works/pi-coding-agent@0.84.1`; the SDK does not accept an
+unversioned global `pi` on `PATH` as an implicit substitute. All workspace
+packages require Node.js `>=22.19.0`, matching pi's published engine floor.
+The coding-agent package owns and installs its non-optional `pi-agent-core`,
+`pi-ai`, `pi-client`, `pi-protocol`, and `pi-tui` dependencies. BYOK does not
+declare or import those packages separately because the CLI/RPC boundary is
+the sole version authority.
+
+The package manager is not the runtime authority. This repository uses pnpm,
+and downstream pnpm projects install the standard npm registry artifact through
+pnpm's isolated layout. A downstream may use `bun install` to materialize the
+same dependency, but supported production execution remains Node.js 22.19 or
+newer. Bun runtime compatibility is not claimed. A Bun-compiled or Node SEA
+single-file launcher cannot embed pi's external CLI package; that deployment
+must provide the version-matched, Node-executed pi sidecar explicitly through
+`BYOK_PI_BIN`.
+
+The pi RPC boundary is also version-specific. `message_update` is delta-only;
+BYOK assembles progress from `assistantMessageEvent.delta`. `agent_end` closes
+one low-level agent run and is not task completion. Only `agent_settled`, which
+arrives after automatic retry, compaction, and queued continuations are done,
+maps to BYOK `turn_end`. The SDK does not carry parallel 0.74.x semantics.
+
 ## Local Git task workspaces
 
 The client optionally provides local Git checkpoint workspaces for operators who want a consistent, recoverable code-state convention around connected coding agents. The feature is disabled by default and is enabled only by the local daemon configuration:
