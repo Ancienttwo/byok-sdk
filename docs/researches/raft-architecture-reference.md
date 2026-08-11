@@ -1,5 +1,7 @@
 # RAFT（raft.build，內部代號 slock）架構參考
 
+> 2026-08-10 动态补证与静态归因校正见 [`2026-08-10_research-raft-cli-dynamic-report.md`](./2026-08-10_research-raft-cli-dynamic-report.md)。本文“未执行 binary”仍是本次静态拆解的方法边界，不代表仓内此后没有动态证据。
+
 ## 1. 這份文檔是什麼／探針方法與證據等級
 
 ### 1.1 定位
@@ -315,13 +317,15 @@ flowchart LR
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#0d1117","primaryColor":"#1e40af","primaryTextColor":"#ffffff","primaryBorderColor":"#bfdbfe","secondaryColor":"#5b21b6","secondaryTextColor":"#ffffff","secondaryBorderColor":"#ddd6fe","tertiaryColor":"#0f766e","tertiaryTextColor":"#ffffff","tertiaryBorderColor":"#99f6e4","lineColor":"#d1d5db","textColor":"#ffffff","edgeLabelBackground":"#374151","actorBkg":"#1e40af","actorBorder":"#bfdbfe","actorTextColor":"#ffffff","actorLineColor":"#6b7280","signalColor":"#d1d5db","signalTextColor":"#ffffff","labelBoxBkgColor":"#5b21b6","labelBoxBorderColor":"#ddd6fe","labelTextColor":"#ffffff","loopTextColor":"#ffffff","activationBkgColor":"#5b21b6","activationBorderColor":"#ddd6fe","noteBkgColor":"#78350f","noteBorderColor":"#fcd34d","noteTextColor":"#ffffff"}}}%%
 flowchart TB
-  CMD["computer 命令"] --> MUT{"是變更操作?"}
+  CMD["computer 命令"] --> MUT{"使用全域 mutation lock?"}
   MUT -->|"attach / setup / detach / start / stop<br/>restart / reset / runners stop<br/>channel set / upgrade"| LOCK["withMutationLock"]
-  MUT -->|"status / doctor / logs<br/>runners list / channel show"| NOLOCK["直接執行 · 不加鎖"]
+  MUT -->|"status / doctor / logs<br/>runners list / channel show"| NOLOCK["直接執行 · 不取得全域 mutation lock"]
   LOCK --> PL["proper-lockfile<br/>&lt;slockHome&gt;/computer/.lock<br/>stale 60s · retries 10<br/>200→800ms · factor 1.5"]
   PL -->|"搶不到"| ERR["CONCURRENT_OPERATION"]
   PL -->|"取得"| EXEC["執行"]
 ```
+
+不取得 global mutation lock **不等於純唯讀**。在 hash-matched 1.0.15 bundle 中，`status` 會先呼叫 `reconcileStalePendingUpgrade()`，條件收斂時會刪除 settled upgrade status / pending marker；2026-08-10 的空狀態動態執行只觀察到該分支未寫入。`doctor --fix` 也明確可變更本地狀態。因此上圖只分類全域 lock acquisition，不分類 read/write effect；動態邊界見 [RAFT Computer CLI dynamic research](./2026-08-10_research-raft-cli-dynamic-report.md)。
 
 `forceReleaseLock` 在 child service 啟動時**無條件執行**，靠環境變數 `..._PARENT_MUTATION_LOCK_HELD=1` 抑制 —— 這是父進程持鎖 spawn 子進程時避免自我死鎖的機制。
 
@@ -1075,9 +1079,9 @@ taskStatusSchema = enum(["todo", "in_progress", "in_review", "done", "closed"]);
 
 ### 12.3 assignee 模型 `[verified]`
 
-schema 有 `task_assignee_id` / `task_assignee_type` 兩個欄位（皆 nullable optional），但 **CLI 端沒有任何 assignee flag**。
+schema 有 `task_assignee_id` / `task_assignee_type` 兩個欄位（皆 nullable optional）。`task create` 公開 `--assignee <handle>`：建立者可指派給自己，owner/admin 可在建立時 reserve 給別人。`task claim` 則沒有 assignee target，語意是**由當前 agent 認領**。
 
-claim 的語意因此是隱含的：**認領人 = 當前 agent**。agent 不能代替別人認領，也不能指派給別人。這把「誰在做這件事」的寫入權限收斂到單一來源 —— 只有執行者本人能宣告自己在執行。
+因此 RAFT 同時支援 create-time assignment 與 later self-claim；先前「CLI 無 assignee flag、agent 不能指派給別人」的結論不成立。這只證明 client command surface；owner/admin 權限與 claim winner 的 server-side enforcement 仍是 `[unverified]`。
 
 task 是 **channel-scoped**，`--target '#channel'` 為必需參數。
 

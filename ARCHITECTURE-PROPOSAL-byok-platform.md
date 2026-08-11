@@ -2,7 +2,7 @@
 
 > 狀態：**v2 final，取代 v1**（v1 全文留在 git 歷史，本檔直接覆寫）。雙軌 synthesize 裁定日期 2026-08-05。
 > 來源：Opus 軌 `docs/researches/proposal-byok-platform-v2-opus.md`（附件）+ Codex 軌 `docs/researches/proposal-byok-platform-v2-codex.md`（附件）+ `docs/researches/tenant-isolation-decision.md`（租戶隔離定案，附件，其核心結論收進本文 §8）。三份原稿為附件引用，本文為唯一裁定文本。
-> 依據：byok-sdk 工作樹實地複核（2026-08-05，本文所有 `file:line` 由兩份原稿原樣保留）+ Cloudflare 官方文件實查 + raft-computer v1.0.15 兩輪拆解與 task board 探針（方法見 §13）。
+> 依據：byok-sdk 工作樹實地複核（2026-08-05，本文所有 `file:line` 由兩份原稿原樣保留）+ Cloudflare 官方文件實查 + raft-computer v1.0.15 hash-bound 靜態拆解與 2026-08-10 受限動態驗證（方法見 §13）。
 > 搭配文件：`docs/researches/HANDOFF-byok-keys.md`（K 線移植細節）、`plans/plan-20260805-1659-byok-keys-package.md`（K 線 active plan）。
 
 ---
@@ -210,7 +210,7 @@ board 層唯一注入派工層的動作是**把一個 offer 塞進某設備的 o
 
 ### 4.5 本機唯讀短路：加在既有控制面，不開新端口
 
-探針的 `/internal/agent-api`（GET inbox、peek、POST activity 轉發）採納**能力**、否決**傳輸**：byok 已有硬化過的 Unix socket 控制面（`control-server.ts:38,170,175`），比 loopback HTTP 端口嚴格。新增三個唯讀/轉發 RPC 到 `control-protocol.ts` 即可，不開監聽端口。
+RAFT static bundle 的 `/internal/agent-api`（GET inbox、peek、POST activity 轉發）只作 capability reference，不作 transport authority：byok 已有硬化過的 Unix socket 控制面（`control-server.ts:38,170,175`），比 loopback HTTP 端口嚴格。新增三個唯讀/轉發 RPC 到 `control-protocol.ts` 即可，不開監聽端口。
 
 ### 4.6 被否選項
 
@@ -249,7 +249,7 @@ todo ──claim──▶ in_progress ──terminal──▶ in_review ──ac
 
 **claim 是併發鎖不是所有權。** 衝突回 409 + 當前占有者快照（`assignee`/`assignedAt`/`observedAt`），**不回 412**。ETag/version 是給**內容**衝突用的（兩個寫者改同一份正文），claim 是排他指派的 CAS，輸的一方需要知道的是「誰佔著、那是什麼時候觀察到的」，據此決定等、搶還是換路。SQL 上就是 `UPDATE task SET assignee=?, status='in_progress' … WHERE tenant_id=? AND assignee IS NULL RETURNING *`，rowcount 0 就去 SELECT 占有者。**不需要 version 欄位。**
 
-**status 轉移加 `expectedStatus` 前提（本方案在探針之上的增補）。** claim 的 CAS 前提天然是 `assignee IS NULL`，status 轉移沒有這種天然前提；而 board 上人和 daemon 會同時推同一個項目（人打回 `in_progress` 的同時 daemon 剛好報完終態要推 `in_review`）。裸的 last-write-wins 會靜默吃掉一次人工決策。`expectedStatus` 不符回 409 + 現況快照，與真相層 `expectedRev` 同一種 fail-closed 慣用法。
+**status 轉移加 `expectedStatus` 前提（BYOK 自有 contract）。** claim 的 CAS 前提天然是 `assignee IS NULL`，status 轉移沒有這種天然前提；而 board 上人和 daemon 會同時推同一個項目（人打回 `in_progress` 的同時 daemon 剛好報完終態要推 `in_review`）。裸的 last-write-wins 會靜默吃掉一次人工決策。`expectedStatus` 不符回 409 + 現況快照，與真相層 `expectedRev` 同一種 fail-closed 慣用法。
 
 `assignee` 與 `status` 解耦：`done`/`closed` 之外任意態可 claim/unclaim。
 
@@ -266,7 +266,7 @@ GET /byok/board/stream?since=<board_seq>     Accept: text/event-stream
    ※ 每次查詢各自取用/歸還 DB 連線，禁止跨 sleep 持有 transaction
 ```
 
-參數（5s 常規、120s 全量對賬、3s 喚醒後快速追趕、每輪 limit 50）直接沿用 raft 探針實測值——那是生產調過的量級，沒有理由重新猜。
+5s query、120s 全量對賬、15s heartbeat 與每輪 limit 50 是 **BYOK 可配置的初始運營預設**，不是已驗證的 RAFT board production tuning。hash-matched bundle 中相似的 `5s/120s/3s/limit 50` tuple 實際屬於 agent bridge wake-hint handler，不能替 board stream 背書。當前值保留，因為它們已由 BYOK 的 SSE/poll/reconcile 測試覆蓋且可由 `ByokCloudOptions` 注入；生產調整應以 board latency、DB QPS、reconcile repair 與 intermediary timeout 的 BYOK 指標為 authority。
 
 **為何 SSE 在這裡划算，而 50s long-poll hold 在派工路徑上不划算**（成本結構不同，不是前後矛盾）：
 
@@ -277,7 +277,7 @@ GET /byok/board/stream?since=<board_seq>     Accept: text/event-stream
 | runtime 更新中斷 | hold 到一半被 30s 寬限期砍斷 = 靜默截斷 | 有 `Last-Event-ID`/`since` 語義，斷了就是普通重連 |
 | 契約自由度 | 凍結，改不了 | 新增，隨便設計 |
 
-**降級必須是宣告式能力，不是狀態碼嗅探。** 探針顯示 raft 在收到 404/405/501 時降級輪詢；本 repo 的規則禁止 heuristic/best-effort 路徑，照抄嗅探直接違規。改法：雲端在 `GET /byok/capabilities`（或部署配置）明確宣告 `board.sse`，daemon 只在宣告時用 SSE，否則走 `GET /byok/board?since=` 的 5s 輪詢。**兩條路徑都是一等公民、都有測試**，而不是一條主路加一條猜出來的備胎。
+**降級必須是宣告式能力，不是狀態碼嗅探。** RAFT board transport 與 fallback 的 server/runtime 行為未驗證，不作設計 authority；本 repo 的規則也禁止 heuristic/best-effort 路徑。雲端在 `GET /byok/capabilities`（或部署配置）明確宣告 `board.sse`，daemon 只在宣告時用 SSE，否則走 `GET /byok/board?since=` 的 5s 輪詢。**兩條路徑都是一等公民、都有測試**，而不是一條主路加一條猜出來的備胎。
 
 **board 增量流不另建事件表。** 每個 `task` 行帶一個 **per-tenant 單調的 `board_seq`**，每次更新重新分配；增量查詢就是 `WHERE tenant_id=? AND board_seq > ?`。board 表本身就是事件源，不存在「日誌與狀態兩份真相」的漂移。代價是同一行在兩次輪詢之間被改兩次時只看得到最新值，而 120s 全量對賬正是補這個洞的網。
 
@@ -453,9 +453,9 @@ CREATE TABLE activity_tail (
 
 ### 5.6 被否選項
 
-- board 增量另建事件表：日誌與狀態兩份真相，正是探針第一條原則反對的形狀。
+- board 增量另建事件表：會形成日誌與狀態兩份 truth authority，違反 BYOK 的 current-row invariant。
 - claim 衝突回 412 / 加 version 欄位：ETag/version 是給內容衝突用的；輸的一方需要 holder 快照而不是一個裸的 412。
-- 只在 claim 做 CAS、status 裸 last-write-wins（探針原形狀）：會靜默吃掉人工決策。
+- 只在 claim 做 CAS、status 裸 last-write-wins：會靜默吃掉人工決策。
 - 狀態碼嗅探降級：本 repo 明禁 heuristic 路徑。
 - 派工路徑也改 SSE：凍結契約動不了，且它替換的輪詢密度低，攤不回來。
 - 跨網 wake-hint 通道：無 DO 無法推送，SSE 本身即該信號。
@@ -829,13 +829,15 @@ npx vitest run --root . apps/local-agent/src/settings.test.ts
 - 本地開發限制：Hyperdrive 遠端資源不支援、`ratelimit` 不與部署共享限額（`/workers/local-development/`）
 - **`@cloudflare/computer` 為 preview 階段**，本方案**僅作接口品味參考**，不作為任何設計依據或依賴 [附註事實]
 
-### 13.4 raft-computer v1.0.15 拆解與 task board 探針
+### 13.4 raft-computer v1.0.15 靜態拆解與受限動態驗證
 
-**拆解方法（沿用 v1 §8 的本機拆解方法）**：install.sh 全文審計（496 行）→ 安裝 v1.0.15 → CLI 全命令面實測 → `strings -n 8`（868,175 行）targeted grep → 未登入行為實驗（start 被 attach-gate 拒絕、零殘留）→ 公開文件（raft.build / docs.raft.build）比對。**未做**真實 login/attach，故 daemon 帶負載運行時的 run/ 目錄內容與 wss 實際連線為 [inferred]。raft 內部代號 slock（env 前綴 `SLOCK_*`、舊 npm org `@slock-ai`、現 org `@botiverse`）；runner 憑證前綴 `sk_agent_*`。
+**拆解方法與證據邊界**：原靜態報告審計 install.sh、hash-bound SEA payload / bundle、strings 與 targeted source，並未執行 binary。2026-08-10 的[動態補充](docs/researches/2026-08-10_research-raft-cli-dynamic-report.md)在 case-local offline state 真實執行 version/help/status/doctor/channel show/runners list/logs/同版本 upgrade dry-run；**沒有**執行 login/attach/setup/start/真實 upgrade。因此舊有「CLI 全命令面實測、start 被 attach-gate 拒絕且零殘留」不再作為證據。raft 內部代號 slock（env 前綴 `SLOCK_*`、舊 npm org `@slock-ai`、現 org `@botiverse`）；runner 憑證前綴 `sk_agent_*`。
 
-**task board 探針結論**：task = message + 元數據，非獨立真相源；board 是按 channel 過濾的扁平清單；5 態 `todo/in_progress/in_review/done/closed`；assignee 與 status 解耦；claim 是併發鎖、衝突回占有者快照帶 `observedAt`、task 層無 version/etag（同 binary 的 Wiki 有 ETag，是刻意的不同選擇）；SSE 優先 + 404/405/501 降級輪詢，參數 5s／120s／3s／limit 50；本地→雲端狀態變更是離散顯式 POST；agent 活躍度 5 級逐事件推 + 60s 心跳；活動軌跡走獨立批量通道帶 `dropped`；本機 `/internal/agent-api` 唯讀短路。
+**task board 靜態參考結論**：client bundle 暴露 5 態 `todo/in_progress/in_review/done/closed`、assignee/status 欄位、`task create --assignee` 與 current-agent `task claim`；也定義 `online/thinking/working/error/offline` 五個 agent activity 值。server-side transition、claim winner/CAS、conflict response、board SSE/poll transport 與 task truth ownership仍是 `[unverified]`。相似的 5s／120s／3s／limit 50 tuple 屬 agent bridge wake-hint defaults，不能標成 board 參數；`status` 也可能在 stale-upgrade 收斂條件下清 marker，不能按命令名稱歸為純唯讀。
 
-**本方案對探針的四處不照抄**：狀態碼嗅探降級改為能力宣告（repo 明禁 heuristic 路徑）；status 轉移增加 `expectedStatus` CAS（探針只在 claim 有 CAS）；本機短路 API 改掛既有 Unix socket 控制面而非 loopback HTTP 端口（byok 既有實現更嚴格）；砍掉跨網的獨立 wake-hint 通道（SSE 串流本身即該信號）。
+**本方案的四個 BYOK-specific 選擇**：transport 只按 capability declaration 選擇；status 轉移使用 `expectedStatus` CAS；本機 API 掛既有 Unix socket 控制面而非 loopback HTTP 端口；不設跨網的獨立 wake-hint 通道（SSE 串流本身即該信號）。這些都由本倉庫 contract/tests 背書，不宣稱來自已驗證的 RAFT server 行為。
+
+**對 BYOK 的裁定不變**：board current-row authority、claim/status CAS、host-only review acceptance、explicit capability 與 bounded hints 均由本倉庫實作及 conformance 測試成立，不依賴上述 RAFT 歸因。RAFT 的 create-time assignment 是可選產品能力，不是 BYOK 必須搬入的 invariant；本方案保持 authenticated device self-claim 與 host review authority。
 
 **v1 已完成的 raft 對位結論保留**：`@byok-sdk/client` 的 IPC control socket 防護比 raft 嚴（`control-server.ts:38,170,175`）；fail-closed 文化（未配對拒啟動、URL 白名單 unconditional refusal，`create-daemon.ts:178,527`）；K 線用 OS Keychain 存 key，raft 連自家 OAuth token 都存檔案；per-task Git checkpoint（workspaces）raft 沒有對應物。真缺口（doctor/upgrade/退避分級/watchdog 分級）已轉為 C1-C3 儲備里程碑（§9.2）。
 
@@ -844,4 +846,4 @@ npx vitest run --root . apps/local-agent/src/settings.test.ts
 - 無 DO 時 stateless Worker 無跨 isolate 喚醒原語（由「Workers 無共享記憶體、無內建 pub/sub 原語」推得，非官方明文）[inferred]
 - `crypto.subtle` 的 Ed25519 在 Node 20 的穩定性——因此 `verifyDeviceProof` 設計為注入式 verifier（照 repo 既有的 `TokenSigner`/`fetchImpl` 慣用法）[unverified]
 - raft 的 `closed` 究竟是「終止未驗收」還是「done 後歸檔」[unverified]
-- raft-computer task board 探針由調度方提供，Opus 軌未獨立複核 [依證據等級標註]
+- raft-computer server-side task board transition、claim enforcement、transport 與 truth ownership未驗證；client bundle 不替代 server proof [unverified]

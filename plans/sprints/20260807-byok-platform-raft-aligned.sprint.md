@@ -912,7 +912,7 @@ Migrations are forward-only additive. Rollback application code may leave unused
 | B-004 | per-tenant `board_seq` | 中 |
 | B-005 | SSE stream + Last-Event-ID | 中 |
 | B-006 | poll fallback + explicit capability | 低 |
-| B-007 | 120s reconciliation | 低 |
+| B-007 | configurable reconciliation（default 120s） | 低 |
 | B-008 | presence 5-level TTL | 低 |
 | B-009 | activity tail + dropped | 低 |
 | B-010 | I6 and concurrency suite | 低 |
@@ -930,6 +930,7 @@ Migrations are forward-only additive. Rollback application code may leave unused
 - board row 是当前状态，不另建容易漂移的 event table；
 - `board_seq` 支持增量但不是完整历史；
 - reconciliation 修复中间多次更新被压缩的问题。
+- 120s 是 BYOK 已测试且可注入的初始运营默认值，不以 RAFT bridge tuple 作为 production-tuning 证据。
 
 ### S5.3 SSE behavior
 
