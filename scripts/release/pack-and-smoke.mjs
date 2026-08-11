@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const releaseVersion = '0.2.0';
@@ -55,6 +56,83 @@ function sha512Integrity(filePath) {
   return `sha512-${createHash('sha512').update(readFileSync(filePath)).digest('base64')}`;
 }
 
+// --- Release asset guarantee: the migration SQL a runner needs must ship WITH
+// the runner. `@byok-sdk/cloud-postgres` exports `migrate(pool, directory)`, and
+// until the build projected `deploy/sql` into `dist/sql` the tarball carried the
+// runner and none of the files it runs — an install-time hole no import smoke
+// can see. `deploy/sql` stays the only place migrations are authored; `dist/sql`
+// is a generated copy, so the only thing that keeps them honest is this
+// comparison. It is deliberately BIDIRECTIONAL and content-addressed: a missing
+// file, an extra file, and an edited file each fail, and nothing here hardcodes
+// how many migrations exist.
+
+const deploySqlDir = path.join(repoRoot, 'deploy', 'sql');
+const TARBALL_SQL_PREFIX = 'package/dist/sql/';
+
+/** The authoring authority's current contents, keyed by filename. */
+function readDeploySql() {
+  const files = readdirSync(deploySqlDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.sql'))
+    .map((entry) => entry.name)
+    .sort();
+  if (files.length === 0) throw new Error(`no .sql files found in ${deploySqlDir}`);
+  return new Map(files.map((name) => [name, sha256(path.join(deploySqlDir, name))]));
+}
+
+/**
+ * Reads an npm tarball into `path -> sha256`, without shelling out to `tar`:
+ * this script is a release hard gate and runs on Windows runners too, so it
+ * depends on node builtins only. Plain ustar walk — 512-byte header blocks,
+ * octal size, contents padded to the next block.
+ */
+function readTarballDigests(tarballPath) {
+  const tar = gunzipSync(readFileSync(tarballPath));
+  const digests = new Map();
+  for (let offset = 0; offset + 512 <= tar.length; ) {
+    const header = tar.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '');
+    const sizeField = header.subarray(124, 136).toString('utf8').replace(/\0.*$/, '').trim();
+    const size = Number.parseInt(sizeField, 8);
+    if (!Number.isFinite(size)) throw new Error(`${tarballPath}: unreadable tar size for ${name}`);
+    const typeFlag = String.fromCharCode(header[156]);
+    const body = tar.subarray(offset + 512, offset + 512 + size);
+    // '0'/'\0' are regular files; 'x'/'g'/'L' are metadata records, and the
+    // long-name forms would matter only for paths this package cannot produce.
+    if (typeFlag === '0' || typeFlag === '\0') {
+      digests.set(name, createHash('sha256').update(body).digest('hex'));
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return digests;
+}
+
+function assertTarballCarriesMigrations(tarballPath) {
+  const expected = readDeploySql();
+  const digests = readTarballDigests(tarballPath);
+  const actual = new Map(
+    [...digests]
+      .filter(([entry]) => entry.startsWith(TARBALL_SQL_PREFIX))
+      .map(([entry, digest]) => [entry.slice(TARBALL_SQL_PREFIX.length), digest]),
+  );
+
+  const missing = [...expected.keys()].filter((name) => !actual.has(name));
+  const extra = [...actual.keys()].filter((name) => !expected.has(name));
+  const modified = [...expected]
+    .filter(([name, digest]) => actual.has(name) && actual.get(name) !== digest)
+    .map(([name]) => name);
+  if (missing.length > 0 || extra.length > 0 || modified.length > 0) {
+    throw new Error(
+      `${path.basename(tarballPath)} does not carry deploy/sql byte-for-byte under dist/sql/:\n` +
+        `  missing: ${missing.join(', ') || '(none)'}\n` +
+        `  extra: ${extra.join(', ') || '(none)'}\n` +
+        `  modified: ${modified.join(', ') || '(none)'}`,
+    );
+  }
+  console.log(`[release-pack] ${path.basename(tarballPath)} carries ${expected.size} migration(s) matching deploy/sql`);
+  return [...expected.keys()];
+}
+
 try {
   if (existsSync(outDir) && readdirSync(outDir).length > 0) {
     throw new Error(`release output directory must be empty: ${outDir}`);
@@ -64,6 +142,7 @@ try {
   run(pnpmInvocation.command, [...pnpmInvocation.prefix, '-r', 'run', 'build']);
 
   const tarballs = [];
+  let migrationFiles;
   for (const packageName of packages) {
     const before = new Set(readdirSync(outDir));
     run(pnpmInvocation.command, [...pnpmInvocation.prefix, '--filter', packageName, 'pack', '--pack-destination', outDir]);
@@ -71,6 +150,9 @@ try {
     if (created.length !== 1) throw new Error(`${packageName}: expected one tarball, created ${created.length}`);
     const file = created[0];
     const tarballPath = path.join(outDir, file);
+    if (packageName === '@byok-sdk/cloud-postgres') {
+      migrationFiles = assertTarballCarriesMigrations(tarballPath);
+    }
     tarballs.push({
       package: packageName,
       version: releaseVersion,
@@ -98,6 +180,7 @@ try {
     writeFileSync(
       path.join(smokeDir, 'smoke.mjs'),
       `import assert from 'node:assert/strict';\n` +
+        `import { readdirSync, statSync } from 'node:fs';\n` +
         `import { createRequire } from 'node:module';\n` +
         `const require = createRequire(import.meta.url);\n` +
         `const expected = ['client','cloud','cloudPostgres','core','protocol','server'];\n` +
@@ -109,6 +192,13 @@ try {
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, '${releaseVersion}', name);\n` +
         `}\n` +
+        // The other half of the release-asset guarantee: the tarball check above
+        // proves the bytes are IN the package, this proves the installed package
+        // can point a runner at them without any source checkout in reach.
+        `const { migrationsDir } = await import('@byok-sdk/cloud-postgres');\n` +
+        `const migrations = migrationsDir();\n` +
+        `assert.equal(statSync(migrations).isDirectory(), true, migrations);\n` +
+        `assert.deepEqual(readdirSync(migrations).sort(), ${JSON.stringify([...migrationFiles].sort())});\n` +
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
