@@ -322,6 +322,70 @@ jobs:
       - name: Check graph, pack exact tarballs, and import from an isolated npm install
         run: pnpm run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
+  # Tier 2 of the release-asset guarantee. `npm-release-pack` above is the hard
+  # gate and is deliberately service-free: it proves the cloud-postgres tarball
+  # carries `deploy/sql` byte-for-byte under `dist/sql/` and that an isolated
+  # install can resolve `migrationsDir()`. What it cannot prove without a
+  # database is that those files actually migrate one -- so that runs here,
+  # against a Postgres service container, from the SAME tarballs the pack step
+  # produced (read back out of the release manifest, never repacked).
+  #
+  # Distinct from the `dataplane` job above, which runs this repo's suites
+  # against a source checkout: nothing in this job's migrate path touches
+  # `deploy/sql`, because a consumer installing from npm has no checkout. A
+  # service container is enough here (unlike the compose file the dataplane job
+  # needs) because migrating needs Postgres and nothing else.
+  #
+  # The database starts empty on every run, which is what makes the first-run
+  # assertion "every shipped migration was applied" mean something, and the
+  # second run pins idempotence plus the runner's checksum verification.
+  release-pack-migrate:
+    name: migrate an empty Postgres from the packed tarball (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22.19.0', 24]
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: byok
+          POSTGRES_PASSWORD: byok
+          POSTGRES_DB: byok_release_smoke
+        ports:
+          - 5432:5432
+        # Without this the steps below can reach a container that is up but not
+        # yet accepting connections.
+        options: >-
+          --health-cmd "pg_isready -U byok -d byok_release_smoke"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://byok:byok@127.0.0.1:5432/byok_release_smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Pack the exact tarballs a consumer would install
+        run: pnpm run check:release-pack -- --out-dir .ci-artifacts/release-pack
+
+      - name: Migrate an empty database from the packed tarball, then prove the re-run is a no-op
+        run: node scripts/release/pg-migrate-smoke.mjs --artifacts .ci-artifacts/release-pack
+
   # M3-4 Windows Service guarantee: proves the generated WinSW service
   # descriptor (packages/client/src/lifecycle/winsw.ts) actually installs,
   # runs, stops, restarts, and uninstalls as a REAL Windows Service via the

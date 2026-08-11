@@ -36,7 +36,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json",
+    "build": "tsup && tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
