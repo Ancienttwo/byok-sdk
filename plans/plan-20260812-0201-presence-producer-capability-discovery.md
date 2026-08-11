@@ -1,6 +1,6 @@
 # Plan: Presence Producer + Hosted Capability Discovery
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260812-0201
 > **Slug**: presence-producer-capability-discovery
 > **Artifact Level**: work-package
@@ -106,9 +106,9 @@ declaration（`GET /byok/capabilities`，schema 校验）→ gate → heartbeat 
 - 无未决注释；计划经 2026-08-12 会话逐段评审（含对第一轮方案的三处证据纠错），owner 以 "go on" 批准激活。
 
 ## Task Breakdown
-- [ ] hosted capability discovery client（schema 校验 + fail-closed + 可观测降级记录）
-- [ ] capability-gated online heartbeat publisher（AuthManager token lifecycle、401 续签一次、revoked 永久停止）
-- [ ] create-daemon lifecycle 接线（启动/重连启动 discovery→publisher，停机停发）
-- [ ] 测试：gating、cadence 与 `minimumIntervalMs`/TTL 关系、401/revoked、shutdown、fail-closed、cloud composition 集成
-- [ ] 文档：presence 语义（online 定义、TTL 建议、expiry = absence）
-- [ ] salesko dogfood 集成证据落账（byok commit + tarball sha + 下游 commit + 走通面），作为能力宣称前置
+- [x] hosted capability discovery client（schema 校验 + fail-closed + 可观测降级记录）
+- [x] capability-gated online heartbeat publisher（AuthManager token lifecycle、401 续签一次、revoked 永久停止）
+- [x] create-daemon lifecycle 接线（启动/重连启动 discovery→publisher，停机停发）
+- [x] 测试：gating、cadence 与 `minimumIntervalMs`/TTL 关系、401/revoked、shutdown、fail-closed、cloud composition 集成
+- [x] 文档：presence 语义（online 定义、TTL 建议、expiry = absence）
+- [ ] salesko dogfood 集成证据落账（byok commit + tarball sha + 下游 commit + 走通面），作为能力宣称前置 —— 已移入 `tasks/todos.md` 延期账本（条目「salesko dogfood 集成证据落账」），不在本 slice 执行
