@@ -49,18 +49,18 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:a0f4732f6fcf5526430c215113933a7fc8715d65fd8cee40cc2dc3da23910e6d
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: a58b1580ef7e4c62da4ad9fd5a82c522f7d6df43
+> **Verification Evidence SHA256**: sha256:e7ec1ddb27ace40c2482285cc72a0d9dc4e86b2c4994f6ef8ebdff316e12930e
+> **Issued At**: 2026-08-11T19:06:37.459Z
 
-- Summary: No AcceptanceReceipt has been recorded.
-- Findings: none
+- Summary: Gatekeeper PASS twice: base slice (1050 tests, design conformance read point-by-point, test honesty probed) and F1 delta re-gate (reconnect re-discovery semantics verified 8-point, +4 tests to 1054, 3x flake probe stable); F1-F3/F5 folds plus in-flight latch shutdown reset applied and re-verified; zero diff on protocol/cloud/cloud-postgres/server/deploy
+- Findings: P3: reconnect-storm re-settle arriving mid-discovery is dropped, not queued; next reconnect corrects the stale read (recorded lost-update semantics); P3: open->degraded takeover edge deliberately does not trigger re-discovery; docs narrowed to match behavior; P3: presence.hints must not be claimed in release notes until the salesko dogfood evidence row in tasks/todos.md closes (plan precondition)
 
 ## Behavior Diff Notes
 
