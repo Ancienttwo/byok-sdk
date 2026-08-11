@@ -1,6 +1,6 @@
 # Plan: cloud-postgres SQL Build Projection + Two-Tier Release Smoke
 
-> **Status**: Approved
+> **Status**: Archived
 > **Created**: 20260812-0201
 > **Slug**: cloud-postgres-sql-projection
 > **Artifact Level**: work-package

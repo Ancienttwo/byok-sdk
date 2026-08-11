@@ -5,6 +5,29 @@ import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
 import { ByokKeysError } from './errors';
 
+export type SqliteOpenStep = 'after-open' | 'after-wal' | 'after-synchronous';
+
+/** Test-only seam for proving that post-open initialization failures release the native handle. */
+export interface SqliteOpenFaultSeam {
+  onStep?(step: SqliteOpenStep): void;
+  close?(database: DatabaseSync): void;
+}
+
+/** Release an opened handle before propagating an initialization failure. */
+export function closeSqliteDatabaseAfterInitializationFailure(
+  database: DatabaseSync,
+  initializationError: unknown,
+  message: string,
+  close: (database: DatabaseSync) => void = (handle) => handle.close(),
+): never {
+  try {
+    close(database);
+  } catch (closeError) {
+    throw new AggregateError([initializationError, closeError], message);
+  }
+  throw initializationError;
+}
+
 /** Owner-only directory mode, matching `providers.ts:1236`. */
 const SECURE_DIR_MODE = 0o700;
 
@@ -78,6 +101,7 @@ export function isSqliteAvailable(): boolean {
 export function openSqliteDatabase(
   path: string,
   options?: DatabaseSyncOptions,
+  faults?: SqliteOpenFaultSeam,
 ): DatabaseSync {
   const { DatabaseSync } = loadSqliteModule();
   const readOnly = options?.readOnly === true;
@@ -88,11 +112,23 @@ export function openSqliteDatabase(
     timeout: DEFAULT_BUSY_TIMEOUT_MS,
     ...options,
   });
-  if (path !== ':memory:' && !readOnly) {
-    database.exec('PRAGMA journal_mode = WAL');
-    database.exec('PRAGMA synchronous = FULL');
+  try {
+    faults?.onStep?.('after-open');
+    if (path !== ':memory:' && !readOnly) {
+      database.exec('PRAGMA journal_mode = WAL');
+      faults?.onStep?.('after-wal');
+      database.exec('PRAGMA synchronous = FULL');
+      faults?.onStep?.('after-synchronous');
+    }
+    return database;
+  } catch (error) {
+    closeSqliteDatabaseAfterInitializationFailure(
+      database,
+      error,
+      'provider profile SQLite open initialization failed and its native handle could not be closed',
+      faults?.close,
+    );
   }
-  return database;
 }
 
 /**

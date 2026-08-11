@@ -1,6 +1,10 @@
 import { canTransition, type TaskState } from '@byok-sdk/protocol';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
-import { openSqliteDatabase, secureSqliteFilePermissions } from './sqlite-support';
+import {
+  closeSqliteDatabaseAfterInitializationFailure,
+  openSqliteDatabase,
+  secureSqliteFilePermissions,
+} from './sqlite-support';
 import { IllegalTaskTransitionError, type CreateTaskInput, type TaskRecord, type TaskStore } from './task-store';
 import type { TaskResult } from './types';
 
@@ -176,58 +180,67 @@ export class SqliteTaskStore implements TaskStore {
   private readonly selectStmt: StatementSync;
   private readonly selectAllStmt: StatementSync;
   private readonly updatePendingApprovalIdStmt: StatementSync;
+  private closed = false;
 
   constructor(opts: SqliteTaskStoreOptions) {
     this.db = openSqliteDatabase(opts.path);
-    this.db.exec(SCHEMA);
-    // M5 (approval targeting): idempotent — a brand-new database already got
-    // every column from SCHEMA above; this only ever does real work against
-    // a pre-existing file created by an older version of this store. See
-    // `ensureAdditiveColumns`'s own doc comment.
-    ensureAdditiveColumns(this.db);
-    secureSqliteFilePermissions(opts.path);
-    this.insertStmt = this.db.prepare(
-      `INSERT INTO tasks
-         (task_id, state, instruction, runtime, policy_json, device_id, session_ref, created_at, updated_at, result_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    // A separate UPDATE-in-place (rather than reusing `INSERT OR REPLACE`,
-    // which is a delete+insert under the hood) so a transitioned task keeps
-    // its original `rowid` — `list()`'s `ORDER BY rowid ASC` must stay in
-    // creation order across transitions, mirroring `InMemoryTaskStore`'s
-    // `Map`, where `.set()` on an existing key never moves it in iteration
-    // order either.
-    //
-    // `AND state = ?` makes this a compare-and-set rather than an
-    // unconditional update: `transition()` binds the FROM-state it just
-    // validated against as the last parameter, so the write only lands if
-    // the row is still in that state — see `transition()`'s doc comment.
-    this.updateStmt = this.db.prepare(
-      `UPDATE tasks SET
-         state = ?, instruction = ?, runtime = ?, policy_json = ?, device_id = ?,
-         session_ref = ?, created_at = ?, updated_at = ?, result_json = ?, pending_approval_id = ?,
-         claimed_runtime = ?, claimed_runtime_capabilities_json = ?
-       WHERE task_id = ? AND state = ?`,
-    );
-    this.selectStmt = this.db.prepare('SELECT * FROM tasks WHERE task_id = ?');
-    this.selectAllStmt = this.db.prepare('SELECT * FROM tasks ORDER BY rowid ASC');
-    // M5: the one narrow same-state field update — see
-    // `TaskStore.setPendingApprovalId`'s own doc comment for why this can't
-    // go through `updateStmt`/`transition` (no state change to validate
-    // against).
-    //
-    // S3 hardening: `AND state = 'AwaitApproval'` makes this a CAS guard
-    // (mirroring `updateStmt`'s own `AND state = ?` above, just against a
-    // fixed literal rather than a bound from-state, since this method never
-    // changes `state` itself) — without it, a laggard writer (e.g. a
-    // delayed/queued `task.await_approval` processed after the task already
-    // left `AwaitApproval` via a real `approveTask`/`rejectTask` elsewhere)
-    // could resurrect a pending id for a task that has already moved on.
-    // Zero rows affected is a legitimate no-op outcome, not an error — see
-    // `setPendingApprovalId` below.
-    this.updatePendingApprovalIdStmt = this.db.prepare(
-      "UPDATE tasks SET pending_approval_id = ?, updated_at = ? WHERE task_id = ? AND state = 'AwaitApproval'",
-    );
+    try {
+      this.db.exec(SCHEMA);
+      // M5 (approval targeting): idempotent — a brand-new database already got
+      // every column from SCHEMA above; this only ever does real work against
+      // a pre-existing file created by an older version of this store. See
+      // `ensureAdditiveColumns`'s own doc comment.
+      ensureAdditiveColumns(this.db);
+      secureSqliteFilePermissions(opts.path);
+      this.insertStmt = this.db.prepare(
+        `INSERT INTO tasks
+           (task_id, state, instruction, runtime, policy_json, device_id, session_ref, created_at, updated_at, result_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      // A separate UPDATE-in-place (rather than reusing `INSERT OR REPLACE`,
+      // which is a delete+insert under the hood) so a transitioned task keeps
+      // its original `rowid` — `list()`'s `ORDER BY rowid ASC` must stay in
+      // creation order across transitions, mirroring `InMemoryTaskStore`'s
+      // `Map`, where `.set()` on an existing key never moves it in iteration
+      // order either.
+      //
+      // `AND state = ?` makes this a compare-and-set rather than an
+      // unconditional update: `transition()` binds the FROM-state it just
+      // validated against as the last parameter, so the write only lands if
+      // the row is still in that state — see `transition()`'s doc comment.
+      this.updateStmt = this.db.prepare(
+        `UPDATE tasks SET
+           state = ?, instruction = ?, runtime = ?, policy_json = ?, device_id = ?,
+           session_ref = ?, created_at = ?, updated_at = ?, result_json = ?, pending_approval_id = ?,
+           claimed_runtime = ?, claimed_runtime_capabilities_json = ?
+         WHERE task_id = ? AND state = ?`,
+      );
+      this.selectStmt = this.db.prepare('SELECT * FROM tasks WHERE task_id = ?');
+      this.selectAllStmt = this.db.prepare('SELECT * FROM tasks ORDER BY rowid ASC');
+      // M5: the one narrow same-state field update — see
+      // `TaskStore.setPendingApprovalId`'s own doc comment for why this can't
+      // go through `updateStmt`/`transition` (no state change to validate
+      // against).
+      //
+      // S3 hardening: `AND state = 'AwaitApproval'` makes this a CAS guard
+      // (mirroring `updateStmt`'s own `AND state = ?` above, just against a
+      // fixed literal rather than a bound from-state, since this method never
+      // changes `state` itself) — without it, a laggard writer (e.g. a
+      // delayed/queued `task.await_approval` processed after the task already
+      // left `AwaitApproval` via a real `approveTask`/`rejectTask` elsewhere)
+      // could resurrect a pending id for a task that has already moved on.
+      // Zero rows affected is a legitimate no-op outcome, not an error — see
+      // `setPendingApprovalId` below.
+      this.updatePendingApprovalIdStmt = this.db.prepare(
+        "UPDATE tasks SET pending_approval_id = ?, updated_at = ? WHERE task_id = ? AND state = 'AwaitApproval'",
+      );
+    } catch (error) {
+      closeSqliteDatabaseAfterInitializationFailure(
+        this.db,
+        error,
+        'SqliteTaskStore initialization failed and its native handle could not be closed',
+      );
+    }
   }
 
   create(input: CreateTaskInput): TaskRecord {
@@ -366,6 +379,8 @@ export class SqliteTaskStore implements TaskStore {
    * instance against the same file, or on process shutdown.
    */
   close(): void {
+    if (this.closed) return;
     this.db.close();
+    this.closed = true;
   }
 }

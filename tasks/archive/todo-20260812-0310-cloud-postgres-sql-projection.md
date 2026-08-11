@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-12 03:10
+> **Related Plan**: plans/archive/plan-20260812-0201-cloud-postgres-sql-projection.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260812-0310
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-12 02:29
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
@@ -26,4 +32,3 @@ Do not duplicate that execution checklist here. Record only work intentionally d
 | **已消费（ADR-024）**：裁定 R2 object 的 hash authority，并据此冻结 `object_manifest` 与 S4B finalize/GC 约束 | 2026-08-08 的 ADR-024 已裁定：通过认证的 daemon 声明是 canonical SHA-256 authority；cloud `HEAD` 只观测存在性、size/content-type，不读回重算，也不声称验证摘要。 | 同 tenant dedupe/accounting 依赖 daemon 声明；错误或恶意的配对 device 可在自己的 tenant 内错标同 size/type bytes，reconciler 无法发现。换得的是无第二次完整 read-back 的带宽/计算成本，且不为不存在的 R2 checksum 能力造兼容分支。 | **Closed — ADR-024 Accepted.** 仅当 R2 支持 PutObject SHA-256 `FULL_OBJECT`，或产品改为不信任 tenant 内配对 device 时，以新 ADR supersede；否则不重开。 |
 | 裁定 tenant id 的字符集归属：`tenantId()`（`packages/core/src/tenant.ts:53-79`）不约束字符集，而 core 刻意不做正规化（避免与控制面争一源真相），所以 S4A-c 的防御落在 adapter 的 key 构造点（`packages/cloud-postgres/src/stores/r2-blobs.ts` 的 `assertKeySegmentTenant`） | S4A-c 的授权面是 object plane 与 deploy skeleton；`packages/core/` 是本刀的冻结面（机检），而收紧 core 的 mint 点是 tenant identity 的契约修订，需要控制面一起裁 | 每个把 tenant id 用作路径/key 段的新 composition 都要自己再竖一道守卫，漏一个就是跨租户 alias | 下一个把 tenant id 编进命名空间的 composition（D1 adapter、KV、对象前缀变更），或任何一次 tenant identity 的契约修订 |
 | 收敛 composition 混装：`ByokCloudOptions` 对 `cloud` stores 与 `blobContentProxy` 独立接收，呼叫方可把 Postgres/R2 stores 与另一个 proxy 混装并挂上 `/content`（Codex STYLE，S4A-c 双轨验收） | 官方 factory 本身诚实——`createPostgresCloudStores` 不产 proxy，`createInMemoryByokCloud` 两半同源——而把「谁能配谁」提到型别层是 composition API 的形状改动，不是本刀的 P1 修复面 | 「R2 无字节路径」是 factory 层的事实而非型别层的事实：一个手工组装的 host 仍可挂上两条 `/content` route 去代理它其实拿不到的字节 | 出现第二个真实 proxy 实作，或 composition API 下一次修订 |
-| salesko dogfood 集成证据落账（byok commit + tarball sha + 下游 commit + 走通面），作为 `presence.hints` 能力对外宣称的前置 | presence producer slice（`plans/plan-20260812-0201-presence-producer-capability-discovery.md`）只交付 daemon 侧实现与验证；下游真实消费证据不在其 allowed paths 内，也不受本仓 commit 控制。 | 上游能力已可用且有第一方测试背书，但 release notes 在拿到下游证据前不宣称该能力——换取「宣称必有消费方背书」这条纪律，代价是能力落地与对外宣称之间存在时间差。 | 1a tarball 产出后，salesko 承诺当天回证（见 `docs/researches/2026-08-12-salesko-consumption-evidence.md` §4） |

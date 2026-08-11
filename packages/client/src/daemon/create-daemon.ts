@@ -9,6 +9,14 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
+import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
+import {
+  assertPresenceHeartbeatCadence,
+  DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS,
+  DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
+  DEFAULT_PRESENCE_TTL_MS,
+  PresencePublisher,
+} from './presence-publisher';
 import { assertServerUrlAllowed } from './url';
 import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
@@ -286,6 +294,31 @@ export interface DaemonConfig {
    * existed.
    */
   shutdownGraceMs?: number;
+  /**
+   * Cadence for the `online` presence heartbeat (§12.3), when — and only when
+   * — the deployment's capability declaration contains `presence.hints` (see
+   * `capabilities-client.ts`; a deployment that declares nothing, or one this
+   * daemon could not read a declaration from, publishes nothing at all).
+   *
+   * Every field is optional and defaults to `presence-publisher.ts`'s own
+   * constants, which are chosen against the hosted defaults. `ttlMs` and
+   * `minimumIntervalMs` describe THE DEPLOYMENT's hint TTL and publication
+   * throttle as this operator understands them: the daemon never learns either
+   * from the wire, and uses them only to validate `intervalMs` sits strictly
+   * between them — a cadence outside that band is rejected synchronously here,
+   * the same way `maxTaskOutputBytes` is above, rather than degrading into a
+   * rate-limited or flickering hint nobody sees an error for.
+   */
+  presence?: PresenceConfig;
+}
+
+export interface PresenceConfig {
+  /** Heartbeat cadence. Default 30s. */
+  intervalMs?: number;
+  /** The deployment's presence hint TTL. Default 90s (core §12.7.5 suggests 60-120s). */
+  ttlMs?: number;
+  /** The deployment's minimum interval between accepted publications. Default 5s. */
+  minimumIntervalMs?: number;
 }
 
 export interface DaemonStatus {
@@ -504,7 +537,10 @@ function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
   const selectionAdapters = adapters.filter((adapter) =>
     ALL_RUNTIME_IDS.includes(adapter.id as RuntimeId),
   );
-  if (selectionAdapters.every((adapter) => adapter.supportsDispatchSelection === true)) {
+  if (
+    selectionAdapters.length > 0 &&
+    selectionAdapters.every((adapter) => adapter.supportsDispatchSelection === true)
+  ) {
     flags.push('dispatch-selection');
   }
   return flags;
@@ -627,6 +663,18 @@ export function createDaemonWithAdapters(
       `DaemonConfig.maxTaskOutputBytes must be a positive number (or omitted to use the ${DEFAULT_MAX_TASK_OUTPUT_BYTES}-byte default) — got ${config.maxTaskOutputBytes}. Pass Number.POSITIVE_INFINITY to explicitly disable the cap; 0 or a negative number is rejected rather than silently treated as "disabled".`,
     );
   }
+
+  // Same up-front discipline as `maxTaskOutputBytes` above: the presence
+  // cadence is pure config, so a band violation is a construction error rather
+  // than something the heartbeat loop discovers later — see
+  // `DaemonConfig.presence`. Resolved once here so the assertion and the
+  // publisher below can never read different numbers.
+  const presenceCadence = {
+    intervalMs: config.presence?.intervalMs ?? DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS,
+    ttlMs: config.presence?.ttlMs ?? DEFAULT_PRESENCE_TTL_MS,
+    minimumIntervalMs: config.presence?.minimumIntervalMs ?? DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
+  };
+  assertPresenceHeartbeatCadence(presenceCadence);
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
   const store = new DeviceStore(storeDir);
@@ -772,6 +820,17 @@ export function createDaemonWithAdapters(
   // try/catch below).
   let controlServerHandle: ControlServerHandle | undefined;
   let daemonOwnerLease: DaemonOwnerLease | undefined;
+  // The presence producer (§12.3). Both are `undefined` whenever this daemon
+  // is not running, and neither is on the task path in any way: capability
+  // discovery runs off the connection critical path, and a failure to read a
+  // declaration leaves the publisher unstarted and every other daemon function
+  // untouched (ADR-010 fail-closed — never a 404 probe, never an assumed
+  // capability). The controller cancels an in-flight discovery during
+  // shutdown so teardown never waits on a hung deployment.
+  let presencePublisher: PresencePublisher | undefined;
+  let presenceDiscovery: AbortController | undefined;
+  /** Guards against a reconnect storm stacking overlapping declaration reads. */
+  let presenceDiscoveryInFlight = false;
   let shutdownPromise: Promise<void> | undefined;
   const pendingLateMutationBarriers = new Set<Promise<void>>();
   /** M4 Phase 2: when this `start()` began — backs the control socket's `status.uptimeMs`. */
@@ -1229,8 +1288,17 @@ export function createDaemonWithAdapters(
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();
             },
       onStateChange: (state) => {
+        // A connection that re-settles (a fresh WS ack, or long-poll taking
+        // over) is the one moment this daemon knows it may be talking to a
+        // different deployment build than it last read a declaration from —
+        // so it is also where re-discovery belongs. `runPresenceDiscovery` is
+        // a no-op before `startPresenceProducer` arms it and after shutdown
+        // disarms it, so the initial settle during `start()` is not a second
+        // discovery pass.
+        const wasSettled = connectionState === 'open' || connectionState === 'degraded';
         connectionState = state;
         observer.noteConnectionState(state);
+        if (!wasSettled && (state === 'open' || state === 'degraded')) runPresenceDiscovery();
       },
       backoff: overrides.backoff,
       liveness: overrides.liveness,
@@ -1250,6 +1318,7 @@ export function createDaemonWithAdapters(
     });
     await connection.start();
     await connection.waitForAck();
+    startPresenceProducer();
     } catch (err) {
       try {
         // startUnderLease already owns the process-local lifecycle slot. Run
@@ -1261,6 +1330,81 @@ export function createDaemonWithAdapters(
       }
       throw err;
     }
+  }
+
+  /**
+   * Arms capability discovery for this `start()` and runs the first pass.
+   * The controller lives for the whole run, so every later re-discovery
+   * (see `runPresenceDiscovery`) is cancelled by the same shutdown abort.
+   */
+  function startPresenceProducer(): void {
+    presenceDiscovery = new AbortController();
+    runPresenceDiscovery();
+  }
+
+  /**
+   * ADR-010's client half: read the deployment's declaration, and run the
+   * presence heartbeat if and only if it contains `presence.hints`.
+   *
+   * Run on start AND on every connection re-settle (the `onStateChange` hook
+   * above), because a declaration is a deployment fact that a rollout can
+   * change under a long-lived daemon — and because that is also the only
+   * healing path a startup discovery failure gets. There is deliberately NO
+   * retry timer of its own: a failed pass simply leaves presence off until the
+   * next reconnect, which is the one event that already means "this deployment
+   * may not be the same one I last talked to".
+   *
+   * Deliberately NOT awaited by `startUnderLease` — the plan's "discovery is
+   * asynchronous to the connection path" rule. A deployment that is slow to
+   * answer (or never answers) must cost this daemon nothing but presence: no
+   * capability here is on the task path, so there is no state a caller of
+   * `start()` could need this for.
+   *
+   * Every failure is fail-closed and observable: the publisher stays off and a
+   * single `console.warn` records why, matching the operator-facing warning
+   * convention the rest of this file already uses. There is no fallback branch
+   * — no "assume the usual capabilities", no 404-means-unsupported reading —
+   * because a declaration that could not be read is exactly as informative as
+   * one that declares nothing.
+   */
+  function runPresenceDiscovery(): void {
+    const discovery = presenceDiscovery;
+    // Not started (or already torn down), or a pass is still in flight — a
+    // reconnect storm must not stack discovery requests on a deployment.
+    if (!discovery || presenceDiscoveryInFlight) return;
+    presenceDiscoveryInFlight = true;
+    void (async () => {
+      try {
+        const declaration = await fetchCapabilityDeclaration(config.serverUrl, { signal: discovery.signal });
+        // Shutdown may have run while the declaration was in flight; starting a
+        // heartbeat after teardown would leave a timer nothing stops.
+        if (discovery.signal.aborted) return;
+        if (declares(declaration, PRESENCE_HINTS_CAPABILITY)) {
+          // One publisher per `start()`, reused across reconnects: its
+          // revoked latch is a device-level fact, so a fresh declaration must
+          // never resurrect a publisher a revocation stopped.
+          presencePublisher ??= new PresencePublisher({
+            serverUrl: config.serverUrl,
+            auth,
+            ...presenceCadence,
+            onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
+          });
+          presencePublisher.start();
+        } else {
+          // The deployment withdrew the capability. A clean stop, not a
+          // permanent one: a later rollout that declares it again is free to
+          // start this same publisher back up.
+          presencePublisher?.stop();
+        }
+      } catch (err) {
+        if (discovery.signal.aborted) return;
+        console.warn(
+          `[byok/client] capability discovery failed; presence publishing stays off until the next reconnect: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      } finally {
+        presenceDiscoveryInFlight = false;
+      }
+    })();
   }
 
   /**
@@ -1347,6 +1491,20 @@ export function createDaemonWithAdapters(
     // daemon constructed; an injected one belongs to its injector, exactly like
     // an injected journal is not closed here. Idempotent, like every other step
     // in this sequence.
+    // Stop beating first, and cancel a discovery that has not resolved yet.
+    // Nothing downstream depends on either, and both are pure timers/sockets —
+    // no mutation barrier, no errors to collect. Stopping IS this daemon's
+    // offline signal: the hosted hint carries a TTL and expiry means absence,
+    // so no `offline` publish is (or may be) issued here. Both are idempotent,
+    // like every other step in this sequence.
+    presenceDiscovery?.abort();
+    presenceDiscovery = undefined;
+    // A fetch that ignores the abort and stalls would otherwise leave this
+    // latch true forever, silently swallowing every re-discovery a LATER
+    // `start()` asks for.
+    presenceDiscoveryInFlight = false;
+    presencePublisher?.stop();
+    presencePublisher = undefined;
     const stoppingOwnedPressureEngine = ownedPressureEngine;
     const stoppingOwnedJournal = ownedJournal;
     const maintenanceStopped = stoppingOwnedPressureEngine?.stop() ?? Promise.resolve();

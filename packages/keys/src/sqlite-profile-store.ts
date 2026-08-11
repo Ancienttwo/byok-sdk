@@ -11,6 +11,7 @@ import {
   parseModelProviderProfile,
 } from './provider-profile';
 import {
+  closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
   secureSqliteFilePermissions,
 } from './sqlite-support';
@@ -89,9 +90,17 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
       readOnly: options.readOnly ?? false,
     });
     if (!options.readOnly) {
-      this.#database.exec(SCHEMA);
-      this.#database.exec(ENABLED_INDEX);
-      secureSqliteFilePermissions(options.path);
+      try {
+        this.#database.exec(SCHEMA);
+        this.#database.exec(ENABLED_INDEX);
+        secureSqliteFilePermissions(options.path);
+      } catch (error) {
+        closeSqliteDatabaseAfterInitializationFailure(
+          this.#database,
+          error,
+          'SqliteProviderProfileStore initialization failed and its native handle could not be closed',
+        );
+      }
     }
   }
 
