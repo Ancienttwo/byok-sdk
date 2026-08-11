@@ -97,17 +97,30 @@ credential-provider chain is installed.
 
 ## Migrations
 
-Schema lives in the repository's `deploy/sql/` directory as plain SQL files
-named `NNNN_description.sql`. The four-digit prefix is the only ordering
+Schema is authored in the repository's `deploy/sql/` directory as plain SQL
+files named `NNNN_description.sql`. The four-digit prefix is the only ordering
 authority — the same one `pnpm run check:deploy-sql` enforces in CI.
 
+Those files ship inside this package: the build copies them into `dist/sql/`,
+and `migrationsDir()` returns that directory from wherever the package is
+installed. A host owns **when** migrations run, not a copy of their bytes —
+vendoring the SQL into your own repository would make that copy a second source
+of truth, free to drift from the runner installed beside it.
+
 ```ts
-import { createByokPool, migrate } from '@byok-sdk/cloud-postgres';
+import { createByokPool, migrate, migrationsDir } from '@byok-sdk/cloud-postgres';
 
 const pool = createByokPool({ connectionString: process.env.DATABASE_URL! });
-const result = await migrate(pool, '/path/to/deploy/sql');
+const result = await migrate(pool, migrationsDir());
 console.log(result.applied); // e.g. ['0001_cloud_local.sql', ..., '0004_device_proof_truth.sql']
 ```
+
+`migrate` still takes its directory explicitly, because the same runner also
+applies `deploy/sql/` directly for this repository's deploy script and test
+suites. `migrationsDir()` is the answer for anyone who installed the package and
+has no checkout in reach. The release pack compares the two — filename set and
+per-file sha256, in both directions — so a migration that fails to reach the
+tarball fails the release instead of a deployment.
 
 The runner:
 

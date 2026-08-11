@@ -14,9 +14,13 @@
 export { createByokPool } from './pool';
 export type { ByokPoolOptions } from './pool';
 
-// The forward-only migration runner
+// The forward-only migration runner, and the migration files it applies. The
+// SQL is authored in the repository's `deploy/sql/` and copied into this
+// package at build time, so an installed copy can migrate a database without a
+// source checkout in reach.
 export { MigrationChecksumMismatchError, MigrationFilenameError, migrate, readMigrationFiles } from './migrate';
 export type { MigrationFile, MigrationResult } from './migrate';
+export { migrationsDir } from './migrations-dir';
 
 // The cloud-local port implementations, and the composition that bundles them
 export {
