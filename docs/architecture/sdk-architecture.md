@@ -482,6 +482,7 @@ Library exports 分成六组：
 | `store.ts` / `cursor-store.ts` / `session-workspace-store.ts` | device identity/token、redelivery cursor、sessionRef→workspace mapping |
 | `git-workspace.ts` / `git-workspace-store.ts` | optional local checkpoints、one-writer lease、private recovery ledger |
 | `blob-client.ts` | signed URL 方式上传/下载 instruction/artifact |
+| `capabilities-client.ts` / `presence-publisher.ts` | 读取并校验 hosted capability declaration（ADR-010，fail-closed）；仅在声明含 `presence.hints` 时发 `online` 心跳，停机停发（见 §12.3 daemon presence producer） |
 | `device-proof-signer.ts` / `truth-memory-client.ts` | 显式 tenant/product/key proof、metadata-only manifest、本地 selector、selected fetch/rehash/filter 与 truth write |
 | `url.ts` | HTTP/WS URL conversion；remote plaintext 默认拒绝 |
 | `util/*` | bounded async queue、atomic write、POSIX mode / Windows DACL hardening |
@@ -1073,6 +1074,16 @@ presence 是设备级最近提示，activity 是 task 级有损尾部。两者�
 - 写入频率必须 bounded；
 - 可以独立从 SQL 迁往 KV/DO，不影响 truth 与 mailbox。
 - presence minimum interval 在 store 内原子裁决，不依赖单 instance handler timer；activity 以 batch event count + UTF-8 byte ceiling 入场，capacity eviction 与 producer dropped 累加到同一计数。
+
+#### daemon presence producer（当前实现）
+
+`@byok-sdk/client` daemon 是第一方 presence producer，语义只有两条：**online 表示最近一个心跳周期内该设备发过 heartbeat；hint 过期即 absence，不是"值变旧了"**。因此停机不发布 `offline`——停止心跳本身就是离线信号，TTL 到期后 `list`/`read` 再也看不到这台设备，进程崩溃与优雅停机在读端表现一致。
+
+- 是否发布由 declaration 决定（ADR-010）：daemon 连接就绪后读 `GET /byok/capabilities`，用 core 的 `CapabilityDeclarationSchema` 校验，只有声明里含 `presence.hints` 才启动 publisher。读不到、非 200、非 JSON 或 schema 不通过一律 fail-closed：publisher 不启动、`console.warn` 留降级记录、daemon 其余功能不受影响。没有 404 探测分支，也没有"默认按常见能力猜"的回退。
+- declaration 在连接由未 settle（`connecting`/`closed`）重新回到 settled（`open` 或 `degraded`）时重读——`open → degraded` 这条 long-poll 接管边不算重新 settle，不触发重读：部署可能在长跑 daemon 之下完成一次 rollout。新声明不再含 `presence.hints` 就停发（clean stop，之后重新宣称可以再起）；启动时读取失败也只在下一次重连自愈——除此之外没有任何定时重试。设备吊销导致的永久停止不被再发现复活。
+- 心跳节奏必须满足 `minimumIntervalMs < intervalMs < ttlMs`，在 `DaemonConfig.presence` 构造时同步断言。默认 30s 心跳 / 90s TTL / 5s 最小间隔，与 cloud 侧默认和 §12.7.5 建议的 60–120s presence TTL 对齐；快于最小间隔会被 store 判为 `hint_rate_limited`，慢于 TTL 则设备在两次心跳之间闪断。
+- 认证复用 daemon 唯一的 device token lifecycle：401 由 `authedFetch` 续签一次并重试一次；设备被吊销（`DeviceRevokedError`，或续签后仍 401）则永久停止 publisher 并记录，绝不 retry spin。其余失败（429/5xx/网络）只记录，下一拍照常重试。
+- publisher 不读也不写任务状态，输入只有时钟——presence 永远不参与 execution/coordination 判断。
 
 #### truth record 写入与冲突模型（目标设计）
 

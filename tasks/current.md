@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-12T03:10:40+0800 -->
+<!-- updated_at: 2026-08-12T03:37:46+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-12T03:10:40+0800
-> **Source Branch**: codex/cloud-postgres-sql-projection
-> **Source Commit**: 1cb7918
+> **Status**: Active
+> **Updated At**: 2026-08-12T03:37:46+0800
+> **Source Branch**: codex/presence-producer-capability-discovery
+> **Source Commit**: f8498c5
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: manual
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: ManualClearedWithActiveWork
+- Status: Active
 - Active Plan: (none)
 - Plan Status: (none)
 - Next Task: inspect active worktree marker(s)
-- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
+- Clear Note: (none)
 
 ## Mainline Snapshot Reading
 
@@ -31,8 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/kito/Projects/byok-sdk-wt-presence-producer-capability-discovery: plans/plan-20260812-0201-presence-producer-capability-discovery.md
-- /Users/kito/Projects/byok-sdk-wt-presence-producer-capability-discovery: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-presence-producer-capability-discovery
+- /private/tmp/byok-sdk-pi-provider-baseurl-probe: plans/plan-20260812-0333-llm-access-provider-adapter.md
+- /private/tmp/byok-sdk-pi-provider-baseurl-probe: active-worktree owner -> /private/tmp/byok-sdk-pi-provider-baseurl-probe
 ## Active Sprint
 
 - Sprint: (none)
@@ -49,19 +49,33 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 24 changed/untracked path(s)
 
 ```
- D plans/plan-20260812-0201-cloud-postgres-sql-projection.md
- D tasks/contracts/20260812-0201-cloud-postgres-sql-projection.contract.md
- D tasks/notes/20260812-0201-cloud-postgres-sql-projection.notes.md
- D tasks/reviews/20260812-0201-cloud-postgres-sql-projection.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260812-0201-cloud-postgres-sql-projection.md
-?? tasks/archive/contract-20260812-0310-cloud-postgres-sql-projection.md
-?? tasks/archive/notes-20260812-0310-cloud-postgres-sql-projection.md
-?? tasks/archive/review-20260812-0310-cloud-postgres-sql-projection.md
-?? tasks/archive/todo-20260812-0310-cloud-postgres-sql-projection.md
+M  .github/workflows/ci.yml
+M  packages/cloud-postgres/README.md
+M  packages/cloud-postgres/package.json
+A  packages/cloud-postgres/scripts/copy-migrations.mjs
+A  packages/cloud-postgres/src/__tests__/migrations-dir.test.ts
+M  packages/cloud-postgres/src/index.ts
+A  packages/cloud-postgres/src/migrations-dir.ts
+A  packages/keys/src/sqlite-lifecycle.test.ts
+M  packages/keys/src/sqlite-profile-store.ts
+M  packages/keys/src/sqlite-support.ts
+M  packages/server/src/__tests__/sqlite-blob-store.test.ts
+A  packages/server/src/__tests__/sqlite-lifecycle.test.ts
+M  packages/server/src/__tests__/sqlite-task-store.test.ts
+M  packages/server/src/sqlite-blob-store.ts
+M  packages/server/src/sqlite-support.ts
+M  packages/server/src/sqlite-task-store.ts
+R  plans/plan-20260812-0201-cloud-postgres-sql-projection.md -> plans/archive/plan-20260812-0201-cloud-postgres-sql-projection.md
+M  scripts/release/pack-and-smoke.mjs
+A  scripts/release/pg-migrate-smoke.mjs
+A  tasks/archive/contract-20260812-0310-cloud-postgres-sql-projection.md
+A  tasks/archive/notes-20260812-0310-cloud-postgres-sql-projection.md
+A  tasks/archive/review-20260812-0310-cloud-postgres-sql-projection.md
+A  tasks/archive/todo-20260812-0310-cloud-postgres-sql-projection.md
+UU tasks/current.md
 ```
 
 ## Source Artifacts
