@@ -1,13 +1,13 @@
 {
-  "name": "@byok-sdk/server",
+  "name": "@byok-sdk/testkit",
   "version": "0.2.0",
-  "description": "BYOK SDK server: in-memory M0 reference implementation of the SaaS-side coordinator",
+  "description": "BYOK SDK headless device simulator: protocol-level pairing, token renewal, presence, and the built-in negative assertions a host's smoke test would otherwise hand-write",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ancienttwo/byok-sdk.git",
-    "directory": "packages/server"
+    "directory": "packages/testkit"
   },
   "bugs": {
     "url": "https://github.com/Ancienttwo/byok-sdk/issues"
@@ -45,13 +45,6 @@
   },
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
-    "@byok-sdk/protocol": "workspace:*",
-    "@hono/node-server": "^2.0.10",
-    "hono": "^4.12.30",
-    "jose": "^6.2.3",
-    "ws": "^8.21.1"
-  },
-  "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "@byok-sdk/protocol": "workspace:*"
   }
 }
