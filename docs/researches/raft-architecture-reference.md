@@ -18,7 +18,7 @@ RAFT 是 Botiverse 團隊（maintainer 來自 RisingWave）發佈的多方 agent
 
 | 標記 | 含義 |
 |---|---|
-| `[verified]` | 靜態拆解實證。可在下列產物中 grep 覆核到具體行 |
+| `[verified]` | 捕獲時的靜態拆解實證。可在取得相同 hash、且獲授權分析的產物後按文中位置重放；不表示本倉庫保存第三方 bundle |
 | `[inferred]` | 由實證推論。推論鏈條在文中寫明，但未直接觀測到 |
 | `[unverified]` | 無法確認。通常是 server 側行為或未拆解的平台 |
 
@@ -31,11 +31,11 @@ RAFT 是 Botiverse 團隊（maintainer 來自 RisingWave）發佈的多方 agent
 - npm tarball 靜態拆解
 - SEA（Single Executable Application）二進位靜態切片
 
-產物位置：
+捕獲時的 case-local 產物位置如下；這些 `/tmp` 產物現已清除，未納入版本控制。仓库只保存 digest、方法与摘录，见 [clone-visible evidence appendix](./evidence/2026-08-10_raft-cli-dynamic-evidence.md)：
 
 | 產物 | 說明 |
 |---|---|
-| `/tmp/raft-probe/sea/bundle.cjs` | 1.0.15 SEA payload，693,529 行未壓縮 CJS。esbuild bundle 保留 `// packages/*/src/*.ts` 模組註解，**可直接 grep 覆核** |
+| `/tmp/raft-probe/sea/bundle.cjs` | 捕獲時的 1.0.15 SEA payload，693,529 行未壓縮 CJS。esbuild bundle 保留 `// packages/*/src/*.ts` 模組註解；取得相同 hash 的授权副本後可按行重放 |
 | `/tmp/raft-probe/sea/rc.bin` | 原始二進位，150,920,336 B，權限 0600 無執行位 |
 | `/tmp/raft-probe/sea/old/package/` | 0.0.70 npm 基線 |
 | `/tmp/raft-probe/botiverse-raft-0.0.17/` | agent CLI npm 包 |
@@ -69,9 +69,9 @@ RAFT 是 Botiverse 團隊（maintainer 來自 RisingWave）發佈的多方 agent
 | [Lifecycle](https://docs.raft.build/features/agents/lifecycle/) | 公開 lifecycle 與 workspace persistence 語意 | client/server 狀態機實作 |
 | [Messages](https://docs.raft.build/features/messaging/messages/) | workspace 的消息原語 | `/internal/*` route 實作 |
 | npm metadata + CDN manifest | 探針日版本、target、hash 與 Apple metadata | updater 是否實際驗證簽章 |
-| `/tmp/raft-probe/*` 靜態產物 | 本文 `[verified]` 的 client-side control flow | runtime 動態行為與 server-side enforcement |
+| 捕獲時的 `/tmp/raft-probe/*` 靜態產物（現未保留） | 本文 `[verified]` 的 historical、hash-bound client-side control flow | fresh-clone 可獨立重放、runtime 動態行為與 server-side enforcement |
 
-公開文件只支撐產品表面；本文所有進程、route、credential、migration、upgrade 與 telemetry 細節仍以本地靜態產物為證據。npm/CDN 在探針日的 readback 為：agent CLI `0.0.17`、daemon `1.0.15`、computer npm `0.0.70`、CDN SEA `1.0.15`。
+公開文件只支撐產品表面；本文所有進程、route、credential、migration、upgrade 與 telemetry 細節仍以捕獲時的本地靜態產物為證據。產物現已清除，所以這些結論是 digest-bound historical evidence；fresh clone 只能複核保存的 provenance，不能單靠本倉庫重跑拆解。npm/CDN 在探針日的 readback 為：agent CLI `0.0.17`、daemon `1.0.15`、computer npm `0.0.70`、CDN SEA `1.0.15`。
 
 ---
 
