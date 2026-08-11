@@ -161,7 +161,7 @@ The current /private/tmp/byok-sdk-pi-provider-baseurl-probe worktree owns this p
 - [x] Finish the P0 dispatch and credential-custody implementation.
 - [x] Add negative-path and secret-boundary tests.
 - [x] Reconcile spec, security, architecture, PRD, and probe evidence.
-- [ ] Run targeted and full verification, then review the frozen diff.
+- [x] Run targeted and full verification, then review the frozen diff.
 - [ ] Commit, push, open PR, merge to main, and verify the merged revision.
 
 ## Annotations
@@ -171,5 +171,5 @@ The current /private/tmp/byok-sdk-pi-provider-baseurl-probe worktree owns this p
 - [x] Finish the P0 dispatch and credential-custody implementation.
 - [x] Add negative-path and secret-boundary tests.
 - [x] Reconcile spec, security, architecture, PRD, and probe evidence.
-- [ ] Run targeted and full verification, then review the frozen diff.
+- [x] Run targeted and full verification, then review the frozen diff.
 - [ ] Commit, push, open PR, merge to main, and verify the merged revision.

@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260812-0333-llm-access-provider-adapter.md
 > **Contract**: tasks/contracts/20260812-0333-llm-access-provider-adapter.contract.md
 > **Review**: tasks/reviews/20260812-0333-llm-access-provider-adapter.review.md
-> **Last Updated**: 2026-08-12 03:33
+> **Last Updated**: 2026-08-12 04:20
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -22,6 +22,13 @@
   exact key, and opens no listener. Deep review also changed session-directory
   setup to chmod only a directory created by this invocation; an existing
   host-owned directory is never permission-mutated.
+- Merged `origin/main` at `3d66543` and preserved the SQLite lifecycle fix:
+  write-mode schema/PRAGMA initialization failures close the native handle,
+  while launcher read-only opens still create no directory, issue no WAL
+  mutation, and never chmod an existing database. Presence discovery remains
+  orthogonal to connection-level dispatch selection. A zero-adapter daemon now
+  withholds `dispatch-selection` instead of passing an empty-set capability
+  check.
 
 ## Deviations From Plan Or Spec
 
@@ -45,10 +52,17 @@
 - Run snapshots: `.ai/harness/runs/`
 - Pinned Pi positive and zero-network negative control:
   `docs/researches/pi-provider-baseurl-probe.md`
-- Targeted suites before freeze: protocol 195, server 221, client 1043,
-  keys 339. One pre-existing timing-sensitive long-poll test failed once in a
-  full client run and passed immediately in isolated rerun; no source change
-  was made for that unrelated flake.
+- Frozen integrated suites: protocol 195, server 226, client 1064, keys 345,
+  core 112, cloud 130, conformance 117, cloud-postgres 34, SDK 1. Recursive
+  build/typecheck/test and strict workflow checks pass. Two unrelated
+  timing-sensitive tests each failed once across repeated full runs (the
+  previously observed long-poll case and diagnostics' concurrent stale-owner
+  reclaimer); both passed immediate isolated reruns, and no source change was
+  made for either flake.
+- `verify-sprint --prepare-acceptance` contract checks pass 23/23. Its initial
+  allowed-path gate identified two documentation projections already in the
+  frozen diff (`packages/client/README.md` and `packages/protocol/README.md`);
+  the contract now names both explicitly.
 
 ## Promotion Filter
 

@@ -95,8 +95,10 @@ allowed_paths:
   - docs/security.md
   - docs/architecture/sdk-architecture.md
   - docs/researches/pi-provider-baseurl-probe.md
+  - packages/protocol/README.md
   - packages/protocol/src/
   - packages/server/src/
+  - packages/client/README.md
   - packages/client/src/
   - packages/keys/
   - plans/plan-20260812-0333-llm-access-provider-adapter.md
