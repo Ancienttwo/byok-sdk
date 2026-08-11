@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/core",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "BYOK SDK platform contracts: branded tenant identity, tenant-first store ports, device proof canonicalization, and the composition conformance reference",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "sideEffects": false,
   "main": "./dist/index.js",

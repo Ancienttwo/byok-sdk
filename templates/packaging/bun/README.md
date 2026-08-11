@@ -12,6 +12,8 @@ release pipeline.
 
 - [bun](https://bun.com) installed (`curl -fsSL https://bun.com/install | bash`,
   or see bun's own install docs for your platform).
+- Node.js 22.19.0 or newer for the external pi CLI sidecar. `bun install`
+  may install the npm graph, but pi's supported production runtime is Node.
 - Your product's launcher entry point built against `@byok-sdk/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
   it constructs a daemon, calls `.status()`, and probes runtime detection
@@ -44,17 +46,19 @@ templates/packaging/bun/build.sh <entry.ts> <output-dir>
 
 ## What this actually guarantees (and what it doesn't)
 
-Bundling a Node.js daemon into one file is not automatically safe. Runtime
-CLIs remain external, user-installed executables. The pi adapter resolves only
-`BYOK_PI_BIN` or a bare `pi` on PATH, whose `detect()` reports
-`present: false` if unavailable. This recipe's `smoke-test.sh` proves both
-absence and explicit pickup under a real compiled bun binary.
+Bundling a Node.js daemon into one file is not automatically safe. The pi
+adapter normally resolves the exact required npm package, but that external
+CLI is not embedded in a single-file executable. There is no automatic PATH
+fallback because it would introduce an unversioned second authority. This
+recipe proves the missing-sidecar state and explicit pickup under a compiled
+Bun binary.
 
 Empirically confirmed while building this recipe (see
 `smoke-test.sh`'s two assertions):
 
-- **pi absent** (no `BYOK_PI_BIN`, no `pi` on PATH): `PiAdapter.detect()`
-  reports `{ present: false }` cleanly. No crash, exit 0.
+- **pi sidecar absent** (no `BYOK_PI_BIN`): `PiAdapter.detect()` reports
+  `{ present: false }` cleanly. A product treats this as a missing core
+  deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
   the version-matched Node 22.19+ pi binary at that path is detected correctly

@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const releaseVersion = '0.1.1';
+const releaseVersion = '0.2.0';
+const piVersion = '0.84.1';
 const packages = [
   '@byok-sdk/core',
   '@byok-sdk/protocol',
@@ -115,8 +116,15 @@ try {
       throw new Error('isolated umbrella install unexpectedly contains @byok-sdk/keys');
     }
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
+    if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
+      throw new Error(`isolated client manifest must require pi ${piVersion}`);
+    }
     if (clientManifest.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
-      throw new Error('isolated client install still contains the removed Pi optional dependency');
+      throw new Error('isolated client manifest must not make pi optional');
+    }
+    const piManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8'));
+    if (piManifest.version !== piVersion) {
+      throw new Error(`isolated client install resolved pi ${piManifest.version}, expected ${piVersion}`);
     }
   } finally {
     rmSync(smokeDir, { recursive: true, force: true });

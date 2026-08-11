@@ -61,10 +61,9 @@ export class PiAdapter implements RuntimeAdapter {
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      // Empirically, pi (0.74.2 and 0.80.7) prints `--version` output to
-      // STDERR, not stdout — confirmed with an explicit stdout/stderr probe,
-      // not assumed. Check both so this doesn't silently regress if a future
-      // pi release moves it back to stdout.
+      const bin = this.resolveBin();
+      // Empirically, pi 0.84.1 prints `--version` to stdout. Check stderr too
+      // so detection remains accurate if a future pinned release moves it.
       const { stdout, stderr } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
       const version = stdout.trim() || stderr.trim();
       const authPresent = KNOWN_PROVIDER_ENV_VARS.some((name) => process.env[name] !== undefined);

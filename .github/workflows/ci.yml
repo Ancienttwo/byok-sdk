@@ -101,7 +101,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: ['22.19.0', 24]
     env:
       BYOK_REQUIRE_DATAPLANE: '1'
       BYOK_TEST_POSTGRES_URL: postgres://byok:byok@127.0.0.1:5433/byok_test
@@ -150,9 +150,9 @@ jobs:
 
       # repo-harness is a bun-only tool (`engines.bun`, a bare-`.ts` bin, an
       # `exec bun` shim) — Node cannot run it, and declaring it as a workspace
-      # dependency drags in transitive packages that require Node >= 22.12 and
-      # so break the Node 20 leg at install time. It therefore stays OUT of the
-      # dependency tree entirely and is fetched by `bunx` at a pinned version
+      # dependency drags unrelated toolchain packages into the product graph.
+      # It therefore stays OUT of the dependency tree entirely and is fetched
+      # by `bunx` at a pinned version
       # only for this one step. The root `check:deploy-sql` script remains the
       # local-workflow entrypoint for the same check.
       - name: Setup bun
@@ -176,7 +176,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: ['22.19.0', 24]
     defaults:
       run:
         shell: pwsh
@@ -224,8 +224,9 @@ jobs:
 
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) while
-  # runtime CLIs remain external. An unavailable user-installed pi must
-  # report `present: false`, while BYOK_PI_BIN must remain detectable. See
+  # runtime CLIs remain external subprocesses. A single-file bundle without
+  # its required Pi sidecar must report `present: false`, while BYOK_PI_BIN
+  # must remain detectable. See
   # templates/packaging/{bun,sea} for
   # the full recipes + empirically-confirmed rationale (including a macOS
   # postject gotcha that silently segfaults without one extra flag), and
@@ -301,7 +302,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node-version: [20, 22]
+        node-version: ['22.19.0', 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v7

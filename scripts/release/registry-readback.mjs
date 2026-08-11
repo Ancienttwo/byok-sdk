@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const expectedVersion = '0.1.1';
+const expectedVersion = '0.2.0';
+const piVersion = '0.84.1';
 const packages = [
   '@byok-sdk/core',
   '@byok-sdk/protocol',
@@ -87,8 +88,15 @@ try {
     throw new Error('registry umbrella install unexpectedly contains @byok-sdk/keys');
   }
   const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
+  if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
+    throw new Error(`registry client manifest must require pi ${piVersion}`);
+  }
   if (clientManifest.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
-    throw new Error('registry client still installs the removed Pi optional dependency');
+    throw new Error('registry client manifest must not make pi optional');
+  }
+  const piManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8'));
+  if (piManifest.version !== piVersion) {
+    throw new Error(`registry install resolved pi ${piManifest.version}, expected ${piVersion}`);
   }
 } finally {
   rmSync(smokeDir, { recursive: true, force: true });

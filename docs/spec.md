@@ -6,10 +6,13 @@ Describe the product intent, users, workflows, acceptance scenarios, and constra
 
 ## Core pi runtime contract
 
-Pi is a required BYOK capability. `@byok/client` depends on the exact npm
+Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
 artifact `@earendil-works/pi-coding-agent@0.84.1`; the SDK does not accept an
 unversioned global `pi` on `PATH` as an implicit substitute. All workspace
-packages require Node.js `>=22.19.0`, matching pi's published engine floor.
+dispatch packages and private conformance tests require Node.js `>=22.19.0`,
+matching pi's published engine floor. The independent
+`@byok-sdk/keys@0.1.0` package remains outside the dispatch graph and retains
+its Node.js 20 floor.
 The coding-agent package owns and installs its non-optional `pi-agent-core`,
 `pi-ai`, `pi-client`, `pi-protocol`, and `pi-tui` dependencies. BYOK does not
 declare or import those packages separately because the CLI/RPC boundary is

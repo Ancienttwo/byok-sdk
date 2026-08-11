@@ -10,6 +10,7 @@ assert.deepEqual(adaptersExport, {
   types: './dist/adapters/index.d.ts',
   import: './dist/adapters/index.js',
 });
+assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], '0.84.1');
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
 
 for (const relativePath of [adaptersExport.import, adaptersExport.types]) {

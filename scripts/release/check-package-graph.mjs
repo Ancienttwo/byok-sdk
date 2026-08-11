@@ -3,8 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const releaseVersion = '0.1.1';
+const releaseVersion = '0.2.0';
 const keysVersion = '0.1.0';
+const piVersion = '0.84.1';
 const dispatchPackages = [
   ['packages/core', '@byok-sdk/core'],
   ['packages/protocol', '@byok-sdk/protocol'],
@@ -33,7 +34,8 @@ for (const [directory, expectedName] of publicPackages) {
   if (manifest.version !== expectedVersion) errors.push(`${manifestPath}: expected version ${expectedVersion}, got ${manifest.version}`);
   if (manifest.license !== 'MIT') errors.push(`${manifestPath}: license must be MIT`);
   if (manifest.publishConfig?.access !== 'public') errors.push(`${manifestPath}: publishConfig.access must be public`);
-  if (manifest.engines?.node !== '>=20') errors.push(`${manifestPath}: engines.node must be >=20`);
+  const expectedEngine = expectedName === keys[1] ? '>=20' : '>=22.19.0';
+  if (manifest.engines?.node !== expectedEngine) errors.push(`${manifestPath}: engines.node must be ${expectedEngine}`);
   if (manifest.repository?.url !== 'git+https://github.com/Ancienttwo/byok-sdk.git') {
     errors.push(`${manifestPath}: repository URL is not canonical`);
   }
@@ -94,8 +96,11 @@ for (const field of [...runtimeFields, 'devDependencies']) {
 }
 
 const clientManifest = manifests.get('@byok-sdk/client');
+if (clientManifest?.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
+  errors.push(`packages/client/package.json: required pi dependency must be exactly ${piVersion}`);
+}
 if (clientManifest?.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
-  errors.push('packages/client/package.json: client must not install a Node-22-only pi runtime into the Node-20 SDK graph');
+  errors.push('packages/client/package.json: pi must be required, not optional');
 }
 if (
   clientManifest?.exports?.['./adapters']?.import !== './dist/adapters/index.js' ||
@@ -162,6 +167,9 @@ for (const relativePath of scanFiles) {
 const conformance = readJson('packages/conformance/package.json');
 if (conformance.name !== '@byok-sdk/conformance' || conformance.private !== true) {
   errors.push('packages/conformance/package.json: conformance must remain private @byok-sdk/conformance');
+}
+if (conformance.engines?.node !== '>=22.19.0') {
+  errors.push('packages/conformance/package.json: engines.node must be >=22.19.0');
 }
 
 if (errors.length > 0) {

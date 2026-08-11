@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/client",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
   "type": "module",
   "license": "MIT",
@@ -55,6 +55,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
     "ws": "^8.21.1"

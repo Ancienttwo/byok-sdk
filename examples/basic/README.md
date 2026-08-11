@@ -19,10 +19,10 @@ pnpm install
 pnpm -r build
 ```
 
-Install and authenticate `@earendil-works/pi-coding-agent` separately, then
-ensure its `pi` executable is on `PATH`. The SDK does not install runtime CLIs
-or own their credentials. `BYOK_PI_BIN` is the explicit override for a custom
-executable location or test fixture.
+The workspace install includes the exact supported
+`@earendil-works/pi-coding-agent` package. Authenticate Pi with your own
+provider credentials; the SDK does not own them. `BYOK_PI_BIN` is the explicit
+override for a version-matched Node sidecar or test fixture.
 
 ## Run it
 

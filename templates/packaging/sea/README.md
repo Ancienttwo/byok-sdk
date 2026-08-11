@@ -107,17 +107,19 @@ binary (or a wrapper around it) happens to be a `.cmd`/`.bat` on Windows.
 
 ## What this actually guarantees (and what it doesn't)
 
-Bundling a Node.js daemon into one file is not automatically safe. Runtime
-CLIs remain external, user-installed executables. The pi adapter resolves only
-`BYOK_PI_BIN` or a bare `pi` on PATH, whose `detect()` reports
-`present: false` if unavailable. This recipe's `smoke-test.sh` proves both
-absence and explicit pickup under a real Node SEA binary.
+Bundling a Node.js daemon into one file is not automatically safe. The pi
+adapter normally resolves the exact required npm package, but SEA cannot embed
+that external CLI. There is no automatic PATH fallback because it would
+introduce an unversioned second authority. Production SEA deployments provide
+the version-matched Node sidecar through `BYOK_PI_BIN`; this recipe proves the
+missing and configured states under a real SEA binary.
 
 Empirically confirmed while building this recipe (see `smoke-test.sh`'s two
 assertions):
 
-- **pi absent** (no `BYOK_PI_BIN`, no `pi` on PATH): `PiAdapter.detect()`
-  reports `{ present: false }` cleanly. No crash, exit 0.
+- **pi sidecar absent** (no `BYOK_PI_BIN`): `PiAdapter.detect()` reports
+  `{ present: false }` cleanly. A product treats this as a missing core
+  deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
   version-matched Node 22.19+ pi binary at that path is detected correctly

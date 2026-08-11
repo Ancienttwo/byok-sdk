@@ -89,9 +89,9 @@ describe('the CI dataplane job', () => {
     expect(workflow).toContain('pnpm --filter @byok-sdk/conformance test');
   });
 
-  it('covers both supported Node majors', () => {
+  it('covers the exact supported Node floor and current LTS line', () => {
     const dataplaneJob = workflow.slice(workflow.indexOf('\n  dataplane:'));
-    expect(dataplaneJob).toContain('node-version: [20, 22]');
+    expect(dataplaneJob).toContain("node-version: ['22.19.0', 24]");
   });
 });
 

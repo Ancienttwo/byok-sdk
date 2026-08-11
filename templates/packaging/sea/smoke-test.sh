@@ -54,7 +54,7 @@ fi
 
 # Isolated run directory: copy the standalone executable out to a location
 # with no node_modules of its own in its ancestor chain, matching a shipped
-# product binary whose runtime CLIs must come from the user's PATH.
+# product binary whose required Pi runtime must be injected as a sidecar.
 ISOLATED_DIR="$WORK_DIR/isolated-run"
 mkdir -p "$ISOLATED_DIR"
 RUN_BIN="$ISOLATED_DIR/$(basename "$BIN")"

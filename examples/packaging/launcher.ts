@@ -11,10 +11,10 @@
 // The hazard: `packages/client/src/adapters/pi/resolve-bin.ts` calls
 // `import.meta.resolve(PI_PACKAGE_NAME)` to find pi's required package
 // install. tsup marks that package `external` (never bundled into
-// @byok-sdk/client's own dist), and resolve-bin.ts already wraps the call in a
-// try/catch that falls back to a bare `pi` on PATH, whose `detect()` then
-// reports `present: false` when that also fails. That fallback is exercised
-// and passing in this repo's ordinary Node test suite -- what's NOT
+// @byok-sdk/client's own dist), so a single-file product must inject its
+// required Node 22.19+ pi sidecar with BYOK_PI_BIN. `detect()` reports
+// `present: false` when neither the package nor that explicit sidecar is
+// reachable. What's NOT
 // exercised anywhere else is whether `import.meta.resolve` still behaves
 // (throws catchably, degrades) once @byok-sdk/client's own code is itself
 // flattened into a single-file compiled binary, run somewhere with no
