@@ -52,9 +52,11 @@ import {
   ByokCoreError,
   contentHash,
   isContentHash,
+  objectKeyPrefix,
   tenantObjectKey,
   type Clock,
   type ContentHash,
+  type ObjectKeyPrefix,
   type ObjectStore,
   type StorageReservation,
   type TenantId,
@@ -176,6 +178,34 @@ export interface R2BlobStoreOptions {
    * discover a config default nobody chose.
    */
   readonly region: string;
+  /**
+   * A key namespace for this deployment, e.g. `acme/prod` →
+   * `acme/prod/tenants/<tenant>/objects/sha256/<hex>`. Omit it and the key is
+   * the unprefixed `tenants/...` layout, byte for byte.
+   *
+   * What it is for: one bucket, several deployments. Without it every
+   * deployment owns the bucket root, so a host running two products against
+   * one R2 account has to open a bucket per product.
+   *
+   * **Immutable per deployment, and only for a NEW one.** This value is
+   * spliced into the key at write time and at read time from the same field;
+   * there is no second layout anything falls back to, by design. Change it on
+   * a deployment that has already stored objects and those objects are
+   * stranded — still in the bucket, no longer addressable, and invisible to
+   * this SDK's own maintenance surface. A dual-read across the old and new
+   * prefix is NOT a supported way to switch and will not be added: it would
+   * make two key layouts simultaneously authoritative for the same object.
+   * Moving an existing deployment onto a prefix is a separate, one-shot,
+   * operator-invoked copy of the objects themselves, out of this SDK's scope.
+   *
+   * Validated at construction ({@link ObjectKeyPrefix}): slash-joined segments
+   * of lowercase alphanumerics, `.`, `_`, `-`, each starting with an
+   * alphanumeric, no leading/trailing slash, no empty segment. `''` is a
+   * refusal, not a synonym for "no prefix" — it is what an unset environment
+   * variable looks like, and silently treating it as the default would put a
+   * deployment's objects somewhere nobody chose.
+   */
+  readonly keyPrefix?: string;
   readonly presignTtlSeconds?: number;
   /** Injected so a fault injector can sit in front of the real one. */
   readonly fetch?: ObjectStoreFetch;
@@ -221,6 +251,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
   readonly #client: AwsClient;
   readonly #origin: string;
   readonly #bucket: string;
+  readonly #keyPrefix: ObjectKeyPrefix | undefined;
   readonly #presignTtlSeconds: number;
   readonly #fetch: ObjectStoreFetch;
   readonly #maxAttempts: number;
@@ -241,6 +272,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
     });
     this.#origin = options.endpoint.replace(/\/+$/, '');
     this.#bucket = options.bucket;
+    this.#keyPrefix = resolveKeyPrefix(options.keyPrefix);
     this.#presignTtlSeconds = assertPresignTtl(options.presignTtlSeconds ?? DEFAULT_PRESIGN_TTL_SECONDS);
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
@@ -416,7 +448,9 @@ export class R2CloudBlobStore implements CloudBlobStore {
    */
   #objectUrl(tenant: TenantId, hash: ContentHash): URL {
     assertKeySegmentTenant(tenant);
-    return new URL(`${this.#origin}/${this.#bucket}/${tenantObjectKey(tenant, hash)}`);
+    return new URL(
+      `${this.#origin}/${this.#bucket}/${tenantObjectKey(tenant, hash, this.#keyPrefix)}`,
+    );
   }
 
   /**
@@ -546,6 +580,7 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
   readonly #client: AwsClient;
   readonly #origin: string;
   readonly #bucket: string;
+  readonly #keyPrefix: ObjectKeyPrefix | undefined;
   readonly #fetch: ObjectStoreFetch;
   readonly #maxAttempts: number;
   readonly #retryDelayMs: number;
@@ -561,6 +596,7 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
     });
     this.#origin = options.endpoint.replace(/\/+$/, '');
     this.#bucket = options.bucket;
+    this.#keyPrefix = resolveKeyPrefix(options.keyPrefix);
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     this.#retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
@@ -659,7 +695,9 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
 
   #objectUrl(tenant: TenantId, hash: ContentHash): URL {
     assertKeySegmentTenant(tenant);
-    return new URL(`${this.#origin}/${this.#bucket}/${tenantObjectKey(tenant, hash)}`);
+    return new URL(
+      `${this.#origin}/${this.#bucket}/${tenantObjectKey(tenant, hash, this.#keyPrefix)}`,
+    );
   }
 
   async #send(request: Request): Promise<{ readonly response: Response; readonly attempts: number }> {
@@ -722,6 +760,20 @@ function assertKeySegmentTenant(tenant: TenantId): void {
     'storage_tenant_key_unsafe',
     `Tenant id ${JSON.stringify(tenant)} is not a single safe object-key segment, so no key can be built for it.`,
   );
+}
+
+/**
+ * The deployment's key namespace, decided once, here, at construction.
+ *
+ * Validation is core's, not this adapter's: the key layout is core's contract
+ * ({@link tenantObjectKey}), and a second opinion about what a legal prefix
+ * looks like is a second authority over where objects live. This function only
+ * decides that an ABSENT option means the unprefixed layout — every other
+ * value, `''` included, goes to the mint point and is either accepted verbatim
+ * or refused here and now, before a single key is built.
+ */
+function resolveKeyPrefix(keyPrefix: string | undefined): ObjectKeyPrefix | undefined {
+  return keyPrefix === undefined ? undefined : objectKeyPrefix(keyPrefix);
 }
 
 function assertPresignTtl(seconds: number): number {

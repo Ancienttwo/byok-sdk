@@ -69,6 +69,7 @@ export const CORE_ERROR_CODES = {
   hint_rate_limited: 'hint_rate_limited',
 
   // object manifest (§12.7.4, §12.7.8)
+  object_key_prefix_invalid: 'object_key_prefix_invalid',
   object_not_found: 'object_not_found',
   object_state_invalid: 'object_state_invalid',
 
