@@ -46,6 +46,7 @@ describe.skipIf(!sqliteReady)('SqliteTaskStore', () => {
     const store = new SqliteTaskStore({ path: ':memory:' });
     expect(store.get('nope')).toBeUndefined();
     store.close();
+    expect(() => store.close()).not.toThrow();
   });
 
   it('walks the full happy path Offered -> Claimed -> Running -> Complete, persisting the result', () => {

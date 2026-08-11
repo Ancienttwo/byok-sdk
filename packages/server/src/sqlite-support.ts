@@ -3,6 +3,34 @@ import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
+export type SqliteOpenStep = 'after-open' | 'after-wal';
+
+/** Test-only seam for proving that post-open initialization failures release the native handle. */
+export interface SqliteOpenFaultSeam {
+  onStep?(step: SqliteOpenStep): void;
+  close?(db: DatabaseSync): void;
+}
+
+/**
+ * Preserve the initialization error after deterministically releasing an
+ * already-open SQLite handle. If cleanup itself fails, surface both failures
+ * instead of losing the reason construction failed or pretending ownership
+ * was returned.
+ */
+export function closeSqliteDatabaseAfterInitializationFailure(
+  db: DatabaseSync,
+  initializationError: unknown,
+  message: string,
+  close: (db: DatabaseSync) => void = (database) => database.close(),
+): never {
+  try {
+    close(db);
+  } catch (closeError) {
+    throw new AggregateError([initializationError, closeError], message);
+  }
+  throw initializationError;
+}
+
 /**
  * Thrown when `node:sqlite` isn't available in the running Node.js binary.
  * `node:sqlite` shipped in Node.js 22.5.0 (https://nodejs.org/api/sqlite.html)
@@ -139,16 +167,31 @@ const SECURE_DIR_MODE = 0o700;
  * {@link isSqliteAvailable}) — callers don't need their own guard for that;
  * this is the single choke point.
  */
-export function openSqliteDatabase(path: string, options?: DatabaseSyncOptions): DatabaseSync {
+export function openSqliteDatabase(
+  path: string,
+  options?: DatabaseSyncOptions,
+  faults?: SqliteOpenFaultSeam,
+): DatabaseSync {
   const { DatabaseSync } = loadSqliteModule();
   if (path !== ':memory:') {
     mkdirSync(dirname(path), { recursive: true, mode: SECURE_DIR_MODE });
   }
   const db = new DatabaseSync(path, { timeout: DEFAULT_BUSY_TIMEOUT_MS, ...options });
-  if (path !== ':memory:') {
-    db.exec('PRAGMA journal_mode = WAL;');
+  try {
+    faults?.onStep?.('after-open');
+    if (path !== ':memory:') {
+      db.exec('PRAGMA journal_mode = WAL;');
+      faults?.onStep?.('after-wal');
+    }
+    return db;
+  } catch (error) {
+    closeSqliteDatabaseAfterInitializationFailure(
+      db,
+      error,
+      'SQLite open initialization failed and its native handle could not be closed',
+      faults?.close,
+    );
   }
-  return db;
 }
 
 /**

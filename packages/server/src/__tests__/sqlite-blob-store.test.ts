@@ -95,6 +95,8 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     expect(await store.readContent('blob_nope')).toBeUndefined();
     expect(await store.getDownloadUrl('blob_nope')).toBeUndefined();
     expect(await store.exists('blob_nope')).toBe(false);
+    store.close();
+    expect(() => store.close()).not.toThrow();
   });
 
   it('bytes written via one instance are read back byte-identical via a second instance on the same db file (restart-safety)', async () => {
