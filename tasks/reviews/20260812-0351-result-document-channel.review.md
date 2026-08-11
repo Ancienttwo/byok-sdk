@@ -49,18 +49,18 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:5e61393453b33d42222e8c49cf8b4e5bd527843f372a86109ff4e42cd213316f
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 3d66543c504f2aa3c6517e34e57c4c2a745232dd
+> **Verification Evidence SHA256**: sha256:fe729dabaf50fc1a7ffaf6618ae5977e307a257a6bef67b4eda91c97b978dc47
+> **Issued At**: 2026-08-11T20:44:58.857Z
 
-- Summary: No AcceptanceReceipt has been recorded.
-- Findings: none
+- Summary: Dual-track: gatekeeper PASS (structural golden strip-diff, 190 required arrays identical, 223 strict nodes unchanged, corpus untouched and parsing) + codex adversarial found 3xP1/1xP2 all fixed with red/green evidence (canonical-snapshot semantics kill toJSON smuggling/lossy stringify/getter instability; capability re-check after last await; distinct-values projection test) + prototype clause vs Map-equals-empty; protocol 218 / server 230 / client 1073 green
+- Findings: P2: residual capability window: server rollback landing inside a single in-flight send can still strip document — outbox conversion rejected as second-authority-over-terminal-outcomes; documented in protocol.md 7.2 as known bound; P3: freeze-guard fingerprint renders refine semantics as {} — cap value changes invisible to golden; covered by constant assertion tests; P3: final freeze/claim of result-document awaits salesko Phase B payload real samples per dogfood freeze-order
 
 ## Behavior Diff Notes
 
