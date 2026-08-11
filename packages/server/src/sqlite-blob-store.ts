@@ -7,7 +7,11 @@ import {
   type ReadContentResult,
   type WriteContentResult,
 } from './blob-store';
-import { openSqliteDatabase, secureSqliteFilePermissions } from './sqlite-support';
+import {
+  closeSqliteDatabaseAfterInitializationFailure,
+  openSqliteDatabase,
+  secureSqliteFilePermissions,
+} from './sqlite-support';
 
 export interface SqliteBlobStoreOptions {
   /**
@@ -144,23 +148,32 @@ export class SqliteBlobStore implements BlobStore {
   private readonly selectBlobStmt: StatementSync;
   private readonly selectUploadedStmt: StatementSync;
   private readonly writeContentStmt: StatementSync;
+  private closed = false;
 
   constructor(opts: SqliteBlobStoreOptions) {
     this.db = openSqliteDatabase(opts.path);
-    this.db.exec(SCHEMA);
-    secureSqliteFilePermissions(opts.path);
-    this.urlTtlMs = opts.urlTtlMs ?? DEFAULT_URL_TTL_MS;
-    this.secret = opts.signingKey ?? loadOrCreateSigningSecret(this.db);
+    try {
+      this.db.exec(SCHEMA);
+      secureSqliteFilePermissions(opts.path);
+      this.urlTtlMs = opts.urlTtlMs ?? DEFAULT_URL_TTL_MS;
+      this.secret = opts.signingKey ?? loadOrCreateSigningSecret(this.db);
 
-    this.insertBlobStmt = this.db.prepare(
-      `INSERT INTO blobs (blob_id, size, content_type, content_hash, uploaded, data)
-       VALUES (?, ?, ?, ?, 0, NULL)`,
-    );
-    this.selectBlobStmt = this.db.prepare(
-      'SELECT size, content_type, content_hash, uploaded, data FROM blobs WHERE blob_id = ?',
-    );
-    this.selectUploadedStmt = this.db.prepare('SELECT uploaded FROM blobs WHERE blob_id = ?');
-    this.writeContentStmt = this.db.prepare('UPDATE blobs SET data = ?, uploaded = 1 WHERE blob_id = ?');
+      this.insertBlobStmt = this.db.prepare(
+        `INSERT INTO blobs (blob_id, size, content_type, content_hash, uploaded, data)
+         VALUES (?, ?, ?, ?, 0, NULL)`,
+      );
+      this.selectBlobStmt = this.db.prepare(
+        'SELECT size, content_type, content_hash, uploaded, data FROM blobs WHERE blob_id = ?',
+      );
+      this.selectUploadedStmt = this.db.prepare('SELECT uploaded FROM blobs WHERE blob_id = ?');
+      this.writeContentStmt = this.db.prepare('UPDATE blobs SET data = ?, uploaded = 1 WHERE blob_id = ?');
+    } catch (error) {
+      closeSqliteDatabaseAfterInitializationFailure(
+        this.db,
+        error,
+        'SqliteBlobStore initialization failed and its native handle could not be closed',
+      );
+    }
   }
 
   async createUpload(input: CreateUploadInput, requestedBlobId?: string): Promise<{ blobId: string; uploadUrl: string }> {
@@ -223,7 +236,9 @@ export class SqliteBlobStore implements BlobStore {
 
   /** Close the underlying database connection — see `SqliteTaskStore.close`'s doc comment; same rationale. */
   close(): void {
+    if (this.closed) return;
     this.db.close();
+    this.closed = true;
   }
 
   private computeSig(blobId: string, action: 'put' | 'get', exp: number): string {
