@@ -466,6 +466,100 @@ export interface ApprovalsRequestResult {
   reason?: string;
 }
 
+// ---------------------------------------------------------------------------
+// `assertion.issue` (plan device-assertion-broker)
+// ---------------------------------------------------------------------------
+
+/**
+ * Params for `assertion.issue`: a sibling local process (the host's own CLI,
+ * installed alongside this daemon) asking the daemon to mint one short-lived,
+ * audience-scoped device assertion with the paired device key. See
+ * `@byok-sdk/core`'s `device-assertion.ts` for the envelope, and
+ * `create-daemon.ts`'s handler for the six fail-closed gates every call passes
+ * through in a fixed order.
+ *
+ * One field, and nothing else. In particular there is deliberately no caller
+ * identity, no requested TTL, and no requested claim set: every process running
+ * as this UID can reach the control socket, so anything a caller "tells" the
+ * daemon about itself is decoration, and a caller-chosen lifetime is just the
+ * TTL ceiling handed to whoever asks.
+ */
+export interface AssertionIssueParams {
+  audience: string;
+}
+
+/**
+ * Bound on the `audience` a caller may send, in UTF-8 bytes — mirrors
+ * `@byok-sdk/core`'s `DEVICE_ASSERTION_AUDIENCE_MAX_BYTES`. Restated here rather
+ * than imported so the WIRE bound is checked before anything reaches the claim
+ * schema: this is the frame-level shape gate, and it must reject an oversized
+ * value without that value ever reaching a signer or an audit line.
+ */
+export const ASSERTION_AUDIENCE_MAX_BYTES = 256;
+
+/**
+ * Strict shape check. `undefined` means `bad_request` — a distinct gate from
+ * `audience_denied` (see `create-daemon.ts`): "you sent something that is not a
+ * request" and "you asked for an audience you may not have" are different
+ * facts, and collapsing them would let a caller probe the allowlist by
+ * malforming requests.
+ *
+ * Rejects an unknown key outright rather than ignoring it. A tolerated extra
+ * field is how a future caller comes to believe it can influence the claim set.
+ */
+export function parseAssertionIssueParams(value: unknown): AssertionIssueParams | undefined {
+  if (!isRecord(value)) return undefined;
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== 'audience') return undefined;
+  const { audience } = value;
+  if (typeof audience !== 'string' || audience.length === 0) return undefined;
+  if (Buffer.byteLength(audience, 'utf8') > ASSERTION_AUDIENCE_MAX_BYTES) return undefined;
+  return { audience };
+}
+
+/**
+ * Result of `assertion.issue`. `assertion` is the full signing envelope
+ * (`DeviceAssertionEnvelopeV1`), carried as an opaque JSON value on this wire —
+ * the caller hands it to the host's cloud, which parses and verifies it with
+ * core's own `verifyDeviceAssertion`. `expiresAt` is repeated outside the
+ * envelope purely so a caller can schedule a refresh without parsing claims it
+ * has no business interpreting.
+ */
+export interface AssertionIssueResult {
+  assertion: unknown;
+  expiresAt: string;
+}
+
+/**
+ * The six `ControlError` codes `assertion.issue` can answer with, in the exact
+ * order the handler checks them (`create-daemon.ts`). Each one is a distinct
+ * refusal with a distinct cause; none of them ever signs anything.
+ *
+ * - `assertion_disabled` — this daemon has no `deviceAssertion` config, or an
+ *   empty audience allowlist. The feature is OFF by default.
+ * - `bad_request` — params were not `{audience: string}` within the byte bound.
+ * - `audience_denied` — the audience is not in the configured allowlist. The
+ *   message never echoes the allowlist: a refusal must not be an enumeration
+ *   oracle.
+ * - `shutting_down` — a shutdown has been requested. Closes the window between
+ *   the shutdown RPC being acknowledged and the control socket actually
+ *   closing, during which a device that is being unpaired could otherwise still
+ *   mint credentials.
+ * - `revoked` — the server has revoked this device.
+ * - `not_paired` — there is no device record on disk (never paired, or already
+ *   cleared).
+ */
+export const ASSERTION_ISSUE_ERROR_CODES = [
+  'assertion_disabled',
+  'bad_request',
+  'audience_denied',
+  'shutting_down',
+  'revoked',
+  'not_paired',
+] as const;
+
+export type AssertionIssueErrorCode = (typeof ASSERTION_ISSUE_ERROR_CODES)[number];
+
 export type ShutdownReason = 'unpair' | 'operator';
 
 export interface ShutdownParams {

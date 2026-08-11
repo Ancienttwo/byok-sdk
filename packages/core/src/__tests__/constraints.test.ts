@@ -116,6 +116,7 @@ describe('public API surface', () => {
     './blob',
     './quota',
     './attestation',
+    './device-assertion',
     './capabilities',
     './stores',
     './ports-contract',
@@ -151,10 +152,19 @@ describe('public API surface', () => {
       'CapabilityDeclarationSchema',
       'CoreConflictError',
       'DEFAULT_ACTIVITY_CAPACITY',
+      'DEVICE_ASSERTION_ALGORITHMS',
+      'DEVICE_ASSERTION_AUDIENCE_MAX_BYTES',
+      'DEVICE_ASSERTION_DEFAULT_TTL_MS',
+      'DEVICE_ASSERTION_DOMAIN_PREFIX',
+      'DEVICE_ASSERTION_MAX_TTL_MS',
+      'DEVICE_ASSERTION_SCHEMA_ID',
+      'DEVICE_ASSERTION_VERSION',
       'DEVICE_PROOF_ALGORITHMS',
       'DEVICE_PROOF_DOMAIN_PREFIX',
       'DEVICE_PROOF_SCHEMA_ID',
       'DEVICE_PROOF_VERSION',
+      'DeviceAssertionClaimsSchema',
+      'DeviceAssertionEnvelopeV1Schema',
       'DeviceProofEnvelopeV1Schema',
       'DeviceProofProtectedClaimsSchema',
       'IN_MEMORY_CLOCK_EPOCH',
@@ -186,6 +196,9 @@ describe('public API surface', () => {
       'createInMemoryCoreCompositionWithClock',
       'createInMemoryCoreStores',
       'createMutableClock',
+      'deviceAssertionCanonicalClaims',
+      'deviceAssertionCanonicalJson',
+      'deviceAssertionSigningInput',
       'deviceProofCanonicalClaims',
       'deviceProofCanonicalJson',
       'deviceProofSigningInput',
@@ -200,11 +213,13 @@ describe('public API surface', () => {
       'isLegalObjectTransition',
       'isTenantId',
       'parseCapabilityDeclaration',
+      'parseDeviceAssertionEnvelope',
       'parseDeviceProofEnvelope',
       'principalTenant',
       'tenantId',
       'tenantKey',
       'tenantObjectKey',
+      'verifyDeviceAssertion',
     ]);
   });
 });
@@ -432,5 +447,30 @@ describe('device proof', () => {
   it('keeps its golden outside the protocol golden', () => {
     const goldenFiles = readdirSync(new URL('./golden/', new URL('__tests__/', SRC_URL)));
     expect(goldenFiles).toContain('device-proof-v1.canonical.json');
+  });
+});
+
+describe('device assertion', () => {
+  it('carries the domain prefix literal', () => {
+    expect(read('device-assertion.ts')).toContain('byok-device-assertion-v1');
+  });
+
+  it('keeps crypto out of core: verification is an injected port', () => {
+    const code = stripComments(read('device-assertion.ts'));
+    expect(code).not.toMatch(/\bcrypto\b/);
+    expect(code).toMatch(/export interface DeviceAssertionVerifier \{/);
+  });
+
+  it('freezes its own signing bytes with its own golden', () => {
+    const goldenFiles = readdirSync(new URL('./golden/', new URL('__tests__/', SRC_URL)));
+    expect(goldenFiles).toContain('device-assertion-v1.canonical.json');
+  });
+
+  it('reuses the one canonicalizer rather than growing a second one', () => {
+    // A second canonicalizer would be a second byte authority; the whole
+    // envelope design rests on there being exactly one.
+    const code = stripComments(read('device-assertion.ts'));
+    expect(code).toMatch(/from '\.\/attestation'/);
+    expect(code).not.toContain('function canonicalizeValue');
   });
 });

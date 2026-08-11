@@ -164,6 +164,29 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       ].filter((part): part is string => part !== undefined);
       return parts.join(' ');
     }
+    case 'device-assertion': {
+      // Plan `device-assertion-broker`. No signature or envelope to render —
+      // the event type cannot carry either. codex round-2 F4: the DENIED
+      // variant has no raw audience field at all (only `audienceSize`), so a
+      // caller-supplied secret shaped as an audience can never reach this
+      // stdout line — the daemon prints these live to the
+      // foreground/systemd/launchd/WinSW log. The ISSUED audience came from
+      // the allowlist and is safe to print.
+      const parts =
+        event.result === 'issued'
+          ? [
+              `${prefix} device-assertion result=issued`,
+              `audience=${quote(event.audience)}`,
+              `jti=${event.jti}`,
+              `expiresAt=${event.expiresAt}`,
+            ]
+          : [
+              `${prefix} device-assertion result=denied`,
+              `reason=${event.reason}`,
+              event.audienceSize !== undefined ? `audienceSize=${event.audienceSize}` : undefined,
+            ].filter((part): part is string => part !== undefined);
+      return parts.join(' ');
+    }
   }
 }
 
