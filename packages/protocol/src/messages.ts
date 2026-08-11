@@ -343,11 +343,225 @@ export const TaskAwaitApprovalPayloadSchema = z.object({
 });
 export type TaskAwaitApprovalPayload = z.infer<typeof TaskAwaitApprovalPayloadSchema>;
 
-/** daemon -> server: task finished successfully. */
+/**
+ * Hard cap (1 MiB) on a single `task.complete.document` (see
+ * {@link TaskCompletePayloadSchema}), measured as the UTF-8 byte length of
+ * its canonical JSON encoding — NOT as a node/key count, since a document is
+ * schema-neutral and its object shape is unbounded by design.
+ *
+ * The cap is a REJECT-AT-BOUNDARY limit on both sides: a daemon that
+ * produces an over-cap document reports `task.fail` instead of sending it,
+ * and a server rejects an over-cap document at schema validation. It is
+ * never truncated — a truncated JSON document is not valid JSON, so
+ * "shrinking to fit" can only hand the consumer garbage.
+ *
+ * 1 MiB is the conservative ceiling declared by the first real consumer
+ * (`docs/researches/2026-08-12-salesko-consumption-evidence.md` §1/§2:
+ * smallest real frame 8.4 KiB, typical 48-96 KiB, 512 KiB comfortable).
+ * Producers should stay at or under ~512 KiB (docs/protocol.md); the extra
+ * headroom exists because raising a protocol cap later is additive while
+ * lowering one is breaking. A result too big for this channel belongs in
+ * `artifactRefs` (the multi-file/binary/oversized channel), not here.
+ */
+export const RESULT_DOCUMENT_MAX_BYTES = 1_048_576;
+
+/**
+ * Outcome of {@link checkResultDocument}.
+ *
+ * `bytes` is the measured canonical JSON UTF-8 byte length, present on both
+ * the accept and the over-cap rejection so a caller can name the actual size
+ * in a failure reason. `canonical` is the CANONICAL SNAPSHOT — the value a
+ * sender must actually put on the wire; see {@link checkResultDocument}.
+ */
+export type ResultDocumentCheck =
+  | { readonly ok: true; readonly bytes: number; readonly canonical: unknown }
+  | { readonly ok: false; readonly reason: 'not-serializable' }
+  | { readonly ok: false; readonly reason: 'over-cap'; readonly bytes: number }
+  | { readonly ok: false; readonly reason: 'not-plain-json' };
+
+/**
+ * Structural equality between a value and its own JSON round trip, written
+ * out by hand (no node builtins — this package deliberately has none) over
+ * exactly the three shapes pure JSON data can take.
+ *
+ * The asymmetry is the point: `a` is the CALLER's object, which may contain
+ * anything JavaScript allows, while `b` is always the output of
+ * `JSON.parse` — pure data. So every case where `a` is something JSON cannot
+ * represent (a `Date`, a function, `undefined`, `NaN`, a symbol, a getter
+ * that answers differently the second time, an object whose `toJSON` rewrote
+ * it) shows up here as a shape or value mismatch against `b`, and is
+ * rejected. `NaN !== NaN` falls out of strict equality for free, which is
+ * exactly what we want: `NaN` serializes to `null`, so it is not
+ * representable and must not pass.
+ *
+ * The one case structural comparison alone cannot see — an object whose data
+ * lives somewhere other than its own enumerable string keys, e.g. a
+ * populated `Map` — gets its own explicit rejection in the object branch
+ * below.
+ */
+function isSameJsonData(a: unknown, b: unknown): boolean {
+  if (a === null || b === null) return a === b;
+
+  const typeOfA = typeof a;
+  if (typeOfA !== typeof b) return false;
+
+  if (typeOfA !== 'object') {
+    // string | number | boolean. Anything else (function, symbol, bigint,
+    // undefined) can never equal a JSON.parse output, and `NaN === NaN` is
+    // false, so this single comparison covers every primitive case.
+    return a === b;
+  }
+
+  const aIsArray = Array.isArray(a);
+  if (aIsArray !== Array.isArray(b)) return false;
+
+  if (aIsArray) {
+    const arrayA = a as unknown[];
+    const arrayB = b as unknown[];
+    if (arrayA.length !== arrayB.length) return false;
+    for (let index = 0; index < arrayA.length; index += 1) {
+      if (!isSameJsonData(arrayA[index], arrayB[index])) return false;
+    }
+    return true;
+  }
+
+  const objectA = a as Record<string, unknown>;
+  const objectB = b as Record<string, unknown>;
+  const keysA = Object.keys(objectA); // own enumerable string keys
+  const keysB = Object.keys(objectB);
+
+  // An object whose data does NOT live in its own enumerable string keys is
+  // invisible to both `JSON.stringify` and the key comparison below — a
+  // populated `Map`/`Set` serializes to `{}` and would otherwise compare
+  // EQUAL to that `{}`, delivering an empty document as the task's truthful
+  // structured result. That is the same silent-wrong-output class the whole
+  // plain-data contract exists to stop, so a container-shaped value with no
+  // own enumerable string keys and a non-plain prototype is rejected here.
+  // Applied at every object node (this function recurses), so a nested
+  // `Map`/`Set`/exotic instance dies exactly like a top-level one.
+  //
+  // The boundary this deliberately draws: a class instance WITH own
+  // enumerable fields still passes, because its data really is in those
+  // fields and survives the round trip intact. A class whose values come
+  // from PROTOTYPE-level getters does not — those are invisible to JSON, so
+  // such an instance is not plain JSON data and is outside this contract by
+  // definition (docs/protocol.md §7.2). `Object.create(null)` is explicitly
+  // fine: a null prototype is plain data, just without `Object.prototype`.
+  if (keysA.length === 0) {
+    const prototypeA: unknown = Object.getPrototypeOf(objectA);
+    if (prototypeA !== Object.prototype && prototypeA !== null) return false;
+  }
+
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!Object.prototype.hasOwnProperty.call(objectB, key)) return false;
+    if (!isSameJsonData(objectA[key], objectB[key])) return false;
+  }
+  return true;
+}
+
+/**
+ * THE single authority for "is this a legal `task.complete.document`", and
+ * the one place its canonical form is produced. `TaskCompletePayloadSchema`'s
+ * own refinement calls it, and the daemon-side pre-send gate
+ * (`packages/client`'s `task-runner.ts`) imports and calls the exact same
+ * function rather than re-deriving any part of it: a daemon that measured or
+ * judged a document even slightly differently from the server that validates
+ * it would either reject documents the wire would have accepted, or hand the
+ * server a payload it is about to reject after the runtime session already
+ * ended.
+ *
+ * **The contract is: a document must be PLAIN JSON DATA.** Not "an object
+ * that happens to survive `JSON.stringify`" — that bar is far too low, and
+ * two concrete attacks/mistakes live under it:
+ *
+ *   1. `JSON.stringify` succeeding does not mean the value was preserved. An
+ *      `undefined`-valued key, a `NaN`, a function-valued property, or a
+ *      `Date` all serialize "successfully" while silently becoming something
+ *      else (dropped, `null`, or a string). The result is a well-formed,
+ *      under-cap document that is not what the producer had — a confidently
+ *      wrong terminal result, the worst outcome this channel has.
+ *   2. `toJSON(key)` receives the property key it is being serialized under,
+ *      so an object can legally answer one way at the root (`key === ''`,
+ *      where this function measures it) and a completely different way when
+ *      nested inside the envelope payload (`key === 'document'`, where the
+ *      codec actually serializes it). A root-only measurement is therefore
+ *      not a bound on what goes on the wire at all. The same hole exists for
+ *      any getter that answers differently on a second read.
+ *
+ * Both die together via the same mechanism. The steps:
+ *
+ *   1. `JSON.stringify` must succeed and not return `undefined`.
+ *   2. Its UTF-8 byte length must be within {@link RESULT_DOCUMENT_MAX_BYTES}.
+ *   3. `JSON.parse` that string — the CANONICAL SNAPSHOT. It is pure data:
+ *      no `toJSON`, no getters, no prototype, nothing left that can answer
+ *      differently a second time.
+ *   4. The original must be structurally equal to the snapshot
+ *      ({@link isSameJsonData}). Any mismatch means the value was not plain
+ *      JSON data, and it is rejected rather than silently transformed.
+ *
+ * On success the snapshot is returned as `canonical`, and **every sender
+ * must put THAT on the wire, never the original reference** — which is what
+ * closes the contextual-`toJSON`/unstable-getter hole for good: pure data
+ * serializes identically at the root and nested, so what was measured is
+ * necessarily what is sent. The check is idempotent on pure data, so the
+ * server re-running it on an already-parsed payload is a no-op that always
+ * agrees.
+ */
+export function checkResultDocument(document: unknown): ResultDocumentCheck {
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(document);
+  } catch {
+    return { ok: false, reason: 'not-serializable' };
+  }
+  if (json === undefined) return { ok: false, reason: 'not-serializable' };
+
+  const bytes = new TextEncoder().encode(json).length;
+  if (bytes > RESULT_DOCUMENT_MAX_BYTES) return { ok: false, reason: 'over-cap', bytes };
+
+  const canonical: unknown = JSON.parse(json);
+  if (!isSameJsonData(document, canonical)) return { ok: false, reason: 'not-plain-json' };
+
+  return { ok: true, bytes, canonical };
+}
+
+/**
+ * daemon -> server: task finished successfully.
+ *
+ * `document` (additive-minor, docs/protocol.md "Freeze rule"): the OPTIONAL
+ * structured terminal result of the task — one JSON value the product on the
+ * other side consumes as the task's actual output, as opposed to `summary`
+ * (human-readable prose) or `artifactRefs` (files). Deliberately
+ * `z.unknown()`: this SDK never understands, validates, or transforms the
+ * product's own document schema — that validation belongs to the consumer.
+ * The only constraints the wire imposes are the ones
+ * {@link checkResultDocument} enforces: it must be PLAIN JSON DATA (equal to
+ * its own JSON round trip — see that function for why "stringify succeeded"
+ * is not enough), and its canonical JSON UTF-8 encoding must be at most
+ * {@link RESULT_DOCUMENT_MAX_BYTES}. An over-cap document is REJECTED here,
+ * never truncated (see that constant's own doc comment). A sender puts the
+ * check's `canonical` snapshot on the wire, never the original object.
+ *
+ * Unlike `approvalId` on `task.await_approval` above, emitting this field IS
+ * gated on a capability flag (`result-document`, `version.ts`): a pre-
+ * `result-document` server strips it silently as an unknown key (the
+ * tolerant `z.object()` behavior §1 mandates), and silently losing the
+ * task's primary structured result is not a tolerable degradation the way
+ * losing an observability hint is. So a daemon sends `document` only to a
+ * server that advertised the flag, and fails the task loudly otherwise —
+ * see `packages/client`'s `task-runner.ts`.
+ */
 export const TaskCompletePayloadSchema = z.object({
   summary: z.string(),
   sessionRef: z.string(),
   artifactRefs: z.array(BlobRefSchema).optional(),
+  document: z
+    .unknown()
+    .optional()
+    .refine((value) => value === undefined || checkResultDocument(value).ok, {
+      message: `task.complete.document must be plain JSON data (equal to its own JSON round trip) and at most ${RESULT_DOCUMENT_MAX_BYTES} bytes as canonical JSON (UTF-8)`,
+    }),
 });
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 

@@ -5,7 +5,8 @@
     "blob-upload",
     "interactive-approval",
     "approval_resolved",
-    "approval-targeting"
+    "approval-targeting",
+    "result-document"
   ],
   "permissionModes": [
     "auto",
@@ -825,7 +826,8 @@
             ],
             "additionalProperties": false
           }
-        }
+        },
+        "document": {}
       },
       "required": [
         "summary",
@@ -2161,7 +2163,8 @@
                   ],
                   "additionalProperties": false
                 }
-              }
+              },
+              "document": {}
             },
             "required": [
               "summary",
@@ -4232,7 +4235,8 @@
                           ],
                           "additionalProperties": false
                         }
-                      }
+                      },
+                      "document": {}
                     },
                     "required": [
                       "summary",
@@ -5731,7 +5735,8 @@
                           ],
                           "additionalProperties": false
                         }
-                      }
+                      },
+                      "document": {}
                     },
                     "required": [
                       "summary",

@@ -3,13 +3,16 @@ import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  checkResultDocument,
   createEnvelope,
+  RESULT_DOCUMENT_MAX_BYTES,
   RuntimeIdSchema,
   type AgentEvent,
   type BlobRef,
   type Envelope,
   type PermissionMode,
   type PermissionPolicy,
+  type ResultDocumentCheck,
   type RuntimeId,
   type TaskOfferPayload,
 } from '@byok-sdk/protocol';
@@ -134,6 +137,81 @@ export const MAX_DURATION_EXCEEDED_REASON_PREFIX = 'resource limit exceeded: max
 
 /** M5 batch-3 (workstream 2): same contract as {@link MAX_DURATION_EXCEEDED_REASON_PREFIX}, for `DaemonConfig.maxTaskOutputBytes` — see `TaskRunner.pump`'s own per-event byte counting. */
 export const MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX = 'resource limit exceeded: maxTaskOutputBytes';
+
+/**
+ * additive-minor (`task.complete.document`): same stable-PREFIX contract as
+ * {@link MAX_DURATION_EXCEEDED_REASON_PREFIX} above, carried by every
+ * `task.fail` this daemon reports because a configured
+ * `DaemonConfig.resultDocument` extractor produced a document that could not
+ * be delivered — over the cap, not JSON-serializable, or destined for a
+ * server that never advertised the `result-document` capability. All three
+ * are `retryable: false`: none of them can come out differently on a retry
+ * against the same server with the same extractor. Everything after the
+ * prefix is human-readable detail (including the measured size), not part of
+ * the stable shape.
+ *
+ * There is deliberately no "send it anyway" or "send it truncated" path.
+ * A document is the task's PRIMARY structured result, so quietly dropping or
+ * mangling it would report success while destroying the thing the task
+ * existed to produce.
+ */
+export const RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX = 'result document undeliverable';
+
+/**
+ * The task identity handed to a {@link ResultDocumentExtractor} alongside the
+ * final output text. Deliberately minimal — identity only, no session
+ * handle, no workspace path, no adapter: this seam exists to turn text the
+ * runtime already produced into the product's own JSON, not to become a
+ * general-purpose end-of-task callback with access to the daemon's innards.
+ */
+export interface ResultDocumentTask {
+  readonly taskId: string;
+  readonly sessionRef: string;
+}
+
+/**
+ * Host-supplied glue that turns a finished task's final output into the
+ * product's structured terminal result (`task.complete.document`). Returning
+ * `undefined` means "this task has no structured result" and completes the
+ * task exactly as it would have without an extractor configured at all.
+ *
+ * SYNCHRONOUS by contract, like every other single-purpose callback on
+ * `TaskRunnerDeps`, and the runtime ENFORCES that rather than trusting it:
+ * the returned value is treated as data and JSON-encoded as-is, never
+ * awaited, so a returned promise would encode to an empty document (`{}`) —
+ * a well-formed, under-cap, and completely WRONG result. A thenable return
+ * is therefore rejected exactly like a throw (`task.fail`, `retryable:
+ * false`), because delivering a confidently wrong terminal result is worse
+ * than delivering none.
+ *
+ * Throwing is a real outcome, not a nuisance: it fails the task
+ * (`retryable: false`) rather than completing it without the result the
+ * extractor was supposed to produce — see {@link
+ * RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}.
+ */
+export type ResultDocumentExtractor = (finalOutput: string, task: ResultDocumentTask) => unknown;
+
+/**
+ * Human-readable detail for a rejected document, one branch per rejection
+ * reason the protocol's own {@link checkResultDocument} can return. Kept
+ * exhaustive over the union (the `never` default) so a new rejection reason
+ * added upstream fails this package's typecheck instead of silently
+ * degrading into a vague catch-all message.
+ */
+function resultDocumentRejectionDetail(check: Extract<ResultDocumentCheck, { ok: false }>): string {
+  switch (check.reason) {
+    case 'over-cap':
+      return `${check.bytes} bytes as canonical JSON, over the ${RESULT_DOCUMENT_MAX_BYTES}-byte limit (it is never truncated — a truncated JSON document is not valid JSON; use artifactRefs for a result this size)`;
+    case 'not-serializable':
+      return 'not JSON-serializable (JSON.stringify threw, or produced no output at all)';
+    case 'not-plain-json':
+      return 'not plain JSON data: it does not equal its own JSON round trip, so serializing it would silently change it (an undefined-valued key, NaN, a function or symbol value, a Date, a toJSON that rewrites the value, or a getter that answers differently on a second read)';
+    default: {
+      const exhaustive: never = check;
+      throw new Error(`unhandled result document rejection: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
 
 /**
  * M5 batch-3 (workstream 2): default cap (64 MiB) on accumulated
@@ -272,6 +350,18 @@ export interface TaskRunnerDeps {
    * behaves exactly as it did before this seam existed.
    */
   admissionGuard?: (offer: { readonly taskId: string; readonly payload: TaskOfferPayload }) => AdmissionGuardDecision;
+  /**
+   * additive-minor (`task.complete.document`): the host's structured-result
+   * extractor, consulted once per task at the moment `task.complete` is
+   * built — see {@link ResultDocumentExtractor} and `DaemonConfig
+   * .resultDocument` (`create-daemon.ts`) for the full contract.
+   *
+   * Optional, and absent by default: with no extractor supplied, the
+   * completion path is byte-identical to what it was before this seam
+   * existed — no document is computed, no capability is consulted, and
+   * `task.complete` carries exactly the fields it always did.
+   */
+  resultDocument?: { readonly extract: ResultDocumentExtractor };
 }
 
 /** See {@link TaskRunnerDeps.admissionGuard}. */
@@ -1523,11 +1613,55 @@ export class TaskRunner {
         if (event.type === 'turn_end') {
           active.batcher.push(event);
           active.batcher.flush();
+          const finalOutput = active.summaryParts.join('');
+          // additive-minor (`task.complete.document`): resolved BEFORE the
+          // 'completed' git observation below, so a task that cannot deliver
+          // its structured result takes the salvage path `fail()` already
+          // applies to every other failure — rather than being observed as
+          // completed and only then failed.
+          const outcome = await this.resolveResultDocument(active, finalOutput);
+          if (!outcome.deliver) return; // already reported task.fail and finished
           await this.observeGit(active, 'completed');
+          // F3 (codex adversarial review, P1): the capability was checked
+          // inside `resolveResultDocument` — but `observeGit` above is an
+          // await, and a reconnect landing in that window can replace the
+          // connection with one whose `conn.ack` never advertised
+          // `result-document` (`ConnectionManager.onWsOutcome` clears the
+          // learned capabilities on any acked-then-closed connection, and
+          // only a fresh ack repopulates them). The queued envelope would
+          // then drain to a server that strips the document silently — the
+          // exact loss this whole gate exists to prevent. So the flag is
+          // re-read here, after the last await, immediately before the
+          // envelope is handed to `send`. See `resolveResultDocument`'s own
+          // doc comment for the residual window this still cannot close.
+          if (outcome.document !== undefined && !this.hasResultDocumentCapability()) {
+            await this.fail(
+              active.taskId,
+              `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the connected server stopped advertising the result-document capability before this completion could be sent (a reconnect to an older server), so it would silently discard this document`,
+              false,
+            );
+            return;
+          }
           this.deps.send(
             createEnvelope(
               'task.complete',
-              { summary: active.summaryParts.join(''), sessionRef: active.session.sessionRef },
+              {
+                summary: finalOutput,
+                sessionRef: active.session.sessionRef,
+                // Spread rather than `document: outcome.document`, so a
+                // completion with no document is the exact same payload it
+                // was before this field existed — not one carrying an
+                // explicit `document: undefined` key.
+                //
+                // `outcome.document` is the protocol's CANONICAL SNAPSHOT
+                // (`checkResultDocument`), never the object the extractor
+                // returned: pure data serializes identically at the root
+                // (where it was measured) and nested inside this payload
+                // (where the codec actually serializes it), so a contextual
+                // `toJSON(key)` or an unstable getter cannot make the wire
+                // bytes differ from what the cap gate approved.
+                ...(outcome.document !== undefined ? { document: outcome.document } : {}),
+              },
               { taskId: active.taskId, sessionRef: active.session.sessionRef },
             ),
           );
@@ -2219,6 +2353,125 @@ export class TaskRunner {
     if (active) await this.observeGit(active, 'salvage');
     this.deps.send(createEnvelope('task.fail', { reason, retryable }, { taskId }));
     await this.finish(taskId);
+  }
+
+  /**
+   * additive-minor (`task.complete.document`): the whole daemon-side gate
+   * between a configured {@link ResultDocumentExtractor} and the wire —
+   * called once, from the `turn_end` completion path, immediately before
+   * `task.complete` is built.
+   *
+   * `{deliver: true}` means "go on and send `task.complete`", carrying the
+   * document when there is one. `{deliver: false}` means this method has
+   * ALREADY reported `task.fail` and finished the task; the caller must
+   * return without sending anything further.
+   *
+   * Four fail-closed branches, all `retryable: false` (see
+   * {@link RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX} for why none of them
+   * can succeed on a retry):
+   *
+   *   1. The extractor threw — its error is surfaced, never swallowed.
+   *   2. The extractor returned a thenable, violating the synchronous
+   *      contract in the one way that would otherwise ship a wrong answer.
+   *   3. The document is over the cap, not JSON-serializable, or not plain
+   *      JSON data, per `checkResultDocument` — the protocol's OWN check,
+   *      imported rather than reimplemented, so this gate and the server's
+   *      schema validation can never disagree about what is legal.
+   *   4. The connected server never advertised `result-document`. Its
+   *      tolerant `z.object()` would silently strip the field on arrival
+   *      (`version.ts`'s own flag doc comment), so "send anyway" is not a
+   *      degraded-but-working path — it is the task's primary structured
+   *      result being deleted in transit with nothing reported anywhere.
+   *
+   * The capability is checked LAST, deliberately: a document that is itself
+   * invalid is the host's own bug and is worth reporting as such even when
+   * the connected server could not have accepted any document at all. It is
+   * then re-checked once more by the caller after its own last await, since
+   * a reconnect can invalidate this answer in between (F3).
+   *
+   * **Residual window (bounded, deliberately not hacked around).** Even the
+   * caller's re-check happens before `ConnectionManager.send` hands the
+   * envelope to a transport, and a queued envelope can outlive the
+   * connection it was queued for: a reconnect between `send()` and the
+   * outbox actually draining could still deliver this `task.complete` to a
+   * rolled-back N-1 server that strips the document. Closing that would
+   * mean teaching the transport outbox to inspect payload semantics and
+   * mint a substitute `task.fail` for a task this runner already finished —
+   * a second authority over terminal outcomes living in the queue, which is
+   * worse than the window it closes. Documented instead, here and in
+   * docs/protocol.md §7.2.
+   */
+  private async resolveResultDocument(
+    active: ActiveTask,
+    finalOutput: string,
+  ): Promise<{ deliver: true; document?: unknown } | { deliver: false }> {
+    const extract = this.deps.resultDocument?.extract;
+    if (!extract) return { deliver: true };
+
+    let document: unknown;
+    try {
+      document = extract(finalOutput, { taskId: active.taskId, sessionRef: active.session.sessionRef });
+    } catch (err) {
+      await this.fail(
+        active.taskId,
+        `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the configured resultDocument.extract threw: ${errorMessage(err)}`,
+        false,
+      );
+      return { deliver: false };
+    }
+
+    // A thenable is the one violation of the synchronous contract that would
+    // otherwise pass every check below and ship a WRONG answer: a promise
+    // JSON-stringifies to `{}` — a well-formed, comfortably-under-cap
+    // document that the server accepts, persists, and hands the product as
+    // its truthful terminal result. Silently delivering `{}` where the real
+    // document should be is strictly worse than failing, so this is
+    // fail-closed alongside the throw branch above rather than left to the
+    // documented contract alone.
+    if (typeof (document as { then?: unknown } | null | undefined)?.then === 'function') {
+      await this.fail(
+        active.taskId,
+        `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the configured resultDocument.extract returned a promise; the contract is synchronous (an awaited value is never read, and a promise encodes to an empty document)`,
+        false,
+      );
+      return { deliver: false };
+    }
+
+    // "This task has no structured result" — indistinguishable, on the wire
+    // and to the server, from no extractor being configured at all.
+    if (document === undefined) return { deliver: true };
+
+    const check = checkResultDocument(document);
+    if (!check.ok) {
+      const detail = resultDocumentRejectionDetail(check);
+      await this.fail(active.taskId, `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: ${detail}`, false);
+      return { deliver: false };
+    }
+
+    if (!this.hasResultDocumentCapability()) {
+      await this.fail(
+        active.taskId,
+        `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the connected server did not advertise the result-document capability, so it would silently discard this ${check.bytes}-byte document`,
+        false,
+      );
+      return { deliver: false };
+    }
+
+    // The CANONICAL SNAPSHOT, not the object the extractor returned — see
+    // `checkResultDocument` and the send site in `pump`.
+    return { deliver: true, document: check.canonical };
+  }
+
+  /**
+   * Whether the CURRENTLY connected server advertised `result-document` —
+   * read fresh on every call, never captured, because the answer changes
+   * across a reconnect (`ConnectionManager.getServerCapabilities` returns
+   * `[]` from the moment an acked connection closes until a fresh
+   * `conn.ack` repopulates it). An absent `getServerCapabilities` seam is
+   * "no capabilities", the fail-closed reading.
+   */
+  private hasResultDocumentCapability(): boolean {
+    return (this.deps.getServerCapabilities?.() ?? []).includes('result-document');
   }
 
   private async observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {

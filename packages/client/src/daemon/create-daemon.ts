@@ -52,7 +52,12 @@ import {
   type LocalStoragePolicy,
   type LocalStoragePolicyInput,
 } from './journal/storage-policy';
-import { DEFAULT_MAX_TASK_OUTPUT_BYTES, TaskRunner, type TaskRunnerDeps } from './task-runner';
+import {
+  DEFAULT_MAX_TASK_OUTPUT_BYTES,
+  TaskRunner,
+  type ResultDocumentExtractor,
+  type TaskRunnerDeps,
+} from './task-runner';
 import type { ProgressBatcherOptions } from './progress-batcher';
 
 /**
@@ -275,6 +280,46 @@ export interface DaemonConfig {
    * explicitly instead to opt out of enforcement altogether.
    */
   maxTaskOutputBytes?: number;
+  /**
+   * additive-minor (`task.complete.document`): the seam through which this
+   * product turns a finished task's final output text into the STRUCTURED
+   * terminal result the wire carries as `task.complete.document`, and the
+   * server projects into `TaskResult.document`.
+   *
+   * `extract(finalOutput, task)` is called exactly once per task, at the
+   * moment `task.complete` is built, with the same text that becomes
+   * `summary` (the concatenated `progress` events for that task) plus the
+   * task's `taskId`/`sessionRef`. Return `undefined` for "no structured
+   * result this time". Everything about the document's SHAPE is the
+   * product's business — the SDK never inspects, validates, or transforms
+   * it; extraction logic (prompting for JSON, parsing a fenced block,
+   * validating against the product's own schema) is product glue and belongs
+   * in this callback, not in the SDK.
+   *
+   * The SDK enforces exactly two wire rules, via the protocol's own
+   * `checkResultDocument`: the value must be JSON-serializable, and at most
+   * `RESULT_DOCUMENT_MAX_BYTES` (1 MiB) as canonical JSON. Stay under ~512
+   * KiB in practice (docs/protocol.md); a bigger result belongs in an
+   * artifact, not here.
+   *
+   * FAIL-CLOSED, never silent: if the extractor throws, returns a promise
+   * (the seam is synchronous and the runtime enforces it — an unawaited
+   * promise would be encoded as an empty document), produces something
+   * unsendable, or produces a document while the connected server never
+   * advertised the `result-document` capability (an old server would strip
+   * the field on arrival without a word), the task is reported as
+   * `task.fail` with `retryable: false` and a reason prefixed
+   * `result document undeliverable` — see
+   * `RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX` (`task-runner.ts`).
+   * Completing a task while quietly discarding the structured result it
+   * exists to produce is not an option this SDK offers.
+   *
+   * Omitted entirely by default, in which case the completion path is
+   * unchanged in every respect — no extractor call, no capability check, and
+   * a `task.complete` payload byte-identical to the one sent before this
+   * field existed.
+   */
+  resultDocument?: { readonly extract: ResultDocumentExtractor };
   /**
    * M5 batch-3 (workstream 2): deadline bound on the graceful-shutdown
    * sequence's own wait for `TaskRunner.shutdownActiveTasks` to finish
@@ -1137,6 +1182,11 @@ export function createDaemonWithAdapters(
       shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,
       // M5 batch-3 (workstream 2): see DaemonConfig.maxTaskOutputBytes's own doc comment — already validated above.
       maxTaskOutputBytes: config.maxTaskOutputBytes,
+      // additive-minor (`task.complete.document`): passed through verbatim,
+      // absent when unconfigured — see `DaemonConfig.resultDocument`'s own
+      // doc comment. Spread rather than assigned so an unconfigured daemon
+      // builds the exact `deps` object it did before this seam existed.
+      ...(config.resultDocument ? { resultDocument: config.resultDocument } : {}),
       // M4 Phase 3 hardening: bridges TaskRunner's stale-approval-race
       // finding out to the SAME local observability seam every other
       // daemon-local event already uses (see observer.ts's own module doc
