@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/protocol",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "BYOK SDK wire protocol: envelope schema, message types, and codec helpers",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "sideEffects": false,
   "main": "./dist/index.js",

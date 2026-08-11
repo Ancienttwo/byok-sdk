@@ -190,6 +190,9 @@ probe's zero-`HIT` result.
   `rolldown`/`rollup`, `koffi`), but those trace to build-time/dev tooling
   (tsup's bundler, etc.), not anything that runs inside the daemon process
   tree. This was a dependency-manifest check, not a full transitive audit.
+  As of the 0.84.1 core-dependency upgrade on 2026-08-11, pi is required and
+  its transitive graph changed; this historical M4 observation must not be
+  treated as an audit of the new graph.
   **Recommendation: repeat this audit under `strace -f -e trace=open,openat,
   read` on the Ubuntu CI leg** (`.github/workflows/ci.yml` already runs
   `ipc-smoke` on ubuntu/macos/windows-latest), where kernel tracing needs no

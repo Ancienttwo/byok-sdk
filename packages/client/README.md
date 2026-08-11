@@ -7,8 +7,9 @@ and exposes authenticated local diagnostics/control commands.
 The package installs `byok-agent` and `byok-approval-mcp` binaries. Provider
 credentials are not read by the dispatch plane; `@byok-sdk/keys` is separate.
 
-Pi, Claude Code and Codex are user-installed runtimes. Install and authenticate
-the runtime CLI you choose; the SDK never packages its executable or
+Pi is a required exact npm dependency and runs as an external Node subprocess;
+authenticate it with your own provider credentials. Claude Code and Codex
+remain user-installed runtimes. The SDK never reads or packages provider
 credentials. Hosts that only need runtime detection/composition can import the
 transport-free adapter surface:
 
@@ -16,5 +17,4 @@ transport-free adapter surface:
 import { PiAdapter, ClaudeAdapter, CodexAdapter } from '@byok-sdk/client/adapters';
 ```
 
-MIT licensed. Node.js 20 or newer; SQLite-backed journaling requires a runtime
-with `node:sqlite` support.
+MIT licensed. Node.js 22.19.0 or newer.

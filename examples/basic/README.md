@@ -10,6 +10,8 @@ Not published — this package is `private` and lives under `examples/`.
 
 ## Prerequisites
 
+Node.js 22.19.0 or newer is required.
+
 From the repo root:
 
 ```sh
@@ -17,10 +19,10 @@ pnpm install
 pnpm -r build
 ```
 
-Install and authenticate `@earendil-works/pi-coding-agent` separately, then
-ensure its `pi` executable is on `PATH`. The SDK does not install runtime CLIs
-or own their credentials. `BYOK_PI_BIN` is the explicit override for a custom
-executable location or test fixture.
+The workspace install includes the exact supported
+`@earendil-works/pi-coding-agent` package. Authenticate Pi with your own
+provider credentials; the SDK does not own them. `BYOK_PI_BIN` is the explicit
+override for a version-matched Node sidecar or test fixture.
 
 ## Run it
 
@@ -115,8 +117,8 @@ restart, persisted under `examples/basic/data/` (gitignored):
 BYOK_STORE=sqlite pnpm --filter @byok-sdk/example-basic dev
 ```
 
-Requires Node.js 22.5+ (`node:sqlite`'s minimum); on an older Node this fails
-fast with a clear error rather than a cryptic one (see
+The repository's Node.js 22.19+ baseline includes `node:sqlite`; unsupported
+runtimes still fail fast with a clear capability error (see
 `packages/server/src/sqlite-support.ts`).
 
 ## Provider API key (for a *real* pi run)
@@ -138,42 +140,32 @@ needing a real key.
 
 `pi` (`@earendil-works/pi-coding-agent`) already ships a **built-in**
 `zai` provider — no extension, no `models.json`, no code change anywhere in
-this SDK is needed. Empirically confirmed (2026-07-16) against the actually
-installed 0.74.2, and cross-checked against the current `latest` (0.80.7,
-`@earendil-works/pi-ai`'s bundled `providers/zai.models.js`): both versions
-define it identically —
+this SDK is needed. The installed 0.84.1 registry defines it as:
 
 ```
 provider: "zai", api: "openai-completions", baseUrl: "https://api.z.ai/api/coding/paas/v4"
 ```
 
-— i.e. the OpenAI-completions-compatible z.ai coding-plan endpoint the task
-brief called out, not the Anthropic-compatible one (`api.z.ai/api/anthropic`);
-there was no need to touch the latter, since a ready-made provider already
-exists for the former. **0.74.2 fully suffices** — no Node-baseline bump is
-needed for this. The only difference in `latest` (0.80.7) is one newer model
-(`glm-5.2`, 1M context) and a separate `zai-coding-cn` region-variant
-provider (`ZAI_CODING_CN_API_KEY`) for the mainland-China z.ai endpoint;
-neither changes the mechanism below.
+The separate `zai-coding-cn` provider uses `ZAI_CODING_CN_API_KEY` for the
+mainland-China endpoint.
 
-### Exact model IDs (from the installed 0.74.2's own bundled registry)
+### Exact model IDs (from the installed 0.84.1 bundled registry)
 
 ```
-zai/glm-4.5-air   (131K context,  98K max output)
-zai/glm-4.7       (204.8K context, 131K max output)
-zai/glm-5-turbo   (200K context,  131K max output)
-zai/glm-5.1       (200K context,  131K max output)
-zai/glm-5v-turbo  (200K context,  131K max output, vision)
+zai/glm-4.7            (204.8K context, 131K max output)
+zai/glm-5-turbo        (200K context,   131K max output)
+zai/glm-5.2            (1M context,     131K max output)
+zai/glm-5.2-highspeed  (1M context,     131K max output)
 ```
 
-(`glm-4.6`, sometimes mentioned elsewhere as a z.ai coding-plan model, is not
-in this registry snapshot — already superseded. `glm-4.7` is current and is
-this doc's recommended default.)
+(`glm-4.7` remains a conservative default; newer accounts may prefer
+`glm-5.2`.)
 
 ### Config mechanism
 
 The byok-sdk `PiAdapter` never passes `--model`/`--provider` on pi's command
-line (`pi-adapter.ts` only adds `--mode rpc --session-id <ref>` plus
+line (`pi-adapter.ts` only adds `--mode rpc`, an optional fail-closed
+`--session <ref>`, plus
 permission-mapping flags) — so GLM has to be pi's own **default** model, set
 once, rather than something byok selects per task:
 
@@ -236,14 +228,8 @@ all absent):
   by default, authenticated with the configured key, with no further config
   needed. A real key in place of the dummy one is the only missing piece.
 
-Note also: pi-adapter.ts's own `authPresent` heuristic (surfaced in this
-example's "runtime chips") only recognizes a fixed list of common provider
-env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc. — see
-`KNOWN_PROVIDER_ENV_VARS` in `pi-adapter.ts`); `ZAI_API_KEY` isn't in that
-list, so a GLM-configured device's runtime chip will show `✗auth` in this
-demo's UI even when correctly configured — cosmetic only, not a functional
-gap (this is a deliberately non-exhaustive, "common providers" list per its
-own doc comment, not a bug).
+`pi-adapter.ts` includes `ZAI_API_KEY` in its presence-only `authPresent`
+probe, so a configured GLM runtime is reflected in the example's runtime chip.
 
 ## Policy mode
 
@@ -258,6 +244,6 @@ that dispatched with the SDK default would fail-closed on every single run.
 ## Debugging a stuck task
 
 If a dispatched task never claims, check the daemon's stdout for a
-`task.fail` reason — most likely an unavailable runtime (`pi` not
-installed/on PATH and no `BYOK_PI_BIN` override) or an unsupported policy.
+`task.fail` reason — most likely a corrupt/missing required pi install, an
+explicit sidecar path that cannot execute, or an unsupported policy.
 `byok-agent start` logs daemon status every 5s.

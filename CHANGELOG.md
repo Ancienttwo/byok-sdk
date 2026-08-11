@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0 — 2026-08-11
+
+Pi runtime contract release.
+
+- Promoted `@earendil-works/pi-coding-agent@0.84.1` to an exact required
+  dependency of `@byok-sdk/client`; Pi remains an external Node subprocess and
+  provider credentials remain user-owned.
+- Raised the dispatch graph and private conformance suite to Node.js 22.19.0,
+  matching Pi's engine floor. The independent `@byok-sdk/keys@0.1.0` package
+  remains outside that graph and retains Node.js 20 support.
+- Updated the Pi RPC adapter for delta-only `message_update` events and made
+  `agent_settled` the sole task-completion signal after retries, compaction,
+  and queued continuations finish.
+- Kept pnpm as the workspace package manager and verified npm tarball installs.
+  Downstreams may install with pnpm or Bun, but supported execution remains
+  Node.js 22.19+; standalone bundles inject Pi through `BYOK_PI_BIN`.
+
 ## 0.1.1 — 2026-08-10
 
 Security and packageability patch for local runtime adapters.

@@ -415,8 +415,8 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
 
 // node:sqlite requires Node 22.5+ and shipped behind a flag until later in
 // the 22.x line — gate on ACTUAL availability, mirroring
-// `sqlite-task-store.test.ts`'s own convention, so this skips cleanly on the
-// Node 20 leg instead of failing.
+// `sqlite-task-store.test.ts`'s own convention, so unusual Node builds with
+// SQLite disabled still skip cleanly instead of failing.
 const sqliteReady = isSqliteAvailable();
 
 describe.skipIf(!sqliteReady)('S0 (GAP-002): the capability snapshot survives a SqliteTaskStore roundtrip', () => {

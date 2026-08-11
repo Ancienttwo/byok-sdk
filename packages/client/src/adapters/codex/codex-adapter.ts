@@ -100,9 +100,10 @@ export class CodexAdapter implements RuntimeAdapter {
    * Two independently-verified channel gotchas apply here, the "pi lesson"
    * yet again:
    *   - `codex login status`'s human-readable "Logged in using ChatGPT"
-   *     message prints on STDERR, not stdout (the opposite-channel
-   *     counterpart of pi's own `--version`-goes-to-stderr surprise) — both
-   *     streams are checked here for exactly that reason.
+   *     message prints on STDERR, not stdout — both streams are checked
+   *     here for exactly that reason. pi's `--version` is the same class of
+   *     hazard from the other direction: its channel has moved between pi
+   *     releases (see ../pi/pi-adapter.ts), so neither stream is assumed.
    *   - The NOT-logged-in message/exit-code shape was deliberately never
    *     empirically tested: this machine has a real, live ChatGPT login, and
    *     running `codex logout` to observe the negative case would have

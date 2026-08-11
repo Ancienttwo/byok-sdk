@@ -2,44 +2,17 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { PiRpcMessage } from './rpc-client';
 
 /**
- * ROOT CAUSE of the 2026-07-16 live GLM run's "finding #2" hang (task stuck
- * `Running` forever after pi streamed its final answer; pi process alive,
- * idle, no sockets, only stdio pipes): this mapper used to listen for a pi
- * event type `agent_settled` to know a whole run had finished. That type
- * does not exist anywhere in the real, installed
- * `@earendil-works/pi-coding-agent@0.74.2` package — not in its bundled
- * `docs/rpc.md`, not in `dist/modes/rpc/rpc-types.d.ts`, not in
- * `pi-agent-core`'s own `AgentEvent` union (`dist/types.d.ts`), and not
- * observed even once across live probes against real GLM traffic (raw JSONL
- * frame capture). The real "whole run is done, pi is idle again" signal is
- * `agent_end` — confirmed both by `pi-agent-core`'s own doc comment ("
- * `agent_end` is the last event emitted for a run... The agent becomes idle
- * only after those listeners finish") and empirically: a live run's frame
- * sequence ended `...turn_end (tool call), ..., turn_end (final text),
- * agent_end` with nothing further arriving even after an 8s idle-grace
- * window. Because this switch had no `agent_end` case, it fell to
- * `default: return undefined` — silently dropped — so `task-runner.ts`'s
- * `pump()` loop never saw a `turn_end` `AgentEvent` and blocked forever on
- * the next one. This repo's own fixture (`fake-pi.mjs`) masked the bug for
- * the whole M0/M1 test suite by emitting a fictional `agent_settled` frame
- * of its own alongside the real `agent_end` one — fixed alongside this
- * change (see fake-pi.mjs's doc comment).
+ * Map pi 0.84.1 RPC frames into BYOK's runtime-neutral event contract.
  *
- * `agent_end` (not pi's own per-LLM-turn `turn_end`) is what maps to our
- * `turn_end`: a single pi prompt can produce several internal turns (tool
- * round-trips, each ending its own real `turn_end`); only once the whole
- * run is settled (no auto-retry, compaction-retry, or queued continuation
- * left) is the task actually done. Forwarding pi's own `turn_end` 1:1 would
- * emit multiple confusing `turn_end`s for what the daemon must treat as one
- * task — empirically confirmed: a single-tool-call prompt produced two real
- * `turn_end` frames (one after the tool call, one after the final text) and
- * exactly one `agent_end`.
+ * `agent_settled` is the only whole-task completion authority. `agent_end`
+ * ends one low-level agent run, but pi may still perform retry/compaction or
+ * consume queued work before it emits `agent_settled`. Pi's own `turn_end`
+ * is even narrower: a tool-using prompt can emit several of them. Mapping
+ * either earlier boundary to BYOK `turn_end` would acknowledge the task
+ * before the runtime is actually idle.
  *
- * Returns undefined for pi messages with no protocol equivalent (session/
- * compaction/retry bookkeeping — see `ROUTINE_PI_EVENT_TYPES` below —
- * extension UI dialogs, which never reach here at all in production since
- * `PiRpcClient` answers them itself before they'd ever be queued as an
- * event; see rpc-client.ts).
+ * `message_update` is delta-only in this contract. The mapper forwards text
+ * deltas and never reads the removed cumulative `message`/`partial` fields.
  */
 export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefined {
   switch (msg.type) {
@@ -65,7 +38,7 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
       };
     }
 
-    case 'agent_end':
+    case 'agent_settled':
       return { type: 'turn_end' };
 
     /**
@@ -105,15 +78,20 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
     // `recordUnmappedFrame`) can tell "known, expected, silently ignored"
     // apart from "genuinely never seen before" (falls to `default` below).
     case 'agent_start':
+    case 'agent_end': // one low-level run; `agent_settled` is BYOK completion
     case 'turn_start':
-    case 'turn_end': // pi's own per-LLM-turn boundary, not ours — see `agent_end` above
+    case 'turn_end': // pi's own per-LLM-turn boundary, not ours
     case 'message_start':
     case 'message_end':
+    case 'bash_execution_update':
     case 'tool_execution_update':
     case 'queue_update':
     case 'compaction_start':
     case 'compaction_end':
     case 'auto_retry_start':
+    case 'summarization_retry_scheduled':
+    case 'summarization_retry_attempt_start':
+    case 'summarization_retry_finished':
     case 'session_info_changed':
     case 'thinking_level_changed':
       return undefined;
@@ -130,7 +108,7 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
  * (pi-adapter.ts) calls `PiRpcClient.recordUnmappedFrame` for any message
  * type that maps to `undefined` AND isn't in this set — i.e. traffic nobody
  * has ever told this adapter to expect. That distinction is what makes a
- * regression like this file's root-cause bug (`agent_end` going unhandled)
+ * regression like a changed completion event
  * self-diagnosing: a warning fires the first time the new/renamed settle
  * event shows up, instead of the daemon just quietly hanging. `default`-only
  * unknowns (a type not listed in the switch at all) are equally "not
@@ -139,15 +117,20 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
  */
 export const ROUTINE_PI_EVENT_TYPES: ReadonlySet<string> = new Set([
   'agent_start',
+  'agent_end',
   'turn_start',
   'turn_end',
   'message_start',
   'message_end',
+  'bash_execution_update',
   'tool_execution_update',
   'queue_update',
   'compaction_start',
   'compaction_end',
   'auto_retry_start',
+  'summarization_retry_scheduled',
+  'summarization_retry_attempt_start',
+  'summarization_retry_finished',
   'session_info_changed',
   'thinking_level_changed',
 ]);

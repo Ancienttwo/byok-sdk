@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/server",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "BYOK SDK server: in-memory M0 reference implementation of the SaaS-side coordinator",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "sideEffects": false,
   "main": "./dist/index.js",

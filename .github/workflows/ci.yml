@@ -13,9 +13,9 @@ name: CI
 # The freeze-guard test (packages/protocol/src/__tests__/freeze-guard.test.ts)
 # runs as an ordinary part of `pnpm -r test` — no separate step for it.
 #
-# Node matrix: `engines.node` in package.json pins a >=20 floor; this matrix
-# covers both that floor (20) and the version this repo is actually developed
-# against (22) so a floor regression doesn't hide behind a newer local Node.
+# Node matrix: `engines.node` pins a >=22.19.0 floor because the required pi
+# runtime has the same floor. The matrix covers that exact minimum and Node 24
+# so a floor regression cannot hide behind a newer local runtime.
 #
 # Note for anyone debugging a LOCAL sandbox run of this same test suite (not
 # a concern for these hosted runners): a couple of integration tests
@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: ['22.19.0', 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -101,7 +101,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: ['22.19.0', 24]
     env:
       BYOK_REQUIRE_DATAPLANE: '1'
       BYOK_TEST_POSTGRES_URL: postgres://byok:byok@127.0.0.1:5433/byok_test
@@ -150,9 +150,9 @@ jobs:
 
       # repo-harness is a bun-only tool (`engines.bun`, a bare-`.ts` bin, an
       # `exec bun` shim) — Node cannot run it, and declaring it as a workspace
-      # dependency drags in transitive packages that require Node >= 22.12 and
-      # so break the Node 20 leg at install time. It therefore stays OUT of the
-      # dependency tree entirely and is fetched by `bunx` at a pinned version
+      # dependency drags unrelated toolchain packages into the product graph.
+      # It therefore stays OUT of the dependency tree entirely and is fetched
+      # by `bunx` at a pinned version
       # only for this one step. The root `check:deploy-sql` script remains the
       # local-workflow entrypoint for the same check.
       - name: Setup bun
@@ -176,7 +176,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: ['22.19.0', 24]
     defaults:
       run:
         shell: pwsh
@@ -224,8 +224,9 @@ jobs:
 
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) while
-  # runtime CLIs remain external. An unavailable user-installed pi must
-  # report `present: false`, while BYOK_PI_BIN must remain detectable. See
+  # runtime CLIs remain external subprocesses. A single-file bundle without
+  # its required Pi sidecar must report `present: false`, while BYOK_PI_BIN
+  # must remain detectable. See
   # templates/packaging/{bun,sea} for
   # the full recipes + empirically-confirmed rationale (including a macOS
   # postject gotcha that silently segfaults without one extra flag), and
@@ -266,10 +267,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies
@@ -301,7 +302,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node-version: [20, 22]
+        node-version: ['22.19.0', 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -353,10 +354,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies
@@ -418,10 +419,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 22
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies
@@ -452,10 +453,10 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Setup Node 20
+      - name: Setup Node 22.19
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22.19.0
           cache: pnpm
 
       - name: Install dependencies

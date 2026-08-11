@@ -12,8 +12,7 @@ repo and adapt it to your own entry point, signing, and release pipeline.
 
 ## Prerequisites
 
-- Node.js >= 20 (this repo's own floor; SEA has existed since Node 20,
-  matured through 21/22).
+- Node.js >= 22.19.0 (this repo and the required pi runtime share this floor).
 - [`esbuild`](https://esbuild.github.io) to flatten the launcher + its
   dependency graph into a single file first (see "Why bundle to CommonJS
   first" below) — any bundler that can produce a single CJS file works.
@@ -47,11 +46,13 @@ describe:
 2. Write a `sea-config.json` pointing `main` at that bundle, then
    `node --experimental-sea-config sea-config.json` to produce the blob.
 3. Copy the running `node` executable to your output name.
-4. **macOS only:** `codesign --remove-signature` the copy.
-5. `npx postject <bin> NODE_SEA_BLOB <blob> --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2`
+4. Make the output copy owner-writable (`chmod u+w`); package-manager-owned
+   Node binaries may be installed as read-only, but `postject` must modify it.
+5. **macOS only:** `codesign --remove-signature` the copy.
+6. `npx postject <bin> NODE_SEA_BLOB <blob> --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2`
    — **on macOS, this needs one more flag: `--macho-segment-name NODE_SEA`.**
-6. **macOS only:** `codesign --sign - <bin>` (ad-hoc re-sign).
-7. **Windows only (optional):** `signtool sign /fd SHA256 <bin>.exe` if you
+7. **macOS only:** `codesign --sign - <bin>` (ad-hoc re-sign).
+8. **Windows only (optional):** `signtool sign /fd SHA256 <bin>.exe` if you
    have a real certificate — Node's docs note the unsigned binary still
    runs fine without one.
 
@@ -86,7 +87,7 @@ crashes before any application code — including our own try/catch —
 ever runs). That's a Node-version/tooling gap in the ESM path specifically,
 not a defect in pi's resolve-bin.ts. This recipe uses the CJS path instead,
 because it actually works on the Node versions this SDK targets
-(`engines.node >= 20`); revisit `mainFormat: "module"` once it's reliably
+(`engines.node >= 22.19.0`); revisit `mainFormat: "module"` once it's reliably
 supported on your floor.
 
 ### A Windows note: `BYOK_PI_BIN` and `.cmd`/`.bat` don't mix with `execFile`
@@ -106,21 +107,23 @@ binary (or a wrapper around it) happens to be a `.cmd`/`.bat` on Windows.
 
 ## What this actually guarantees (and what it doesn't)
 
-Bundling a Node.js daemon into one file is not automatically safe. Runtime
-CLIs remain external, user-installed executables. The pi adapter resolves only
-`BYOK_PI_BIN` or a bare `pi` on PATH, whose `detect()` reports
-`present: false` if unavailable. This recipe's `smoke-test.sh` proves both
-absence and explicit pickup under a real Node SEA binary.
+Bundling a Node.js daemon into one file is not automatically safe. The pi
+adapter normally resolves the exact required npm package, but SEA cannot embed
+that external CLI. There is no automatic PATH fallback because it would
+introduce an unversioned second authority. Production SEA deployments provide
+the version-matched Node sidecar through `BYOK_PI_BIN`; this recipe proves the
+missing and configured states under a real SEA binary.
 
 Empirically confirmed while building this recipe (see `smoke-test.sh`'s two
 assertions):
 
-- **pi absent** (no `BYOK_PI_BIN`, no `pi` on PATH): `PiAdapter.detect()`
-  reports `{ present: false }` cleanly. No crash, exit 0.
+- **pi sidecar absent** (no `BYOK_PI_BIN`): `PiAdapter.detect()` reports
+  `{ present: false }` cleanly. A product treats this as a missing core
+  deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
-  real pi binary at that path is detected correctly (`present: true`) even
-  inside the SEA binary.
+  version-matched Node 22.19+ pi binary at that path is detected correctly
+  (`present: true`) even inside the SEA binary.
 
 **claude and codex are never a hazard here.** Both adapters'
 `resolve-bin.ts` (`packages/client/src/adapters/{claude,codex}/`) only ever
@@ -153,7 +156,7 @@ templates/packaging/sea/smoke-test.sh
 
 Builds the launcher, runs it from an isolated directory (no `node_modules`
 of its own) with and without a stub `pi` on `BYOK_PI_BIN`, and asserts both
-the degrade-holds and pickup-works cases. This is exactly what CI runs on
+the missing-sidecar and pickup-works cases. This is exactly what CI runs on
 every push (`.github/workflows/ci.yml`, `packageability-smoke` job) on
 Linux and macOS; see that workflow's comments for the current Windows-SEA
 status.

@@ -12,6 +12,8 @@ release pipeline.
 
 - [bun](https://bun.com) installed (`curl -fsSL https://bun.com/install | bash`,
   or see bun's own install docs for your platform).
+- Node.js 22.19.0 or newer for the external pi CLI sidecar. `bun install`
+  may install the npm graph, but pi's supported production runtime is Node.
 - Your product's launcher entry point built against `@byok-sdk/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
   it constructs a daemon, calls `.status()`, and probes runtime detection
@@ -29,6 +31,12 @@ No separate transpile/bundle step is needed first, unlike the Node SEA
 recipe (`../sea/`): bun's bundler already understands ESM and
 `import.meta.resolve` natively.
 
+This is a packageability smoke, not a declaration that the complete BYOK
+daemon is supported under Bun's JavaScript runtime. Downstream projects may
+use `bun install`; production BYOK/pi execution remains on Node 22.19+, and a
+Bun-compiled launcher must inject that Node-executed sidecar with
+`BYOK_PI_BIN`.
+
 `build.sh` in this folder is the same command, parameterized for this repo's
 own CI smoke:
 
@@ -38,21 +46,23 @@ templates/packaging/bun/build.sh <entry.ts> <output-dir>
 
 ## What this actually guarantees (and what it doesn't)
 
-Bundling a Node.js daemon into one file is not automatically safe. Runtime
-CLIs remain external, user-installed executables. The pi adapter resolves only
-`BYOK_PI_BIN` or a bare `pi` on PATH, whose `detect()` reports
-`present: false` if unavailable. This recipe's `smoke-test.sh` proves both
-absence and explicit pickup under a real compiled bun binary.
+Bundling a Node.js daemon into one file is not automatically safe. The pi
+adapter normally resolves the exact required npm package, but that external
+CLI is not embedded in a single-file executable. There is no automatic PATH
+fallback because it would introduce an unversioned second authority. This
+recipe proves the missing-sidecar state and explicit pickup under a compiled
+Bun binary.
 
 Empirically confirmed while building this recipe (see
 `smoke-test.sh`'s two assertions):
 
-- **pi absent** (no `BYOK_PI_BIN`, no `pi` on PATH): `PiAdapter.detect()`
-  reports `{ present: false }` cleanly. No crash, exit 0.
+- **pi sidecar absent** (no `BYOK_PI_BIN`): `PiAdapter.detect()` reports
+  `{ present: false }` cleanly. A product treats this as a missing core
+  deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
-  real pi binary at that path is detected correctly (`present: true`) even
-  inside the compiled executable.
+  the version-matched Node 22.19+ pi binary at that path is detected correctly
+  (`present: true`) even inside the compiled executable.
 
 **claude and codex are never a hazard here.** Both adapters'
 `resolve-bin.ts` (`packages/client/src/adapters/{claude,codex}/`) only ever
@@ -83,6 +93,6 @@ templates/packaging/bun/smoke-test.sh
 
 Builds the launcher, runs it from an isolated directory (no `node_modules`
 of its own) with and without a stub `pi` on `BYOK_PI_BIN`, and asserts both
-the degrade-holds and pickup-works cases. This is exactly what CI runs on
+the missing-sidecar and pickup-works cases. This is exactly what CI runs on
 every push (`.github/workflows/ci.yml`, `packageability-smoke` job) across
 Linux, macOS, and Windows.

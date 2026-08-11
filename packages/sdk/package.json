@@ -1,6 +1,6 @@
 {
   "name": "byok-sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Bring-your-own-agent SDK for local daemons, self-hosted coordination, and hosted multi-tenant BYOK infrastructure",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "sideEffects": false,
   "main": "./dist/index.js",

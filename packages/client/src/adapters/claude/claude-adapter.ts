@@ -156,9 +156,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     const bin = this.resolveBin();
     try {
-      // Empirically confirmed (unlike pi, which prints to stderr — see
-      // ../pi/pi-adapter.ts's own doc comment on that): claude 2.1.212
-      // prints `--version` output to STDOUT.
+      // Empirically confirmed: claude 2.1.212 prints `--version` output to
+      // STDOUT. Only stdout is read here because that is what was probed;
+      // pi reads both streams instead because its own `--version` channel
+      // has moved between pi releases (see ../pi/pi-adapter.ts).
       const { stdout } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
       const version = stdout.trim();
       const authPresent = await this.probeAuthPresent(bin.command);

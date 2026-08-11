@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/cloud",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "BYOK SDK hosted device surface: stateless frozen-v1 HTTP handlers over tenant-first @byok-sdk/core ports",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "sideEffects": false,
   "main": "./dist/index.js",

@@ -7,4 +7,4 @@ stores over the frozen v1 protocol.
 Use `@byok-sdk/cloud` plus `@byok-sdk/cloud-postgres` for the durable hosted
 composition.
 
-MIT licensed. Node.js 20 or newer.
+MIT licensed. Node.js 22.19.0 or newer.

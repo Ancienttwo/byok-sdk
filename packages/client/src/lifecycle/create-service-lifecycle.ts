@@ -40,8 +40,8 @@ export interface CreateServiceLifecycleOptions {
  *
  * Deliberately does NOT try to auto-resolve `ServiceDefinition.program`'s
  * `command`/`agentBin` from `import.meta.resolve`/`import.meta.url`-style
- * introspection the way `adapters/pi/resolve-bin.ts` does for pi's
- * optionalDependency. That pattern is a genuinely hazardous fit here: a
+ * introspection the way `adapters/pi/resolve-bin.ts` does for pi's required
+ * package. That pattern is a genuinely hazardous fit here: a
  * relative path from THIS source file to `bin/byok-agent.ts` (`../bin/...`,
  * since `lifecycle/` and `bin/` are sibling directories under `src/`) does
  * NOT survive tsup's bundling unchanged — `src/index.ts` and

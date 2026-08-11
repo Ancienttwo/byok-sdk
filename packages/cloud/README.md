@@ -6,4 +6,4 @@ logic but no durable database or object-storage driver.
 
 Pair it with `@byok-sdk/cloud-postgres` for Postgres + R2 production storage.
 
-MIT licensed. Node.js 20 or newer.
+MIT licensed. Node.js 22.19.0 or newer.

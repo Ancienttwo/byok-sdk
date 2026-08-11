@@ -72,7 +72,7 @@ async function makeHarness(runtimeEnvironment?: Record<string, { allow?: string[
   const captured: Record<RuntimeId, { env?: NodeJS.ProcessEnv }> = { pi: {}, claude: {}, codex: {} };
 
   const piAdapter = new PiAdapter({
-    resolveBin: () => ({ command: PI_FIXTURE, source: 'path' }),
+    resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }),
     spawnFn: makeCapturingSpawn<PiSpawnFn>(captured.pi),
   });
   const claudeAdapter = new ClaudeAdapter({

@@ -60,12 +60,10 @@ export class PiAdapter implements RuntimeAdapter {
   constructor(private readonly options: PiAdapterOptions = {}) {}
 
   async detect(): Promise<RuntimeDetectResult> {
-    const bin = this.resolveBin();
     try {
-      // Empirically, pi (0.74.2 and 0.80.7) prints `--version` output to
-      // STDERR, not stdout — confirmed with an explicit stdout/stderr probe,
-      // not assumed. Check both so this doesn't silently regress if a future
-      // pi release moves it back to stdout.
+      const bin = this.resolveBin();
+      // Empirically, pi 0.84.1 prints `--version` to stdout. Check stderr too
+      // so detection remains accurate if a future pinned release moves it.
       const { stdout, stderr } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
       const version = stdout.trim() || stderr.trim();
       const authPresent = KNOWN_PROVIDER_ENV_VARS.some((name) => process.env[name] !== undefined);
@@ -105,20 +103,7 @@ export class PiAdapter implements RuntimeAdapter {
     }
 
     const bin = this.resolveBin();
-    // BLOCKING BUG FOUND + FIXED DURING THE 2026-07-16 LIVE pi x GLM e2e run:
-    // this used to pass `--session-id <ref>` to `pi --mode rpc`, but that flag
-    // does not exist on the real installed pi CLI (confirmed against both
-    // `pi --help` and the package's own bundled `docs/rpc.md` for 0.74.2 —
-    // only `--session <path|id>` (resume-only, errors "No session found..."
-    // for a fresh/unknown id), `--session-dir`, `--no-session`, `--continue`,
-    // `--resume` exist). It crashed EVERY real pi invocation unconditionally
-    // (`Error: Unknown option: --session-id`, exit code 1) before reaching any
-    // model call — never caught by this repo's own test suite because
-    // `fake-pi.mjs` never inspected argv beyond `--version` (now fixed
-    // alongside this task — see fake-pi.mjs). Not GLM/z.ai specific; this
-    // broke 100% of real-pi task dispatch for any provider.
-    //
-    // Finding #3 (session/workspace continuity) follow-up, now implemented:
+    // Session/workspace continuity:
     // `task.sessionRef` is only ever non-empty here when `task-runner.ts`
     // has (a) found a recorded workspace for this exact sessionRef in its
     // `SessionWorkspaceStore` and (b) spawned this adapter with
@@ -140,7 +125,10 @@ export class PiAdapter implements RuntimeAdapter {
     // docs/protocol.md §2's note on this field for the explicit
     // reserved/ignored status); a real implementation is a genuine
     // follow-on design task, not a mechanical fix, and is intentionally
-    // left alone here.
+    // left alone here. pi 0.84.1 also offers `--session-id`, but that flag
+    // creates a missing session. BYOK deliberately uses `--session` so a
+    // lost/unknown authoritative sessionRef fails closed instead of silently
+    // starting a new history under the requested id.
     const resumeSessionId = task.sessionRef;
     const args = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
 

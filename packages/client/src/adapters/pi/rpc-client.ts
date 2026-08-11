@@ -123,10 +123,7 @@ export class PiRpcClient {
    * traffic. Logs once per distinct type (not per occurrence, so a
    * repeating unmapped type can't spam stdout); the running tally is also
    * folded into this client's exit-time error message (`buildExitError`) so
-   * a post-mortem on a failed/hung task has it without needing separate log
-   * scraping. This is the exact mechanism that would have turned this
-   * task's root-cause hang (`agent_end` arriving with no mapping) into a
-   * one-line, immediate warning instead of a silent stall.
+   * a post-mortem on a failed/hung task has it without separate log scraping.
    */
   recordUnmappedFrame(type: string): void {
     const next = (this.unmappedFrameCounts.get(type) ?? 0) + 1;
@@ -176,12 +173,8 @@ export class PiRpcClient {
     }
     if (msg.type === 'extension_ui_request' && typeof msg.id === 'string' && typeof msg.method === 'string') {
       // Answered here, not enqueued — see `respondToExtensionUiRequest`. If
-      // left unanswered this blocks pi's entire run exactly like the
-      // agent_end/agent_settled root-cause bug does (process alive, idle,
-      // waiting on stdin forever) — this was the task's leading hypothesis
-      // for finding #2 before the live-frame capture pinned the actual
-      // cause on the settle-event mismatch; handled regardless, since it's a
-      // real, documented way for a future extension/skill to hang a task.
+      // left unanswered this blocks pi's entire run (process alive, waiting
+      // on stdin forever), so every blocking dialog is handled here.
       this.respondToExtensionUiRequest(msg.id, msg.method);
       return;
     }

@@ -24,7 +24,7 @@ set -euo pipefail
 # was NOT reliably functional on Node 22.22.3 (the version this was built
 # against) as of this writing -- see the README's "why CJS, not ESM" note.
 # This recipe uses the battle-tested CJS path so it actually works on the
-# Node versions this SDK targets (engines.node >=20).
+# Node versions this SDK targets (engines.node >=22.19.0).
 
 ENTRY="${1:?usage: build.sh <entry.ts> <output-dir>}"
 OUT_DIR="${2:?usage: build.sh <entry.ts> <output-dir>}"
@@ -109,6 +109,11 @@ if [ "$OS" = "Windows" ]; then
 else
   cp "$(command -v node)" "$OUT_BIN"
 fi
+# Package-manager-owned Node executables can be installed read-only (for
+# example Homebrew uses mode 0555). `cp` preserves that mode on macOS, while
+# postject must open the copied executable for writing. Only make the disposable
+# output copy owner-writable; never mutate the source Node installation.
+chmod u+w "$OUT_BIN"
 
 if [ "$OS" = "macOS" ]; then
   echo "==> stripping existing code signature (macOS)"

@@ -32,47 +32,32 @@ describe('mapPermissionPolicyToPiArgs', () => {
     expect(result.args).toEqual(['--no-tools']);
   });
 
-  // `--exclude-tools` is NOT a real pi CLI flag — confirmed against the
-  // installed pi 0.74.2 binary (`Error: Unknown option: --exclude-tools`,
-  // exit code 1, before any model call) and its own `dist/cli/args.js`
-  // parser, which recognizes only `--tools`/`-t`, `--no-tools`/`-nt`,
-  // `--no-builtin-tools`/`-nbt` for tool control. This is a second,
-  // self-discovered instance of the exact same bug class as the
-  // `--session-id` finding this task's live GLM run root-caused: it crashed
-  // every real pi invocation for any policy with a non-empty `denyTools`,
-  // unconditionally, and (like `--session-id`) was never caught by this
-  // repo's test suite because `fake-pi.mjs` never validated argv. Fixed by
-  // resolving `denyTools` to an equivalent `--tools` allowlist in-process
-  // (pi has no "default set minus these" flag — `--tools` always replaces
-  // the active set wholesale).
-  it('denyTools resolves to an equivalent --tools allowlist (pi\'s real default active set minus the denied names), never --exclude-tools', () => {
+  it('denyTools maps to pi 0.84.1\'s native --exclude-tools flag', () => {
     const result = mapPermissionPolicyToPiArgs({ mode: 'auto', denyTools: ['bash'] });
     expect(result.ok).toBe(true);
-    // pi's real default active tools (confirmed against dist/core/sdk.js's
-    // own `defaultActiveToolNames`): read, bash, edit, write — minus bash.
-    expect(result.args).toEqual(['--tools', 'read,edit,write']);
+    expect(result.args).toEqual(['--exclude-tools', 'bash']);
   });
 
-  it('denyTools subtracts from an explicit allowTools instead of the default set, when both are given', () => {
+  it('passes explicit allowTools and denyTools as separate native constraints', () => {
     const result = mapPermissionPolicyToPiArgs({ mode: 'auto', allowTools: ['bash', 'edit'], denyTools: ['edit'] });
     expect(result.ok).toBe(true);
-    expect(result.args).toEqual(['--tools', 'bash']);
+    expect(result.args).toEqual(['--tools', 'bash,edit', '--exclude-tools', 'edit']);
   });
 
-  it('denyTools that removes every candidate tool falls back to --no-tools, never an absent flag', () => {
+  it('lets pi apply a denylist that removes every explicitly allowed tool', () => {
     const result = mapPermissionPolicyToPiArgs({
       mode: 'auto',
       allowTools: ['bash'],
       denyTools: ['bash'],
     });
     expect(result.ok).toBe(true);
-    expect(result.args).toEqual(['--no-tools']);
+    expect(result.args).toEqual(['--tools', 'bash', '--exclude-tools', 'bash']);
   });
 
-  it('readonly + denyTools intersects with the readonly set first, then subtracts the denied names', () => {
+  it('readonly constrains the allowlist before adding the native denylist', () => {
     const result = mapPermissionPolicyToPiArgs({ mode: 'readonly', denyTools: ['read'] });
     expect(result.ok).toBe(true);
-    expect(result.args).toEqual(['--tools', 'grep,find,ls']);
+    expect(result.args).toEqual(['--tools', 'read,grep,find,ls', '--exclude-tools', 'read']);
   });
 
   it('an empty denyTools array behaves exactly like no denyTools at all', () => {

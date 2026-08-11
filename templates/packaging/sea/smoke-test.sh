@@ -54,7 +54,7 @@ fi
 
 # Isolated run directory: copy the standalone executable out to a location
 # with no node_modules of its own in its ancestor chain, matching a shipped
-# product binary whose runtime CLIs must come from the user's PATH.
+# product binary whose required Pi runtime must be injected as a sidecar.
 ISOLATED_DIR="$WORK_DIR/isolated-run"
 mkdir -p "$ISOLATED_DIR"
 RUN_BIN="$ISOLATED_DIR/$(basename "$BIN")"
@@ -126,7 +126,7 @@ echo "==> scenario 1: pi absent (isolated dir, no BYOK_PI_BIN)"
 OUT1="$WORK_DIR/out1.log"
 EXIT1=0
 ( cd "$ISOLATED_DIR" && "./$(basename "$RUN_BIN")" ) >"$OUT1" 2>&1 || EXIT1=$?
-assert_probe "pi-absent-degrades" "false" "$OUT1" "$EXIT1"
+assert_probe "pi-sidecar-missing" "false" "$OUT1" "$EXIT1"
 
 echo "==> scenario 2: BYOK_PI_BIN stub (pi picked up)"
 OUT2="$WORK_DIR/out2.log"

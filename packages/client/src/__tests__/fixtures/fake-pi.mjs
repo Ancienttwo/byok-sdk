@@ -1,18 +1,13 @@
 #!/usr/bin/env node
 // Fake `pi --mode rpc`: replays a representative, empirically grounded frame
 // sequence (pi's bundled docs/rpc.md, cross-checked against live probes of
-// @earendil-works/pi-coding-agent 0.74.2 and 0.80.7 against real GLM/z.ai
+// @earendil-works/pi-coding-agent 0.84.1 against its documented RPC contract
 // traffic) without spawning a real LLM call. Substituted for the real pi
 // binary via PiAdapterOptions.resolveBin/spawnFn in tests.
 //
 // Argv validation (2026-07-16 hardening): real pi rejects any flag it
 // doesn't recognize with `Error: Unknown option: --xxx` on stderr and exit
-// code 1 — confirmed live against the installed 0.74.2 binary, both for a
-// typo'd flag and, tellingly, for two flags THIS adapter used to pass
-// unconditionally (`--session-id`, and `--exclude-tools` for a non-empty
-// `denyTools`) that simply don't exist on the real CLI. Neither bug was
-// ever caught by this repo's own test suite because this fixture never
-// looked at argv beyond `--version`. ALLOWED_FLAGS below is deliberately
+// code 1. ALLOWED_FLAGS below is deliberately
 // scoped to exactly what packages/client/src/adapters/pi/*.ts can ever
 // construct (not pi's full flag surface) — anything else fails exactly like
 // real pi would, so a future flag regression fails a test instead of
@@ -71,7 +66,7 @@
 //                                           (default application/octet-stream).
 //   FAKE_PI_HANG_AFTER_TOOL=1     -> after the bash tool_use/tool_result (and
 //                                    the artifact block, if any), stop —
-//                                    never send turn_end/agent_end on its
+//                                    never send turn_end/agent_end/agent_settled on its
 //                                    own. Without this, the whole canned
 //                                    sequence sends synchronously fast enough
 //                                    that a task.cancel racing it can lose
@@ -108,6 +103,7 @@ const FLAG_TAKES_VALUE = {
   '--mode': true,
   '--session': true,
   '--tools': true,
+  '--exclude-tools': true,
   '--no-tools': false,
 };
 
@@ -127,7 +123,7 @@ const sessionIdx = argv.indexOf('--session');
 if (sessionIdx !== -1) {
   const requested = argv[sessionIdx + 1];
   if (requested !== sessionId) {
-    // Verbatim format, empirically confirmed against real pi 0.74.2 given
+    // Verbatim format, retained from an empirical pi resume failure given
     // an unknown/unminted session id in a fresh cwd.
     process.stderr.write(`No session found matching '${requested}'\n`);
     process.exit(1);
@@ -291,7 +287,8 @@ async function handleCommand(msg) {
         message: { role: 'assistant', content: [{ type: 'text', text: finalTextPart1 + finalTextPart2 }] },
       });
       send({ type: 'turn_end', message: {}, toolResults: [] });
-      send({ type: 'agent_end', messages: [] });
+      send({ type: 'agent_end', messages: [], willRetry: false });
+      send({ type: 'agent_settled' });
       break;
     }
 
@@ -301,7 +298,8 @@ async function handleCommand(msg) {
 
     case 'abort':
       send({ type: 'response', command: 'abort', success: true, id: msg.id });
-      send({ type: 'agent_end', messages: [] });
+      send({ type: 'agent_end', messages: [], willRetry: false });
+      send({ type: 'agent_settled' });
       break;
 
     case 'bash':
