@@ -1,6 +1,6 @@
 # Plan: Consolidate /byok route path constants into protocol (B-2)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260813-0423
 > **Slug**: route-path-constants
 > **Planning Source**: waza-think

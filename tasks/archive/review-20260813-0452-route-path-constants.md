@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-13 04:52
+> **Related Plan**: plans/archive/plan-20260813-0423-route-path-constants.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260813-0452
+
 # Task Review: route-path-constants
 
 > **Status**: Pending
