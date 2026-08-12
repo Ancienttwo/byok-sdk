@@ -48,8 +48,9 @@ const GOLDEN_URL = new URL('./golden/device-assertion-v1.canonical.json', import
  * The third domain, `byok-nonce-v1\n`, is a WIRE constant that lives in
  * `@byok-sdk/client`'s `device-keys.ts` (and `packages/server/src/auth.ts`) and
  * is deliberately not shared through a package. Core cannot import it without
- * creating an edge that must not exist (`constraints.test.ts` forbids any
- * `@byok/*` import from this package, tests included), so restating the literal
+ * creating an edge that must not exist (`constraints.test.ts` forbids core
+ * from importing any sibling `@byok-sdk/*` workspace package, tests included),
+ * so restating the literal
  * here would only test a copy — production drift in the real nonce constant
  * would sail past it. The authoritative three-way (nonce-inclusive) falsifier
  * therefore lives in the CLIENT suite (`device-assertion-broker.test.ts`),

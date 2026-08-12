@@ -16,6 +16,7 @@ const packages = [
   '@byok-sdk/cloud',
   '@byok-sdk/client',
   '@byok-sdk/cloud-postgres',
+  '@byok-sdk/testkit',
   'byok-sdk',
 ];
 const nodeBin = process.execPath;
