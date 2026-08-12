@@ -1,6 +1,6 @@
 # Task Contract: skill-pack-postgres-phase2
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260813-0339-skill-pack-postgres-phase2.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->

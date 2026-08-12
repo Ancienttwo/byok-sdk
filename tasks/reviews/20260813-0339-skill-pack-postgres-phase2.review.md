@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:19464536ab0de931510fd3bae8a76453069ed429d8247a3c71c4e11d9dc43f84
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 3ef5110269ba56c4089627c899aa18bc95e72d26
+> **Verification Evidence SHA256**: sha256:efa0c60eff4d2914efe528a9803cc5b1d3dd535bfbeb82d20f66edcf395a0fa7
+> **Issued At**: 2026-08-12T20:03:36.152Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: A-1 R1 Phase 2 skill-pack cloud-postgres: gatekeeper PASS. Clean single-authority CORE_STORE_NAMES cutover (bridge discharged, duplicate port-name machinery collapsed); PostgresSkillPackStore mirrors in-memory, reuses core validators, tenant-first, validation-before-transaction, replace-on-publish; migration 0005 byte_size=integer verified correct (256KiB-capped number); protocol zero-diff; conformance both compositions (in-memory local, Postgres CI). 9/9 Fulfilled.
 - Findings: none
 
 ## Behavior Diff Notes
