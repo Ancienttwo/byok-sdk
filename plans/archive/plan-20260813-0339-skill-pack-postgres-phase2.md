@@ -1,6 +1,6 @@
 # Plan: Skill-pack cloud-postgres persistence (R1 Phase 2)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260813-0339
 > **Slug**: skill-pack-postgres-phase2
 > **Planning Source**: waza-think
