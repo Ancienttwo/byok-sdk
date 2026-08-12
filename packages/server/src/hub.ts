@@ -1005,6 +1005,16 @@ export class ConnectionHub {
       summary: payload.summary,
       sessionRef: payload.sessionRef,
       artifactRefs: payload.artifactRefs,
+      // additive-minor (`task.complete.document`): projected verbatim, the
+      // same way `summary`/`artifactRefs` are. Nothing to validate or
+      // measure here — the payload only got this far because
+      // `TaskCompletePayloadSchema`'s own refinement already enforced
+      // JSON-serializability and `RESULT_DOCUMENT_MAX_BYTES` at the inbound
+      // boundary, and re-checking would make this a second authority for a
+      // rule the wire already owns. Stays `undefined` for the two cases that
+      // never carry one: a daemon with no extractor configured, and a
+      // pre-`result-document` daemon build.
+      document: payload.document,
     };
     this.applyOrFail(taskId, 'Complete', { result, sessionRef: payload.sessionRef });
   }

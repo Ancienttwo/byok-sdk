@@ -46,8 +46,11 @@ export {
   TaskFailPayloadSchema,
   TaskCancelledPayloadSchema,
   TaskApprovalResolvedPayloadSchema,
+  RESULT_DOCUMENT_MAX_BYTES,
+  checkResultDocument,
 } from './messages';
 export type {
+  ResultDocumentCheck,
   MessageType,
   RuntimeId,
   RuntimeInfo,

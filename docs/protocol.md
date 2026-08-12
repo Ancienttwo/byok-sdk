@@ -117,6 +117,23 @@ message, or a daemon talking to an old server that never advertises
 `approval_resolved`, never sends the new message at all, and the server
 keeps inferring exactly as it did before this section's previous wording.
 
+**Landed additive minor: `task.complete.document` + the `result-document`
+capability flag.** A new OPTIONAL field on an existing payload plus a new
+capability flag — the first and fourth bullets at the top of this section —
+so both landed with `PROTOCOL_VERSION` still `1`. `document` carries the
+task's structured terminal result (one JSON value the product consumes as
+the task's actual output), bounded by `RESULT_DOCUMENT_MAX_BYTES`; the
+server-advertised `result-document` flag (`CAPABILITY_FLAGS`, `version.ts`)
+is what tells a daemon the other side will actually keep the field instead
+of stripping it. Full contract, cap semantics, and the
+`document`-vs-`artifactRefs` boundary: §7.2. The golden fixtures
+(`packages/protocol/src/__tests__/golden/v1.frozen.json`) were regenerated
+deliberately for the fingerprint change, with the additive-only diff
+recorded in `tasks/notes/20260812-0351-result-document-channel.notes.md`;
+the historical envelope corpus (`v1.envelopes.ndjson`) was NOT touched,
+since a pre-`document` peer's committed bytes must keep parsing unchanged —
+which is exactly what proves the change additive.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -216,7 +233,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
-| `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?` | Runtime reached `turn_end` |
+| `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2) | Runtime reached `turn_end` |
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
@@ -834,6 +851,139 @@ always emit this exact form when declaring or referencing a blob.
 Inline payloads stay under the existing 64KB limit (`task.artifact.inline`,
 `task.offer.instruction` string form); anything larger goes through blobs.
 Default per-product size ceiling: 100MB (server-enforced, not schema-enforced).
+
+### 7.2 `task.complete.document` — bounded structured terminal result (additive minor)
+
+`task.complete` carries three different KINDS of output, and the difference
+matters:
+
+| Field | Carries | For |
+|---|---|---|
+| `summary` | Prose | A human reading what happened |
+| `artifactRefs[]` | Files (inline or blob) | Multi-file, binary, or oversized output |
+| `document` | ONE JSON value | The product's structured terminal result |
+
+**`document` is schema-neutral and stays that way.** It is typed
+`z.unknown()` (`TaskCompletePayloadSchema`, `messages.ts`): this SDK never
+inspects, validates, or transforms the product's own document shape, and
+never will — that validation belongs to the consumer that defined the shape.
+Any JSON root is legal (object, array, string, number, boolean, `null`), not
+just an object. Producing it is product glue: a daemon supplies
+`DaemonConfig.resultDocument.extract(finalOutput, task)`
+(`create-daemon.ts`), which turns the same text that becomes `summary` into
+the product's JSON, or returns `undefined` for "no structured result this
+time".
+
+**A document must be PLAIN JSON DATA — equal to its own JSON round trip.**
+Not merely "a value `JSON.stringify` accepts", which is a much weaker bar
+that lets two real failures through:
+
+- **Silent lossiness.** An `undefined`-valued key, a `NaN`, a function-valued
+  property, or a `Date` all serialize "successfully" while becoming something
+  else (dropped, `null`, a string). The result is a well-formed, under-cap
+  document that is *not what the producer had* — a confidently wrong terminal
+  result, the worst outcome this channel has.
+- **Contextual serialization.** `toJSON(key)` receives the key it is being
+  serialized under, so a value can legally answer one way at the root (where
+  a naive check would measure it) and another way nested under `document`
+  (where the codec actually writes it). A root-only measurement is then no
+  bound on the wire bytes at all. The same hole exists for any getter that
+  answers differently on a second read.
+
+So `checkResultDocument` (`messages.ts`) — the single authority both ends
+call — canonicalizes rather than merely measuring: it serializes, checks the
+byte cap, `JSON.parse`s the result into a **canonical snapshot**, and
+requires the original to be structurally equal to that snapshot (recursively:
+own enumerable string keys must match, arrays by length and element,
+primitives by strict equality, so `NaN` can never pass). Any mismatch is a
+rejection, never a silent transformation. **On success the snapshot — not the
+original object — is what a sender puts on the wire.** Pure data serializes
+identically at the root and nested, so what was measured is necessarily what
+is sent, and both holes above close together. Re-running the check on an
+already-parsed payload is idempotent, which is why the server's schema
+refinement and the daemon's pre-send gate always agree.
+
+One case structural comparison alone cannot see gets its own rule. An object
+whose data does not live in its own enumerable string keys is invisible to
+JSON: a populated `Map` or `Set` serializes to `{}`, and would compare equal
+to that `{}` — an empty document delivered as the task's real result. **An
+object with no own enumerable string keys whose prototype is neither
+`Object.prototype` nor `null` is therefore rejected**, at every node, so a
+nested `Map`/`Set`/exotic instance dies exactly like a top-level one. The
+boundary this draws: a class instance WITH own enumerable fields is accepted
+(its data genuinely survives the round trip), and `Object.create(null)`
+carrying data is accepted (a null prototype is still plain data) — but a
+class whose values come from PROTOTYPE-level getters is not, because those
+are invisible to JSON and such an instance is therefore not plain JSON data
+by definition. Hand this channel data, not objects with behavior.
+
+**Cap: `RESULT_DOCUMENT_MAX_BYTES` = 1 MiB (1 048 576).** Measured as the
+UTF-8 byte length of the canonical form serialized at the root — canonical
+JSON bytes, not keys, not nodes, not characters (a 2-byte character counts as
+2). The daemon-side pre-send gate imports and calls the same
+`checkResultDocument` rather than re-deriving the rule, so the two ends
+cannot disagree about what fits. **Producers should stay at or under ~512
+KiB.** The extra headroom to 1 MiB exists because raising a protocol cap
+later is additive while lowering one is breaking — it is not an invitation to
+fill it.
+
+**Reject at the boundary; never truncate.** An over-cap, non-serializable,
+or not-plain-JSON document is refused at every layer that touches it:
+`createEnvelope` throws before such a frame can be built, the server's
+schema validation rejects the payload, and the daemon fails the task before
+sending anything. Truncating is not on the table — a truncated JSON document
+is not valid JSON, so "shrinking to fit" can only deliver garbage to a
+consumer that has no way to tell. A result genuinely too big for this
+channel is an artifact, not a document.
+
+**Emission is gated on the server-advertised `result-document` capability
+flag** (`CAPABILITY_FLAGS`, `version.ts`), unlike `approvalId` (§5.3) which
+ships unconditionally. The difference is what an old peer does with the
+field: `TaskCompletePayloadSchema` is a tolerant `z.object()`, so a
+pre-`document` server SILENTLY STRIPS it (§1's forward-compat rule, working
+exactly as designed) — and silently losing the task's primary structured
+result is data loss, not the harmless dropped-observability-hint case that
+tolerance exists for. So:
+
+- Old server, new daemon: the flag is absent from `conn.ack.capabilities`,
+  so the daemon never sends `document`. If its extractor did produce one,
+  the daemon reports `task.fail` (`retryable: false` — the same server will
+  strip it on every retry too) with a reason prefixed `result document
+  undeliverable`, rather than reporting a success that quietly deleted the
+  result. There is no silent-omission path.
+- New server, old daemon: unaffected. The field is optional and an old
+  daemon simply never sets it.
+- No extractor configured: unchanged in every respect — no document is
+  computed, no capability is consulted, and the payload is byte-identical to
+  the one sent before this field existed.
+
+The capability is read fresh at BOTH ends of the completion path — once when
+the document is resolved, and again immediately before the envelope is handed
+to the transport — because a reconnect in between can replace the connection
+with one whose `conn.ack` never advertised the flag (a daemon drops its
+learned capabilities the moment an acked connection closes, and only a fresh
+ack repopulates them). A rollback caught in that window is the same
+fail-closed `task.fail`, not a silent send.
+
+**Residual window (known, bounded, deliberately not worked around).** Even
+the second check runs before the envelope leaves the daemon's outbox. A
+server rolled back to a pre-`document` build *while a queued `task.complete`
+is still draining* can therefore still receive — and silently strip — a
+document. Closing this would mean teaching the transport outbox to inspect
+payload semantics and mint a substitute `task.fail` for a task the daemon
+already considers finished: a second authority over terminal outcomes living
+in the queue, which is worse than the window it closes. The bound is a
+rollback landing inside a single in-flight send.
+
+The other fail-closed daemon-side branches share that same reason prefix and
+`retryable: false`: an extractor that throws; one that returns a promise
+(the seam is synchronous and the runtime ENFORCES that — an unawaited
+promise encodes to `{}`, a well-formed, under-cap, and completely wrong
+result, which is worse than no result at all); and a document that is
+over-cap, non-serializable, or not plain JSON data. On the server, `document` is projected
+verbatim into `TaskResult.document` (`hub.ts`) and persists inside the same
+`result_json` record that already carries `summary`/`artifactRefs` — no new
+column, no migration, no second authority.
 
 ## 8. Long-poll fallback
 

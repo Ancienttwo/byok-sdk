@@ -68,6 +68,26 @@ export const PROTOCOL_VERSION = 1;
  * other flag here, just consumed for observability instead of gating.
  */
 /**
+ * `result-document` (additive-minor): a SERVER-advertised flag meaning "I
+ * understand the optional `task.complete.document` field" (`messages.ts`).
+ * Functionally gating, like `approval_resolved` and unlike
+ * `approval-targeting`.
+ *
+ * This is the N/N-1 answer for that new daemon -> server FIELD. An old
+ * server's `CAPABILITY_FLAGS`/`conn.ack.capabilities` never includes it, and
+ * its `TaskCompletePayloadSchema` is a tolerant (non-`.strict()`)
+ * `z.object()`, so a `document` sent to it would be silently STRIPPED on
+ * parse and vanish without a trace. That is exactly why emission is gated
+ * here rather than sent unconditionally the way `approvalId` is: `document`
+ * carries the task's primary structured RESULT, so losing it silently is
+ * data loss, not a missed observability hint. A new daemon talking to an old
+ * server therefore never sends `document` at all, and — if its configured
+ * extractor did produce one — reports `task.fail` (retryable: false; the
+ * same server will strip it on every retry too) instead of completing the
+ * task with its main result quietly deleted (`packages/client`'s
+ * `task-runner.ts`). A new server talking to an old daemon is unaffected:
+ * the field is optional, and an old daemon simply never sets it.
+ *
  * `dispatch-selection` (additive-minor) is a correctness gate for the
  * optional `task.offer.dispatchSelection` control field. An older v1 daemon
  * legally strips unknown optional fields, so a server must never send an
@@ -81,6 +101,7 @@ export const CAPABILITY_FLAGS = [
   'interactive-approval',
   'approval_resolved',
   'approval-targeting',
+  'result-document',
   'dispatch-selection',
 ] as const;
 

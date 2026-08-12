@@ -6,6 +6,7 @@
     "interactive-approval",
     "approval_resolved",
     "approval-targeting",
+    "result-document",
     "dispatch-selection"
   ],
   "permissionModes": [
@@ -894,7 +895,8 @@
             ],
             "additionalProperties": false
           }
-        }
+        },
+        "document": {}
       },
       "required": [
         "summary",
@@ -2298,7 +2300,8 @@
                   ],
                   "additionalProperties": false
                 }
-              }
+              },
+              "document": {}
             },
             "required": [
               "summary",
@@ -4437,7 +4440,8 @@
                           ],
                           "additionalProperties": false
                         }
-                      }
+                      },
+                      "document": {}
                     },
                     "required": [
                       "summary",
@@ -6004,7 +6008,8 @@
                           ],
                           "additionalProperties": false
                         }
-                      }
+                      },
+                      "document": {}
                     },
                     "required": [
                       "summary",
