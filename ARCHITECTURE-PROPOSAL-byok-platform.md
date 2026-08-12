@@ -261,12 +261,11 @@ GET /byok/board/stream?since=<board_seq>     Accept: text/event-stream
    每 5s：  SELECT … WHERE tenant_id=? AND board_seq > cursor ORDER BY board_seq LIMIT 50
             逐行 emit  `id: <board_seq>\ndata: <json>\n\n`，推進 cursor
    每 120s：emit  `event: reconcile`  要求 client 做一次全量列表對賬
-   每 3s：  喚醒後快速追趕窗口
    每 15s： emit  `:\n\n` 心跳註釋，防中間層超時斷流
    ※ 每次查詢各自取用/歸還 DB 連線，禁止跨 sleep 持有 transaction
 ```
 
-5s query、120s 全量對賬、15s heartbeat 與每輪 limit 50 是 **BYOK 可配置的初始運營預設**，不是已驗證的 RAFT board production tuning。hash-matched bundle 中相似的 `5s/120s/3s/limit 50` tuple 實際屬於 agent bridge wake-hint handler，不能替 board stream 背書。當前值保留，因為它們已由 BYOK 的 SSE/poll/reconcile 測試覆蓋且可由 `ByokCloudOptions` 注入；生產調整應以 board latency、DB QPS、reconcile repair 與 intermediary timeout 的 BYOK 指標為 authority。
+5s query、120s 全量對賬、15s heartbeat 與每輪 limit 50 是 **BYOK 可配置的初始運營預設**，不是已驗證的 RAFT board production tuning。hash-matched bundle 中相似的 `5s/120s/3s/limit 50` tuple 實際屬於 agent bridge wake-hint handler，不能替 board stream 背書；BYOK 沒有採納或實作其中的 3s wake-hint seam。當前四個 BYOK 值保留，因為它們已由 SSE/poll/reconcile 測試覆蓋且可由 `ByokCloudOptions` 注入；生產調整應以 board latency、DB QPS、reconcile repair 與 intermediary timeout 的 BYOK 指標為 authority。
 
 **為何 SSE 在這裡划算，而 50s long-poll hold 在派工路徑上不划算**（成本結構不同，不是前後矛盾）：
 

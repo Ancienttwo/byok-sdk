@@ -18,13 +18,13 @@
 3. `runners list` 与 `logs` 在无 attachment 时以 `NO_ATTACHMENT` fail-closed，返回 `1`，并明确声明没有修改本地状态。
 4. `upgrade --dry-run --target-version 1.0.15` 对 shell 返回成功并输出“无升级目标”，但仍写入 `0600` 的 `upgrade.log`，其中 `outcome="err"`、`errorCode="UPGRADE_NO_TARGET"`。这是已观察到的双层语义，不足以单独判定为漏洞。
 
-另有一项静态/动态对位结果：当前安装 binary 与既有 `/tmp/raft-probe/sea/rc.bin` 的 SHA-256 完全相同，因此可以把匹配 bundle 用于窄范围 control-flow 校正。校正发现现有 RAFT 文档有四处实质归因错误：board timing tuple 实际锚在 agent bridge、task create 实有 `--assignee`、五级 activity 词汇实属 RAFT bundle、`status` 在 stale-upgrade 条件下可能写状态。
+另有一项静态/动态对位结果：在 2026-08-10 的捕获时点，当前安装 binary 与当时存在的 `/tmp/raft-probe/sea/rc.bin` SHA-256 完全相同，因此该次捕获可用匹配 bundle 做窄范围 control-flow 校正。校正发现现有 RAFT 文档有四处实质归因错误：board timing tuple 实际锚在 agent bridge、task create 实有 `--assignee`、五级 activity 词汇实属 RAFT bundle、`status` 在 stale-upgrade 条件下可能写状态。临时 bundle 现已不存在；E-008 是 hash-bound historical observation，不是 fresh clone 可独立重放的证据。
 
 ## 2. Scope 与方法
 
-- Scope 契约：[scope.md](../../work/20260810-raft-cli-dynamic/scope.md)
-- Timeline：[timeline.md](../../work/20260810-raft-cli-dynamic/timeline.md)
-- Work items：[workitems.md](../../work/20260810-raft-cli-dynamic/workitems.md)
+- Scope 契约：[clone-visible evidence appendix](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#scope)
+- Timeline：[clone-visible evidence appendix](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#timeline)
+- Work items：[clone-visible evidence appendix](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#work-items)
 - 网络边界：`sandbox-exec` 使用 `(deny network*)`；未登录、未 attach、未启动或安装 service、未 rollback。
 - 状态边界：未读取真实 `~/.slock/`；全部状态指向 `work/20260810-raft-cli-dynamic/` 下的隔离目录。
 - 证据边界：动态证据只证明本报告执行过的 CLI 分支，不把静态 control flow 自动升级为运行时事实。
@@ -91,14 +91,14 @@ flowchart LR
 
 | ID | 观察 | Source / 复现 | Hash |
 |---|---|---|---|
-| E-001 | arm64 Mach-O、大小、SHA-256、Developer ID 签名有效 | [E-001](../../work/20260810-raft-cli-dynamic/evidence/E-001.md) | binary SHA-256 `87f298...51b` |
-| E-002 | `1.0.15` 与 root command surface | [E-002](../../work/20260810-raft-cli-dynamic/evidence/E-002.md) | n/a |
-| E-003 | 空状态 `status` exit `0` 且无写入 | [E-003](../../work/20260810-raft-cli-dynamic/evidence/E-003.md) | n/a |
-| E-004 | 无 attachment 的 runners/logs exit `1` 且无写入 | [E-004](../../work/20260810-raft-cli-dynamic/evidence/E-004.md) | n/a |
-| E-005 | computer 层 `SLOCK_HOME` precedence；doctor exit `1` | [E-005](../../work/20260810-raft-cli-dynamic/evidence/E-005.md) | n/a |
-| E-006 | dry-run 写 `0600 upgrade.log`，外层成功、内层 err | [E-006](../../work/20260810-raft-cli-dynamic/evidence/E-006.md) | artifact SHA-256 `e9265f...7070` |
-| E-007 | `status` public options 只有 `--help` | [E-007](../../work/20260810-raft-cli-dynamic/evidence/E-007.md) | n/a |
-| E-008 | 当前 binary 与 archived rc.bin 同 hash；matched bundle 暴露文档归因冲突 | [E-008](../../work/20260810-raft-cli-dynamic/evidence/E-008.md) | bundle SHA-256 `18c3eb...609` |
+| E-001 | arm64 Mach-O、大小、SHA-256、Developer ID 签名有效 | [E-001](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-001) | binary SHA-256 `87f298...51b` |
+| E-002 | `1.0.15` 与 root command surface | [E-002](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-002) | n/a |
+| E-003 | 空状态 `status` exit `0` 且无写入 | [E-003](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-003) | n/a |
+| E-004 | 无 attachment 的 runners/logs exit `1` 且无写入 | [E-004](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-004) | n/a |
+| E-005 | computer 层 `SLOCK_HOME` precedence；doctor exit `1` | [E-005](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-005) | n/a |
+| E-006 | dry-run 写 `0600 upgrade.log`，外层成功、内层 err | [E-006](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-006) | artifact SHA-256 `e9265f...7070` |
+| E-007 | `status` public options 只有 `--help` | [E-007](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-007) | n/a |
+| E-008 | 捕获时 binary 与 rc.bin 同 hash；matched bundle 暴露文档归因冲突 | [E-008](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-008) | bundle SHA-256 `18c3eb...609` |
 
 ## 7. Findings
 
@@ -167,8 +167,8 @@ flowchart LR
 - impact: 四类错误会把 bridge 参数误当 board production tuning、把实际 assignee 能力说成不存在、把 RAFT activity 词汇误归为 BYOK、把 status 空状态观察误推广为纯只读；它们会改变后续 architecture decision 的 evidence strength。
 - confidence: `high`
 - repro_steps:
-  1. 比对当前 binary 与 `/tmp/raft-probe/sea/rc.bin` 的 SHA-256；二者均为 `87f298...51b`。
-  2. 在匹配 `bundle.cjs` 复核 `agentBridgeCommand`、`taskCreateCommand`、`AGENT_ACTIVITIES`、`program3 status` 与 `reconcileStalePendingUpgrade`。
+  1. 先读取 [E-008 retained evidence](./evidence/2026-08-10_raft-cli-dynamic-evidence.md#e-008) 的捕获时 hash 与归因；仓库不声称临时 `/tmp/raft-probe` 仍存在。
+  2. 若取得相同 hash、且获授权分析的 binary/bundle，再独立复核 `agentBridgeCommand`、`taskCreateCommand`、`AGENT_ACTIVITIES`、`program3 status` 与 `reconcileStalePendingUpgrade`。
   3. 对照上述三份文档的行级归因。
 - remediation: 分别更正来源与证据等级；board/server enforcement 继续标 `[unverified]`，不得用 bridge/client bundle 代替 server 证明。
 
@@ -192,7 +192,7 @@ flowchart LR
 
 本报告确认了既有静态参考中三项事实的运行面：`1.0.15` command surface、computer 层 state-root precedence、无 attachment 的 fail-closed gate。它没有验证下列静态结论：三角色 argv dispatch、daemon in-process 加载、WebSocket 重连、credential mint、runtime driver、upgrade package trust、alpha channel、staging cleanup、hidden commands 或 server-side board semantics。
 
-当前 binary 与 archived `rc.bin` hash 相同，允许对相同 payload 的静态 symbol 做窄范围校正，但不能把 client bundle 提升为 server proof。校正矩阵如下：
+捕获时 binary 与 archived `rc.bin` hash 相同，允许把当次相同 payload 的静态 symbol 作为窄范围 historical correction，但不能把 client bundle 提升为 server proof，也不能声称 fresh clone 可独立重放 E-008。校正矩阵如下：
 
 | 现有陈述 | hash-matched evidence | 裁定 |
 |---|---|---|
@@ -205,6 +205,8 @@ flowchart LR
 Developer ID 签名“当前文件在磁盘上有效”也不等于“应用内 updater 验证了下载物签名/公证”。`spctl --assess --type execute` 对该 standalone CLI 返回 `rejected (the code is valid but does not seem to be an app)`；因此本轮不宣称 Gatekeeper/notarization acceptance，只保留 `codesign --verify` 的窄结论。
 
 ## 10. 可复现命令
+
+以下命令只重放 E-001 至 E-007，前提是同一可执行文件仍由 operator 合法持有。E-008 的临时 extracted bundle 未纳入仓库，不能从 fresh clone 重放；其 provenance 边界见 clone-visible evidence appendix。
 
 ```bash
 RAFT_CASE=/Users/ancienttwo/Projects/byok-sdk/work/20260810-raft-cli-dynamic

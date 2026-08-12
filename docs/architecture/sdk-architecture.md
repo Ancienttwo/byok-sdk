@@ -24,7 +24,7 @@
 - Agent dispatch plane：`@byok-sdk/protocol` + `@byok-sdk/server` + `@byok-sdk/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key，并可通过独立 launcher 把 credential-blind projection 交给 Pi；dispatch 包仍不 import 它，组合发生在进程边界。
 
-目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 已将六个 dispatch package 统一发布为 `@byok-sdk/*@0.1.0`，并发布 `byok-sdk@0.1.0` namespace umbrella；`@byok-sdk/keys` 继续独立安装，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录最终执行状态。
+目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 先将六个 dispatch package 与 `byok-sdk` namespace umbrella 发布为 `0.1.0`；随后 adapter-only security release 把同一七包 dispatch graph 推进到 `0.1.1`。`@byok-sdk/keys` 继续独立停在 `0.1.0`，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录最终执行状态。
 
 ## 1. P1：全局架构地图
 
@@ -924,7 +924,7 @@ CI 验证层次：
 | GAP-002 | task-level steer 未按 claimed runtime gate | Claude/Codex 收到 steer 会 throw，并可能 stall cursor | §3.3 | **已修复（S0）**：修复形状是 claimed-runtime snapshot gate——claim 时把所选 runtime 的 capabilities 快照写入 task record，`steerTask()` 在构造 envelope 前按快照拒绝并抛 typed `SteerRejectedError` / `steer_unsupported_runtime`（快照缺失 fail-closed）；client 侧把 unsupported inbound steer 记为非重试性错误并 ack，cursor 不冻结 | 已收口 | S0（已交付） |
 | GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | **已决策（S0）**：维持 reserved 并已文档化（§2.2、`docs/protocol.md` §2、ADR-023）；wire 保留、禁止声称工作区选择能力，接线需另立 ADR 先定 resolver 设计 | 已收口 | S0（已交付） |
 | GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | 原证据：`auth.ts` 发裸 `randomBytes(24)`，`http.ts` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | **已修复（S1）**：修复形状是单一域常数 `NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n'`（`auth.ts`），server 侧只有 `verifyNonceSignature` 一个 nonce 签名检查点、前缀在函数内部施加，client `device-keys.ts` 的 `signNonce` 签同一字面量；裸签名 401，无双模、无 flag、无过渡窗口，两端同批交付 | 已收口 | S1（已交付） |
-| GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | 原证据：`auth.ts` 的 `DeviceRecord` 只有 `deviceId/deviceName/devicePublicKey/revoked` | **已修复（S1）**：修复形状是 required tenant——`DeviceRecord` 增加 required `tenantId`/`productId`（无 optional、无默认值），值只来自 server 铸造的 pairing claims；`DeviceRegistry` 按 `(tenantId, deviceId)` 复合键查找且公开面 tenant-first（`get`/`revoke` 均带 tenantId），naked deviceId 查找不从包入口导出 | 已收口 | S1（已交付） |
+| GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | 原证据：`auth.ts` 的 `DeviceRecord` 只有 `deviceId/deviceName/devicePublicKey/revoked` | **已修复（S1）**：修复形状是 required tenant——`DeviceRecord` 增加 required `tenantId`/`productId`（无 optional、无默认值），值只来自 server 铸造的 pairing claims；tenant-owned 公开面按 `(tenantId, deviceId)` 复合键且 tenant-first（`get`/`revoke` 均带 tenantId）。cloud 的 `DeviceDirectory.resolveByDeviceId(deviceId)` 是 challenge/token 两条 pre-tenant auth route 的窄端口，不进入 tenant facade；server package 入口不导出 naked lookup | 已收口 | S1（已交付） |
 | GAP-007 | **已收口（S4A/S4B）**：`deploy/sql` forward-only migrations、Postgres+R2 composition、compose substrate 与 hosted env/runbook 已落地 | 平台设计已有 real Postgres+MinIO 实证 | §12.7 | 保留 SQL order/checksum、hard env 与 deploy runbook gate | 已收口 | S4 |
 | GAP-010 | reconnect 缺确定性种子 | fleet 同时重连时退避不可复现，也无法按设备错峰 | S7-a 已新增 `daemon/deterministic-jitter.ts`，以 product/device identity、domain 与 sequence 派生稳定 delay；`deterministic-jitter.test.ts` 覆盖 domain separation、bounds、fleet peak 与真实 WS retry 接线 | **已收口（S7-a）**：automatic reconnect/upload/maintenance 使用 domain-separated deterministic jitter；operator immediate retry 不加 jitter | 已收口 | S7 |
 
@@ -953,7 +953,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 
 ## 12. 平台架构（S0–S7 与 release/registry closeout 已落地）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability、registry publish/readback 与 `v0.1.0` tag/Release。wire v1 保持冻结。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 仍独立为 `0.1.0`；wire v1 保持冻结。
 
 ### 12.1 目标 package graph
 
@@ -1277,7 +1277,7 @@ S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回
 
 #### 12.6.6 Composition contracts
 
-- 所有 store port 第一参数是 required `TenantId`；没有裸 `deviceId/taskId` lookup。
+- 所有 tenant-owned data method 第一参数是 required `TenantId`，没有裸 `taskId` lookup。唯一 naked device lookup 是 `DeviceDirectory.resolveByDeviceId(deviceId)`：它只服务 challenge/token 的 pre-tenant auth bootstrap，返回行后仍以行内 tenant/product 为 authority，且不进入 tenant facade。
 - pairing code 由 server-side claim 绑定 tenant/product；device record 不允许“无 tenant”。
 - terminal record immutable；同 task 不同 hash 返回 conflict，不覆盖第一份事实。
 - board claim 用 SQL CAS；N 个并发 claim 只允许 1 个成功，其余返回 holder snapshot。
@@ -1594,7 +1594,7 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll（已实现；PR gate 见 sprint ledger） | P3 |
 | S6 | Device proof + memory | P4 |
-| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b/S7-c 与 `v0.1.0` release 已完成） | 不对应 P5；P5 是独立 deferred plan |
+| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b/S7-c 与 `v0.1.0` release 已完成；后续 adapter-only `v0.1.1` security release 亦已完成） | 不对应 P5；P5 是独立 deferred plan |
 | 并行 | K4/K4.1 aip swap | K 线，不阻塞 P0/P1 |
 | — | P5：keys profile → `TruthStore` | Deferred standalone plan，触发条件见上表 |
 
@@ -1839,13 +1839,13 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 
 | # | 测试 | 断言 | 落点 |
 | --- | --- | --- | --- |
-| I1 | 跨租户路由穷举矩阵 | 迭代 router 全部已注册路由；tenant B 的 device principal 打 tenant A 的每种资源（board list/claim/status、mailbox pull/ack、records get/put、presence、activity、blob url 签发）→ 一律 401/404、零行；存在未分类路由 → 测试自身失败 | `@byok-sdk/cloud` isolation-matrix 测试；**已于 S3a 落地**：cloud route registry 双向闭合（注册表是唯一挂载路径）+ 跨租户矩阵，board/records/presence/activity 类资源随各自 slice 并入同一矩阵 |
+| I1 | 路由分类闭合 + 已覆盖资源的跨租户矩阵 | route registry 双向闭合，存在未分类或只登记未挂载的路由即失败；现有 route-level cross-tenant matrix 实打 mailbox、inbound messages 与 blob URL，tenant B 只能命中自己的 keyspace。board/records/presence/activity 仍由 tenant facade、handler/store tests 与 conformance 覆盖，尚未全部并入同一 route-level matrix，不得称“每种资源穷举” | `@byok-sdk/cloud` route-inventory + isolation tests；**部分落地**，route-level 全资源矩阵仍是后续测试扩展面 |
 | I2 | pairing 跨租户 | A 的 code 兑换 → 设备落 A 且仅 A；code 二次兑换 401；过期 401；无 claims 无法 mint（类型层拒 + runtime zod 拒） | `@byok-sdk/server` pairing 测试 |
 | I3 | proof 租户不符 | 合法签名 + `claims.tenantId = B`（设备属 A）→ 401；签后篡改 tenantId → 签名败；requestId 重放 → 幂等原结果或 409；skew > 60s → 拒 | core/cloud proof 测试 |
 | I4 | store conformance 跨租户不变式 | 每个 store port 方法：T1 写入、以 T2 读 → empty/undefined；port 不存在可变更 `tenant_id` 的方法；InMemory 与 SQL 后端跑同一份套件 | store conformance suite |
 | I5 | bearer 交叉验证 | token `claims.tenantId` 与 registry 行不符 → 401；registry 为权威 | `@byok-sdk/server` auth 测试 |
 | I6 | `board_seq` 隔离 | 并发双租户写入下，A 的 SSE/轮询流永不出现 B 的行；per-tenant 序列互不推进 | cloud board 测试（P3 并入矩阵） |
-| I7 | 铸造点唯一 | `as TenantId` 只出现在 auth 模块与测试 fixture（grep/lint 测试）；store port 签名全部 tenant-first（类型测试） | repo 级 guard |
+| I7 | 铸造点受控 | `@byok-sdk/core` 只允许 `tenant.ts` 铸造；`@byok-sdk/cloud-postgres` 只允许 row→record 的 `stores/` 边界铸造；cloud 的 pre-tenant device lookup 是显式 auth 例外。各包用自己的 source scan/type tests 守住边界 | package-local guards（不是单一 repo-wide scanner） |
 | I8 | golden 零漂 | `git diff --exit-code packages/protocol/src/__tests__/golden/` 加 freeze-guard 全绿——机检证明 pairing 绑定未碰 DTO | 既有机检 |
 | I9 | `productId` 等值 | `conn.hello.productId` 与 device 行不符 → 拒连 | `@byok-sdk/server` hub 测试 |
 

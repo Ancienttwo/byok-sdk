@@ -143,6 +143,49 @@ describe('access token renewal (protocol §6.2)', () => {
     auth.stop();
   });
 
+  it('waits for an in-flight reactive renewal instead of returning the stale cached token', async () => {
+    server.setTokenTtlMs(60 * 60 * 1000);
+    const storeDir = await tmpDir('byok-auth-read-during-renewal-');
+    const store = new DeviceStore(storeDir);
+    const auth = new AuthManager({ serverUrl: server.url, store });
+    const record = await auth.pair('pairing-code');
+    server.rotateDeviceToken(record.deviceId);
+
+    let renewalSaveReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      renewalSaveReached = resolve;
+    });
+    let releaseRenewalSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => {
+      releaseRenewalSave = resolve;
+    });
+    const realSave = store.save.bind(store);
+    vi.spyOn(store, 'save').mockImplementation(async (next) => {
+      if (next.accessToken !== record.accessToken) {
+        renewalSaveReached();
+        await saveGate;
+      }
+      await realSave(next);
+    });
+
+    const renewal = auth.handleUnauthorized();
+    await reached;
+
+    const tokenRead = auth.getValidAccessToken();
+    await expect(
+      Promise.race([
+        tokenRead.then(() => 'settled'),
+        new Promise<string>((resolve) => setImmediate(() => resolve('pending'))),
+      ]),
+    ).resolves.toBe('pending');
+
+    releaseRenewalSave();
+    const renewedToken = await renewal;
+    await expect(tokenRead).resolves.toBe(renewedToken);
+    expect(renewedToken).toBe(server.currentAccessToken(record.deviceId));
+    await auth.stop();
+  });
+
   it('stop waits for an already-started renewal writer before it resolves', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const storeDir = await tmpDir('byok-auth-stop-barrier-');
