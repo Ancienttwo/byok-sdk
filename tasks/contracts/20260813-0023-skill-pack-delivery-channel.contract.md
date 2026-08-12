@@ -1,6 +1,6 @@
 # Task Contract: skill-pack-delivery-channel
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260813-0023-skill-pack-delivery-channel.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
