@@ -144,6 +144,14 @@ export interface Session {
  */
 export interface RuntimeAdapter {
   id: string;
+  /**
+   * Explicit opt-in to the authoritative `task.offer.dispatchSelection`
+   * contract. A custom adapter using a built-in runtime id must set this only
+   * when it validates and pins the exact lane/provider/model semantics; the
+   * daemon will otherwise withhold the connection-level capability so a
+   * server rejects the offer before sending it.
+   */
+  readonly supportsDispatchSelection?: true;
   detect(): Promise<RuntimeDetectResult>;
   capabilities(): RuntimeCapabilities;
   start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session>;

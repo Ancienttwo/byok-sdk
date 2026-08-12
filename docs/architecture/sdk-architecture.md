@@ -22,7 +22,7 @@
 当前系统有两条安全模型完全不同的产品线：
 
 - Agent dispatch plane：`@byok-sdk/protocol` + `@byok-sdk/server` + `@byok-sdk/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
-- Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key 并直连 model provider；当前已实现，但在仓库内没有任何 dispatch 包或 example import 它。
+- Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key，并可通过独立 launcher 把 credential-blind projection 交给 Pi；dispatch 包仍不 import 它，组合发生在进程边界。
 
 目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 已将六个 dispatch package 统一发布为 `@byok-sdk/*@0.1.0`，并发布 `byok-sdk@0.1.0` namespace umbrella；`@byok-sdk/keys` 继续独立安装，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录最终执行状态。
 
@@ -59,12 +59,15 @@ flowchart LR
     IPC(["Unix socket / named pipe<br/>HMAC control channel"]):::client
     Runtime(["RuntimeAdapter"]):::runtime
     Pi(["pi CLI"]):::runtime
+    PiLauncher(["byok-pi-provider-launcher<br/>credential custody"]):::isolated
     Claude(["Claude Code CLI"]):::runtime
     Codex(["Codex CLI"]):::runtime
     Workspace[("Task workspace<br/>可选 Git checkpoints")]:::store
     Agent --> IPC
     Agent --> Runtime
     Runtime --> Pi
+    Runtime -.->|"non-secret selection + stdio"| PiLauncher
+    PiLauncher -->|"private projection + child env"| Pi
     Runtime --> Claude
     Runtime --> Codex
     Runtime --> Workspace
@@ -79,7 +82,8 @@ flowchart LR
   Pi -->|"CLI 自有认证"| Provider
   Claude -->|"CLI 自有认证"| Provider
   Codex -->|"CLI 自有认证"| Provider
-  Keys -->|"OS credential store + direct HTTP"| Provider
+  Keys -->|"OS credential store"| PiLauncher
+  Keys -->|"explicit direct clients"| Provider
 
   style SaaS fill:none,stroke:#60a5fa,stroke-width:2px,color:#60a5fa
   style Device fill:none,stroke:#a78bfa,stroke-width:2px,color:#a78bfa
@@ -673,6 +677,7 @@ flowchart LR
 | `profile-store.ts` / `sqlite-profile-store.ts` | non-secret profile memory/SQLite persistence |
 | `headers.ts` | bearer / x-api-key / none；缺 secret fail-closed |
 | `openai-client.ts` / `anthropic-client.ts` | direct provider transports |
+| `pi-provider-projection.ts` / `pi-provider-launcher-core.ts` / `bin/pi-provider-launcher.ts` | credential-blind Pi `models.json` projection；独立进程只读 profile DB、按 auth mode 读取 keychain、注入 Pi child env、继承 RPC stdio、退出清理 |
 | `http.ts` / `url.ts` | 15s timeout、2MiB response cap、HTTP error classification、loopback/private-host guards |
 | `errors.ts` | stable key-management error taxonomy |
 
@@ -680,7 +685,7 @@ flowchart LR
 
 `ProviderRegistry.configure()` 的顺序是先写 secret，再验证 secret 已存在，最后写 profile；status 只暴露 `secret_configured` boolean，不返回 secret。`resolve()` 只对 enabled、valid、secret-complete 的 profile 构造 transport。
 
-`@byok-sdk/keys` 不是 daemon 的 runtime credential source。当前没有任何 `client/server/protocol/examples/templates` import site；把它画进 agent spawn environment 会直接破坏 dispatch plane 的 credential-isolation claim。
+`@byok-sdk/keys` 不是 daemon 进程内的 runtime credential source，且仍没有任何 `client/server/protocol` import edge。BYOK Pi 的组合点是显式配置的 launcher executable：client 只传 provider/model 与非秘密路径；launcher 才读取 profile/keychain，生成 process-scoped projection 并 spawn Pi。这个进程边界保留 dependency graph 的零边，也让 dispatch 进程无法取得 key value。
 
 ## 8. P2：端到端数据流
 
@@ -825,7 +830,7 @@ flowchart TB
 | device auth | pairing single-use、Ed25519 nonce proof、bearer claims、revoke | 同一 OS user 读取本地 `device.json` |
 | transport gate | remote plaintext 默认拒绝；WSS/HTTPS 默认路径 | SDK 自己提供 TLS termination |
 | policy | device ceiling 合并；adapter 无法表达则 decline | kernel-level sandbox 或强制 filesystem confinement |
-| runtime credentials | dispatch daemon 不读 runtime credential stores；ambient env 按 allowlist | 被显式 allow 的 env value 不含 secret |
+| runtime credentials | subscription login store 与 BYOK key 都不由 dispatch daemon 读取；authoritative BYOK 走独立 launcher | 同一 OS user 无法调试/观察 launcher 或 Pi child process |
 | control socket | mutual HMAC、endpoint permission/DACL、method pre-auth unreachable | 同一 user 且能读 token 的恶意进程 |
 | audit/observer | 只记录 task id、event type、tool/runtime name、counts/sizes | 保存完整 tool input/output 作为审计证据 |
 | resource limits | max duration、max output bytes、bounded queues/collections、shutdown deadlines | cgroup/rlimit；恶意 child 一定会响应 interrupt |
@@ -837,14 +842,14 @@ flowchart TB
 
 dispatch daemon 当前的 credential 边界由六条构成，前五条是已实现行为，第六条是 CI 层的实证（§10 第 6 层的 `strace` audit）：
 
-- 不读取 model provider key；
+- dispatch daemon 不读取 model provider key；BYOK key 只由独立 launcher 读取；
 - 不读取 runtime 自己的 login store；
 - 不把 host/server token 注入 runtime 子进程；
 - 不 import `@byok-sdk/keys`（package graph 的零边，§1.2）；
-- task environment 走 per-runtime allowlist，`BYOK_*` hard deny；
+- task environment 走 per-runtime allowlist，`BYOK_*` hard deny；subscription 与 BYOK-launcher spawn 额外移除 provider credential env names；
 - credential-isolation audit 是 release gate，不是可选检查。
 
-**目标设计**：若未来真的出现 managed agent credential 需求，它必须独立立 ADR，并同时满足——per-launch scoped token；真 credential 不进 child env；loopback proxy 的 token file 0600；scope 最小化；mint 失败即 fail-closed。它不得改变现有 dispatch 默认的安全承诺，即默认形状仍是"daemon 不持有任何 runtime credential"。
+**当前 BYOK 设计**：不引入 loopback credential proxy。每次 dispatch 启动一个无 listener 的 custody launcher；projection 目录私有且 process-scoped，Pi child env 从封闭 platform/proxy baseline 加唯一 resolved key 重建，不继承 launcher 的 ambient secrets；key 只在 launcher 内存与 Pi child env 中短暂存在，缺 profile/model/keychain/key 任一条件都在 Pi 网络请求前 fail closed。默认承诺仍是“dispatch daemon 不持有任何 runtime credential”。
 
 ### 9.2 Permission bypass：REJECTED
 
@@ -929,7 +934,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 
 | 条目 | 架构影响 | 当前正确表述 |
 | --- | --- | --- |
-| `@byok-sdk/keys` 零主链 import | key custody 与 dispatch 尚未组合 | 标为“已实现、隔离”，不是 placeholder，也不是 daemon secret source；这条零边是安全 invariant（§1.2、§14.3） |
+| `@byok-sdk/keys` 零主链 import | key custody 与 dispatch 通过 executable process boundary 组合 | keys 不是 daemon 进程内 secret source；零 import edge 仍是安全 invariant，launcher 只接收 non-secret selection（§1.2、§7.2、§14.3） |
 | embedded SQLite 不恢复 in-flight | record persistence 不等于 runtime recovery | 只承诺 task/blob record 跨重启，不承诺 live handle/session；应作为 self-hosted 的公开契约而非隐藏实现细节 |
 
 ### 11.2 目标平台缺口与收口轨迹

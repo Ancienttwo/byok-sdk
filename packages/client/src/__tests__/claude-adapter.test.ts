@@ -133,6 +133,43 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     ]);
   });
 
+  it('passes the subscription selection model to Claude without provider credentials', async () => {
+    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: ((command: string, args: string[], options: object) => {
+        calls.push({ args: [...args], env: (options as { env?: NodeJS.ProcessEnv }).env ?? {} });
+        return realSpawn(command, args, options);
+      }) as never,
+    });
+    const session = await adapter.start(
+      {
+        ...baseTask,
+        dispatchSelection: {
+          lane: 'subscription',
+          runtimeId: 'claude',
+          providerId: null,
+          modelId: 'opus',
+        },
+      },
+      await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
+    );
+    openSessions.push(session);
+    expect(calls[0]?.args).toContain('--model');
+    expect(calls[0]?.args[calls[0].args.indexOf('--model') + 1]).toBe('opus');
+    expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
+    await expect(session.followUp({
+      instruction: 'switch model',
+      policy: { mode: 'auto' },
+      dispatchSelection: {
+        lane: 'subscription',
+        runtimeId: 'claude',
+        providerId: null,
+        modelId: 'sonnet',
+      },
+    })).rejects.toThrow(/persistent session cannot change model/);
+  });
+
   it('a task.offer carrying a known sessionRef resumes via the real --resume flag, matching session_id', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: 'resume-me-123' });

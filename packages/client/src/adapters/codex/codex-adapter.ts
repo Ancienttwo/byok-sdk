@@ -14,6 +14,7 @@ import {
 } from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
+import { withoutProviderCredentials } from '../provider-credential-environment';
 import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
 import { isRoutineCodexEvent, mapCodexEventToAgentEvents, unmappedFrameKey } from './events';
 import { CodexProcessRunner, type CodexRawEvent, type SpawnFn } from './process-runner';
@@ -73,6 +74,7 @@ export interface CodexAdapterOptions {
  * (`../pi/pi-adapter.ts`'s `resolveFreshSessionId`, finding F8).
  */
 export class CodexAdapter implements RuntimeAdapter {
+  readonly supportsDispatchSelection = true;
   readonly id = 'codex';
 
   constructor(private readonly options: CodexAdapterOptions = {}) {}
@@ -154,6 +156,7 @@ export class CodexAdapter implements RuntimeAdapter {
     if (!mapping.ok) {
       throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by codex adapter');
     }
+    const modelId = subscriptionModel(task);
 
     const bin = this.resolveBin();
     const queue = new AsyncQueue<AgentEvent>();
@@ -170,13 +173,15 @@ export class CodexAdapter implements RuntimeAdapter {
     // every run, not just a contrived edge case.
     const workspaceDir = await resolveRealWorkspaceDir(ctx.workspaceDir);
 
+    const runtimeEnv = withoutProviderCredentials(ctx.env);
     const { sessionRef, runner } = await runCodexTurn({
       command: bin.command,
       resumeRef: task.sessionRef,
       instruction: task.instruction,
+      modelId,
       policyArgs: mapping.args,
       cwd: ctx.workspaceDir,
-      env: ctx.env,
+      env: runtimeEnv,
       spawnFn: this.options.spawnFn,
       workspaceDir,
       queue,
@@ -195,6 +200,7 @@ export class CodexAdapter implements RuntimeAdapter {
       recordUnmapped,
       initialRunner: runner,
       preparedGit: ctx.gitWorkspace !== undefined,
+      modelId,
     });
   }
 
@@ -245,6 +251,7 @@ interface RunTurnParams {
   command: string;
   resumeRef: string | undefined;
   instruction: string;
+  modelId: string | undefined;
   policyArgs: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -285,9 +292,22 @@ interface RunTurnResult {
  * safety net" gate) — confirmed via `codex exec --help`, which documents it
  * separately from every sandbox/approval flag.
  */
-function buildArgv(resumeRef: string | undefined, policyArgs: string[], instruction: string, preparedGit = false): string[] {
+function buildArgv(
+  resumeRef: string | undefined,
+  policyArgs: string[],
+  instruction: string,
+  modelId: string | undefined,
+  preparedGit = false,
+): string[] {
   const base = resumeRef !== undefined ? ['exec', 'resume', resumeRef] : ['exec'];
-  return [...base, '--json', ...(preparedGit ? [] : ['--skip-git-repo-check']), ...policyArgs, instruction];
+  return [
+    ...base,
+    '--json',
+    ...(modelId ? ['--model', modelId] : []),
+    ...(preparedGit ? [] : ['--skip-git-repo-check']),
+    ...policyArgs,
+    instruction,
+  ];
 }
 
 /**
@@ -300,7 +320,13 @@ function buildArgv(resumeRef: string | undefined, policyArgs: string[], instruct
  * `CodexSession.followUp()` (always a resume).
  */
 async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
-  const argv = buildArgv(params.resumeRef, params.policyArgs, params.instruction, params.preparedGit);
+  const argv = buildArgv(
+    params.resumeRef,
+    params.policyArgs,
+    params.instruction,
+    params.modelId,
+    params.preparedGit,
+  );
 
   let firstLineSettled = false;
   let resolveFirstLine!: (ref: string) => void;
@@ -445,6 +471,7 @@ interface CodexSessionOptions {
   recordUnmapped: (key: string) => void;
   initialRunner: CodexProcessRunner;
   preparedGit: boolean;
+  modelId: string | undefined;
 }
 
 class CodexSession implements Session {
@@ -469,6 +496,7 @@ class CodexSession implements Session {
   private readonly queue: AsyncQueue<AgentEvent>;
   private readonly recordUnmapped: (key: string) => void;
   private readonly preparedGit: boolean;
+  private readonly modelId: string | undefined;
   private currentRunner: CodexProcessRunner | undefined;
   private closed = false;
 
@@ -481,6 +509,7 @@ class CodexSession implements Session {
     this.queue = options.queue;
     this.recordUnmapped = options.recordUnmapped;
     this.preparedGit = options.preparedGit;
+    this.modelId = options.modelId;
     this.currentRunner = options.initialRunner;
     void this.forgetRunnerOnceClosed(options.initialRunner);
   }
@@ -545,6 +574,17 @@ class CodexSession implements Session {
     if (!mapping.ok) {
       throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by codex adapter');
     }
+    const requestedModel = subscriptionModel(task);
+    if (requestedModel !== undefined && requestedModel !== this.modelId) {
+      throw new PolicyUnsupportedError(
+        `codex persistent session cannot change model from ${this.modelId ?? '(legacy default)'} to ${requestedModel}`,
+      );
+    }
+    // A follow-up with no additive dispatchSelection still pins the model
+    // selected when this session object was created. Omitting --model on a
+    // new `codex exec resume` process would let ambient config choose a
+    // different target while the session silently continued.
+    const modelId = this.modelId;
 
     const resumeRef = this.sessionRef;
     let sessionRef: string;
@@ -554,9 +594,10 @@ class CodexSession implements Session {
         command: this.command,
         resumeRef,
         instruction: task.instruction,
+        modelId,
         policyArgs: mapping.args,
         cwd: this.workspaceDir,
-        env: this.env,
+        env: withoutProviderCredentials(this.env),
         spawnFn: this.spawnFn,
         workspaceDir: this.workspaceDir,
         queue: this.queue,
@@ -646,4 +687,15 @@ class CodexSession implements Session {
       'codex adapter does not support approval resume: codex exec never emits a needs_approval-equivalent event (sandbox-denied actions resolve internally with no wire-visible pause)',
     );
   }
+}
+
+function subscriptionModel(task: TaskOfferPayload): string | undefined {
+  const selection = task.dispatchSelection;
+  if (selection === undefined) return undefined;
+  if (selection.lane !== 'subscription' || selection.runtimeId !== 'codex') {
+    throw new PolicyUnsupportedError(
+      `codex adapter cannot execute ${selection.lane} selection for runtime ${selection.runtimeId}`,
+    );
+  }
+  return selection.modelId;
 }

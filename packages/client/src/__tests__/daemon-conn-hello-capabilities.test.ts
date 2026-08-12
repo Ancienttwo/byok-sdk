@@ -7,6 +7,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import type { RuntimeAdapter } from '../types';
 import { TestServer } from './fixtures/test-server';
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
@@ -148,8 +149,56 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
     expect(hello.payload.capabilities).toContain('approval-targeting');
+    expect(hello.payload.capabilities).toContain('dispatch-selection');
     // Unconditional, exactly like `blob-upload` — not gated on any
     // adapter's own `capabilities()` the way `steer` is.
     expect(hello.payload.capabilities).toContain('blob-upload');
+  });
+
+  it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {
+    const opaquePi: RuntimeAdapter = {
+      id: 'pi',
+      async detect() {
+        return { present: true };
+      },
+      capabilities() {
+        return {
+          steer: false,
+          resume: false,
+          approvalInteractive: false,
+          permissionModes: ['auto'],
+        };
+      },
+      async start() {
+        throw new Error('not used by capability handshake test');
+      },
+    };
+    const workspaceRoot = await tmpDir('byok-conn-hello-capflags-custom-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-capflags-custom-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      [opaquePi],
+    );
+    await daemon.pair('pairing-code');
+    await daemon.start();
+
+    const hello = await server.waitFor((event) => event.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    expect(hello.payload.capabilities).not.toContain('dispatch-selection');
+  });
+
+  it('withholds dispatch-selection when no selectable runtime adapter is configured', async () => {
+    const workspaceRoot = await tmpDir('byok-conn-hello-capflags-empty-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-capflags-empty-store-');
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      [],
+    );
+    await daemon.pair('pairing-code');
+    await daemon.start();
+
+    const hello = await server.waitFor((event) => event.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    expect(hello.payload.capabilities).not.toContain('dispatch-selection');
   });
 });

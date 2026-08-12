@@ -205,7 +205,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 |---|---|---|---|---|---|
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `runtimes?`, `cursor?` | Opening (or reopening) the WSS connection |
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
-| `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
+| `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -220,6 +220,27 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
+
+**`TaskOfferPayload.dispatchSelection` is the authoritative LLM target when
+present.** It is a strict discriminated union:
+
+- subscription: `{lane:'subscription', runtimeId:'claude'|'codex',
+  providerId:null, modelId:string}`;
+- BYOK: `{lane:'byok', runtimeId:'pi', providerId:string, modelId:string}`.
+
+Every id is non-empty, bounded to 160 characters, and rejects NUL/CR/LF. The
+server derives the task's requested runtime from `runtimeId`; if the legacy
+optional `runtime` field is also present, disagreement is rejected before task
+creation. Because an older v1 daemon is allowed to strip an unknown optional
+field, the server first requires the target connection to advertise the
+additive `dispatch-selection` capability; absence rejects before task creation
+instead of degrading to a runtime-only offer. The daemon repeats the runtime
+check before claim and selects the adapter
+from `dispatchSelection.runtimeId`. Adapters then pass the exact model (and, for
+Pi, provider) to the runtime. No layer may infer a missing provider/model or
+fall back to another target. The field is additive in frozen v1; offers that do
+not use provider selection retain the pre-existing `runtime?` behavior, but the
+new path never degrades into it after a selection was supplied.
 
 **`TaskOfferPayload.workspaceHint` is RESERVED — currently ignored end to
 end.** The field exists on the wire (`TaskOfferPayloadSchema`,

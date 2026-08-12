@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -77,6 +77,20 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
       provider_id: 'openai',
     });
     second.close();
+  });
+
+  it('opens an existing profile database read-only and never creates a missing one', () => {
+    const writer = new SqliteProviderProfileStore({ path: databasePath });
+    writer.save(profile('openai'));
+    writer.close();
+
+    const reader = new SqliteProviderProfileStore({ path: databasePath, readOnly: true });
+    expect(reader.get('openai')?.model).toBe('gpt-5.2');
+    reader.close();
+
+    const missingPath = join(directory, 'missing', 'profiles.sqlite');
+    expect(() => new SqliteProviderProfileStore({ path: missingPath, readOnly: true })).toThrow();
+    expect(existsSync(missingPath)).toBe(false);
   });
 
   it('re-validates a row on read, so a reopen cannot hand back a bad profile', () => {
