@@ -114,7 +114,39 @@ export type DaemonEvent =
    * full race this closes.
    */
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reason?: string }
-  | { kind: 'git-workspace'; ts: string; taskId: string; workspaceId: string; phase: string; headChanged?: boolean; commitsSinceBaseline?: number; dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number }; errorCategory?: string };
+  | { kind: 'git-workspace'; ts: string; taskId: string; workspaceId: string; phase: string; headChanged?: boolean; commitsSinceBaseline?: number; dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number }; errorCategory?: string }
+  /**
+   * Plan `device-assertion-broker`: one `assertion.issue` control call
+   * resolved — either an assertion was minted (`issued`) or one of the six
+   * fail-closed gates refused (`denied`, with `reason` naming which one; see
+   * `ASSERTION_ISSUE_ERROR_CODES`, `control-protocol.ts`).
+   *
+   * ONE kind for both outcomes, so an operator reading the feed sees the
+   * issuance rate and the refusal rate on the same line shape rather than
+   * having to correlate two.
+   *
+   * The signature and the envelope bytes are NOT fields of this event and
+   * never can be. That is structural, not a redaction rule: `bin/audit-log.ts`
+   * can only drop what it is handed, and an event type that cannot carry a
+   * signature cannot leak one into a durable file no matter how the audit
+   * projection is later edited. What IS carried is the metadata an incident
+   * needs — which audience, which `jti` (so a suspect assertion presented to
+   * the host's cloud can be traced back to the exact local call that minted
+   * it), and when it expires.
+   *
+   * codex round-2 F4 — the union is split by `result` for the same structural
+   * reason: on the ISSUED path `audience` came from this daemon's own
+   * configured allowlist (operator-authored, safe verbatim), but on the DENIED
+   * path it is whatever the CALLER sent — free text that could be a PEM, a
+   * signature, or any secret shaped as an audience. So the denied variant has
+   * NO raw `audience` field at all; it carries only `audienceSize` (a byte
+   * count), computed at event-construction time (`noteDeviceAssertion`). The
+   * raw denied audience therefore never reaches the observer feed, `format.ts`,
+   * daemon stdout, or the audit file — there is no field to carry it, rather
+   * than a redactor that has to remember to strip it.
+   */
+  | { kind: 'device-assertion'; ts: string; result: 'issued'; audience: string; jti: string; expiresAt: string }
+  | { kind: 'device-assertion'; ts: string; result: 'denied'; reason: string; audienceSize?: number };
 
 export type DaemonEventListener = (event: DaemonEvent) => void;
 export type Unsubscribe = () => void;
@@ -354,6 +386,42 @@ export class DaemonObserver {
   /** M4 Phase 2: see the `shutdown-complete` `DaemonEvent` variant's own doc comment (finding F5(b): `undeliveredOutboxCount`). */
   noteShutdownComplete(reason: string, undeliveredOutboxCount?: number): void {
     this.emit({ kind: 'shutdown-complete', ts: nowIso(), reason, undeliveredOutboxCount });
+  }
+
+  /**
+   * Plan `device-assertion-broker`: see the `device-assertion` `DaemonEvent`
+   * variant's own doc comment. The parameter type is what keeps the signature
+   * out — there is no field to pass one through.
+   *
+   * codex round-2 F4: the DENIED caller can pass its raw `audience` here, but
+   * it is converted to a byte SIZE the instant the event is constructed and the
+   * raw string is dropped — it is never placed on the emitted `DaemonEvent`, so
+   * it cannot reach a subscriber, `format.ts`, stdout, or the audit file. The
+   * ISSUED `audience` came from the allowlist and is kept verbatim.
+   */
+  noteDeviceAssertion(
+    event:
+      | { result: 'issued'; audience: string; jti: string; expiresAt: string }
+      | { result: 'denied'; reason: string; audience?: string },
+  ): void {
+    if (event.result === 'issued') {
+      this.emit({
+        kind: 'device-assertion',
+        ts: nowIso(),
+        result: 'issued',
+        audience: event.audience,
+        jti: event.jti,
+        expiresAt: event.expiresAt,
+      });
+      return;
+    }
+    this.emit({
+      kind: 'device-assertion',
+      ts: nowIso(),
+      result: 'denied',
+      reason: event.reason,
+      audienceSize: event.audience === undefined ? undefined : Buffer.byteLength(event.audience, 'utf8'),
+    });
   }
 
   /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */

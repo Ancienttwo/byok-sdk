@@ -27,6 +27,24 @@ export interface DaemonOwnerLease {
   release(): Promise<void>;
 }
 
+/**
+ * Optional dependency-injection knobs for {@link acquireDaemonOwner}, in the
+ * same additive spirit as its `clock` parameter.
+ */
+export interface AcquireDaemonOwnerOptions {
+  /**
+   * Bind the cross-process store-mutex listener to THIS exact port (at
+   * attempt 0) instead of deriving it from the storeDir hash. Undefined in
+   * production, where the hash derivation is used unchanged — this exists only
+   * so a highly-parallel test runner can hand each daemon a guaranteed-unique
+   * mutex port and avoid birthday-paradox collisions in the bounded hash band
+   * ({@link STORE_MUTEX_PORT_BASE}..+{@link STORE_MUTEX_PORT_COUNT}). The
+   * bind/probe/reclaim/fail-closed semantics are IDENTICAL either way; only the
+   * port-selection source changes.
+   */
+  readonly mutexPort?: number;
+}
+
 interface LivenessListener {
   port: number;
   close(): Promise<void>;
@@ -56,7 +74,12 @@ function storeMutexIdentity(canonicalStoreDir: string): string {
   return createHash('sha256').update(canonicalStoreDir).digest('hex');
 }
 
-function storeMutexPort(identity: string, attempt: number): number {
+function storeMutexPort(identity: string, attempt: number, override?: number): number {
+  // Test-injected exact port (see `AcquireDaemonOwnerOptions.mutexPort`): use it
+  // verbatim at attempt 0, and step by +attempt on the rare EADDRINUSE so the
+  // candidate-negotiation loop below still functions identically. Undefined in
+  // production, which falls through to the unchanged hash derivation.
+  if (override !== undefined) return override + attempt;
   const digest = Buffer.from(identity, 'hex');
   const start = digest.readUInt32BE(0) % STORE_MUTEX_PORT_COUNT;
   const step = 1 + (digest.readUInt32BE(4) % (STORE_MUTEX_PORT_COUNT - 1));
@@ -281,11 +304,11 @@ async function probeStoreMutex(port: number): Promise<StoreMutexProbe> {
   });
 }
 
-async function acquireStoreMutex(canonicalStoreDir: string): Promise<LivenessListener> {
+async function acquireStoreMutex(canonicalStoreDir: string, mutexPortOverride?: number): Promise<LivenessListener> {
   const identity = storeMutexIdentity(canonicalStoreDir);
   for (let attempt = 0; attempt < STORE_MUTEX_PORT_CANDIDATES; attempt += 1) {
     const server: Server = createServer((socket) => socket.end(`${STORE_MUTEX_ID_PREFIX}${identity}\n`));
-    const port = storeMutexPort(identity, attempt);
+    const port = storeMutexPort(identity, attempt, mutexPortOverride);
     try {
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
@@ -368,6 +391,7 @@ export async function acquireDaemonOwner(
   storeDir: string,
   role: OwnerRecord['role'],
   clock: () => Date = () => new Date(),
+  options: AcquireDaemonOwnerOptions = {},
 ): Promise<DaemonOwnerLease> {
   await ensureSecureDir(storeDir);
   // Resolve aliases before deriving the kernel mutex identity. `ownerPath`
@@ -380,7 +404,7 @@ export async function acquireDaemonOwner(
   // process can inspect, remove and republish these pathnames at a time. It is
   // retained for the full lease so another process cannot pass the pathname
   // checks during the small owner-file publication/release windows.
-  const mutex = await acquireStoreMutex(canonicalStoreDir);
+  const mutex = await acquireStoreMutex(canonicalStoreDir, options.mutexPort);
   let liveness: LivenessListener | undefined;
   try {
     liveness = await createLivenessListener();

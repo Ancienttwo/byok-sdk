@@ -311,6 +311,28 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       // redaction rule as `failed`/`cancelled` above) — `decision` is just
       // the fixed 'approve'|'reject' identifier, kept verbatim.
       return { ...base, taskId: event.taskId, decision: event.decision, reasonSize: byteSize(event.reason) };
+    case 'device-assertion':
+      // Plan `device-assertion-broker`. There is no signature or envelope to
+      // drop here — the event type cannot carry either (see `observer.ts`'s
+      // own doc comment on this variant), so this projection is a projection
+      // of metadata only, by construction rather than by vigilance.
+      //
+      // codex round-2 F4: the DENIED variant already carries `audienceSize`
+      // (a number) and NO raw audience — the observer converted it at event
+      // construction, so there is no raw string here to strip, on the feed OR
+      // on disk. This redactor merely copies the size across. The ISSUED
+      // `audience` came from the allowlist and is kept verbatim, as are the
+      // daemon's own `jti`/`expiresAt` (the `jti` ties a suspect assertion back
+      // to the call that minted it).
+      return event.result === 'issued'
+        ? {
+            ...base,
+            result: 'issued',
+            audience: event.audience,
+            jti: event.jti,
+            expiresAt: event.expiresAt,
+          }
+        : { ...base, result: 'denied', reason: event.reason, audienceSize: event.audienceSize };
     case 'git-workspace':
       // Git observations are deliberately coarse: paths, commit ids,
       // filenames, messages, raw Git output, and free-form errors never cross
@@ -467,6 +489,32 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
         taskId: str(raw.taskId),
         decision: str(raw.decision) as 'approve' | 'reject',
         reason: reasonSize === undefined ? undefined : placeholderFor(reasonSize),
+      };
+    }
+    case 'device-assertion': {
+      // Read-side inverse of `redactForAudit`'s own `device-assertion` case.
+      // Anything that is not exactly `'issued'` reconstructs as `denied` — a
+      // corrupt or unrecognized result must never replay as a successful
+      // issuance. codex round-2 F4: the denied line only ever held a byte
+      // size (there was never a raw audience on disk), so it reads back as a
+      // number; the issued line's allowlist audience reads back verbatim.
+      if (raw.result === 'issued') {
+        return {
+          kind: 'device-assertion',
+          ts,
+          result: 'issued',
+          audience: typeof raw.audience === 'string' ? raw.audience : '',
+          jti: typeof raw.jti === 'string' ? raw.jti : '',
+          expiresAt: typeof raw.expiresAt === 'string' ? raw.expiresAt : '',
+        };
+      }
+      const audienceSize = num(raw.audienceSize);
+      return {
+        kind: 'device-assertion',
+        ts,
+        result: 'denied',
+        reason: typeof raw.reason === 'string' ? raw.reason : '',
+        ...(audienceSize === undefined ? {} : { audienceSize }),
       };
     }
     case 'git-workspace': {

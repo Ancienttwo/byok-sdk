@@ -75,6 +75,8 @@ export class TestServer {
   private blobSeq = 0;
   private seqCounter = 0;
   private tokenTtlMs = 60 * 60 * 1000;
+  /** One-shot gate that holds the next `/byok/pair` handler open — see `blockNextPair`. */
+  private pairGate: Promise<void> | undefined;
   private rejectWs = false;
   private failBlobUploads = false;
   private dropNextBlobFinalizeResponse = false;
@@ -143,6 +145,22 @@ export class TestServer {
   revokeDevice(deviceId: string): void {
     const device = this.devicesById.get(deviceId);
     if (device) device.revoked = true;
+  }
+
+  /**
+   * Test hook: make the NEXT `/byok/pair` request hang inside its handler until
+   * the returned release function is called. Lets a test hold an in-progress
+   * `daemon.pair()` open — and thus occupy the client's lifecycle-mutation
+   * queue — deterministically, so a `stop()`/`unpair()` queued behind it can be
+   * observed while the predecessor is still running. One-shot: cleared once it
+   * fires. Off by default; no existing test is affected.
+   */
+  blockNextPair(): () => void {
+    let release!: () => void;
+    this.pairGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return release;
   }
 
   isRevoked(deviceId: string): boolean {
@@ -337,6 +355,13 @@ export class TestServer {
 
   private async handlePair(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = (await readJsonBody(req)) as { pairingCode: string; deviceName: string; devicePublicKey: string };
+    // Test hook (see `blockNextPair`): hold this handler open until released so
+    // a test can keep `daemon.pair()` in flight, occupying the lifecycle queue.
+    if (this.pairGate) {
+      const gate = this.pairGate;
+      this.pairGate = undefined;
+      await gate;
+    }
 
     let device = [...this.devicesById.values()].find((d) => d.publicKeyBase64Url === body.devicePublicKey);
     if (device) {

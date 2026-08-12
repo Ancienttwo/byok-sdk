@@ -45,6 +45,13 @@ export const CORE_ERROR_CODES = {
   proof_envelope_invalid: 'proof_envelope_invalid',
   proof_canonicalization_failed: 'proof_canonicalization_failed',
 
+  // device assertion (plan device-assertion-broker) — deliberately its own
+  // code rather than reusing `proof_envelope_invalid`: the two envelopes are
+  // non-interchangeable by design, and one shared "envelope was bad" code is
+  // exactly how a log stops being able to say which authentication surface was
+  // probed.
+  assertion_envelope_invalid: 'assertion_envelope_invalid',
+
   // mailbox (§12.7.3)
   mailbox_message_not_found: 'mailbox_message_not_found',
   mailbox_cursor_regression: 'mailbox_cursor_regression',

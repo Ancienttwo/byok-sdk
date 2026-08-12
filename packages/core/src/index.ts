@@ -199,6 +199,36 @@ export type {
   JsonValue,
 } from './attestation';
 
+// Device assertion (plan device-assertion-broker): the short-lived,
+// audience-scoped envelope a paired device mints for a sibling local process,
+// and the verifier a host runs at exchange time. Separate module, separate
+// domain prefix, separate error code — see `device-assertion.ts`'s own doc
+// comment for why none of it is folded into the device proof above.
+export {
+  DEVICE_ASSERTION_ALGORITHMS,
+  DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
+  DEVICE_ASSERTION_DEFAULT_TTL_MS,
+  DEVICE_ASSERTION_DOMAIN_PREFIX,
+  DEVICE_ASSERTION_MAX_TTL_MS,
+  DEVICE_ASSERTION_SCHEMA_ID,
+  DEVICE_ASSERTION_VERSION,
+  DeviceAssertionClaimsSchema,
+  DeviceAssertionEnvelopeV1Schema,
+  deviceAssertionCanonicalClaims,
+  deviceAssertionCanonicalJson,
+  deviceAssertionSigningInput,
+  parseDeviceAssertionEnvelope,
+  verifyDeviceAssertion,
+} from './device-assertion';
+export type {
+  DeviceAssertionAlgorithm,
+  DeviceAssertionClaims,
+  DeviceAssertionDeviceRow,
+  DeviceAssertionEnvelopeV1,
+  DeviceAssertionVerifier,
+  DeviceAssertionVerifyDeps,
+  DeviceAssertionVerifyInput,
+} from './device-assertion';
 // Nonce signing domain (§6.2) — the one authority the daemon, the hosted
 // surface, and the reference server all sign/verify against.
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';

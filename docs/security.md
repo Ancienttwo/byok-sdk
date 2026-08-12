@@ -359,7 +359,7 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 |---|---|---|
 | Remote network | — | Reach this at all — Unix sockets/named pipes have no network path |
 | Malicious/compromised SaaS | — | Reach this at all, for the same reason |
-| Same-user local process | Read `control.token`, complete the handshake, and call any control method (`status`, `approvals.*`, `tasks.subscribe`, `shutdown`) — **this is by design**: same-user is the trust boundary, equivalent to the device owner running the CLI themselves | — |
+| Same-user local process | Read `control.token`, complete the handshake, and call any control method (`status`, `approvals.*`, `tasks.subscribe`, `shutdown`, and — when explicitly enabled — `assertion.issue`, see section 5) — **this is by design**: same-user is the trust boundary, equivalent to the device owner running the CLI themselves | — |
 | Other local user | — | Read `control.token` (0600) or traverse into `storeDir`/the tmpdir fallback subdirectory (0700 + ownership/symlink checks) — cannot complete the handshake without the token even if a connection were somehow reachable |
 
 ### 3. Approval path (claude realtime confirm mode)
@@ -453,12 +453,160 @@ mutual HMAC handshake, not pipe-name secrecy, to defeat an impostor). Which
 account the service actually runs as is a deployment choice the operator
 makes at install time, not something this SDK can constrain from inside.
 
+### 5. Local device-assertion broker (`assertion.issue`)
+
+`packages/core/src/device-assertion.ts` (envelope + verifier),
+`packages/client/src/daemon/device-assertion-signer.ts` (signing),
+`create-daemon.ts`'s `assertion.issue` control method (gates),
+`daemon/assertion-client.ts` (`requestDeviceAssertion`, the one public entry
+point).
+
+The problem it solves: a host that ships its own CLI alongside this daemon
+wants "pair once, both are authorized". Rather than giving the CLI a second
+credential to store, the daemon mints a short-lived, audience-scoped
+**device assertion** with the device identity key it already holds, over the
+already-authenticated control socket. The host's cloud exchanges that
+assertion for a product session.
+
+**Off by default.** With no `DaemonConfig.deviceAssertion` section — or one
+with an empty `audiences` list — `assertion.issue` answers
+`assertion_disabled` for every input, including malformed ones. Enabling it
+is an explicit operator decision that adds a local authentication surface.
+
+**Six fail-closed gates, in a fixed order, none of which signs anything:**
+
+1. `assertion_disabled` — feature off. Checked first, so a daemon with the
+   feature off cannot be probed for anything else.
+2. `bad_request` — params are not exactly `{audience: string}` within 256
+   UTF-8 bytes. Checked before the allowlist so a malformed request cannot be
+   used to probe membership.
+3. `audience_denied` — the audience is not in the configured allowlist,
+   compared with **exact string equality** (`Set.has`). There is deliberately
+   no prefix, suffix, subdomain, or case-insensitive rule: an allowlist entry
+   of `salesko-api` under a `startsWith` rule would also admit
+   `salesko-api.evil.com`. The error message never echoes the allowlist —
+   a refusal must not be an enumeration oracle.
+4. `shutting_down` — a shutdown has been requested. The flag is latched
+   synchronously inside `performControlShutdown`, before the shutdown RPC's
+   own response is written, which closes the window between the shutdown
+   acknowledgement and the control socket actually closing (bounded by the
+   shutdown grace deadline, 10s by default). An `unpair` walks through that
+   window on every run — the CLI shuts the daemon down first and clears
+   `device.json` afterwards.
+5. `revoked` — the server has revoked this device (`AuthManager.isRevoked()`).
+6. `not_paired` — `device.json` is re-read from disk on **every** call, never
+   cached, so clearing it removes local signing authority immediately rather
+   than at the next restart.
+
+**Revocation is honestly two halves, and this daemon is only one of them.**
+Gates 4-6 make this daemon stop minting promptly (and the shutdown/revocation
+flags are re-checked once more at the signing point itself, after the async
+`store.load()`, so a revocation or shutdown that lands mid-call still blocks
+the signature — there is no check-then-await-then-sign gap). They do **not**
+recall an assertion already in a caller's hands. Nothing in this SDK provides
+synchronous invalidation on its own, and no documentation, release note, or
+sales claim may say otherwise. The other half is the host's own recheck at
+exchange time. `verifyDeviceAssertion` structures that recheck so it cannot be
+skipped: instead of accepting a pre-fetched revocation boolean (which a caller
+could satisfy with a literal `false` and never look the row up), it takes a
+**lookup port** — `lookupDevice(deviceId) => { publicKeyJwkX, revoked } |
+undefined`. The verifier reads `deviceId` from the claims, calls the port
+itself, rejects on a missing or revoked row, and checks the signature against
+**the row's** key. There is no way to invoke a verification without supplying
+the means to resolve the current row, and both the key and the revocation
+state come from that one lookup — so "forgot to check the current row" is not
+an expressible mistake, and neither is "checked revocation but verified
+against an envelope-supplied key".
+
+**Signed bytes and domain separation.** The signing input is
+`byok-device-assertion-v1\n` followed by RFC 8785-subset canonical claim
+JSON, frozen by `packages/core/src/__tests__/golden/device-assertion-v1.canonical.json`.
+That prefix is pairwise distinct from — and pairwise non-prefix with — the
+other two domains this same Ed25519 key signs under, `byok-nonce-v1\n`
+(challenge/token renewal) and `byok-device-proof-v1\n` (request-bound
+proof), so no signature made under one domain can be reinterpreted under
+another. This is not JWS: a JWS `typ` header is not required to be checked by
+any verifier, which is a fail-open shape for exactly this problem.
+
+**What the claims deliberately omit**, and why each omission is load-bearing:
+
+- No `devicePublicKey` — a verifier must resolve the key from its own device
+  directory by `deviceId`, or the envelope authenticates itself.
+- No caller identity — every process under this UID can reach the control
+  socket, so a "who asked" field would be synthesized authority, not evidence.
+- No `keyId` — there is no key-rotation story for this envelope yet, and a
+  field nothing populates honestly invites a verifier to trust it.
+
+**TTL.** Default 120s, hard ceiling 300s, never caller-selectable. The
+ceiling is enforced twice: at daemon construction (an out-of-range `ttlMs` is
+a construction error, never a clamp) and again inside `verifyDeviceAssertion`,
+which rejects any envelope whose own `issuedAt`→`expiresAt` span exceeds it
+regardless of who minted it. There is no clock-skew tolerance: the short
+window is the entire safety margin, and a tolerance knob is that window
+quietly widened.
+
+**No `jti` bookkeeping on the daemon.** The daemon is not on the verification
+path, so a local "have I seen this `jti`" table would be theatre. Its
+obligations are exactly three, and it meets all three: 128 bits of CSPRNG per
+`jti`, a short expiry, and no reuse.
+
+**Downstream obligations — the verifier MUST do all of these.**
+`verifyDeviceAssertion` resolves the device row through the caller's
+`lookupDevice` port, rejects a missing or revoked row, checks the time window
+(half-open `[issuedAt, expiresAt)`), the lifetime ceiling, and the signature
+against the row's key. It does not and cannot check the rest:
+
+- Supply a `lookupDevice` port that resolves the row by `claims.deviceId` from
+  the verifier's OWN device directory, returning that row's public key and
+  current `revoked` state (never anything from the envelope). The verifier
+  calls the port; the caller only provides it.
+- Assert `claims.audience` equals the audience the verifier actually serves.
+- Assert `claims.issuer` and `claims.productId` match its own deployment.
+- **Burn `claims.jti`** so one assertion cannot be presented twice.
+- Terminate TLS. This envelope is a bearer credential in transit.
+
+**Audit boundary.** One `device-assertion` `DaemonEvent` kind covers both
+outcomes. The signature and the envelope bytes are not fields of that event
+and cannot be — the isolation is structural, not a redact-after rule, so
+`bin/audit-log.ts` has nothing to leak even if its projection is later edited.
+What is persisted is the metadata an incident needs: `result`, the gate
+`reason` on a refusal, `jti` and `expiresAt` on an issuance, and the
+`audience` — verbatim when it came from the operator's own allowlist, as a
+byte size only when it is caller-supplied free text from a denied request.
+
+The audience allowlist and the TTL cap are **not** a same-UID security
+boundary, and this table does not pretend otherwise. A same-UID process can
+read the 0600 `device.json` directly and forge an assertion with any claims it
+likes — the same way it can read every runtime credential the OS trust
+boundary already grants it. The allowlist and TTL constrain a
+**control-socket client that does NOT have direct key access** (or chooses to
+go through the broker rather than reimplement signing), and the broker's job
+is to **not widen** the same-UID boundary — not to close it, which it cannot.
+Everything in the "Cannot" cell below is scoped to "over the broker",
+explicitly.
+
+| Attacker position | Can | Cannot |
+|---|---|---|
+| Remote network / malicious SaaS | — | Reach `assertion.issue` at all — it is control-socket only |
+| Same-UID process using the broker | Mint assertions for any **allowlisted** audience, at the configured TTL, while the daemon is paired, running, and not shutting down | *Over the broker:* mint for a non-allowlisted audience, choose the TTL, influence any claim other than `audience`, or read key material out of the result |
+| Same-UID process NOT using the broker | Read `device.json` (0600) and forge an assertion with **arbitrary** claims — audience, issuer, TTL, all of it | Nothing the broker adds: this is within the OS trust boundary (same-UID = device owner), exactly as it can read any runtime credential. The broker neither enables nor prevents this; it simply does not widen it |
+| Other local user | — | Complete the control handshake without `control.token` (0600), and therefore reach this method at all |
+| Holder of a leaked assertion, **against a conforming exchange** (one that performs the downstream-MUST list above — compares `audience`/`issuer`/`productId` and burns `jti`) | Present it to the named audience until it expires (≤300s) or that exchange burns its `jti` | Use it against a different audience/issuer/product, extend it, or replay it once that exchange has burned the `jti` — *because the exchange enforces those comparisons.* `verifyDeviceAssertion` itself does NOT compare audience/issuer/product; it surfaces the claims for exactly that comparison. Against a NON-conforming exchange that skips the checks, none of these "Cannot"s hold — which is why the downstream-MUST list is mandatory, not advisory |
+
 ## Residual risks (explicit)
 
 - **A same-user process can resolve approvals or read device credentials.**
   Stated above, repeated here because it's the single most powerful local
   position this system has: it is the intended trust boundary (same-user =
   device owner), not an oversight.
+- **A device assertion already handed out survives revocation until it
+  expires.** Stated in full above (§5, "Revocation is honestly two halves").
+  The daemon stops minting within one control call of learning about a
+  revocation, an unpair, or a shutdown; it has no way to recall a credential
+  it has already returned. Bounding the damage is the TTL (≤300s) plus the
+  verifier's own mandatory recheck and `jti` burn at exchange time. Nothing in
+  this SDK delivers synchronous invalidation on its own, and the feature is
+  off by default precisely so a deployment opts into that trade knowingly.
 - **An abrupt WS close can lose an unacknowledged tail of traffic.**
   `docs/protocol.md` (§ Version-negotiation drill / rate-limit section)
   states this directly: rate limiting's own abrupt WS close on

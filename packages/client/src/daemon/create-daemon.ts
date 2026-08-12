@@ -1,3 +1,8 @@
+import {
+  DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
+  DEVICE_ASSERTION_DEFAULT_TTL_MS,
+  DEVICE_ASSERTION_MAX_TTL_MS,
+} from '@byok-sdk/core';
 import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS } from '@byok-sdk/protocol';
 import { isAbsolute } from 'node:path';
 import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
@@ -17,7 +22,8 @@ import {
   DEFAULT_PRESENCE_TTL_MS,
   PresencePublisher,
 } from './presence-publisher';
-import { assertServerUrlAllowed } from './url';
+import { assertServerUrlAllowed, toHttpBase } from './url';
+import { mintDeviceAssertion } from './device-assertion-signer';
 import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
 import type { ControlMethods, ControlServerHandle } from './control-server';
@@ -25,7 +31,9 @@ import {
   ControlError,
   parseApprovalsRequestParams,
   parseApprovalsResolveParams,
+  parseAssertionIssueParams,
   parseShutdownParams,
+  type AssertionIssueResult,
   type ControlActiveTask,
   type ControlStatusResult,
   type ControlStorageStatus,
@@ -355,6 +363,62 @@ export interface DaemonConfig {
    * rate-limited or flickering hint nobody sees an error for.
    */
   presence?: PresenceConfig;
+  /**
+   * Plan `device-assertion-broker`: opt-in local assertion broker — lets a
+   * sibling process on this same machine (typically the host's own CLI,
+   * installed alongside this daemon) ask the daemon, over the already
+   * authenticated control socket, to mint a short-lived audience-scoped
+   * assertion signed with the paired device key. See
+   * {@link DeviceAssertionConfig}.
+   *
+   * OFF by default, and off is expressed two ways that mean the same thing: an
+   * absent section, or a present one with an empty `audiences` list. Both make
+   * `assertion.issue` answer `assertion_disabled` without looking at anything
+   * else. A new local authentication surface does not get to be on because
+   * someone left a config key behind.
+   */
+  deviceAssertion?: DeviceAssertionConfig;
+}
+
+/**
+ * Plan `device-assertion-broker`. Two fields, both about what this daemon will
+ * refuse.
+ *
+ * Every field is validated synchronously at construction, the same way
+ * `maxTaskOutputBytes` and the presence cadence are — a misconfigured
+ * authentication surface must fail when the daemon is built, not on the first
+ * call that needed it.
+ */
+export interface DeviceAssertionConfig {
+  /**
+   * The EXACT audience strings this daemon will mint for. Matched with
+   * `Set.has` — exact string equality, never a prefix or suffix or subdomain
+   * rule.
+   *
+   * Prefix matching is the classic hole here: an allowlist entry of
+   * `salesko-api` under a `startsWith` rule also admits `salesko-api.evil.com`,
+   * and a suffix rule admits `evil-salesko-api`. There is no configuration
+   * that turns this into a pattern match, because there is no pattern-matching
+   * code to configure.
+   *
+   * An empty list means the feature is off (see
+   * `DaemonConfig.deviceAssertion`). Duplicate entries, empty entries, and
+   * entries over 256 UTF-8 bytes are construction errors — a duplicate is
+   * usually a copy-paste that hid a typo'd second entry, and silently
+   * de-duplicating it would hide it for good.
+   */
+  audiences: string[];
+  /**
+   * Assertion lifetime, ms. Default
+   * `DEVICE_ASSERTION_DEFAULT_TTL_MS` (120s), hard ceiling
+   * `DEVICE_ASSERTION_MAX_TTL_MS` (300s) — both from `@byok-sdk/core`, which
+   * enforces the same ceiling again at verification time, so a daemon patched
+   * to ignore this one still cannot get a longer-lived assertion accepted.
+   *
+   * Deliberately NOT caller-selectable over the control socket: a lifetime a
+   * caller can ask for is a lifetime every caller asks the maximum of.
+   */
+  ttlMs?: number;
 }
 
 export interface PresenceConfig {
@@ -485,6 +549,95 @@ export interface DaemonOverrides {
      */
     pressureEngine?: LocalStoragePressureEngine;
   };
+}
+
+/**
+ * Plan `device-assertion-broker` (codex round-2 F3): the internal, NON-public
+ * test seam for observing assertion issuance.
+ *
+ * This is NOT reachable through `DaemonConfig`/`DaemonOverrides`, and is NOT
+ * re-exported from the package `index.ts` — a test imports it straight from
+ * this module. That isolation is the point. The earlier `DaemonOverrides.
+ * deviceAssertion.mint` seam replaced the SIGNER, which meant a production
+ * embedder (`DaemonOverrides` is public API) could inject a callback that
+ * received the whole `DeviceRecord` — private key included — and exfiltrate it
+ * or forge claims.
+ *
+ * `onIssued` is a strict OBSERVER, called only AFTER a real, successful sign,
+ * with non-secret metadata ONLY (`jti`, `audience`). It cannot see the private
+ * key, cannot alter the signature, the claims, or the audit event, and cannot
+ * be reached from any public type. A test counts these calls to prove a gate
+ * rejection never reached the signer (a rejection never calls `onIssued`).
+ */
+export interface AssertionIssueProbe {
+  onIssued(meta: { jti: string; audience: string }): void;
+}
+
+// ---------------------------------------------------------------------------
+// Store-mutex port seam (test-only) — NOT public API, NOT exported from
+// index.ts, NOT on DaemonConfig/DaemonOverrides. Production leaves this unset,
+// so every daemon derives its owner-lease port from the storeDir hash exactly
+// as before (`daemon-owner.ts`), byte-identically.
+//
+// Why it exists: the owner lease is a cross-process port mutex whose port is
+// hash-derived into a bounded band. Under a highly-parallel test runner (many
+// vitest worker PROCESSES each creating daemons), independent stores suffer
+// birthday-paradox collisions on that band; a collision whose holder is
+// mid-teardown and doesn't answer the probe in time fail-closes with
+// `DaemonOwnerActiveError('unknown')` — correct for production, a flake under
+// test parallelism. Handing each test daemon a guaranteed-unique port removes
+// the collision at its source without touching the production fail-closed path.
+// ---------------------------------------------------------------------------
+
+/**
+ * An explicitly-installed provider takes precedence (a test may set one via
+ * {@link __setStoreMutexPortProviderForTests}). Undefined in production.
+ */
+let injectedStoreMutexPortProvider: (() => number | undefined) | undefined;
+
+/**
+ * @internal TEST SEAM. Install a provider that returns a unique store-mutex
+ * port per call (one call per constructed daemon). Never exported from
+ * `index.ts`; a test imports it straight from this module. Pass `undefined` to
+ * clear it.
+ */
+export function __setStoreMutexPortProviderForTests(provider: (() => number | undefined) | undefined): void {
+  injectedStoreMutexPortProvider = provider;
+}
+
+// A safe deterministic test band: ABOVE the hash band (10000..29999) and BELOW
+// the Linux ephemeral floor (32768) — so it never collides with either the
+// hash-derived production ports or the OS's own ephemeral allocations, on both
+// Linux and macOS.
+const VITEST_MUTEX_PORT_BASE = 30_000;
+const VITEST_MUTEX_BAND_SIZE = 64;
+const VITEST_MUTEX_BANDS = 42; // 30000 + 42*64 = 32688 < 32768
+let vitestDaemonSeq = 0;
+
+/**
+ * Default provider used under vitest when no explicit provider was installed —
+ * which is what makes EVERY daemon-creating test get a unique port with no
+ * per-file wiring. Gated strictly on `VITEST_WORKER_ID`/`VITEST_POOL_ID`, which
+ * only the test runner ever sets, so this returns `undefined` in production and
+ * the hash derivation is used unchanged.
+ *
+ * Per-worker disjoint bands (`(workerId-1) % BANDS`) guarantee no cross-worker
+ * collision; a small per-worker counter (`% BAND_SIZE`) cycles within the band,
+ * and since a worker runs its tests sequentially only a couple of daemons are
+ * ever live at once, so the cycle never reuses a still-bound port.
+ */
+function defaultVitestStoreMutexPort(): number | undefined {
+  const raw = process.env['VITEST_WORKER_ID'] ?? process.env['VITEST_POOL_ID'];
+  if (raw === undefined) return undefined;
+  const workerId = Number.parseInt(raw, 10);
+  const band = (Number.isFinite(workerId) && workerId > 0 ? (workerId - 1) % VITEST_MUTEX_BANDS : 0) * VITEST_MUTEX_BAND_SIZE;
+  return VITEST_MUTEX_PORT_BASE + band + (vitestDaemonSeq++ % VITEST_MUTEX_BAND_SIZE);
+}
+
+/** Resolve the store-mutex port for one daemon: explicit provider first, then the vitest default, else undefined (production hash derivation). */
+function resolveStoreMutexPort(): number | undefined {
+  if (injectedStoreMutexPortProvider) return injectedStoreMutexPortProvider();
+  return defaultVitestStoreMutexPort();
 }
 
 /**
@@ -689,10 +842,80 @@ function validatePiByokLauncherConfig(
   }
 }
 
+/**
+ * Plan `device-assertion-broker`: validates `DaemonConfig.deviceAssertion
+ * .audiences` and resolves it to the exact-match `Set` the `assertion.issue`
+ * gate consults.
+ *
+ * `undefined` means the feature is OFF — returned for an absent section AND
+ * for a present one with an empty list, which are the same statement. Every
+ * other malformed shape throws: this is an allowlist for a local
+ * authentication surface, and an operator who wrote one that does not parse
+ * must not end up with a daemon that quietly allows nothing (indistinguishable
+ * from "off") or, worse, one that allows something they did not write.
+ */
+function resolveDeviceAssertionAudiences(config: DeviceAssertionConfig | undefined): Set<string> | undefined {
+  if (config === undefined) return undefined;
+  if (!Array.isArray(config.audiences)) {
+    throw new Error(
+      `DaemonConfig.deviceAssertion.audiences must be an array of exact audience strings — got ${JSON.stringify(config.audiences)}. Omit the deviceAssertion section (or pass an empty array) to leave the assertion broker disabled.`,
+    );
+  }
+  if (config.audiences.length === 0) return undefined;
+  const audiences = new Set<string>();
+  for (const audience of config.audiences) {
+    if (typeof audience !== 'string' || audience.length === 0) {
+      throw new Error(
+        `DaemonConfig.deviceAssertion.audiences entries must be non-empty strings — got ${JSON.stringify(audience)}`,
+      );
+    }
+    if (Buffer.byteLength(audience, 'utf8') > DEVICE_ASSERTION_AUDIENCE_MAX_BYTES) {
+      throw new Error(
+        `DaemonConfig.deviceAssertion.audiences entry ${JSON.stringify(audience)} exceeds ${DEVICE_ASSERTION_AUDIENCE_MAX_BYTES} UTF-8 bytes`,
+      );
+    }
+    if (audiences.has(audience)) {
+      throw new Error(
+        `DaemonConfig.deviceAssertion.audiences contains ${JSON.stringify(audience)} twice — rejected rather than de-duplicated, because a duplicate is usually a copy-paste that hid a typo in the entry that was meant to be different`,
+      );
+    }
+    audiences.add(audience);
+  }
+  return audiences;
+}
+
+/** Plan `device-assertion-broker`: see `DeviceAssertionConfig.ttlMs`. Out of range is a construction error, never a clamp — silently shortening (or lengthening) an operator's configured credential lifetime is worse than refusing to start. */
+function resolveDeviceAssertionTtlMs(config: DeviceAssertionConfig | undefined): number {
+  const ttlMs = config?.ttlMs ?? DEVICE_ASSERTION_DEFAULT_TTL_MS;
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0 || ttlMs > DEVICE_ASSERTION_MAX_TTL_MS) {
+    throw new Error(
+      `DaemonConfig.deviceAssertion.ttlMs must be a positive integer no greater than ${DEVICE_ASSERTION_MAX_TTL_MS} ms — got ${JSON.stringify(config?.ttlMs)}`,
+    );
+  }
+  return ttlMs;
+}
+
 export function createDaemonWithAdapters(
   config: DaemonConfig,
   adapters: RuntimeAdapter[],
   overrides: DaemonOverrides = {},
+): Daemon {
+  return buildDaemonWithAdapters(config, adapters, overrides);
+}
+
+/**
+ * codex round-2 F3: the real builder. Exported from THIS module but NOT from
+ * the package `index.ts`, so the optional `assertionProbe` (an
+ * {@link AssertionIssueProbe} post-sign observer) is reachable only by tests
+ * importing this module directly — never through any public type. The public
+ * `createDaemonWithAdapters` above forwards without it, so production has no
+ * observer and no signer-injection surface at all.
+ */
+export function buildDaemonWithAdapters(
+  config: DaemonConfig,
+  adapters: RuntimeAdapter[],
+  overrides: DaemonOverrides = {},
+  assertionProbe?: AssertionIssueProbe,
 ): Daemon {
   if (config.piByokLauncher !== undefined) {
     validatePiByokLauncherConfig(config.piByokLauncher);
@@ -721,7 +944,37 @@ export function createDaemonWithAdapters(
   };
   assertPresenceHeartbeatCadence(presenceCadence);
 
+  // Plan `device-assertion-broker`: same up-front discipline as the two blocks
+  // above. This one guards a local AUTHENTICATION surface, so every rejection
+  // below is a construction error rather than a runtime refusal — a daemon
+  // that starts with a malformed allowlist is a daemon whose operator believes
+  // an allowlist is in force.
+  //
+  // Resolved into a `Set` (exact membership, no ordering, no pattern) and a
+  // number here, once, so the handler below cannot read a different allowlist
+  // or a different TTL than the one that was validated.
+  const deviceAssertionAudiences = resolveDeviceAssertionAudiences(config.deviceAssertion);
+  const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
+  /**
+   * Set SYNCHRONOUSLY by `performControlShutdown`, before the shutdown RPC's
+   * own response is even written — see that function and the `shutting_down`
+   * gate for the ~10s minting window this closes.
+   *
+   * Latched: nothing ever sets it back to `false`, including a later
+   * `start()` on this same instance. A daemon that has been told to shut down
+   * does not get to mint credentials again in this process, and "fail closed
+   * until restart" is the correct posture for the one flag whose entire job is
+   * to stop issuance during teardown.
+   */
+  let shuttingDown = false;
+
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
+  // Resolved ONCE per daemon and reused for every owner-lease acquire in this
+  // daemon's lifetime (pair/start/unpair), so the daemon always contends on the
+  // same port. `undefined` in production → `acquireDaemonOwner` derives the port
+  // from the storeDir hash exactly as before. See the store-mutex port seam above.
+  const storeMutexPort = resolveStoreMutexPort();
+  const daemonOwnerOptions = storeMutexPort === undefined ? undefined : { mutexPort: storeMutexPort };
   const store = new DeviceStore(storeDir);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   let fleetJitter: FleetJitter | undefined;
@@ -977,7 +1230,7 @@ export function createDaemonWithAdapters(
     // renewal (AuthManager.loadExisting does that under start()'s lease), so a
     // short-lived pair command can release ownership once the write lands.
     const acquiredHere = daemonOwnerLease === undefined;
-    if (acquiredHere) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+    if (acquiredHere) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon', undefined, daemonOwnerOptions);
     // Finding F5: capture whatever device is currently on disk for this
     // serverUrl (if any) BEFORE pairing — `auth.pair()` mints/persists a
     // brand new deviceId (the server always does, even on a same-keypair
@@ -1012,7 +1265,7 @@ export function createDaemonWithAdapters(
   }
 
   async function startUnderLease(): Promise<void> {
-    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon', undefined, daemonOwnerOptions);
     try {
     // This is the first point at which daemon-owned hosted storage may touch
     // the filesystem. The lease was acquired above, so SQLite open/schema/
@@ -1501,6 +1754,17 @@ export function createDaemonWithAdapters(
    * `daemon.stop()`), which must neither double-fail a task nor throw.
    */
   async function runShutdownSequence(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+    // Plan `device-assertion-broker` (codex F1): the assertion-minting latch is
+    // armed at the top of THIS function, synchronously, before the first
+    // `await` below. This is the single choke point EVERY teardown path crosses
+    // — the control-socket `shutdown` RPC, the public `daemon.stop()`, and
+    // `unpair()` all funnel here — so arming it here means `stop()`/`unpair()`
+    // close the minting window too, not only the RPC. The RPC handler
+    // additionally arms it before its own `setImmediate` defer (see
+    // `controlMethods.shutdown`) so a pipelined `shutdown`+`assertion.issue`
+    // batch cannot mint in the gap between the RPC returning and this function
+    // being scheduled. Latched, never cleared.
+    shuttingDown = true;
     const errors: unknown[] = [];
     let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
     if (!hostedStorageInitializationBarrierComplete) {
@@ -1655,6 +1919,15 @@ export function createDaemonWithAdapters(
    * below supplies its own `reason` instead of this default.
    */
   async function stop(opts: { drainTimeoutMs?: number; reason?: string } = {}): Promise<void> {
+    // Plan `device-assertion-broker` (codex round-2 F1): arm the minting latch
+    // the INSTANT `stop()` is called, before `requestShutdown` enqueues the
+    // teardown behind any in-progress lifecycle mutation. `runShutdownSequence`
+    // sets it too, but that runs only AFTER `runLifecycleMutation` awaits its
+    // predecessor — so a `stop()` queued behind an in-progress `start()`/
+    // `pair()` would otherwise leave the control socket minting with
+    // `shuttingDown === false` for the whole duration of that predecessor.
+    // Setting it here, synchronously, before the first await, closes that gap.
+    shuttingDown = true;
     await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
   }
 
@@ -1684,6 +1957,13 @@ export function createDaemonWithAdapters(
    * in-memory record still usable.
    */
   async function unpair(): Promise<void> {
+    // codex round-2 F1: same synchronous arming as `stop()` above — an `unpair`
+    // queued behind an in-progress `start()`/`pair()` must not leave the socket
+    // minting while it waits its turn in the lifecycle queue. Unpair is the
+    // exact path where this matters most: it tears the daemon down and then
+    // clears `device.json`, so any assertion minted in the queue-wait window
+    // would be for a device that is being unpaired.
+    shuttingDown = true;
     await runLifecycleMutation(unpairUnderLease);
   }
 
@@ -1695,7 +1975,7 @@ export function createDaemonWithAdapters(
     // stop() releases only after every daemon writer settles. Reacquire before
     // destructive identity cleanup; if another daemon won the gap, fail
     // closed rather than clearing state under it.
-    const cleanupLease = await acquireDaemonOwner(storeDir, 'daemon');
+    const cleanupLease = await acquireDaemonOwner(storeDir, 'daemon', undefined, daemonOwnerOptions);
     try {
       // The identity being removed is read under the same lease as both the
       // device and cursor mutations. A pair that wins stop()'s release gap is
@@ -1845,6 +2125,13 @@ export function createDaemonWithAdapters(
    */
   async function performControlShutdown(reason: ShutdownReason | undefined): Promise<void> {
     const effectiveReason = reason ?? 'operator';
+    // Plan `device-assertion-broker` (codex F1): belt-and-suspenders re-arm of
+    // the minting latch. The `shutdown` RPC handler already set it
+    // synchronously before deferring this function, and `runShutdownSequence`
+    // (called below, via `requestShutdown`) sets it again — but re-asserting it
+    // here keeps this function correct on its own terms regardless of how it is
+    // reached, and setting an already-`true` boolean is free.
+    shuttingDown = true;
     observer.noteShutdownRequested(effectiveReason);
     // Hardening finding (P2 re-gate): `noteShutdownComplete` now fires in a
     // `finally` — `start.ts`'s own wait for THIS event (see the doc comment
@@ -1901,7 +2188,151 @@ export function createDaemonWithAdapters(
         if (!runner) throw new ControlError('not_found', 'daemon is not started');
         return runner.requestApproval(parsed.taskId, parsed.summary);
       },
+      /**
+       * Plan `device-assertion-broker`: mint one short-lived, audience-scoped
+       * device assertion for a sibling local process.
+       *
+       * SIX fail-closed gates, in this exact order, none of which signs
+       * anything on the way out. The order is part of the contract, not an
+       * implementation detail:
+       *
+       * 1. `assertion_disabled` — before anything else, because a daemon that
+       *    was never configured for this must not reveal, by answering
+       *    differently for different inputs, that it even validates params.
+       * 2. `bad_request` — shape/length, checked before the allowlist so a
+       *    malformed request cannot be used to probe membership.
+       * 3. `audience_denied` — EXACT `Set.has`, never a prefix/suffix rule
+       *    (`salesko-api.evil.com` and `salesko-ap` both fail against an entry
+       *    of `salesko-api`). The message deliberately does not echo the
+       *    allowlist: a refusal must not be an enumeration oracle.
+       * 4. `shutting_down` — see `performControlShutdown`'s own comment for
+       *    the minting window this closes.
+       * 5. `revoked` — the server-side revocation this daemon already knows
+       *    about.
+       * 6. `not_paired` — the on-disk record, re-read on EVERY call (never
+       *    cached), so clearing `device.json` removes local signing authority
+       *    immediately.
+       *
+       * Only after all six does the private key get imported, used once, and
+       * dropped (`device-assertion-signer.ts`).
+       *
+       * Honest limit, and it must stay in the docs as well as here: gates 4-6
+       * are only HALF of revocation. They make this daemon stop minting
+       * promptly, but an assertion already in a caller's hands is not recalled
+       * by any of them. The other half is the host's own recheck at exchange
+       * time, which is why core's `verifyDeviceAssertion` makes the device
+       * row's `revoked` state a REQUIRED parameter. Nothing here entitles
+       * anyone to claim this daemon delivers synchronous invalidation on its
+       * own.
+       */
+      'assertion.issue': async (params): Promise<AssertionIssueResult> => {
+        // Gate 1.
+        if (deviceAssertionAudiences === undefined) {
+          observer.noteDeviceAssertion({ result: 'denied', reason: 'assertion_disabled' });
+          throw new ControlError(
+            'assertion_disabled',
+            'this daemon is not configured to issue device assertions (DaemonConfig.deviceAssertion.audiences is absent or empty)',
+          );
+        }
+        // Gate 2.
+        const parsed = parseAssertionIssueParams(params);
+        if (!parsed) {
+          // The audience is reported only when it was a string at all — and
+          // even then `bin/audit-log.ts` persists just its byte size, since on
+          // this path it is unvalidated caller free text.
+          const rawAudience =
+            typeof params === 'object' && params !== null && typeof (params as { audience?: unknown }).audience === 'string'
+              ? (params as { audience: string }).audience
+              : undefined;
+          observer.noteDeviceAssertion({ result: 'denied', reason: 'bad_request', audience: rawAudience });
+          throw new ControlError(
+            'bad_request',
+            `assertion.issue requires exactly {audience} where audience is a non-empty string of at most ${DEVICE_ASSERTION_AUDIENCE_MAX_BYTES} UTF-8 bytes`,
+          );
+        }
+        // Gate 3. Exact membership only.
+        if (!deviceAssertionAudiences.has(parsed.audience)) {
+          observer.noteDeviceAssertion({ result: 'denied', reason: 'audience_denied', audience: parsed.audience });
+          throw new ControlError('audience_denied', 'the requested audience is not allowed by this daemon');
+        }
+        // Gate 4.
+        if (shuttingDown) {
+          observer.noteDeviceAssertion({ result: 'denied', reason: 'shutting_down', audience: parsed.audience });
+          throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
+        }
+        // Gate 5.
+        if (auth.isRevoked()) {
+          observer.noteDeviceAssertion({ result: 'denied', reason: 'revoked', audience: parsed.audience });
+          throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
+        }
+        // Gate 6. Read from disk every time — never a cached record.
+        const record = await store.load();
+        if (record === undefined) {
+          observer.noteDeviceAssertion({ result: 'denied', reason: 'not_paired', audience: parsed.audience });
+          throw new ControlError('not_paired', 'this device is not paired; nothing can be asserted about it');
+        }
+
+        // Plan `device-assertion-broker` (codex F2): re-check the mutable
+        // conditions IMMEDIATELY before signing, at the signing point itself.
+        // `store.load()` above is async, and a shutdown request or a
+        // revocation can land during that `await` — after gates 4/5 already
+        // passed but before the key is ever touched. The same
+        // check-then-await-then-sign shape that made the result-document
+        // capability re-check necessary applies here: the only checks that
+        // count are the ones that still hold at the moment of signing.
+        //
+        // `store.load()` returning a record is itself the fresh not-paired
+        // re-check (unpair clears `device.json` under a lease, so a record
+        // read here is a currently-paired record). Shutdown and revocation are
+        // in-memory flags, so they are re-read here explicitly.
+        if (shuttingDown) {
+          observer.noteDeviceAssertion({ result: 'denied', reason: 'shutting_down', audience: parsed.audience });
+          throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
+        }
+        if (auth.isRevoked()) {
+          observer.noteDeviceAssertion({ result: 'denied', reason: 'revoked', audience: parsed.audience });
+          throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
+        }
+
+        const minted = mintDeviceAssertion({
+          record,
+          // `toHttpBase` is the one place a configured serverUrl is normalized
+          // (ws:->http:, wss:->https:, path stripped), so an operator who
+          // configured the websocket spelling and one who configured the HTTP
+          // spelling of the same deployment produce the same issuer.
+          issuer: new URL(toHttpBase(config.serverUrl)).origin,
+          productId: config.productId,
+          audience: parsed.audience,
+          ttlMs: deviceAssertionTtlMs,
+          now: new Date(),
+        });
+        observer.noteDeviceAssertion({
+          result: 'issued',
+          audience: minted.claims.audience,
+          jti: minted.claims.jti,
+          expiresAt: minted.expiresAt,
+        });
+        // codex round-2 F3: post-sign observer — non-secret metadata only,
+        // reachable only from the internal test seam. Never sees the key,
+        // never alters anything above it.
+        assertionProbe?.onIssued({ jti: minted.claims.jti, audience: minted.claims.audience });
+        return { assertion: minted.envelope, expiresAt: minted.expiresAt };
+      },
       shutdown: (params) => {
+        // Plan `device-assertion-broker` (codex F1): arm the minting latch
+        // SYNCHRONOUSLY, as the very first statement of this handler, BEFORE
+        // the `setImmediate` defer below. The teardown itself is deferred so
+        // the `{acknowledged:true}` response is written first — but the LATCH
+        // must not be. A client can pipeline `shutdown` and `assertion.issue`
+        // as two NDJSON lines in one write; the server dispatches them in
+        // order on the same tick, so if the latch were only set inside the
+        // deferred `performControlShutdown` (next macrotask), the
+        // `assertion.issue` that runs on THIS tick would still see
+        // `shuttingDown === false` and mint. Setting it here, before yielding,
+        // closes that exact window. `runShutdownSequence` sets it again
+        // (idempotent) so the non-RPC `stop()`/`unpair()` paths are covered
+        // too.
+        shuttingDown = true;
         const { reason } = parseShutdownParams(params);
         // Fire-and-forget, deliberately AFTER this handler's own return
         // value has been serialized and written to the socket (see

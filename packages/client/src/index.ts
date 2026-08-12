@@ -19,7 +19,22 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig } from './daemon/create-daemon';
+export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig } from './daemon/create-daemon';
+
+/**
+ * Plan `device-assertion-broker`: the ONLY control-socket capability this
+ * package exposes publicly. `connectControlClient`/`ControlClient` are
+ * deliberately NOT exported and must never be — they also carry `shutdown`,
+ * approval resolution and the raw task-event stream, and exporting the client
+ * would make all of it public API in one line. See `daemon/assertion-client.ts`
+ * and the constraint test that pins this.
+ */
+export { requestDeviceAssertion } from './daemon/assertion-client';
+export type {
+  RequestDeviceAssertionOptions,
+  RequestDeviceAssertionResult,
+  RequestDeviceAssertionErrorCode,
+} from './daemon/assertion-client';
 export type { OperationalHealthSnapshot, OperationalHealthState } from './daemon/operational-health';
 
 // S3b (L-001/L-002): the durable local journal (architecture §12.7.2). The

@@ -1,0 +1,39 @@
+{
+  "schema": "byok-device-assertion-v1",
+  "domainPrefix": "byok-device-assertion-v1\n",
+  "note": "Canonical signing bytes for byok-device-assertion-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok-sdk/core test, and treat any diff as a breaking change to the signature format.",
+  "cases": [
+    {
+      "name": "minimal ascii claim set",
+      "claims": {
+        "version": 1,
+        "issuer": "https://api.example.com",
+        "productId": "product-a",
+        "deviceId": "device-1",
+        "audience": "salesko-api",
+        "jti": "AAAAAAAAAAAAAAAAAAAAAA",
+        "issuedAt": "2026-08-12T04:45:00.000Z",
+        "expiresAt": "2026-08-12T04:47:00.000Z"
+      },
+      "canonicalJson": "{\"audience\":\"salesko-api\",\"deviceId\":\"device-1\",\"expiresAt\":\"2026-08-12T04:47:00.000Z\",\"issuedAt\":\"2026-08-12T04:45:00.000Z\",\"issuer\":\"https://api.example.com\",\"jti\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"productId\":\"product-a\",\"version\":1}",
+      "signingInputUtf8": "byok-device-assertion-v1\n{\"audience\":\"salesko-api\",\"deviceId\":\"device-1\",\"expiresAt\":\"2026-08-12T04:47:00.000Z\",\"issuedAt\":\"2026-08-12T04:45:00.000Z\",\"issuer\":\"https://api.example.com\",\"jti\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"productId\":\"product-a\",\"version\":1}",
+      "signingInputHex": "62796f6b2d6465766963652d617373657274696f6e2d76310a7b2261756469656e6365223a2273616c65736b6f2d617069222c226465766963654964223a226465766963652d31222c22657870697265734174223a22323032362d30382d31325430343a34373a30302e3030305a222c226973737565644174223a22323032362d30382d31325430343a34353a30302e3030305a222c22697373756572223a2268747470733a2f2f6170692e6578616d706c652e636f6d222c226a7469223a2241414141414141414141414141414141414141414141222c2270726f647563744964223a2270726f647563742d61222c2276657273696f6e223a317d"
+    },
+    {
+      "name": "non-ascii audience and product, non-default port issuer",
+      "claims": {
+        "version": 1,
+        "issuer": "https://staging.example.com:8443",
+        "productId": "产品-b",
+        "deviceId": "device-2",
+        "audience": "受众/\"quoted\"\u0000",
+        "jti": "ZmFrZS1qdGktZm9yLWdvbA",
+        "issuedAt": "2026-08-12T04:45:00.000Z",
+        "expiresAt": "2026-08-12T04:50:00.000Z"
+      },
+      "canonicalJson": "{\"audience\":\"受众/\\\"quoted\\\"\\u0000\",\"deviceId\":\"device-2\",\"expiresAt\":\"2026-08-12T04:50:00.000Z\",\"issuedAt\":\"2026-08-12T04:45:00.000Z\",\"issuer\":\"https://staging.example.com:8443\",\"jti\":\"ZmFrZS1qdGktZm9yLWdvbA\",\"productId\":\"产品-b\",\"version\":1}",
+      "signingInputUtf8": "byok-device-assertion-v1\n{\"audience\":\"受众/\\\"quoted\\\"\\u0000\",\"deviceId\":\"device-2\",\"expiresAt\":\"2026-08-12T04:50:00.000Z\",\"issuedAt\":\"2026-08-12T04:45:00.000Z\",\"issuer\":\"https://staging.example.com:8443\",\"jti\":\"ZmFrZS1qdGktZm9yLWdvbA\",\"productId\":\"产品-b\",\"version\":1}",
+      "signingInputHex": "62796f6b2d6465766963652d617373657274696f6e2d76310a7b2261756469656e6365223a22e58f97e4bc972f5c2271756f7465645c225c7530303030222c226465766963654964223a226465766963652d32222c22657870697265734174223a22323032362d30382d31325430343a35303a30302e3030305a222c226973737565644174223a22323032362d30382d31325430343a34353a30302e3030305a222c22697373756572223a2268747470733a2f2f73746167696e672e6578616d706c652e636f6d3a38343433222c226a7469223a225a6d46725a53317164476b745a6d39794c5764766241222c2270726f647563744964223a22e4baa7e593812d62222c2276657273696f6e223a317d"
+    }
+  ]
+}
