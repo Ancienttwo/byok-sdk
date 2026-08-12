@@ -1,6 +1,15 @@
 import { createHash } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import {
+  BYOK_BLOB_CONTENT_ROUTE,
+  BYOK_BLOB_FINALIZE_ROUTE,
+  BYOK_BLOB_URL_ROUTE,
+  BYOK_BLOBS_PATH,
+  BYOK_CHALLENGE_PATH,
+  BYOK_EVENTS_PATH,
+  BYOK_MESSAGES_PATH,
+  BYOK_PAIR_PATH,
+  BYOK_TOKEN_PATH,
   ChallengeRequestSchema,
   CreateBlobRequestSchema,
   MessagesSendRequestSchema,
@@ -73,7 +82,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // Auth v2 (§6)
   // -------------------------------------------------------------------
 
-  app.post('/byok/pair', async (c) => {
+  app.post(BYOK_PAIR_PATH, async (c) => {
     const parsed = PairRequestSchema.safeParse(await readJsonBody(c));
     if (!parsed.success) {
       return c.json({ error: 'pairingCode, deviceName, and devicePublicKey are required strings' }, 400);
@@ -114,7 +123,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     return c.json(response, 200);
   });
 
-  app.post('/byok/challenge', async (c) => {
+  app.post(BYOK_CHALLENGE_PATH, async (c) => {
     const parsed = ChallengeRequestSchema.safeParse(await readJsonBody(c));
     if (!parsed.success) return c.json({ error: 'deviceId is required' }, 400);
     const { deviceId } = parsed.data;
@@ -134,7 +143,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     return c.json(response, 200);
   });
 
-  app.post('/byok/token', async (c) => {
+  app.post(BYOK_TOKEN_PATH, async (c) => {
     const parsed = TokenRequestSchema.safeParse(await readJsonBody(c));
     if (!parsed.success) return c.json({ error: 'deviceId, nonce, and signature are required' }, 400);
     const { deviceId, nonce, signature } = parsed.data;
@@ -182,7 +191,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // trip a device's WS connection closed for unrelated reasons.
   // -------------------------------------------------------------------
 
-  app.post('/byok/blobs', async (c) => {
+  app.post(BYOK_BLOBS_PATH, async (c) => {
     const principal = await authenticateBearer(c.req.header('authorization'), deps);
     if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
@@ -210,7 +219,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     }
   });
 
-  app.post('/byok/blobs/:id/finalize', async (c) => {
+  app.post(BYOK_BLOB_FINALIZE_ROUTE, async (c) => {
     const principal = await authenticateBearer(c.req.header('authorization'), deps);
     if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
@@ -228,7 +237,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     return c.body(null, 204);
   });
 
-  app.get('/byok/blobs/:id/url', async (c) => {
+  app.get(BYOK_BLOB_URL_ROUTE, async (c) => {
     const principal = await authenticateBearer(c.req.header('authorization'), deps);
     if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
@@ -239,7 +248,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     return c.json(response, 200);
   });
 
-  app.put('/byok/blobs/:id/content', async (c) => {
+  app.put(BYOK_BLOB_CONTENT_ROUTE, async (c) => {
     const blobId = c.req.param('id');
     const { sig, exp } = signedUrlParams(c.req.query('sig'), c.req.query('exp'));
     if (!sig || exp === undefined || !deps.blobStore.verifySignedUrl(blobId, 'put', sig, exp)) {
@@ -252,7 +261,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     return c.body(null, 204);
   });
 
-  app.get('/byok/blobs/:id/content', async (c) => {
+  app.get(BYOK_BLOB_CONTENT_ROUTE, async (c) => {
     const blobId = c.req.param('id');
     const { sig, exp } = signedUrlParams(c.req.query('sig'), c.req.query('exp'));
     if (!sig || exp === undefined || !deps.blobStore.verifySignedUrl(blobId, 'get', sig, exp)) {
@@ -268,7 +277,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // Long-poll fallback (§8)
   // -------------------------------------------------------------------
 
-  app.get('/byok/events', async (c) => {
+  app.get(BYOK_EVENTS_PATH, async (c) => {
     const principal = await authenticateBearer(c.req.header('authorization'), deps);
     if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
@@ -317,7 +326,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // landed.
   // -------------------------------------------------------------------
 
-  app.post('/byok/messages', async (c) => {
+  app.post(BYOK_MESSAGES_PATH, async (c) => {
     const principal = await authenticateBearer(c.req.header('authorization'), deps);
     if (!principal) return c.json({ error: 'unauthorized' }, 401);
 

@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
+import { byokBlobContentPath } from '@byok-sdk/protocol';
 import {
   BlobDeclarationConflictError,
   type BlobStore,
@@ -248,6 +249,6 @@ export class SqliteBlobStore implements BlobStore {
   private signUrl(blobId: string, action: 'put' | 'get'): string {
     const exp = Date.now() + this.urlTtlMs;
     const sig = this.computeSig(blobId, action, exp);
-    return `/byok/blobs/${blobId}/content?sig=${sig}&exp=${exp}`;
+    return `${byokBlobContentPath(blobId)}?sig=${sig}&exp=${exp}`;
   }
 }

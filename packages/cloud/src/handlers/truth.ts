@@ -1,4 +1,5 @@
 import {
+  DEVICE_PROOF_HEADER,
   STORAGE_ERROR_CODES,
   STORAGE_ERROR_HTTP_STATUS,
   TRUTH_RECORD_KINDS,
@@ -29,7 +30,9 @@ import {
 } from '../truth/contract';
 import { isTruthCommitError } from '../truth/errors';
 
-export const DEVICE_PROOF_HEADER = 'x-byok-device-proof';
+// Re-exported from core (single source of truth for the wire header); still
+// part of this module's public surface for callers importing it from cloud.
+export { DEVICE_PROOF_HEADER };
 export const DEFAULT_MAX_TRUTH_REQUEST_BYTES = 2 * 1024 * 1024;
 export const MAX_DEVICE_PROOF_HEADER_BYTES = 16 * 1024;
 

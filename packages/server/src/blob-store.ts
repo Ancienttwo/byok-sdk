@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { byokBlobContentPath } from '@byok-sdk/protocol';
 
 /**
  * Blob flows (docs/protocol.md §7): `POST /byok/blobs` declares a blob and
@@ -160,6 +161,6 @@ export class LocalDiskBlobStore implements BlobStore {
   private signUrl(blobId: string, action: 'put' | 'get'): string {
     const exp = Date.now() + this.urlTtlMs;
     const sig = this.computeSig(blobId, action, exp);
-    return `/byok/blobs/${blobId}/content?sig=${sig}&exp=${exp}`;
+    return `${byokBlobContentPath(blobId)}?sig=${sig}&exp=${exp}`;
   }
 }

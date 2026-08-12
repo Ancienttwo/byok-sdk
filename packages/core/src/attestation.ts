@@ -45,6 +45,14 @@ export const DEVICE_PROOF_VERSION = 1;
 export const DEVICE_PROOF_ALGORITHMS = ['ed25519'] as const;
 export type DeviceProofAlgorithm = (typeof DEVICE_PROOF_ALGORITHMS)[number];
 
+/**
+ * HTTP header carrying the base64url device-proof envelope on a truth-route
+ * request (§12.6.3). Both the daemon that mints the proof and the host that
+ * decodes it must name the exact same header, so it is a single wire constant
+ * here rather than a string re-spelled on each side.
+ */
+export const DEVICE_PROOF_HEADER = 'x-byok-device-proof';
+
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 const HTTP_METHOD_PATTERN = /^[A-Z]+$/;
 

@@ -27,6 +27,7 @@
  * (same posture as the reference server, §7).
  */
 import { ByokCoreError, type Clock, type ContentHash, type ObjectStore, type StorageReservation, type TenantId } from '@byok-sdk/core';
+import { byokBlobContentPath } from '@byok-sdk/protocol';
 import type { CloudCrypto } from '../../crypto/port';
 import type {
   BlobContent,
@@ -80,7 +81,7 @@ class InMemoryBlobRegistry {
   async signUrl(blobId: string, action: 'put' | 'get'): Promise<string> {
     const exp = this.clock.now().getTime() + this.urlTtlMs;
     const sig = await this.computeSig(blobId, action, exp);
-    return `/byok/blobs/${blobId}/content?sig=${sig}&exp=${exp}`;
+    return `${byokBlobContentPath(blobId)}?sig=${sig}&exp=${exp}`;
   }
 
   computeSig(blobId: string, action: 'put' | 'get', exp: number): Promise<string> {

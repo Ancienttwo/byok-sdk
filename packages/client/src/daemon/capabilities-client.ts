@@ -20,6 +20,7 @@
  * holds a credential), so no bearer token is attached here.
  */
 import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok-sdk/core';
+import { BYOK_CAPABILITIES_PATH } from '@byok-sdk/protocol';
 import { toHttpBase } from './url';
 
 /**
@@ -53,7 +54,7 @@ export async function fetchCapabilityDeclaration(
   serverUrl: string,
   options: FetchCapabilityDeclarationOptions = {},
 ): Promise<CapabilityDeclaration> {
-  const url = new URL('/byok/capabilities', toHttpBase(serverUrl));
+  const url = new URL(BYOK_CAPABILITIES_PATH, toHttpBase(serverUrl));
 
   let response: Response;
   try {

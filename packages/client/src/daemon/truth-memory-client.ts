@@ -6,13 +6,13 @@ import {
   type TruthRecordKind,
   type TruthRecordSelector,
 } from '@byok-sdk/core';
-import type { DeviceProofEnvelopeV1 } from '@byok-sdk/core';
+import { DEVICE_PROOF_HEADER, type DeviceProofEnvelopeV1 } from '@byok-sdk/core';
+import { BYOK_RECORDS_PATH, byokRecordPath } from '@byok-sdk/protocol';
 import type { DeviceProofSigner } from './device-proof-signer';
 import { toHttpBase } from './url';
 
 const EMPTY_BODY = new Uint8Array();
 const LARGE_SNAPSHOT_THRESHOLD_BYTES = 1024 * 1024;
-const DEVICE_PROOF_HEADER = 'x-byok-device-proof';
 
 export interface TruthManifestRecord {
   readonly kind: TruthRecordKind;
@@ -421,11 +421,11 @@ function manifestPath(query: TruthManifestQueryInput): string {
   if (query.keyPrefix !== undefined) search.set('prefix', query.keyPrefix);
   if (query.limit !== undefined) search.set('limit', String(query.limit));
   const encoded = search.toString();
-  return encoded.length === 0 ? '/byok/records' : `/byok/records?${encoded}`;
+  return encoded.length === 0 ? BYOK_RECORDS_PATH : `${BYOK_RECORDS_PATH}?${encoded}`;
 }
 
 function recordPath(kind: TruthRecordKind, recordKey: string): string {
-  return `/byok/records/${encodeURIComponent(kind)}/${encodeURIComponent(recordKey)}`;
+  return byokRecordPath(kind, recordKey);
 }
 
 function prepareTransportBody(body: TruthWriteBody): PreparedTransportBody {

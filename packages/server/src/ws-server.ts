@@ -1,12 +1,12 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { CAPABILITY_FLAGS, decodeEnvelope, PROTOCOL_VERSION, type ConnHelloPayload } from '@byok-sdk/protocol';
+import { BYOK_WS_PATH, CAPABILITY_FLAGS, decodeEnvelope, PROTOCOL_VERSION, type ConnHelloPayload } from '@byok-sdk/protocol';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { authenticateBearer, type AuthDeps, type AuthenticatedDevice } from './auth';
 import { startHeartbeat, type Heartbeat } from './heartbeat';
 import type { ConnectionHub } from './hub';
 
-const WS_PATH = '/byok/ws';
+const WS_PATH = BYOK_WS_PATH;
 
 /**
  * Capability flags this server implements. Unlike the M0 server, `blob-upload`

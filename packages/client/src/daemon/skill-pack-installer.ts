@@ -51,6 +51,7 @@ import {
   type SkillPackCheck,
   type SkillPackManifest,
 } from '@byok-sdk/core';
+import { BYOK_SKILL_PACKS_PATH, byokSkillPackFilePath } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
@@ -302,7 +303,7 @@ export async function installSkillPacks(
   const base = toHttpBase(options.serverUrl);
   const source = originOf(options.serverUrl);
   const body = await getJson(
-    new URL('/byok/skill-packs', base),
+    new URL(BYOK_SKILL_PACKS_PATH, base),
     options.auth,
     options.signal,
     'the skill pack manifest list',
@@ -378,10 +379,7 @@ async function installOne(
   const bodies = new Map<string, string>();
   let totalBytes = 0;
   for (const declared of manifest.files) {
-    const url = new URL(
-      `/byok/skill-packs/${encodeURIComponent(manifest.name)}/files/${encodeURIComponent(declared.path)}`,
-      base,
-    );
+    const url = new URL(byokSkillPackFilePath(manifest.name, declared.path), base);
     const raw = await getJson(url, options.auth, options.signal, `skill pack file ${JSON.stringify(declared.path)}`);
     const content = (raw as { content?: unknown } | null)?.content;
     if (typeof content !== 'string') {

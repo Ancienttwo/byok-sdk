@@ -163,3 +163,97 @@ export const MessagesSendResponseSchema = z.object({
   rejected: z.number().int().nonnegative().optional(),
 });
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Route paths — the single source of truth for the `/byok/*` HTTP surface.
+//
+// These literals were previously hand-copied across client, cloud, server, and
+// testkit; the doc comments above already named every one of them but exported
+// no constant. They ARE the wire contract (unlike the host-owned, opaque
+// capability vocabulary of ADR-010, which stays out of protocol), so they live
+// here and every package imports them — a route change is now one edit.
+//
+// Two shapes:
+//   - Static paths (`BYOK_*_PATH`) — used identically by routers and clients.
+//   - Parameterized routes: a router template (`BYOK_*_ROUTE`, with `:param`
+//     placeholders) for mounting, plus a builder (`byok*Path(...)`) that fills
+//     the params for a client request. Each builder reproduces its call site
+//     byte-for-byte, including whether a segment is `encodeURIComponent`-encoded.
+// ---------------------------------------------------------------------------
+
+/** `GET /byok/ws` — WebSocket upgrade path. */
+export const BYOK_WS_PATH = '/byok/ws';
+
+/** `POST /byok/pair` — one-time device pairing (§6). */
+export const BYOK_PAIR_PATH = '/byok/pair';
+/** `POST /byok/challenge` — token-renewal challenge (§6.3). */
+export const BYOK_CHALLENGE_PATH = '/byok/challenge';
+/** `POST /byok/token` — token-renewal exchange (§6.3). */
+export const BYOK_TOKEN_PATH = '/byok/token';
+
+/** `GET /byok/capabilities` — ADR-010 declaration route. */
+export const BYOK_CAPABILITIES_PATH = '/byok/capabilities';
+
+/** `GET /byok/events` — long-poll receive (§8). */
+export const BYOK_EVENTS_PATH = '/byok/events';
+/** `POST /byok/messages` — long-poll batched send (§8.2). */
+export const BYOK_MESSAGES_PATH = '/byok/messages';
+
+/** `PUT /byok/presence` — presence heartbeat. */
+export const BYOK_PRESENCE_PATH = '/byok/presence';
+/** `POST /byok/activity` — activity-tail append. */
+export const BYOK_ACTIVITY_PATH = '/byok/activity';
+
+/** `GET /byok/board` — coordination board list/poll. */
+export const BYOK_BOARD_PATH = '/byok/board';
+/** `GET /byok/board/stream` — coordination board SSE. */
+export const BYOK_BOARD_STREAM_PATH = '/byok/board/stream';
+/** Router template — `POST /byok/board/:id/claim`. */
+export const BYOK_BOARD_CLAIM_ROUTE = '/byok/board/:id/claim';
+/** Router template — `POST /byok/board/:id/unclaim`. */
+export const BYOK_BOARD_UNCLAIM_ROUTE = '/byok/board/:id/unclaim';
+/** Router template — `POST /byok/board/:id/status`. */
+export const BYOK_BOARD_STATUS_ROUTE = '/byok/board/:id/status';
+
+/** `GET /byok/records` — truth manifest list (§12.3). */
+export const BYOK_RECORDS_PATH = '/byok/records';
+/** Router template for a single truth record — `GET`/`PUT /byok/records/:kind/:key`. */
+export const BYOK_RECORD_ROUTE = '/byok/records/:kind/:key';
+/** Client builder for a truth record path. Mirrors the `:kind/:key` template, each segment URL-encoded. */
+export function byokRecordPath(kind: string, key: string): string {
+  return `/byok/records/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`;
+}
+
+/** `GET /byok/skill-packs` — skill-pack manifest catalogue. */
+export const BYOK_SKILL_PACKS_PATH = '/byok/skill-packs';
+/** Router template for a skill-pack file — `GET /byok/skill-packs/:name/files/:path`. */
+export const BYOK_SKILL_PACK_FILE_ROUTE = '/byok/skill-packs/:name/files/:path';
+/** Client builder for a skill-pack file path. Mirrors the `:name`/`:path` template, each segment URL-encoded. */
+export function byokSkillPackFilePath(name: string, path: string): string {
+  return `/byok/skill-packs/${encodeURIComponent(name)}/files/${encodeURIComponent(path)}`;
+}
+
+/** `POST /byok/blobs` — declare a blob upload (§7). */
+export const BYOK_BLOBS_PATH = '/byok/blobs';
+/** Router template — `POST /byok/blobs/:id/finalize`. */
+export const BYOK_BLOB_FINALIZE_ROUTE = '/byok/blobs/:id/finalize';
+/** Router template — `GET /byok/blobs/:id/url`. */
+export const BYOK_BLOB_URL_ROUTE = '/byok/blobs/:id/url';
+/** Router template for the two presigned byte routes — `PUT`/`GET /byok/blobs/:id/content`. */
+export const BYOK_BLOB_CONTENT_ROUTE = '/byok/blobs/:id/content';
+/** Client builder — `POST /byok/blobs/:id/finalize`, blob id URL-encoded (client-supplied). */
+export function byokBlobFinalizePath(blobId: string): string {
+  return `/byok/blobs/${encodeURIComponent(blobId)}/finalize`;
+}
+/** Client builder — `GET /byok/blobs/:id/url`, blob id URL-encoded (client-supplied). */
+export function byokBlobUrlPath(blobId: string): string {
+  return `/byok/blobs/${encodeURIComponent(blobId)}/url`;
+}
+/**
+ * Path portion of a presigned `/byok/blobs/:id/content` URL. The blob id here
+ * is a server-minted token (NOT URL-encoded, matching the reference stores that
+ * mint these signed URLs); callers append the `?sig=&exp=` query themselves.
+ */
+export function byokBlobContentPath(blobId: string): string {
+  return `/byok/blobs/${blobId}/content`;
+}
