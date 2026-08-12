@@ -45,18 +45,18 @@
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
 > **Reviewed Subject SHA256**: sha256:8e403cbb8648735b2d09b7482e93278fc712011a8954d57dd2aad89c2cb710bb
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 3d66543c504f2aa3c6517e34e57c4c2a745232dd
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Verification Evidence SHA256**: sha256:c803c6bf054cc4a42c58649fe73b1e3873f37cf6deb4574a938024e1a44bea1d
+> **Issued At**: 2026-08-12T03:28:01.972Z
 
-- Summary: verification evidence is frozen and ready for the contract's semantic acceptance step.
-- Findings: none.
+- Summary: 接受 PR #53 的既定范围与残余风险：cloud mailbox 调用方 capability gate、web-to-device secret provisioning 不在本 PR、keychain subprocess 无 launcher 专属 timeout；授权按 user waiver 合并。
+- Findings: none
 
 ## Behavior Diff Notes
 
