@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:20a0a372e42b3a17ac848c07ac3af94a064fce97753df853964e884ea8346bef
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: b9e759860089833c2aa79632a1ad18a669440ca0
+> **Verification Evidence SHA256**: sha256:a330635d18d2962e58976e14e5d9f6473e220befe5258419089a56a9cb557a0e
+> **Issued At**: 2026-08-12T20:51:32.898Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: B-2 route path constants → @byok-sdk/protocol + B-6(a) DEVICE_PROOF_HEADER→core: gatekeeper PASS. Byte-drift provably zero (http-routes.test.ts independent witnesses), freeze-guard intact (protocol diff purely additive +121/-0, golden unchanged), single documented conformance residual (no protocol dep), cloud public API unchanged via re-export. 9/9 Fulfilled.
 - Findings: none
 
 ## Behavior Diff Notes
