@@ -1,6 +1,6 @@
 # Plan: Skill-pack delivery channel (R1)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260813-0023
 > **Slug**: skill-pack-delivery-channel
 > **Planning Source**: waza-think
