@@ -181,7 +181,7 @@ export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './uti
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 
 export { PiAdapter } from './adapters/pi/pi-adapter';
-export type { PiAdapterOptions } from './adapters/pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';

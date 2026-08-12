@@ -212,6 +212,7 @@ function runProbeOrTurnFlow() {
     '--input-format': true,
     '--output-format': true,
     '--verbose': false,
+    '--model': true,
     '--resume': true,
     '--permission-mode': true,
     '--tools': true,

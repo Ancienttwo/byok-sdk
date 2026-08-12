@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -85,6 +86,83 @@ describe('PiAdapter against the fake-pi fixture', () => {
       { type: 'progress', text: 'world' },
       { type: 'turn_end' },
     ]);
+  });
+
+  it('routes an authoritative BYOK selection through the credential launcher without a key in argv or env', async () => {
+    const calls: Array<{ command: string; args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ command, args: [...args], env: options?.env ?? {} });
+      const separator = args.indexOf('--');
+      return realSpawn(FIXTURE_PATH, args.slice(separator + 1), options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      spawnFn,
+      byokLauncher: {
+        command: '/opt/byok-pi-provider-launcher',
+        profileDbPath: '/private/providers.sqlite',
+        sessionDir: '/private/pi-sessions',
+      },
+    });
+    const task: TaskOfferPayload = {
+      ...baseTask,
+      dispatchSelection: {
+        lane: 'byok',
+        runtimeId: 'pi',
+        providerId: 'openai',
+        modelId: 'gpt-5.2',
+      },
+    };
+    const session = await adapter.start(
+      task,
+      await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
+    );
+    openSessions.push(session);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe('/opt/byok-pi-provider-launcher');
+    expect(calls[0]?.args).toEqual([
+      '--pi-bin',
+      FIXTURE_PATH,
+      '--profile-db',
+      '/private/providers.sqlite',
+      '--session-dir',
+      '/private/pi-sessions',
+      '--provider',
+      'openai',
+      '--model',
+      'gpt-5.2',
+      '--',
+      '--mode',
+      'rpc',
+    ]);
+    expect(JSON.stringify(calls[0])).not.toContain('sk-sentinel');
+    expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
+    await expect(session.followUp({
+      instruction: 'switch provider',
+      policy: { mode: 'auto' },
+      dispatchSelection: {
+        lane: 'byok',
+        runtimeId: 'pi',
+        providerId: 'deepseek',
+        modelId: 'deepseek-chat',
+      },
+    })).rejects.toThrow(/cannot change its authoritative BYOK provider\/model/);
+  });
+
+  it('fails closed before spawn when a BYOK selection has no credential launcher', async () => {
+    const task: TaskOfferPayload = {
+      ...baseTask,
+      dispatchSelection: {
+        lane: 'byok',
+        runtimeId: 'pi',
+        providerId: 'openai',
+        modelId: 'gpt-5.2',
+      },
+    };
+    await expect(fakePiAdapter().start(task, await makeCtx())).rejects.toThrow(
+      /requires a configured credential-custody launcher/,
+    );
   });
 
   it('FAKE_PI_ARTIFACT_NAME drives a >64KB file write + an artifact AgentEvent (M1-4 blob-path e2e fixture)', async () => {

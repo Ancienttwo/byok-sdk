@@ -16,6 +16,7 @@ import {
   type TaskContext,
 } from '../../types';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
+import { withoutProviderCredentials } from '../provider-credential-environment';
 import { resolveApprovalMcpBin, type ResolvedApprovalMcpBin } from './resolve-approval-mcp-bin';
 import { mapPermissionPolicyToClaudeArgs } from './permission-mapping';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
@@ -149,6 +150,7 @@ export interface ClaudeAdapterOptions {
  * like a queued follow-up under a name that implies live redirection.
  */
 export class ClaudeAdapter implements RuntimeAdapter {
+  readonly supportsDispatchSelection = true;
   readonly id = 'claude';
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {}
@@ -206,6 +208,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     if (!mapping.ok) {
       throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by claude adapter');
     }
+    const modelId = subscriptionModel(task, 'claude');
 
     // M4 Phase 3: `confirm` mode's approval channel. Generating the
     // temp --mcp-config file is a real filesystem side effect (see
@@ -272,6 +275,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // "Error: When using --print, --output-format=stream-json requires
       // --verbose", before spawning any model call.
       '--verbose',
+      ...(modelId ? ['--model', modelId] : []),
       ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
       ...mapping.args,
     ];
@@ -280,7 +284,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       command: bin.command,
       args,
       cwd: ctx.workspaceDir,
-      env: ctx.env,
+      env: withoutProviderCredentials(ctx.env),
       spawnFn: this.options.spawnFn,
     });
 
@@ -333,7 +337,14 @@ export class ClaudeAdapter implements RuntimeAdapter {
       );
     }
 
-    return new ClaudeSession(sessionRef, client, ctx.workspaceDir, ctx.approvalChannel, approvalMcpConfigDir);
+    return new ClaudeSession(
+      sessionRef,
+      client,
+      ctx.workspaceDir,
+      ctx.approvalChannel,
+      approvalMcpConfigDir,
+      modelId,
+    );
   }
 
   /**
@@ -370,6 +381,20 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 }
 
+function subscriptionModel(
+  task: TaskOfferPayload,
+  runtimeId: 'claude',
+): string | undefined {
+  const selection = task.dispatchSelection;
+  if (selection === undefined) return undefined;
+  if (selection.lane !== 'subscription' || selection.runtimeId !== runtimeId) {
+    throw new PolicyUnsupportedError(
+      `claude adapter cannot execute ${selection.lane} selection for runtime ${selection.runtimeId}`,
+    );
+  }
+  return selection.modelId;
+}
+
 class ClaudeSession implements Session {
   private readonly correlation: ToolUseCorrelation = createToolUseCorrelation();
 
@@ -381,6 +406,7 @@ class ClaudeSession implements Session {
     private readonly approvalChannel?: ApprovalChannel,
     /** M4 Phase 3: the temp `--mcp-config` directory `start()` created for this session, if any — removed in `close()`. */
     private readonly approvalMcpConfigDir?: string,
+    private readonly modelId?: string,
   ) {}
 
   get events(): AsyncIterable<AgentEvent> {
@@ -470,6 +496,12 @@ class ClaudeSession implements Session {
   async followUp(task: TaskOfferPayload): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
+    }
+    const requestedModel = subscriptionModel(task, 'claude');
+    if (requestedModel !== undefined && requestedModel !== this.modelId) {
+      throw new PolicyUnsupportedError(
+        `claude persistent session cannot change model from ${this.modelId ?? '(legacy default)'} to ${requestedModel}`,
+      );
     }
     // Writes onto the SAME persistent process this session already has
     // open — empirically confirmed live that claude keeps a

@@ -387,13 +387,16 @@ describe('result-document capability flag', () => {
   });
 
   it('did not disturb any pre-existing flag (additive only)', () => {
-    expect([...CAPABILITY_FLAGS]).toEqual([
+    // The five flags that existed before this slice, unchanged and in order,
+    // as an exact prefix — later additive flags (result-document here, plus
+    // any landed concurrently) may follow but must not reorder or drop these.
+    expect([...CAPABILITY_FLAGS].slice(0, 5)).toEqual([
       'steer',
       'blob-upload',
       'interactive-approval',
       'approval_resolved',
       'approval-targeting',
-      'result-document',
     ]);
+    expect(CAPABILITY_FLAGS).toContain('result-document');
   });
 });

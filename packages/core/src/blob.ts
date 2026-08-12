@@ -47,12 +47,67 @@ export function isContentHash(value: unknown): value is ContentHash {
 }
 
 /**
+ * What a deployment-level key namespace may look like: slash-joined segments of
+ * lowercase alphanumerics, `.`, `_`, and `-`, each starting with an
+ * alphanumeric. No leading or trailing slash, and therefore no empty segment.
+ *
+ * Narrow on purpose, and narrower than S3 keys allow. A prefix is spliced into
+ * every key this SDK ever writes, so the only prefixes worth accepting are the
+ * ones that reach the object store spelled exactly as configured: anything
+ * requiring percent-encoding would give the deployment's objects two names, and
+ * anything with an empty segment would make `a//b` and `a/b` the same key at
+ * rest but different strings in config. Case is folded out for the same reason
+ * {@link contentHash} refuses uppercase hex — one address, one spelling.
+ */
+export const OBJECT_KEY_PREFIX_PATTERN = /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/;
+
+/** A validated deployment key namespace. Branded, so only the mint point below can produce one. */
+export type ObjectKeyPrefix = string & { readonly __byokObjectKeyPrefix: unique symbol };
+
+/**
+ * The single mint point for {@link ObjectKeyPrefix}.
+ *
+ * There is no "empty means no prefix" spelling here: a composition that has no
+ * prefix omits the option, and one that passes `''` has misconfigured something
+ * (an unset environment variable is the usual way). Accepting it silently would
+ * make the two indistinguishable at exactly the moment the difference decides
+ * where a deployment's objects live.
+ *
+ * @throws {ByokCoreError} code `object_key_prefix_invalid`.
+ */
+export function objectKeyPrefix(value: string): ObjectKeyPrefix {
+  if (!OBJECT_KEY_PREFIX_PATTERN.test(value)) {
+    throw new ByokCoreError(
+      'object_key_prefix_invalid',
+      `Object key prefix must match ${OBJECT_KEY_PREFIX_PATTERN.source}, received ${JSON.stringify(value)}.`,
+    );
+  }
+  return value as ObjectKeyPrefix;
+}
+
+/**
  * Tenant-scoped object key, e.g.
  * `tenants/<tenantId>/objects/sha256/<hex>` (§12.7.4).
+ *
+ * `prefix` namespaces the whole layout — `<prefix>/tenants/...` — so one bucket
+ * can hold several deployments without either of them owning the bucket root.
+ * Omitting it produces the unprefixed key verbatim, which is what makes the
+ * option safe to add: every object already at rest was written without one.
+ *
+ * The prefix is an IMMUTABLE property of a deployment. It is spliced in here
+ * and nowhere else, and nothing reads a key back under a second layout: change
+ * a live deployment's prefix and its existing objects become unaddressable.
+ * See `R2BlobStoreOptions.keyPrefix` in `@byok-sdk/cloud-postgres` for the full
+ * operational contract.
  */
-export function tenantObjectKey(tenant: TenantId, hash: ContentHash): string {
+export function tenantObjectKey(
+  tenant: TenantId,
+  hash: ContentHash,
+  prefix?: ObjectKeyPrefix,
+): string {
   const hex = hash.slice('sha256:'.length);
-  return `tenants/${tenant as string}/objects/sha256/${hex}`;
+  const key = `tenants/${tenant as string}/objects/sha256/${hex}`;
+  return prefix === undefined ? key : `${prefix as string}/${key}`;
 }
 
 /**

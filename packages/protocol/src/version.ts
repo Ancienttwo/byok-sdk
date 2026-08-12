@@ -87,6 +87,13 @@ export const PROTOCOL_VERSION = 1;
  * task with its main result quietly deleted (`packages/client`'s
  * `task-runner.ts`). A new server talking to an old daemon is unaffected:
  * the field is optional, and an old daemon simply never sets it.
+ *
+ * `dispatch-selection` (additive-minor) is a correctness gate for the
+ * optional `task.offer.dispatchSelection` control field. An older v1 daemon
+ * legally strips unknown optional fields, so a server must never send an
+ * authoritative provider/model selection unless the target connection
+ * advertises this flag. Absence means reject before task creation, not send
+ * a legacy runtime-only offer that could reach a different provider.
  */
 export const CAPABILITY_FLAGS = [
   'steer',
@@ -95,6 +102,7 @@ export const CAPABILITY_FLAGS = [
   'approval_resolved',
   'approval-targeting',
   'result-document',
+  'dispatch-selection',
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

@@ -104,7 +104,8 @@ export function openSqliteDatabase(
   faults?: SqliteOpenFaultSeam,
 ): DatabaseSync {
   const { DatabaseSync } = loadSqliteModule();
-  if (path !== ':memory:') {
+  const readOnly = options?.readOnly === true;
+  if (path !== ':memory:' && !readOnly) {
     mkdirSync(dirname(path), { mode: SECURE_DIR_MODE, recursive: true });
   }
   const database = new DatabaseSync(path, {
@@ -113,7 +114,7 @@ export function openSqliteDatabase(
   });
   try {
     faults?.onStep?.('after-open');
-    if (path !== ':memory:') {
+    if (path !== ':memory:' && !readOnly) {
       database.exec('PRAGMA journal_mode = WAL');
       faults?.onStep?.('after-wal');
       database.exec('PRAGMA synchronous = FULL');
