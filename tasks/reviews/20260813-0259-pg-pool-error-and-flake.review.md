@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:6532690b732973780987eda39a102fa26436e852f233d2588030b3dd35055f09
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 9050d1fef78664b4395d84cf7261cda0ac6f456c
+> **Verification Evidence SHA256**: sha256:ac02690bcbae6e4b22fa980d9912b245dd6825604fcc15fd5322362b553c83fa
+> **Issued At**: 2026-08-12T19:30:04.199Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: B-1 pg pool error handler + undici keep-alive teardown flake fix: gatekeeper PASS (fresh context), sound-by-construction. Part 1 (pool 'error' handler) fully verified; Part 2 (undici keep-alive off, process-wide, covers conformance path) CI-verified via Node 22+24 dataplane. protocol zero-diff, no error-masking, no uncaughtException swallow, int8 parser untouched. 9/9 contract checks Fulfilled. Unrelated pre-existing daemon-owner mutex-port flake (packages/client) noted, out of scope.
 - Findings: none
 
 ## Behavior Diff Notes
