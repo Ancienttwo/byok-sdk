@@ -63,6 +63,34 @@ Two consequences worth stating outright:
   keys are built at one point from a value core already validated. A non-hex id
   cannot become a `ContentHash`, so it cannot reach key construction.
 
+### `keyPrefix`: one bucket, several deployments
+
+Object keys default to `tenants/<tenant>/objects/sha256/<hex>` at the bucket
+root. `R2BlobStoreOptions.keyPrefix` puts a namespace in front of that —
+`keyPrefix: 'acme/prod'` writes `acme/prod/tenants/<tenant>/objects/sha256/<hex>`
+— so a host running more than one product against one R2 account no longer needs
+a bucket per product. Omit the option and the key is the unprefixed layout, byte
+for byte.
+
+**It is immutable per deployment, and it is only for a new one.** The same field
+builds the key on write and on read; nothing falls back to a second layout, and
+nothing will be added that does — a dual-read across an old and a new prefix
+would make two key layouts authoritative for the same object at the same time.
+So changing `keyPrefix` on a deployment that has already stored objects strands
+them: still in the bucket, no longer addressable, invisible to the cleanup
+maintenance surface. Moving an existing deployment onto a prefix means a
+separate, operator-invoked, one-shot copy of the objects themselves, which this
+SDK does not provide.
+
+The value is validated when the store is constructed, never afterwards (there is
+no setter): slash-joined segments of lowercase alphanumerics, `.`, `_` and `-`,
+each segment starting with an alphanumeric — no leading or trailing slash, no
+empty segment, no uppercase, nothing that would be percent-encoded. Anything else
+throws a `ByokCoreError` with code `object_key_prefix_invalid` at construction.
+`keyPrefix: ''` is refused rather than treated as "no prefix": an empty string is
+what an unset environment variable looks like, and accepting it would silently
+decide where a deployment's objects live.
+
 `x-amz-checksum-sha256` is deliberately not signed. MinIO honors it, but R2's S3
 compatibility table implements SHA-256 as `COMPOSITE` only — not the
 `FULL_OBJECT` type a single-shot PutObject uses — so signing it would mint URLs
