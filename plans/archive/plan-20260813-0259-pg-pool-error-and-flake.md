@@ -1,6 +1,6 @@
 # Plan: pg Pool error handler + CI teardown flake (B-1)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260813-0259
 > **Slug**: pg-pool-error-and-flake
 > **Planning Source**: waza-think

@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-13 03:30
+> **Related Plan**: plans/archive/plan-20260813-0259-pg-pool-error-and-flake.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260813-0330
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-13 01:55
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
