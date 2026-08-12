@@ -243,25 +243,6 @@ export interface ProofRequestReceiptStore {
 }
 
 // ---------------------------------------------------------------------------
-// Per-device delivery sequence
-// ---------------------------------------------------------------------------
-
-/**
- * The daemon's redelivery cursor is the envelope-level `seq`, which has to be
- * baked into the envelope BEFORE it can be handed to `MailboxStore.append` —
- * the mailbox transports opaque bytes and cannot number an envelope it is
- * being given. So the delivery number is allocated here first, and the
- * enqueue path then asserts the mailbox agreed (`mailbox_seq_mismatch`)
- * rather than letting two counters drift apart silently.
- *
- * A port rather than a counter held by the composition, so no handler-adjacent
- * module carries mutable state (S3.5 boxes 14-15).
- */
-export interface DeviceSequenceStore {
-  next(tenant: TenantId, deviceId: string): Promise<number>;
-}
-
-// ---------------------------------------------------------------------------
 // Blobs (§7)
 // ---------------------------------------------------------------------------
 
@@ -367,7 +348,6 @@ export interface CloudStores {
   readonly tasks: TaskAttemptStore;
   readonly receipts: RequestReceiptStore;
   readonly proofReceipts: ProofRequestReceiptStore;
-  readonly sequence: DeviceSequenceStore;
   readonly blobs: CloudBlobStore;
   readonly rateLimiter: InboundRateLimiter;
 }
@@ -381,7 +361,6 @@ export const CLOUD_STORE_NAMES = [
   'tasks',
   'receipts',
   'proofReceipts',
-  'sequence',
   'blobs',
   'rateLimiter',
 ] as const;

@@ -5,8 +5,10 @@
  * a durable `delete_pending` tombstone, and a missing object is an idempotent
  * DELETE replay — never evidence that a committed manifest was truthful.
  */
+import { createHash } from 'node:crypto';
 import {
   ByokCoreError,
+  contentHash,
   tenantId,
   type Clock,
   type ContentHash,
@@ -14,12 +16,14 @@ import {
   type MailboxMessageState,
   type TenantId,
 } from '@byok-sdk/core';
+import { decodeEnvelope, encodeEnvelope, EnvelopeSchema, isServerToDaemonType } from '@byok-sdk/protocol';
 import type { Pool, PoolClient } from 'pg';
 import {
   R2ObjectMaintenanceStore,
   type R2BlobStoreOptions,
   type R2ObjectMaintenance,
 } from './stores/r2-blobs';
+import { allocateMailboxSequence } from './stores/core/mailbox-sequence';
 
 const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;
@@ -395,6 +399,7 @@ export class PostgresCloudCleanup {
     const client = await this.#pool.connect();
     let result: MailboxMessage | undefined;
     let rejection: Error | undefined;
+    let rollbackAllocation = false;
     try {
       await client.query('BEGIN');
       const originalResult = await client.query<OutboxRow>(
@@ -415,14 +420,10 @@ export class PostgresCloudCleanup {
         );
         const existing = existingResult.rows[0];
         if (existing !== undefined) {
-          if (
-            existing.body_hash !== original.body_hash ||
-            existing.byte_size !== original.byte_size ||
-            existing.replay_source_seq !== original.seq
-          ) {
+          if (!replayMatches(existing, original)) {
             rejection = new CloudCleanupError(
               'cleanup_invalid_input',
-              `Replay id ${input.replayMessageId} already binds different mailbox bytes.`,
+              `Replay id ${input.replayMessageId} already binds a different replay delivery.`,
             );
           } else {
             result = toMailboxMessage(existing);
@@ -451,14 +452,10 @@ export class PostgresCloudCleanup {
           );
           const winner = serializedExisting.rows[0];
           if (winner !== undefined) {
-            if (
-              winner.body_hash !== original.body_hash ||
-              winner.byte_size !== original.byte_size ||
-              winner.replay_source_seq !== original.seq
-            ) {
+            if (!replayMatches(winner, original)) {
               rejection = new CloudCleanupError(
                 'cleanup_invalid_input',
-                `Replay id ${input.replayMessageId} already binds different mailbox bytes.`,
+                `Replay id ${input.replayMessageId} already binds a different replay delivery.`,
               );
             } else {
               result = toMailboxMessage(winner);
@@ -468,46 +465,73 @@ export class PostgresCloudCleanup {
               'cleanup_policy_missing',
               `Tenant ${tenant} has no storage entitlement/usage row.`,
             );
-          } else if (capacity.mailbox_bytes + original.byte_size > capacity.mailbox_limit_bytes) {
-            rejection = new ByokCoreError(
-              'storage_quota_exceeded',
-              `Replaying the dead letter would exceed tenant ${tenant}'s mailbox limit.`,
-            );
           } else {
-            const inserted = await client.query<OutboxRow>(
-              `WITH allocated AS (
-                 INSERT INTO device_stream (tenant_id, device_id, next_seq, acked_seq, acked_at)
-                 VALUES ($1, $2, 2, 0, $7)
-                 ON CONFLICT (tenant_id, device_id) DO UPDATE
-                    SET next_seq = device_stream.next_seq + 1
-                 RETURNING next_seq - 1 AS seq
-               )
-               INSERT INTO outbox (${OUTBOX_COLUMNS})
-               SELECT $1, $2, allocated.seq, $3, $4, $5, $6, 'pending', $7, $8
-                 FROM allocated
-               RETURNING ${OUTBOX_COLUMNS}`,
-              [
-                tenant,
-                input.deviceId,
-                input.replayMessageId,
-                original.body,
-                original.body_hash,
-                original.byte_size,
-                this.#now(),
-                original.seq,
-              ],
+            // Hold the same per-device allocator lock as normal mailbox append
+            // until the rebound envelope row is inserted. This keeps replay
+            // commits ordered with live offers.
+            const seq = await allocateMailboxSequence(
+              client,
+              tenant,
+              input.deviceId,
+              this.#now(),
             );
-            await client.query(
-              `UPDATE storage_usage
-                  SET mailbox_bytes = mailbox_bytes + $2::bigint, updated_at = $3
-                WHERE tenant_id = $1`,
-              [tenant, original.byte_size, this.#now()],
+            // Normal mailbox append uses this same device lock. Recheck after
+            // acquiring it so an append that won between the usage check and
+            // allocation resolves through typed idempotency rather than a raw
+            // unique violation. Roll back the unused allocation either way.
+            const afterAllocation = await client.query<OutboxRow>(
+              `SELECT ${OUTBOX_COLUMNS} FROM outbox
+                WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
+              [tenant, input.deviceId, input.replayMessageId],
             );
-            result = toMailboxMessage(inserted.rows[0]!);
+            const appendWinner = afterAllocation.rows[0];
+            if (appendWinner !== undefined) {
+              rollbackAllocation = true;
+              if (!replayMatches(appendWinner, original)) {
+                rejection = new CloudCleanupError(
+                  'cleanup_invalid_input',
+                  `Replay id ${input.replayMessageId} already binds a different replay delivery.`,
+                );
+              } else {
+                result = toMailboxMessage(appendWinner);
+              }
+            } else {
+              const rebound = materializeReplayBody(original, seq);
+              if (capacity.mailbox_bytes + rebound.byteSize > capacity.mailbox_limit_bytes) {
+                rejection = new ByokCoreError(
+                  'storage_quota_exceeded',
+                  `Replaying the dead letter would exceed tenant ${tenant}'s mailbox limit.`,
+                );
+              } else {
+                const inserted = await client.query<OutboxRow>(
+                  `INSERT INTO outbox (${OUTBOX_COLUMNS})
+                   VALUES ($1, $2, $3::bigint, $4, $5, $6, $7::bigint, 'pending', $8, $9)
+                   RETURNING ${OUTBOX_COLUMNS}`,
+                  [
+                    tenant,
+                    input.deviceId,
+                    seq,
+                    input.replayMessageId,
+                    rebound.body,
+                    rebound.bodyHash,
+                    rebound.byteSize,
+                    this.#now(),
+                    original.seq,
+                  ],
+                );
+                await client.query(
+                  `UPDATE storage_usage
+                      SET mailbox_bytes = mailbox_bytes + $2::bigint, updated_at = $3
+                    WHERE tenant_id = $1`,
+                  [tenant, rebound.byteSize, this.#now()],
+                );
+                result = toMailboxMessage(inserted.rows[0]!);
+              }
+            }
           }
         }
       }
-      if (rejection === undefined) await client.query('COMMIT');
+      if (rejection === undefined && !rollbackAllocation) await client.query('COMMIT');
       else await client.query('ROLLBACK');
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});
@@ -1200,6 +1224,45 @@ function toMailboxMessage(row: OutboxRow): MailboxMessage {
     state: row.state as MailboxMessageState,
     appendedAt: row.appended_at,
   };
+}
+
+interface ReplayBody {
+  readonly body: string;
+  readonly bodyHash: ContentHash;
+  readonly byteSize: bigint;
+}
+
+function materializeReplayBody(original: OutboxRow, seq: number): ReplayBody {
+  try {
+    const envelope = decodeEnvelope(original.body);
+    if (!isServerToDaemonType(envelope.type)) {
+      throw new Error(`Envelope type ${envelope.type} is not server-to-daemon.`);
+    }
+    const rebound = EnvelopeSchema.parse({ ...envelope, seq });
+    const body = encodeEnvelope(rebound);
+    const bytes = new TextEncoder().encode(body);
+    return {
+      body,
+      bodyHash: contentHash(`sha256:${createHash('sha256').update(bytes).digest('hex')}`),
+      byteSize: BigInt(bytes.length),
+    };
+  } catch (cause) {
+    throw new CloudCleanupError(
+      'cleanup_invalid_input',
+      `Dead letter ${original.device_id}/${String(original.seq)} is not a replayable server-to-daemon envelope.`,
+      { cause },
+    );
+  }
+}
+
+function replayMatches(row: OutboxRow, original: OutboxRow): boolean {
+  if (row.replay_source_seq !== original.seq) return false;
+  const expected = materializeReplayBody(original, Number(row.seq));
+  return (
+    row.body === expected.body &&
+    row.body_hash === expected.bodyHash &&
+    row.byte_size === expected.byteSize
+  );
 }
 
 function assertPolicy(input: TenantRetentionPolicyInput): void {

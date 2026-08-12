@@ -110,6 +110,9 @@ importers:
       '@byok-sdk/core':
         specifier: workspace:*
         version: link:../core
+      '@byok-sdk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       aws4fetch:
         specifier: 1.0.20
         version: 1.0.20

@@ -53,6 +53,7 @@ import {
   BYOK_SKILL_PACKS_PATH,
   BYOK_TOKEN_PATH,
   createEnvelope,
+  decodeEnvelope,
   encodeEnvelope,
   type Envelope,
   type TaskOfferPayload,
@@ -468,32 +469,38 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     async enqueueOffer(tenant, deviceId, input) {
       const stores = tenantStoresFor(controlPlane(tenant), root);
       const taskId = input.taskId ?? `task_${options.crypto.randomUuid()}`;
-
-      // The delivery seq has to exist before the envelope does — it is a field
-      // INSIDE the bytes the mailbox stores, and the mailbox transports opaque
-      // bytes it cannot renumber. So allocate, build, append, then check the
-      // mailbox agreed rather than letting two counters drift.
-      const seq = await stores.sequence.next(deviceId);
-      const envelope = createEnvelope('task.offer', input.payload, { taskId, seq });
-      const body = encodeEnvelope(envelope);
-      const bytes = new TextEncoder().encode(body);
+      const messageId = options.crypto.randomUuid();
 
       const message = await stores.mailbox.append({
         deviceId,
-        body,
-        bodyHash: contentHash(await options.crypto.sha256(bytes)),
-        byteSize: BigInt(bytes.length),
-        messageId: envelope.id,
+        messageId,
+        materialize: async (seq) => {
+          // Core stays protocol-free: it reserves the number, then asks this
+          // producer to build opaque bytes while append is still serialized.
+          const envelope = createEnvelope('task.offer', input.payload, {
+            id: messageId,
+            taskId,
+            seq,
+          });
+          const body = encodeEnvelope(envelope);
+          const bytes = new TextEncoder().encode(body);
+          return {
+            body,
+            bodyHash: contentHash(await options.crypto.sha256(bytes)),
+            byteSize: BigInt(bytes.length),
+          };
+        },
       });
-      if (message.seq !== seq) {
+      const envelope = decodeEnvelope(message.body);
+      if (envelope.seq !== message.seq) {
         throw new ByokCloudError(
           'mailbox_seq_mismatch',
-          `Mailbox numbered this offer ${message.seq} while the delivery sequence allocated ${seq}; the daemon's redelivery cursor would be wrong.`,
+          `Mailbox stored offer seq ${String(envelope.seq)} at row ${message.seq}; the daemon's redelivery cursor would be wrong.`,
         );
       }
 
       const attempt = await stores.tasks.open({ taskId, deviceId });
-      return { taskId, seq, envelope, attempt };
+      return { taskId, seq: message.seq, envelope, attempt };
     },
 
     readTaskAttempt(tenant, taskId) {

@@ -108,7 +108,6 @@ export type {
   TenantBoundQuota,
   TenantBoundRateLimiter,
   TenantBoundReceipts,
-  TenantBoundSequence,
   TenantBoundTaskAttempts,
   TenantStores,
 } from './tenant-stores';
@@ -187,7 +186,6 @@ export type {
   DeviceDirectory,
   DeviceRecord,
   DeviceRegistration,
-  DeviceSequenceStore,
   InboundDedupStore,
   InboundRateLimiter,
   NonceStore,
@@ -213,7 +211,6 @@ export {
   InMemoryBlobContentProxy,
   InMemoryCloudBlobStore,
   InMemoryDeviceDirectory,
-  InMemoryDeviceSequenceStore,
   InMemoryInboundDedupStore,
   InMemoryNonceStore,
   InMemoryPairingCodeStore,
