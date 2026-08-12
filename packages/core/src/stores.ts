@@ -22,6 +22,7 @@ import type { BoardStore } from './board';
 import type { MailboxStore } from './mailbox';
 import type { ObjectStore } from './blob';
 import type { QuotaStore } from './quota';
+import type { SkillPackStore } from './skill-pack';
 import type { TenantId } from './tenant';
 import type { TruthStore } from './truth';
 
@@ -52,6 +53,14 @@ export interface CoreStores {
   readonly activity: ActivityStore;
   readonly objects: ObjectStore;
   readonly quota: QuotaStore;
+  /**
+   * Skill-pack storage is a MANDATORY member: every composition creates the
+   * tables and supplies the port (Phase 2 of `skill-pack-delivery-channel`).
+   * Storage presence is not capability advertisement — the wire route/capability
+   * stays optional in `@byok-sdk/cloud` (`includeSkillPacks`), and a deployment
+   * that never declares `skills.pack` simply keeps the tables empty.
+   */
+  readonly skillPacks: SkillPackStore;
 }
 
 /** Names of the ports in {@link CoreStores}, in contract order. */
@@ -63,6 +72,7 @@ export const CORE_STORE_NAMES = [
   'activity',
   'objects',
   'quota',
+  'skillPacks',
 ] as const;
 
 export type CoreStoreName = (typeof CORE_STORE_NAMES)[number];

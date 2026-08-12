@@ -151,7 +151,6 @@ describe('public API surface', () => {
       'CORE_NON_COMPOSITION_PORT_NAMES',
       'CORE_PORT_INTERFACES',
       'CORE_PORT_METHODS',
-      'CORE_PORT_NAMES',
       'CORE_STORE_NAMES',
       'CapabilityDeclarationSchema',
       'CoreConflictError',

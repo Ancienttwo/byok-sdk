@@ -13,6 +13,7 @@ import { InMemoryBoardStore } from './board';
 import { InMemoryMailboxStore } from './mailbox';
 import { InMemoryObjectStore } from './blob';
 import { InMemoryQuotaStore } from './quota';
+import { InMemorySkillPackStore } from './skill-pack';
 import { InMemoryTruthStore } from './truth';
 import { createMutableClock } from './clock';
 import type { Clock, CoreStores, MutableClock } from '../stores';
@@ -24,8 +25,6 @@ export { InMemoryTruthStore } from './truth';
 export { InMemoryPresenceStore, InMemoryActivityStore } from './presence';
 export { InMemoryObjectStore } from './blob';
 export { InMemoryQuotaStore } from './quota';
-// Not a member of `createInMemoryCoreStores`' bundle: `skillPacks` is a core
-// port but not (yet) a `CoreStores` member — see `ports-contract.ts`.
 export { InMemorySkillPackStore } from './skill-pack';
 
 export interface InMemoryCoreOptions {
@@ -52,6 +51,7 @@ export function createInMemoryCoreStores(
     activity: new InMemoryActivityStore(clock),
     objects,
     quota: new InMemoryQuotaStore(clock, objects),
+    skillPacks: new InMemorySkillPackStore(),
   };
   return { stores, clock };
 }

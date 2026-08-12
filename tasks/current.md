@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-13T03:30:57+0800 -->
+<!-- updated_at: 2026-08-13T04:04:22+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-13T03:30:57+0800
-> **Source Branch**: codex/pg-pool-error-and-flake
-> **Source Commit**: daf8ec4
+> **Updated At**: 2026-08-13T04:04:22+0800
+> **Source Branch**: codex/skill-pack-postgres-phase2
+> **Source Commit**: dbaef74
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -48,19 +48,18 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 9 changed/untracked path(s)
 
 ```
- D plans/plan-20260813-0259-pg-pool-error-and-flake.md
- D tasks/contracts/20260813-0259-pg-pool-error-and-flake.contract.md
- D tasks/notes/20260813-0259-pg-pool-error-and-flake.notes.md
- D tasks/reviews/20260813-0259-pg-pool-error-and-flake.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260813-0259-pg-pool-error-and-flake.md
-?? tasks/archive/contract-20260813-0330-pg-pool-error-and-flake.md
-?? tasks/archive/notes-20260813-0330-pg-pool-error-and-flake.md
-?? tasks/archive/review-20260813-0330-pg-pool-error-and-flake.md
-?? tasks/archive/todo-20260813-0330-pg-pool-error-and-flake.md
+ D plans/plan-20260813-0339-skill-pack-postgres-phase2.md
+ D tasks/contracts/20260813-0339-skill-pack-postgres-phase2.contract.md
+ D tasks/notes/20260813-0339-skill-pack-postgres-phase2.notes.md
+ D tasks/reviews/20260813-0339-skill-pack-postgres-phase2.review.md
+?? plans/archive/plan-20260813-0339-skill-pack-postgres-phase2.md
+?? tasks/archive/contract-20260813-0404-skill-pack-postgres-phase2.md
+?? tasks/archive/notes-20260813-0404-skill-pack-postgres-phase2.md
+?? tasks/archive/review-20260813-0404-skill-pack-postgres-phase2.md
+?? tasks/archive/todo-20260813-0404-skill-pack-postgres-phase2.md
 ```
 
 ## Source Artifacts

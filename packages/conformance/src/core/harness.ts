@@ -21,6 +21,7 @@ import { runTruthConformance } from './truth';
 import { runPresenceConformance } from './presence';
 import { runObjectConformance } from './objects';
 import { runQuotaConformance } from './quota';
+import { runSkillPackConformance } from './skill-packs';
 import { runTenantIsolationConformance } from './tenant-isolation';
 import { runTimestampConformance } from './timestamps';
 import { runPortInventoryConformance } from './port-inventory';
@@ -78,6 +79,7 @@ export function runCoreConformance(name: string, factory: CoreCompositionFactory
     runPresenceConformance(factory);
     runObjectConformance(factory);
     runQuotaConformance(factory);
+    runSkillPackConformance(factory);
     runTimestampConformance(factory);
     runTenantIsolationConformance(factory);
   });

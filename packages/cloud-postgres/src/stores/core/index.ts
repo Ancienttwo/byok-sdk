@@ -1,13 +1,14 @@
 /**
- * The Postgres composition of the seven `@byok-sdk/core` ports.
+ * The Postgres composition of the eight `@byok-sdk/core` ports.
  *
- * All seven, or none: `runCoreConformance`'s port-inventory dimension asserts a
+ * All eight, or none: `runCoreConformance`'s port-inventory dimension asserts a
  * composition supplies exactly `CORE_STORE_NAMES` and exactly the methods
  * `CORE_PORT_METHODS` declares, so there is no such thing as a partial core
- * composition to certify. That is why the seven implementations landed in one
- * slice rather than one per port (design §11), and it is why this function
- * returns a full `CoreStores` where the cloud-local sibling returns a named
- * subset.
+ * composition to certify. The original seven landed in one slice (design §11);
+ * `skillPacks` is the eighth, added in Phase 2 of `skill-pack-delivery-channel`
+ * when it graduated from a bridge port to a mandatory `CoreStores` member. This
+ * function returns a full `CoreStores` where the cloud-local sibling returns a
+ * named subset.
  *
  * Everything that reads time reads the injected clock. Nothing calls SQL
  * `now()` — presence expiry, activity expiry and reservation expiry are all
@@ -22,6 +23,7 @@ import { PostgresBoardStore } from './board';
 import { PostgresMailboxStore } from './mailbox';
 import { PostgresObjectStore } from './objects';
 import { PostgresQuotaStore } from './quota';
+import { PostgresSkillPackStore } from './skill-pack';
 import { PostgresTruthStore } from './truth';
 
 export { PostgresMailboxStore } from './mailbox';
@@ -30,6 +32,7 @@ export { PostgresTruthStore } from './truth';
 export { PostgresPresenceStore, PostgresActivityStore } from './presence';
 export { PostgresObjectStore } from './objects';
 export { PostgresQuotaStore } from './quota';
+export { PostgresSkillPackStore } from './skill-pack';
 
 export interface PostgresCoreStoreOptions {
   readonly pool: Pool;
@@ -51,5 +54,8 @@ export function createPostgresCoreStores(options: PostgresCoreStoreOptions): Cor
     activity: new PostgresActivityStore(pool, clock),
     objects: new PostgresObjectStore(pool, clock),
     quota: new PostgresQuotaStore(pool, clock),
+    // No clock: a skill-pack manifest carries no timestamp, so this store reads
+    // none — the same shape as the cloud-local `devices` directory.
+    skillPacks: new PostgresSkillPackStore(pool),
   };
 }

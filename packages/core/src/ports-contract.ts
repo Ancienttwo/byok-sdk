@@ -23,33 +23,24 @@
 import { CORE_STORE_NAMES, type CoreStoreName } from './stores';
 
 /**
- * Ports that are NOT (yet) members of the composition contract.
+ * Ports that are core ports but NOT members of the composition contract.
  *
- * `CORE_STORE_NAMES` answers "what must every composition supply", and the
- * conformance suite reads it to assert exactly that. This list answers a
- * different question — "what is a core port, and therefore bound by the
- * tenant-first/async rules the source scan enforces" — and the two are not the
- * same set while a port is being introduced across more than one merge unit.
- *
- * `skillPacks` is here because its Postgres implementation is Phase 2 of the
- * `skill-pack-delivery-channel` plan. Adding it to `CoreStores` in Phase 1
- * would have obliged every existing composition to implement it in the same
- * slice — the alternative shapes were an optional port member (a compatibility
- * fallback, forbidden) or a port outside the contract table entirely (which
- * would exempt it from the tenant-first scan, the one rule most worth having).
- * Phase 2 moves it into `CORE_STORE_NAMES` and this list goes back to empty.
+ * Now empty, and that is the whole point of Phase 2. Phase 1 of
+ * `skill-pack-delivery-channel` held `skillPacks` here as a self-declared
+ * temporary bridge: adding it to `CoreStores` before its Postgres
+ * implementation existed would have obliged every composition to implement it
+ * in the same slice, and the alternatives — an optional port member (a
+ * compatibility fallback, forbidden) or a port outside the contract table
+ * entirely (exempt from the tenant-first scan, the one rule most worth having)
+ * — were both worse. Phase 2 delivered that implementation and moved
+ * `skillPacks` into `CORE_STORE_NAMES`, so this list goes back to empty exactly
+ * as the Phase 1 note promised. The empty set stays named rather than deleted:
+ * it is the testable statement "every core port is a composition member", which
+ * `CORE_STORE_NAMES` alone cannot make.
  */
-export const CORE_NON_COMPOSITION_PORT_NAMES = ['skillPacks'] as const;
+export const CORE_NON_COMPOSITION_PORT_NAMES = [] as const;
 
-/** Every port name in this package: the composition contract plus the list above. */
-export const CORE_PORT_NAMES = [
-  ...CORE_STORE_NAMES,
-  ...CORE_NON_COMPOSITION_PORT_NAMES,
-] as const;
-
-export type CorePortName = CoreStoreName | (typeof CORE_NON_COMPOSITION_PORT_NAMES)[number];
-
-export const CORE_PORT_METHODS: Readonly<Record<CorePortName, readonly string[]>> = {
+export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]>> = {
   mailbox: ['append', 'readAfter', 'advanceCursor', 'readCursor', 'collectRetired'],
   board: ['create', 'get', 'list', 'claim', 'unclaim', 'updateStatus'],
   truth: ['writeTerminal', 'writeSnapshot', 'getRecord', 'listManifest'],
@@ -81,7 +72,7 @@ export const CORE_PORT_METHODS: Readonly<Record<CorePortName, readonly string[]>
 };
 
 /** The interface each port name is declared as, for the source-side scan. */
-export const CORE_PORT_INTERFACES: Readonly<Record<CorePortName, string>> = {
+export const CORE_PORT_INTERFACES: Readonly<Record<CoreStoreName, string>> = {
   mailbox: 'MailboxStore',
   board: 'BoardStore',
   truth: 'TruthStore',
