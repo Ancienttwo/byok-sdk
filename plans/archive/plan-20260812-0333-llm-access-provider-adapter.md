@@ -1,6 +1,6 @@
 # Plan: LLM access provider adapter
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260812-0333
 > **Slug**: llm-access-provider-adapter
 > **Planning Source**: repo-harness-plan
@@ -162,7 +162,7 @@ The current /private/tmp/byok-sdk-pi-provider-baseurl-probe worktree owns this p
 - [x] Add negative-path and secret-boundary tests.
 - [x] Reconcile spec, security, architecture, PRD, and probe evidence.
 - [x] Run targeted and full verification, then review the frozen diff.
-- [ ] Commit, push, open PR, merge to main, and verify the merged revision.
+- [x] Commit, push, open PR, merge to main, and verify the merged revision. (merged via PR #53 lineage; branch tip 77a8459 `docs: record provider adapter acceptance` is ancestor of main; worktree cleaned 2026-08-13)
 
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
@@ -172,4 +172,4 @@ The current /private/tmp/byok-sdk-pi-provider-baseurl-probe worktree owns this p
 - [x] Add negative-path and secret-boundary tests.
 - [x] Reconcile spec, security, architecture, PRD, and probe evidence.
 - [x] Run targeted and full verification, then review the frozen diff.
-- [ ] Commit, push, open PR, merge to main, and verify the merged revision.
+- [x] Commit, push, open PR, merge to main, and verify the merged revision. (merged via PR #53 lineage; branch tip 77a8459 `docs: record provider adapter acceptance` is ancestor of main; worktree cleaned 2026-08-13)

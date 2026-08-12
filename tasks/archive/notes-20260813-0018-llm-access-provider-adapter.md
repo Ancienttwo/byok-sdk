@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-13 00:18
+> **Related Plan**: plans/archive/plan-20260812-0333-llm-access-provider-adapter.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260813-0018
+
 # Implementation Notes: llm-access-provider-adapter
 
 > **Status**: Active
