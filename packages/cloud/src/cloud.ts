@@ -30,7 +30,33 @@ import {
   type SkillPackStore,
   type TenantId,
 } from '@byok-sdk/core';
-import { createEnvelope, encodeEnvelope, type Envelope, type TaskOfferPayload } from '@byok-sdk/protocol';
+import {
+  BYOK_ACTIVITY_PATH,
+  BYOK_BLOB_CONTENT_ROUTE,
+  BYOK_BLOB_FINALIZE_ROUTE,
+  BYOK_BLOB_URL_ROUTE,
+  BYOK_BLOBS_PATH,
+  BYOK_BOARD_CLAIM_ROUTE,
+  BYOK_BOARD_PATH,
+  BYOK_BOARD_STATUS_ROUTE,
+  BYOK_BOARD_STREAM_PATH,
+  BYOK_BOARD_UNCLAIM_ROUTE,
+  BYOK_CAPABILITIES_PATH,
+  BYOK_CHALLENGE_PATH,
+  BYOK_EVENTS_PATH,
+  BYOK_MESSAGES_PATH,
+  BYOK_PAIR_PATH,
+  BYOK_PRESENCE_PATH,
+  BYOK_RECORD_ROUTE,
+  BYOK_RECORDS_PATH,
+  BYOK_SKILL_PACK_FILE_ROUTE,
+  BYOK_SKILL_PACKS_PATH,
+  BYOK_TOKEN_PATH,
+  createEnvelope,
+  encodeEnvelope,
+  type Envelope,
+  type TaskOfferPayload,
+} from '@byok-sdk/protocol';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
 import type { TokenSigner } from './auth/tokens';
 import { CLOUD_CAPABILITIES, declares } from './capabilities';
@@ -237,20 +263,20 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   };
 
   // Auth v2 (§6) — always mounted: without pairing there is no deployment.
-  registry.register({ method: 'POST', path: '/byok/pair', class: 'public' }, pairHandler({ auth }));
-  registry.register({ method: 'POST', path: '/byok/challenge', class: 'public' }, challengeHandler({ auth }));
-  registry.register({ method: 'POST', path: '/byok/token', class: 'public' }, tokenHandler({ auth }));
+  registry.register({ method: 'POST', path: BYOK_PAIR_PATH, class: 'public' }, pairHandler({ auth }));
+  registry.register({ method: 'POST', path: BYOK_CHALLENGE_PATH, class: 'public' }, challengeHandler({ auth }));
+  registry.register({ method: 'POST', path: BYOK_TOKEN_PATH, class: 'public' }, tokenHandler({ auth }));
 
   // ADR-010 — the declaration itself is always readable; a client that cannot
   // read it has no way to learn anything else without probing status codes.
   registry.register(
-    { method: 'GET', path: '/byok/capabilities', class: 'public' },
+    { method: 'GET', path: BYOK_CAPABILITIES_PATH, class: 'public' },
     capabilitiesHandler({ declaration }),
   );
 
   if (declares(declaration, CLOUD_CAPABILITIES.eventsLongPoll)) {
     registry.register(
-      { method: 'GET', path: '/byok/events', class: 'device' },
+      { method: 'GET', path: BYOK_EVENTS_PATH, class: 'device' },
       eventsHandler({
         ...deviceRouteDeps,
         longPollHoldMs: options.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS,
@@ -262,7 +288,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   if (declares(declaration, CLOUD_CAPABILITIES.messagesBatch)) {
     registry.register(
-      { method: 'POST', path: '/byok/messages', class: 'device' },
+      { method: 'POST', path: BYOK_MESSAGES_PATH, class: 'device' },
       messagesHandler({ ...deviceRouteDeps, activityBounds }),
     );
   }
@@ -272,24 +298,24 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       ...deviceRouteDeps,
       pageLimit: options.boardPageLimit ?? DEFAULT_BOARD_PAGE_LIMIT,
     };
-    registry.register({ method: 'GET', path: '/byok/board', class: 'device' }, boardListHandler(boardDeps));
+    registry.register({ method: 'GET', path: BYOK_BOARD_PATH, class: 'device' }, boardListHandler(boardDeps));
     registry.register(
-      { method: 'POST', path: '/byok/board/:id/claim', class: 'device' },
+      { method: 'POST', path: BYOK_BOARD_CLAIM_ROUTE, class: 'device' },
       boardClaimHandler(deviceRouteDeps),
     );
     registry.register(
-      { method: 'POST', path: '/byok/board/:id/unclaim', class: 'device' },
+      { method: 'POST', path: BYOK_BOARD_UNCLAIM_ROUTE, class: 'device' },
       boardUnclaimHandler(deviceRouteDeps),
     );
     registry.register(
-      { method: 'POST', path: '/byok/board/:id/status', class: 'device' },
+      { method: 'POST', path: BYOK_BOARD_STATUS_ROUTE, class: 'device' },
       boardStatusHandler(deviceRouteDeps),
     );
   }
 
   if (declares(declaration, CLOUD_CAPABILITIES.boardSse)) {
     registry.register(
-      { method: 'GET', path: '/byok/board/stream', class: 'device' },
+      { method: 'GET', path: BYOK_BOARD_STREAM_PATH, class: 'device' },
       boardStreamHandler({
         ...deviceRouteDeps,
         pageLimit: options.boardPageLimit ?? DEFAULT_BOARD_PAGE_LIMIT,
@@ -305,7 +331,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   if (declares(declaration, CLOUD_CAPABILITIES.presenceHints)) {
     registry.register(
-      { method: 'PUT', path: '/byok/presence', class: 'device' },
+      { method: 'PUT', path: BYOK_PRESENCE_PATH, class: 'device' },
       presencePublishHandler({
         ...deviceRouteDeps,
         ttlMs: options.presenceTtlMs ?? DEFAULT_PRESENCE_TTL_MS,
@@ -318,7 +344,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   if (declares(declaration, CLOUD_CAPABILITIES.activityTail)) {
     registry.register(
-      { method: 'POST', path: '/byok/activity', class: 'device' },
+      { method: 'POST', path: BYOK_ACTIVITY_PATH, class: 'device' },
       activityAppendHandler({ ...deviceRouteDeps, bounds: activityBounds }),
     );
   }
@@ -341,15 +367,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       maxRequestBytes: options.maxTruthRequestBytes ?? DEFAULT_MAX_TRUTH_REQUEST_BYTES,
     };
     registry.register(
-      { method: 'GET', path: '/byok/records', class: 'proof' },
+      { method: 'GET', path: BYOK_RECORDS_PATH, class: 'proof' },
       truthManifestHandler(truthDeps),
     );
     registry.register(
-      { method: 'GET', path: '/byok/records/:kind/:key', class: 'proof' },
+      { method: 'GET', path: BYOK_RECORD_ROUTE, class: 'proof' },
       truthGetHandler(truthDeps),
     );
     registry.register(
-      { method: 'PUT', path: '/byok/records/:kind/:key', class: 'proof' },
+      { method: 'PUT', path: BYOK_RECORD_ROUTE, class: 'proof' },
       truthPutHandler(truthDeps),
     );
   }
@@ -366,11 +392,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       pageLimit: options.skillPackPageLimit ?? DEFAULT_SKILL_PACK_PAGE_LIMIT,
     };
     registry.register(
-      { method: 'GET', path: '/byok/skill-packs', class: 'device' },
+      { method: 'GET', path: BYOK_SKILL_PACKS_PATH, class: 'device' },
       skillPackListHandler(skillPackDeps),
     );
     registry.register(
-      { method: 'GET', path: '/byok/skill-packs/:name/files/:path', class: 'device' },
+      { method: 'GET', path: BYOK_SKILL_PACK_FILE_ROUTE, class: 'device' },
       skillPackFileHandler(skillPackDeps),
     );
   }
@@ -380,9 +406,9 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       ...deviceRouteDeps,
       maxBlobSizeBytes: options.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES,
     };
-    registry.register({ method: 'POST', path: '/byok/blobs', class: 'device' }, createBlobHandler(blobDeps));
-    registry.register({ method: 'POST', path: '/byok/blobs/:id/finalize', class: 'device' }, finalizeBlobHandler(blobDeps));
-    registry.register({ method: 'GET', path: '/byok/blobs/:id/url', class: 'device' }, blobDownloadUrlHandler(blobDeps));
+    registry.register({ method: 'POST', path: BYOK_BLOBS_PATH, class: 'device' }, createBlobHandler(blobDeps));
+    registry.register({ method: 'POST', path: BYOK_BLOB_FINALIZE_ROUTE, class: 'device' }, finalizeBlobHandler(blobDeps));
+    registry.register({ method: 'GET', path: BYOK_BLOB_URL_ROUTE, class: 'device' }, blobDownloadUrlHandler(blobDeps));
   }
 
   // Byte proxying: BOTH conditions, and neither is inferred from the other.
@@ -408,11 +434,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   if (contentProxy !== undefined && declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) {
     const contentDeps = { contentProxy };
     registry.register(
-      { method: 'PUT', path: '/byok/blobs/:id/content', class: 'presigned' },
+      { method: 'PUT', path: BYOK_BLOB_CONTENT_ROUTE, class: 'presigned' },
       blobUploadContentHandler(contentDeps),
     );
     registry.register(
-      { method: 'GET', path: '/byok/blobs/:id/content', class: 'presigned' },
+      { method: 'GET', path: BYOK_BLOB_CONTENT_ROUTE, class: 'presigned' },
       blobDownloadContentHandler(contentDeps),
     );
   }

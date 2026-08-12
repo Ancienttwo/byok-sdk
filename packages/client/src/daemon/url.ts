@@ -1,3 +1,5 @@
+import { BYOK_WS_PATH } from '@byok-sdk/protocol';
+
 /** Normalize a configured `serverUrl` (http/https/ws/wss, any path) to an http(s) base with no path/query. */
 export function toHttpBase(serverUrl: string): string {
   const url = new URL(serverUrl);
@@ -10,7 +12,7 @@ export function toHttpBase(serverUrl: string): string {
 
 /** Derive the `/byok/ws` WebSocket URL from a configured `serverUrl`. */
 export function toWsUrl(serverUrl: string): string {
-  const url = new URL('/byok/ws', toHttpBase(serverUrl));
+  const url = new URL(BYOK_WS_PATH, toHttpBase(serverUrl));
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
 }

@@ -4,6 +4,7 @@ import {
   hasCapability,
   type CapabilityDeclaration,
 } from '@byok-sdk/core';
+import { BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH } from '@byok-sdk/protocol';
 import { z } from 'zod';
 import { CLOUD_CAPABILITIES } from './capabilities';
 
@@ -92,7 +93,7 @@ export class BoardFeedClient {
   }
 
   async #readPollOnce(afterSeq: number, signal?: AbortSignal): Promise<BoardFeedRead> {
-    const url = new URL('/byok/board', this.#base);
+    const url = new URL(BYOK_BOARD_PATH, this.#base);
     url.searchParams.set('since', String(afterSeq));
     const response = await this.#fetch(url, {
       headers: { authorization: `Bearer ${this.#accessToken}` },
@@ -103,7 +104,7 @@ export class BoardFeedClient {
   }
 
   async #readSseOnce(afterSeq: number, signal?: AbortSignal): Promise<BoardFeedRead> {
-    const url = new URL('/byok/board/stream', this.#base);
+    const url = new URL(BYOK_BOARD_STREAM_PATH, this.#base);
     const response = await this.#fetch(url, {
       headers: {
         accept: 'text/event-stream',

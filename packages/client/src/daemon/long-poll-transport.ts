@@ -1,4 +1,4 @@
-import { MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok-sdk/protocol';
+import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
@@ -215,7 +215,7 @@ export class LongPollClient {
     try {
       const base = toHttpBase(this.opts.serverUrl);
       const res = await authedFetch(
-        new URL('/byok/messages', base),
+        new URL(BYOK_MESSAGES_PATH, base),
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -240,7 +240,7 @@ export class LongPollClient {
     while (this.running) {
       try {
         const base = toHttpBase(this.opts.serverUrl);
-        const url = new URL('/byok/events', base);
+        const url = new URL(BYOK_EVENTS_PATH, base);
         const cursor = this.opts.getCursor();
         if (cursor !== undefined) url.searchParams.set('cursor', String(cursor));
 

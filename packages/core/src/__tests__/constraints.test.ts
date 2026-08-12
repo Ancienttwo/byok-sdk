@@ -164,6 +164,7 @@ describe('public API surface', () => {
       'DEVICE_ASSERTION_VERSION',
       'DEVICE_PROOF_ALGORITHMS',
       'DEVICE_PROOF_DOMAIN_PREFIX',
+      'DEVICE_PROOF_HEADER',
       'DEVICE_PROOF_SCHEMA_ID',
       'DEVICE_PROOF_VERSION',
       'DeviceAssertionClaimsSchema',

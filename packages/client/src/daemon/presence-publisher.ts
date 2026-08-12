@@ -24,6 +24,7 @@
  * publisher permanently — there is no recourse but a fresh `pair()`, so
  * retrying would be a pure spin.
  */
+import { BYOK_PRESENCE_PATH } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
 import { DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
@@ -107,7 +108,7 @@ export class PresencePublisher {
     // error at the publish site.
     assertPresenceHeartbeatCadence({ intervalMs, ttlMs, minimumIntervalMs });
     this.intervalMs = intervalMs;
-    this.url = new URL('/byok/presence', toHttpBase(opts.serverUrl));
+    this.url = new URL(BYOK_PRESENCE_PATH, toHttpBase(opts.serverUrl));
   }
 
   /** Publishes immediately, then every `intervalMs`. Idempotent; a no-op after a permanent stop. */

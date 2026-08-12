@@ -31,6 +31,10 @@
  */
 import type { PresenceHint, PresenceLevel } from '@byok-sdk/core';
 import {
+  BYOK_CHALLENGE_PATH,
+  BYOK_PAIR_PATH,
+  BYOK_PRESENCE_PATH,
+  BYOK_TOKEN_PATH,
   ChallengeResponseSchema,
   PairResponseSchema,
   TokenResponseSchema,
@@ -39,10 +43,10 @@ import { createDeviceIdentity, type DeviceIdentity } from './identity';
 
 /** The device-surface routes this simulator drives (docs/protocol.md §6, §12.3). */
 export const DEVICE_ROUTES = {
-  pair: '/byok/pair',
-  challenge: '/byok/challenge',
-  token: '/byok/token',
-  presence: '/byok/presence',
+  pair: BYOK_PAIR_PATH,
+  challenge: BYOK_CHALLENGE_PATH,
+  token: BYOK_TOKEN_PATH,
+  presence: BYOK_PRESENCE_PATH,
 } as const;
 
 export const DEFAULT_DEVICE_NAME = 'byok-testkit-device';

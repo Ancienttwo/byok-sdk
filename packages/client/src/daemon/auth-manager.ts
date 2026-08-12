@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH } from '@byok-sdk/protocol';
 import type { ChallengeResponse, PairResponse, TokenResponse } from '@byok-sdk/protocol';
 import { DeviceStore, type DeviceRecord } from './store';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
@@ -85,7 +86,7 @@ export class AuthManager {
           ? { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey }
           : generateDeviceKeyPair();
 
-        const url = new URL('/byok/pair', toHttpBase(this.opts.serverUrl));
+        const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -164,7 +165,7 @@ export class AuthManager {
     const base = toHttpBase(this.opts.serverUrl);
     const privateKey = importPrivateKeyPem(record.devicePrivateKeyPem);
 
-    const challengeRes = await fetch(new URL('/byok/challenge', base), {
+    const challengeRes = await fetch(new URL(BYOK_CHALLENGE_PATH, base), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ deviceId: record.deviceId }),
@@ -178,7 +179,7 @@ export class AuthManager {
     const { nonce } = (await challengeRes.json()) as ChallengeResponse;
     const signature = signNonce(privateKey, nonce);
 
-    const tokenRes = await fetch(new URL('/byok/token', base), {
+    const tokenRes = await fetch(new URL(BYOK_TOKEN_PATH, base), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ deviceId: record.deviceId, nonce, signature }),

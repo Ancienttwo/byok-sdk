@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { BYOK_BLOBS_PATH, byokBlobFinalizePath, byokBlobUrlPath } from '@byok-sdk/protocol';
 import type { BlobRef } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
 import { authedFetch } from './http-client';
@@ -33,7 +34,7 @@ export class BlobClient implements BlobResolver {
   async resolveInstruction(blobRef: BlobRef): Promise<string> {
     const base = toHttpBase(this.serverUrl);
     const urlRes = await authedFetch(
-      new URL(`/byok/blobs/${encodeURIComponent(blobRef.blobId)}/url`, base),
+      new URL(byokBlobUrlPath(blobRef.blobId), base),
       { method: 'GET' },
       this.auth,
     );
@@ -73,7 +74,7 @@ export class BlobClient implements BlobResolver {
     const reservationId = `blob_${randomUUID()}`;
 
     const createRes = await authedFetch(
-      new URL('/byok/blobs', base),
+      new URL(BYOK_BLOBS_PATH, base),
       {
         method: 'POST',
         headers: {
@@ -110,7 +111,7 @@ export class BlobClient implements BlobResolver {
       let response: Response;
       try {
         response = await authedFetch(
-          new URL(`/byok/blobs/${encodeURIComponent(blobId)}/finalize`, base),
+          new URL(byokBlobFinalizePath(blobId), base),
           {
             method: 'POST',
             headers: { 'idempotency-key': reservationId },
