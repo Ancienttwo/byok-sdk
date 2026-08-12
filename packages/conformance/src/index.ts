@@ -23,3 +23,12 @@ export type {
   CloudConformancePortName,
   CloudConformanceStores,
 } from './cloud/index';
+
+export {
+  runPairingSimulatorConformance,
+  withPairingSimulatorComposition,
+} from './simulator/index';
+export type {
+  PairingSimulatorComposition,
+  PairingSimulatorCompositionFactory,
+} from './simulator/index';

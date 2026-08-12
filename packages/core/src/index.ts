@@ -105,16 +105,19 @@ export type {
 // Content addressing + object manifest (§12.7.4, §12.7.8)
 export {
   CONTENT_HASH_PATTERN,
+  OBJECT_KEY_PREFIX_PATTERN,
   OBJECT_STATES,
   OBJECT_STATE_TRANSITIONS,
   contentHash,
   isContentHash,
   isLegalObjectTransition,
+  objectKeyPrefix,
   tenantObjectKey,
 } from './blob';
 export type {
   ContentHash,
   ObjectCommitInput,
+  ObjectKeyPrefix,
   ObjectListQuery,
   ObjectManifestEntry,
   ObjectManifestInput,
@@ -195,6 +198,10 @@ export type {
   JsonPrimitive,
   JsonValue,
 } from './attestation';
+
+// Nonce signing domain (§6.2) — the one authority the daemon, the hosted
+// surface, and the reference server all sign/verify against.
+export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
 
 // In-memory reference implementation
 export {

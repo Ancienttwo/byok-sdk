@@ -1151,7 +1151,21 @@ export class TaskRunner {
         return;
       }
 
-      const pick = await this.pickAdapter(payload.runtime, payload.policy.mode);
+      if (
+        payload.dispatchSelection !== undefined &&
+        payload.runtime !== undefined &&
+        payload.runtime !== payload.dispatchSelection.runtimeId
+      ) {
+        this.decline(
+          taskId,
+          `offer runtime ${payload.runtime} does not match dispatchSelection.runtimeId ${payload.dispatchSelection.runtimeId}`,
+          false,
+        );
+        return;
+      }
+
+      const requestedRuntime = payload.dispatchSelection?.runtimeId ?? payload.runtime;
+      const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode);
       if (!pick.ok) {
         this.decline(taskId, pick.reason, pick.retryable);
         return;

@@ -239,6 +239,7 @@ export async function connectFakeDaemonWs(
     deviceId: string;
     accessToken: string;
     productId: string;
+    capabilities?: string[];
     runtimes?: RuntimeInfo[];
     cursor?: number;
   },
@@ -255,7 +256,7 @@ export async function connectFakeDaemonWs(
     ws,
     createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
-      capabilities: [],
+      capabilities: opts.capabilities ?? [],
       deviceId: opts.deviceId,
       productId: opts.productId,
       runtimes: opts.runtimes,
@@ -279,7 +280,7 @@ export async function connectFakeDaemon(
   baseUrl: string,
   port: number,
   pairingCode: string,
-  opts: { deviceName?: string; productId: string; runtimes?: RuntimeInfo[]; cursor?: number; identity?: FakeDeviceIdentity },
+  opts: { deviceName?: string; productId: string; capabilities?: string[]; runtimes?: RuntimeInfo[]; cursor?: number; identity?: FakeDeviceIdentity },
 ): Promise<{
   ws: WebSocket;
   deviceId: string;
@@ -292,6 +293,7 @@ export async function connectFakeDaemon(
     deviceId,
     accessToken,
     productId: opts.productId,
+    capabilities: opts.capabilities,
     runtimes: opts.runtimes,
     cursor: opts.cursor,
   });

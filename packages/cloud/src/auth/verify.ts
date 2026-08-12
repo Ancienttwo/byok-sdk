@@ -12,14 +12,18 @@
  * is deliberately no dual mode and no grace window — a device on the old
  * encoding re-pairs.
  *
- * The literal is byte-identical to `@byok-sdk/server`'s `NONCE_SIGNING_DOMAIN`
- * and to what the daemon signs (`packages/client/src/daemon/device-keys.ts`),
- * because the daemon must not be able to tell self-hosted from hosted. Parity
- * is asserted by behavior tests, never by importing the server.
+ * The domain literal itself lives in `@byok-sdk/core` (`src/pairing.ts`): the
+ * daemon must not be able to tell self-hosted from hosted, and three copies
+ * each commented as byte-identical to the other two were a drift hazard, not a
+ * design. Importing the constant from the package all three ends already depend
+ * on is not the same as importing the server — parity of *behavior* is still
+ * asserted by behavior tests, and this package still has no `@byok-sdk/server`
+ * edge. Re-exported so this module's public surface is unchanged.
  */
+import { NONCE_SIGNING_DOMAIN } from '@byok-sdk/core';
 import type { CloudCrypto } from '../crypto/port';
 
-export const NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n';
+export { NONCE_SIGNING_DOMAIN } from '@byok-sdk/core';
 
 export function verifyNonceSignature(
   crypto: CloudCrypto,
@@ -27,5 +31,8 @@ export function verifyNonceSignature(
   nonce: string,
   signature: string,
 ): Promise<boolean> {
+  // `CloudCrypto.verifyEd25519` takes the message as a string and encodes it as
+  // UTF-8 itself, so the concatenation happens here rather than through core's
+  // `nonceSigningBytes` — same bytes, one encoding step instead of two.
   return crypto.verifyEd25519(devicePublicKey, NONCE_SIGNING_DOMAIN + nonce, signature);
 }

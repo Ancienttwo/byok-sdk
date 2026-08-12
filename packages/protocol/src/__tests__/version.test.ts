@@ -14,4 +14,8 @@ describe('protocol version and capability flags', () => {
   it('includes the interactive-approval flag (RESERVED: gates routing an approval-requiring policy to a daemon)', () => {
     expect(CAPABILITY_FLAGS).toContain('interactive-approval');
   });
+
+  it('includes the dispatch-selection correctness gate', () => {
+    expect(CAPABILITY_FLAGS).toContain('dispatch-selection');
+  });
 });

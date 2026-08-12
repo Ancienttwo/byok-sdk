@@ -23,6 +23,8 @@ export interface SqliteProviderProfileStoreOptions {
    * it does for `@byok-sdk/server`'s `SqliteTaskStore`.
    */
   path: string;
+  /** Open an existing profile database without creating or mutating it. */
+  readOnly?: boolean;
 }
 
 /**
@@ -84,17 +86,21 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
   #closed = false;
 
   constructor(options: SqliteProviderProfileStoreOptions) {
-    this.#database = openSqliteDatabase(options.path);
-    try {
-      this.#database.exec(SCHEMA);
-      this.#database.exec(ENABLED_INDEX);
-      secureSqliteFilePermissions(options.path);
-    } catch (error) {
-      closeSqliteDatabaseAfterInitializationFailure(
-        this.#database,
-        error,
-        'SqliteProviderProfileStore initialization failed and its native handle could not be closed',
-      );
+    this.#database = openSqliteDatabase(options.path, {
+      readOnly: options.readOnly ?? false,
+    });
+    if (!options.readOnly) {
+      try {
+        this.#database.exec(SCHEMA);
+        this.#database.exec(ENABLED_INDEX);
+        secureSqliteFilePermissions(options.path);
+      } catch (error) {
+        closeSqliteDatabaseAfterInitializationFailure(
+          this.#database,
+          error,
+          'SqliteProviderProfileStore initialization failed and its native handle could not be closed',
+        );
+      }
     }
   }
 

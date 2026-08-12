@@ -3,7 +3,7 @@
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
 
-Status: **K3 done** — the pure-function layer (K0), the `SecretStore` layer
+Status: **K3 + Pi provider launcher done** — the pure-function layer (K0), the `SecretStore` layer
 backed by the macOS Keychain and the Windows Credential Manager (K1), and the
 configure/resolve registry with pluggable profile persistence (K2) have all
 landed. K3 settled the settings-page question, recorded under
@@ -20,12 +20,19 @@ touches credentials. This package's job *is* to hold a provider API key, so it
 lives on the other side of that line: `client`, `server`, and `protocol` must not
 depend on `keys`.
 
-Two consequences hold today and are the package's standing constraints:
+Three consequences hold today and are the package's standing constraints:
 
 1. `client`, `server`, and `protocol` must not gain a dependency on `keys`.
 2. `@byok-sdk/keys` is outside the scope of the M5 credential-isolation claim.
    Installing it is opting into a package that holds a provider API key, and
    that choice is yours, not something the dispatch SDK does on your behalf.
+3. The optional `byok-pi-provider-launcher` is the only supported composition
+   with agent dispatch. It receives non-secret provider/model ids and paths,
+   opens the already-provisioned profile database read-only, reads the OS
+   credential only when the selected profile requires one, writes a private
+   process-scoped Pi projection, reconstructs the Pi child environment from a
+   closed platform/proxy baseline plus the exact key, and inherits stdio. It
+   opens no listener and never returns the key to the daemon.
 
 The full declaration of the boundary between the two security models is
 [`docs/security.md`](../../docs/security.md), section *Key management
@@ -71,9 +78,10 @@ guarantee that the key does not leave the machine.**
 
 With the page gone, `@byok-sdk/keys` guarantees only its own half: the key goes
 into the OS credential store, it is never written to the profile store, it is
-never present in any `ProviderStatus`, and it leaves the process only in the
-`authorization` / `x-api-key` header of a request to the provider base URL the
-profile declares. **Everything between the user's keystroke and
+never present in any `ProviderStatus`, and it leaves custody only in the
+`authorization` / `x-api-key` header of an explicit client request or in the
+environment of the pinned Pi child launched for that exact profile.
+**Everything between the user's keystroke and
 `configure(configuration, secret)` is now yours.** If your settings page posts
 the key to your own backend before handing it to this package, or renders it
 back into a response, or logs the request body, the key has left the machine —
@@ -89,6 +97,7 @@ usable on Node 20.
 | --- | --- | --- |
 | `InMemoryProviderProfileStore` | Node 20+ | — the whole configure/resolve lifecycle works |
 | `SqliteProviderProfileStore` | Node 22.5+ (`node:sqlite`) | fails closed with `PROVIDER_STORE_UNAVAILABLE` |
+| `byok-pi-provider-launcher` | Node 22.5+ (`node:sqlite`) and macOS/Windows for authenticated profiles | fails closed; `auth_mode: none` does not require a credential backend |
 
 Only on-disk profile persistence needs the newer runtime. `node:sqlite` shipped
 in Node 22.5 and spent part of the 22.x line behind `--experimental-sqlite`, so
@@ -128,6 +137,9 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `sqlite-profile-store.ts` | `SqliteProviderProfileStore` — on-disk profile persistence on `node:sqlite` |
 | `sqlite-support.ts` | Runtime `node:sqlite` capability detection and owner-only database file/directory creation |
 | `registry.ts` | `ProviderRegistry` — the configure / list / resolve / delete lifecycle that binds a profile store to a secret store and hands back a ready client |
+| `pi-provider-projection.ts` | Credential-blind Pi `models.json` projection for one validated profile/model |
+| `pi-provider-launcher-core.ts` | Closed launcher argv contract and auth-mode-aware exact secret resolution |
+| `bin/pi-provider-launcher.ts` | No-listener credential-custody executable that reads the OS store and spawns pinned Pi with a private projection |
 
 Auth modes map to headers as follows, and this mapping is the package's wire
 contract:

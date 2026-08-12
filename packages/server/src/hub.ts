@@ -3,6 +3,7 @@ import {
   canTransition,
   createEnvelope,
   DAEMON_TO_SERVER_TYPES,
+  DispatchSelectionSchema,
   encodeEnvelope,
   PROTOCOL_VERSION,
   TASK_STATES,
@@ -1460,6 +1461,10 @@ export class ConnectionHub {
   // ---------------------------------------------------------------------
 
   async dispatch(input: DispatchInput): Promise<TaskHandle> {
+    const dispatchSelection =
+      input.dispatchSelection === undefined
+        ? undefined
+        : DispatchSelectionSchema.parse(input.dispatchSelection);
     const deviceId = input.deviceId ?? this.pickFirstConnectedDevice();
     // M0 routing has no queue-until-connect: reject clearly instead of
     // silently queuing a task nothing will ever claim.
@@ -1471,12 +1476,32 @@ export class ConnectionHub {
       );
     }
 
+    if (
+      dispatchSelection !== undefined &&
+      !(this.getDeviceCapabilities(deviceId)?.includes('dispatch-selection') ?? false)
+    ) {
+      throw new Error(
+        `device ${deviceId} did not advertise dispatch-selection capability; refusing authoritative provider/model dispatch`,
+      );
+    }
+
+    if (
+      dispatchSelection !== undefined &&
+      input.runtime !== undefined &&
+      input.runtime !== dispatchSelection.runtimeId
+    ) {
+      throw new Error(
+        `dispatch runtime ${input.runtime} does not match dispatchSelection.runtimeId ${dispatchSelection.runtimeId}`,
+      );
+    }
+
     const taskId = generateTaskId();
     const policy = input.policy ?? DEFAULT_POLICY;
+    const runtime = dispatchSelection?.runtimeId ?? input.runtime;
     const record = this.taskStore.create({
       taskId,
       instruction: input.instruction,
-      runtime: input.runtime,
+      runtime,
       policy,
       deviceId,
       sessionRef: input.sessionRef,
@@ -1497,7 +1522,8 @@ export class ConnectionHub {
       {
         instruction: input.instruction,
         policy,
-        runtime: input.runtime,
+        runtime,
+        dispatchSelection,
         sessionRef: input.sessionRef,
       },
       { taskId, sessionRef: input.sessionRef },

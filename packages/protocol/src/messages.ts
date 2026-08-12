@@ -118,6 +118,39 @@ export type ConnAckPayload = z.infer<typeof ConnAckPayloadSchema>;
  */
 const InstructionBlobRefSchema = z.object({ blobRef: BlobRefSchema }).strict();
 
+const DispatchTargetIdSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .regex(/^[^\u0000\r\n]+$/u, 'dispatch target ids must not contain control line breaks');
+
+/**
+ * The web-selected runtime/model target carried end to end with a task.
+ *
+ * This is an additive v1 field. The discriminated union makes lane ownership
+ * fail closed at decode time: subscription credentials can only belong to the
+ * vendor CLIs, while a BYOK provider can only be executed through Pi.
+ */
+export const DispatchSelectionSchema = z.discriminatedUnion('lane', [
+  z
+    .object({
+      lane: z.literal('subscription'),
+      runtimeId: z.enum(['claude', 'codex']),
+      providerId: z.null(),
+      modelId: DispatchTargetIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      lane: z.literal('byok'),
+      runtimeId: z.literal('pi'),
+      providerId: DispatchTargetIdSchema,
+      modelId: DispatchTargetIdSchema,
+    })
+    .strict(),
+]);
+export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
+
 /**
  * server -> daemon: offer a task for a device to claim.
  *
@@ -128,6 +161,7 @@ export const TaskOfferPayloadSchema = z.object({
   instruction: z.union([z.string(), InstructionBlobRefSchema]),
   policy: PermissionPolicySchema,
   runtime: RuntimeIdSchema.optional(),
+  dispatchSelection: DispatchSelectionSchema.optional(),
   sessionRef: z.string().optional(),
   workspaceHint: z.string().optional(),
   limits: z

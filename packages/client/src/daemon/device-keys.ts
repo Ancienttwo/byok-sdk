@@ -1,4 +1,5 @@
 import { createPrivateKey, generateKeyPairSync, sign as edSign, type KeyObject } from 'node:crypto';
+import { nonceSigningBytes } from '@byok-sdk/core';
 
 /**
  * Device identity keypair (protocol §6): Ed25519, generated once on first
@@ -42,26 +43,28 @@ export function importPrivateKeyPem(pem: string): KeyObject {
 
 /**
  * S1 (GAP-004): the domain-separation prefix this device signs along with a
- * challenge nonce, byte-identical to the server's own
- * `NONCE_SIGNING_DOMAIN` (`packages/server/src/auth.ts`). The device key is a
- * long-lived identity key that later planes will also sign structured
- * messages with; tagging the domain is what stops a signature made for one of
- * those from being replayable as a token-renewal credential.
+ * challenge nonce. The device key is a long-lived identity key that later
+ * planes will also sign structured messages with; tagging the domain is what
+ * stops a signature made for one of those from being replayable as a
+ * token-renewal credential.
  *
- * Not shared through a package: the two ends agree on a wire constant, and
- * inventing a dependency between server and client to hold one string literal
- * would couple them far harder than the literal does.
+ * The literal itself now lives in `@byok-sdk/core` (`src/pairing.ts`), which
+ * the daemon, the hosted surface, and the reference server all already depend
+ * on. It used to be three copies, each commented as byte-identical to the
+ * others — an agreement that holds only until someone edits one of them.
+ * Re-exported here so this module's public surface is unchanged.
  */
-export const NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n';
+export { NONCE_SIGNING_DOMAIN } from '@byok-sdk/core';
 
 /**
  * Sign a challenge nonce with the device private key: the signed message is
- * {@link NONCE_SIGNING_DOMAIN} followed by `nonce` (UTF-8), and the result is
- * the raw 64-byte Ed25519 signature, base64url-encoded (protocol §6.2). A
- * server on the domain-separated contract rejects the undomained form, so
- * there is no variant of this that omits the prefix.
+ * `NONCE_SIGNING_DOMAIN` followed by `nonce` (UTF-8) — core's
+ * {@link nonceSigningBytes} produces those bytes — and the result is the raw
+ * 64-byte Ed25519 signature, base64url-encoded (protocol §6.2). A server on the
+ * domain-separated contract rejects the undomained form, so there is no variant
+ * of this that omits the prefix.
  */
 export function signNonce(privateKey: KeyObject, nonce: string): string {
-  const signature = edSign(null, Buffer.from(NONCE_SIGNING_DOMAIN + nonce, 'utf8'), privateKey);
+  const signature = edSign(null, nonceSigningBytes(nonce), privateKey);
   return signature.toString('base64url');
 }

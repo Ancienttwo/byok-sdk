@@ -110,3 +110,8 @@ export type {
   ProviderRegistryOptions,
   ProviderStatus,
 } from './registry';
+
+export {
+  PI_PROJECTED_KEY_ENV,
+  buildPiProviderProjection,
+} from './pi-provider-projection';

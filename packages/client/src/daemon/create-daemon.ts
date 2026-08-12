@@ -1,4 +1,5 @@
 import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS } from '@byok-sdk/protocol';
+import { isAbsolute } from 'node:path';
 import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig } from '../types';
@@ -177,6 +178,12 @@ export interface DaemonConfig {
    * unchanged from M1/M2.
    */
   runtimeAllowlist?: string[];
+  /**
+   * Separate-process Pi BYOK credential boundary. Required only for a
+   * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
+   * Pi tasks do not invoke it.
+   */
+  piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
   /**
    * M5 batch-3 (workstream 1): explicit auto-select priority order for
    * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
@@ -572,6 +579,15 @@ function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
   if (adapters.some((adapter) => adapter.capabilities().steer)) flags.push('steer');
   flags.push('blob-upload');
   flags.push('approval-targeting');
+  const selectionAdapters = adapters.filter((adapter) =>
+    ALL_RUNTIME_IDS.includes(adapter.id as RuntimeId),
+  );
+  if (
+    selectionAdapters.length > 0 &&
+    selectionAdapters.every((adapter) => adapter.supportsDispatchSelection === true)
+  ) {
+    flags.push('dispatch-selection');
+  }
   return flags;
 }
 
@@ -600,10 +616,10 @@ function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
  */
 const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
-function buildAdapter(id: RuntimeId): RuntimeAdapter {
+function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
   switch (id) {
     case 'pi':
-      return new PiAdapter();
+      return new PiAdapter({ byokLauncher: config.piByokLauncher });
     case 'claude':
       return new ClaudeAdapter();
     case 'codex':
@@ -620,11 +636,57 @@ function buildAdapter(id: RuntimeId): RuntimeAdapter {
  * already applies to an unknown *requested* runtime — and it de-duplicates
  * repeated entries for free.
  */
-function buildDefaultAdapters(runtimeAllowlist: string[] | undefined): RuntimeAdapter[] {
-  const ids = runtimeAllowlist
-    ? ALL_RUNTIME_IDS.filter((id) => runtimeAllowlist.includes(id))
+function buildDefaultAdapters(config: DaemonConfig): RuntimeAdapter[] {
+  const ids = config.runtimeAllowlist
+    ? ALL_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
     : ALL_RUNTIME_IDS;
-  return ids.map(buildAdapter);
+  return ids.map((id) => buildAdapter(id, config));
+}
+
+function validatePiByokLauncherConfig(
+  launcher: NonNullable<DaemonConfig['piByokLauncher']>,
+): void {
+  for (const [field, value] of [
+    ['command', launcher.command],
+    ['profileDbPath', launcher.profileDbPath],
+    ['sessionDir', launcher.sessionDir],
+  ] as const) {
+    if (value.trim().length === 0 || /[\u0000\r\n]/u.test(value)) {
+      throw new Error(`DaemonConfig.piByokLauncher.${field} must be a non-empty single-line string`);
+    }
+  }
+  if (!isAbsolute(launcher.profileDbPath) || !isAbsolute(launcher.sessionDir)) {
+    throw new Error(
+      'DaemonConfig.piByokLauncher profileDbPath and sessionDir must be absolute paths',
+    );
+  }
+  if (launcher.secretServicePrefix !== undefined && (
+    launcher.secretServicePrefix.trim().length === 0 ||
+    /[\u0000\r\n]/u.test(launcher.secretServicePrefix)
+  )) {
+    throw new Error(
+      'DaemonConfig.piByokLauncher.secretServicePrefix must be a non-empty single-line string',
+    );
+  }
+  const reserved = new Set([
+    '--',
+    '--pi-bin',
+    '--profile-db',
+    '--session-dir',
+    '--secret-service-prefix',
+    '--provider',
+    '--model',
+  ]);
+  const conflicting = launcher.args?.find((arg) => reserved.has(arg));
+  if (conflicting !== undefined) {
+    throw new Error(
+      `DaemonConfig.piByokLauncher.args must not override reserved launcher argument ${conflicting}`,
+    );
+  }
+  const invalidArg = launcher.args?.find((arg) => arg.length === 0 || /[\u0000\r\n]/u.test(arg));
+  if (invalidArg !== undefined) {
+    throw new Error('DaemonConfig.piByokLauncher.args must contain only non-empty single-line strings');
+  }
 }
 
 export function createDaemonWithAdapters(
@@ -632,6 +694,9 @@ export function createDaemonWithAdapters(
   adapters: RuntimeAdapter[],
   overrides: DaemonOverrides = {},
 ): Daemon {
+  if (config.piByokLauncher !== undefined) {
+    validatePiByokLauncherConfig(config.piByokLauncher);
+  }
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
   // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
   // zero/negative-is-an-error / `Number.POSITIVE_INFINITY`-is-the-real-
@@ -1912,5 +1977,5 @@ export function createDaemonWithAdapters(
  * in-house runtime, test stubs) use `createDaemonWithAdapters` directly.
  */
 export function createDaemon(config: DaemonConfig): Daemon {
-  return createDaemonWithAdapters(config, buildDefaultAdapters(config.runtimeAllowlist));
+  return createDaemonWithAdapters(config, buildDefaultAdapters(config));
 }

@@ -6,7 +6,8 @@
     "interactive-approval",
     "approval_resolved",
     "approval-targeting",
-    "result-document"
+    "result-document",
+    "dispatch-selection"
   ],
   "permissionModes": [
     "auto",
@@ -376,6 +377,74 @@
             "pi",
             "claude",
             "codex"
+          ]
+        },
+        "dispatchSelection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "subscription"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex"
+                  ]
+                },
+                "providerId": {
+                  "type": "null"
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "^[^\\u0000\\r\\n]+$"
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerId",
+                "modelId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "byok"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "const": "pi"
+                },
+                "providerId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "^[^\\u0000\\r\\n]+$"
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "^[^\\u0000\\r\\n]+$"
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerId",
+                "modelId"
+              ],
+              "additionalProperties": false
+            }
           ]
         },
         "sessionRef": {
@@ -1224,6 +1293,74 @@
                   "pi",
                   "claude",
                   "codex"
+                ]
+              },
+              "dispatchSelection": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "subscription"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "enum": [
+                          "claude",
+                          "codex"
+                        ]
+                      },
+                      "providerId": {
+                        "type": "null"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^[^\\u0000\\r\\n]+$"
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerId",
+                      "modelId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "byok"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "const": "pi"
+                      },
+                      "providerId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^[^\\u0000\\r\\n]+$"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^[^\\u0000\\r\\n]+$"
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerId",
+                      "modelId"
+                    ],
+                    "additionalProperties": false
+                  }
                 ]
               },
               "sessionRef": {
@@ -3298,6 +3435,74 @@
                           "codex"
                         ]
                       },
+                      "dispatchSelection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "subscription"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "enum": [
+                                  "claude",
+                                  "codex"
+                                ]
+                              },
+                              "providerId": {
+                                "type": "null"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerId",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerId",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
                       "sessionRef": {
                         "type": "string"
                       },
@@ -4796,6 +5001,74 @@
                           "pi",
                           "claude",
                           "codex"
+                        ]
+                      },
+                      "dispatchSelection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "subscription"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "enum": [
+                                  "claude",
+                                  "codex"
+                                ]
+                              },
+                              "providerId": {
+                                "type": "null"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerId",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerId",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          }
                         ]
                       },
                       "sessionRef": {
