@@ -35,6 +35,7 @@ export {
   DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS,
   DEFAULT_BOARD_STREAM_RECONCILIATION_INTERVAL_MS,
 } from './handlers/board';
+export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs';
 export { createInMemoryByokCloud } from './composition/in-memory';
 export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory';
 

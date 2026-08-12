@@ -1,26 +1,26 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-12T03:37:46+0800 -->
+<!-- updated_at: 2026-08-13T01:51:00+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Active
-> **Updated At**: 2026-08-12T03:37:46+0800
-> **Source Branch**: codex/presence-producer-capability-discovery
-> **Source Commit**: f8498c5
+> **Status**: Idle
+> **Updated At**: 2026-08-13T01:51:00+0800
+> **Source Branch**: codex/skill-pack-delivery-channel
+> **Source Commit**: 6854522
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: manual
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Active
+- Status: Idle
 - Active Plan: (none)
 - Plan Status: (none)
-- Next Task: inspect active worktree marker(s)
+- Next Task: (none)
 - Clear Note: (none)
 
 ## Mainline Snapshot Reading
@@ -31,8 +31,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /private/tmp/byok-sdk-pi-provider-baseurl-probe: plans/plan-20260812-0333-llm-access-provider-adapter.md
-- /private/tmp/byok-sdk-pi-provider-baseurl-probe: active-worktree owner -> /private/tmp/byok-sdk-pi-provider-baseurl-probe
+- (none)
 ## Active Sprint
 
 - Sprint: (none)
@@ -49,33 +48,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 24 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
-M  .github/workflows/ci.yml
-M  packages/cloud-postgres/README.md
-M  packages/cloud-postgres/package.json
-A  packages/cloud-postgres/scripts/copy-migrations.mjs
-A  packages/cloud-postgres/src/__tests__/migrations-dir.test.ts
-M  packages/cloud-postgres/src/index.ts
-A  packages/cloud-postgres/src/migrations-dir.ts
-A  packages/keys/src/sqlite-lifecycle.test.ts
-M  packages/keys/src/sqlite-profile-store.ts
-M  packages/keys/src/sqlite-support.ts
-M  packages/server/src/__tests__/sqlite-blob-store.test.ts
-A  packages/server/src/__tests__/sqlite-lifecycle.test.ts
-M  packages/server/src/__tests__/sqlite-task-store.test.ts
-M  packages/server/src/sqlite-blob-store.ts
-M  packages/server/src/sqlite-support.ts
-M  packages/server/src/sqlite-task-store.ts
-R  plans/plan-20260812-0201-cloud-postgres-sql-projection.md -> plans/archive/plan-20260812-0201-cloud-postgres-sql-projection.md
-M  scripts/release/pack-and-smoke.mjs
-A  scripts/release/pg-migrate-smoke.mjs
-A  tasks/archive/contract-20260812-0310-cloud-postgres-sql-projection.md
-A  tasks/archive/notes-20260812-0310-cloud-postgres-sql-projection.md
-A  tasks/archive/review-20260812-0310-cloud-postgres-sql-projection.md
-A  tasks/archive/todo-20260812-0310-cloud-postgres-sql-projection.md
-UU tasks/current.md
+ D plans/plan-20260813-0023-skill-pack-delivery-channel.md
+ D tasks/contracts/20260813-0023-skill-pack-delivery-channel.contract.md
+ D tasks/notes/20260813-0023-skill-pack-delivery-channel.notes.md
+ D tasks/reviews/20260813-0023-skill-pack-delivery-channel.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260813-0023-skill-pack-delivery-channel.md
+?? tasks/archive/contract-20260813-0150-skill-pack-delivery-channel.md
+?? tasks/archive/notes-20260813-0150-skill-pack-delivery-channel.md
+?? tasks/archive/review-20260813-0150-skill-pack-delivery-channel.md
+?? tasks/archive/todo-20260813-0150-skill-pack-delivery-channel.md
 ```
 
 ## Source Artifacts

@@ -89,6 +89,10 @@ export const CORE_ERROR_CODES = {
   storage_reservation_expired: 'storage_reservation_expired',
   storage_integrity_mismatch: 'storage_integrity_mismatch',
   storage_write_suspended: 'storage_write_suspended',
+
+  // skill packs (plan `skill-pack-delivery-channel`)
+  skill_pack_manifest_invalid: 'skill_pack_manifest_invalid',
+  skill_pack_frontmatter_invalid: 'skill_pack_frontmatter_invalid',
 } as const;
 
 export type CoreErrorCode = (typeof CORE_ERROR_CODES)[keyof typeof CORE_ERROR_CODES];

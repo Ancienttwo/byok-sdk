@@ -7,7 +7,13 @@
  * cannot tell this from `@byok-sdk/server`, and nothing in the path needs a
  * database to prove it.
  */
-import { createInMemoryCoreStores, type Clock, type CapabilityDeclaration, type CoreStores } from '@byok-sdk/core';
+import {
+  createInMemoryCoreStores,
+  type CapabilityDeclaration,
+  type Clock,
+  type CoreStores,
+  type SkillPackStore,
+} from '@byok-sdk/core';
 import { createHmacTokenSigner, type TokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { createWebCrypto } from '../crypto/web-crypto';
@@ -60,6 +66,14 @@ export interface InMemoryByokCloudOptions {
   readonly truthCommitter?: TruthCommitter;
   readonly truthObjectDownloads?: TruthObjectDownloads;
   readonly maxTruthRequestBytes?: number;
+  /**
+   * Host/test supplied skill pack catalogue. Absent by default, and
+   * `fullCapabilityDeclaration()` withholds `skills.pack` to match — a
+   * composition that declared a channel it has no store for would be refused at
+   * construction, which would break every existing in-memory deployment.
+   */
+  readonly skillPacks?: SkillPackStore;
+  readonly skillPackPageLimit?: number;
 }
 
 export interface InMemoryByokCloud {
@@ -136,6 +150,10 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     ...(options.maxTruthRequestBytes === undefined
       ? {}
       : { maxTruthRequestBytes: options.maxTruthRequestBytes }),
+    ...(options.skillPacks === undefined ? {} : { skillPacks: options.skillPacks }),
+    ...(options.skillPackPageLimit === undefined
+      ? {}
+      : { skillPackPageLimit: options.skillPackPageLimit }),
   });
 
   return { cloud, core, stores, blobContentProxy, clock, crypto };

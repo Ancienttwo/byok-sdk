@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-13 01:50
+> **Related Plan**: plans/archive/plan-20260813-0023-skill-pack-delivery-channel.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260813-0150
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-12 04:00
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

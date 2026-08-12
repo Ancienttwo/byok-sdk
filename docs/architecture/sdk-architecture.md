@@ -1639,6 +1639,40 @@ flowchart LR
 - 已知的 capability honesty 缺口（GAP-001/002）不拖到平台完成之后才修——S0 已先于任何平台线工作收口；
 - 每个 sprint 都要有独立的 rollback 与 evidence。
 
+### 12.9 Skill pack 分发通道（`skills.pack`，Phase 1 已实现）
+
+SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态资源）经 hosted HTTP 下发到已配对 device。拆解证据见 `docs/researches/2026-08-12_hermes-buzz-extraction-assessment.md` §3。
+
+**wire 边界。** 走 hosted HTTP + ADR-010 声明，不进 frozen v1 envelope，不新增 `MESSAGE_TYPES`——技能包是 device 读到声明后主动拉取的内容，不是 server 推进 task 流的消息。`packages/protocol` 零 diff 是本次交付的硬验收。
+
+| 路由 | class | 职责 |
+| --- | --- | --- |
+| `GET /byok/skill-packs` | device bearer | 本 tenant 的 manifest 列表 |
+| `GET /byok/skill-packs/:name/files/:path` | device bearer | 单文件内容；`:path` 是单段 percent-encoded 值，handler 不做任何路径归一化 |
+
+两条路由与 `blobs.contentproxy` 是同一副非对称形状：**声明了却没供 `SkillPackStore`，`createByokCloud` 构造期即失败**（`capability_over_declared`）；供了却没声明则静默不挂载。`fullCapabilityDeclaration()` 默认不含 `skills.pack`（与 `truth.records` 一样是 composition-bound），否则既有 in-memory 部署会全部构造失败。device 面只有读，没有 publish 路由：device bearer 授权的写会让同 tenant 任一设备向其余设备投内容，发布是 host control-plane 直接调 port 的动作。
+
+**凭证隔离。** `SkillPackManifestSchema` 是 `strictObject`，`SKILL_PACK_FORBIDDEN_FIELDS`（exec/command/entrypoint/env/credential/hooks/allowed-tools 等）另给具名拒绝；`SKILL.md` frontmatter 只认 `name` 与 `description`，其余键一律拒绝而非忽略。格式本身表达不出可执行语义，下游宿主也就不必判断要不要执行——这是 §9.1 凭证隔离铁律在第二处的落点，由 `packages/core/src/__tests__/skill-pack.test.ts` 从正反两侧钉死。
+
+**每条限制都有求值点。** buzz 教训（同研究 §5.1）是「定义了但不求值」的装饰性约束，所以：
+
+| 限制 | 求值点 | 拒绝理由名 |
+| --- | --- | --- |
+| 路径安全（拒 `..`、绝对路径、盘符、UNC、dotfile、空段） | `isSkillPackPathSafe` 的 allowlist 文法（非 blocklist），落盘前另有 `resolveInside` 复核 | `path-unsafe` / `store_unsafe` |
+| 单文件与整包字节上限 | `checkSkillPackFileContent` 按**实测**字节判而非 manifest 自称，client 侧另累计整包实测字节 | `file-over-cap` / `pack-over-cap` |
+| 逐文件 sha256 | client 用 `node:crypto` 重算后比对 | `hash-mismatch` |
+| 包级 content hash | `skillPackContentHashInput` 是唯一 canonical 字节形，两端各自 hash 后比对 | `manifest_invalid` |
+| frontmatter | `parseSkillFrontmatter` 的封闭双键文法，不用通用 YAML 引擎 | `skill_pack_frontmatter_invalid` |
+| capability | `installSkillPacks` 在**发请求之前**做 `hasCapability` 判定 | `capability_unavailable` |
+
+任一失败拒装整包，无部分安装，无降级路径。
+
+**device 侧存储。** `<dataDir>/skill-packs/<name>/<content-hash>/` content-addressed 落盘，`lock.json` 最后写（记 `content_hash`/`source`/`installed_at`/`files`），所以未完成的安装不会覆盖上一个可用版本，内容未变的重装是 no-op。审计走该目录下独立的 `audit.jsonl`（install/rejected/projected 各一行，0600），刻意不复用 `bin/audit-log.ts` 的 `DaemonEvent` 流——那是 task 生命周期的读模型，技能安装不属于任何 task。
+
+**K4 判例。** vendor CLI 技能目录布局是 host policy。SDK 只拥有自有 store 与 `listInstalledSkillPacks()`/`projectSkillPack()` 两个投影 API，从不写 `~/.claude/skills` 一类目录。投影是**拷贝**不是 symlink（symlink 会让 store 的后续变化在 runtime 脚下改内容，也把 store 布局外泄进宿主目录），且拷出前按 lock 重新 hash 校验——上周验证过的安装不构成对今天磁盘上那个文件的证据。
+
+**port 契约的过渡形状。** `SkillPackStore` 已进 `CORE_PORT_INTERFACES`/`CORE_PORT_METHODS`，因而受 tenant-first + async 的源码扫描约束；但**尚未**进 `CORE_STORE_NAMES`/`CoreStores`：Postgres 实现属 Phase 2，Phase 1 就把它列入 composition 契约会要求所有既有 composition 同 slice 实现。这个差集由 `CORE_NON_COMPOSITION_PORT_NAMES` 显式记名，Phase 2 落地后该常量归空。
+
 ## 13. RAFT 受限参考
 
 完整静态证据与版本拓扑放在 `docs/researches/raft-architecture-reference.md`，本机动态边界与归因校正放在 `docs/researches/2026-08-10_research-raft-cli-dynamic-report.md`。SDK 架构只保留决策映射：
