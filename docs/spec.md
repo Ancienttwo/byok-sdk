@@ -51,6 +51,49 @@ one low-level agent run and is not task completion. Only `agent_settled`, which
 arrives after automatic retry, compaction, and queued continuations are done,
 maps to BYOK `turn_end`. The SDK does not carry parallel 0.74.x semantics.
 
+## Skill pack delivery
+
+A SaaS product using this SDK can distribute curated, declarative content — an
+`agentskills.io`-compatible `SKILL.md` plus its static companion files — to the
+coding agents running on its users' machines. The channel is pull-based: a
+deployment publishes a tenant-scoped catalogue, and a paired device fetches,
+verifies and installs from it. Nothing is pushed into a task.
+
+Availability is a declaration, not a discovery: a deployment that serves the
+channel names `skills.pack` in its capability declaration, and a device that
+does not read that name installs nothing and reports why. There is no probing of
+endpoints and no interpretation of status codes.
+
+A skill pack carries content and nothing else. Its manifest has no field for a
+command, an entrypoint, a hook, an environment variable, or a credential, and a
+manifest carrying one is rejected rather than ignored. The same rule applies to
+the `SKILL.md` frontmatter, which may declare only a name and a description.
+This is the credential-isolation boundary stated in a second place: the channel
+cannot deliver something to execute, so no downstream host has to decide whether
+to execute it.
+
+Every limit the channel declares is enforced where the bytes arrive. The device
+checks each file's path against a relative-path rule that cannot express a
+parent-directory hop or an absolute path, measures each file and the pack total
+in bytes against fixed caps, verifies each file's sha256 against the manifest,
+re-derives the pack's own content hash from its file rows, and validates the
+entry file's frontmatter. Any failure refuses the whole pack; there is no
+partial install and no degraded mode.
+
+An installed pack lives in the SDK's own store under
+`<dataDir>/skill-packs/<name>/<content-hash>/`, with a `lock.json` recording the
+content hash, the source deployment, the install time, and the file list, plus
+an append-only audit line for each install, refusal, and projection. Because the
+revision directory is content-addressed and the lock is written last, a
+re-install of unchanged content is a no-op and an interrupted install never
+replaces a working pack.
+
+Where a vendor CLI keeps its skills is host policy, not SDK policy. The SDK owns
+its store and exposes two calls — list what is installed, and project one pack
+into a directory the host names. Projection copies bytes rather than linking
+them, and re-verifies each file against the lock on the way out; the SDK never
+writes into `~/.claude/skills` or any equivalent directory on a host's behalf.
+
 ## Local Git task workspaces
 
 The client optionally provides local Git checkpoint workspaces for operators who want a consistent, recoverable code-state convention around connected coding agents. The feature is disabled by default and is enabled only by the local daemon configuration:

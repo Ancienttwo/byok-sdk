@@ -24,6 +24,9 @@ export { InMemoryTruthStore } from './truth';
 export { InMemoryPresenceStore, InMemoryActivityStore } from './presence';
 export { InMemoryObjectStore } from './blob';
 export { InMemoryQuotaStore } from './quota';
+// Not a member of `createInMemoryCoreStores`' bundle: `skillPacks` is a core
+// port but not (yet) a `CoreStores` member — see `ports-contract.ts`.
+export { InMemorySkillPackStore } from './skill-pack';
 
 export interface InMemoryCoreOptions {
   /** Defaults to a fresh {@link createMutableClock}, so TTL behavior is deterministic. */

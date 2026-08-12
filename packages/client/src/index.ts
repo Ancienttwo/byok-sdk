@@ -127,6 +127,36 @@ export type {
   DeviceProofSigner,
   StoredDeviceProofSignerOptions,
 } from './daemon/device-proof-signer';
+/**
+ * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
+ * channel. The install pipeline and the two read APIs are public because the
+ * HOST, not this SDK, decides where a vendor CLI keeps its skills (K4) — a host
+ * lists what is installed and projects the pack it wants into the directory its
+ * own runtime reads. Nothing here ever writes to a vendor CLI's skill directory.
+ */
+export {
+  SKILL_PACKS_CAPABILITY,
+  SKILL_PACKS_DIRNAME,
+  SKILL_PACK_AUDIT_FILENAME,
+  SKILL_PACK_INSTALL_ERROR_CODES,
+  SKILL_PACK_LOCK_FILENAME,
+  SKILL_PACK_LOCK_SCHEMA,
+  SKILL_PACK_RESPONSE_MAX_BYTES,
+  SkillPackInstallError,
+  installSkillPacks,
+  listInstalledSkillPacks,
+  projectSkillPack,
+  skillPacksRoot,
+} from './daemon/skill-pack-installer';
+export type {
+  InstallSkillPacksOptions,
+  InstalledSkillPack,
+  ProjectedSkillPack,
+  SkillPackInstallErrorCode,
+  SkillPackInstallResult,
+  SkillPackLock,
+} from './daemon/skill-pack-installer';
+
 export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client';
 export type {
   LocalMemoryFilter,

@@ -50,6 +50,18 @@ export const CLOUD_CAPABILITIES = {
   activityTail: 'activity.tail',
   /** Request-bound device proof record manifest/read/write surface (S6). */
   truthRecords: 'truth.records',
+  /**
+   * Tenant-scoped skill pack distribution: the manifest list plus the per-file
+   * content route a paired device installs from.
+   *
+   * Hosted HTTP on purpose. A pack is DECLARATIVE CONTENT a device pulls after
+   * reading this declaration — not a message — so `@byok-sdk/protocol` gains
+   * nothing from it and the frozen v1 envelope stays untouched. Composition-
+   * bound like `truth.records`: a deployment that declares it without supplying
+   * a `SkillPackStore` is refused at construction rather than publishing two
+   * routes it would then 404.
+   */
+  skillPacks: 'skills.pack',
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
@@ -65,6 +77,12 @@ export interface FullCapabilityDeclarationOptions {
    * composition cannot truthfully promise a cross-store atomic commit.
    */
   readonly includeTruthRecords?: boolean;
+  /**
+   * `skills.pack` is omitted for the same reason: the standard composition is
+   * given no `SkillPackStore`, and a default-on declaration would make every
+   * existing deployment refuse to construct.
+   */
+  readonly includeSkillPacks?: boolean;
 }
 
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
@@ -75,10 +93,11 @@ export function fullCapabilityDeclaration(
   return {
     schema: 'byok-capabilities-v1',
     version,
-    capabilities: Object.values(CLOUD_CAPABILITIES).filter(
-      (capability) =>
-        capability !== CLOUD_CAPABILITIES.truthRecords || options.includeTruthRecords === true,
-    ),
+    capabilities: Object.values(CLOUD_CAPABILITIES).filter((capability) => {
+      if (capability === CLOUD_CAPABILITIES.truthRecords) return options.includeTruthRecords === true;
+      if (capability === CLOUD_CAPABILITIES.skillPacks) return options.includeSkillPacks === true;
+      return true;
+    }),
   };
 }
 

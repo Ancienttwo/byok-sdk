@@ -27,6 +27,7 @@ import {
   type ControlPlanePrincipal,
   type CoreStores,
   type PresenceHint,
+  type SkillPackStore,
   type TenantId,
 } from '@byok-sdk/core';
 import { createEnvelope, encodeEnvelope, type Envelope, type TaskOfferPayload } from '@byok-sdk/protocol';
@@ -72,6 +73,11 @@ import {
 } from './handlers/board';
 import { activityAppendHandler, presencePublishHandler } from './handlers/presence';
 import {
+  DEFAULT_SKILL_PACK_PAGE_LIMIT,
+  skillPackFileHandler,
+  skillPackListHandler,
+} from './handlers/skill-packs';
+import {
   DEFAULT_MAX_TRUTH_REQUEST_BYTES,
   truthGetHandler,
   truthManifestHandler,
@@ -115,6 +121,14 @@ export interface ByokCloudOptions {
   readonly truthCommitter?: TruthCommitter;
   /** Content-hash keyed object GET grants for object-backed truth bodies. */
   readonly truthObjectDownloads?: TruthObjectDownloads;
+  /**
+   * Tenant-scoped skill pack catalogue. OPTIONAL, and absent is a first-class
+   * answer: a deployment that distributes no declarative content supplies
+   * nothing here and declares no `skills.pack`. Supplying it is necessary but
+   * not sufficient for the routes to exist — the deployment must also declare
+   * the capability (ADR-010), the same asymmetry the byte proxy above has.
+   */
+  readonly skillPacks?: SkillPackStore;
   readonly crypto: CloudCrypto;
   readonly tokenSigner: TokenSigner;
   readonly clock: Clock;
@@ -141,6 +155,7 @@ export interface ByokCloudOptions {
   readonly activityCapacity?: number;
   readonly activityTtlMs?: number;
   readonly maxTruthRequestBytes?: number;
+  readonly skillPackPageLimit?: number;
 }
 
 export interface EnqueueOfferInput {
@@ -195,6 +210,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     options.blobContentProxy,
     options.truthCommitter,
     options.truthObjectDownloads,
+    options.skillPacks,
   );
   const root: CloudRootStores = { core: options.core, cloud: options.cloud };
   const auth: AuthPlane = createAuthPlane({
@@ -335,6 +351,27 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     registry.register(
       { method: 'PUT', path: '/byok/records/:kind/:key', class: 'proof' },
       truthPutHandler(truthDeps),
+    );
+  }
+
+  // Skill packs: both conditions, same asymmetry as the byte proxy below.
+  // Declared-without-a-store is fatal (above); supplied-without-a-declaration
+  // is a silent no-mount, which is how a deployment rolls the channel out or
+  // back without ever telling a client something false.
+  const skillPacks = options.skillPacks;
+  if (skillPacks !== undefined && declares(declaration, CLOUD_CAPABILITIES.skillPacks)) {
+    const skillPackDeps = {
+      bearer: deviceRouteDeps.bearer,
+      skillPacks,
+      pageLimit: options.skillPackPageLimit ?? DEFAULT_SKILL_PACK_PAGE_LIMIT,
+    };
+    registry.register(
+      { method: 'GET', path: '/byok/skill-packs', class: 'device' },
+      skillPackListHandler(skillPackDeps),
+    );
+    registry.register(
+      { method: 'GET', path: '/byok/skill-packs/:name/files/:path', class: 'device' },
+      skillPackFileHandler(skillPackDeps),
     );
   }
 
@@ -495,6 +532,7 @@ function assertNoOverDeclaration(
   contentProxy: BlobContentProxy | undefined,
   truthCommitter: TruthCommitter | undefined,
   truthObjectDownloads: TruthObjectDownloads | undefined,
+  skillPacks: SkillPackStore | undefined,
 ): void {
   if (
     declares(declaration, CLOUD_CAPABILITIES.boardSse) &&
@@ -521,6 +559,12 @@ function assertNoOverDeclaration(
     throw new ByokCloudError(
       'capability_over_declared',
       `This deployment declares ${CLOUD_CAPABILITIES.truthRecords} but was given no content-hash keyed TruthObjectDownloads authority.`,
+    );
+  }
+  if (skillPacks === undefined && declares(declaration, CLOUD_CAPABILITIES.skillPacks)) {
+    throw new ByokCloudError(
+      'capability_over_declared',
+      `This deployment declares ${CLOUD_CAPABILITIES.skillPacks} but was given no SkillPackStore, so both /byok/skill-packs routes would be published and unserved.`,
     );
   }
 }

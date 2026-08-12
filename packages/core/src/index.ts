@@ -163,6 +163,47 @@ export {
 } from './capabilities';
 export type { CapabilityDeclaration } from './capabilities';
 
+// Skill packs (plan `skill-pack-delivery-channel`): the declarative content
+// channel a deployment declares as `skills.pack` (ADR-010) and a paired device
+// installs. Schema, limits, and the evaluation point for every one of them.
+export {
+  SKILL_FRONTMATTER_FIELDS,
+  SKILL_PACK_DESCRIPTION_MAX_LENGTH,
+  SKILL_PACK_ENTRY_PATH,
+  SKILL_PACK_FILE_MAX_BYTES,
+  SKILL_PACK_FILE_PATH_MAX_LENGTH,
+  SKILL_PACK_FILE_PATH_PATTERN,
+  SKILL_PACK_FORBIDDEN_FIELDS,
+  SKILL_PACK_MANIFEST_SCHEMA_ID,
+  SKILL_PACK_MAX_BYTES,
+  SKILL_PACK_MAX_FILES,
+  SKILL_PACK_NAME_MAX_LENGTH,
+  SKILL_PACK_NAME_PATTERN,
+  SKILL_PACK_REJECTIONS,
+  SKILL_PACK_VERSION_PATTERN,
+  SkillPackFileSchema,
+  SkillPackManifestSchema,
+  checkSkillPackEntry,
+  checkSkillPackFileContent,
+  checkSkillPackManifest,
+  isSkillPackPathSafe,
+  parseSkillFrontmatter,
+  parseSkillPackManifest,
+  skillPackContentHashInput,
+} from './skill-pack';
+export type {
+  ObservedSkillPackFile,
+  SkillFrontmatter,
+  SkillPackCheck,
+  SkillPackFile,
+  SkillPackFileContent,
+  SkillPackListQuery,
+  SkillPackManifest,
+  SkillPackPublishInput,
+  SkillPackRejection,
+  SkillPackStore,
+} from './skill-pack';
+
 // Composition contract
 export { CORE_STORE_NAMES } from './stores';
 export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
@@ -171,7 +212,13 @@ export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores';
 // so `@byok-sdk/conformance` can assert compositions against the same table
 // `__tests__/constraints.test.ts` asserts the source interfaces against —
 // without a `core → conformance` cycle.
-export { CORE_PORT_INTERFACES, CORE_PORT_METHODS } from './ports-contract';
+export {
+  CORE_NON_COMPOSITION_PORT_NAMES,
+  CORE_PORT_INTERFACES,
+  CORE_PORT_METHODS,
+  CORE_PORT_NAMES,
+} from './ports-contract';
+export type { CorePortName } from './ports-contract';
 
 // Device proof (§12.6.3, sprint §S6.2)
 export {
@@ -242,6 +289,7 @@ export {
   InMemoryObjectStore,
   InMemoryPresenceStore,
   InMemoryQuotaStore,
+  InMemorySkillPackStore,
   InMemoryTruthStore,
   createInMemoryCoreStores,
   createInMemoryCoreCompositionWithClock,
