@@ -199,6 +199,10 @@ export type {
   JsonValue,
 } from './attestation';
 
+// Nonce signing domain (§6.2) — the one authority the daemon, the hosted
+// surface, and the reference server all sign/verify against.
+export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
+
 // In-memory reference implementation
 export {
   IN_MEMORY_CLOCK_EPOCH,

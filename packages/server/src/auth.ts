@@ -1,4 +1,5 @@
 import { createPublicKey, randomBytes, verify as verifyEd25519Raw } from 'node:crypto';
+import { nonceSigningBytes } from '@byok-sdk/core';
 import { jwtVerify, SignJWT } from 'jose';
 
 /**
@@ -24,14 +25,19 @@ const NONCE_TTL_MS = 5 * 60 * 1000;
  * another, and an attacker who can get a device to sign anything shaped like
  * a nonce holds a token-renewal credential.
  *
- * The client signs the same literal (`packages/client/src/daemon/device-keys.ts`).
+ * The literal lives in `@byok-sdk/core` (`src/pairing.ts`) and the client signs
+ * the same binding (`packages/client/src/daemon/device-keys.ts`) — it used to
+ * be three copies, each commented as byte-identical to the other two, which is
+ * an agreement that holds only until someone edits one. Re-exported here so
+ * this module's public surface is unchanged.
+ *
  * There is deliberately no dual mode: a raw, unprefixed nonce signature is
  * simply invalid here, with no flag, fallback, or grace window that would
  * make the old encoding acceptable again. Because the four packages have no
  * published compatibility contract yet, the recovery path for a device on
  * the old encoding is a re-pair, not a server-side shim.
  */
-export const NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n';
+export { NONCE_SIGNING_DOMAIN } from '@byok-sdk/core';
 
 // ---------------------------------------------------------------------------
 // TokenSigner — interface-shaped so a SaaS can supply its own signer later
@@ -265,17 +271,17 @@ export class NonceStore {
 
 /**
  * Verify `signature` (base64url) is a valid Ed25519 signature over `message`
- * (UTF-8) made by the private key matching `devicePublicKey` (base64url raw
- * 32-byte Ed25519 public key — the same encoding as a JWK's `x` field, which
- * is how we hand it to `node:crypto` without needing DER/SPKI conversion).
+ * made by the private key matching `devicePublicKey` (base64url raw 32-byte
+ * Ed25519 public key — the same encoding as a JWK's `x` field, which is how we
+ * hand it to `node:crypto` without needing DER/SPKI conversion).
  */
-function verifyEd25519Signature(devicePublicKey: string, message: string, signature: string): boolean {
+function verifyEd25519Signature(devicePublicKey: string, message: Uint8Array, signature: string): boolean {
   try {
     const keyObject = createPublicKey({
       key: { kty: 'OKP', crv: 'Ed25519', x: devicePublicKey },
       format: 'jwk',
     });
-    return verifyEd25519Raw(null, Buffer.from(message, 'utf8'), keyObject, Buffer.from(signature, 'base64url'));
+    return verifyEd25519Raw(null, message, keyObject, Buffer.from(signature, 'base64url'));
   } catch {
     return false;
   }
@@ -283,13 +289,13 @@ function verifyEd25519Signature(devicePublicKey: string, message: string, signat
 
 /**
  * The ONLY nonce-signature check on this server (§6.2): the signed message is
- * {@link NONCE_SIGNING_DOMAIN} followed by the nonce. Applying the domain here
- * rather than at the call site is the point — there is one place that decides
- * what a device signature over a nonce means, so no route can be written that
- * accepts the undomained form.
+ * core's `nonceSigningBytes` — the domain followed by the nonce. Applying the
+ * domain here rather than at the call site is the point — there is one place
+ * that decides what a device signature over a nonce means, so no route can be
+ * written that accepts the undomained form.
  */
 export function verifyNonceSignature(devicePublicKey: string, nonce: string, signature: string): boolean {
-  return verifyEd25519Signature(devicePublicKey, NONCE_SIGNING_DOMAIN + nonce, signature);
+  return verifyEd25519Signature(devicePublicKey, nonceSigningBytes(nonce), signature);
 }
 
 // ---------------------------------------------------------------------------

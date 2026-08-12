@@ -135,6 +135,10 @@ importers:
       '@byok-sdk/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@byok-sdk/testkit':
+        specifier: workspace:*
+        version: link:../testkit
 
   packages/core:
     dependencies:
@@ -177,6 +181,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@byok-sdk/core':
+        specifier: workspace:*
+        version: link:../core
       '@byok-sdk/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -196,6 +203,15 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+
+  packages/testkit:
+    dependencies:
+      '@byok-sdk/core':
+        specifier: workspace:*
+        version: link:../core
+      '@byok-sdk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
 packages:
 
