@@ -311,6 +311,13 @@ export function extractBearerToken(header: string | undefined): string | undefin
 export interface AuthDeps {
   tokenSigner: TokenSigner;
   devices: DeviceRegistry;
+  /**
+   * The product THIS server instance serves (`createByokServer`'s
+   * `productId`). Part of authentication, not of routing: a device row paired
+   * into another product is not a principal here at all — see
+   * {@link authenticateBearer}.
+   */
+  productId: string;
 }
 
 /**
@@ -333,10 +340,20 @@ export interface AuthenticatedDevice {
  * S1 shape: the token's `(tenantId, deviceId)` are LOOKUP KEYS into the
  * registry, and the row that comes back is the authority. A token for a
  * device that no longer exists, one whose tenant does not own that device,
- * one whose product disagrees with the row, and one for a revoked device all
- * fail identically here and are indistinguishable to the caller — there is
- * deliberately no "which of those was it" signal to hand back, so no route
- * can turn a 401 into a cross-tenant existence oracle.
+ * one whose product disagrees with the row, one whose row belongs to a
+ * different product than this instance serves, and one for a revoked device
+ * all fail identically here and are indistinguishable to the caller — there
+ * is deliberately no "which of those was it" signal to hand back, so no route
+ * can turn a 401 into a cross-tenant (or cross-product) existence oracle.
+ *
+ * The last two checks are different facts and both are needed. Row vs claims
+ * says "the token belongs to this row"; row vs instance says "this row
+ * belongs to the product this server serves" — a single server can mint
+ * pairing codes for any product (`createPairingCode` takes the claims per
+ * code), so a row from another product is a real row holding a real token
+ * and is still not a principal here. `conn.hello`'s own product checks
+ * (`ws-server.ts`) validate the client's ANNOUNCEMENT, which is a third fact
+ * and stays where it is.
  */
 export async function authenticateBearer(
   header: string | undefined,
@@ -349,5 +366,6 @@ export async function authenticateBearer(
   const device = deps.devices.get(claims.tenantId, claims.deviceId);
   if (!device || device.revoked) return undefined;
   if (device.productId !== claims.productId) return undefined;
+  if (device.productId !== deps.productId) return undefined;
   return { deviceId: device.deviceId, tenantId: device.tenantId, productId: device.productId };
 }

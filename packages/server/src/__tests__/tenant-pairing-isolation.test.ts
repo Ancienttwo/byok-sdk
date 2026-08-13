@@ -287,24 +287,22 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
   // instance config.
   // -----------------------------------------------------------------------
 
-  it('refuses a hello whose productId disagrees with the device row, before registering the connection', async () => {
+  it('refuses the upgrade for a device row outside the instance product, before any hello', async () => {
     // The instance serves PRODUCT_ID, but this device was paired into a code
-    // minted for OTHER_PRODUCT_ID — so a hello announcing PRODUCT_ID passes
-    // the instance check and must still be refused on the row.
+    // minted for OTHER_PRODUCT_ID. The enforcement point moved (slice
+    // longpoll-auth-parity): `authenticateBearer` (`auth.ts`) now compares the
+    // row against the product this instance serves, so such a row is refused
+    // at the upgrade and never gets to announce anything — the hello gate's
+    // own row check (`ws-server.ts:121`) is thereby unreachable and kept as
+    // belt-and-braces under this slice's zero-diff freeze on that file.
     const started = await startWith();
     const device = await pairInto(started.baseUrl, started.byok, {
       tenantId: TENANT_A,
       productId: OTHER_PRODUCT_ID,
     });
 
-    const outcome = await helloOutcome(started.port, {
-      deviceId: device.deviceId,
-      accessToken: device.accessToken,
-      productId: PRODUCT_ID,
-    });
-
-    expect(outcome.acked).toBe(false);
-    expect(outcome.closeCode).toBe(1002);
+    // 401 rather than 101 — no hello is ever exchanged.
+    expect(await expectUpgradeRejected(started.port, device.accessToken)).toBe(401);
     // Never registered: the hub knows the device (it is paired) but has no
     // connection for it.
     const machine = started.byok.machines.list().find((m) => m.deviceId === device.deviceId);
