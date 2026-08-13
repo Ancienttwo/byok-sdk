@@ -173,7 +173,6 @@ exit_criteria:
     - pnpm -r run test
     - pnpm -r run build
     - repo-harness run check-task-workflow --strict
-    - repo-harness run verify-contract --contract tasks/contracts/20260814-0007-prepared-runtime-operation-manifest.contract.md --strict
 ```
 
 ## Acceptance Notes (Human Review)

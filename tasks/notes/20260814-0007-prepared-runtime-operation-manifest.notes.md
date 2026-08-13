@@ -2,11 +2,11 @@
 
 > **Durable dispatch**: worker `/root/prepared_runtime_operation_manifest`; worktree `/Users/kito/Projects/byok-sdk-wt-prepared-runtime-operation-manifest`; branch `codex/prepared-runtime-operation-manifest`; base `98cea8c534f595314d4bbd67ea434da6feeb0e20`.
 
-> **Status**: Rebased; complete verification in progress
+> **Status**: Implementation and verification evidence complete; outer contract verification pending
 > **Plan**: plans/plan-20260814-0007-prepared-runtime-operation-manifest.md
 > **Contract**: tasks/contracts/20260814-0007-prepared-runtime-operation-manifest.contract.md
 > **Review**: tasks/reviews/20260814-0007-prepared-runtime-operation-manifest.review.md
-> **Last Updated**: 2026-08-14 00:55
+> **Last Updated**: 2026-08-14 01:15
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -80,6 +80,11 @@
   114 files / 1180 tests; rebuilt entry smoke passed all three positive adapters
   plus the zero-side-effect Pi missing-launcher case; release package graph
   passed at 0.4.0.
+- Post-rebase workspace verification: `pnpm -r run typecheck`, `pnpm -r run
+  test`, and `pnpm -r run build` all passed after rebuilding the stale local
+  dependency artifacts required by main's toolset-discovery changes. The
+  contract no longer lists `verify-contract` inside its own `commands_succeed`
+  list: invoking that outer gate from within the list is self-recursive.
 
 ## Promotion Filter
 

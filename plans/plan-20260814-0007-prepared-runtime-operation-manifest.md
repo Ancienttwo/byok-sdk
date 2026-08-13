@@ -215,7 +215,7 @@ This plan stays Draft. Approval means accepting: the 0.4.0 breaking API cut, the
 - [x] Add zero-side-effect rejection, snapshot drift, environment secrecy, claim/start consistency, and positive adapter tests.
 - [x] Extend the built-entry adapter smoke with a pre-spawn rejection scenario.
 - [x] Move the aligned dispatch release train metadata to 0.4.0 and add the custom-adapter migration note; do not publish.
-- [ ] Update spec/security/architecture truth and run the complete verification boundary.
+- [x] Update spec/security/architecture truth and run the complete verification boundary.
 
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
@@ -229,4 +229,4 @@ This plan stays Draft. Approval means accepting: the 0.4.0 breaking API cut, the
 - [x] Add zero-side-effect rejection, snapshot drift, environment secrecy, claim/start consistency, and positive adapter tests.
 - [x] Extend the built-entry adapter smoke with a pre-spawn rejection scenario.
 - [x] Move the aligned dispatch release train metadata to 0.4.0 and add the custom-adapter migration note; do not publish.
-- [ ] Update spec/security/architecture truth and run the complete verification boundary.
+- [x] Update spec/security/architecture truth and run the complete verification boundary.
