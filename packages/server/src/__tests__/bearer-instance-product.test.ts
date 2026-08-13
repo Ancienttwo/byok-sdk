@@ -77,6 +77,9 @@ describe('S1: a bearer token is only good on the instance serving its product', 
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
+    // This suite is made almost entirely of requests the server rejects
+    // mid-request, which is what surfaced the unread-body connection pin
+    // `stopServer` now handles for every server suite — see its doc comment.
     if (server) await stopServer(server);
     byok?.stop();
     server = undefined;

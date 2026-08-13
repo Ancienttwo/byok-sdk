@@ -38,7 +38,21 @@ export async function startServer(
   });
 }
 
+/**
+ * Close a fixture server, dropping lingering client connections first.
+ *
+ * `closeAllConnections()` is load-bearing, not tidiness: a route that answers
+ * before reading the request body — every `authenticateBearer` 401
+ * short-circuits ahead of `readJsonBody` — leaves a rejected POST's body
+ * unread, and under bun's `node:http` such a connection is never counted idle
+ * again, so `close()`'s callback never fires and the suite dies on a hook
+ * timeout. Node/undici drains the same socket, which is why this is invisible
+ * under vitest. Probed with the pin isolated: a rejected GET (no body) and a
+ * 401 whose body IS read both close in 0ms, `Connection: close` does not help,
+ * and only the unread body pins the socket.
+ */
 export async function stopServer(server: HttpServer): Promise<void> {
+  server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
