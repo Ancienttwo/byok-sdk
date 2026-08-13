@@ -1,6 +1,6 @@
 # Task Contract: control-socket-fallback
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260813-1925-control-socket-fallback.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict

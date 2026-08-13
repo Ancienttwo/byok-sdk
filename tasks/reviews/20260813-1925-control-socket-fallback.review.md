@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:b99624f0f33ff3197fc8b1f4036796f104ccc69d8d2168ecc0399d1497518ac4
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 6af6eab8a85fa56eee7f485e1baeb7476c17ab47
+> **Verification Evidence SHA256**: sha256:d9f5d054d088a1b66cf6fa3e0f256fcfa2ccc69dc7ceb7de008cda50e4f39143
+> **Issued At**: 2026-08-13T11:41:36.311Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: gatekeeper PASS: controlSocketPath fallback fixed to /tmp literal (env-independent, always within sun_path); short path byte-invariant, control-server zero diff, degrade semantics untouched; guards E/F + byte-invariance green after RED capture; deep-TMPDIR smoke no longer degrades
 - Findings: none
 
 ## Behavior Diff Notes
