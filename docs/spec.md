@@ -18,6 +18,9 @@ Describe the product intent, users, workflows, acceptance scenarios, and constra
   representation of one selected BYOK provider/model. Pi remains the sole
   provider registry, transport, and agent-loop authority; the projection is
   immutable for one process and failures never fall back to another target.
+- **host MCP toolset** — a logical task requirement whose executable stdio
+  MCP definition is owned by the device's local daemon configuration. The
+  SaaS may name the toolset but cannot supply its command or credentials.
 
 ## Core pi runtime contract
 
@@ -93,6 +96,40 @@ its store and exposes two calls — list what is installed, and project one pack
 into a directory the host names. Projection copies bytes rather than linking
 them, and re-verifies each file against the lock on the way out; the SDK never
 writes into `~/.claude/skills` or any equivalent directory on a host's behalf.
+
+## Task-scoped host MCP toolsets
+
+A SaaS task may require one or more host-integrated tools without making the
+SaaS an execution or credential authority. It uses the distinct additive
+`task.offer_with_toolsets` message and carries 1–16 bounded logical ids. It does
+not widen `task.offer`: an older daemon must skip an unknown offer type rather
+than strip an optional field and execute the instruction without its required
+tools.
+
+The device operator configures each id in `DaemonConfig.mcpToolsets` as one or
+more stdio MCP servers. This first slice accepts only `command` and `args`;
+environment variables, headers, remote URLs, tokens, and cookies are not part
+of the selectable shape. This does not sanitize arbitrary instruction text;
+the host must not put connector secrets there. The daemon validates and
+snapshots the registry at construction, resolves every requested id before
+claim, and rejects missing ids or colliding server names. Runtime selection
+also requires an adapter that advertises `mcpToolsets`; no semantic fallback to
+a tool-less runtime exists.
+
+Claude is the sole bundled runtime supported in this slice. Its selected local
+servers are projected into one task-scoped `--mcp-config` under
+`--strict-mcp-config`; confirm mode's internal approval server is merged into
+the same closed file. Pi and Codex decline toolset-aware offers. The
+self-hosted coordinator requires a live `toolset-selection` capability before
+task creation; a stateless hosted caller must route only to a device it already
+knows is capable.
+
+This feature is the injection contract, not a connector catalogue or security
+sandbox. The SDK does not ship Gmail, LinkedIn, social-media, or browser
+connectors and does not own OAuth/cookie custody, refresh, revocation, domain
+policy, or data redaction. A Salesko-like host supplies those behind its local
+MCP process and its own credential broker; that subprocess still runs with the
+daemon user's OS authority.
 
 ## Local Git task workspaces
 

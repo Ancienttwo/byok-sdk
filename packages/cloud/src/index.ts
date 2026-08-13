@@ -22,7 +22,13 @@ export type { TenantId } from '@byok-sdk/core';
 
 // The composition entry points
 export { createByokCloud } from './cloud';
-export type { ByokCloud, ByokCloudOptions, EnqueueOfferInput, EnqueuedOffer } from './cloud';
+export type {
+  ByokCloud,
+  ByokCloudOptions,
+  EnqueueOfferInput,
+  EnqueueToolsetOfferInput,
+  EnqueuedOffer,
+} from './cloud';
 export {
   DEFAULT_EVENTS_PAGE_LIMIT,
   DEFAULT_LONG_POLL_HOLD_MS,

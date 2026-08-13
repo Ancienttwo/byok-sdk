@@ -110,6 +110,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'conn.hello': { taskId: 'optional', seq: 'optional' },
     'conn.ack': { taskId: 'optional', seq: 'required' },
     'task.offer': { taskId: 'required', seq: 'required' },
+    'task.offer_with_toolsets': { taskId: 'required', seq: 'required' },
     'task.approve': { taskId: 'required', seq: 'required' },
     'task.reject': { taskId: 'required', seq: 'required' },
     'task.cancel': { taskId: 'required', seq: 'required' },
@@ -154,6 +155,10 @@ type CodecRequirednessMatrix = {
   'conn.hello': { taskId: FieldRequiredness<'conn.hello', 'taskId'>; seq: FieldRequiredness<'conn.hello', 'seq'> };
   'conn.ack': { taskId: FieldRequiredness<'conn.ack', 'taskId'>; seq: FieldRequiredness<'conn.ack', 'seq'> };
   'task.offer': { taskId: FieldRequiredness<'task.offer', 'taskId'>; seq: FieldRequiredness<'task.offer', 'seq'> };
+  'task.offer_with_toolsets': {
+    taskId: FieldRequiredness<'task.offer_with_toolsets', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_with_toolsets', 'seq'>;
+  };
   'task.approve': { taskId: FieldRequiredness<'task.approve', 'taskId'>; seq: FieldRequiredness<'task.approve', 'seq'> };
   'task.reject': { taskId: FieldRequiredness<'task.reject', 'taskId'>; seq: FieldRequiredness<'task.reject', 'seq'> };
   'task.cancel': { taskId: FieldRequiredness<'task.cancel', 'taskId'>; seq: FieldRequiredness<'task.cancel', 'seq'> };
@@ -425,6 +430,8 @@ function minimalPayloadForProbe(type: MessageType): unknown {
       return { protocolVersion: 1, capabilities: [], serverTime: '2026-01-01T00:00:00.000Z' };
     case 'task.offer':
       return { instruction: 'do it', policy: { mode: 'auto' } };
+    case 'task.offer_with_toolsets':
+      return { instruction: 'find leads', policy: { mode: 'auto' }, requiredToolsets: ['salesko'] };
     case 'task.approve':
       return {};
     case 'task.reject':

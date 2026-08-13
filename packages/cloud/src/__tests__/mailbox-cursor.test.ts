@@ -29,6 +29,25 @@ async function poll(
 }
 
 describe('GET /byok/events cursor semantics', () => {
+  it('delivers a logical-toolset offer as its distinct fail-closed message type', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const enqueued = await harness.cloud.enqueueToolsetOffer(TENANT_A, device.deviceId, {
+      payload: {
+        instruction: 'find qualified leads',
+        policy: { mode: 'auto' },
+        runtime: 'claude',
+        requiredToolsets: ['salesko'],
+      },
+    });
+
+    const page = await poll(harness, device.authorization);
+    expect(page.events).toHaveLength(1);
+    expect(page.events[0]?.type).toBe('task.offer_with_toolsets');
+    expect(page.events[0]).toEqual(enqueued.envelope);
+    expect(JSON.stringify(page.events[0])).not.toMatch(/command|args|secret/i);
+  });
+
   it('replays the same page for as long as the daemon keeps reporting the same cursor', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

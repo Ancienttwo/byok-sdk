@@ -94,6 +94,12 @@ export const PROTOCOL_VERSION = 1;
  * authoritative provider/model selection unless the target connection
  * advertises this flag. Absence means reject before task creation, not send
  * a legacy runtime-only offer that could reach a different provider.
+ *
+ * `toolset-selection` (additive-minor) means the daemon understands
+ * `task.offer_with_toolsets` and can resolve its logical ids against local
+ * MCP configuration. The distinct message type is also the N/N-1 safety
+ * boundary for long-poll: an older daemon skips it as unknown and therefore
+ * cannot accidentally execute the instruction without the required tools.
  */
 export const CAPABILITY_FLAGS = [
   'steer',
@@ -103,6 +109,7 @@ export const CAPABILITY_FLAGS = [
   'approval-targeting',
   'result-document',
   'dispatch-selection',
+  'toolset-selection',
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

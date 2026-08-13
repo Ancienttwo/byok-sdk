@@ -36,6 +36,27 @@ evidence.
   [Workspace confinement is a convention, not a sandbox](#workspace-confinement-is-a-convention-not-a-sandbox)
   below — this is the one place this doc most wants to avoid overclaiming.
 
+### Task-scoped host MCP toolsets
+
+A toolset-aware offer's selector carries logical ids only. Commands and
+arguments live in the device operator's local `mcpToolsets` configuration; the
+selector has no executable, environment, HTTP-header, token, cookie, or
+connector-credential field. This boundary does not inspect the arbitrary task
+instruction, so the host remains responsible for never embedding secrets in
+instruction text. Configuration is strictly validated and snapshotted when
+the daemon starts. Before claim, the daemon must resolve every requested id and
+prove that the selected toolsets have disjoint MCP server names; otherwise it
+declines without starting a runtime.
+
+Claude receives exactly the resolved local stdio servers in a task-scoped
+configuration under `--strict-mcp-config`. Confirm mode's internal approval
+server shares that closed configuration. Pi and Codex do not advertise this
+capability and decline toolset offers. This boundary prevents a SaaS task from
+turning tool selection into remote command or secret injection, but it is not
+an OS sandbox: the configured MCP subprocess still runs as the daemon's user.
+Connector OAuth, cookie custody, token refresh, domain policy, and data
+redaction remain responsibilities of a host-owned local credential broker.
+
 ## Local Git checkpoint workspaces
 
 The daemon has an optional, disabled-by-default local checkpoint mode. An operator enables it in the device's local configuration with:

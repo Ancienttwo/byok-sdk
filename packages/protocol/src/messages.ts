@@ -46,6 +46,8 @@ export const RuntimeCapabilitiesSchema = z.object({
   steer: z.boolean().optional(),
   resume: z.boolean().optional(),
   approvalInteractive: z.boolean().optional(),
+  /** Whether this runtime can project a locally configured MCP toolset into one task. */
+  mcpToolsets: z.boolean().optional(),
   permissionModes: z.array(z.string()).optional(),
 });
 export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
@@ -172,6 +174,50 @@ export const TaskOfferPayloadSchema = z.object({
     .optional(),
 });
 export type TaskOfferPayload = z.infer<typeof TaskOfferPayloadSchema>;
+
+/**
+ * Logical, host-owned MCP toolset identifier. A task may request this name,
+ * but the executable/server definition behind it exists only in the daemon's
+ * local configuration and never crosses the SaaS wire.
+ */
+export const ToolsetIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u, 'toolset ids must be lowercase logical identifiers');
+export type ToolsetId = z.infer<typeof ToolsetIdSchema>;
+
+/** Every named toolset is required; duplicates are rejected instead of silently de-duplicated. */
+export const RequiredToolsetsSchema = z
+  .array(ToolsetIdSchema)
+  .min(1)
+  .max(16)
+  .superRefine((ids, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, id] of ids.entries()) {
+      if (seen.has(id)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [index],
+          message: `duplicate required toolset: ${id}`,
+        });
+      }
+      seen.add(id);
+    }
+  });
+
+/**
+ * Additive v1 offer variant for tasks whose semantics require local MCP
+ * tools. This is a distinct message type rather than an optional field on
+ * `task.offer`: an older v1 daemon skips an unknown message type, whereas it
+ * would legally strip an unknown optional control field and run the task
+ * without its required tools. The whole payload is strict because every
+ * field here affects execution authority.
+ */
+export const TaskOfferWithToolsetsPayloadSchema = TaskOfferPayloadSchema.extend({
+  requiredToolsets: RequiredToolsetsSchema,
+}).strict();
+export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsPayloadSchema>;
 
 /**
  * server -> daemon: approve a pending `task.await_approval` request.
@@ -682,6 +728,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'conn.hello': ConnHelloPayloadSchema,
   'conn.ack': ConnAckPayloadSchema,
   'task.offer': TaskOfferPayloadSchema,
+  'task.offer_with_toolsets': TaskOfferWithToolsetsPayloadSchema,
   'task.approve': TaskApprovePayloadSchema,
   'task.reject': TaskRejectPayloadSchema,
   'task.cancel': TaskCancelPayloadSchema,
@@ -710,6 +757,7 @@ export const MESSAGE_TYPES = Object.keys(MESSAGE_PAYLOAD_SCHEMAS) as MessageType
 export const SERVER_TO_DAEMON_TYPES = [
   'conn.ack',
   'task.offer',
+  'task.offer_with_toolsets',
   'task.approve',
   'task.reject',
   'task.cancel',

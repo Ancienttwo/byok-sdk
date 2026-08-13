@@ -102,6 +102,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       // → approval MCP server → control socket), so this adapter is the one
       // bundled runtime that honestly reports interactive approval.
       approvalInteractive: true,
+      mcpToolsets: true,
       permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     });
   });
@@ -278,6 +279,40 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await session.close();
     openSessions.pop();
     await expect(fs.access(mcpConfigPath)).rejects.toThrow();
+  });
+
+  it('projects task-scoped local MCP servers through one strict config without enabling the approval tool', async () => {
+    const spawnCalls: { args: string[] }[] = [];
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: ((command: string, args: readonly string[] = [], options: object = {}) => {
+        const argsArray = [...args];
+        spawnCalls.push({ args: argsArray });
+        return realSpawn(command, argsArray, options);
+      }) as unknown as SpawnFn,
+    });
+    const ctx = await makeCtx();
+    ctx.mcpServers = {
+      salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] },
+    };
+
+    const session = await adapter.start(baseTask, ctx);
+    openSessions.push(session);
+    const args = spawnCalls[0]?.args ?? [];
+    expect(args).toContain('--mcp-config');
+    expect(args).toContain('--strict-mcp-config');
+    expect(args).not.toContain('--permission-prompt-tool');
+    const configPath = args[args.indexOf('--mcp-config') + 1];
+    if (typeof configPath !== 'string') throw new Error('missing mcp config path');
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toEqual({
+      mcpServers: {
+        salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] },
+      },
+    });
+
+    await session.close();
+    openSessions.pop();
+    await expect(fs.access(configPath)).rejects.toThrow();
   });
 
   it('fails closed on a blob-ref instruction (no blob fetch in M2)', async () => {

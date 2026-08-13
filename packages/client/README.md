@@ -24,4 +24,30 @@ transport-free adapter surface:
 import { PiAdapter, ClaudeAdapter, CodexAdapter } from '@byok-sdk/client/adapters';
 ```
 
+Claude tasks can select operator-owned local stdio MCP servers by logical id.
+The toolset selector carries no MCP command or connector credential:
+
+```ts
+import { createDaemon } from '@byok-sdk/client';
+
+createDaemon({
+  // ...normal device and transport configuration
+  mcpToolsets: {
+    'salesko.prospecting': {
+      mcpServers: {
+        'salesko-connectors': {
+          command: '/opt/salesko/bin/connector-mcp',
+          args: ['--profile', 'default'],
+        },
+      },
+    },
+  },
+});
+```
+
+The map accepts only `command` and `args`; put OAuth tokens, cookies, and other
+secrets behind the local MCP process's own credential broker. Toolset offers
+for Pi or Codex are declined because those adapters do not yet expose a strict
+task-scoped MCP configuration boundary.
+
 MIT licensed. Node.js 22.19.0 or newer.

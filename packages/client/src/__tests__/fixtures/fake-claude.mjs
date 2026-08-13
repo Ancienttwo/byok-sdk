@@ -133,11 +133,88 @@
 //                                          the process staying alive is the
 //                                          whole point of this toggle.
 
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
 const argv = process.argv.slice(2);
+
+async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
+  const configIndex = argv.indexOf('--mcp-config');
+  if (configIndex === -1 || !argv[configIndex + 1]) {
+    throw new Error('fake claude was asked to call MCP without --mcp-config');
+  }
+  const config = JSON.parse(readFileSync(argv[configIndex + 1], 'utf8'));
+  const server = config.mcpServers?.[serverName];
+  if (!server || typeof server.command !== 'string') {
+    throw new Error(`fake claude could not find MCP server ${serverName}`);
+  }
+
+  const child = spawn(server.command, Array.isArray(server.args) ? server.args : [], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, ...(server.env ?? {}) },
+  });
+  const pending = new Map();
+  const childLines = createInterface({ input: child.stdout, terminal: false });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += String(chunk);
+  });
+  childLines.on('line', (line) => {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const waiter = pending.get(message.id);
+    if (!waiter) return;
+    pending.delete(message.id);
+    clearTimeout(waiter.timer);
+    if (message.error) waiter.reject(new Error(message.error.message ?? 'MCP request failed'));
+    else waiter.resolve(message.result);
+  });
+  child.on('exit', (code) => {
+    if (code === 0 || pending.size === 0) return;
+    for (const waiter of pending.values()) {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error(`MCP server exited ${code}: ${stderr}`));
+    }
+    pending.clear();
+  });
+
+  let requestId = 0;
+  function request(method, params = {}) {
+    requestId += 1;
+    const id = requestId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`MCP request timed out: ${method}`));
+      }, 3000);
+      pending.set(id, { resolve, reject, timer });
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+    });
+  }
+
+  try {
+    await request('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'fake-claude', version: '1.0.0' },
+    });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
+    const listed = await request('tools/list');
+    if (!listed?.tools?.some((tool) => tool.name === toolName)) {
+      throw new Error(`MCP server ${serverName} did not list tool ${toolName}`);
+    }
+    return await request('tools/call', { name: toolName, arguments: toolArguments });
+  } finally {
+    childLines.close();
+    child.kill('SIGTERM');
+  }
+}
 
 // Fix 4 (cross-model review, probe timeout): checked FIRST, before any other
 // argv handling below, and deliberately never calls process.exit() — the
@@ -285,10 +362,13 @@ function runProbeOrTurnFlow() {
     }
     if (msg.type !== 'user') return; // only real input shape this fixture accepts, per --input-format stream-json
     const text = msg.message?.content?.[0]?.text ?? '';
-    runTurn(text);
+    void runTurn(text).catch((error) => {
+      process.stderr.write(`fake claude MCP flow failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    });
   });
 
-  function runTurn(incomingText) {
+  async function runTurn(incomingText) {
     turn += 1;
 
     send({
@@ -309,8 +389,24 @@ function runProbeOrTurnFlow() {
 
     const toolUseId = `toolu_fake_${turn}`;
     const artifactPath = process.env.FAKE_CLAUDE_ARTIFACT_PATH;
+    let mcpResultText;
 
-    if (artifactPath) {
+    if (incomingText === 'salesko:find-leads') {
+      const toolInput = { company: 'Acme', limit: 2 };
+      send({
+        type: 'assistant',
+        message: { model: 'fake-model', id: `msg_${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'mcp__salesko__find_leads', input: toolInput }] },
+        session_id: reportedSessionId,
+      });
+      const mcpResult = await callConfiguredMcpTool('salesko', 'find_leads', toolInput);
+      mcpResultText = mcpResult?.content?.[0]?.text ?? JSON.stringify(mcpResult);
+      send({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: mcpResultText }] },
+        tool_use_result: mcpResult,
+        session_id: reportedSessionId,
+      });
+    } else if (artifactPath) {
       const resolved = path.resolve(process.cwd(), artifactPath);
       send({
         type: 'assistant',
@@ -363,7 +459,7 @@ function runProbeOrTurnFlow() {
       return; // stay "running" indefinitely — see the toggle's doc comment above
     }
 
-    const finalText = `reply-${turn}:${incomingText}`;
+    const finalText = `reply-${turn}:${mcpResultText ?? incomingText}`;
     const content = [
       { type: 'thinking', thinking: `thinking about turn ${turn}`, signature: 'fake-sig' },
       { type: 'text', text: finalText },

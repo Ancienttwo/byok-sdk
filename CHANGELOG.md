@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Added fail-closed host toolset selection through the distinct additive
+  `task.offer_with_toolsets` message. Its selector carries logical ids only;
+  the daemon resolves validated device-local stdio MCP definitions and Claude
+  runs them under a task-scoped `--strict-mcp-config`.
+- Added self-hosted `dispatch({ requiredToolsets })`, hosted
+  `enqueueToolsetOffer()`, capability gating, persistence, protocol freeze
+  coverage, and a Salesko-style fake connector end-to-end test.
+
 ## 0.2.0 — 2026-08-11
 
 Pi runtime contract release.

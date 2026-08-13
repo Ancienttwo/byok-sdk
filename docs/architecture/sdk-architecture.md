@@ -97,7 +97,7 @@ flowchart LR
 | 本机 library | `createDaemon()` / `createDaemonWithAdapters()` | 配对、连接、任务执行、observer、service lifecycle |
 | 本机 CLI | `byok-agent` | pair/start/status/runtimes/tasks/workspaces/unpair/approval/service commands |
 | Approval helper | `byok-approval-mcp` | Claude confirm 模式的 stdio MCP 子进程，经 control socket 回调 daemon |
-| Wire contract | `@byok-sdk/protocol` public index | envelope、17 类消息、HTTP schema、状态机、capability flags |
+| Wire contract | `@byok-sdk/protocol` public index | envelope、18 类消息、HTTP schema、状态机、capability flags |
 | Key custody | `ProviderRegistry` | profile 与 secret 分库存储，构造 OpenAI-compatible / Anthropic client |
 
 ### 1.2 Monorepo 与依赖图
@@ -232,7 +232,7 @@ flowchart TB
 | 文件 | 主要 exports / 功能 |
 | --- | --- |
 | `version.ts` | `PROTOCOL_VERSION = 1`、`CAPABILITY_FLAGS` |
-| `messages.ts` | runtime info、17 个 payload schemas、direction type lists、`MESSAGE_PAYLOAD_SCHEMAS` 单一来源 |
+| `messages.ts` | runtime info、18 个 payload schemas、direction type lists、`MESSAGE_PAYLOAD_SCHEMAS` 单一来源 |
 | `envelope.ts` | discriminated union；所有 `task.*` 必须有 `task_id`，server→daemon 必须有 envelope `seq` |
 | `codec.ts` | `parseMessage`、`decodeEnvelope`、`encodeEnvelope`、`createEnvelope` |
 | `agent-event.ts` | 8 个已知 event、unknown wrapper、`isKnownAgentEvent`、`partitionAgentEvents` |
@@ -242,16 +242,24 @@ flowchart TB
 | `http-api.ts` | pair/challenge/token/blob/events/messages DTO；消息 POST batch 上限 256 |
 | `errors.ts` | parse、unknown type、validation 三类错误 |
 
-### 2.2 17 个消息类型
+### 2.2 18 个消息类型
 
 | 分组 | 类型 |
 | --- | --- |
 | connection | `conn.hello`、`conn.ack` |
-| server → daemon | `task.offer`、`task.approve`、`task.reject`、`task.cancel`、`task.steer` |
+| server → daemon | `task.offer`、`task.offer_with_toolsets`、`task.approve`、`task.reject`、`task.cancel`、`task.steer` |
 | daemon → server lifecycle | `task.claim`、`task.started`、`task.decline`、`task.await_approval`、`task.complete`、`task.fail`、`task.cancelled` |
 | daemon → server data | `task.progress`、`task.artifact`、`task.approval_resolved` |
 
 `task.offer.workspaceHint` 是**已实现、保留字段**：protocol schema 已有，但 public `DispatchInput`、TaskRunner 与 adapters 都没有消费它，不能把它描述成工作区选择能力。S0 已就此做出决策——维持 reserved，wire 上保留（删除是 breaking 的 v1 变更，留着的成本只是一个被忽略的 optional key），并禁止任何文档、SDK surface 或 UI 声称它能选工作区。接线需要另立 ADR 先定 resolver 设计：与 `sessionRef` 派生映射的优先级、路径校验与 confinement、设备无法满足 hint 时的行为（附录 A 的 ADR-023）。
+
+`task.offer_with_toolsets` 是单独的 additive 消息，其
+`requiredToolsets` 只携带逻辑 id。daemon 在 claim 前用本机
+`mcpToolsets` 解析全部 id；缺失、server name 冲突或 runtime 不支持
+都 fail-closed decline。目前只有 Claude 支持，且以 task-scoped
+`--mcp-config --strict-mcp-config` 启动本地 stdio server。toolset control shape
+不存在 command、env、header、token 或 cookie 字段；任意 instruction 文本不在此
+保护之内，host 不得将凭证写入其中，connector 凭证仍由本地 broker 管理。
 
 ### 2.3 执行状态机
 
@@ -500,6 +508,7 @@ Library exports 分成六组：
 | mid-turn steer | **yes** | no，写 stdin 只会排成 follow-up | no |
 | permission modes | `auto`,`readonly` | `auto`,`readonly`,`plan`,`confirm` | `auto`,`readonly` |
 | confirm/approval | no，fail-closed | **已接线**：permission-prompt-tool → MCP → control socket | no，fail-closed |
+| task-scoped host MCP toolsets | no | **已接线**：本机逻辑 id 解析 → strict MCP config | no |
 | allow/deny tools | 支持 | 条件支持 | 不支持，相关 policy fail-closed |
 | network control | `network:false` 不可保证 | `network:false` 不可保证 | `network:true` 不可保证 |
 | usage event | 无 | input/cache/output | input/cache/output/reasoning |

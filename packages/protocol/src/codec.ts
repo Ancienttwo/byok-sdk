@@ -84,6 +84,7 @@ interface EnvelopeShapeOptions {
   'conn.hello': { taskId?: string; seq?: number };
   'conn.ack': { taskId?: string; seq: number };
   'task.offer': { taskId: string; seq: number };
+  'task.offer_with_toolsets': { taskId: string; seq: number };
   'task.approve': { taskId: string; seq: number };
   'task.reject': { taskId: string; seq: number };
   'task.cancel': { taskId: string; seq: number };

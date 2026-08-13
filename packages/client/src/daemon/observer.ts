@@ -29,8 +29,8 @@ import type { ConnectionState } from './ws-transport';
  * - `ConnectionManagerOptions.onEnvelope`/`onStateChange` — likewise already
  *   `create-daemon.ts`'s own closures (`(envelope) =>
  *   runner?.handleEnvelope(envelope)`, `(state) => { connectionState = state;
- *   }`). `onEnvelope` additionally exposes the raw INBOUND `task.offer` — the
- *   one event with no corresponding outbound envelope of its own — see
+ *   }`). `onEnvelope` additionally exposes the raw INBOUND offer variants —
+ *   the one event class with no corresponding outbound envelope of its own — see
  *   `handleInboundEnvelope`.
  *
  * Neither seam required adding anything to `TaskRunnerDeps`/`TaskRunner`
@@ -230,7 +230,7 @@ export class DaemonObserver {
 
   /**
    * Feed a raw INBOUND (server -> daemon) envelope. Deliberately narrow: only
-   * `task.offer` produces a local event here — every other inbound type
+   * either offer variant produces a local event here — every other inbound type
    * (`task.cancel`/`task.steer`/`task.approve`/`task.reject`) is a
    * best-effort notification whose OWN observable effect already surfaces
    * through the daemon's outbound envelopes (`task.cancelled`, `task.progress`
@@ -238,7 +238,7 @@ export class DaemonObserver {
    * where those are actually reported from.
    */
   handleInboundEnvelope(envelope: Envelope): void {
-    if (envelope.type !== 'task.offer') return;
+    if (envelope.type !== 'task.offer' && envelope.type !== 'task.offer_with_toolsets') return;
     const taskId = envelope.task_id;
 
     // Redelivery guard (protocol §9, at-least-once delivery): this observer
@@ -248,7 +248,7 @@ export class DaemonObserver {
     // already has an entry for was necessarily already offered once before
     // (an entry can only ever be created here or in `handleOutboundEnvelope`,
     // both of which only ever fire for a taskId TaskRunner itself has already
-    // seen), so a second `task.offer` for it is never "the first time" here
+    // seen), so a second offer for it is never "the first time" here
     // either. Without this, a stalled-cursor re-poll redelivering an
     // already-succeeded offer (`task-runner.ts`'s own doc comment on
     // `finishedTaskIds` describes exactly this scenario) would locally
