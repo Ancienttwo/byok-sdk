@@ -1,5 +1,4 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
@@ -40,6 +39,22 @@ export const HANDSHAKE_TIMEOUT_MS = 3000;
  */
 const UNIX_SOCKET_PATH_SOFT_LIMIT = 100;
 
+/**
+ * The one fixed root the long-path fallback below binds under. Deliberately
+ * NOT `os.tmpdir()`, which reads `TMPDIR`/`TMP`/`TEMP` — an endpoint address
+ * that varies with the environment is not an endpoint both sides can find,
+ * and a caller may have pointed `TMPDIR` INSIDE the very tree that made the
+ * natural path too long, where `os.tmpdir()` yields an address LONGER than
+ * the one being escaped (`bind()` then fails `EINVAL` and the daemon degrades
+ * to no control socket at all). A literal `/tmp` is POSIX-guaranteed,
+ * environment-independent, and short enough that this candidate always fits
+ * the budget above. Same fix, same reasons as `daemon-owner.ts`'s
+ * `STORE_MUTEX_FALLBACK_ROOT`; kept as its own constant because the two
+ * derivations differ in name and ownership contract and must stay
+ * independently readable.
+ */
+const CONTROL_SOCKET_FALLBACK_ROOT = '/tmp';
+
 function shortHash(input: string): string {
   return createHash('sha256').update(input, 'utf8').digest('hex').slice(0, 16);
 }
@@ -51,12 +66,20 @@ function shortHash(input: string): string {
  * time this matters — see `control-server.ts`'s `startControlServer`);
  * falls back, whenever the natural path would risk exceeding {@link
  * UNIX_SOCKET_PATH_SOFT_LIMIT}, to a short, deterministic path nested under
- * a PER-DAEMON PRIVATE subdirectory of `os.tmpdir()` — derived from a hash
- * of `storeDir` alone, so both the daemon and any CLI invocation pointed at
- * the same `storeDir` independently compute the identical fallback path.
+ * a PER-DAEMON PRIVATE subdirectory of {@link CONTROL_SOCKET_FALLBACK_ROOT}
+ * — derived from a hash of `storeDir` alone, so both the daemon and any CLI
+ * invocation pointed at the same `storeDir` independently compute the
+ * identical fallback path.
+ *
+ * That root was `os.tmpdir()` until it was proven to break both halves of
+ * that sentence: it reads `TMPDIR`, so the daemon (under a service manager)
+ * and the CLI (in an operator shell) derived DIFFERENT addresses for one
+ * store, and under a `TMPDIR` nested in the same long tree the fallback came
+ * out LONGER than the path it escaped — `bind()` `EINVAL`, and the daemon
+ * ran on with no control socket at all.
  *
  * Nested one level deep (rather than a bare `<hash>.sock` file directly in
- * the shared, world-traversable `os.tmpdir()`) specifically so
+ * that shared, world-traversable root) specifically so
  * `control-server.ts`'s `bindControlEndpoint` can create+chmod that
  * subdirectory 0700 BEFORE ever binding inside it — the directory's own
  * mode gates traversal into it regardless of the socket file's own
@@ -67,7 +90,7 @@ function shortHash(input: string): string {
 export function controlSocketPath(storeDir: string): string {
   const candidate = path.join(storeDir, 'control.sock');
   if (Buffer.byteLength(candidate, 'utf8') <= UNIX_SOCKET_PATH_SOFT_LIMIT) return candidate;
-  return path.join(os.tmpdir(), `byok-${shortHash(storeDir)}`, 'sock');
+  return path.join(CONTROL_SOCKET_FALLBACK_ROOT, `byok-${shortHash(storeDir)}`, 'sock');
 }
 
 /**
