@@ -71,7 +71,24 @@ export interface ControlServerOptions {
 export interface ControlServerHandle {
   /** The bound Unix socket path or Windows pipe name. */
   endpoint: string;
-  /** Stops accepting new connections, destroys every open one, and removes the socket/token files (a Windows pipe leaves no file to remove). Idempotent. */
+  /**
+   * Stops accepting new connections and destroys every open one, WITHOUT
+   * removing the socket/token files. Idempotent, and the first half of
+   * {@link close}.
+   *
+   * Split out from `close()` for `create-daemon.ts`'s shutdown sequence
+   * (plan `shutdown-lease-order`): the socket/token files ARE this daemon's
+   * only external liveness signal (`isControlDaemonGone` in
+   * `bin/control-client.ts` reads "token file gone AND a connect refused"),
+   * so a shutdown must be able to stop serving RPCs, release its
+   * store-mutation lease, and only THEN publish "gone" by removing the
+   * files. Between the two stages a connect is already refused while the
+   * token file still exists — which reads as "still running", the
+   * conservative answer, rather than as "exited while still holding the
+   * lease".
+   */
+  stopServing(): Promise<void>;
+  /** Runs {@link stopServing}, then removes the socket/token files (a Windows pipe leaves no file to remove). Idempotent. */
   close(): Promise<void>;
 }
 
@@ -438,17 +455,29 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
     throw err;
   }
 
+  // Memoized rather than boolean-latched so a `close()` racing an in-flight
+  // `stopServing()` awaits the SAME teardown instead of returning while the
+  // listener is still going down under it — the file removal below must
+  // never overtake the listener close it is supposed to follow.
+  let stopServingPromise: Promise<void> | undefined;
+  async function stopServing(): Promise<void> {
+    stopServingPromise ??= (async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    })();
+    await stopServingPromise;
+  }
+
   let closed = false;
   async function close(): Promise<void> {
     if (closed) return;
     closed = true;
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await stopServing();
     if (process.platform !== 'win32') {
       await fs.rm(endpoint, { force: true }).catch(() => {});
     }
     await fs.rm(tokenPath, { force: true }).catch(() => {});
   }
 
-  return { endpoint, close };
+  return { endpoint, stopServing, close };
 }

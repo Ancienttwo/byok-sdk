@@ -1775,7 +1775,10 @@ export function buildDaemonWithAdapters(
    * `SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS` — so a hung task teardown can never
    * block this daemon from actually stopping) -> bounded wait for that
    * outbox to actually drain (finding F5(b)) -> close the connection / stop
-   * the auth renewal timer / close the control socket.
+   * the auth renewal timer / stop serving control RPCs -> release the
+   * store-mutation lease -> remove the control socket/token files (that last
+   * split is an ordering INVARIANT, not a detail — see the comment at the
+   * end of this function).
    *
    * CRITICAL preservation (M4 Phase 2 fix, unchanged by this refactor): the
    * connection must not close until AFTER `shutdownActiveTasks` has actually
@@ -1796,7 +1799,11 @@ export function buildDaemonWithAdapters(
    * its own contract; `connection.stop()` is documented idempotent
    * (`connection-manager.ts`); and `controlServerHandle` is reassigned to
    * `undefined` after the first close, so a second call's `?.close()` is a
-   * no-op. See `daemon-control-socket.test.ts`'s "REGRESSION
+   * no-op. (When the first call kept the lease — see the split teardown at
+   * the end of this function — the handle deliberately survives instead,
+   * already stopped serving; both of its stages are themselves idempotent,
+   * so the retry that finally releases the lease is what removes the
+   * socket/token files.) See `daemon-control-socket.test.ts`'s "REGRESSION
    * (gatekeeper-caught)" test for exactly this double-teardown shape (a
    * control-socket shutdown followed by `runStartCommand`'s own
    * `daemon.stop()`), which must neither double-fail a task nor throw.
@@ -1934,15 +1941,49 @@ export function buildDaemonWithAdapters(
     // `bin/commands/start.ts`, `unpair()` below, and the control socket's
     // OWN `shutdown` RPC — see `performControlShutdown`) already funnels
     // through, so nothing else needs its own control-socket teardown logic.
+    //
+    // Plan `shutdown-lease-order`: that teardown is SPLIT around the lease
+    // release, and the order below is the invariant, not an implementation
+    // detail. The control socket/token files are this daemon's only external
+    // liveness signal — `bin/control-client.ts`'s `isControlDaemonGone`
+    // (which `bin/commands/unpair.ts` polls, and every contender's own
+    // "is it gone yet" check mirrors) reads exactly "token file gone AND a
+    // connect refused". Removing them while this daemon still holds the
+    // store-mutation lease publishes "exited" to a contender whose immediate
+    // `acquireDaemonOwner` then hits the still-bound mutex and is refused
+    // with `DaemonOwnerActiveError('unknown')` — a measured 11-46ms window
+    // (CI job 94465898325's intermittent `ipc-smoke` failure). So:
+    // stop serving RPCs, release the lease, and only then remove the files.
+    //
+    // Stage 1 keeps the mutation-barrier coupling the combined close() had:
+    // a stop-serving failure means a control RPC may still be in flight
+    // against this store, i.e. a possible residual writer, and the lease
+    // must be retained for it.
     await attempt(async () => {
-      await controlServerHandle?.close();
-      controlServerHandle = undefined;
+      await controlServerHandle?.stopServing();
     }, true);
     if (mutationBarrierComplete && daemonOwnerLease) {
       await attempt(() => operationalHealth.markCleanStop(), false);
       await attempt(async () => {
         await daemonOwnerLease?.release();
         daemonOwnerLease = undefined;
+      }, false);
+    }
+    // Stage 2, the last observable act of this daemon, and gated on the ONE
+    // condition that makes "gone" honest: this process no longer holds the
+    // lease. That gate also fixes the `mutationBarrierComplete === false`
+    // branch, which used to remove the signal (publishing "exited") while
+    // deliberately retaining the lease forever — the combination that turned
+    // `unpair`'s intended `UnpairExitUnconfirmedError` into a confusing
+    // `DaemonOwnerActiveError` from its post-exit reacquire. Keeping the
+    // files in place instead leaves `isControlDaemonGone` false, so unpair's
+    // exit poll times out and fails closed with its own typed error, exactly
+    // as its "unknown state is unsafe" contract intends. Same gate covers a
+    // failed `release()`: the lease is still held, so nothing is published.
+    if (daemonOwnerLease === undefined) {
+      await attempt(async () => {
+        await controlServerHandle?.close();
+        controlServerHandle = undefined;
       }, false);
     }
     if (errors.length === 1) throw errors[0];
