@@ -184,6 +184,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     devices,
     nonces,
     tokenSigner,
+    // S1: the product this instance serves is part of `authenticateBearer`'s
+    // decision (`auth.ts`), not just of the WS hello gate — so every
+    // bearer-authed route gets the same instance-equality guarantee the WS
+    // upgrade already had transitively.
+    productId: opts.productId,
     blobStore,
     maxBlobSizeBytes,
     longPollHoldMs,
