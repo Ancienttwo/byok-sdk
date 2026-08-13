@@ -183,9 +183,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (typeof input.offer.instruction !== 'string') {
-      return { kind: 'reject', reason: 'claude adapter only supports string instructions in M2 (no blob-ref fetch yet)', retryable: false };
-    }
     const mapping = mapPermissionPolicyToClaudeArgs(input.policy);
     if (!mapping.ok) return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by claude adapter', retryable: false };
     let modelId: string | undefined;
@@ -227,6 +224,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
     approvalMcpBin: ResolvedApprovalMcpBin | undefined,
   ): Promise<Session> {
     if (!initialMapping.ok) throw new Error('unreachable: prepared claude mapping was rejected');
+    if (typeof startInput.instruction !== 'string') {
+      throw new PolicyUnsupportedError('prepared claude operation requires a resolved string instruction');
+    }
     const mapping = { ...initialMapping, args: [...initialMapping.args] };
 
     // M4 Phase 3: `confirm` mode's approval channel. Generating the

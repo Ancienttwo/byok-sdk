@@ -2,11 +2,16 @@ import { createHash } from 'node:crypto';
 import { promises as fs, symlinkSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
+import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
+import type { RuntimeAdapter } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+
+const FAKE_CLAUDE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -25,7 +30,7 @@ describe('blob client (protocol §7)', () => {
     await server.close();
   });
 
-  async function setupDaemon(adapter: StubRuntimeAdapter): Promise<Daemon> {
+  async function setupDaemon(adapter: RuntimeAdapter): Promise<Daemon> {
     const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
@@ -66,6 +71,51 @@ describe('blob client (protocol §7)', () => {
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
     expect(adapter.startCalls[0]?.task.instruction).toBe(bigInstruction);
+  });
+
+  it('admits a blobRef through a bundled prepared adapter, resolves it after claim, and starts with the resolved string', async () => {
+    const resolvedInstruction = 'run the blob-backed prepared operation';
+    const taskId = 'task-blob-bundled-prepared';
+    server.seedBlob('instr-blob-bundled-prepared', resolvedInstruction, 'text/plain');
+    const instructionHash = `sha256:${createHash('sha256').update(resolvedInstruction).digest('hex')}`;
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FAKE_CLAUDE_PATH, source: 'path' }),
+    });
+    await setupDaemon(adapter);
+
+    server.send(
+      createEnvelope(
+        'task.offer',
+        {
+          instruction: {
+            blobRef: {
+              blobId: 'instr-blob-bundled-prepared',
+              contentHash: instructionHash,
+              size: Buffer.byteLength(resolvedInstruction),
+              contentType: 'text/plain',
+            },
+          },
+          policy: { mode: 'auto' },
+          runtime: 'claude',
+        },
+        { taskId, seq: server.nextSeq() },
+      ),
+    );
+
+    await server.waitFor((event) => event.type === 'task.claim' && event.task_id === taskId);
+    expect(server.received.some((event) => event.type === 'task.decline' && event.task_id === taskId)).toBe(false);
+    await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);
+    const progress = await server.waitFor(
+      (event) =>
+        event.type === 'task.progress' &&
+        event.task_id === taskId &&
+        (event.payload as { events: Array<{ type: string; text?: string }> }).events.some(
+          (item) => item.type === 'progress' && item.text === `reply-1:${resolvedInstruction}`,
+        ),
+    );
+
+    expect(progress).toBeDefined();
+    expect(server.httpRequests.some((request) => request.method === 'GET' && request.pathname === '/byok/blobs/instr-blob-bundled-prepared/url')).toBe(true);
   });
 
   it('fails the task (not a pre-claim decline) if the referenced blob cannot be resolved', async () => {

@@ -86,10 +86,6 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (typeof input.offer.instruction !== 'string') {
-      return { kind: 'reject', reason: 'pi adapter only supports string instructions in M0 (no blob-ref fetch yet)', retryable: false };
-    }
-
     const mapping = mapPermissionPolicyToPiArgs(input.policy);
     if (!mapping.ok) {
       return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
@@ -160,6 +156,9 @@ export class PiAdapter implements RuntimeAdapter {
           const manifestSelection = startInput.manifest.dispatchSelection;
           if (!sameDispatchSelection(manifestSelection, pinnedSelection)) {
             throw new PolicyUnsupportedError('prepared pi operation received a manifest with different runtime selection');
+          }
+          if (typeof startInput.instruction !== 'string') {
+            throw new PolicyUnsupportedError('prepared pi operation requires a resolved string instruction');
           }
           const resumeSessionId = startInput.manifest.sessionRef;
           const piArgs = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];

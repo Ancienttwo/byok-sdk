@@ -285,14 +285,18 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/cannot express permission mode "confirm"/);
   });
 
-  it('fails closed on a blob-ref instruction (no blob fetch in M0)', async () => {
+  it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
     const adapter = fakePiAdapter();
-    const ctx = await makeCtx();
     const task: TaskOfferPayload = {
       ...baseTask,
-      instruction: { blobRef: { blobId: 'b1', contentHash: 'sha256:x', size: 10, contentType: 'text/plain' } },
+      instruction: { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } },
     };
-    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/only supports string instructions/);
+    await expect(adapter.prepare({
+      offer: task,
+      policy: task.policy,
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: [],
+    })).resolves.toMatchObject({ kind: 'prepared' });
   });
 
   it('descriptor advertises exactly what the adapter can express', () => {

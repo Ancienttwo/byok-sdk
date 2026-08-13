@@ -509,14 +509,18 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(spawnFn).not.toHaveBeenCalled();
   });
 
-  it('fails closed on a blob-ref instruction at start() (no blob fetch in M2)', async () => {
+  it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
     const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx();
     const task: TaskOfferPayload = {
       ...baseTask,
-      instruction: { blobRef: { blobId: 'b1', contentHash: 'sha256:x', size: 10, contentType: 'text/plain' } },
+      instruction: { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } },
     };
-    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/only supports string instructions/);
+    await expect(adapter.prepare({
+      offer: task,
+      policy: task.policy,
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: [],
+    })).resolves.toMatchObject({ kind: 'prepared' });
   });
 
   it('interrupt() SIGTERMs a hanging turn and close() tears it down cleanly (no hang, no orphaned process)', async () => {

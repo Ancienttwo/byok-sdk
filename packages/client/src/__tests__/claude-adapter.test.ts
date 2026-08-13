@@ -320,14 +320,18 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(fs.access(configPath)).rejects.toThrow();
   });
 
-  it('fails closed on a blob-ref instruction (no blob fetch in M2)', async () => {
+  it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
     const adapter = fakeClaudeAdapter();
-    const ctx = await makeCtx();
     const task: TaskOfferPayload = {
       ...baseTask,
-      instruction: { blobRef: { blobId: 'b1', contentHash: 'sha256:x', size: 10, contentType: 'text/plain' } },
+      instruction: { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } },
     };
-    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/only supports string instructions/);
+    await expect(adapter.prepare({
+      offer: task,
+      policy: task.policy,
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: [],
+    })).resolves.toMatchObject({ kind: 'prepared' });
   });
 
   it('FAKE_CLAUDE_HANG_AFTER_TOOL keeps the session running past the tool call; interrupt()+close() still tear it down cleanly via SIGTERM', async () => {

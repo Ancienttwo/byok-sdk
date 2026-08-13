@@ -138,9 +138,6 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (typeof input.offer.instruction !== 'string') {
-      return { kind: 'reject', reason: 'codex adapter only supports string instructions in M2 (no blob-ref fetch yet)', retryable: false };
-    }
     const mapping = mapPermissionPolicyToCodexArgs(input.policy);
     if (!mapping.ok) return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by codex adapter', retryable: false };
     let modelId: string | undefined;
@@ -169,6 +166,9 @@ export class CodexAdapter implements RuntimeAdapter {
     modelId: string | undefined,
     command: string,
   ): Promise<Session> {
+    if (typeof startInput.instruction !== 'string') {
+      throw new PolicyUnsupportedError('prepared codex operation requires a resolved string instruction');
+    }
     const queue = new AsyncQueue<AgentEvent>();
     const recordUnmapped = makeUnmappedFrameRecorder(new Map<string, number>());
 

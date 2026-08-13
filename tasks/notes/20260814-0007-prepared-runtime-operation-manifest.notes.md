@@ -2,11 +2,11 @@
 
 > **Durable dispatch**: worker `/root/prepared_runtime_operation_manifest`; worktree `/Users/kito/Projects/byok-sdk-wt-prepared-runtime-operation-manifest`; branch `codex/prepared-runtime-operation-manifest`; base `98cea8c534f595314d4bbd67ea434da6feeb0e20`.
 
-> **Status**: Code verification passed; ship blocked pending fresh acceptance receipt
+> **Status**: Code verification passed (including blobRef P1 fix); ship blocked pending fresh acceptance receipt
 > **Plan**: plans/plan-20260814-0007-prepared-runtime-operation-manifest.md
 > **Contract**: tasks/contracts/20260814-0007-prepared-runtime-operation-manifest.contract.md
 > **Review**: tasks/reviews/20260814-0007-prepared-runtime-operation-manifest.review.md
-> **Last Updated**: 2026-08-14 01:30
+> **Last Updated**: 2026-08-14 02:00
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -94,6 +94,17 @@
   `Executing`, not review-complete: a fresh acceptance receipt is still needed
   before ship authorization. No review artifact or acceptance receipt was
   fabricated by this implementation worker.
+- Claude P1 fix: Pi, Claude, and Codex now accept the protocol-valid raw
+  instruction `blobRef` during pure `prepare()` while pinning their normal
+  policy/selection/launcher decisions; only prepared-operation `start()`
+  accepts the resolved string. The real daemon regression uses the bundled
+  fake Claude adapter: it observes `task.claim`, no pre-claim decline, the
+  blob GET, and `reply-1:<resolved blob text>` after `task.started`.
+- P1 verification: targeted daemon-blob plus Pi/Claude/Codex adapter suites
+  passed 4 files / 91 tests; client typecheck, full client test (114 files /
+  1181 tests), build, adapter smoke, strict workflow, and one outer strict
+  contract verification all passed after this fix. Acceptance remains fresh
+  receipt-dependent because this source SHA changed.
 
 ## Promotion Filter
 
