@@ -63,6 +63,14 @@
   `check-adapters-entry.mjs` proved an adapters-entry failure is recognized by
   the root-entry guard without importing daemon transport into the adapter
   entry.
+- First `verify-sprint --prepare-acceptance` exposed that contract-file tests
+  run under Bun, where Vitest's `vi.waitFor` helper is absent. The test now
+  asserts the already-established post-`task.started` invariant directly;
+  both `bun test packages/client/src/__tests__/task-runner-runtime-failure.test.ts`
+  (5/5) and the Vitest invocation pass. The same first clean-worktree run also
+  reached full workspace typecheck/test before `@byok-sdk/keys` had a `dist`;
+  its later workspace build produced the required artifacts, so the second
+  full verification determines whether any product failure remains.
 
 ## Promotion Filter
 

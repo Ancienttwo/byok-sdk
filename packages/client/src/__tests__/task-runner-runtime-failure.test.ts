@@ -64,7 +64,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     await start(adapter);
     await offer('typed-run-semantic');
     await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'typed-run-semantic');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
     adapter.sessions[0]!.emit({ type: 'error', message: 'provider diagnostic' });
     adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
       phase: 'run',
@@ -84,7 +84,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     await start(adapter);
     await offer('typed-run-race');
     await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'typed-run-race');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
     const session = adapter.sessions[0]!;
     session.fail(new RuntimeExecutionFailure({
       phase: 'run',
@@ -96,11 +96,9 @@ describe('TaskRunner typed runtime failure projection', () => {
     session.emit({ type: 'turn_end' });
 
     await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'typed-run-race');
-    await vi.waitFor(() => {
-      expect(server.received.filter((event) => event.task_id === 'typed-run-race' && (
-        event.type === 'task.fail' || event.type === 'task.complete' || event.type === 'task.cancelled'
-      ))).toHaveLength(1);
-    });
+    expect(server.received.filter((event) => event.task_id === 'typed-run-race' && (
+      event.type === 'task.fail' || event.type === 'task.complete' || event.type === 'task.cancelled'
+    ))).toHaveLength(1);
   });
 
   it('rejects an untyped run throw as a stable non-retryable adapter-contract violation', async () => {
@@ -109,7 +107,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     await start(adapter);
     await offer('untyped-run');
     await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'untyped-run');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
     adapter.sessions[0]!.fail(new Error('temporary timeout please retry'));
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'untyped-run');
@@ -128,7 +126,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     await start(adapter);
     await offer('clean-end-without-success');
     await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'clean-end-without-success');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
     adapter.sessions[0]!.endAbruptly();
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'clean-end-without-success');
