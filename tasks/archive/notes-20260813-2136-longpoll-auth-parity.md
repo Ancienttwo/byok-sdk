@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-13 21:36
+> **Related Plan**: plans/archive/plan-20260813-2106-longpoll-auth-parity.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260813-2136
+
 # Implementation Notes: longpoll-auth-parity
 
 > **Status**: Active

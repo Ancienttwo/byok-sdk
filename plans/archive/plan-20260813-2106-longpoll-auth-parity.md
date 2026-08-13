@@ -1,6 +1,6 @@
 # Plan: bearer-auth instance-product parity (O-3)
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260813-2106
 > **Slug**: longpoll-auth-parity
 > **Planning Source**: repo-harness-plan

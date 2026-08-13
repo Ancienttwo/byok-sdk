@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-13 21:36
+> **Related Plan**: plans/archive/plan-20260813-2106-longpoll-auth-parity.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260813-2136
+
 # Task Review: longpoll-auth-parity
 
 > **Status**: Pending
