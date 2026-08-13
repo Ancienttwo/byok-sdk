@@ -83,6 +83,7 @@ allowed_paths:
   - packages/client/src/types.ts
   - packages/client/src/index.ts
   - packages/client/src/daemon/task-runner.ts
+  - packages/client/src/adapters/index.ts
   - packages/client/src/adapters/pi/
   - packages/client/src/adapters/claude/
   - packages/client/src/adapters/codex/

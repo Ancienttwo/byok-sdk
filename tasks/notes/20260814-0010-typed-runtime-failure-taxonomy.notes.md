@@ -71,6 +71,11 @@
   reached full workspace typecheck/test before `@byok-sdk/keys` had a `dist`;
   its later workspace build produced the required artifacts, so the second
   full verification determines whether any product failure remains.
+- The second prepare-acceptance run passed all 16 contract checks, including
+  full client/workspace matrices and adapter smoke. Its outer scope gate found
+  the new adapter-only public export file was not named exactly in
+  `allowed_paths` (provider subdirectories were, their sibling entrypoint was
+  not); the contract now names `packages/client/src/adapters/index.ts`.
 
 ## Promotion Filter
 
