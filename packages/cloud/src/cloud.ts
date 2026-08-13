@@ -53,9 +53,11 @@ import {
   BYOK_SKILL_PACKS_PATH,
   BYOK_TOKEN_PATH,
   createEnvelope,
+  decodeEnvelope,
   encodeEnvelope,
   type Envelope,
   type TaskOfferPayload,
+  type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
 import type { TokenSigner } from './auth/tokens';
@@ -190,6 +192,13 @@ export interface EnqueueOfferInput {
   readonly payload: TaskOfferPayload;
 }
 
+export interface EnqueueToolsetOfferInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  /** Strict control payload containing logical ids only; executable MCP definitions are not part of this type. */
+  readonly payload: TaskOfferWithToolsetsPayload;
+}
+
 export interface EnqueuedOffer {
   readonly taskId: string;
   /** The per-(tenant, device) delivery seq — the daemon's redelivery cursor position for this envelope. */
@@ -215,6 +224,8 @@ export interface ByokCloud {
   createPairingCode(tenant: TenantId, input: { readonly productId: string; readonly ttlMs?: number }): Promise<PairingCodeInfo>;
   /** Host control plane: hand a device a frozen-v1 `task.offer`. The hosted replacement for `dispatch()` — a function, not a handle. */
   enqueueOffer(tenant: TenantId, deviceId: string, input: EnqueueOfferInput): Promise<EnqueuedOffer>;
+  /** Host control plane: enqueue the additive fail-closed offer variant that requires local MCP toolsets. */
+  enqueueToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueToolsetOfferInput): Promise<EnqueuedOffer>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
@@ -455,6 +466,45 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return { kind: 'control-plane', tenantId: tenant, operatorId };
   }
 
+  async function enqueueTaskEnvelope(
+    tenant: TenantId,
+    deviceId: string,
+    requestedTaskId: string | undefined,
+    buildEnvelope: (taskId: string, seq: number, messageId: string) => Envelope,
+  ): Promise<EnqueuedOffer> {
+    const stores = tenantStoresFor(controlPlane(tenant), root);
+    const taskId = requestedTaskId ?? `task_${options.crypto.randomUuid()}`;
+    const messageId = options.crypto.randomUuid();
+
+    const message = await stores.mailbox.append({
+      deviceId,
+      messageId,
+      materialize: async (seq) => {
+        // Core stays protocol-free: the mailbox reserves the one authoritative
+        // delivery number, then asks this producer to build opaque bytes while
+        // allocation and insertion are still serialized per device.
+        const envelope = buildEnvelope(taskId, seq, messageId);
+        const body = encodeEnvelope(envelope);
+        const bytes = new TextEncoder().encode(body);
+        return {
+          body,
+          bodyHash: contentHash(await options.crypto.sha256(bytes)),
+          byteSize: BigInt(bytes.length),
+        };
+      },
+    });
+    const envelope = decodeEnvelope(message.body);
+    if (envelope.seq !== message.seq) {
+      throw new ByokCloudError(
+        'mailbox_seq_mismatch',
+        `Mailbox stored offer seq ${String(envelope.seq)} at row ${message.seq}; the daemon's redelivery cursor would be wrong.`,
+      );
+    }
+
+    const attempt = await stores.tasks.open({ taskId, deviceId });
+    return { taskId, seq: message.seq, envelope, attempt };
+  }
+
   return {
     fetch: registry.fetch,
     routes: registry.routes,
@@ -466,34 +516,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueOffer(tenant, deviceId, input) {
-      const stores = tenantStoresFor(controlPlane(tenant), root);
-      const taskId = input.taskId ?? `task_${options.crypto.randomUuid()}`;
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, (taskId, seq, messageId) =>
+        createEnvelope('task.offer', input.payload, { id: messageId, taskId, seq }),
+      );
+    },
 
-      // The delivery seq has to exist before the envelope does — it is a field
-      // INSIDE the bytes the mailbox stores, and the mailbox transports opaque
-      // bytes it cannot renumber. So allocate, build, append, then check the
-      // mailbox agreed rather than letting two counters drift.
-      const seq = await stores.sequence.next(deviceId);
-      const envelope = createEnvelope('task.offer', input.payload, { taskId, seq });
-      const body = encodeEnvelope(envelope);
-      const bytes = new TextEncoder().encode(body);
-
-      const message = await stores.mailbox.append({
-        deviceId,
-        body,
-        bodyHash: contentHash(await options.crypto.sha256(bytes)),
-        byteSize: BigInt(bytes.length),
-        messageId: envelope.id,
-      });
-      if (message.seq !== seq) {
-        throw new ByokCloudError(
-          'mailbox_seq_mismatch',
-          `Mailbox numbered this offer ${message.seq} while the delivery sequence allocated ${seq}; the daemon's redelivery cursor would be wrong.`,
-        );
-      }
-
-      const attempt = await stores.tasks.open({ taskId, deviceId });
-      return { taskId, seq, envelope, attempt };
+    async enqueueToolsetOffer(tenant, deviceId, input) {
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_with_toolsets', input.payload, { id: messageId, taskId, seq }),
+      );
     },
 
     readTaskAttempt(tenant, taskId) {

@@ -5,6 +5,8 @@ export type {
   Session,
   TaskContext,
   GitWorkspaceConfig,
+  McpStdioServerConfig,
+  McpToolsetConfig,
 } from './types';
 export { PolicyUnsupportedError, SteerUnsupportedError } from './types';
 // M5: per-runtime environment allowlist — part of the `RuntimeAdapter`

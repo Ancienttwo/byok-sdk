@@ -12,7 +12,6 @@ import type { BlobContentProxy, CloudStores } from '../ports';
 import { AllowAllRateLimiter } from './rate-limiter';
 import { createInMemoryBlobs } from './blobs';
 import { InMemoryDeviceDirectory } from './device-directory';
-import { InMemoryDeviceSequenceStore } from './sequence';
 import { InMemoryInboundDedupStore } from './dedup';
 import { InMemoryNonceStore } from './nonces';
 import { InMemoryPairingCodeStore } from './pairing-codes';
@@ -30,7 +29,6 @@ export {
 export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs';
 export { DEDUP_RING_CAPACITY, InMemoryInboundDedupStore } from './dedup';
 export { InMemoryDeviceDirectory } from './device-directory';
-export { InMemoryDeviceSequenceStore } from './sequence';
 export { InMemoryNonceStore, NONCE_TTL_MS } from './nonces';
 export { InMemoryPairingCodeStore } from './pairing-codes';
 export { InMemoryRequestReceiptStore } from './receipts';
@@ -66,7 +64,6 @@ export function createInMemoryCloudStores(
       tasks: new InMemoryTaskAttemptStore(clock),
       receipts: new InMemoryRequestReceiptStore(clock),
       proofReceipts: new InMemoryProofRequestReceiptStore(clock),
-      sequence: new InMemoryDeviceSequenceStore(),
       blobs: blobs.blobs,
       rateLimiter: new AllowAllRateLimiter(),
     },

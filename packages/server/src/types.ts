@@ -9,6 +9,7 @@ import type {
   TaskApprovalResolvedPayload,
   TaskArtifactPayload,
   TaskState,
+  ToolsetId,
 } from '@byok-sdk/protocol';
 import type { BlobStore } from './blob-store';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -106,6 +107,8 @@ export interface DispatchInput {
   policy?: PermissionPolicy;
   deviceId?: string;
   sessionRef?: string;
+  /** Logical device-local MCP toolsets required for this task; never executable definitions. */
+  requiredToolsets?: ToolsetId[];
 }
 
 /** Outcome of a task that reached a terminal state. */
@@ -208,6 +211,7 @@ export interface TaskSnapshot {
    */
   runtime?: RuntimeId;
   policy: PermissionPolicy;
+  requiredToolsets?: ToolsetId[];
   deviceId?: string;
   sessionRef?: string;
   createdAt: string;

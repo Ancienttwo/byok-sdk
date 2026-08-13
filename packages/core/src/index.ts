@@ -50,6 +50,7 @@ export { MAILBOX_MESSAGE_STATES } from './mailbox';
 export type {
   MailboxAdvanceCursorInput,
   MailboxAppendInput,
+  MailboxBody,
   MailboxCursorState,
   MailboxMessage,
   MailboxMessageState,

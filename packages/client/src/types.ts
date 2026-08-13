@@ -24,6 +24,12 @@ export interface RuntimeCapabilities {
   steer: boolean;
   resume: boolean;
   /**
+   * Whether this adapter can project task-scoped, locally configured MCP
+   * servers into the runtime without accepting executable definitions from
+   * the remote task. Omission is fail-closed and means unsupported.
+   */
+  mcpToolsets?: boolean;
+  /**
    * Whether this adapter can genuinely pause a running session on
    * `needs_approval` and resume it from an out-of-band decision — i.e.
    * whether {@link Session.resolveApproval} really resolves rather than
@@ -39,6 +45,17 @@ export interface RuntimeCapabilities {
   approvalInteractive: boolean;
   /** Subset of {@link PermissionPolicy}'s `mode` values this adapter can express without widening. */
   permissionModes: string[];
+}
+
+/** One local stdio MCP server definition. Remote task payloads can never supply this shape. */
+export interface McpStdioServerConfig {
+  command: string;
+  args?: readonly string[];
+}
+
+/** A logical group of local MCP servers selectable by a wire-level toolset id. */
+export interface McpToolsetConfig {
+  mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
 }
 
 /**
@@ -86,6 +103,12 @@ export interface TaskContext {
   workspaceDir: string;
   policy: PermissionPolicy;
   env: NodeJS.ProcessEnv;
+  /**
+   * MCP servers resolved from this device's local registry for this task.
+   * The wire carries only logical toolset ids; command/args never originate
+   * from the SaaS task and are never copied into the task instruction.
+   */
+  mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   /** Prepared local checkpoint repository metadata; absent for legacy plain workspaces. */
   gitWorkspace?: {
     workspaceId: string;

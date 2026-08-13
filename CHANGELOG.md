@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.0 — 2026-08-13
+
+Salesko integration and hosted correctness release.
+
+- Added fail-closed host toolset selection through the distinct additive
+  `task.offer_with_toolsets` message. Its selector carries logical ids only;
+  the daemon resolves validated device-local stdio MCP definitions and Claude
+  runs them under a task-scoped `--strict-mcp-config`.
+- Added self-hosted `dispatch({ requiredToolsets })`, hosted
+  `enqueueToolsetOffer()`, capability gating, persistence, protocol freeze
+  coverage, and a Salesko-style fake connector end-to-end test.
+- Added a private Salesko connector-broker reference with OS-backed OAuth
+  custody, exact correspondent-domain policy, a read-only Gmail provider port,
+  strict metadata-only projection, and stdio MCP end-to-end coverage.
+- Completed that reference with desktop Google OAuth over loopback + PKCE,
+  process-local access-token refresh, confirmed upstream revoke, a real bounded
+  Gmail metadata adapter, RFC 5322 address parsing, and fake-Google HTTP → MCP
+  coverage. Restricted-scope verification, DPoP, and live user consent remain
+  external production gates.
+- Fixed hosted Postgres offer delivery by making `MailboxStore.append()` the
+  sole per-device sequence authority. Envelope materialization and outbox
+  insertion now share the same serialized allocation, eliminating the
+  `mailbox_seq_mismatch` failure in `@byok-sdk/cloud-postgres@0.2.0`.
+- Added bounded structured task results, the public headless device testkit,
+  the daemon-local device-assertion broker, and capability-gated hosted
+  presence publication.
+- Added fail-closed LLM provider selection, immutable R2 key prefixes, and the
+  declarative skill-pack delivery channel with durable Postgres persistence.
+- Hardened stale-token renewal, embedded product isolation, daemon ownership
+  and control-socket locks, Postgres pool failure handling, and release CI.
+
 ## 0.2.0 — 2026-08-11
 
 Pi runtime contract release.

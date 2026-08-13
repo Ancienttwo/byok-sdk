@@ -14,11 +14,9 @@ export const CLOUD_ERROR_CODES = {
   /** The composition handed a device row whose tenant is not a mintable `TenantId`. */
   device_tenant_invalid: 'device_tenant_invalid',
   /**
-   * The mailbox assigned a row `seq` that disagrees with the delivery `seq`
-   * baked into the enqueued envelope. Loud rather than silent: those two
-   * numbers ARE the daemon's redelivery cursor, and a composition whose
-   * mailbox numbers rows differently from `DeviceSequenceStore` would
-   * mis-deliver every subsequent poll.
+   * The mailbox committed a row `seq` that disagrees with the delivery `seq`
+   * its body factory baked into the envelope. Loud rather than silent: those
+   * two numbers ARE the daemon's redelivery cursor.
    */
   mailbox_seq_mismatch: 'mailbox_seq_mismatch',
   /** A capability declaration the host supplied that core refused. */

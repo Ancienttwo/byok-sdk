@@ -20,10 +20,8 @@ export function runTenantIsolationConformance(factory: CoreCompositionFactory): 
       await withComposition(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, {
           deviceId: 'device-1',
-          body: '{}',
-          bodyHash: hashOf(1),
-          byteSize: 2n,
           messageId: 'msg-1',
+          materialize: () => ({ body: '{}', bodyHash: hashOf(1), byteSize: 2n }),
         });
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: 'device-1', ackedSeq: 1 });
 

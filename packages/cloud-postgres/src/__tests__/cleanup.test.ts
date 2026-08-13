@@ -1,4 +1,5 @@
 /** S4B-c retention, tombstone, crash and reconciliation matrix. */
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   contentHash,
@@ -8,6 +9,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { BlobObservation } from '@byok-sdk/cloud';
+import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import type { Pool, PoolClient } from 'pg';
 import { PostgresCloudCleanup } from '../cleanup';
 import { migrate } from '../migrate';
@@ -33,6 +35,37 @@ const TENANT = tenantId('tenant-cleanup');
 const HASH_A = contentHash(`sha256:${'a'.repeat(64)}`);
 const HASH_B = contentHash(`sha256:${'b'.repeat(64)}`);
 const HASH_C = contentHash(`sha256:${'c'.repeat(64)}`);
+
+function opaqueBody(body: string, bodyHash: ContentHash) {
+  return () => ({
+    body,
+    bodyHash,
+    byteSize: BigInt(new TextEncoder().encode(body).length),
+  });
+}
+
+function replayableOffer(seed: number) {
+  return (seq: number) => {
+    const body = encodeEnvelope(
+      createEnvelope(
+        'task.offer',
+        { instruction: `cleanup offer ${seed}`, policy: { mode: 'auto' } },
+        {
+          id: `00000000-0000-4000-8000-${String(seed).padStart(12, '0')}`,
+          ts: '2026-01-01T00:00:00.000Z',
+          taskId: `task-cleanup-${seed}`,
+          seq,
+        },
+      ),
+    );
+    const bytes = new TextEncoder().encode(body);
+    return {
+      body,
+      bodyHash: contentHash(`sha256:${createHash('sha256').update(bytes).digest('hex')}`),
+      byteSize: BigInt(bytes.length),
+    };
+  };
+}
 
 class MutableClock implements Clock {
   #instant: Date;
@@ -194,24 +227,20 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const quota = new PostgresQuotaStore(scope.pool, clock);
       const mailbox = new PostgresMailboxStore(scope.pool, clock);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
-      await seedEntitlement(quota, 100n, 100n);
+      await seedEntitlement(quota, 2_000n, 2_000n);
       await configurePolicy(cleanup);
 
       const first = await mailbox.append(TENANT, {
         deviceId: 'device-a',
         messageId: 'message-1',
-        body: 'one',
-        bodyHash: HASH_A,
-        byteSize: 3n,
+        materialize: replayableOffer(1),
       });
       const second = await mailbox.append(TENANT, {
         deviceId: 'device-a',
         messageId: 'message-2',
-        body: 'two',
-        bodyHash: HASH_B,
-        byteSize: 3n,
+        materialize: replayableOffer(2),
       });
-      await quota.applyMailboxDelta(TENANT, { deltaBytes: 6n });
+      await quota.applyMailboxDelta(TENANT, { deltaBytes: first.byteSize + second.byteSize });
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-a', ackedSeq: first.seq });
       await scope.pool.query(
         `INSERT INTO auth_nonce (tenant_id, device_id, nonce, expires_at, used)
@@ -234,9 +263,9 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const result = await cleanup.runTenant(TENANT, 'retention-1');
       expect(result.mailboxDeletedCount).toBe(1n);
       expect(result.mailboxExpiredCount).toBe(1n);
-      expect(result.mailboxReleasedBytes).toBe(3n);
+      expect(result.mailboxReleasedBytes).toBe(first.byteSize);
       expect(result.ttlRowsDeleted).toBe(3n);
-      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(3n);
+      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(second.byteSize);
 
       const dead = await cleanup.listDeadLetters(TENANT, { deviceId: 'device-a' });
       expect(dead.messages.map((message) => message.seq)).toEqual([second.seq]);
@@ -247,7 +276,16 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       });
       expect(replayed.state).toBe('pending');
       expect(replayed.seq).toBeGreaterThan(second.seq);
-      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(6n);
+      expect(decodeEnvelope(replayed.body).seq).toBe(replayed.seq);
+      expect(replayed.body).not.toBe(second.body);
+      const replayedBytes = new TextEncoder().encode(replayed.body);
+      expect(replayed.byteSize).toBe(BigInt(replayedBytes.length));
+      expect(replayed.bodyHash).toBe(
+        contentHash(`sha256:${createHash('sha256').update(replayedBytes).digest('hex')}`),
+      );
+      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(
+        second.byteSize + replayed.byteSize,
+      );
 
       const sameReplay = await cleanup.replayDeadLetter(TENANT, {
         deviceId: 'device-a',
@@ -255,10 +293,12 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         replayMessageId: 'operator-replay-1',
       });
       expect(sameReplay.seq).toBe(replayed.seq);
-      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(6n);
+      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(
+        second.byteSize + replayed.byteSize,
+      );
 
       await cleanup.discardDeadLetter(TENANT, { deviceId: 'device-a', seq: second.seq });
-      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(3n);
+      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(replayed.byteSize);
       expect((await cleanup.listDeadLetters(TENANT)).messages).toEqual([]);
     } finally {
       await scope.dispose();
@@ -278,16 +318,12 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const first = await mailbox.append(TENANT, {
         deviceId: 'device-race',
         messageId: 'message-race-1',
-        body: 'one',
-        bodyHash: HASH_A,
-        byteSize: 3n,
+        materialize: opaqueBody('one', HASH_A),
       });
       const second = await mailbox.append(TENANT, {
         deviceId: 'device-race',
         messageId: 'message-race-2',
-        body: 'two',
-        bodyHash: HASH_B,
-        byteSize: 3n,
+        materialize: opaqueBody('two', HASH_B),
       });
       await quota.applyMailboxDelta(TENANT, { deltaBytes: 6n });
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-race', ackedSeq: first.seq });
@@ -328,23 +364,19 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       await migrate(scope.pool, DEPLOY_SQL);
       const quota = new PostgresQuotaStore(scope.pool, clock);
       const mailbox = new PostgresMailboxStore(scope.pool, clock);
-      await seedEntitlement(quota, 100n, 100n);
+      await seedEntitlement(quota, 2_000n, 2_000n);
 
       const first = await mailbox.append(TENANT, {
         deviceId: 'device-replay-race',
         messageId: 'expired-race-1',
-        body: 'same',
-        bodyHash: HASH_A,
-        byteSize: 4n,
+        materialize: replayableOffer(3),
       });
       const second = await mailbox.append(TENANT, {
         deviceId: 'device-replay-race',
         messageId: 'expired-race-2',
-        body: 'same',
-        bodyHash: HASH_A,
-        byteSize: 4n,
+        materialize: replayableOffer(4),
       });
-      await quota.applyMailboxDelta(TENANT, { deltaBytes: 8n });
+      await quota.applyMailboxDelta(TENANT, { deltaBytes: first.byteSize + second.byteSize });
 
       const cleanup = new PostgresCloudCleanup({
         pool: interceptClientQueries(scope.pool, async (sql) => {
@@ -380,9 +412,82 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         status: 'rejected',
         reason: { code: 'cleanup_invalid_input' },
       });
-      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(12n);
+      const fulfilled = outcomes.find(
+        (outcome): outcome is PromiseFulfilledResult<Awaited<ReturnType<typeof cleanup.replayDeadLetter>>> =>
+          outcome.status === 'fulfilled',
+      );
+      expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(
+        first.byteSize + second.byteSize + fulfilled!.value.byteSize,
+      );
     } finally {
       releaseBarrier();
+      await scope.dispose();
+    }
+  });
+
+  it('resolves a normal append that wins the replay id after the pre-lock check', async () => {
+    const scope = await createDataplaneScope(4);
+    const clock = new MutableClock('2026-01-01T00:00:00.000Z');
+    const storage = new FakeObjectMaintenance();
+    let releaseAllocation!: () => void;
+    let allocationReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      allocationReached = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      releaseAllocation = resolve;
+    });
+    let intercepted = false;
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const quota = new PostgresQuotaStore(scope.pool, clock);
+      const mailbox = new PostgresMailboxStore(scope.pool, clock);
+      await seedEntitlement(quota, 2_000n, 2_000n);
+      const original = await mailbox.append(TENANT, {
+        deviceId: 'device-append-replay-race',
+        messageId: 'expired-append-race',
+        materialize: replayableOffer(5),
+      });
+      await quota.applyMailboxDelta(TENANT, { deltaBytes: original.byteSize });
+      const expirer = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
+      await configurePolicy(expirer);
+      clock.set('2026-01-01T00:00:02.000Z');
+      await expirer.runTenant(TENANT, 'expire-append-replay-race');
+
+      const cleanup = new PostgresCloudCleanup({
+        pool: interceptClientQueries(scope.pool, async (sql) => {
+          if (!intercepted && sql.includes('INSERT INTO device_stream')) {
+            intercepted = true;
+            allocationReached();
+            await barrier;
+          }
+        }),
+        clock,
+        objectStorage: storage,
+      });
+      const replay = cleanup.replayDeadLetter(TENANT, {
+        deviceId: 'device-append-replay-race',
+        seq: original.seq,
+        replayMessageId: 'shared-append-replay-id',
+      });
+      await reached;
+      const winner = await mailbox.append(TENANT, {
+        deviceId: 'device-append-replay-race',
+        messageId: 'shared-append-replay-id',
+        materialize: replayableOffer(5),
+      });
+      releaseAllocation();
+
+      await expect(replay).rejects.toMatchObject({ code: 'cleanup_invalid_input' });
+      await expect(
+        mailbox.append(TENANT, {
+          deviceId: 'device-append-replay-race',
+          messageId: 'after-shared-append-replay-id',
+          materialize: replayableOffer(6),
+        }),
+      ).resolves.toMatchObject({ seq: winner.seq + 1 });
+    } finally {
+      releaseAllocation();
       await scope.dispose();
     }
   });

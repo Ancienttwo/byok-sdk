@@ -28,6 +28,7 @@ interface DeviceMailbox {
   nextSeq: number;
   ackedSeq: number;
   cursorUpdatedAt: string;
+  mutationTail: Promise<void>;
   readonly messages: MailboxMessage[];
   readonly byMessageId: Map<string, MailboxMessage>;
 }
@@ -42,24 +43,33 @@ export class InMemoryMailboxStore implements MailboxStore {
 
   async append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage> {
     const device = this.#device(tenant, input.deviceId);
-    const existing = device.byMessageId.get(input.messageId);
-    if (existing !== undefined) return existing;
+    const appended = device.mutationTail.then(async () => {
+      const existing = device.byMessageId.get(input.messageId);
+      if (existing !== undefined) return existing;
 
-    const message: MailboxMessage = {
-      tenantId: tenant,
-      deviceId: input.deviceId,
-      seq: device.nextSeq,
-      messageId: input.messageId,
-      body: input.body,
-      bodyHash: input.bodyHash,
-      byteSize: input.byteSize,
-      state: 'pending',
-      appendedAt: this.#now(),
-    };
-    device.nextSeq += 1;
-    device.messages.push(message);
-    device.byMessageId.set(message.messageId, message);
-    return message;
+      const seq = device.nextSeq;
+      const materialized = await input.materialize(seq);
+      const message: MailboxMessage = {
+        tenantId: tenant,
+        deviceId: input.deviceId,
+        seq,
+        messageId: input.messageId,
+        ...materialized,
+        state: 'pending',
+        appendedAt: this.#now(),
+      };
+      device.nextSeq += 1;
+      device.messages.push(message);
+      device.byMessageId.set(message.messageId, message);
+      return message;
+    });
+    // A failed materializer rejects its own append but must not poison the
+    // per-device serializer; the next append starts from the same sequence.
+    device.mutationTail = appended.then(
+      () => undefined,
+      () => undefined,
+    );
+    return appended;
   }
 
   async readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage> {
@@ -87,23 +97,30 @@ export class InMemoryMailboxStore implements MailboxStore {
     input: MailboxAdvanceCursorInput,
   ): Promise<MailboxCursorState> {
     const device = this.#device(tenant, input.deviceId);
-    if (input.ackedSeq < device.ackedSeq) {
-      throw new CoreConflictError(
-        'mailbox_cursor_regression',
-        `Cursor for device ${input.deviceId} is at ${device.ackedSeq}; refusing to move it back to ${input.ackedSeq}.`,
-        this.#cursorState(tenant, input.deviceId, device),
-        this.#now(),
-      );
-    }
-    device.ackedSeq = input.ackedSeq;
-    device.cursorUpdatedAt = this.#now();
-    for (const [index, message] of device.messages.entries()) {
-      if (message.state === 'pending' && message.seq <= input.ackedSeq) {
-        device.messages[index] = { ...message, state: 'acked' };
-        device.byMessageId.set(message.messageId, device.messages[index]!);
+    const advanced = device.mutationTail.then(() => {
+      if (input.ackedSeq < device.ackedSeq) {
+        throw new CoreConflictError(
+          'mailbox_cursor_regression',
+          `Cursor for device ${input.deviceId} is at ${device.ackedSeq}; refusing to move it back to ${input.ackedSeq}.`,
+          this.#cursorState(tenant, input.deviceId, device),
+          this.#now(),
+        );
       }
-    }
-    return this.#cursorState(tenant, input.deviceId, device);
+      device.ackedSeq = input.ackedSeq;
+      device.cursorUpdatedAt = this.#now();
+      for (const [index, message] of device.messages.entries()) {
+        if (message.state === 'pending' && message.seq <= input.ackedSeq) {
+          device.messages[index] = { ...message, state: 'acked' };
+          device.byMessageId.set(message.messageId, device.messages[index]!);
+        }
+      }
+      return this.#cursorState(tenant, input.deviceId, device);
+    });
+    device.mutationTail = advanced.then(
+      () => undefined,
+      () => undefined,
+    );
+    return advanced;
   }
 
   async readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState> {
@@ -166,6 +183,7 @@ export class InMemoryMailboxStore implements MailboxStore {
       nextSeq: 1,
       ackedSeq: 0,
       cursorUpdatedAt: this.#now(),
+      mutationTail: Promise.resolve(),
       messages: [],
       byMessageId: new Map(),
     };

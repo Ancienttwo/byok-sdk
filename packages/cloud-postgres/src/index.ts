@@ -1,7 +1,7 @@
 /**
  * `@byok-sdk/cloud-postgres` — the durable data plane.
  *
- * `cloud-postgres → core + cloud + pg`, and never the reverse. The two
+ * `cloud-postgres → core + cloud + protocol + pg`, and never the reverse. The two
  * platform-neutral packages stay loadable on Workers precisely because the
  * database driver lives here (design §4): `@byok-sdk/cloud` is a stateless handler
  * package, and a `hono` user must not be made to install `pg` to use it.
@@ -25,7 +25,6 @@ export { migrationsDir } from './migrations-dir';
 // The cloud-local port implementations, and the composition that bundles them
 export {
   PostgresDeviceDirectory,
-  PostgresDeviceSequenceStore,
   PostgresInboundDedupStore,
   PostgresNonceStore,
   PostgresPairingCodeStore,

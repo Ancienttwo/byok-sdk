@@ -17,5 +17,6 @@ describe('protocol version and capability flags', () => {
 
   it('includes the dispatch-selection correctness gate', () => {
     expect(CAPABILITY_FLAGS).toContain('dispatch-selection');
+    expect(CAPABILITY_FLAGS).toContain('toolset-selection');
   });
 });

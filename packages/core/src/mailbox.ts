@@ -38,16 +38,29 @@ export interface MailboxMessage {
   readonly appendedAt: string;
 }
 
-export interface MailboxAppendInput {
-  readonly deviceId: string;
+/** Opaque bytes produced after the mailbox has atomically reserved their delivery sequence. */
+export interface MailboxBody {
   readonly body: string;
   readonly bodyHash: ContentHash;
   readonly byteSize: bigint;
+}
+
+export interface MailboxAppendInput {
+  readonly deviceId: string;
   /**
    * Producer-supplied idempotency key. A second append with the same
    * `messageId` returns the existing row instead of enqueuing a duplicate.
    */
   readonly messageId: string;
+  /**
+   * Builds the opaque body around the sequence reserved by this append.
+   *
+   * The store invokes this only for a new row and commits the returned bytes
+   * at exactly that `seq`. Allocation, materialization, and insertion are one
+   * per-device serialized operation; otherwise concurrent offers could commit
+   * out of order and let an ack skip a late lower sequence.
+   */
+  readonly materialize: (seq: number) => MailboxBody | Promise<MailboxBody>;
 }
 
 export interface MailboxReadQuery {

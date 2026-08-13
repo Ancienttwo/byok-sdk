@@ -12,7 +12,8 @@ import { serve } from '@hono/node-server';
 // nothing that ships is touched. S6-c adds the intended `client -> core` edge
 // for canonical device-proof bytes and truth selector contracts; it still does
 // not make the daemon depend on the hosted implementation.
-import type { PresenceHint } from '@byok-sdk/core';
+import type { ActivityTail, PresenceHint } from '@byok-sdk/core';
+import type { TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import {
   createInMemoryByokCloud,
   fullCapabilityDeclaration,
@@ -54,9 +55,13 @@ export interface RealCloudHandle {
   createPairingCode(): Promise<PairingCodeInfo>;
   /** The hosted control-plane input: hand a device a frozen-v1 `task.offer`. No `TaskHandle` exists on this surface. */
   enqueueOffer(deviceId: string, instruction: string): Promise<EnqueuedOffer>;
+  /** Additive hosted offer whose logical toolset ids must resolve on the target device before claim. */
+  enqueueToolsetOffer(deviceId: string, payload: TaskOfferWithToolsetsPayload): Promise<EnqueuedOffer>;
   readTaskAttempt(taskId: string): Promise<TaskAttempt | undefined>;
   /** The recorded terminal envelope for a task, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `cloud/src/inbound.ts`). */
   readTerminalBody(taskId: string): Promise<string | undefined>;
+  /** Lossy hosted activity projection for assertions about non-terminal runtime events. */
+  readActivity(taskId: string): Promise<ActivityTail | undefined>;
   /** Unexpired presence hints only — an expired hint is indistinguishable from one never written (§12.3). */
   listPresence(): Promise<readonly PresenceHint[]>;
   close(): Promise<void>;
@@ -130,8 +135,11 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
         createPairingCode: () => cloud.createPairingCode(tenant, { productId: opts.productId }),
         enqueueOffer: (deviceId, instruction) =>
           cloud.enqueueOffer(tenant, deviceId, { payload: { instruction, policy: { mode: 'auto' } } }),
+        enqueueToolsetOffer: (deviceId, payload) =>
+          cloud.enqueueToolsetOffer(tenant, deviceId, { payload }),
         readTaskAttempt: (taskId) => cloud.readTaskAttempt(tenant, taskId),
         readTerminalBody: async (taskId) => (await cloud.readTerminalReceipt(tenant, taskId))?.body,
+        readActivity: (taskId) => cloud.readActivity(tenant, taskId),
         listPresence: () => cloud.listPresence(tenant),
         close: () => closeServer(httpServer as unknown as HttpServer),
       });

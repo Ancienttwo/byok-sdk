@@ -1,4 +1,4 @@
-import { canTransition, type PermissionPolicy, type RuntimeId, type TaskState } from '@byok-sdk/protocol';
+import { canTransition, type PermissionPolicy, type RuntimeId, type TaskState, type ToolsetId } from '@byok-sdk/protocol';
 import type { TaskSnapshot } from './types';
 
 /** Thrown by a {@link TaskStore}'s `transition` when `from -> to` is not in TASK_TRANSITIONS. Every implementation (in-memory, SQLite, or otherwise) must throw this rather than silently applying an invalid move. */
@@ -18,6 +18,7 @@ export interface CreateTaskInput {
   instruction: string;
   runtime?: RuntimeId;
   policy: PermissionPolicy;
+  requiredToolsets?: ToolsetId[];
   deviceId?: string;
   sessionRef?: string;
 }
@@ -117,6 +118,7 @@ export class InMemoryTaskStore implements TaskStore {
       instruction: input.instruction,
       runtime: input.runtime,
       policy: input.policy,
+      requiredToolsets: input.requiredToolsets,
       deviceId: input.deviceId,
       sessionRef: input.sessionRef,
       createdAt: now,

@@ -24,7 +24,6 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   tasks: ['open', 'get', 'claim', 'recordStatus'],
   receipts: ['record', 'get'],
   proofReceipts: ['record', 'get'],
-  sequence: ['next'],
   // Three methods, not six: the byte-proxy trio moved to `BlobContentProxy`,
   // which is a composition input rather than a port and therefore has no row
   // in this table (docs/researches/s4a-dataplane-design.md §6).
@@ -41,7 +40,6 @@ export const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>> = {
   tasks: 'TaskAttemptStore',
   receipts: 'RequestReceiptStore',
   proofReceipts: 'ProofRequestReceiptStore',
-  sequence: 'DeviceSequenceStore',
   blobs: 'CloudBlobStore',
   rateLimiter: 'InboundRateLimiter',
 };

@@ -1,13 +1,13 @@
 # @byok-sdk/cloud-postgres
 
 The durable data plane for the BYOK SDK's hosted device surface: Postgres
-implementations of **all ten cloud-local store ports and all seven `@byok-sdk/core`
+implementations of **all nine cloud-local store ports and all seven `@byok-sdk/core`
 ports**, the R2/S3 object adapter that backs the blob port, and the forward-only
 migration runner that creates the tables they read.
 
 Three store/maintenance compositions plus one transaction authority ship from here. `createPostgresCloudStores` supplies the full
 `CloudStores` bundle (`devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
-`receipts`, `proofReceipts`, `sequence`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
+`receipts`, `proofReceipts`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
 supplies the full `CoreStores` bundle (`mailbox`, `board`, `truth`, `presence`,
 `activity`, `objects`, `quota`). Both return every port rather than a subset,
 because the conformance suites certify a composition as a whole — there is no
@@ -35,7 +35,7 @@ createByokCloud({
 });
 ```
 
-Two of those ten are not tables. `rateLimiter` is the allow-all reference and
+Two of those nine are not tables. `rateLimiter` is the allow-all reference and
 gets no table by design: persisting an allow-all would be a table that is always
 empty, and a real limiter is edge work rather than a per-request write. `blobs`
 is the R2 adapter described below.
@@ -119,8 +119,10 @@ those ports. It sits here rather than inside `@byok-sdk/cloud` for two reasons: 
 and `@byok-sdk/cloud` stay loadable on Workers precisely because `pg` never enters
 their dependency graph.
 
-Dependency direction is one-way: `cloud-postgres → core + cloud + pg +` the
-explicit S3 signer/XML parser. Nothing depends back on it; no ambient AWS
+Dependency direction is one-way: `cloud-postgres → core + cloud + protocol +
+pg +` the explicit S3 signer/XML parser. The protocol edge is used only by the
+host-owned dead-letter replay path to rebind frozen envelope bytes to the new
+mailbox sequence; core remains protocol-free. Nothing depends back on it; no ambient AWS
 credential-provider chain is installed.
 
 ## Migrations

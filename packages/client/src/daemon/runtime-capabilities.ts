@@ -39,6 +39,7 @@ export function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRu
     steer: caps.steer,
     resume: caps.resume,
     approvalInteractive: caps.approvalInteractive,
+    ...(caps.mcpToolsets === undefined ? {} : { mcpToolsets: caps.mcpToolsets }),
     permissionModes: caps.permissionModes,
   };
 }
