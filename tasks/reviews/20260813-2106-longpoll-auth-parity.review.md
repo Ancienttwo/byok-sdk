@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:9352d91c761b9685c74a39a696d64b0bdcd3af44d5018bc3d3e2b1b2904f9ec6
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 6d5ac9b2ca4e30b8a8cc4bb74eb2615a70eaa162
+> **Verification Evidence SHA256**: sha256:25538aa5389373814f1777a5533e6126f0a894b023bcbc044463c5d2aeec3037
+> **Issued At**: 2026-08-13T13:36:06.749Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: gatekeeper PASS: instance-product equality enforced inside authenticateBearer (indistinguishable 401, no oracle), protocolVersions waiver documented, WS/announcement coverage intact, cross-package zero diff; bun unread-body connection pin fixed in shared stopServer; full workspace suites green
 - Findings: none
 
 ## Behavior Diff Notes

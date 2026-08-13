@@ -1,6 +1,6 @@
 # Task Contract: longpoll-auth-parity
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260813-2106-longpoll-auth-parity.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
