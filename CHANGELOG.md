@@ -9,6 +9,10 @@
 - Added self-hosted `dispatch({ requiredToolsets })`, hosted
   `enqueueToolsetOffer()`, capability gating, persistence, protocol freeze
   coverage, and a Salesko-style fake connector end-to-end test.
+- Added a private Salesko connector-broker reference with OS-backed OAuth
+  custody, exact correspondent-domain policy, a host-owned read-only Gmail
+  provider port, strict metadata-only projection, and stdio MCP end-to-end
+  coverage. Real Google OAuth/refresh and Gmail API calls remain downstream.
 
 ## 0.2.0 — 2026-08-11
 

@@ -50,4 +50,10 @@ secrets behind the local MCP process's own credential broker. Toolset offers
 for Pi or Codex are declined because those adapters do not yet expose a strict
 task-scoped MCP configuration boundary.
 
+For a concrete private host composition, see the
+[`examples/salesko-connector-broker`](../../examples/salesko-connector-broker)
+reference. It keeps `@byok-sdk/client` credential-blind while combining
+OS-backed OAuth custody, exact domain policy, a host-owned Gmail provider port,
+and a closed metadata-only MCP result.
+
 MIT licensed. Node.js 22.19.0 or newer.

@@ -57,6 +57,18 @@ an OS sandbox: the configured MCP subprocess still runs as the daemon's user.
 Connector OAuth, cookie custody, token refresh, domain policy, and data
 redaction remain responsibilities of a host-owned local credential broker.
 
+The private `examples/salesko-connector-broker` composition is the bounded
+reference for that broker boundary. It stores one short-lived Gmail access
+token in macOS Keychain or Windows Credential Manager, rejects requested
+domains that are not exact members of the local correspondent-domain
+allowlist before reading the credential, and accepts only a strict bounded
+metadata projection from the provider. It has no plaintext or Linux fallback,
+does not acquire or refresh OAuth credentials, and treats the provider module
+as trusted credential-plane code. The allowlist is therefore a data-policy
+gate, not a network-egress or process sandbox. BYOK device/pairing revocation,
+local secret deletion, and upstream Google token revocation are separate
+authorities: the host must explicitly wire all three lifecycle operations.
+
 ## Local Git checkpoint workspaces
 
 The daemon has an optional, disabled-by-default local checkpoint mode. An operator enables it in the device's local configuration with:

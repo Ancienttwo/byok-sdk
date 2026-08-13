@@ -40,6 +40,17 @@ graph. Install it explicitly when that security model is required:
 npm install @byok-sdk/keys
 ```
 
+## Host connector composition
+
+[`examples/salesko-connector-broker`](examples/salesko-connector-broker) is a
+private reference composition for a Salesko-style local connector. It combines
+device-local OS credential custody, exact correspondent-domain policy, a
+read-only Gmail provider port, and a metadata-only stdio MCP projection with
+the daemon's logical toolset injection. It is integration guidance, not a
+published connector catalogue: real Google OAuth acquisition/refresh and API
+calls remain host-owned, and LinkedIn, social-media, and browser connectors are
+not included.
+
 ## Runtime and license
 
 The dispatch SDK requires Node.js 22.19.0 or newer. The independently

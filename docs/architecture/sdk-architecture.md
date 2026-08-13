@@ -186,6 +186,7 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 | --- | --- | --- |
 | `examples/basic` | 嵌入 `@byok-sdk/server` 的 Hono demo + browser API/SSE UI | 已实现；可用 `BYOK_STORE=sqlite` 切换持久层 |
 | `examples/packaging` | 单文件打包 probe | 已实现；只做 daemon status 与 Pi detection，不 pair/start/network |
+| `examples/salesko-connector-broker` | private Salesko host glue；单向依赖 `@byok-sdk/keys`，通过 stdio MCP 接入 logical toolset | 已实现参考边界与 fake-provider E2E；真实 Google OAuth/Gmail provider 仍由 downstream 提供 |
 | `templates/packaging/bun` | `bun build --compile` copy-out recipe | 已实现；含 build/smoke |
 | `templates/packaging/sea` | Node SEA + esbuild/postject recipe | 已实现；含跨平台边界说明与 smoke |
 | `templates/service` | launchd/systemd/WinSW reference recipes | 已实现；真正执行逻辑在 `packages/client/src/lifecycle/*` |

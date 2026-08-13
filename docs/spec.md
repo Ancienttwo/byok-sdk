@@ -124,12 +124,16 @@ self-hosted coordinator requires a live `toolset-selection` capability before
 task creation; a stateless hosted caller must route only to a device it already
 knows is capable.
 
-This feature is the injection contract, not a connector catalogue or security
-sandbox. The SDK does not ship Gmail, LinkedIn, social-media, or browser
-connectors and does not own OAuth/cookie custody, refresh, revocation, domain
-policy, or data redaction. A Salesko-like host supplies those behind its local
-MCP process and its own credential broker; that subprocess still runs with the
-daemon user's OS authority.
+This feature is the injection contract, not a public connector catalogue or
+security sandbox. The public SDK does not ship Gmail, LinkedIn, social-media,
+or browser connectors and does not own OAuth/cookie acquisition, refresh, or
+upstream revocation. The private
+[`examples/salesko-connector-broker`](../examples/salesko-connector-broker)
+composition demonstrates the downstream seam with OS-backed credential
+custody, exact correspondent-domain policy, a read-only Gmail provider port,
+and a strict metadata-only result projection. Real Google OAuth and Gmail API
+I/O remain host-owned; the provider subprocess still runs with the daemon
+user's OS authority.
 
 ## Local Git task workspaces
 
