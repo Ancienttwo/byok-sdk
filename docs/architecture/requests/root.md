@@ -2,7 +2,7 @@
 
 > **Status**: Pending
 > **Detected**: 2026-08-05T17:31:51+0800
-> **Updated**: 2026-08-14T00:14:09+0800
+> **Updated**: 2026-08-14T00:17:46+0800
 > **Severity**: medium
 > **Change Type**: boundary-or-config
 > **File**: `packages/client/package.json`
@@ -33,7 +33,7 @@
 
 | Last Event | Severity | Change Type | File |
 | --- | --- | --- | --- |
-| 2026-08-14T00:14:09+0800 | medium | boundary-or-config | `packages/client/package.json` |
+| 2026-08-14T00:17:46+0800 | medium | boundary-or-config | `packages/client/package.json` |
 | 2026-08-13T23:42:07+0800 | medium | boundary-or-config | `packages/cloud-postgres/package.json` |
 | 2026-08-07T14:02:03+0800 | medium | boundary-or-config | `packages/keys/package.json` |
 | 2026-08-07T14:01:52+0800 | medium | boundary-or-config | `packages/server/package.json` |
@@ -44,7 +44,7 @@
 
 ```json
 {
-  "ts": "2026-08-14T00:14:09+0800",
+  "ts": "2026-08-14T00:17:46+0800",
   "file_path": "packages/client/package.json",
   "severity": "medium",
   "functional_block": "root",
