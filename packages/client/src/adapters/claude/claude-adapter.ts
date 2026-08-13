@@ -16,6 +16,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
+import { RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
 import { resolveApprovalMcpBin, type ResolvedApprovalMcpBin } from './resolve-approval-mcp-bin';
@@ -223,9 +224,19 @@ export class ClaudeAdapter implements RuntimeAdapter {
     bin: ResolvedBin,
     approvalMcpBin: ResolvedApprovalMcpBin | undefined,
   ): Promise<Session> {
-    if (!initialMapping.ok) throw new Error('unreachable: prepared claude mapping was rejected');
+    if (!initialMapping.ok) throw new RuntimeExecutionFailure({
+      phase: 'start',
+      category: 'authority',
+      retry: 'non-retryable',
+      reason: 'prepared claude permission mapping was invalid',
+    });
     if (typeof startInput.instruction !== 'string') {
-      throw new PolicyUnsupportedError('prepared claude operation requires a resolved string instruction');
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared claude operation requires a resolved string instruction',
+      });
     }
     const mapping = { ...initialMapping, args: [...initialMapping.args] };
 
@@ -247,11 +258,17 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // Internal-consistency fail-closed: TaskRunner always populates this
         // (see task-runner.ts's handleOffer) — a missing one here means
         // something upstream is badly wired, not a normal policy rejection.
-        throw new PolicyUnsupportedError(
-          'claude adapter requires policy.mode "confirm" to be started with an approval channel — none was provided',
-        );
+        throw new RuntimeExecutionFailure({
+          phase: 'start',
+          category: 'authority',
+          retry: 'non-retryable',
+          reason: 'claude adapter requires policy.mode "confirm" to be started with an approval channel',
+        });
       }
-      if (!approvalMcpBin) throw new Error('unreachable: prepared claude approval MCP binary was not resolved');
+      if (!approvalMcpBin) throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'authority', retry: 'non-retryable',
+        reason: 'prepared claude approval MCP binary was not resolved',
+      });
     }
 
     if (needsMcpConfig) {
@@ -261,9 +278,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const mcpServers: Record<string, unknown> = { ...taskMcpServers };
       if (mapping.needsApprovalMcp) {
         const approvalChannel = startInput.approvalChannel;
-        if (!approvalChannel) throw new Error('unreachable: approval channel checked above');
+        if (!approvalChannel) throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'authority', retry: 'non-retryable',
+          reason: 'prepared claude approval channel was not available',
+        });
         const preparedApprovalMcpBin = approvalMcpBin;
-        if (!preparedApprovalMcpBin) throw new Error('unreachable: prepared claude approval MCP binary was not resolved');
+        if (!preparedApprovalMcpBin) throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'authority', retry: 'non-retryable',
+          reason: 'prepared claude approval MCP binary was not resolved',
+        });
         mcpServers[APPROVAL_MCP_SERVER_NAME] = {
           command: preparedApprovalMcpBin.command,
           args: preparedApprovalMcpBin.args,
@@ -290,9 +313,24 @@ export class ClaudeAdapter implements RuntimeAdapter {
     }
 
     const resumeSessionId = startInput.manifest.sessionRef;
-    const manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection, 'claude');
+    let manifestModelId: string | undefined;
+    try {
+      manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection, 'claude');
+    } catch (cause) {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared claude operation received an invalid runtime selection manifest',
+      }, { cause });
+    }
     if (manifestModelId !== modelId) {
-      throw new PolicyUnsupportedError('prepared claude operation received a manifest with different runtime selection');
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared claude operation received a manifest with different runtime selection',
+      });
     }
     const args = [
       '-p',
@@ -310,13 +348,22 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ...mapping.args,
     ];
 
-    const client = new ClaudeProcessClient({
-      command: bin.command,
-      args,
-      cwd: startInput.manifest.workspace.workspaceDir,
-      env: withoutProviderCredentials(startInput.env),
-      spawnFn: this.options.spawnFn,
-    });
+    let client: ClaudeProcessClient;
+    try {
+      client = new ClaudeProcessClient({
+        command: bin.command,
+        args,
+        cwd: startInput.manifest.workspace.workspaceDir,
+        env: withoutProviderCredentials(startInput.env),
+        spawnFn: this.options.spawnFn,
+      });
+    } catch (cause) {
+      await cleanupMcpConfigDir(mcpConfigDir);
+      throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'infrastructure', retry: 'retryable',
+        reason: 'claude runtime process could not be spawned',
+      }, { cause });
+    }
 
     // `--input-format stream-json` expects the first turn's instruction on
     // stdin too, not as a positional CLI argument — empirically confirmed
@@ -326,7 +373,16 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // `followUp()` afterward (see `ClaudeSession.followUp` /
     // `ClaudeProcessClient.writeUserMessage`) avoids two different
     // send-a-prompt code paths.
-    client.writeUserMessage(startInput.instruction);
+    try {
+      client.writeUserMessage(startInput.instruction);
+    } catch (cause) {
+      client.kill();
+      await cleanupMcpConfigDir(mcpConfigDir);
+      throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'infrastructure', retry: 'retryable',
+        reason: 'claude initial instruction transport failed',
+      }, { cause });
+    }
 
     let sessionRef: string;
     try {
@@ -348,7 +404,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
     } catch (err) {
       client.kill();
       await cleanupMcpConfigDir(mcpConfigDir);
-      throw err;
+      if (isRuntimeExecutionFailure(err)) throw err;
+      throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'infrastructure', retry: 'retryable',
+        reason: `claude exited before yielding an authoritative session id: ${errorMessage(err)}`,
+      }, { cause: err });
     }
 
     // Cross-model review finding: the doc comment above states this is
@@ -362,9 +422,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
     if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
       client.kill();
       await cleanupMcpConfigDir(mcpConfigDir);
-      throw new Error(
-        `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef}) — refusing to continue in a possibly-wrong session (fail-closed)`,
-      );
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef})`,
+      });
     }
 
     return new ClaudeSession(
@@ -452,6 +515,7 @@ class ClaudeSession implements Session {
         // one `AgentEvent` per `next()` call like every other adapter's
         // `Session.events`.
         let pending: AgentEvent[] = [];
+        let terminalFailure: RuntimeExecutionFailure | undefined;
         // Cross-model re-review finding (P1 regression, the "claude-hang
         // class"): set once THIS turn's own `result` frame has been read off
         // `inner` — `result` is claude's real "whole run settled" signal and
@@ -484,14 +548,36 @@ class ClaudeSession implements Session {
               const buffered = pending.shift();
               if (buffered) return { value: buffered, done: false };
 
-              if (turnSettled) return { value: undefined as never, done: true };
+              if (turnSettled) {
+                if (terminalFailure) throw terminalFailure;
+                return { value: undefined as never, done: true };
+              }
 
-              const { value, done } = await inner.next();
-              if (done) return { value: undefined as never, done: true };
+              let raw: IteratorResult<import('./events').ClaudeStreamMessage>;
+              try {
+                raw = await inner.next();
+              } catch (cause) {
+                throw new RuntimeExecutionFailure({
+                  phase: 'run',
+                  category: 'infrastructure',
+                  retry: 'retryable',
+                  reason: 'claude runtime event transport failed',
+                }, { cause });
+              }
+              const { value, done } = raw;
+              if (done) {
+                throw new RuntimeExecutionFailure({
+                  phase: 'run',
+                  category: 'infrastructure',
+                  retry: 'retryable',
+                  reason: 'claude runtime process ended before a terminal result frame',
+                }, { cause: client.terminalError });
+              }
 
               if (value.type === 'result') turnSettled = true;
 
               const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
+              terminalFailure = mapped.terminalFailure ?? terminalFailure;
               if (mapped.unmappedLabel) {
                 client.recordUnmappedFrame(mapped.unmappedLabel);
               }

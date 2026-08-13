@@ -11,6 +11,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
+import { RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
@@ -155,38 +156,67 @@ export class PiAdapter implements RuntimeAdapter {
         start: async (startInput: RuntimeOperationStartInput): Promise<Session> => {
           const manifestSelection = startInput.manifest.dispatchSelection;
           if (!sameDispatchSelection(manifestSelection, pinnedSelection)) {
-            throw new PolicyUnsupportedError('prepared pi operation received a manifest with different runtime selection');
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: 'prepared pi operation received a manifest with different runtime selection',
+            });
           }
           if (typeof startInput.instruction !== 'string') {
-            throw new PolicyUnsupportedError('prepared pi operation requires a resolved string instruction');
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: 'prepared pi operation requires a resolved string instruction',
+            });
           }
           const resumeSessionId = startInput.manifest.sessionRef;
           const piArgs = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
           const args = launcherArgs === undefined ? piArgs : [...launcherArgs, '--', ...piArgs];
-          const rpc = new PiRpcClient({
-            command,
-            args,
-            cwd: startInput.manifest.workspace.workspaceDir,
-            env: manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env),
-            spawnFn: this.options.spawnFn,
-          });
+          let rpc: PiRpcClient;
+          try {
+            rpc = new PiRpcClient({
+              command,
+              args,
+              cwd: startInput.manifest.workspace.workspaceDir,
+              env: manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env),
+              spawnFn: this.options.spawnFn,
+            });
+          } catch (cause) {
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'infrastructure', retry: 'retryable',
+              reason: 'pi runtime process could not be spawned',
+            }, { cause });
+          }
 
-          const response = await rpc.send({ type: 'prompt', message: startInput.instruction });
+          let response: PiRpcMessage;
+          try {
+            response = await rpc.send({ type: 'prompt', message: startInput.instruction });
+          } catch (cause) {
+            rpc.kill();
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'infrastructure', retry: 'retryable',
+              reason: `pi initial prompt transport failed: ${errorMessage(cause)}`,
+            }, { cause });
+          }
           if (response.success === false) {
             rpc.kill();
-            throw new Error(typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt');
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'semantic', retry: 'non-retryable',
+              reason: typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt',
+            });
           }
 
           let sessionRef: string;
-          if (resumeSessionId) {
-            sessionRef = resumeSessionId;
-          } else {
-            try {
-              sessionRef = await resolveFreshSessionId(rpc);
-            } catch (err) {
-              rpc.kill();
-              throw err;
-            }
+          try {
+            sessionRef = await resolveAuthoritativeSessionId(rpc);
+          } catch (err) {
+            rpc.kill();
+            throw err;
+          }
+          if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
+            rpc.kill();
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: 'pi resumed a different authoritative session than requested',
+            });
           }
           return new PiSession(sessionRef, rpc, manifestSelection);
         },
@@ -230,19 +260,30 @@ function sameDispatchSelection(
  * `PiRpcClient.buildExitError`), exactly like any other adapter start()
  * failure `task-runner.ts` already knows how to report as `task.fail`.
  */
-async function resolveFreshSessionId(rpc: PiRpcClient): Promise<string> {
+async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> {
   let state: PiRpcMessage;
   try {
     state = await rpc.send({ type: 'get_state' });
   } catch (err) {
-    throw new Error(`pi did not yield an authoritative session id (get_state failed): ${errorMessage(err)}`, {
+    if (isRuntimeExecutionFailure(err)) throw err;
+    throw new RuntimeExecutionFailure({
+      phase: 'start',
+      category: 'infrastructure',
+      retry: 'retryable',
+      reason: `pi transport ended before yielding an authoritative session id: ${errorMessage(err)}`,
+    }, {
       cause: err,
     });
   }
 
   if (state.success === false) {
     const reason = typeof state.error === 'string' ? state.error : 'get_state reported failure';
-    throw new Error(`pi did not yield an authoritative session id (get_state failed): ${reason}`);
+    throw new RuntimeExecutionFailure({
+      phase: 'start',
+      category: 'authority',
+      retry: 'non-retryable',
+      reason: `pi did not yield an authoritative session id: ${reason}`,
+    });
   }
 
   const data = state.data as { sessionId?: unknown } | undefined;
@@ -250,9 +291,12 @@ async function resolveFreshSessionId(rpc: PiRpcClient): Promise<string> {
     return data.sessionId;
   }
 
-  throw new Error(
-    'pi did not yield an authoritative session id (get_state succeeded but reported no sessionId) — cannot mint a resumable session',
-  );
+  throw new RuntimeExecutionFailure({
+    phase: 'start',
+    category: 'authority',
+    retry: 'non-retryable',
+    reason: 'pi get_state reported no authoritative session id',
+  });
 }
 
 class PiSession implements Session {
@@ -267,12 +311,40 @@ class PiSession implements Session {
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
         const inner = rpc.events[Symbol.asyncIterator]();
+        let terminalFailure: RuntimeExecutionFailure | undefined;
         return {
           async next(): Promise<IteratorResult<AgentEvent>> {
             for (;;) {
-              const { value, done } = await inner.next();
-              if (done) return { value: undefined as never, done: true };
+              if (terminalFailure) throw terminalFailure;
+              let result: IteratorResult<PiRpcMessage>;
+              try {
+                result = await inner.next();
+              } catch (cause) {
+                throw new RuntimeExecutionFailure({
+                  phase: 'run',
+                  category: 'infrastructure',
+                  retry: 'retryable',
+                  reason: 'pi runtime event transport failed',
+                }, { cause });
+              }
+              const { value, done } = result;
+              if (done) {
+                throw new RuntimeExecutionFailure({
+                  phase: 'run',
+                  category: 'infrastructure',
+                  retry: 'retryable',
+                  reason: 'pi runtime process ended before agent_settled',
+                }, { cause: rpc.terminalError });
+              }
               const mapped = mapPiMessageToAgentEvent(value);
+              if (value.type === 'auto_retry_end' && value.success === false) {
+                terminalFailure = new RuntimeExecutionFailure({
+                  phase: 'run',
+                  category: 'semantic',
+                  retry: 'non-retryable',
+                  reason: 'pi exhausted its native retry policy',
+                });
+              }
               if (mapped) return { value: mapped, done: false };
               // Unmapped pi message: routine bookkeeping (compaction/retry/
               // session events — see ROUTINE_PI_EVENT_TYPES) is silently

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { SteerUnsupportedError, type Session } from '../types';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
@@ -270,7 +271,15 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       FAKE_CODEX_REPORTED_THREAD_ID: 'some-other-thread', // but thread.started reports a DIFFERENT id
     });
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/echoed a different thread id than requested/);
+    let failure: unknown;
+    try {
+      await startAdapter(adapter, task, ctx);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(failure).toHaveProperty('message', expect.stringMatching(/echoed a different thread id than requested/));
   });
 
   it('fails closed (never a fabricated sessionRef) when codex does not yield thread.started as its first event', async () => {
@@ -282,10 +291,18 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('surfaces stderr context in the start() failure when codex exits immediately (bad-flag/crash shape)', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_CRASH_WITH_STDERR: 'Error: Unknown option: --bogus' });
-    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/Unknown option: --bogus/);
+    let failure: unknown;
+    try {
+      await startAdapter(adapter, baseTask, ctx);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'retryable' });
+    expect(failure).toHaveProperty('message', expect.stringMatching(/Unknown option: --bogus/));
   });
 
-  it('maps a turn.failed turn to an error AgentEvent and ends the stream without a turn_end (task-runner.ts then reports task.fail)', async () => {
+  it('maps turn.failed to a diagnostic error, then typed semantic non-retryable terminal evidence', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_TURN_FAILS: '1', FAKE_CODEX_FAIL_MESSAGE: 'model rejected the request' });
     const session = await startAdapter(adapter, baseTask, ctx);
@@ -293,12 +310,15 @@ describe('CodexAdapter against the fake-codex fixture', () => {
 
     // 4 mapped events total: the always-present skills-budget notice, the
     // "attempting..." progress message, the top-level error, and
-    // turn.failed's own error — never a turn_end. `takeEvents` bounds the
-    // read so this can never hang even if the count assumption is wrong.
+    // turn.failed's own diagnostic — never a turn_end. The subsequent fresh
+    // iterator observes the shared typed terminal authority.
     const events = await takeEvents(session, 4);
     expect(events.some((e) => e.type === 'turn_end')).toBe(false);
     expect(events).toContainEqual({ type: 'progress', text: 'attempting...' });
     expect(events).toContainEqual({ type: 'error', message: 'model rejected the request' });
+    await expect(async () => {
+      for await (const _event of session.events) void _event;
+    }).rejects.toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable' });
   });
 
   it('cross-model review (Fix 1): fake-codex exits after a partial turn with NO terminal event at all — the event stream ENDS (not a hang) and surfaces a synthetic error with stderr context', async () => {
@@ -312,8 +332,11 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     // 250ms later next() still pending"). If this regresses, the test fails
     // via vitest's own per-test timeout below rather than hanging the suite.
     const events: AgentEvent[] = [];
-    for await (const event of session.events) {
-      events.push(event);
+    let failure: unknown;
+    try {
+      for await (const event of session.events) events.push(event);
+    } catch (error) {
+      failure = error;
     }
 
     expect(events.some((e) => e.type === 'turn_end')).toBe(false);
@@ -322,6 +345,8 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(lastEvent.type).toBe('error');
     expect(lastEvent.message).toMatch(/exited without completing the turn/);
     expect(lastEvent.message).toMatch(/worker crashed unexpectedly/); // stderr ring context, per buildExitError
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'run', category: 'infrastructure', retry: 'retryable' });
   }, 5000);
 
   it('FAKE_CODEX_ARTIFACT_NAME drives a real file write + an artifact AgentEvent with a workspace-relative name', async () => {
@@ -419,9 +444,9 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     // Drain whatever this (possibly-mismatched) turn's own onEvent
     // processing already pushed before the identity check ran — race-
     // dependent (0 or more items), and not what this test asserts on.
-    for await (const _drained of session.events) {
-      void _drained;
-    }
+    await expect(async () => {
+      for await (const _drained of session.events) void _drained;
+    }).rejects.toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
 
     // The property this fix actually guarantees: the queue is DURABLY ended,
     // not just lucky once — a second, entirely fresh for-await over the same
@@ -429,10 +454,9 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     // immediately with nothing further, rather than hanging on its own first
     // next() call.
     const secondPass: AgentEvent[] = [];
-    for await (const event of session.events) {
-      secondPass.push(event);
-    }
-    expect(secondPass).toEqual([]);
+    await expect(async () => {
+      for await (const event of session.events) secondPass.push(event);
+    }).rejects.toBeInstanceOf(RuntimeExecutionFailure);
   }, 5000);
 
   it('M4 Fix 2: followUp() failing on a session-identity mismatch terminates the events stream promptly even when the underlying process would otherwise hang, and close() afterward still resolves cleanly', async () => {
@@ -457,15 +481,14 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       /echoed a different thread id than requested/,
     );
 
-    for await (const _drained of session.events) {
-      void _drained;
-    }
+    await expect(async () => {
+      for await (const _drained of session.events) void _drained;
+    }).rejects.toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
 
     const secondPass: AgentEvent[] = [];
-    for await (const event of session.events) {
-      secondPass.push(event);
-    }
-    expect(secondPass).toEqual([]);
+    await expect(async () => {
+      for await (const event of session.events) secondPass.push(event);
+    }).rejects.toBeInstanceOf(RuntimeExecutionFailure);
 
     // The other half of "child/runner is cleaned up": close() (which
     // SIGTERMs whatever `currentRunner` still refers to — here, turn 1's own

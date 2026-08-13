@@ -8,6 +8,7 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
 import { SteerUnsupportedError, type Session } from '../types';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -193,7 +194,15 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       FAKE_CLAUDE_REPORTED_SESSION_ID: 'some-other-session', // but system/init reports a DIFFERENT id
     });
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/echoed a different session id than requested/);
+    let failure: unknown;
+    try {
+      await startAdapter(adapter, task, ctx);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect(failure).toHaveProperty('message', expect.stringMatching(/echoed a different session id than requested/));
   });
 
   it('an unresolvable sessionRef surfaces claude\'s real resume rejection as a clean start() failure, not a hang (empirically confirmed against real claude: "No conversation found with session ID: ...", exit 1)', async () => {
@@ -207,7 +216,15 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('surfaces a bad-flag-class crash\'s stderr in the start() failure (finding #1-class failure, mirroring the pi adapter\'s own stderr-ring-buffer finding)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_CRASH_WITH_STDERR: 'error: simulated crash for stderr-capture test' });
-    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/simulated crash for stderr-capture test/);
+    let failure: unknown;
+    try {
+      await startAdapter(adapter, baseTask, ctx);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'retryable' });
+    expect(failure).toHaveProperty('message', expect.stringMatching(/simulated crash for stderr-capture test/));
   });
 
   it('M4 Phase 3: confirm mode with no approval channel wired up fails closed (internal-consistency check — TaskRunner always populates one; a missing one means something upstream is badly wired)', async () => {
@@ -384,14 +401,19 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     // `result` frame has been fully drained, so this loop terminates well
     // under the timeout without the process ever being killed here.
     const events: AgentEvent[] = [];
-    for await (const event of session.events) {
-      events.push(event);
+    let failure: unknown;
+    try {
+      for await (const event of session.events) events.push(event);
+    } catch (error) {
+      failure = error;
     }
 
     expect(events.some((e) => e.type === 'turn_end')).toBe(false);
     const lastEvent = events[events.length - 1] as { type: string; message?: string };
     expect(lastEvent.type).toBe('error');
     expect(lastEvent.message).toMatch(/missing\/invalid is_error flag/);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
   }, 5000);
 
   it('followUp() sends a new turn on the SAME persistent process/session, confirmed by an unchanged sessionRef and a second full event cycle', async () => {

@@ -12,6 +12,13 @@ export type {
   RuntimeDetectResult,
 } from '../types';
 export type { RuntimeEnvironmentRequirements } from '../daemon/environment';
+export { RuntimeExecutionFailure } from '../runtime-failure';
+export type {
+  RuntimeExecutionFailureInput,
+  RuntimeFailureCategory,
+  RuntimeFailurePhase,
+  RuntimeRetryDisposition,
+} from '../runtime-failure';
 
 export { PiAdapter } from './pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './pi/pi-adapter';

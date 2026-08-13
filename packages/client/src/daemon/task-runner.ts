@@ -18,7 +18,6 @@ import {
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
 import {
-  PolicyUnsupportedError,
   SteerUnsupportedError,
   freezeRuntimeAdapterDescriptor,
   sealRuntimeOperationManifest,
@@ -29,6 +28,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../types';
+import { projectRuntimeBoundaryFailure } from '../runtime-failure';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
@@ -438,11 +438,11 @@ interface ActiveTask {
    * side effect (e.g. claude's `interrupt()`/`close()` are both
    * `client.kill()`, which SIGTERMs the process — killing it ends the
    * stdout stream that backs `events`). Without this flag, `pump()`'s own
-   * "the events iterable ended without an explicit turn_end" fallback
-   * (which exists for a genuinely UNEXPECTED adapter/process crash) can't
+   * "the events iterable ended without an explicit turn_end" contract guard
+   * (which exists for an unexpected adapter termination) can't
    * tell that apart from a teardown *this* runner itself just triggered, and
-   * would report its OWN `task.fail` (retryable: true, "runtime session
-   * ended without completing the task") — racing `teardownActiveTask`'s own
+   * would report its OWN adapter-contract `task.fail` — racing
+   * `teardownActiveTask`'s own
    * intended, more specific outcome, and potentially winning it: for a
    * fast-closing session, `pump()`'s reaction to the queue ending is a
    * SHORTER chain than `teardownActiveTask`'s own remaining steps (a
@@ -1437,10 +1437,13 @@ export class TaskRunner {
       try {
         session = await prepared.operation.start(startInput);
       } catch (err) {
-        const retryable = !(err instanceof PolicyUnsupportedError);
+        const failure = projectRuntimeBoundaryFailure(err, 'start');
+        if (failure.contractViolation) {
+          console.error('[byok/client] runtime adapter start() returned an untyped failure', err);
+        }
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', 'repository-invalid');
         gitLease?.release();
-        await this.fail(taskId, `adapter failed to start: ${errorMessage(err)}`, retryable);
+        await this.fail(taskId, failure.reason, failure.retryable);
         return;
       }
 
@@ -1758,9 +1761,12 @@ export class TaskRunner {
         }
         active.batcher.push(event);
       }
-      // The events iterable ended without an explicit turn_end. This is
-      // usually the underlying runtime process exiting unexpectedly — but
-      // it's also exactly what happens when `handleCancel`/`handleReject`
+      // The events iterable ended without either an explicit turn_end or a
+      // typed RuntimeExecutionFailure. Bundled adapters translate process
+      // disappearance into a typed infrastructure failure before their
+      // iterable ends; a clean end here is therefore an adapter-contract
+      // violation, not permission for TaskRunner to guess provider meaning.
+      // This is also exactly what happens when `handleCancel`/`handleReject`
       // concurrently call `session.close()` while this loop is still
       // awaiting the same iterable (ending it is how those paths stop the
       // session). Check identity against the tasks map — if something else
@@ -1773,11 +1779,17 @@ export class TaskRunner {
       // check alone doesn't cover that path's pre-finish() hard-kill
       // `close()` call.
       if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-      await this.fail(active.taskId, 'runtime session ended without completing the task', true);
+      const failure = projectRuntimeBoundaryFailure(undefined, 'run');
+      console.error('[byok/client] runtime adapter events iterable ended without terminal authority');
+      await this.fail(active.taskId, failure.reason, failure.retryable);
     } catch (err) {
       if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
       active.batcher.flush();
-      await this.fail(active.taskId, `runtime error: ${errorMessage(err)}`, true);
+      const failure = projectRuntimeBoundaryFailure(err, 'run');
+      if (failure.contractViolation) {
+        console.error('[byok/client] runtime adapter events iterable returned an untyped failure', err);
+      }
+      await this.fail(active.taskId, failure.reason, failure.retryable);
     }
   }
 

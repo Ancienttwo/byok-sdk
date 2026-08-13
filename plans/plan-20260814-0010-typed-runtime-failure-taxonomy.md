@@ -207,26 +207,26 @@ Approved for execution after Row 1 passed exact-SHA review and landed on `main`.
 
 ## Task Breakdown
 
-- [ ] Confirm the landed Row 1 prepared-operation contract and freeze the failure boundary it exposes.
-- [ ] Add the closed phase/category/retry-disposition execution failure vocabulary and public contract documentation.
-- [ ] Replace TaskRunner start/run catch-all retry mapping with exhaustive typed projection and fail-closed handling of untyped throws.
-- [ ] Map Pi native semantic, infrastructure, and authority failures to the shared vocabulary.
-- [ ] Map Claude native semantic, infrastructure, and authority failures to the shared vocabulary.
-- [ ] Map Codex native semantic, infrastructure, and authority failures to the shared vocabulary.
-- [ ] Migrate all custom adapter/session fixtures and add exactly-once race coverage.
-- [ ] Add static no-message-parser/no-default-retry guards plus the full negative/positive matrix.
+- [x] Confirm the landed Row 1 prepared-operation contract and freeze the failure boundary it exposes.
+- [x] Add the closed phase/category/retry-disposition execution failure vocabulary and public contract documentation.
+- [x] Replace TaskRunner start/run catch-all retry mapping with exhaustive typed projection and fail-closed handling of untyped throws.
+- [x] Map Pi native semantic, infrastructure, and authority failures to the shared vocabulary.
+- [x] Map Claude native semantic, infrastructure, and authority failures to the shared vocabulary.
+- [x] Map Codex native semantic, infrastructure, and authority failures to the shared vocabulary.
+- [x] Migrate all custom adapter/session fixtures and add exactly-once race coverage.
+- [x] Add static no-message-parser/no-default-retry guards plus the full negative/positive matrix.
 - [ ] Update spec/security/architecture truth and run the complete verification boundary.
 
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Confirm the landed Row 1 prepared-operation contract and freeze the failure boundary it exposes.
-- [ ] Add the closed phase/category/retry-disposition execution failure vocabulary and public contract documentation.
-- [ ] Replace TaskRunner start/run catch-all retry mapping with exhaustive typed projection and fail-closed handling of untyped throws.
-- [ ] Map Pi native semantic, infrastructure, and authority failures to the shared vocabulary.
-- [ ] Map Claude native semantic, infrastructure, and authority failures to the shared vocabulary.
-- [ ] Map Codex native semantic, infrastructure, and authority failures to the shared vocabulary.
-- [ ] Migrate all custom adapter/session fixtures and add exactly-once race coverage.
-- [ ] Add static no-message-parser/no-default-retry guards plus the full negative/positive matrix.
+- [x] Confirm the landed Row 1 prepared-operation contract and freeze the failure boundary it exposes.
+- [x] Add the closed phase/category/retry-disposition execution failure vocabulary and public contract documentation.
+- [x] Replace TaskRunner start/run catch-all retry mapping with exhaustive typed projection and fail-closed handling of untyped throws.
+- [x] Map Pi native semantic, infrastructure, and authority failures to the shared vocabulary.
+- [x] Map Claude native semantic, infrastructure, and authority failures to the shared vocabulary.
+- [x] Map Codex native semantic, infrastructure, and authority failures to the shared vocabulary.
+- [x] Migrate all custom adapter/session fixtures and add exactly-once race coverage.
+- [x] Add static no-message-parser/no-default-retry guards plus the full negative/positive matrix.
 - [ ] Update spec/security/architecture truth and run the complete verification boundary.

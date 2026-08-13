@@ -13,6 +13,11 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
+import {
+  RuntimeExecutionFailure,
+  isRuntimeExecutionFailure,
+  type RuntimeFailurePhase,
+} from '../../runtime-failure';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
@@ -167,9 +172,15 @@ export class CodexAdapter implements RuntimeAdapter {
     command: string,
   ): Promise<Session> {
     if (typeof startInput.instruction !== 'string') {
-      throw new PolicyUnsupportedError('prepared codex operation requires a resolved string instruction');
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared codex operation requires a resolved string instruction',
+      });
     }
     const queue = new AsyncQueue<AgentEvent>();
+    const terminal: RuntimeTurnTerminal = {};
     const recordUnmapped = makeUnmappedFrameRecorder(new Map<string, number>());
 
     // Realpath'd once, up front — see `resolveRealWorkspaceDir`'s doc
@@ -181,12 +192,35 @@ export class CodexAdapter implements RuntimeAdapter {
     // stock `os.tmpdir()`-based workspace on macOS (`/var/folders/...`,
     // itself a symlink to `/private/var/folders/...`) hits this on literally
     // every run, not just a contrived edge case.
-    const workspaceDir = await resolveRealWorkspaceDir(startInput.manifest.workspace.workspaceDir);
+    let workspaceDir: string;
+    try {
+      workspaceDir = await resolveRealWorkspaceDir(startInput.manifest.workspace.workspaceDir);
+    } catch (cause) {
+      throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'infrastructure', retry: 'retryable',
+        reason: 'codex runtime workspace could not be resolved',
+      }, { cause });
+    }
 
     const runtimeEnv = withoutProviderCredentials(startInput.env);
-    const manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection);
+    let manifestModelId: string | undefined;
+    try {
+      manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection);
+    } catch (cause) {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared codex operation received an invalid runtime selection manifest',
+      }, { cause });
+    }
     if (manifestModelId !== modelId) {
-      throw new PolicyUnsupportedError('prepared codex operation received a manifest with different runtime selection');
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared codex operation received a manifest with different runtime selection',
+      });
     }
     const { sessionRef, runner } = await runCodexTurn({
       command,
@@ -202,6 +236,8 @@ export class CodexAdapter implements RuntimeAdapter {
       recordUnmapped,
       expectedSessionRef: startInput.manifest.sessionRef,
       preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
+      failurePhase: 'start',
+      terminal,
     });
 
     return new CodexSession({
@@ -215,6 +251,7 @@ export class CodexAdapter implements RuntimeAdapter {
       initialRunner: runner,
       preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
       modelId: manifestModelId,
+      terminal,
     });
   }
 
@@ -285,6 +322,12 @@ interface RunTurnParams {
    */
   expectedSessionRef?: string | undefined;
   preparedGit?: boolean;
+  failurePhase: RuntimeFailurePhase;
+  terminal: RuntimeTurnTerminal;
+}
+
+interface RuntimeTurnTerminal {
+  failure?: RuntimeExecutionFailure;
 }
 
 interface RunTurnResult {
@@ -358,34 +401,58 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
   // reuses this exact same queue — see `CodexSession` below).
   let turnEnded = false;
 
-  const runner = new CodexProcessRunner({
-    command: params.command,
-    args: argv,
-    cwd: params.cwd,
-    env: params.env,
-    spawnFn: params.spawnFn,
-    onEvent: (evt: CodexRawEvent) => {
-      if (!firstLineSettled) {
-        firstLineSettled = true;
-        if (evt.type === 'thread.started' && typeof evt.thread_id === 'string' && evt.thread_id.length > 0) {
-          resolveFirstLine(evt.thread_id);
-        } else {
-          rejectFirstLine(
-            new Error(`codex did not yield thread.started as its first event (got ${JSON.stringify(evt).slice(0, 200)})`),
-          );
+  let runner: CodexProcessRunner;
+  try {
+    runner = new CodexProcessRunner({
+      command: params.command,
+      args: argv,
+      cwd: params.cwd,
+      env: params.env,
+      spawnFn: params.spawnFn,
+      onEvent: (evt: CodexRawEvent) => {
+        if (!firstLineSettled) {
+          firstLineSettled = true;
+          if (evt.type === 'thread.started' && typeof evt.thread_id === 'string' && evt.thread_id.length > 0) {
+            resolveFirstLine(evt.thread_id);
+          } else {
+            rejectFirstLine(
+              new RuntimeExecutionFailure({
+                phase: params.failurePhase,
+                category: 'authority',
+                retry: 'non-retryable',
+                reason: `codex did not yield thread.started as its first event (got ${JSON.stringify(evt).slice(0, 200)})`,
+              }),
+            );
+          }
+          return;
         }
-        return;
-      }
-      const mapped = mapCodexEventToAgentEvents(evt, params.workspaceDir);
-      for (const agentEvent of mapped) {
-        if (agentEvent.type === 'turn_end') turnEnded = true;
-        params.queue.push(agentEvent);
-      }
-      if (mapped.length === 0 && !isRoutineCodexEvent(evt)) {
-        params.recordUnmapped(unmappedFrameKey(evt));
-      }
-    },
-  });
+        const mapped = mapCodexEventToAgentEvents(evt, params.workspaceDir);
+        for (const agentEvent of mapped) {
+          if (agentEvent.type === 'turn_end') turnEnded = true;
+          params.queue.push(agentEvent);
+        }
+        if (evt.type === 'turn.failed') {
+          params.terminal.failure = new RuntimeExecutionFailure({
+            phase: 'run',
+            category: 'semantic',
+            retry: 'non-retryable',
+            reason: 'codex reported terminal task failure',
+          });
+          params.queue.end();
+        }
+        if (mapped.length === 0 && !isRoutineCodexEvent(evt)) {
+          params.recordUnmapped(unmappedFrameKey(evt));
+        }
+      },
+    });
+  } catch (cause) {
+    throw new RuntimeExecutionFailure({
+      phase: params.failurePhase,
+      category: 'infrastructure',
+      retry: 'retryable',
+      reason: 'codex runtime process could not be spawned',
+    }, { cause });
+  }
 
   /**
    * Cross-model review finding (the "pi-hang class" — a task that never
@@ -412,8 +479,15 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
    * this watcher to it) is a harmless no-op (`AsyncQueue` is idempotent).
    */
   void runner.waitClosed().then(() => {
-    if (turnEnded) return;
-    params.queue.push({ type: 'error', message: runner.buildExitError('codex exited without completing the turn').message });
+    if (turnEnded || params.terminal.failure) return;
+    const cause = runner.buildExitError('codex exited without completing the turn');
+    params.terminal.failure = new RuntimeExecutionFailure({
+      phase: 'run',
+      category: 'infrastructure',
+      retry: 'retryable',
+      reason: cause.message,
+    }, { cause });
+    params.queue.push({ type: 'error', message: cause.message });
     params.queue.end();
   });
 
@@ -446,7 +520,13 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
       void runner.waitClosed().then(() => {
         if (!settled) {
           settled = true;
-          reject(runner.buildExitError('codex exited before yielding an authoritative thread id'));
+          const cause = runner.buildExitError('codex exited before yielding an authoritative thread id');
+          reject(new RuntimeExecutionFailure({
+            phase: params.failurePhase,
+            category: 'infrastructure',
+            retry: 'retryable',
+            reason: cause.message,
+          }, { cause }));
         }
       });
     });
@@ -467,9 +547,12 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
   // actually meant — fail closed rather than quietly proceeding.
   if (params.expectedSessionRef !== undefined && sessionRef !== params.expectedSessionRef) {
     runner.kill();
-    throw new Error(
-      `codex exec resume echoed a different thread id than requested (requested ${params.expectedSessionRef}, got ${sessionRef}) — refusing to continue in a possibly-wrong session (fail-closed)`,
-    );
+    throw new RuntimeExecutionFailure({
+      phase: params.failurePhase,
+      category: 'authority',
+      retry: 'non-retryable',
+      reason: `codex exec resume echoed a different thread id than requested (requested ${params.expectedSessionRef}, got ${sessionRef})`,
+    });
   }
 
   return { sessionRef, runner };
@@ -486,6 +569,7 @@ interface CodexSessionOptions {
   initialRunner: CodexProcessRunner;
   preparedGit: boolean;
   modelId: string | undefined;
+  terminal: RuntimeTurnTerminal;
 }
 
 class CodexSession implements Session {
@@ -511,6 +595,7 @@ class CodexSession implements Session {
   private readonly recordUnmapped: (key: string) => void;
   private readonly preparedGit: boolean;
   private readonly modelId: string | undefined;
+  private terminal: RuntimeTurnTerminal;
   private currentRunner: CodexProcessRunner | undefined;
   private closed = false;
 
@@ -524,12 +609,36 @@ class CodexSession implements Session {
     this.recordUnmapped = options.recordUnmapped;
     this.preparedGit = options.preparedGit;
     this.modelId = options.modelId;
+    this.terminal = options.terminal;
     this.currentRunner = options.initialRunner;
     void this.forgetRunnerOnceClosed(options.initialRunner);
   }
 
   get events(): AsyncIterable<AgentEvent> {
-    return this.queue;
+    const queue = this.queue;
+    const session = this;
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
+        const inner = queue[Symbol.asyncIterator]();
+        return {
+          async next(): Promise<IteratorResult<AgentEvent>> {
+            let result: IteratorResult<AgentEvent>;
+            try {
+              result = await inner.next();
+            } catch (cause) {
+              throw new RuntimeExecutionFailure({
+                phase: 'run',
+                category: 'infrastructure',
+                retry: 'retryable',
+                reason: 'codex runtime event transport failed',
+              }, { cause });
+            }
+            if (result.done && session.terminal.failure) throw session.terminal.failure;
+            return result;
+          },
+        };
+      },
+    };
   }
 
   private async forgetRunnerOnceClosed(runner: CodexProcessRunner): Promise<void> {
@@ -603,6 +712,7 @@ class CodexSession implements Session {
     const resumeRef = this.sessionRef;
     let sessionRef: string;
     let runner: CodexProcessRunner;
+    const terminal: RuntimeTurnTerminal = {};
     try {
       ({ sessionRef, runner } = await runCodexTurn({
         command: this.command,
@@ -618,6 +728,8 @@ class CodexSession implements Session {
         recordUnmapped: this.recordUnmapped,
         expectedSessionRef: resumeRef,
         preparedGit: this.preparedGit,
+        failurePhase: 'run',
+        terminal,
       }));
     } catch (err) {
       // Fix (queue-leak-on-failure): confirmed empirically with a diagnostic
@@ -648,8 +760,19 @@ class CodexSession implements Session {
       // queue's usefulness ends, since nothing can safely keep sharing it
       // once a turn's own result has been this explicitly distrusted.
       this.queue.end();
+      this.terminal = {
+        failure: isRuntimeExecutionFailure(err)
+          ? err
+          : new RuntimeExecutionFailure({
+              phase: 'run',
+              category: 'authority',
+              retry: 'non-retryable',
+              reason: 'codex follow-up violated the runtime adapter contract',
+            }, { cause: err }),
+      };
       throw err;
     }
+    this.terminal = terminal;
     this.sessionRef = sessionRef;
     this.currentRunner = runner;
     void this.forgetRunnerOnceClosed(runner);

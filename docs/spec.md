@@ -47,6 +47,33 @@ before claim. A prepared operation receives runtime resources only after the
 sealed manifest exists and claim has succeeded. This is a client-internal
 admission/lifecycle cut: protocol-v1 bytes and runtime ids are unchanged.
 
+### Post-admission runtime failure authority
+
+After claim, every expected adapter failure crosses one of two boundaries as a
+`RuntimeExecutionFailure`: `start` before a `Session` is published, or `run`
+from the published Session's event iterator. The failure carries two
+independent closed axes: `category` is `semantic`, `infrastructure`, or
+`authority`; `retry` is explicitly `retryable` or `non-retryable` and is never
+derived from category or reason text.
+
+- Vendor-native terminal task failure is semantic and non-retryable unless the
+  provider supplies structured retry authority.
+- Spawn, transport, or child-process disappearance before native terminal
+  evidence is infrastructure and retryable.
+- Session identity mismatch, malformed authoritative frames, or sealed
+  operation-manifest drift is authority and non-retryable.
+- A bare throw, wrong-phase typed failure, or Session iterator that ends
+  without `turn_end` or a typed failure is an adapter-contract violation. It
+  produces one stable non-retryable failure; TaskRunner does not inspect the
+  thrown message to invent semantics.
+
+`AgentEvent.error` remains diagnostic and may precede either success or typed
+failure. It is not terminal authority. Success still requires `turn_end`.
+TaskRunner projects the typed retry disposition onto the existing
+`task.fail.reason` and `task.fail.retryable` fields, so protocol-v1 bytes and
+event variants do not change. Interruption/close evidence is a separate
+teardown lifecycle and cannot rewrite an already established semantic result.
+
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm

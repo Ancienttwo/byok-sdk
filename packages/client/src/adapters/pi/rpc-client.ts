@@ -116,6 +116,11 @@ export class PiRpcClient {
     return this.eventQueue;
   }
 
+  /** Local transport diagnostic retained when the process closes; consumers must classify it explicitly. */
+  get terminalError(): Error | undefined {
+    return this.exitError;
+  }
+
   /**
    * Record a pi RPC message `type` that `PiSession` (pi-adapter.ts) decided
    * has no `AgentEvent` mapping and isn't routine bookkeeping (see

@@ -22,10 +22,19 @@ assert.doesNotMatch(bundledEntry, /(?:from|import\()\s*["']ws["']/);
 assert.doesNotMatch(bundledEntry, /ws-transport|createDaemon/);
 
 const adapters = await import(new URL('../dist/adapters/index.js', import.meta.url));
+const root = await import(new URL('../dist/index.js', import.meta.url));
 assert.deepEqual(
   Object.keys(adapters).sort(),
-  ['ClaudeAdapter', 'CodexAdapter', 'PI_PACKAGE_NAME', 'PiAdapter'],
+  ['ClaudeAdapter', 'CodexAdapter', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeExecutionFailure'],
 );
+const crossEntryFailure = new adapters.RuntimeExecutionFailure({
+  phase: 'start',
+  category: 'infrastructure',
+  retry: 'retryable',
+  reason: 'adapter-entry-smoke',
+});
+assert.equal(crossEntryFailure.retry, 'retryable');
+assert.equal(root.isRuntimeExecutionFailure(crossEntryFailure), true);
 assert.equal(new adapters.PiAdapter().descriptor.id, 'pi');
 assert.equal(new adapters.ClaudeAdapter().descriptor.id, 'claude');
 assert.equal(new adapters.CodexAdapter().descriptor.id, 'codex');

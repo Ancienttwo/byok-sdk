@@ -55,6 +55,25 @@ start consume that same manifest. A mutable custom-adapter descriptor cannot
 alter an already admitted operation, and the public interface has no direct
 `start()` fallback.
 
+Post-admission retryability has one typed authority. Expected start/run
+failures must be a frozen `RuntimeExecutionFailure` with closed phase,
+category, and explicit retry disposition. TaskRunner never classifies a
+provider error by regex, substring, exit prose, or an `AgentEvent.error`.
+Unknown throws, wrong-phase failures, and clean iterator completion without
+`turn_end` fail closed as a stable, non-retryable adapter-contract violation;
+their source value is logged locally only and is not copied to the wire.
+
+The typed `reason` is intentionally the adapter-authored operator/wire reason,
+so a custom adapter must treat it as wire-visible. Bundled adapters preserve
+their existing process-exit/stderr-tail diagnostics there; known credentials,
+environment values, prompts, tool bodies, and provider response payloads must
+not be deliberately copied into it. In contrast, the source value of an
+untyped contract violation remains local-only. Process or transport loss may
+be marked retryable; session/protocol/manifest authority violations and
+unstructured native task failure are non-retryable. Teardown remains separate
+because an interrupt or close failure may happen after the task already has a
+semantic terminal result and must not replace it.
+
 ### Task-scoped host MCP toolsets
 
 A toolset-aware offer's selector carries logical ids only. Commands and
@@ -117,7 +136,7 @@ The daemon never makes a checkpoint commit or changes Git identity. It does not 
 
 ### Interruption, redispatch, and local recovery
 
-A preparation failure after claim produces one sanitized protocol failure and leaves the directory intact. On runtime failure, cancellation, approval rejection, resource-limit teardown, shutdown, or other interruption, the daemon takes a bounded best-effort local observation, marks the private record for recovery, releases the writer lease, and preserves all files and `.git`. A daemon restart marks records left in `preparing` or `active` as `interrupted`; it does not revive the old protocol task and emits no synthetic wire continuation. A later valid redispatch may reuse the exact recorded directory only through its matching session/workspace records and the one-writer lease. Disabling the feature does not delete or convert existing directories.
+A prepared-operation start failure after claim produces one sanitized protocol failure and leaves the directory intact. On runtime failure, cancellation, approval rejection, resource-limit teardown, shutdown, or other interruption, the daemon takes a bounded best-effort local observation, marks the private record for recovery, releases the writer lease, and preserves all files and `.git`. A daemon restart marks records left in `preparing` or `active` as `interrupted`; it does not revive the old protocol task and emits no synthetic wire continuation. A later valid redispatch may reuse the exact recorded directory only through its matching session/workspace records and the one-writer lease. Disabling the feature does not delete or convert existing directories.
 
 ### Private ledger and audit boundary
 

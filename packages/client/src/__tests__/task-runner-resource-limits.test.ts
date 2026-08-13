@@ -257,20 +257,18 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
 
 /**
  * Acceptance gap: `pump()`'s OWN fallback (task-runner.ts:~1374-1375) for a
- * genuine mid-task crash — the runtime session's `events` iterable ending
- * with no explicit `turn_end` AND no teardown of any kind in flight
- * (`active.beingTornDown` never set). Unlike this file's two describe blocks
- * above, nothing here is limit-triggered: no `maxDurationMs`, no
- * `maxTaskOutputBytes` override — this is the plain "the underlying CLI
- * process just died" case, using `StubSession.endAbruptly()` (ends the event
- * queue with no `turn_end`, mirroring an unexpected exit) to reach it
- * deterministically instead of depending on a real adapter crashing.
+ * invalid custom-adapter termination — a Session `events` iterable ending
+ * with neither explicit `turn_end` nor a typed RuntimeExecutionFailure and no
+ * teardown in flight. Bundled adapters translate a genuine process crash to
+ * typed infrastructure/retryable before ending; TaskRunner cannot infer that
+ * meaning from a custom iterable's clean end.
  */
-describe("TaskRunner: genuine mid-task crash detection (pump's own fallback)", () => {
-  it('reports exactly one retryable task.fail with the fixed reason when the runtime session ends abruptly with no teardown in flight', async () => {
+describe('TaskRunner: clean custom Session termination', () => {
+  it('reports exactly one non-retryable contract violation when the runtime session ends without terminal authority', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent);
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await runner.handleEnvelope(
       createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-crash', seq: 1 }),
@@ -288,10 +286,12 @@ describe("TaskRunner: genuine mid-task crash detection (pump's own fallback)", (
     const fails = sent.filter((e) => e.type === 'task.fail' && e.task_id === 'task-crash');
     expect(fails).toHaveLength(1);
     expect(fails[0]?.payload).toMatchObject({
-      retryable: true,
-      reason: 'runtime session ended without completing the task',
+      retryable: false,
+      reason: 'runtime adapter contract violation during run',
     });
     expect(sent.some((e) => e.type === 'task.decline' && e.task_id === 'task-crash')).toBe(false);
     expect(runner.activeTaskCount).toBe(0);
+    expect(diagnostic).toHaveBeenCalledOnce();
+    diagnostic.mockRestore();
   });
 });

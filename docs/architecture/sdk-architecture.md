@@ -465,7 +465,7 @@ Library exports 分成六组：
 | 组 | 主要 public API |
 | --- | --- |
 | daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、`AuthManager`、`DeviceRevokedError`、`BlobClient` |
-| adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`PolicyUnsupportedError` |
+| adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`PolicyUnsupportedError` |
 | bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter` 与 options |
 | observability | `DaemonObserver`、event/task projection types |
 | Git workspace | `GitWorkspaceManager`、`GitWorkspaceStore`、ledger/lease/observation types |
@@ -478,6 +478,21 @@ credential-free `RuntimeOperationManifest`，然后将同一份 authority 用于
 admission、claim capability、环境筛选、runtime/lane/provider/model 与
 operation start。`prepare()` 不得 spawn、创建临时文件、分配或修改 workspace/
 session，也不得读取 credential value；旧 direct `start()` contract 不保留。
+
+post-admission failure 也只有一条 authority seam：prepared operation 的
+`start()` 或已发布 `Session.events` 以 frozen `RuntimeExecutionFailure` 终止，
+并显式携带 `phase: start|run`、`category:
+semantic|infrastructure|authority` 与 `retry: retryable|non-retryable`。
+provider adapter 负责把 native terminal frame、session identity、spawn/exit/
+transport 事实翻译到这组 closed vocabulary；`TaskRunner` 只做 exhaustive
+wire projection，不读 message、stderr 或 `AgentEvent.error` 猜 retryability。
+untyped throw、wrong-phase failure、或 iterator 无 `turn_end` 直接 clean end
+一律变成 stable non-retryable adapter-contract violation。`AgentEvent.error`
+只保留 diagnostic 职责；teardown/close failure 属独立 lifecycle，不能覆盖已
+成立的 semantic terminal result。root 与 adapter-only 两个 public ESM entry
+虽分别 bundle，此 failure authority 用 versioned global-symbol brand 加 closed
+field validation 跨 entry 识别，不依赖会分裂 constructor identity 的
+`instanceof`。
 
 `byok-agent` 命令面：
 
@@ -780,7 +795,8 @@ sequenceDiagram
     alt turn_end
       TR-->>Hub: task.complete
       Hub->>Store: Running to Complete
-    else runtime or policy failure
+    else typed runtime execution failure
+      AD-->>TR: RuntimeExecutionFailure phase/category/retry
       TR-->>Hub: task.fail
       Hub->>Store: non-terminal to Failed
     else cancel
@@ -791,7 +807,7 @@ sequenceDiagram
   end
 ```
 
-关键 ownership 变化：SaaS 创建 task；Hub 持有 embedded task record；TaskRunner 决定是否能安全执行；adapter 只拿 effective policy 与 daemon-owned workspace；runtime process 产生原始事件；adapter 归一化；server 只接受 owner device 的 daemon→server envelopes。
+关键 ownership 变化：SaaS 创建 task；Hub 持有 embedded task record；TaskRunner 决定是否能安全执行；adapter 只拿 effective policy 与 daemon-owned workspace；runtime process 产生原始事件；adapter 同时拥有 native event normalization 与 execution-failure classification；TaskRunner 只把显式 retry disposition 投影到既有 `task.fail` wire；server 只接受 owner device 的 daemon→server envelopes。
 
 ### 8.3 WS、long-poll 与 redelivery
 

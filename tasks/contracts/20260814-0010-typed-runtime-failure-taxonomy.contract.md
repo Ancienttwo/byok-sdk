@@ -90,12 +90,16 @@ allowed_paths:
   - packages/client/src/__tests__/runtime-failure.test.ts
   - packages/client/src/__tests__/task-runner-runtime-failure.test.ts
   - packages/client/src/__tests__/task-runner-runtime-selection.test.ts
+  - packages/client/src/__tests__/daemon-task-loop.test.ts
+  - packages/client/src/__tests__/task-runner-resource-limits.test.ts
   - packages/client/src/__tests__/pi-adapter.test.ts
   - packages/client/src/__tests__/claude-adapter.test.ts
   - packages/client/src/__tests__/codex-adapter.test.ts
   - packages/client/src/__tests__/pi-events.test.ts
+  - packages/client/src/__tests__/fixtures/fake-pi.mjs
   - packages/client/src/__tests__/claude-events.test.ts
   - packages/client/src/__tests__/codex-events.test.ts
+  - packages/client/scripts/check-adapters-entry.mjs
 ```
 
 ## Evidence Requirements

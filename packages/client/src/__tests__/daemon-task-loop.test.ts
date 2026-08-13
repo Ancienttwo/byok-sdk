@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { PolicyUnsupportedError } from '../types';
+import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
@@ -243,9 +243,14 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
     expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-4')).toBe(false);
   });
 
-  it('a PolicyUnsupportedError from adapter.start() is reported non-retryable; other start() errors are retryable', async () => {
+  it('a typed authority failure from adapter.start() is reported non-retryable', async () => {
     const unsupportedAdapter = new StubRuntimeAdapter('pi');
-    unsupportedAdapter.startError = new PolicyUnsupportedError('pi cannot express this policy');
+    unsupportedAdapter.startError = new RuntimeExecutionFailure({
+      phase: 'start',
+      category: 'authority',
+      retry: 'non-retryable',
+      reason: 'pi cannot express this policy',
+    });
     await setupDaemon(unsupportedAdapter);
 
     server.send(
@@ -263,9 +268,10 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
     expect((fail.payload as { reason: string }).reason).toContain('pi cannot express this policy');
   });
 
-  it('a generic (non-PolicyUnsupportedError) start() failure is reported retryable', async () => {
+  it('an untyped start() failure fails closed as a non-retryable adapter-contract violation', async () => {
     const flakyAdapter = new StubRuntimeAdapter('pi');
     flakyAdapter.startError = new Error('spawn ENOENT');
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await setupDaemon(flakyAdapter);
 
     server.send(
@@ -277,7 +283,12 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
     );
     await server.waitFor((e) => e.type === 'task.claim');
     const fail = await server.waitFor((e) => e.type === 'task.fail');
-    expect(fail.payload).toMatchObject({ retryable: true });
+    expect(fail.payload).toEqual({
+      reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.start,
+      retryable: false,
+    });
+    expect(diagnostic).toHaveBeenCalledOnce();
+    diagnostic.mockRestore();
   });
 
   it('steer forwards text to the running session', async () => {

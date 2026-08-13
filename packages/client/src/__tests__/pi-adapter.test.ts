@@ -8,6 +8,7 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { Session } from '../types';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 
@@ -91,6 +92,23 @@ describe('PiAdapter against the fake-pi fixture', () => {
       { type: 'progress', text: 'world' },
       { type: 'turn_end' },
     ]);
+  });
+
+  it('classifies spawn unavailability as typed start infrastructure retryable', async () => {
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      spawnFn: (() => {
+        throw new Error('spawn ENOENT');
+      }) as never,
+    });
+    let failure: unknown;
+    try {
+      await startAdapter(adapter, baseTask, await makeCtx());
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'retryable' });
   });
 
   it('routes an authoritative BYOK selection through the credential launcher without a key in argv or env', async () => {
@@ -240,6 +258,28 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_GET_STATE_FAIL: '1' });
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/did not yield an authoritative session id/);
+  });
+
+  it('emits the native retry diagnostic, then terminates with typed semantic non-retryable failure', async () => {
+    const adapter = fakePiAdapter();
+    const ctx = await makeCtx({ ...process.env, FAKE_PI_AUTO_RETRY_FAIL: '1' });
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    const iterator = session.events[Symbol.asyncIterator]();
+    const events = [];
+    let failure: unknown;
+    try {
+      for (;;) {
+        const next = await iterator.next();
+        if (next.done) break;
+        events.push(next.value);
+      }
+    } catch (error) {
+      failure = error;
+    }
+    expect(events).toContainEqual({ type: 'error', message: 'provider still unavailable' });
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable' });
   });
 
   it('a task.offer carrying a known sessionRef resumes it via the real `--session <id>` flag', async () => {

@@ -17,6 +17,20 @@ export type {
 } from './types';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
+export {
+  RuntimeExecutionFailure,
+  RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON,
+  isRuntimeExecutionFailure,
+  projectRuntimeBoundaryFailure,
+  projectRuntimeExecutionFailure,
+} from './runtime-failure';
+export type {
+  RuntimeExecutionFailureInput,
+  RuntimeFailureCategory,
+  RuntimeFailurePhase,
+  RuntimeFailureProjection,
+  RuntimeRetryDisposition,
+} from './runtime-failure';
 
 export { GitWorkspaceManager, GitWorkspaceError, isGitWorkspaceConfig, prependGitWorkspaceGuidance } from './daemon/git-workspace';
 export type { GitWorkspaceObservation, GitWorkspaceLease, GitWorkspaceOptions, GitErrorCategory } from './daemon/git-workspace';

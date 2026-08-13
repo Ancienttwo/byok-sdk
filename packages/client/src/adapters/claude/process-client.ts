@@ -136,6 +136,11 @@ export class ClaudeProcessClient {
     return this.eventQueue;
   }
 
+  /** Local transport diagnostic retained when the process closes; consumers classify it at the session boundary. */
+  get terminalError(): Error | undefined {
+    return this.exitError;
+  }
+
   /**
    * Record a claude stream-json frame/subtype/content-block label that
    * `ClaudeSession`'s event iterator (`../claude-adapter.ts`) decided has

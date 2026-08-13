@@ -43,6 +43,7 @@ export class StubSession implements Session {
   steerAttempts = 0;
   private closeGate: Promise<void> | undefined;
   private steerGate: Promise<void> | undefined;
+  private terminalFailure: Error | undefined;
 
   constructor(public readonly sessionRef: string) {}
 
@@ -82,7 +83,20 @@ export class StubSession implements Session {
   }
 
   get events(): AsyncIterable<AgentEvent> {
-    return this.queue;
+    const queue = this.queue;
+    const session = this;
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
+        const inner = queue[Symbol.asyncIterator]();
+        return {
+          async next(): Promise<IteratorResult<AgentEvent>> {
+            const result = await inner.next();
+            if (result.done && session.terminalFailure) throw session.terminalFailure;
+            return result;
+          },
+        };
+      },
+    };
   }
 
   async steer(text: string): Promise<void> {
@@ -125,6 +139,12 @@ export class StubSession implements Session {
 
   /** Test helper: end the session's event stream without a `turn_end` (simulates an unexpected exit). */
   endAbruptly(): void {
+    this.queue.end();
+  }
+
+  /** Test helper: end the stream with an explicit typed or untyped terminal failure. */
+  fail(error: Error): void {
+    this.terminalFailure = error;
     this.queue.end();
   }
 }

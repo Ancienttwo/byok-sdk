@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
+import { RuntimeExecutionFailure } from '../../runtime-failure';
 
 /**
  * A raw parsed line from `claude --output-format stream-json`. Shapes vary
@@ -47,6 +48,8 @@ export interface MapClaudeMessageOptions {
 
 export interface MapClaudeMessageResult {
   events: AgentEvent[];
+  /** Present only when this frame is authoritative terminal failure evidence. */
+  terminalFailure?: RuntimeExecutionFailure;
   /**
    * Set when this exact frame (or, for `assistant`/`user` frames, one
    * content block inside it) was genuinely unrecognized — a frame/subtype/
@@ -376,7 +379,15 @@ function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
           ? `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed; diagnostic content on the frame: ${truncateResultDiagnostic(diagnostic)}`
           : `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed`;
   const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'error', message }] : [{ type: 'error', message }];
-  return { events };
+  return {
+    events,
+    terminalFailure: new RuntimeExecutionFailure({
+      phase: 'run',
+      category: msg.is_error === true ? 'semantic' : 'authority',
+      retry: 'non-retryable',
+      reason: msg.is_error === true ? 'claude reported terminal task failure' : 'claude emitted a malformed terminal result frame',
+    }),
+  };
 }
 
 /** Sane upper bound on how much of a malformed `result` frame's own diagnostic content (`errors`/`result`) gets folded into the fail-closed message above — no existing truncation helper in this file to reuse (the codex adapter's equivalent, `codex-adapter.ts`'s `JSON.stringify(evt).slice(0, 200)`, lives in a different module entirely), so this is its own small, local bound rather than a shared one. */

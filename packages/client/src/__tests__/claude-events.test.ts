@@ -9,6 +9,7 @@ import {
   ROUTINE_CLAUDE_SYSTEM_SUBTYPES,
   type ClaudeStreamMessage,
 } from '../adapters/claude/events';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 
 async function tmpWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-events-test-'));
@@ -172,9 +173,12 @@ describe('mapClaudeMessageToAgentEvents', () => {
       is_error: true,
       errors: ['No conversation found with session ID: bogus'],
     };
-    expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({
-      events: [{ type: 'error', message: 'No conversation found with session ID: bogus' }],
-    });
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events).toEqual([{ type: 'error', message: 'No conversation found with session ID: bogus' }]);
+    expect(result.terminalFailure).toEqual(expect.objectContaining({
+      phase: 'run', category: 'semantic', retry: 'non-retryable',
+    }));
+    expect(result.terminalFailure).toBeInstanceOf(RuntimeExecutionFailure);
   });
 
   it('maps a failed result that still carries partial usage to a usage AgentEvent followed by error', () => {
@@ -186,20 +190,20 @@ describe('mapClaudeMessageToAgentEvents', () => {
       errors: ['model overloaded'],
       usage: { input_tokens: 50, output_tokens: 0 },
     };
-    expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({
-      events: [
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events).toEqual([
         { type: 'usage', inputTokens: 50, outputTokens: 0 },
         { type: 'error', message: 'model overloaded' },
-      ],
-    });
+    ]);
+    expect(result.terminalFailure).toMatchObject({ category: 'semantic', retry: 'non-retryable' });
   });
 
   it('falls back to a generic error message when a failed result has neither errors nor a result string', () => {
     const correlation = createToolUseCorrelation();
     const msg: ClaudeStreamMessage = { type: 'result', is_error: true };
-    expect(mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' })).toEqual({
-      events: [{ type: 'error', message: 'claude reported an error result' }],
-    });
+    const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events).toEqual([{ type: 'error', message: 'claude reported an error result' }]);
+    expect(result.terminalFailure).toMatchObject({ category: 'semantic', retry: 'non-retryable' });
   });
 
   it('cross-model review (Fix 3): a result with a MISSING is_error is never reported as success — fails closed rather than treating an absent flag as success', () => {
