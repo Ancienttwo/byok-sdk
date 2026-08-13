@@ -1,9 +1,9 @@
 # Sprint: Runtime Adapter Lifecycle Contracts
 
-> **Status**: Draft
+> **Status**: Approved
 > **Slug**: runtime-adapter-lifecycle-contracts
 > **Created**: 2026-08-14 00:05
-> **Updated**: 2026-08-14 00:13
+> **Updated**: 2026-08-14 00:18
 > **Source PRD**: (none — source research) `docs/researches/2026-08-13_deepseek-harness-extraction-assessment.md`
 > **Source Spec**: `docs/spec.md`
 > **Goal Mode**: incremental

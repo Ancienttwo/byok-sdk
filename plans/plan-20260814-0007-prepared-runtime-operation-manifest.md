@@ -1,12 +1,13 @@
 # Plan: Prepared Runtime Operation Manifest
 
-> **Status**: Draft
+> **Status**: Executing
 > **Created**: 20260814-0007
 > **Slug**: prepared-runtime-operation-manifest
 > **Planning Source**: waza-think
 > **Orchestration Kind**: sprint-task
 > **Source Ref**: sprint:plans/sprints/20260814-0005-runtime-adapter-lifecycle-contracts.sprint.md#Prepared runtime operation manifest + pre-claim admission cut
 > **Artifact Level**: work-package
+> **Execution Mode**: contract-worktree
 > **Promotion Reason**: Current TaskRunner admission reads adapter capabilities more than once, evaluates environment requirements after claim, and lets adapter-specific permanent rejections occur after claim; the public RuntimeAdapter cut spans all three bundled adapters and every custom-adapter test fake, so it is an independently reviewable breaking merge unit.
 > **Verification Boundary**: Run client typecheck/test/build, adapter built-entry smoke, workspace typecheck/test/build, release package-graph check, and strict contract/workflow verification; negative tests must prove zero claim/start/spawn/workspace side effects before admission.
 > **Rollback Surface**: Revert the single 0.4.0 RuntimeAdapter contract commit and its coordinated client/sdk manifest, release-script, docs, adapter, daemon, fixture, and test changes; do not retain an old/new dual adapter path.
