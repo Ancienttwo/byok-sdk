@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-13 19:42
+> **Related Plan**: plans/archive/plan-20260813-1925-control-socket-fallback.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260813-1942
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-13 19:25
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-13 19:42
+> **Related Plan**: plans/archive/plan-20260813-1925-control-socket-fallback.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260813-1942
+
 # Task Contract: control-socket-fallback
 
 > **Status**: Fulfilled

@@ -1,6 +1,6 @@
 # Plan: controlSocketPath fallback — fixed root, env-independent address
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260813-1925
 > **Slug**: control-socket-fallback
 > **Planning Source**: repo-harness-plan
