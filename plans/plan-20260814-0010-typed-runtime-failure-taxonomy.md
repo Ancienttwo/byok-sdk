@@ -1,6 +1,6 @@
 # Plan: Typed Runtime Failure Taxonomy
 
-> **Status**: Draft
+> **Status**: Approved
 > **Created**: 20260814-0010
 > **Slug**: typed-runtime-failure-taxonomy
 > **Planning Source**: waza-think
@@ -203,7 +203,7 @@ One implementation worker owns all production files because the exhaustive type 
 
 ## Approval Boundary
 
-This plan stays Draft. Approval of the Sprint can approve its ordering, but Row 2 execution starts only after Row 1 passes review and lands. Approval does not authorize teardown/process-group changes or publication.
+Approved for execution after Row 1 passed exact-SHA review and landed on `main`. This approval does not authorize teardown/process-group changes or publication.
 
 ## Task Breakdown
 
