@@ -4,7 +4,7 @@
  * The exact counterpart of `@byok-sdk/core`'s `ports-contract.ts`, and it exists
  * for the same reason: the table says what a port IS, so it has to be readable
  * by every enforcer without any of them owning it. `@byok-sdk/conformance` asserts
- * live compositions against it; a durable adapter (`@byok-sdk/cloud-postgres`) is
+ * live compositions against it; a durable adapter (`@byok-sdk/cloud-dataplane`) is
  * written against it.
  *
  * This module adds data and nothing else. It does not re-declare, re-shape, or

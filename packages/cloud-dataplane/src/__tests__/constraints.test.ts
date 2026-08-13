@@ -85,7 +85,7 @@ describe('the CI dataplane job', () => {
   it('runs BOTH compositions of the cloud conformance suite', () => {
     // One assertion source, two compositions, one job: a divergence between
     // them has to be a failure here, not a discrepancy discovered later.
-    expect(workflow).toContain('pnpm --filter @byok-sdk/cloud-postgres test');
+    expect(workflow).toContain('pnpm --filter @byok-sdk/cloud-dataplane test');
     expect(workflow).toContain('pnpm --filter @byok-sdk/conformance test');
   });
 

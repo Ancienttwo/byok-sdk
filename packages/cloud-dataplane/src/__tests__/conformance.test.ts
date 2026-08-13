@@ -15,7 +15,7 @@
  *
  * The composition lives here rather than beside the in-memory entry because the
  * dependency direction has to stay one-way: `conformance → core + cloud`, and
- * `cloud-postgres --devDep--> conformance`. Putting this file in the suite
+ * `cloud-dataplane --devDep--> conformance`. Putting this file in the suite
  * package would make the suite depend on an adapter — the same cycle that
  * moving `CORE_PORT_*` into core's shipped source was meant to break.
  */

@@ -39,4 +39,4 @@ for (const name of migrations) {
   copyFileSync(path.join(sourceDir, name), path.join(targetDir, name));
 }
 
-console.log(`[cloud-postgres] projected ${migrations.length} migration(s) from deploy/sql into dist/sql`);
+console.log(`[cloud-dataplane] projected ${migrations.length} migration(s) from deploy/sql into dist/sql`);

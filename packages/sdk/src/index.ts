@@ -9,4 +9,4 @@ export * as protocol from '@byok-sdk/protocol';
 export * as client from '@byok-sdk/client';
 export * as server from '@byok-sdk/server';
 export * as cloud from '@byok-sdk/cloud';
-export * as cloudPostgres from '@byok-sdk/cloud-postgres';
+export * as cloudDataplane from '@byok-sdk/cloud-dataplane';

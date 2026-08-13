@@ -24,7 +24,11 @@
 - Agent dispatch plane：`@byok-sdk/protocol` + `@byok-sdk/server` + `@byok-sdk/client`。SaaS 只提出任务，本机 daemon 才是执行权威；这条链承诺 credential isolation。
 - Provider key plane：`@byok-sdk/keys`。它主动保管 provider API key，并可通过独立 launcher 把 credential-blind projection 交给 Pi；dispatch 包仍不 import 它，组合发生在进程边界。
 
-目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-postgres` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 先将六个 dispatch package 与 `byok-sdk` namespace umbrella 发布为 `0.1.0`；随后 adapter-only security release 把同一七包 dispatch graph 推进到 `0.1.1`。`@byok-sdk/keys` 继续独立停在 `0.1.0`，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录最终执行状态。
+目标平台新增的 `@byok-sdk/core`、`@byok-sdk/cloud` 与 `@byok-sdk/cloud-dataplane` 已落地，把可组装契约、mailbox、board、truth record、多租户边界与 Postgres+R2 production composition 独立出来。`@byok-sdk/core` 于 2026-08-07（S2）成为 zod-only、protocol-free、Node-free workspace package；`@byok-sdk/cloud` 消费其 hosted contracts，S6-c 再让 `@byok-sdk/client` 消费同一个 proof canonicalizer 与 truth selector types，避免两份签名字节权威。`server`/`keys` 尚未接线到 core。S7-c 先将六个 dispatch package 与 `byok-sdk` namespace umbrella 发布为 `0.1.0`；随后 adapter-only security release 把同一七包 dispatch graph 推进到 `0.1.1`。`@byok-sdk/keys` 继续独立停在 `0.1.0`，不进入 umbrella 或 dispatch dependency graph。本文在第 12 节记录最终执行状态。
+
+> Package identity note：registry releases `0.1.0`–`0.3.0` 使用历史名称
+> `@byok-sdk/cloud-postgres` / `cloudPostgres`；当前源码已一次性切换为
+> `@byok-sdk/cloud-dataplane` / `cloudDataplane`，不提供双名称 alias。
 
 ## 1. P1：全局架构地图
 
@@ -118,7 +122,7 @@ flowchart LR
   Keys(["@byok-sdk/keys<br/>provider credential plane"]):::key
   Core(["@byok-sdk/core<br/>zod-only composable contracts"]):::contract
   Cloud(["@byok-sdk/cloud<br/>stateless hosted surface"]):::runtime
-  CloudPg(["@byok-sdk/cloud-postgres<br/>Postgres + R2 composition"]):::runtime
+  CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 composition"]):::runtime
   SDK(["byok-sdk<br/>six namespace umbrella"]):::example
   Conformance(["@byok-sdk/conformance<br/>private test authority"]):::dev
   Basic(["examples/basic<br/>E2E SaaS demo"]):::example
@@ -156,7 +160,7 @@ flowchart LR
 | keys | 18 / 2,718 | 15 / 2,958 | 独立 key-custody 安全模型 |
 | core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
 | cloud | 42 / 5,045 | 10 / 3,003 | stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
-| cloud-postgres | 22 / 6,309 | 14 / 3,533 | production Postgres + R2 composition；事务、quota、GC 与 reconciliation authority |
+| cloud-dataplane | 22 / 6,309 | 14 / 3,533 | production Postgres + R2 composition；事务、quota、GC 与 reconciliation authority |
 | sdk | 1 / 12 | 1 / 16 | public namespace umbrella；依赖六个 dispatch package，明确排除 keys |
 | conformance | 26 / 2,842 | 2 / 84 | private shared assertion authority；不得进入发布依赖树 |
 
@@ -170,7 +174,7 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 
 对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余 package。
 
-强依赖是 `server → protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-postgres → cloud/core` 与 `byok-sdk → 六个 dispatch package`；弱依赖是 `client -dev→ server` 与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
+强依赖是 `server → protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core` 与 `byok-sdk → 六个 dispatch package`；弱依赖是 `client -dev→ server` 与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
 
 - `core !→ protocol`、`core !→ node`：core 必须保持 protocol-free、Node-free，由包内 constraint test 执行（ADR-003）。
 - `client → core`（S6-c 当前事实）：只消费 proof canonicalizer 与 truth selector contracts，不依赖 cloud implementation。
@@ -963,7 +967,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 
 ## 12. 平台架构（S0–S7 与 release/registry closeout 已落地）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-postgres` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 仍独立为 `0.1.0`；wire v1 保持冻结。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-dataplane` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 仍独立为 `0.1.0`；wire v1 保持冻结。
 
 ### 12.1 目标 package graph
 
@@ -977,7 +981,7 @@ flowchart TB
   Protocol(["@byok-sdk/protocol<br/>existing, frozen v1"]):::existing
   Core(["@byok-sdk/core<br/>implemented, consumed by cloud<br/>zod-only, protocol-free, Node-free"]):::existing
   Cloud(["@byok-sdk/cloud<br/>stateless device + board + truth surface<br/>InMemory composition"]):::existing
-  CloudPg(["@byok-sdk/cloud-postgres<br/>Postgres + R2 production composition"]):::existing
+  CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 production composition"]):::existing
   Client(["@byok-sdk/client<br/>existing local authority"]):::existing
   Server(["@byok-sdk/server<br/>existing self-hosted option"]):::existing
   SDK(["byok-sdk<br/>six dispatch namespaces"]):::existing
@@ -1635,7 +1639,7 @@ flowchart LR
 
 | RC profile | 范围 | 门禁 |
 | --- | --- | --- |
-| Dispatch Platform RC | 六个 dispatch packages（`protocol`、`server`、`client`、`cloud`、`core`、`cloud-postgres`）与 `byok-sdk` namespace umbrella | S7 operations/release、full compositions、packageability、registry readback；umbrella runtime graph 不得到达 keys |
+| Dispatch Platform RC | 六个 dispatch packages（`protocol`、`server`、`client`、`cloud`、`core`、`cloud-dataplane`）与 `byok-sdk` namespace umbrella | S7 operations/release、full compositions、packageability、registry readback；umbrella runtime graph 不得到达 keys |
 | BYOK product-suite RC | Dispatch Platform RC + 独立 `@byok-sdk/keys` 的 K4/K4.1 host integration | 追加 K4 golden parity 与 keys graph invariant；这是 product-suite 验证集合，不表示 `byok-sdk` npm umbrella 依赖或导出 keys |
 
 排序原则：
@@ -1889,7 +1893,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | I4 | store conformance 跨租户不变式 | 每个 store port 方法：T1 写入、以 T2 读 → empty/undefined；port 不存在可变更 `tenant_id` 的方法；InMemory 与 SQL 后端跑同一份套件 | store conformance suite |
 | I5 | bearer 交叉验证 | token `claims.tenantId` 与 registry 行不符 → 401；registry 为权威 | `@byok-sdk/server` auth 测试 |
 | I6 | `board_seq` 隔离 | 并发双租户写入下，A 的 SSE/轮询流永不出现 B 的行；per-tenant 序列互不推进 | cloud board 测试（P3 并入矩阵） |
-| I7 | 铸造点受控 | `@byok-sdk/core` 只允许 `tenant.ts` 铸造；`@byok-sdk/cloud-postgres` 只允许 row→record 的 `stores/` 边界铸造；cloud 的 pre-tenant device lookup 是显式 auth 例外。各包用自己的 source scan/type tests 守住边界 | package-local guards（不是单一 repo-wide scanner） |
+| I7 | 铸造点受控 | `@byok-sdk/core` 只允许 `tenant.ts` 铸造；`@byok-sdk/cloud-dataplane` 只允许 row→record 的 `stores/` 边界铸造；cloud 的 pre-tenant device lookup 是显式 auth 例外。各包用自己的 source scan/type tests 守住边界 | package-local guards（不是单一 repo-wide scanner） |
 | I8 | golden 零漂 | `git diff --exit-code packages/protocol/src/__tests__/golden/` 加 freeze-guard 全绿——机检证明 pairing 绑定未碰 DTO | 既有机检 |
 | I9 | `productId` 等值 | `conn.hello.productId` 与 device 行不符 → 拒连 | `@byok-sdk/server` hub 测试 |
 

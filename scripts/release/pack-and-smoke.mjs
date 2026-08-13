@@ -15,7 +15,7 @@ const packages = [
   '@byok-sdk/server',
   '@byok-sdk/cloud',
   '@byok-sdk/client',
-  '@byok-sdk/cloud-postgres',
+  '@byok-sdk/cloud-dataplane',
   '@byok-sdk/testkit',
   'byok-sdk',
 ];
@@ -58,7 +58,7 @@ function sha512Integrity(filePath) {
 }
 
 // --- Release asset guarantee: the migration SQL a runner needs must ship WITH
-// the runner. `@byok-sdk/cloud-postgres` exports `migrate(pool, directory)`, and
+// the runner. `@byok-sdk/cloud-dataplane` exports `migrate(pool, directory)`, and
 // until the build projected `deploy/sql` into `dist/sql` the tarball carried the
 // runner and none of the files it runs — an install-time hole no import smoke
 // can see. `deploy/sql` stays the only place migrations are authored; `dist/sql`
@@ -151,7 +151,7 @@ try {
     if (created.length !== 1) throw new Error(`${packageName}: expected one tarball, created ${created.length}`);
     const file = created[0];
     const tarballPath = path.join(outDir, file);
-    if (packageName === '@byok-sdk/cloud-postgres') {
+    if (packageName === '@byok-sdk/cloud-dataplane') {
       migrationFiles = assertTarballCarriesMigrations(tarballPath);
     }
     tarballs.push({
@@ -184,19 +184,19 @@ try {
         `import { readdirSync, statSync } from 'node:fs';\n` +
         `import { createRequire } from 'node:module';\n` +
         `const require = createRequire(import.meta.url);\n` +
-        `const expected = ['client','cloud','cloudPostgres','core','protocol','server'];\n` +
+        `const expected = ['client','cloud','cloudDataplane','core','protocol','server'];\n` +
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-postgres']) await import(name);\n` +
-        `for (const name of ['byok-sdk','@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-postgres']) {\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane']) await import(name);\n` +
+        `for (const name of ['byok-sdk','@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane']) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, '${releaseVersion}', name);\n` +
         `}\n` +
         // The other half of the release-asset guarantee: the tarball check above
         // proves the bytes are IN the package, this proves the installed package
         // can point a runner at them without any source checkout in reach.
-        `const { migrationsDir } = await import('@byok-sdk/cloud-postgres');\n` +
+        `const { migrationsDir } = await import('@byok-sdk/cloud-dataplane');\n` +
         `const migrations = migrationsDir();\n` +
         `assert.equal(statSync(migrations).isDirectory(), true, migrations);\n` +
         `assert.deepEqual(readdirSync(migrations).sort(), ${JSON.stringify([...migrationFiles].sort())});\n` +

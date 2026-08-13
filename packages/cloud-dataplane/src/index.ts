@@ -1,13 +1,16 @@
 /**
- * `@byok-sdk/cloud-postgres` — the durable data plane.
+ * `@byok-sdk/cloud-dataplane` — the durable data plane.
  *
- * `cloud-postgres → core + cloud + protocol + pg`, and never the reverse. The two
+ * `cloud-dataplane → core + cloud + protocol + pg`, and never the reverse. The two
  * platform-neutral packages stay loadable on Workers precisely because the
  * database driver lives here (design §4): `@byok-sdk/cloud` is a stateless handler
  * package, and a `hono` user must not be made to install `pg` to use it.
  *
- * The naming family is `@byok-sdk/cloud-<transaction authority>`; a future optional
- * D1 adapter would be `@byok-sdk/cloud-d1`.
+ * The package name follows its hosted role rather than leaking one storage
+ * technology into the public identity. Postgres remains the transaction
+ * authority and R2/S3-compatible storage remains the byte plane; a future
+ * alternative composition must use a distinct package name rather than making
+ * this authority conditional at runtime.
  */
 
 // The pool factory (int8 parsing configured per-pool, never globally)

@@ -6,7 +6,7 @@ describe('byok-sdk umbrella', () => {
     expect(Object.keys(sdk).sort()).toEqual([
       'client',
       'cloud',
-      'cloudPostgres',
+      'cloudDataplane',
       'core',
       'protocol',
       'server',

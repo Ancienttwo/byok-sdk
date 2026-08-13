@@ -10,12 +10,12 @@ npm install byok-sdk
 ```
 
 ```ts
-import { client, cloud, cloudPostgres, core, protocol, server } from 'byok-sdk';
+import { client, cloud, cloudDataplane, core, protocol, server } from 'byok-sdk';
 ```
 
 The umbrella uses namespaces so each contract keeps its package owner. The
 same modules are also directly installable as `@byok-sdk/client`,
-`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-postgres`,
+`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`,
 `@byok-sdk/core`, and `@byok-sdk/protocol`.
 
 ## Choose a composition
@@ -23,7 +23,7 @@ same modules are also directly installable as `@byok-sdk/client`,
 - Self-hosted: use `server` for the in-memory coordinator and `client` for the
   local daemon. This is the smallest complete deployment and does not require
   Postgres or object storage.
-- Hosted: use `cloud` for stateless device routes and `cloudPostgres` for the
+- Hosted: use `cloud` for stateless device routes and `cloudDataplane` for the
   durable Postgres + R2 data plane. The host owns authentication, scheduling,
   migration execution, deployment, signing, updater channels, and operations.
 

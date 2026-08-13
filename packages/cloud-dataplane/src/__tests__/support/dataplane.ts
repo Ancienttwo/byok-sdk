@@ -9,7 +9,7 @@
  *   developer without docker sees a signpost, not a mystery.
  * - `BYOK_REQUIRE_DATAPLANE=1` → absence is a hard failure instead. That flag
  *   is set by exactly one CI job, so the skip path can never be how CI stays
- *   green, and `packages/cloud-postgres/src/__tests__/constraints.test.ts`
+ *   green, and `packages/cloud-dataplane/src/__tests__/constraints.test.ts`
  *   pins the job that sets it.
  *
  * `process.env.CI` is deliberately NOT the gate: `pnpm -r test` already runs

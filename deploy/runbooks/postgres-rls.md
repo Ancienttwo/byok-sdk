@@ -1,7 +1,7 @@
 # Postgres row-level security — optional hardening, not relied upon
 
 > **Status**: documented, deliberately not enabled
-> **Applies to**: any hosted deployment of `deploy/sql/` + `@byok-sdk/cloud-postgres`
+> **Applies to**: any hosted deployment of `deploy/sql/` + `@byok-sdk/cloud-dataplane`
 > **Sprint box**: S4A.5 "Postgres optional RLS hardening documented but not relied upon"
 
 ## The ruling
@@ -82,7 +82,7 @@ relied upon are verified by:
 
 - `pnpm -r test` — the conformance suite's tenant-isolation dimension on both compositions
   (`packages/conformance/src/cloud/tenant-isolation.ts`, `.../core/tenant-isolation.ts`).
-- `packages/cloud-postgres/src/__tests__/invariants.test.ts` — the catalog assertions in
+- `packages/cloud-dataplane/src/__tests__/invariants.test.ts` — the catalog assertions in
   `tests/sql/control_plane_invariants.sql`, including its own mutation check.
-- `packages/cloud-postgres/src/__tests__/object-suite.test.ts` — the object plane's tenant
+- `packages/cloud-dataplane/src/__tests__/object-suite.test.ts` — the object plane's tenant
   binding, adjudicated by the object store rather than by us.

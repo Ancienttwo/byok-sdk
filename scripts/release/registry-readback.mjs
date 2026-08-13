@@ -11,7 +11,7 @@ const packages = [
   '@byok-sdk/server',
   '@byok-sdk/cloud',
   '@byok-sdk/client',
-  '@byok-sdk/cloud-postgres',
+  '@byok-sdk/cloud-dataplane',
   '@byok-sdk/testkit',
   'byok-sdk',
 ];
@@ -78,7 +78,7 @@ try {
     path.join(smokeDir, 'readback.mjs'),
     `import assert from 'node:assert/strict';\n` +
       `const sdk = await import('byok-sdk');\n` +
-      `assert.deepEqual(Object.keys(sdk).sort(), ['client','cloud','cloudPostgres','core','protocol','server']);\n` +
+      `assert.deepEqual(Object.keys(sdk).sort(), ['client','cloud','cloudDataplane','core','protocol','server']);\n` +
       `assert.equal('keys' in sdk, false);\n` +
       `await import('@byok-sdk/client/adapters');\n` +
       `for (const name of ${JSON.stringify(packages.slice(0, -1))}) await import(name);\n` +

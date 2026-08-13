@@ -4,7 +4,7 @@ The self-hosted SaaS-side reference coordinator: pairing, authenticated device
 HTTP/WebSocket/long-poll transport, task leasing, approvals, and in-memory
 stores over the frozen v1 protocol.
 
-Use `@byok-sdk/cloud` plus `@byok-sdk/cloud-postgres` for the durable hosted
+Use `@byok-sdk/cloud` plus `@byok-sdk/cloud-dataplane` for the durable hosted
 composition.
 
 Toolset-aware dispatch names logical device-local MCP toolsets; it never sends

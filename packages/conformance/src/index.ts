@@ -9,7 +9,7 @@
  * and nothing here depends on a durable adapter. A composition that wants to be
  * certified takes THIS package as a devDependency and calls
  * `runCoreConformance` / `runCloudConformance` with a factory, which is why
- * `@byok-sdk/cloud-postgres` owns its own composition entry rather than this
+ * `@byok-sdk/cloud-dataplane` owns its own composition entry rather than this
  * package owning a file that imports it: an adapter⇄suite cycle is exactly the
  * edge that moving `CORE_PORT_*` into core's shipped source was meant to break.
  */

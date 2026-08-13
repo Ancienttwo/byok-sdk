@@ -2,7 +2,7 @@
 #
 # Apply every pending migration in `deploy/sql/` to $DATABASE_URL.
 #
-# A thin invocation of the runner in `@byok-sdk/cloud-postgres`, and deliberately
+# A thin invocation of the runner in `@byok-sdk/cloud-dataplane`, and deliberately
 # nothing more. The runner owns ordering, the advisory lock, per-file
 # transactions, the ledger, and the checksum check; a script that re-implemented
 # any of that would be a second source of truth about how this schema moves.
@@ -28,7 +28,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-adapter="$repo_root/packages/cloud-postgres/dist/index.js"
+adapter="$repo_root/packages/cloud-dataplane/dist/index.js"
 
 if [ ! -f "$adapter" ]; then
   # Built output, not source: this script is meant to run in a deployment image

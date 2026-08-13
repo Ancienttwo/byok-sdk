@@ -5,7 +5,7 @@ operator can get wrong that nothing will warn them about.
 
 Authority: `docs/architecture/sdk-architecture.md` §12.7.3 and §12.7.5, the port
 contract in `packages/core/src/mailbox.ts`, and the Postgres implementation in
-`packages/cloud-postgres/src/stores/core/mailbox.ts`.
+`packages/cloud-dataplane/src/stores/core/mailbox.ts`.
 
 ## What the sweep does
 
@@ -42,7 +42,7 @@ sweeps on large tenants.
 ## Who runs it
 
 **The SDK ships no scheduler.** Nothing in `@byok-sdk/core`, `@byok-sdk/cloud` or
-`@byok-sdk/cloud-postgres` starts a timer, and nothing calls `collectRetired` on its
+`@byok-sdk/cloud-dataplane` starts a timer, and nothing calls `collectRetired` on its
 own. The host runs it: a cron job, a queue consumer, a Cloudflare cron trigger,
 a Kubernetes CronJob — whatever the deployment already has. Two consequences
 worth stating plainly:

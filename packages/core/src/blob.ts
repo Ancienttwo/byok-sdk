@@ -97,7 +97,7 @@ export function objectKeyPrefix(value: string): ObjectKeyPrefix {
  * The prefix is an IMMUTABLE property of a deployment. It is spliced in here
  * and nowhere else, and nothing reads a key back under a second layout: change
  * a live deployment's prefix and its existing objects become unaddressable.
- * See `R2BlobStoreOptions.keyPrefix` in `@byok-sdk/cloud-postgres` for the full
+ * See `R2BlobStoreOptions.keyPrefix` in `@byok-sdk/cloud-dataplane` for the full
  * operational contract.
  */
 export function tenantObjectKey(

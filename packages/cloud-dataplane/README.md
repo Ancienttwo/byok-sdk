@@ -1,4 +1,4 @@
-# @byok-sdk/cloud-postgres
+# @byok-sdk/cloud-dataplane
 
 The durable data plane for the BYOK SDK's hosted device surface: Postgres
 implementations of **all nine cloud-local store ports and all seven `@byok-sdk/core`
@@ -119,7 +119,7 @@ those ports. It sits here rather than inside `@byok-sdk/cloud` for two reasons: 
 and `@byok-sdk/cloud` stay loadable on Workers precisely because `pg` never enters
 their dependency graph.
 
-Dependency direction is one-way: `cloud-postgres → core + cloud + protocol +
+Dependency direction is one-way: `cloud-dataplane → core + cloud + protocol +
 pg +` the explicit S3 signer/XML parser. The protocol edge is used only by the
 host-owned dead-letter replay path to rebind frozen envelope bytes to the new
 mailbox sequence; core remains protocol-free. Nothing depends back on it; no ambient AWS
@@ -138,7 +138,7 @@ vendoring the SQL into your own repository would make that copy a second source
 of truth, free to drift from the runner installed beside it.
 
 ```ts
-import { createByokPool, migrate, migrationsDir } from '@byok-sdk/cloud-postgres';
+import { createByokPool, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';
 
 const pool = createByokPool({ connectionString: process.env.DATABASE_URL! });
 const result = await migrate(pool, migrationsDir());
@@ -188,7 +188,7 @@ The suites need a real Postgres, and get one from the repository's
 docker compose -f docker-compose.test.yml up -d --wait
 export BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test
 export BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100
-pnpm --filter @byok-sdk/cloud-postgres test
+pnpm --filter @byok-sdk/cloud-dataplane test
 ```
 
 Both variables, one gate: the compose file starts Postgres and MinIO together,

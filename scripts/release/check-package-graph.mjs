@@ -12,7 +12,7 @@ const dispatchPackages = [
   ['packages/client', '@byok-sdk/client'],
   ['packages/server', '@byok-sdk/server'],
   ['packages/cloud', '@byok-sdk/cloud'],
-  ['packages/cloud-postgres', '@byok-sdk/cloud-postgres'],
+  ['packages/cloud-dataplane', '@byok-sdk/cloud-dataplane'],
 ];
 const umbrella = ['packages/sdk', 'byok-sdk'];
 const keys = ['packages/keys', '@byok-sdk/keys'];

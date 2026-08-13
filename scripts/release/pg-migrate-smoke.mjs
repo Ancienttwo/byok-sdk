@@ -52,8 +52,8 @@ const manifest = JSON.parse(readFileSync(path.join(artifactsDir, 'release-manife
 const dependencies = Object.fromEntries(
   manifest.packages.map((entry) => [entry.package, `file:./artifacts/${entry.file}`]),
 );
-if (!dependencies['@byok-sdk/cloud-postgres']) {
-  throw new Error('release manifest carries no @byok-sdk/cloud-postgres tarball');
+if (!dependencies['@byok-sdk/cloud-dataplane']) {
+  throw new Error('release manifest carries no @byok-sdk/cloud-dataplane tarball');
 }
 
 // The expectation comes from the authoring directory, so adding a migration
@@ -81,7 +81,7 @@ try {
   writeFileSync(
     path.join(smokeDir, 'migrate-smoke.mjs'),
     `import assert from 'node:assert/strict';\n` +
-      `import { createByokPool, migrate, migrationsDir } from '@byok-sdk/cloud-postgres';\n` +
+      `import { createByokPool, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';\n` +
       `const expected = ${JSON.stringify(expected)};\n` +
       `const pool = createByokPool({ connectionString: process.env.DATABASE_URL });\n` +
       `try {\n` +

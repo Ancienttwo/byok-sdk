@@ -78,13 +78,13 @@ jobs:
   #
   # BYOK_REQUIRE_DATAPLANE=1 is what closes that hole: with it set, a missing
   # BYOK_TEST_POSTGRES_URL is a hard failure instead of a skip
-  # (packages/cloud-postgres/src/__tests__/support/dataplane.ts throws at import
+  # (packages/cloud-dataplane/src/__tests__/support/dataplane.ts throws at import
   # time). `process.env.CI` deliberately is NOT the gate -- `pnpm -r test` in
   # build-test already runs with CI=true where these services do not exist, so
   # keying off it would turn that job red.
   #
   # This job's existence is itself pinned by a source-scan constraint test
-  # (packages/cloud-postgres/src/__tests__/constraints.test.ts), the same idiom
+  # (packages/cloud-dataplane/src/__tests__/constraints.test.ts), the same idiom
   # the core/cloud packages already use: deleting or renaming the job below
   # turns that test red rather than silently dropping dataplane coverage.
   #
@@ -140,7 +140,7 @@ jobs:
       # The migrate runner's fault suite plus the Postgres composition running
       # the cloud conformance suite.
       - name: Dataplane suites (Postgres composition + migrate runner)
-        run: pnpm --filter @byok-sdk/cloud-postgres test
+        run: pnpm --filter @byok-sdk/cloud-dataplane test
 
       # The same assertion source against the in-memory composition. Running
       # both in one job is what makes a divergence a failure here rather than a
@@ -333,7 +333,7 @@ jobs:
         run: pnpm run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
   # Tier 2 of the release-asset guarantee. `npm-release-pack` above is the hard
-  # gate and is deliberately service-free: it proves the cloud-postgres tarball
+  # gate and is deliberately service-free: it proves the cloud-dataplane tarball
   # carries `deploy/sql` byte-for-byte under `dist/sql/` and that an isolated
   # install can resolve `migrationsDir()`. What it cannot prove without a
   # database is that those files actually migrate one -- so that runs here,

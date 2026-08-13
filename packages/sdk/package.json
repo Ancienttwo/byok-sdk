@@ -46,7 +46,7 @@
   "dependencies": {
     "@byok-sdk/client": "workspace:*",
     "@byok-sdk/cloud": "workspace:*",
-    "@byok-sdk/cloud-postgres": "workspace:*",
+    "@byok-sdk/cloud-dataplane": "workspace:*",
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
     "@byok-sdk/server": "workspace:*"

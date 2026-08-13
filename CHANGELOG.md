@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Renamed the production hosted composition from
+  `@byok-sdk/cloud-postgres` to `@byok-sdk/cloud-dataplane`, and renamed the
+  umbrella namespace from `cloudPostgres` to `cloudDataplane`. The old package
+  identity and namespace are not retained as aliases; releases through `0.3.0`
+  remain published under the historical name.
+
 ## 0.3.0 — 2026-08-13
 
 Salesko integration and hosted correctness release.

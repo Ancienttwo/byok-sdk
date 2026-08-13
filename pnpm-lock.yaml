@@ -127,7 +127,7 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
-  packages/cloud-postgres:
+  packages/cloud-dataplane:
     dependencies:
       '@byok-sdk/cloud':
         specifier: workspace:*
@@ -197,9 +197,9 @@ importers:
       '@byok-sdk/cloud':
         specifier: workspace:*
         version: link:../cloud
-      '@byok-sdk/cloud-postgres':
+      '@byok-sdk/cloud-dataplane':
         specifier: workspace:*
-        version: link:../cloud-postgres
+        version: link:../cloud-dataplane
       '@byok-sdk/core':
         specifier: workspace:*
         version: link:../core
