@@ -1,6 +1,6 @@
 # Plan: Typed Runtime Failure Taxonomy
 
-> **Status**: Approved
+> **Status**: Executing
 > **Created**: 20260814-0010
 > **Slug**: typed-runtime-failure-taxonomy
 > **Planning Source**: waza-think
