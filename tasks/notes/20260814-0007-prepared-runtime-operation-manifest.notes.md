@@ -2,11 +2,11 @@
 
 > **Durable dispatch**: worker `/root/prepared_runtime_operation_manifest`; worktree `/Users/kito/Projects/byok-sdk-wt-prepared-runtime-operation-manifest`; branch `codex/prepared-runtime-operation-manifest`; base `98cea8c534f595314d4bbd67ea434da6feeb0e20`.
 
-> **Status**: Implementation and verification evidence complete; outer contract verification pending
+> **Status**: Complete; strict outer contract verification passed
 > **Plan**: plans/plan-20260814-0007-prepared-runtime-operation-manifest.md
 > **Contract**: tasks/contracts/20260814-0007-prepared-runtime-operation-manifest.contract.md
 > **Review**: tasks/reviews/20260814-0007-prepared-runtime-operation-manifest.review.md
-> **Last Updated**: 2026-08-14 01:15
+> **Last Updated**: 2026-08-14 01:20
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -85,6 +85,11 @@
   dependency artifacts required by main's toolset-discovery changes. The
   contract no longer lists `verify-contract` inside its own `commands_succeed`
   list: invoking that outer gate from within the list is self-recursive.
+- Final gate: one outer `repo-harness run verify-contract --contract
+  tasks/contracts/20260814-0007-prepared-runtime-operation-manifest.contract.md
+  --strict` passed, including client typecheck/test/build/smoke, release graph,
+  workspace typecheck/test/build, and strict workflow validation. The verifier
+  set the contract status to `Fulfilled`.
 
 ## Promotion Filter
 
