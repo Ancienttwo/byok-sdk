@@ -1,6 +1,5 @@
 import { createPublicKey, generateKeyPairSync, sign as edSign, verify as edVerify } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +16,7 @@ import {
   type DeviceAssertionDeviceRow,
   type DeviceAssertionVerifier,
 } from '@byok-sdk/core';
-import { __setStoreMutexPortProviderForTests, buildDaemonWithAdapters, createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
+import { buildDaemonWithAdapters, createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
 import { ControlError, type AssertionIssueResult } from '../daemon/control-protocol';
 import { connectControlClient, type ControlClient } from '../bin/control-client';
 import { createAuditAppender, auditLogPath } from '../bin/audit-log';
@@ -618,59 +617,7 @@ describe('device assertion broker: assertion.issue', () => {
     expect(serialized).not.toContain(record.devicePublicKey);
   });
 
-  // -------------------------------------------------------------------------
-  // Store-mutex port DI seam (codex round-3)
-  // -------------------------------------------------------------------------
-
-  it('codex round-3: threads an injected store-mutex port through, one per constructed daemon, and binds it', async () => {
-    // Ports above the vitest band (30000..32687) and below the Linux ephemeral
-    // floor (32768) — free on both Linux and macOS, and not touched by any
-    // other worker's default-band daemons.
-    let calls = 0;
-    const ports: number[] = [];
-    __setStoreMutexPortProviderForTests(() => {
-      const port = 32_700 + calls;
-      calls += 1;
-      ports.push(port);
-      return port;
-    });
-    try {
-      const first = await pairedAndStarted('acme-mutex-seam-a');
-      expect(calls).toBe(1); // consulted exactly once per daemon, at construction
-      // The running daemon holds its store mutex on the injected port: an
-      // exclusive bind attempt must see EADDRINUSE.
-      await expect(bindIsInUse(ports[0]!)).resolves.toBe(true);
-
-      const second = await pairedAndStarted('acme-mutex-seam-b');
-      expect(calls).toBe(2);
-      expect(ports[1]).toBe(32_701); // a DISTINCT port for the second daemon
-      await expect(bindIsInUse(ports[1]!)).resolves.toBe(true);
-
-      // Both are real, working daemons on their injected ports.
-      const client = await control(first.storeDir, first.config.productId);
-      const result = await client.request<AssertionIssueResult>('assertion.issue', { audience: ALLOWED_AUDIENCE });
-      expect(parseDeviceAssertionEnvelope(result.assertion).protected.audience).toBe(ALLOWED_AUDIENCE);
-      void second;
-    } finally {
-      __setStoreMutexPortProviderForTests(undefined);
-    }
-  });
 });
-
-/** True when an exclusive bind on `port` fails with EADDRINUSE (i.e. something already holds it). */
-function bindIsInUse(port: number): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once('error', (err: NodeJS.ErrnoException) => {
-      probe.removeAllListeners();
-      if (err.code === 'EADDRINUSE') resolve(true);
-      else reject(err);
-    });
-    probe.listen({ host: '127.0.0.1', port, exclusive: true }, () => {
-      probe.close(() => resolve(false));
-    });
-  });
-}
 
 // ---------------------------------------------------------------------------
 // codex F6c: the authoritative three-way domain-separation falsifier — the

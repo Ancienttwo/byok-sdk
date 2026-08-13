@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection, createServer, type Server } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { ensureSecureDir } from '../util/secure-dir';
 
@@ -27,63 +28,93 @@ export interface DaemonOwnerLease {
   release(): Promise<void>;
 }
 
-/**
- * Optional dependency-injection knobs for {@link acquireDaemonOwner}, in the
- * same additive spirit as its `clock` parameter.
- */
-export interface AcquireDaemonOwnerOptions {
-  /**
-   * Bind the cross-process store-mutex listener to THIS exact port (at
-   * attempt 0) instead of deriving it from the storeDir hash. Undefined in
-   * production, where the hash derivation is used unchanged — this exists only
-   * so a highly-parallel test runner can hand each daemon a guaranteed-unique
-   * mutex port and avoid birthday-paradox collisions in the bounded hash band
-   * ({@link STORE_MUTEX_PORT_BASE}..+{@link STORE_MUTEX_PORT_COUNT}). The
-   * bind/probe/reclaim/fail-closed semantics are IDENTICAL either way; only the
-   * port-selection source changes.
-   */
-  readonly mutexPort?: number;
-}
-
 interface LivenessListener {
   port: number;
   close(): Promise<void>;
 }
 
-// A canonical-path-derived loopback listener is the cross-process mutex for
-// the owner/reclaim transition. The listener identifies its store hash to
-// another conforming contender: the same hash means "active"; a different
-// valid hash means an unrelated store collided on this port and both sides can
-// safely use the next deterministic candidate. A listener that explicitly
-// closes/resets without presenting the contract is not mutex authority and is
-// skipped. A connected listener that stays silent remains fail-closed: it may
-// be this store's holder with a starved event loop, so advancing would discard
-// the kernel mutex as an independent safety authority. Keeping this mutex separate is important:
+/** The lock endpoint held for a store's whole owner lease — a Unix domain socket on POSIX, a named pipe on win32. */
+interface StoreMutexLock {
+  endpoint: string;
+  close(): Promise<void>;
+}
+
+// A STORE-SCOPED lock endpoint is the cross-process mutex for the
+// owner/reclaim transition: a Unix domain socket at a path derived from the
+// canonical storeDir (POSIX) or a named pipe whose name is derived from that
+// same path's hash (win32) — the identical platform split, and the identical
+// conventions (path-length fallback, stale-socket-file cleanup, private
+// endpoint directory), that `control-server.ts`/`control-protocol.ts` already
+// use for the daemon's control endpoint.
+//
+// It was previously a listener on a loopback TCP port derived from the same
+// hash into a shared band (10000..29999). That namespace is not this SDK's to
+// reserve: ordinary third-party software occupying the derived port — WeChat,
+// VS Code helpers, cloudflared, `ssh -L`, all accept-then-stay-silent
+// listeners — made the identity probe time out, which fails closed and denied
+// a store its own lease with no way out (a hash is deterministic, so the
+// affected store stayed locked out of `start`/doctor for as long as the
+// squatter ran; see this task's `scratchpad/rcp-mutex/13-external-listener-
+// classification.txt` for the ten live listeners classified on one machine).
+// A store-scoped endpoint is not in any shared namespace, so a foreign
+// listener cannot appear on it and the ambiguous "connected but unidentified"
+// outcome is unreachable in practice; where it is still representable
+// (something planted at this store's own private lock path) it stays
+// fail-closed exactly as before, and there is deliberately NO "advance to
+// another candidate" branch — advancing is what would reopen the
+// stale-owner/reclaim TOCTOU this mutex exists to close.
+//
+// The holder still presents `STORE_MUTEX_ID_PREFIX + sha256(canonicalStoreDir)`
+// on accept, so a contender's probe gets a definitive answer about WHAT is
+// holding the endpoint rather than inferring it from the address alone.
+// Keeping this mutex separate from the liveness listener still matters:
 // probing a stale owner's random liveness port must not observe the
 // contender's own transition listener.
-// Stay below the host ephemeral-client range used by the test/runtime HTTP and
-// WebSocket connections. Candidate negotiation handles collisions between
-// BYOK stores inside this reserved deterministic window.
-const STORE_MUTEX_PORT_BASE = 10_000;
-const STORE_MUTEX_PORT_COUNT = 20_000;
-const STORE_MUTEX_PORT_CANDIDATES = 32;
 const STORE_MUTEX_ID_PREFIX = 'byok-store-mutex-v1:';
 const STORE_MUTEX_PROBE_TIMEOUT_MS = 1_000;
+const STORE_MUTEX_SOCKET_FILENAME = 'mutex.sock';
+/**
+ * Same conservative `sockaddr_un.sun_path` budget `control-protocol.ts`'s
+ * `controlSocketPath` uses, for the same reason: macOS caps that field at 104
+ * bytes including the NUL, so a socket path comfortably under 100 never hits
+ * `ENAMETOOLONG` at `bind()`/`connect()` on the tightest common platform.
+ */
+const UNIX_SOCKET_PATH_SOFT_LIMIT = 100;
 
 function storeMutexIdentity(canonicalStoreDir: string): string {
   return createHash('sha256').update(canonicalStoreDir).digest('hex');
 }
 
-function storeMutexPort(identity: string, attempt: number, override?: number): number {
-  // Test-injected exact port (see `AcquireDaemonOwnerOptions.mutexPort`): use it
-  // verbatim at attempt 0, and step by +attempt on the rare EADDRINUSE so the
-  // candidate-negotiation loop below still functions identically. Undefined in
-  // production, which falls through to the unchanged hash derivation.
-  if (override !== undefined) return override + attempt;
-  const digest = Buffer.from(identity, 'hex');
-  const start = digest.readUInt32BE(0) % STORE_MUTEX_PORT_COUNT;
-  const step = 1 + (digest.readUInt32BE(4) % (STORE_MUTEX_PORT_COUNT - 1));
-  return STORE_MUTEX_PORT_BASE + ((start + attempt * step) % STORE_MUTEX_PORT_COUNT);
+/**
+ * Where this store's lock lives. Keyed by the CANONICAL storeDir alone — not
+ * by product id or OS user — because the store is the resource being
+ * serialized: a symlink alias and its target, or two products pointed at one
+ * store directory, must contend for the same endpoint (see
+ * `acquireDaemonOwner`'s own note on resolving aliases before deriving this).
+ *
+ * POSIX prefers `<storeDir>/mutex.sock`, keeping the lock beside the
+ * store state it guards in a directory `ensureSecureDir` has already made
+ * 0700; when that would risk {@link UNIX_SOCKET_PATH_SOFT_LIMIT} it falls back
+ * to a per-store private subdirectory of `os.tmpdir()`, nested one level deep
+ * so the directory itself can be created 0700 BEFORE anything binds inside it
+ * — both conventions taken from `controlSocketPath`. win32 has no socket file
+ * to place; a named pipe lives in one flat machine-wide namespace, so the name
+ * carries the store hash to keep two stores from colliding.
+ *
+ * @internal Exported for the regression guard only (never re-exported from
+ * `index.ts`): the crashed-holder recovery path can only be exercised by
+ * planting a stale socket file at the exact address this derives, and a test
+ * recomputing the derivation itself would prove nothing about this one.
+ */
+export function storeMutexEndpoint(
+  canonicalStoreDir: string,
+  identity: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === 'win32') return `\\\\.\\pipe\\byok-store-mutex-${identity.slice(0, 16)}`;
+  const candidate = path.join(canonicalStoreDir, STORE_MUTEX_SOCKET_FILENAME);
+  if (Buffer.byteLength(candidate, 'utf8') <= UNIX_SOCKET_PATH_SOFT_LIMIT) return candidate;
+  return path.join(os.tmpdir(), `byok-store-mutex-${identity.slice(0, 16)}`, 'sock');
 }
 
 export class DaemonOwnerActiveError extends Error {
@@ -259,88 +290,143 @@ async function createLivenessListener(): Promise<LivenessListener> {
 }
 
 type StoreMutexProbe =
-  | { kind: 'identity'; identity: string }
-  | { kind: 'foreign-or-gone' }
-  | { kind: 'uncertain' };
+  /** Nothing is listening behind this name — on POSIX, a socket FILE left by a holder that died without closing it. */
+  | { kind: 'unbound' }
+  /** Presented this store's identity line: a proven, conforming holder of THIS store's lease. */
+  | { kind: 'holder' }
+  /** Answered the connect but never presented the contract (or went silent). Not proven to be anything; never proven absent either. */
+  | { kind: 'occupied' };
 
-async function probeStoreMutex(port: number): Promise<StoreMutexProbe> {
+async function probeStoreMutex(endpoint: string, identity: string): Promise<StoreMutexProbe> {
   return new Promise<StoreMutexProbe>((resolve) => {
-    const socket = createConnection({ host: '127.0.0.1', port });
+    const socket = createConnection(endpoint);
     let settled = false;
     let raw = '';
     const finish = (result: StoreMutexProbe): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
+      socket.removeAllListeners();
       socket.destroy();
       resolve(result);
     };
-    socket.setEncoding('utf8');
-    // A conforming mutex writes its identity immediately after accept. A
+    // A conforming holder writes its identity immediately after accept. A
     // connection that stays open without doing so is ambiguous rather than
-    // proven foreign: a conforming same-store process may have accepted the
-    // socket and then had its event loop starved. Preserve the independent
-    // kernel authority by failing closed on that timeout.
-    socket.setTimeout(STORE_MUTEX_PROBE_TIMEOUT_MS, () => finish({ kind: 'uncertain' }));
+    // proven absent: a conforming same-store process may have accepted the
+    // socket and then had its event loop starved. Bound rather than left to
+    // the socket's own inactivity timer so a slow drip cannot extend it.
+    const timer = setTimeout(() => finish({ kind: 'occupied' }), STORE_MUTEX_PROBE_TIMEOUT_MS);
+    socket.setEncoding('utf8');
     socket.on('data', (chunk: string) => {
       raw += chunk;
-      if (raw.length > STORE_MUTEX_ID_PREFIX.length + 64 + 1) finish({ kind: 'foreign-or-gone' });
+      if (raw.length > STORE_MUTEX_ID_PREFIX.length + 64 + 1) finish({ kind: 'occupied' });
     });
-    socket.once('end', () => {
-      const line = raw.trimEnd();
-      const identity = line.startsWith(STORE_MUTEX_ID_PREFIX)
-        ? line.slice(STORE_MUTEX_ID_PREFIX.length)
-        : undefined;
-      finish(
-        identity && /^[a-f0-9]{64}$/.test(identity)
-          ? { kind: 'identity', identity }
-          : { kind: 'foreign-or-gone' },
-      );
-    });
-    // The port disappeared between bind failure and connect, or belongs to a
-    // non-BYOK listener that reset the probe. Neither can be the current
-    // transition authority; the owner/reclaim records remain the durable
-    // second authority before any lease is returned.
-    socket.once('error', () => finish({ kind: 'foreign-or-gone' }));
+    socket.once('end', () => finish(raw.trimEnd() === `${STORE_MUTEX_ID_PREFIX}${identity}` ? { kind: 'holder' } : { kind: 'occupied' }));
+    // `ECONNREFUSED`/`ENOENT` is the one positive proof of absence POSIX
+    // offers: the name resolves to no listening socket. Every other errno
+    // (`EACCES`, `ENOTSOCK`, a reset mid-handshake) leaves the endpoint's real
+    // state unknown, which this treats as occupied — the same "unknown state
+    // is unsafe" convention `control-server.ts`'s `probeUnixSocketAlive` uses.
+    socket.once('error', (err: NodeJS.ErrnoException) =>
+      finish(err.code === 'ECONNREFUSED' || err.code === 'ENOENT' ? { kind: 'unbound' } : { kind: 'occupied' }),
+    );
   });
 }
 
-async function acquireStoreMutex(canonicalStoreDir: string, mutexPortOverride?: number): Promise<LivenessListener> {
-  const identity = storeMutexIdentity(canonicalStoreDir);
-  for (let attempt = 0; attempt < STORE_MUTEX_PORT_CANDIDATES; attempt += 1) {
-    const server: Server = createServer((socket) => socket.end(`${STORE_MUTEX_ID_PREFIX}${identity}\n`));
-    const port = storeMutexPort(identity, attempt, mutexPortOverride);
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen({ host: '127.0.0.1', port, exclusive: true }, () => {
-          server.removeListener('error', reject);
-          resolve();
-        });
-      });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
-      const probe = await probeStoreMutex(port);
-      if (probe.kind === 'uncertain' || (probe.kind === 'identity' && probe.identity === identity)) {
-        throw new DaemonOwnerActiveError('unknown');
-      }
-      continue;
-    }
-    server.unref();
-    let closed = false;
-    return {
-      port,
-      close: () =>
-        new Promise<void>((resolve, reject) => {
-          if (closed) {
-            resolve();
-            return;
-          }
-          closed = true;
-          server.close((err) => (err ? reject(err) : resolve()));
-        }),
-    };
+/**
+ * POSIX only. The lock's socket FILE outlives a holder that died without
+ * closing it (crash, `kill -9`), and is then indistinguishable on disk from
+ * one a live holder is bound to — so a real connect decides, exactly as
+ * `control-server.ts`'s `handleStaleUnixSocket` does for the control socket.
+ * Only a proven-unbound name is unlinked; anything answering keeps the lease
+ * refused. A path that is not a socket at all is refused rather than removed:
+ * an unexpected object at this store's own lock path is an unknown state, and
+ * unlinking it would be this code destroying something it cannot identify.
+ */
+async function clearStaleStoreMutexSocket(endpoint: string, identity: string): Promise<void> {
+  let stat: import('node:fs').Stats;
+  try {
+    stat = await fs.lstat(endpoint);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
   }
-  throw new DaemonOwnerActiveError('unknown');
+  if (!stat.isSocket()) throw new Error('store mutation lock path exists but is not a socket');
+  if ((await probeStoreMutex(endpoint, identity)).kind !== 'unbound') throw new DaemonOwnerActiveError('unknown');
+  await fs.rm(endpoint, { force: true });
+}
+
+/**
+ * Mirrors `control-server.ts`'s `assertOwnedPrivateDir` (private to that
+ * module) for this lock's own `os.tmpdir()` fallback directory: `fs.mkdir` is
+ * a silent no-op against a directory that already exists and never fixes its
+ * ownership, and the fallback name is fully predictable from `storeDir` alone,
+ * so another user on the same machine can pre-create it — as a symlink, or
+ * simply owned by a different uid — and control what may be planted at the
+ * exact path this process is about to bind. `lstat` (never `stat`, which
+ * follows a symlink) fails closed on both properties.
+ */
+async function assertOwnedPrivateDir(dir: string): Promise<void> {
+  const uid = process.getuid?.();
+  if (uid === undefined) return;
+  const stat = await fs.lstat(dir);
+  if (stat.isSymbolicLink() || stat.uid !== uid) {
+    throw new Error(`refusing to bind the store mutation lock under "${dir}": not a real directory owned by this process's own uid`);
+  }
+}
+
+async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexLock> {
+  const identity = storeMutexIdentity(canonicalStoreDir);
+  const endpoint = storeMutexEndpoint(canonicalStoreDir, identity);
+  const isPipe = process.platform === 'win32';
+  if (!isPipe) {
+    const endpointDir = path.dirname(endpoint);
+    // A no-op for the common `<storeDir>/mutex.sock` case (the caller
+    // already ran `ensureSecureDir` on it); real work only for the tmpdir
+    // fallback, whose subdirectory does not exist the first time a given
+    // store lands there.
+    if (endpointDir !== canonicalStoreDir) {
+      await ensureSecureDir(endpointDir);
+      await assertOwnedPrivateDir(endpointDir);
+    }
+    await clearStaleStoreMutexSocket(endpoint, identity);
+  }
+  const server: Server = createServer((socket) => socket.end(`${STORE_MUTEX_ID_PREFIX}${identity}\n`));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(endpoint, () => {
+        server.removeListener('error', reject);
+        resolve();
+      });
+    });
+  } catch (err) {
+    // Someone else owns this store's endpoint: a live holder, or the loser's
+    // half of a race against the stale-socket unlink just above. Either way
+    // this store already has a contender that got there first — refuse, and
+    // never walk to a second address, which is what would let two processes
+    // run the stale-owner/reclaim sequence against the same pathnames.
+    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new DaemonOwnerActiveError('unknown');
+    throw err;
+  }
+  // The socket file's own mode, on top of the 0700 directory that already
+  // gates traversal to it — same post-bind tightening `bindControlEndpoint`
+  // does, and best-effort for the same reason (a mode change this process
+  // does not own is `EPERM`, not a safety failure).
+  if (!isPipe) await fs.chmod(endpoint, 0o600).catch(() => undefined);
+  server.unref();
+  let closed = false;
+  return {
+    endpoint,
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+      // A pipe has no file to remove; a Unix socket does, and leaving it
+      // behind would cost the next acquire a probe round-trip to prove stale.
+      if (!isPipe) await fs.rm(endpoint, { force: true }).catch(() => undefined);
+    },
+  };
 }
 
 async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
@@ -391,20 +477,19 @@ export async function acquireDaemonOwner(
   storeDir: string,
   role: OwnerRecord['role'],
   clock: () => Date = () => new Date(),
-  options: AcquireDaemonOwnerOptions = {},
 ): Promise<DaemonOwnerLease> {
   await ensureSecureDir(storeDir);
-  // Resolve aliases before deriving the kernel mutex identity. `ownerPath`
-  // may still be reached through the operator-supplied spelling below, but a
-  // symlink/junction alias and the canonical directory must contend for the
-  // same transition mutex or they could otherwise run two stale-owner
-  // reclaim sequences against the same underlying pathnames.
+  // Resolve aliases before deriving the lock endpoint and its identity.
+  // `ownerPath` may still be reached through the operator-supplied spelling
+  // below, but a symlink/junction alias and the canonical directory must
+  // contend for the same transition mutex or they could otherwise run two
+  // stale-owner reclaim sequences against the same underlying pathnames.
   const canonicalStoreDir = await fs.realpath(storeDir);
   // The mutex closes the stale-owner/reclaim TOCTOU: only one conforming
   // process can inspect, remove and republish these pathnames at a time. It is
   // retained for the full lease so another process cannot pass the pathname
   // checks during the small owner-file publication/release windows.
-  const mutex = await acquireStoreMutex(canonicalStoreDir, options.mutexPort);
+  const mutex = await acquireStoreMutex(canonicalStoreDir);
   let liveness: LivenessListener | undefined;
   try {
     liveness = await createLivenessListener();

@@ -103,10 +103,15 @@ describe('client public surface', () => {
     expect(probeBody).not.toContain('signature');
   });
 
-  it('codex round-3: the public surface exposes no store-mutex port override', () => {
-    // The store-mutex port seam (`__setStoreMutexPortProviderForTests` /
-    // `AcquireDaemonOwnerOptions.mutexPort`) is test-only DI and must never be
-    // reachable through the package index, DaemonConfig, or DaemonOverrides.
+  it('the public surface exposes no store-mutex override at all', () => {
+    // The owner lease is the fail-closed authority over store mutations: an
+    // embedder must never be able to point it somewhere else, whether by
+    // acquiring it directly or by overriding where the lock is held. (The
+    // test-only port seam this originally guarded — `resolveStoreMutexPort` /
+    // `AcquireDaemonOwnerOptions.mutexPort` — is gone with the TCP port
+    // namespace itself; the lock endpoint is now derived from the storeDir and
+    // has no override to expose. The invariant outlives the seam, so the names
+    // stay listed here and any reintroduction turns this red.)
     const exported = Object.keys(publicApi);
     for (const forbidden of ['__setStoreMutexPortProviderForTests', 'AcquireDaemonOwnerOptions', 'acquireDaemonOwner']) {
       expect(exported).not.toContain(forbidden);
@@ -121,8 +126,14 @@ describe('client public surface', () => {
     const createDaemon = readFileSync(new URL('../daemon/create-daemon.ts', import.meta.url), 'utf8');
     for (const iface of ['DaemonConfig', 'DaemonOverrides']) {
       const body = extractInterfaceBody(createDaemon, iface);
-      expect(body, `${iface} must expose no mutex-port override`).not.toMatch(/mutexPort|storeMutexPort/);
+      expect(body, `${iface} must expose no store-mutex override`).not.toMatch(/mutexPort|storeMutexPort|mutexEndpoint/);
     }
+
+    // The seam's whole machinery, not just its public reachability: nothing in
+    // `create-daemon.ts` may hand `acquireDaemonOwner` a lock address again.
+    expect(createDaemon, 'create-daemon.ts must not reintroduce a store-mutex port seam').not.toMatch(
+      /__setStoreMutexPortProviderForTests|resolveStoreMutexPort|VITEST_MUTEX/,
+    );
   });
 });
 
