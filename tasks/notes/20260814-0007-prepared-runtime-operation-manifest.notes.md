@@ -2,11 +2,11 @@
 
 > **Durable dispatch**: worker `/root/prepared_runtime_operation_manifest`; worktree `/Users/kito/Projects/byok-sdk-wt-prepared-runtime-operation-manifest`; branch `codex/prepared-runtime-operation-manifest`; base `98cea8c534f595314d4bbd67ea434da6feeb0e20`.
 
-> **Status**: Code freeze pending rebase to `main@8e8d3a6`
+> **Status**: Rebased; complete verification in progress
 > **Plan**: plans/plan-20260814-0007-prepared-runtime-operation-manifest.md
 > **Contract**: tasks/contracts/20260814-0007-prepared-runtime-operation-manifest.contract.md
 > **Review**: tasks/reviews/20260814-0007-prepared-runtime-operation-manifest.review.md
-> **Last Updated**: 2026-08-14 00:51
+> **Last Updated**: 2026-08-14 00:55
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -37,11 +37,17 @@
 
 ## Deviations From Plan Or Spec
 
-- No product-scope deviation. Parent coordination requires a local checkpoint
-  before rebasing this frozen row from `98cea8c534f595314d4bbd67ea434da6feeb0e20`
-  to `main@8e8d3a6`; `create-daemon.ts` will be manually merged to preserve
-  both descriptor authority and shutdown lease ordering, then every contract
-  check will rerun on the new base.
+- No product-scope deviation. The frozen row checkpoint
+  `4972dc62e86876e35dd97f45ccd7dddcb35f8a15` was rebased from
+  `98cea8c534f595314d4bbd67ea434da6feeb0e20` to
+  `main@8e8d3a601d2c64eece83eb6d9da9f8fbe17549ac`, producing
+  `aaedc384e992aaf5ed80d0ccde93d68f187ee244` with no conflicts. Manual
+  inspection of `packages/client/src/daemon/create-daemon.ts` confirmed both
+  Row 1 descriptor authority and main's shutdown ordering (stop serving
+  control RPCs → release daemon-owner lease → remove control socket/token
+  signal) survived. Main's newly-added hosted child fixture still encoded the
+  removed adapter shape; it was atomically moved to descriptor + prepare as
+  part of the required all-fixture migration.
 
 ## Tradeoffs Considered
 
@@ -69,6 +75,11 @@
   instruments prepare, claim, started, RPC spawn, and workspace existence; the
   missing-launcher case is green with `{ prepares: 1, claimed: false, started:
   false, spawns: 0, workspaceExists: false }`.
+- Post-rebase client verification: source dependency builds (`core`, `protocol`,
+  `cloud`) followed by client typecheck passed; full client Vitest passed
+  114 files / 1180 tests; rebuilt entry smoke passed all three positive adapters
+  plus the zero-side-effect Pi missing-launcher case; release package graph
+  passed at 0.4.0.
 
 ## Promotion Filter
 

@@ -348,11 +348,14 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       const { createDaemonWithAdapters } = await import(process.argv[1]);
       const config = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
       const adapter = {
-        id: 'pi',
+        descriptor: Object.freeze({
+          id: 'pi',
+          supportsDispatchSelection: true,
+          capabilities: Object.freeze({ steer: true, resume: true, approvalInteractive: false, permissionModes: Object.freeze(['auto', 'confirm', 'deny']) }),
+          environmentRequirements: Object.freeze({ credentialNames: Object.freeze([]) }),
+        }),
         detect: async () => ({ present: true, version: 'test', authPresent: true }),
-        capabilities: () => ({ steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'confirm', 'deny'] }),
-        environmentRequirements: () => ({ credentialNames: [] }),
-        start: async () => { throw new Error('not used'); },
+        prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),
       };
       const daemon = createDaemonWithAdapters(config, [adapter]);
       try {
@@ -433,11 +436,14 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       const { createDaemonWithAdapters } = await import(process.argv[1]);
       const config = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
       const adapter = {
-        id: 'pi',
+        descriptor: Object.freeze({
+          id: 'pi',
+          supportsDispatchSelection: true,
+          capabilities: Object.freeze({ steer: true, resume: true, approvalInteractive: false, permissionModes: Object.freeze(['auto', 'confirm', 'deny']) }),
+          environmentRequirements: Object.freeze({ credentialNames: Object.freeze([]) }),
+        }),
         detect: async () => ({ present: true, version: 'test', authPresent: true }),
-        capabilities: () => ({ steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'confirm', 'deny'] }),
-        environmentRequirements: () => ({ credentialNames: [] }),
-        start: async () => { throw new Error('not used'); },
+        prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),
       };
       const daemon = createDaemonWithAdapters(config, [adapter], {
         hostedJournal: {
