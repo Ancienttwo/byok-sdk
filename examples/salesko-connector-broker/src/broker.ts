@@ -1,4 +1,3 @@
-import type { SecretStore } from '@byok-sdk/keys';
 import { z } from 'zod';
 
 export const CONNECTOR_BROKER_ERROR_CODES = {
@@ -92,17 +91,6 @@ export const GmailSearchInputSchema = z
 
 export type GmailSearchInput = z.infer<typeof GmailSearchInputSchema>;
 
-export const OAuthCredentialSchema = z
-  .object({
-    // Leaves room for the JSON envelope under Windows Credential Manager's
-    // smaller byte ceiling instead of defining a macOS-only valid shape.
-    accessToken: z.string().min(16).max(2_048).regex(/^[^\u0000-\u0020\u007f]+$/u),
-    expiresAt: z.iso.datetime({ offset: true }),
-  })
-  .strict();
-
-export type OAuthCredential = z.infer<typeof OAuthCredentialSchema>;
-
 const OPAQUE_ID_SCHEMA = z.string().min(1).max(160).regex(/^[^\u0000\r\n]+$/u);
 const DISPLAY_NAME_SCHEMA = z.string().min(1).max(160).regex(/^[^\u0000\r\n]+$/u);
 
@@ -147,133 +135,13 @@ export interface GmailProviderSearchInput {
   readonly signal: AbortSignal;
 }
 
-/**
- * Host-owned Gmail API seam. The broker owns credential/policy/output gates;
- * a downstream Salesko composition owns Google OAuth acquisition and API I/O.
- */
+/** Gmail API seam. This reference ships a Google implementation; hosts may supply another read-only adapter. */
 export interface GmailReadProvider {
   searchCorrespondence(input: GmailProviderSearchInput): Promise<unknown>;
 }
 
 export interface OAuthAccessTokenSource {
   withAccessToken<T>(profileId: string, use: (accessToken: string) => Promise<T>): Promise<T>;
-}
-
-export interface OAuthCredentialStatus {
-  readonly state: 'missing' | 'invalid' | 'expired' | 'valid';
-  readonly expiresAt?: string;
-}
-
-export const DEFAULT_MINIMUM_TOKEN_VALIDITY_MS = 30_000;
-const GMAIL_OAUTH_SECRET_PREFIX = 'gmail-oauth-';
-
-export function gmailOAuthSecretName(profileId: string): string {
-  const parsed = ConnectorProfileIdSchema.safeParse(profileId);
-  if (!parsed.success) throw new ConnectorBrokerError('CONFIG_INVALID', 'OAuth profile id is invalid');
-  return `${GMAIL_OAUTH_SECRET_PREFIX}${parsed.data}`;
-}
-
-function resolveMinimumValidity(value: number | undefined): number {
-  const resolved = value ?? DEFAULT_MINIMUM_TOKEN_VALIDITY_MS;
-  if (!Number.isSafeInteger(resolved) || resolved < 0) {
-    throw new ConnectorBrokerError('CONFIG_INVALID', 'minimum token validity must be a non-negative integer');
-  }
-  return resolved;
-}
-
-function parseStoredCredential(raw: string): OAuthCredential | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  const parsed = OAuthCredentialSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
-}
-
-export async function provisionOAuthCredential(
-  store: SecretStore<string>,
-  profileId: string,
-  credentialInput: unknown,
-  options: { readonly clock?: () => number; readonly minimumValidityMs?: number } = {},
-): Promise<void> {
-  const parsed = OAuthCredentialSchema.safeParse(credentialInput);
-  if (!parsed.success) {
-    throw new ConnectorBrokerError('CREDENTIAL_INVALID', 'OAuth credential input is invalid');
-  }
-  const clock = options.clock ?? Date.now;
-  const minimumValidityMs = resolveMinimumValidity(options.minimumValidityMs);
-  if (Date.parse(parsed.data.expiresAt) <= clock() + minimumValidityMs) {
-    throw new ConnectorBrokerError('CREDENTIAL_EXPIRED', 'OAuth credential is already expired or too close to expiry');
-  }
-  try {
-    await store.set(gmailOAuthSecretName(profileId), JSON.stringify(parsed.data));
-  } catch {
-    throw new ConnectorBrokerError('CREDENTIAL_STORE_UNAVAILABLE', 'OAuth credential store is unavailable');
-  }
-}
-
-export async function revokeOAuthCredential(store: SecretStore<string>, profileId: string): Promise<boolean> {
-  try {
-    return await store.delete(gmailOAuthSecretName(profileId));
-  } catch {
-    throw new ConnectorBrokerError('CREDENTIAL_STORE_UNAVAILABLE', 'OAuth credential store is unavailable');
-  }
-}
-
-export async function readOAuthCredentialStatus(
-  store: SecretStore<string>,
-  profileId: string,
-  options: { readonly clock?: () => number; readonly minimumValidityMs?: number } = {},
-): Promise<OAuthCredentialStatus> {
-  let raw: string | undefined;
-  try {
-    raw = await store.get(gmailOAuthSecretName(profileId));
-  } catch {
-    throw new ConnectorBrokerError('CREDENTIAL_STORE_UNAVAILABLE', 'OAuth credential store is unavailable');
-  }
-  if (raw === undefined) return { state: 'missing' };
-  const credential = parseStoredCredential(raw);
-  if (!credential) return { state: 'invalid' };
-  const clock = options.clock ?? Date.now;
-  const minimumValidityMs = resolveMinimumValidity(options.minimumValidityMs);
-  return Date.parse(credential.expiresAt) <= clock() + minimumValidityMs
-    ? { state: 'expired', expiresAt: credential.expiresAt }
-    : { state: 'valid', expiresAt: credential.expiresAt };
-}
-
-export class SecretStoreOAuthAccessTokenSource implements OAuthAccessTokenSource {
-  readonly #clock: () => number;
-  readonly #minimumValidityMs: number;
-
-  constructor(
-    private readonly store: SecretStore<string>,
-    options: { readonly clock?: () => number; readonly minimumValidityMs?: number } = {},
-  ) {
-    this.#clock = options.clock ?? Date.now;
-    this.#minimumValidityMs = resolveMinimumValidity(options.minimumValidityMs);
-  }
-
-  async withAccessToken<T>(profileId: string, use: (accessToken: string) => Promise<T>): Promise<T> {
-    let raw: string | undefined;
-    try {
-      raw = await this.store.get(gmailOAuthSecretName(profileId));
-    } catch {
-      throw new ConnectorBrokerError('CREDENTIAL_STORE_UNAVAILABLE', 'OAuth credential store is unavailable');
-    }
-    if (raw === undefined) {
-      throw new ConnectorBrokerError('CREDENTIAL_MISSING', 'OAuth credential is not provisioned for this profile');
-    }
-    const credential = parseStoredCredential(raw);
-    if (!credential) {
-      throw new ConnectorBrokerError('CREDENTIAL_INVALID', 'Stored OAuth credential is malformed');
-    }
-    if (Date.parse(credential.expiresAt) <= this.#clock() + this.#minimumValidityMs) {
-      throw new ConnectorBrokerError('CREDENTIAL_EXPIRED', 'Stored OAuth credential is expired or too close to expiry');
-    }
-    return use(credential.accessToken);
-  }
 }
 
 export interface GmailSearchResult {

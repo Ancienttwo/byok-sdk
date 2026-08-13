@@ -45,11 +45,11 @@ npm install @byok-sdk/keys
 [`examples/salesko-connector-broker`](examples/salesko-connector-broker) is a
 private reference composition for a Salesko-style local connector. It combines
 device-local OS credential custody, exact correspondent-domain policy, a
-read-only Gmail provider port, and a metadata-only stdio MCP projection with
-the daemon's logical toolset injection. It is integration guidance, not a
-published connector catalogue: real Google OAuth acquisition/refresh and API
-calls remain host-owned, and LinkedIn, social-media, and browser connectors are
-not included.
+real desktop Google OAuth + read-only Gmail metadata adapter, and a
+metadata-only stdio MCP projection with the daemon's logical toolset injection.
+It is integration guidance, not a published connector catalogue; Google
+verification/assessment, LinkedIn, social-media, and browser connectors are not
+included.
 
 ## Runtime and license
 

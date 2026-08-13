@@ -130,10 +130,11 @@ or browser connectors and does not own OAuth/cookie acquisition, refresh, or
 upstream revocation. The private
 [`examples/salesko-connector-broker`](../examples/salesko-connector-broker)
 composition demonstrates the downstream seam with OS-backed credential
-custody, exact correspondent-domain policy, a read-only Gmail provider port,
-and a strict metadata-only result projection. Real Google OAuth and Gmail API
-I/O remain host-owned; the provider subprocess still runs with the daemon
-user's OS authority.
+custody, a desktop Google PKCE/loopback OAuth lifecycle, exact
+correspondent-domain policy, real Gmail REST metadata reads, and a strict
+metadata-only result projection. It remains host glue rather than public SDK
+API; Google verification/security assessment and the subprocess's OS authority
+remain host deployment responsibilities.
 
 ## Local Git task workspaces
 

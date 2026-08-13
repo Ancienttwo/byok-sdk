@@ -58,16 +58,23 @@ Connector OAuth, cookie custody, token refresh, domain policy, and data
 redaction remain responsibilities of a host-owned local credential broker.
 
 The private `examples/salesko-connector-broker` composition is the bounded
-reference for that broker boundary. It stores one short-lived Gmail access
-token in macOS Keychain or Windows Credential Manager, rejects requested
-domains that are not exact members of the local correspondent-domain
-allowlist before reading the credential, and accepts only a strict bounded
-metadata projection from the provider. It has no plaintext or Linux fallback,
-does not acquire or refresh OAuth credentials, and treats the provider module
-as trusted credential-plane code. The allowlist is therefore a data-policy
-gate, not a network-egress or process sandbox. BYOK device/pairing revocation,
-local secret deletion, and upstream Google token revocation are separate
-authorities: the host must explicitly wire all three lifecycle operations.
+reference for that broker boundary. It stores the desktop OAuth client and
+refresh credential as separate macOS Keychain or Windows Credential Manager
+entries, uses a random loopback listener plus `state` and PKCE S256, requests
+exactly `gmail.readonly`, and keeps refreshed access tokens process-local. It
+rejects requested domains outside the exact local correspondent-domain
+allowlist before credential access and accepts only bounded metadata returned
+from Gmail `messages.get(format=metadata)`. Subjects, snippets, bodies,
+attachments, raw responses, and direct token echoes are not projected.
+
+There is no plaintext or Linux fallback. Upstream revocation must succeed
+before the normal `revoke` path deletes the local refresh credential; an
+explicit `forget` operation is local-only and claims no upstream effect. BYOK
+device/pairing revocation is a separate authority. The allowlist is a
+data-policy gate, not a network-egress or process sandbox, and the provider
+still runs as the daemon user. DPoP and Google's external restricted-scope
+verification/security assessment remain GA gates rather than implemented SDK
+guarantees.
 
 ## Local Git checkpoint workspaces
 

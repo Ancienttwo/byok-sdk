@@ -10,9 +10,13 @@
   `enqueueToolsetOffer()`, capability gating, persistence, protocol freeze
   coverage, and a Salesko-style fake connector end-to-end test.
 - Added a private Salesko connector-broker reference with OS-backed OAuth
-  custody, exact correspondent-domain policy, a host-owned read-only Gmail
-  provider port, strict metadata-only projection, and stdio MCP end-to-end
-  coverage. Real Google OAuth/refresh and Gmail API calls remain downstream.
+  custody, exact correspondent-domain policy, a read-only Gmail provider port,
+  strict metadata-only projection, and stdio MCP end-to-end coverage.
+- Completed that reference with desktop Google OAuth over loopback + PKCE,
+  process-local access-token refresh, confirmed upstream revoke, a real bounded
+  Gmail metadata adapter, RFC 5322 address parsing, and fake-Google HTTP → MCP
+  coverage. Restricted-scope verification, DPoP, and live user consent remain
+  external production gates.
 
 ## 0.2.0 — 2026-08-11
 

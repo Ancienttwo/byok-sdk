@@ -1,37 +1,26 @@
-import { InMemorySecretStore } from '@byok-sdk/keys';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ConnectorBrokerError,
   GmailConnectorBroker,
-  SecretStoreOAuthAccessTokenSource,
-  provisionOAuthCredential,
-  readOAuthCredentialStatus,
-  revokeOAuthCredential,
   type GmailProviderSearchInput,
   type GmailReadProvider,
+  type OAuthAccessTokenSource,
 } from '../broker';
 import { createSaleskoConnectorSecretStore } from '../platform-store';
 
 const NOW = Date.parse('2026-08-13T12:00:00.000Z');
 const ACCESS_TOKEN = 'ya29.local-secret-token';
 
-async function provision(store: InMemorySecretStore<string>, expiresAt = '2026-08-13T13:00:00.000Z') {
-  await provisionOAuthCredential(
-    store,
-    'default',
-    { accessToken: ACCESS_TOKEN, expiresAt },
-    { clock: () => NOW },
-  );
-}
-
 function makeBroker(
-  store: InMemorySecretStore<string>,
   provider: GmailReadProvider,
+  tokenSource: OAuthAccessTokenSource = {
+    withAccessToken: async (_profileId, use) => use(ACCESS_TOKEN),
+  },
 ): GmailConnectorBroker {
   return new GmailConnectorBroker({
     profileId: 'default',
     policy: { allowedDomains: ['acme.com'], maxResults: 5, maxAgeDays: 30 },
-    tokenSource: new SecretStoreOAuthAccessTokenSource(store, { clock: () => NOW }),
+    tokenSource,
     provider,
     clock: () => NOW,
   });
@@ -39,8 +28,6 @@ function makeBroker(
 
 describe('Salesko Gmail connector broker', () => {
   it('keeps OAuth local, applies exact domain policy, and returns only bounded metadata', async () => {
-    const store = new InMemorySecretStore<string>();
-    await provision(store);
     const calls: GmailProviderSearchInput[] = [];
     const provider: GmailReadProvider = {
       async searchCorrespondence(input) {
@@ -57,7 +44,7 @@ describe('Salesko Gmail connector broker', () => {
       },
     };
 
-    const result = await makeBroker(store, provider).search({
+    const result = await makeBroker(provider).search({
       domains: ['acme.com'],
       limit: 2,
       newerThanDays: 7,
@@ -88,36 +75,32 @@ describe('Salesko Gmail connector broker', () => {
   });
 
   it('rejects a domain outside local policy before reading credentials or calling the provider', async () => {
-    const store = new InMemorySecretStore<string>();
-    await provision(store);
-    const get = vi.spyOn(store, 'get');
+    const withAccessToken = vi.fn();
     const provider = { searchCorrespondence: vi.fn() } satisfies GmailReadProvider;
-    const broker = makeBroker(store, provider);
+    const broker = makeBroker(provider, { withAccessToken });
 
     await expect(broker.search({ domains: ['outside.example'] })).rejects.toMatchObject({
       code: 'DOMAIN_NOT_ALLOWED',
     });
-    expect(get).not.toHaveBeenCalled();
+    expect(withAccessToken).not.toHaveBeenCalled();
     expect(provider.searchCorrespondence).not.toHaveBeenCalled();
   });
 
   it('fails closed on expired credentials and never calls the provider', async () => {
-    const store = new InMemorySecretStore<string>();
-    await store.set(
-      'gmail-oauth-default',
-      JSON.stringify({ accessToken: ACCESS_TOKEN, expiresAt: '2026-08-13T12:00:10.000Z' }),
-    );
     const provider = { searchCorrespondence: vi.fn() } satisfies GmailReadProvider;
+    const tokenSource: OAuthAccessTokenSource = {
+      withAccessToken: async () => {
+        throw new ConnectorBrokerError('CREDENTIAL_EXPIRED', 'OAuth credential expired');
+      },
+    };
 
-    await expect(makeBroker(store, provider).search({ domains: ['acme.com'] })).rejects.toMatchObject({
+    await expect(makeBroker(provider, tokenSource).search({ domains: ['acme.com'] })).rejects.toMatchObject({
       code: 'CREDENTIAL_EXPIRED',
     });
     expect(provider.searchCorrespondence).not.toHaveBeenCalled();
   });
 
   it('rejects provider over-return and out-of-domain data instead of truncating or filtering', async () => {
-    const store = new InMemorySecretStore<string>();
-    await provision(store);
     const item = (index: number, email = `lead${index}@acme.com`) => ({
       messageId: `msg-${index}`,
       correspondent: { email },
@@ -125,21 +108,21 @@ describe('Salesko Gmail connector broker', () => {
       occurredAt: '2026-08-13T11:30:00.000Z',
     });
 
-    const tooMany = makeBroker(store, {
+    const tooMany = makeBroker({
       searchCorrespondence: async () => [item(1), item(2), item(3)],
     });
     await expect(tooMany.search({ domains: ['acme.com'], limit: 2 })).rejects.toMatchObject({
       code: 'PROVIDER_RESPONSE_INVALID',
     });
 
-    const outside = makeBroker(store, {
+    const outside = makeBroker({
       searchCorrespondence: async () => [item(1, 'lead@outside.example')],
     });
     await expect(outside.search({ domains: ['acme.com'] })).rejects.toMatchObject({
       code: 'PROVIDER_POLICY_VIOLATION',
     });
 
-    const mutationAttempt = makeBroker(store, {
+    const mutationAttempt = makeBroker({
       searchCorrespondence: async (input) => {
         try {
           (input.domains as string[]).push('outside.example');
@@ -156,9 +139,7 @@ describe('Salesko Gmail connector broker', () => {
   });
 
   it('rejects correspondence outside the requested age bound instead of filtering it', async () => {
-    const store = new InMemorySecretStore<string>();
-    await provision(store);
-    const broker = makeBroker(store, {
+    const broker = makeBroker({
       searchCorrespondence: async () => [
         {
           messageId: 'old-message',
@@ -175,9 +156,7 @@ describe('Salesko Gmail connector broker', () => {
   });
 
   it('does not expose provider errors or raw provider fields', async () => {
-    const store = new InMemorySecretStore<string>();
-    await provision(store);
-    const failing = makeBroker(store, {
+    const failing = makeBroker({
       searchCorrespondence: async () => {
         throw new Error(`Bearer ${ACCESS_TOKEN}`);
       },
@@ -187,7 +166,7 @@ describe('Salesko Gmail connector broker', () => {
     expect(failure).toMatchObject({ code: 'PROVIDER_FAILED', message: 'Gmail provider request failed' });
     expect(JSON.stringify(failure)).not.toContain(ACCESS_TOKEN);
 
-    const raw = makeBroker(store, {
+    const raw = makeBroker({
       searchCorrespondence: async () => [
         {
           messageId: 'msg-1',
@@ -202,7 +181,7 @@ describe('Salesko Gmail connector broker', () => {
     expect(rawFailure).toMatchObject({ code: 'PROVIDER_RESPONSE_INVALID' });
     expect(JSON.stringify(rawFailure)).not.toContain(ACCESS_TOKEN);
 
-    const projectedField = makeBroker(store, {
+    const projectedField = makeBroker({
       searchCorrespondence: async () => [
         {
           messageId: `message-${ACCESS_TOKEN}`,
@@ -223,8 +202,6 @@ describe('Salesko Gmail connector broker', () => {
   });
 
   it('aborts a provider call at the local deadline', async () => {
-    const store = new InMemorySecretStore<string>();
-    await provision(store);
     const provider: GmailReadProvider = {
       searchCorrespondence: ({ signal }) =>
         new Promise((_resolve, reject) => {
@@ -239,7 +216,9 @@ describe('Salesko Gmail connector broker', () => {
         maxAgeDays: 30,
         providerTimeoutMs: 250,
       },
-      tokenSource: new SecretStoreOAuthAccessTokenSource(store, { clock: () => NOW }),
+      tokenSource: {
+        withAccessToken: async (_profileId, use) => use(ACCESS_TOKEN),
+      },
       provider,
       clock: () => NOW,
     });
@@ -248,17 +227,6 @@ describe('Salesko Gmail connector broker', () => {
       code: 'PROVIDER_FAILED',
       message: 'Gmail provider request failed',
     });
-  });
-
-  it('reports and revokes credential state without returning the token', async () => {
-    const store = new InMemorySecretStore<string>();
-    expect(await readOAuthCredentialStatus(store, 'default', { clock: () => NOW })).toEqual({ state: 'missing' });
-    await provision(store);
-    const status = await readOAuthCredentialStatus(store, 'default', { clock: () => NOW });
-    expect(status).toEqual({ state: 'valid', expiresAt: '2026-08-13T13:00:00.000Z' });
-    expect(JSON.stringify(status)).not.toContain(ACCESS_TOKEN);
-    expect(await revokeOAuthCredential(store, 'default')).toBe(true);
-    expect(await readOAuthCredentialStatus(store, 'default', { clock: () => NOW })).toEqual({ state: 'missing' });
   });
 
   it('has no Linux plaintext credential fallback', () => {

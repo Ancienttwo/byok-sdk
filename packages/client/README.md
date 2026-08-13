@@ -53,7 +53,8 @@ task-scoped MCP configuration boundary.
 For a concrete private host composition, see the
 [`examples/salesko-connector-broker`](../../examples/salesko-connector-broker)
 reference. It keeps `@byok-sdk/client` credential-blind while combining
-OS-backed OAuth custody, exact domain policy, a host-owned Gmail provider port,
-and a closed metadata-only MCP result.
+OS-backed refresh-token custody, a PKCE desktop Google OAuth flow, exact domain
+policy, a real read-only Gmail metadata adapter, and a closed metadata-only MCP
+result.
 
 MIT licensed. Node.js 22.19.0 or newer.

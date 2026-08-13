@@ -2,7 +2,7 @@
   "name": "@byok-sdk/example-salesko-connector-broker",
   "version": "0.0.1",
   "private": true,
-  "description": "Reference Salesko-style local connector broker: OS credential custody, read-only Gmail provider port, domain policy, and stdio MCP",
+  "description": "Private Salesko-style connector broker with desktop Google OAuth, read-only Gmail metadata, local policy, and stdio MCP",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@byok-sdk/keys": "workspace:*",
+    "email-addresses": "5.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

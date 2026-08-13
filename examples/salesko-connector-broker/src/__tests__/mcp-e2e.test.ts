@@ -1,10 +1,7 @@
-import { InMemorySecretStore } from '@byok-sdk/keys';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import {
   GmailConnectorBroker,
-  SecretStoreOAuthAccessTokenSource,
-  provisionOAuthCredential,
   type GmailReadProvider,
 } from '../broker';
 import { GMAIL_SEARCH_TOOL_NAME, MAX_MCP_REQUEST_BYTES, serveConnectorMcp } from '../mcp-server';
@@ -14,13 +11,6 @@ const ACCESS_TOKEN = 'ya29.mcp-local-secret';
 
 describe('Salesko connector stdio MCP end to end', () => {
   it('runs initialize -> tools/list -> tools/call through custody, policy, provider, and redacted output', async () => {
-    const store = new InMemorySecretStore<string>();
-    await provisionOAuthCredential(
-      store,
-      'default',
-      { accessToken: ACCESS_TOKEN, expiresAt: '2026-08-13T13:00:00.000Z' },
-      { clock: () => NOW },
-    );
     const searchCorrespondence = vi.fn(async () => [
       {
         messageId: 'gmail-message-1',
@@ -33,7 +23,9 @@ describe('Salesko connector stdio MCP end to end', () => {
     const broker = new GmailConnectorBroker({
       profileId: 'default',
       policy: { allowedDomains: ['acme.com'], maxResults: 5, maxAgeDays: 30 },
-      tokenSource: new SecretStoreOAuthAccessTokenSource(store, { clock: () => NOW }),
+      tokenSource: {
+        withAccessToken: async (_profileId, use) => use(ACCESS_TOKEN),
+      },
       provider,
       clock: () => NOW,
     });

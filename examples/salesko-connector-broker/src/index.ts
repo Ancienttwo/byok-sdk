@@ -2,19 +2,12 @@ export {
   CONNECTOR_BROKER_ERROR_CODES,
   ConnectorBrokerError,
   ConnectorProfileIdSchema,
-  DEFAULT_MINIMUM_TOKEN_VALIDITY_MS,
   EmailDomainSchema,
   GmailConnectorBroker,
   GmailConnectorPolicySchema,
   GmailCorrespondenceSchema,
   GmailSearchInputSchema,
   NormalizedEmailAddressSchema,
-  OAuthCredentialSchema,
-  SecretStoreOAuthAccessTokenSource,
-  gmailOAuthSecretName,
-  provisionOAuthCredential,
-  readOAuthCredentialStatus,
-  revokeOAuthCredential,
 } from './broker';
 export type {
   ConnectorBrokerErrorCode,
@@ -27,9 +20,41 @@ export type {
   GmailSearchInput,
   GmailSearchResult,
   OAuthAccessTokenSource,
-  OAuthCredential,
-  OAuthCredentialStatus,
 } from './broker';
+
+export {
+  GOOGLE_AUTHORIZATION_ENDPOINT,
+  GOOGLE_GMAIL_PROFILE_ENDPOINT,
+  GOOGLE_GMAIL_READONLY_SCOPE,
+  GOOGLE_REVOKE_ENDPOINT,
+  GOOGLE_TOKEN_ENDPOINT,
+  GoogleOAuthAccessTokenSource,
+  GoogleOAuthClientCredentialSchema,
+  GoogleOAuthRefreshCredentialSchema,
+  authorizeGoogleGmailWithLoopback,
+  configureGoogleOAuthClient,
+  createGoogleAuthorizationRequest,
+  exchangeGoogleAuthorizationCode,
+  forgetGoogleOAuthConnection,
+  googleOAuthClientSecretName,
+  googleOAuthRefreshSecretName,
+  readGoogleOAuthStatus,
+  revokeGoogleOAuthConnection,
+} from './google-oauth';
+export type {
+  GoogleAuthorizationCode,
+  GoogleAuthorizationRequest,
+  GoogleFetch,
+  GoogleOAuthClientCredential,
+  GoogleOAuthRefreshCredential,
+  GoogleOAuthStatus,
+} from './google-oauth';
+
+export {
+  GOOGLE_GMAIL_MESSAGES_ENDPOINT,
+  GoogleGmailReadProvider,
+} from './google-gmail-provider';
+export type { GoogleGmailReadProviderOptions } from './google-gmail-provider';
 
 export {
   GMAIL_SEARCH_TOOL_NAME,
