@@ -1,5 +1,5 @@
 import { isCoreError, PRESENCE_LEVELS } from '@byok-sdk/core';
-import { AgentEventOrUnknownSchema } from '@byok-sdk/protocol';
+import { AgentEventOrUnknownSchema, ConfiguredToolsetsSchema } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { appendActivityEvents, type ActivityBounds } from '../coordination';
@@ -19,6 +19,7 @@ export interface ActivityRouteDeps extends DeviceRouteDeps {
 const PresenceBodySchema = z.object({
   level: z.enum(PRESENCE_LEVELS),
   detail: z.string().optional(),
+  configuredToolsets: ConfiguredToolsetsSchema.optional(),
 });
 
 const ActivityBodySchema = z.object({
@@ -45,6 +46,9 @@ export function presencePublishHandler(deps: PresenceRouteDeps) {
           deviceId: authenticated.device.deviceId,
           level: parsed.data.level,
           ...(parsed.data.detail === undefined ? {} : { detail: parsed.data.detail }),
+          ...(parsed.data.configuredToolsets === undefined
+            ? {}
+            : { configuredToolsets: parsed.data.configuredToolsets }),
           ttlMs: deps.ttlMs,
           minimumIntervalMs: deps.minimumIntervalMs,
         }),

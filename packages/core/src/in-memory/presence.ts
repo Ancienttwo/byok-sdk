@@ -67,6 +67,9 @@ export class InMemoryPresenceStore implements PresenceStore {
       deviceId: input.deviceId,
       level: input.level,
       ...(input.detail === undefined ? {} : { detail: input.detail }),
+      ...(input.configuredToolsets === undefined
+        ? {}
+        : { configuredToolsets: Object.freeze([...input.configuredToolsets]) }),
       observedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + input.ttlMs).toISOString(),
     };

@@ -51,7 +51,7 @@ await simulator.token({
 // …or `await simulator.renewAccessToken()` for all three in one call.
 
 // 4. presence — published under the device bearer, read back host-side
-await simulator.publishPresence('working', 'running the suite');
+await simulator.publishPresence('working', 'running the suite', ['salesko.connectors']);
 const hints = await simulator.readHostPresence();
 
 // 5. revoke — through your host control plane
@@ -118,7 +118,7 @@ write by hand before this package existed.
 | `pair(pairingCode, deviceName, devicePublicKey) → {deviceId, accessToken}` | `simulator.pair(pairingCode, deviceName)` | conformance `pairing simulator › five primitives` |
 | `challenge → {nonce}` | `simulator.challenge(deviceId?)` | same |
 | `token(deviceId, nonce, signature)` | `simulator.token({deviceId, nonce, signature})`, or `renewAccessToken()` | same |
-| `PUT /byok/presence {level, detail}` under device bearer | `simulator.publishPresence(level, detail?)` | same |
+| `PUT /byok/presence {level, detail, configuredToolsets?}` under device bearer | `simulator.publishPresence(level, detail?, configuredToolsets?)` | same |
 | Host-side presence read-back | `simulator.readHostPresence()` via `SimulatorHost` | same |
 | Revoke | `simulator.revoke()` via `SimulatorHost` | same |
 | Negative: unauthenticated request → 401 | `assertUnauthenticatedRejected` | conformance `negative assertions hold` + `can fail` |

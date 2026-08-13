@@ -13,6 +13,7 @@
  * it may read files to prove things about the source that does not.
  */
 import { readFileSync, readdirSync } from 'node:fs';
+import { CONFIGURED_TOOLSETS_MAX_ITEMS } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 
 const SRC_URL = new URL('../', import.meta.url);
@@ -59,6 +60,16 @@ function shipped(path: string): string {
 function repoFile(relativePath: string): string {
   return readFileSync(new URL(relativePath, REPO_ROOT_URL), 'utf8');
 }
+
+describe('the device-presence toolset migration', () => {
+  const migration = repoFile('deploy/sql/0006_device_presence_toolsets.sql');
+
+  it('keeps the SQL inventory bound aligned with the protocol authority', () => {
+    expect(migration).toContain(
+      `jsonb_array_length(configured_toolsets) <= ${CONFIGURED_TOOLSETS_MAX_ITEMS}`,
+    );
+  });
+});
 
 describe('the CI dataplane job', () => {
   const workflow = repoFile('.github/workflows/ci.yml');

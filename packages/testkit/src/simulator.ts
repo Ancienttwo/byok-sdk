@@ -38,6 +38,7 @@ import {
   ChallengeResponseSchema,
   PairResponseSchema,
   TokenResponseSchema,
+  type ToolsetId,
 } from '@byok-sdk/protocol';
 import { createDeviceIdentity, type DeviceIdentity } from './identity';
 
@@ -136,7 +137,11 @@ export interface DeviceSimulator {
   /** `challenge()` → sign with the domain-separated bytes → `token()`, adopting the new access token. */
   renewAccessToken(): Promise<string>;
   /** §12.3 — publish a presence hint under the device bearer. */
-  publishPresence(level: PresenceLevel, detail?: string): Promise<void>;
+  publishPresence(
+    level: PresenceLevel,
+    detail?: string,
+    configuredToolsets?: readonly ToolsetId[],
+  ): Promise<void>;
   /** Read presence back the way a host does, through the supplied {@link SimulatorHost}. */
   readHostPresence(): Promise<readonly PresenceHint[]>;
   /** §6.3 — revoke this device through the supplied {@link SimulatorHost}. */
@@ -279,14 +284,18 @@ export async function createDeviceSimulator(
     token,
     renewAccessToken,
 
-    async publishPresence(level, detail) {
+    async publishPresence(level, detail, configuredToolsets) {
       requireSession('publishPresence()');
       expectOk(
         'presence publication rejected',
         await request({
           method: 'PUT',
           path: DEVICE_ROUTES.presence,
-          body: { level, ...(detail === undefined ? {} : { detail }) },
+          body: {
+            level,
+            ...(detail === undefined ? {} : { detail }),
+            ...(configuredToolsets === undefined ? {} : { configuredToolsets }),
+          },
         }),
       );
     },

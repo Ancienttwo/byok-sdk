@@ -24,7 +24,7 @@
  * publisher permanently — there is no recourse but a fresh `pair()`, so
  * retrying would be a pure spin.
  */
-import { BYOK_PRESENCE_PATH } from '@byok-sdk/protocol';
+import { BYOK_PRESENCE_PATH, type ToolsetId } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
 import { DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
@@ -70,6 +70,8 @@ export function assertPresenceHeartbeatCadence(cadence: {
 export interface PresencePublisherOptions {
   serverUrl: string;
   auth: AuthManager;
+  /** Sorted logical IDs only. Executable MCP definitions and credentials remain device-local. */
+  configuredToolsets?: readonly ToolsetId[];
   /** Heartbeat cadence. Must sit strictly between {@link PresencePublisherOptions.minimumIntervalMs} and {@link PresencePublisherOptions.ttlMs}. */
   intervalMs?: number;
   /** The deployment's presence hint TTL, as this daemon understands it. Only used to validate the cadence. */
@@ -144,7 +146,12 @@ export class PresencePublisher {
         {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ level: 'online' }),
+          body: JSON.stringify({
+            level: 'online',
+            ...(this.opts.configuredToolsets === undefined
+              ? {}
+              : { configuredToolsets: this.opts.configuredToolsets }),
+          }),
         },
         this.opts.auth,
       );

@@ -54,7 +54,25 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     const workspaceRoot = await tmpDir('byok-conn-hello-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      {
+        productName: 'Test Product',
+        productId: 'test-product',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        mcpToolsets: {
+          'salesko.connectors': {
+            mcpServers: {
+              salesko: { command: '/private/device/salesko-connector', args: ['--stdio'] },
+            },
+          },
+          'crm.readonly': {
+            mcpServers: {
+              crm: { command: '/private/device/crm-connector' },
+            },
+          },
+        },
+      },
       [pi, claude, codex],
     );
     await daemon.pair('pairing-code');
@@ -65,6 +83,10 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
 
     const runtimes = hello.payload.runtimes ?? [];
     expect(hello.payload.capabilities).toContain('toolset-selection');
+    expect(hello.payload.configuredToolsets).toEqual(['crm.readonly', 'salesko.connectors']);
+    expect(JSON.stringify(hello.payload)).not.toContain('/private/device/salesko-connector');
+    expect(JSON.stringify(hello.payload)).not.toContain('/private/device/crm-connector');
+    expect(JSON.stringify(hello.payload)).not.toContain('--stdio');
     expect(runtimes).toHaveLength(3);
     const byId = new Map(runtimes.map((r) => [r.id, r.capabilities]));
 

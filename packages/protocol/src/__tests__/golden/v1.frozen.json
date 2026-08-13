@@ -253,6 +253,16 @@
             "additionalProperties": false
           }
         },
+        "configuredToolsets": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+          }
+        },
         "cursor": {
           "type": "integer",
           "minimum": -9007199254740991,
@@ -1289,6 +1299,16 @@
                     "id"
                   ],
                   "additionalProperties": false
+                }
+              },
+              "configuredToolsets": {
+                "maxItems": 64,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
                 }
               },
               "cursor": {
@@ -3685,6 +3705,16 @@
                           "additionalProperties": false
                         }
                       },
+                      "configuredToolsets": {
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                        }
+                      },
                       "cursor": {
                         "type": "integer",
                         "minimum": -9007199254740991,
@@ -5505,6 +5535,16 @@
                             "id"
                           ],
                           "additionalProperties": false
+                        }
+                      },
+                      "configuredToolsets": {
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
                         }
                       },
                       "cursor": {

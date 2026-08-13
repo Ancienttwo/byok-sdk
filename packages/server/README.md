@@ -21,6 +21,8 @@ const task = await server.dispatch({
 ```
 
 The self-hosted coordinator rejects this call before task creation unless the
-live device advertises `toolset-selection`.
+live device advertises `toolset-selection` and its `configuredToolsets`
+inventory contains every required ID. `machines.list()` projects that same
+logical-ID-only inventory; MCP commands and credentials remain device-local.
 
 MIT licensed. Node.js 22.19.0 or newer.

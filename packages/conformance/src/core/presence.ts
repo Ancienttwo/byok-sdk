@@ -28,6 +28,26 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
       });
     });
 
+    it('round-trips a logical toolset inventory without retaining caller mutation', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        const configuredToolsets = ['crm.readonly', 'salesko.connectors'];
+        const published = await stores.presence.publish(TENANT_A, {
+          deviceId: 'device-toolsets',
+          level: 'online',
+          configuredToolsets,
+          ttlMs: 60_000,
+          minimumIntervalMs: 0,
+        });
+        configuredToolsets.push('mutated.after.publish');
+
+        expect(published.configuredToolsets).toEqual(['crm.readonly', 'salesko.connectors']);
+        expect((await stores.presence.read(TENANT_A, 'device-toolsets'))?.configuredToolsets).toEqual([
+          'crm.readonly',
+          'salesko.connectors',
+        ]);
+      });
+    });
+
     it('treats an expired hint as absent', async () => {
       await withComposition(factory, async (handle) => {
         const { stores } = handle;

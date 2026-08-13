@@ -66,6 +66,45 @@ export const RuntimeInfoSchema = z.object({
 });
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 
+/** Maximum logical toolsets one daemon may advertise as locally configured. */
+export const CONFIGURED_TOOLSETS_MAX_ITEMS = 64;
+
+/**
+ * Logical, host-owned MCP toolset identifier. A task may request this name,
+ * but the executable/server definition behind it exists only in the daemon's
+ * local configuration and never crosses the SaaS wire.
+ */
+export const ToolsetIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u, 'toolset ids must be lowercase logical identifiers');
+export type ToolsetId = z.infer<typeof ToolsetIdSchema>;
+
+function rejectDuplicateToolsets(
+  ids: readonly string[],
+  ctx: z.RefinementCtx,
+  label: 'configured' | 'required',
+): void {
+  const seen = new Set<string>();
+  for (const [index, id] of ids.entries()) {
+    if (seen.has(id)) {
+      ctx.addIssue({ code: 'custom', path: [index], message: `duplicate ${label} toolset: ${id}` });
+    }
+    seen.add(id);
+  }
+}
+
+/**
+ * Device-local inventory projected for discovery. IDs only: executable MCP
+ * definitions, arguments, environment and credentials never enter this shape.
+ * Empty means known-none; omission on the containing message means unknown.
+ */
+export const ConfiguredToolsetsSchema = z
+  .array(ToolsetIdSchema)
+  .max(CONFIGURED_TOOLSETS_MAX_ITEMS)
+  .superRefine((ids, ctx) => rejectDuplicateToolsets(ids, ctx, 'configured'));
+
 /** daemon -> server: opening handshake. */
 export const ConnHelloPayloadSchema = z.object({
   protocolVersions: z.array(z.number().int()),
@@ -74,6 +113,8 @@ export const ConnHelloPayloadSchema = z.object({
   productId: z.string(),
   /** Runtimes detected on this device (M1 gap #4; replaces `agents`). */
   runtimes: z.array(RuntimeInfoSchema).optional(),
+  /** Validated logical IDs configured on this device; definitions and secrets stay local. */
+  configuredToolsets: ConfiguredToolsetsSchema.optional(),
   /**
    * Last `seq` this device has seen from the server (M1 redelivery cursor).
    * Omitted on a device's first-ever connection. The server replays any
@@ -175,36 +216,12 @@ export const TaskOfferPayloadSchema = z.object({
 });
 export type TaskOfferPayload = z.infer<typeof TaskOfferPayloadSchema>;
 
-/**
- * Logical, host-owned MCP toolset identifier. A task may request this name,
- * but the executable/server definition behind it exists only in the daemon's
- * local configuration and never crosses the SaaS wire.
- */
-export const ToolsetIdSchema = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u, 'toolset ids must be lowercase logical identifiers');
-export type ToolsetId = z.infer<typeof ToolsetIdSchema>;
-
 /** Every named toolset is required; duplicates are rejected instead of silently de-duplicated. */
 export const RequiredToolsetsSchema = z
   .array(ToolsetIdSchema)
   .min(1)
   .max(16)
-  .superRefine((ids, ctx) => {
-    const seen = new Set<string>();
-    for (const [index, id] of ids.entries()) {
-      if (seen.has(id)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: [index],
-          message: `duplicate required toolset: ${id}`,
-        });
-      }
-      seen.add(id);
-    }
-  });
+  .superRefine((ids, ctx) => rejectDuplicateToolsets(ids, ctx, 'required'));
 
 /**
  * Additive v1 offer variant for tasks whose semantics require local MCP

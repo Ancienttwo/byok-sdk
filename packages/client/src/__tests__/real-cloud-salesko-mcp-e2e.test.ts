@@ -70,6 +70,16 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
     const device = await daemon.pair(pairing.code);
     await daemon.start();
 
+    await vi.waitFor(async () => {
+      const presence = await cloud.listPresence();
+      expect(presence).toHaveLength(1);
+      expect(presence[0]).toMatchObject({
+        deviceId: device.deviceId,
+        configuredToolsets: ['salesko.connectors'],
+      });
+      expect(JSON.stringify(presence)).not.toContain(SALESKO_MCP_FIXTURE);
+    });
+
     const offer = await cloud.enqueueToolsetOffer(device.deviceId, {
       instruction: 'salesko:find-leads',
       policy: { mode: 'readonly', allowTools: [] },

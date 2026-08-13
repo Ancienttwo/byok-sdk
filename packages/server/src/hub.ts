@@ -25,6 +25,7 @@ import {
   type TaskProgressPayload,
   type TaskStartedPayload,
   type TaskState,
+  type ToolsetId,
 } from '@byok-sdk/protocol';
 import type { DeviceRegistry } from './auth';
 import { AsyncEventQueue } from './event-queue';
@@ -81,6 +82,8 @@ interface ConnectionState {
   connected: boolean;
   lastSeen: string;
   runtimes?: RuntimeInfo[];
+  /** Logical IDs from the last conn.hello; executable MCP definitions never enter the hub. */
+  configuredToolsets?: readonly ToolsetId[];
   /**
    * M5 (approval targeting, hello-capability plumbing): the capability flags
    * this connection's `conn.hello` advertised — `undefined` for a device
@@ -472,9 +475,22 @@ export class ConnectionHub {
    * connection this hub never learns capabilities for simply reads back
    * `undefined` from {@link getDeviceCapabilities}.
    */
-  registerConnection(deviceId: string, ws: WebSocket, runtimes: RuntimeInfo[] | undefined, capabilities?: readonly string[]): void {
+  registerConnection(
+    deviceId: string,
+    ws: WebSocket,
+    runtimes: RuntimeInfo[] | undefined,
+    capabilities?: readonly string[],
+    configuredToolsets?: readonly ToolsetId[],
+  ): void {
     const at = new Date().toISOString();
-    this.connections.set(deviceId, { ws, connected: true, lastSeen: at, runtimes, capabilities });
+    this.connections.set(deviceId, {
+      ws,
+      connected: true,
+      lastSeen: at,
+      runtimes,
+      capabilities,
+      configuredToolsets,
+    });
     this.serverEvents.push({ kind: 'device.connected', deviceId, at });
     // Last-transport-wins (§8): a WS connection supersedes any long-poll
     // request currently held open for this device — let it complete now
@@ -592,7 +608,13 @@ export class ConnectionHub {
       // whatever it advertised on the live WS handshake must survive this
       // switch, not silently reset to `undefined` (see `ConnectionState.
       // capabilities`'s own doc comment).
-      this.connections.set(deviceId, { connected: true, lastSeen: at, runtimes: conn.runtimes, capabilities: conn.capabilities });
+      this.connections.set(deviceId, {
+        connected: true,
+        lastSeen: at,
+        runtimes: conn.runtimes,
+        capabilities: conn.capabilities,
+        configuredToolsets: conn.configuredToolsets,
+      });
       ws.close(1000, 'superseded by long-poll connection');
     } else if (!conn) {
       this.connections.set(deviceId, { connected: true, lastSeen: at });
@@ -1470,7 +1492,7 @@ export class ConnectionHub {
       input.requiredToolsets === undefined
         ? undefined
         : RequiredToolsetsSchema.parse(input.requiredToolsets);
-    const deviceId = input.deviceId ?? this.pickFirstConnectedDevice();
+    const deviceId = input.deviceId ?? this.pickFirstConnectedDevice(requiredToolsets);
     // M0 routing has no queue-until-connect: reject clearly instead of
     // silently queuing a task nothing will ever claim.
     if (!deviceId || !this.connections.get(deviceId)?.connected) {
@@ -1497,6 +1519,22 @@ export class ConnectionHub {
       throw new Error(
         `device ${deviceId} did not advertise toolset-selection capability; refusing a task whose semantics require local MCP tools`,
       );
+    }
+
+    if (requiredToolsets !== undefined) {
+      const configuredToolsets = this.connections.get(deviceId)?.configuredToolsets;
+      if (configuredToolsets === undefined) {
+        throw new Error(
+          `device ${deviceId} did not advertise its configured toolset inventory; refusing to guess from runtime capability`,
+        );
+      }
+      const configured = new Set(configuredToolsets);
+      const missing = requiredToolsets.filter((toolsetId) => !configured.has(toolsetId));
+      if (missing.length > 0) {
+        throw new Error(
+          `device ${deviceId} is missing required MCP toolset(s): ${missing.join(', ')}`,
+        );
+      }
     }
 
     if (
@@ -1708,9 +1746,14 @@ export class ConnectionHub {
     this.sendToDevice(record.deviceId, 'task.steer', { text }, { taskId });
   }
 
-  private pickFirstConnectedDevice(): string | undefined {
+  private pickFirstConnectedDevice(requiredToolsets?: readonly ToolsetId[]): string | undefined {
     for (const [deviceId, conn] of this.connections) {
-      if (conn.connected) return deviceId;
+      if (!conn.connected) continue;
+      if (requiredToolsets === undefined) return deviceId;
+      if (!conn.capabilities?.includes('toolset-selection')) continue;
+      if (conn.configuredToolsets === undefined) continue;
+      const configured = new Set(conn.configuredToolsets);
+      if (requiredToolsets.every((toolsetId) => configured.has(toolsetId))) return deviceId;
     }
     return undefined;
   }
@@ -1829,6 +1872,7 @@ export class ConnectionHub {
         connected: conn?.connected ?? false,
         lastSeen: conn?.lastSeen,
         runtimes: conn?.runtimes,
+        configuredToolsets: conn?.configuredToolsets ? [...conn.configuredToolsets] : undefined,
       };
     });
   }
