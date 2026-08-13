@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-13 11:24
+> **Related Plan**: plans/archive/plan-20260813-1028-ci-stability-flakes.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260813-1124
+
 # Task Contract: ci-stability-flakes
 
 > **Status**: Fulfilled

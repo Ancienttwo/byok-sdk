@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-13 11:24
+> **Related Plan**: plans/archive/plan-20260813-1028-ci-stability-flakes.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260813-1124
+
 # Task Review: ci-stability-flakes
 
 > **Status**: Pending

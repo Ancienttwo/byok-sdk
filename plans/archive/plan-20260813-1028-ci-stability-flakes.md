@@ -1,6 +1,6 @@
 # Plan: CI Stability — daemon-owner mutex + MinIO teardown 503 flakes
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260813-1028
 > **Slug**: ci-stability-flakes
 > **Planning Source**: repo-harness-plan
