@@ -465,11 +465,19 @@ Library exports 分成六组：
 | 组 | 主要 public API |
 | --- | --- |
 | daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、`AuthManager`、`DeviceRevokedError`、`BlobClient` |
-| adapter contract | `RuntimeAdapter`、`Session`、`TaskContext`、`RuntimeCapabilities`、`PolicyUnsupportedError` |
+| adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`PolicyUnsupportedError` |
 | bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter` 与 options |
 | observability | `DaemonObserver`、event/task projection types |
 | Git workspace | `GitWorkspaceManager`、`GitWorkspaceStore`、ledger/lease/observation types |
 | OS integration | service lifecycle factories/generators、`ensureSecureDir`、Windows DACL error |
+
+0.4.0 的 adapter seam 只有一条：adapter 把静态事实放在 frozen
+`descriptor`，并为每个 offer 执行无副作用 `prepare()`；它只会 reject 或
+返回一次 `PreparedRuntimeOperation`。`TaskRunner` 在 claim 前封存
+credential-free `RuntimeOperationManifest`，然后将同一份 authority 用于
+admission、claim capability、环境筛选、runtime/lane/provider/model 与
+operation start。`prepare()` 不得 spawn、创建临时文件、分配或修改 workspace/
+session，也不得读取 credential value；旧 direct `start()` contract 不保留。
 
 `byok-agent` 命令面：
 
@@ -520,7 +528,7 @@ Library exports 分成六组：
 
 Runtime policy 不做跨 runtime 的语义翻译：tool name 是 runtime-local vocabulary。adapter 无法精确表达 policy 时必须 decline，不能选择“接近的”参数继续执行。
 
-原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 改为 required 字段，由各 adapter 自己声明（Claude `true`——confirm 路径真实已接线；Pi、Codex `false`），wire `RuntimeInfo.capabilities` 由 adapter 实例生成、纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 与 `permissionModes` 出自同一次 `capabilities()` 调用，因而结构上一致；connection flag `interactive-approval` 仍是 reserved，无人 advertise、无人消费，不作为路由信号。
+原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 是 required 字段，由各 adapter frozen descriptor 自己声明（Claude `true`——confirm 路径真实已接线；Pi、Codex `false`），wire `RuntimeInfo.capabilities` 从 descriptor 纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 与 `permissionModes` 来自同一 descriptor snapshot，因而结构上一致；connection flag `interactive-approval` 仍是 reserved，无人 advertise、无人消费，不作为路由信号。
 
 #### 三层 capability 模型
 
@@ -751,14 +759,16 @@ sequenceDiagram
   Hub->>Store: create Offered record
   Hub-->>CM: task.offer with device seq
   CM->>TR: handle envelope FIFO
-  TR->>TR: dedup, policy, limits, runtime, workspace preflight
+  TR->>TR: dedup, policy, limits, frozen descriptor, toolset preflight
+  TR->>AD: prepare offer with frozen descriptor (no side effects)
   alt pre-claim incompatibility
     TR-->>Hub: task.decline retryable or not
     Hub->>Store: Offered to Failed
   else accepted
-    TR-->>Hub: task.claim with actual runtime
+    TR->>TR: seal credential-free operation manifest
+    TR-->>Hub: task.claim with manifest runtime/capabilities
     Hub->>Store: Offered to Claimed
-    TR->>AD: start offer with effective TaskContext
+    TR->>AD: start prepared operation with manifest + runtime resources
     AD->>Proc: spawn official CLI
     TR-->>Hub: task.started
     Hub->>Store: Claimed to Running

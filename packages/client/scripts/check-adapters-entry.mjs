@@ -26,9 +26,9 @@ assert.deepEqual(
   Object.keys(adapters).sort(),
   ['ClaudeAdapter', 'CodexAdapter', 'PI_PACKAGE_NAME', 'PiAdapter'],
 );
-assert.equal(new adapters.PiAdapter().id, 'pi');
-assert.equal(new adapters.ClaudeAdapter().id, 'claude');
-assert.equal(new adapters.CodexAdapter().id, 'codex');
+assert.equal(new adapters.PiAdapter().descriptor.id, 'pi');
+assert.equal(new adapters.ClaudeAdapter().descriptor.id, 'claude');
+assert.equal(new adapters.CodexAdapter().descriptor.id, 'codex');
 
 console.log(JSON.stringify({
   adapterEntryBytes: Buffer.byteLength(bundledEntry),

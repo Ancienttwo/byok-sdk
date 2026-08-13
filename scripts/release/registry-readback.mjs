@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const expectedVersion = '0.3.0';
+const expectedVersion = '0.4.0';
 const piVersion = '0.84.1';
 const packages = [
   '@byok-sdk/core',

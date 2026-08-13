@@ -5,17 +5,17 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 describe('bin/runtime-probe: defaultRuntimeAdapters', () => {
   it('with no allowlist, returns all three bundled runtimes in canonical order', () => {
     const adapters = defaultRuntimeAdapters(undefined);
-    expect(adapters.map((a) => a.id)).toEqual(['pi', 'claude', 'codex']);
+    expect(adapters.map((a) => a.descriptor.id)).toEqual(['pi', 'claude', 'codex']);
   });
 
   it('with an allowlist, returns exactly (and only) those runtimes', () => {
     const adapters = defaultRuntimeAdapters(['claude', 'codex']);
-    expect(adapters.map((a) => a.id).sort()).toEqual(['claude', 'codex']);
+    expect(adapters.map((a) => a.descriptor.id).sort()).toEqual(['claude', 'codex']);
   });
 
   it('silently ignores an unknown id in the allowlist', () => {
     const adapters = defaultRuntimeAdapters(['pi', 'not-a-real-runtime']);
-    expect(adapters.map((a) => a.id)).toEqual(['pi']);
+    expect(adapters.map((a) => a.descriptor.id)).toEqual(['pi']);
   });
 
   it('an empty allowlist yields no adapters at all', () => {

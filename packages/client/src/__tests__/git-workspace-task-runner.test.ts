@@ -9,7 +9,7 @@ import { GitWorkspaceManager, type GitWorkspaceObservation, type GitWorkspaceLea
 import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import type { Session, TaskContext } from '../types';
+import type { Session } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 
 const dirs: string[] = [];

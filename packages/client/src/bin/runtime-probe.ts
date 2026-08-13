@@ -70,7 +70,7 @@ export interface ProbedRuntime {
 }
 
 /**
- * Runs `detect()`/`capabilities()` on each adapter, in parallel. Every
+ * Runs `detect()` and reads each adapter's frozen descriptor, in parallel. Every
  * bundled adapter's own `detect()` already catches its own failures (e.g.
  * `pi-adapter.ts`'s `detect()` wraps its version probe in try/catch and
  * resolves `{present: false}` rather than rejecting) — the catch here is a
@@ -91,8 +91,8 @@ export async function probeRuntimes(
       let resume = false;
       let permissionModes: string[] = [];
       try {
-        id = boundedSingleLine(adapter.id, MAX_RUNTIME_ID_CHARS);
-        const caps = adapter.capabilities();
+        id = boundedSingleLine(adapter.descriptor.id, MAX_RUNTIME_ID_CHARS);
+        const caps = adapter.descriptor.capabilities;
         steer = caps.steer === true;
         resume = caps.resume === true;
         permissionModes = caps.permissionModes

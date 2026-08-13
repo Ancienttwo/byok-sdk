@@ -21,14 +21,14 @@ export interface RuntimeDetectResult {
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
-  steer: boolean;
-  resume: boolean;
+  readonly steer: boolean;
+  readonly resume: boolean;
   /**
    * Whether this adapter can project task-scoped, locally configured MCP
    * servers into the runtime without accepting executable definitions from
    * the remote task. Omission is fail-closed and means unsupported.
    */
-  mcpToolsets?: boolean;
+  readonly mcpToolsets?: boolean;
   /**
    * Whether this adapter can genuinely pause a running session on
    * `needs_approval` and resume it from an out-of-band decision — i.e.
@@ -42,9 +42,9 @@ export interface RuntimeCapabilities {
    * declare it fails to compile rather than silently defaulting to a claim
    * it cannot back.
    */
-  approvalInteractive: boolean;
+  readonly approvalInteractive: boolean;
   /** Subset of {@link PermissionPolicy}'s `mode` values this adapter can express without widening. */
-  permissionModes: string[];
+  readonly permissionModes: readonly string[];
 }
 
 /** One local stdio MCP server definition. Remote task payloads can never supply this shape. */
@@ -60,8 +60,8 @@ export interface McpToolsetConfig {
 
 /**
  * M4 Phase 3: the out-of-band approval channel `TaskRunner` (`daemon/
- * task-runner.ts`) hands to an adapter's `start()` via `TaskContext
- * .approvalChannel`, for a runtime whose approval mechanism genuinely needs
+ * task-runner.ts`) hands to a prepared operation's `start()` via
+ * `RuntimeOperationStartInput.approvalChannel`, for a runtime whose approval mechanism genuinely needs
  * to reach back into the daemon from OUTSIDE the adapter's own process — the
  * claude adapter's concrete case: `claude`'s `--permission-prompt-tool`
  * resolves a pending permission entirely inside a SEPARATE MCP-server child
@@ -91,31 +91,6 @@ export interface ApprovalChannel {
   timeoutMs: number;
   /** Resolve the single currently-pending out-of-band approval for this task. Rejects if none is pending right now. */
   resolve(approved: boolean, reason?: string): Promise<void>;
-}
-
-/**
- * Per-task execution context handed to {@link RuntimeAdapter.start}. `policy`
- * is the already fail-closed-checked *effective* policy (offer policy merged
- * against the daemon's configured ceiling) — the adapter must obey this, not
- * whatever the raw task offer's own `policy` field said.
- */
-export interface TaskContext {
-  workspaceDir: string;
-  policy: PermissionPolicy;
-  env: NodeJS.ProcessEnv;
-  /**
-   * MCP servers resolved from this device's local registry for this task.
-   * The wire carries only logical toolset ids; command/args never originate
-   * from the SaaS task and are never copied into the task instruction.
-   */
-  mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
-  /** Prepared local checkpoint repository metadata; absent for legacy plain workspaces. */
-  gitWorkspace?: {
-    workspaceId: string;
-    baseline?: string;
-  };
-  /** M4 Phase 3 — see {@link ApprovalChannel}. Optional/adapter-agnostic: unset for every adapter that never requests an out-of-band approval. */
-  approvalChannel?: ApprovalChannel;
 }
 
 /**
@@ -152,52 +127,158 @@ export interface Session {
 }
 
 /**
- * Uniform seam every concrete runtime (pi now; claude/codex in M2) implements.
+ * Immutable runtime facts shared by discovery and one prepared operation.
  *
- * Credential-isolation rule: an adapter spawns only the runtime's official
- * binary. It never reads, proxies, or forwards that runtime's own credential
- * storage (OAuth tokens, API keys on disk, `~/.claude`, `~/.codex`, `~/.pi`
- * auth state, etc). Presence checks are limited to environment variable
- * *names* (see {@link RuntimeDetectResult.authPresent}).
- *
- * M5: separately, {@link RuntimeAdapter.environmentRequirements} below
- * declares which environment variable NAMES (never values inspected here
- * either) this adapter's runtime needs forwarded into its own spawned
- * process — see that method's own doc comment and `daemon/environment.ts`.
+ * The SDK snapshots this value before each offer and never consults adapter
+ * capability authority again during admission, claim, environment projection,
+ * or start. Credential declarations are names only, never values.
  */
-export interface RuntimeAdapter {
-  id: string;
-  /**
-   * Explicit opt-in to the authoritative `task.offer.dispatchSelection`
-   * contract. A custom adapter using a built-in runtime id must set this only
-   * when it validates and pins the exact lane/provider/model semantics; the
-   * daemon will otherwise withhold the connection-level capability so a
-   * server rejects the offer before sending it.
-   */
-  readonly supportsDispatchSelection?: true;
-  detect(): Promise<RuntimeDetectResult>;
-  capabilities(): RuntimeCapabilities;
-  start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session>;
-  /**
-   * M5: declares which environment variable names (exact, or `*`-suffixed
-   * prefix) this runtime's own CLI needs beyond the always-included
-   * platform baseline (`daemon/environment.ts`'s `buildRuntimeEnv`) —
-   * `task-runner.ts` builds each task's `TaskContext.env` from this instead
-   * of ever handing a spawned agent the daemon's raw `process.env` again.
-   * Optional and fail-closed by omission: an adapter that doesn't implement
-   * this gets the platform baseline ONLY, never an implicit "everything."
-   */
-  environmentRequirements?(): RuntimeEnvironmentRequirements;
+export interface RuntimeAdapterDescriptor {
+  readonly id: string;
+  readonly capabilities: RuntimeCapabilities;
+  readonly environmentRequirements: RuntimeEnvironmentRequirements;
+  /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
+  readonly supportsDispatchSelection: boolean;
+}
+
+/** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
+export interface RuntimeAdapterPrepareInput {
+  offer: TaskOfferPayload;
+  policy: PermissionPolicy;
+  descriptor: RuntimeAdapterDescriptor;
+  requiredToolsetIds: readonly string[];
+  /** Locally resolved MCP authority; available for pure admission validation only. */
+  mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+}
+
+/** A permanent or currently-unavailable pre-claim admission rejection. */
+export interface RuntimeAdapterRejectedOperation {
+  kind: 'reject';
+  reason: string;
+  retryable: boolean;
+}
+
+/** The side-effect-free adapter decision made before TaskRunner claims an offer. */
+export interface RuntimeAdapterPreparedOperation {
+  kind: 'prepared';
+  operation: PreparedRuntimeOperation;
+}
+
+export type RuntimeAdapterPrepareResult = RuntimeAdapterRejectedOperation | RuntimeAdapterPreparedOperation;
+
+/**
+ * Credential-free immutable identity for one admitted runtime operation.
+ * It can be emitted, compared, and passed to a prepared operation, but never
+ * serializes environment values or credential material.
+ */
+export interface RuntimeOperationManifest {
+  readonly taskId: string;
+  /** Selected runtime id; lane/provider/model, when present, live only in `dispatchSelection`. */
+  readonly runtimeId: string;
+  readonly descriptor: RuntimeAdapterDescriptor;
+  readonly policy: PermissionPolicy;
+  readonly requiredToolsetIds: readonly string[];
+  /** The credential-free runtime/lane/provider/model authority for this operation. */
+  readonly dispatchSelection?: TaskOfferPayload['dispatchSelection'];
+  readonly sessionRef?: string;
+  readonly workspace: {
+    readonly workspaceDir: string;
+    readonly workspaceId?: string;
+    readonly baseline?: string;
+  };
+  /** Names are audit-safe; credential values intentionally never enter the manifest. */
+  readonly forwardedEnvironmentNames: readonly string[];
+}
+
+/** Runtime resources only available after TaskRunner has sealed the manifest and claimed the task. */
+export interface RuntimeOperationStartInput {
+  readonly manifest: RuntimeOperationManifest;
+  readonly instruction: string;
+  readonly env: NodeJS.ProcessEnv;
+  /** Local MCP authority resolved from logical wire ids. */
+  readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+  /** Optional, adapter-agnostic out-of-band approval channel. */
+  readonly approvalChannel?: ApprovalChannel;
+}
+
+/** A pinned provider/runtime decision. `start()` receives resources only, never a raw offer. */
+export interface PreparedRuntimeOperation {
+  start(input: RuntimeOperationStartInput): Promise<Session>;
 }
 
 /**
- * Thrown by `RuntimeAdapter.start` when the task can never succeed on this
- * adapter as offered — an unsupported `PermissionPolicy` (fail-closed) or an
- * instruction shape the adapter can't handle (e.g. a blob-ref in M0) — as
- * opposed to a transient/environmental failure (spawn error, missing
- * credentials) that might succeed on a later retry. The daemon uses this
- * distinction to set `task.fail`'s `retryable` flag correctly instead of
- * treating every `start()` failure the same way.
+ * Uniform public adapter seam. `prepare()` is required and must not spawn,
+ * create temp files, mutate a workspace, allocate a session id, or read a
+ * credential value. There is intentionally no direct `RuntimeAdapter.start`.
+ */
+export interface RuntimeAdapter {
+  readonly descriptor: RuntimeAdapterDescriptor;
+  detect(): Promise<RuntimeDetectResult>;
+  prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+}
+
+function frozenStrings(values: readonly string[] | undefined): readonly string[] | undefined {
+  return values === undefined ? undefined : Object.freeze([...values]);
+}
+
+function frozenPolicy(policy: PermissionPolicy): PermissionPolicy {
+  const allowTools = policy.allowTools === undefined ? undefined : Object.freeze([...policy.allowTools]) as unknown as string[];
+  const denyTools = policy.denyTools === undefined ? undefined : Object.freeze([...policy.denyTools]) as unknown as string[];
+  return Object.freeze({
+    mode: policy.mode,
+    ...(allowTools === undefined ? {} : { allowTools }),
+    ...(denyTools === undefined ? {} : { denyTools }),
+    ...(policy.workspaceRoot === undefined ? {} : { workspaceRoot: policy.workspaceRoot }),
+    ...(policy.network === undefined ? {} : { network: policy.network }),
+  });
+}
+
+/** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */
+export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor {
+  const baseNames = frozenStrings(descriptor.environmentRequirements.baseNames);
+  const credentialNames = frozenStrings(descriptor.environmentRequirements.credentialNames);
+  return Object.freeze({
+    id: descriptor.id,
+    supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
+    capabilities: Object.freeze({
+      steer: descriptor.capabilities.steer === true,
+      resume: descriptor.capabilities.resume === true,
+      approvalInteractive: descriptor.capabilities.approvalInteractive === true,
+      ...(descriptor.capabilities.mcpToolsets === undefined ? {} : { mcpToolsets: descriptor.capabilities.mcpToolsets === true }),
+      permissionModes: Object.freeze([...descriptor.capabilities.permissionModes]),
+    }),
+    environmentRequirements: Object.freeze({
+      ...(baseNames === undefined
+        ? {}
+        : { baseNames }),
+      ...(credentialNames === undefined
+        ? {}
+        : { credentialNames }),
+    }),
+  });
+}
+
+/** Copy then freeze the complete safe operation authority just before claim. */
+export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest): RuntimeOperationManifest {
+  return Object.freeze({
+    taskId: manifest.taskId,
+    runtimeId: manifest.runtimeId,
+    descriptor: freezeRuntimeAdapterDescriptor(manifest.descriptor),
+    policy: frozenPolicy(manifest.policy),
+    requiredToolsetIds: Object.freeze([...manifest.requiredToolsetIds]),
+    ...(manifest.dispatchSelection === undefined ? {} : { dispatchSelection: Object.freeze({ ...manifest.dispatchSelection }) }),
+    ...(manifest.sessionRef === undefined ? {} : { sessionRef: manifest.sessionRef }),
+    workspace: Object.freeze({ ...manifest.workspace }),
+    forwardedEnvironmentNames: Object.freeze([...manifest.forwardedEnvironmentNames]),
+  });
+}
+
+/**
+ * Thrown by a prepared operation's `start()` when an already admitted task
+ * cannot continue because an internal invariant was violated. Permanent
+ * offer semantics are rejected by `RuntimeAdapter.prepare()` before claim;
+ * this class remains for post-claim operational/session failures whose
+ * retryability is already part of the frozen task behavior.
  */
 export class PolicyUnsupportedError extends Error {
   constructor(message: string) {
@@ -208,7 +289,7 @@ export class PolicyUnsupportedError extends Error {
 
 /**
  * Thrown by {@link Session.steer} on an adapter whose runtime has no
- * mid-turn steering channel at all (`capabilities().steer === false`) — a
+ * mid-turn steering channel at all (`descriptor.capabilities.steer === false`) — a
  * permanent property of the runtime, never a transient failure. Typed
  * rather than a bare `Error` so the daemon can classify an inbound
  * `task.steer` for such a runtime as non-retryable (record + ack, cursor
@@ -216,7 +297,7 @@ export class PolicyUnsupportedError extends Error {
  * on message strings.
  */
 export class SteerUnsupportedError extends Error {
-  /** The `RuntimeAdapter.id` that cannot steer (e.g. `claude`, `codex`). */
+  /** The `RuntimeAdapter.descriptor.id` that cannot steer (e.g. `claude`, `codex`). */
   readonly runtimeId: string;
 
   constructor(runtimeId: string, message: string) {

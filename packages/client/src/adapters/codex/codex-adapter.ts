@@ -5,12 +5,13 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
+  freezeRuntimeAdapterDescriptor,
   type RuntimeAdapter,
-  type RuntimeCapabilities,
   type RuntimeDetectResult,
-  type RuntimeEnvironmentRequirements,
+  type RuntimeAdapterPrepareInput,
+  type RuntimeAdapterPrepareResult,
+  type RuntimeOperationStartInput,
   type Session,
-  type TaskContext,
 } from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
@@ -74,8 +75,17 @@ export interface CodexAdapterOptions {
  * (`../pi/pi-adapter.ts`'s `resolveFreshSessionId`, finding F8).
  */
 export class CodexAdapter implements RuntimeAdapter {
-  readonly supportsDispatchSelection = true;
-  readonly id = 'codex';
+  readonly descriptor = freezeRuntimeAdapterDescriptor({
+    id: 'codex',
+    supportsDispatchSelection: true,
+    capabilities: {
+      steer: false,
+      resume: true,
+      approvalInteractive: false,
+      permissionModes: ['auto', 'readonly'],
+    },
+    environmentRequirements: { credentialNames: [] },
+  });
 
   constructor(private readonly options: CodexAdapterOptions = {}) {}
 
@@ -127,38 +137,38 @@ export class CodexAdapter implements RuntimeAdapter {
     }
   }
 
-  capabilities(): RuntimeCapabilities {
-    // `approvalInteractive: false` — `codex exec` never emits a
-    // `needs_approval`-equivalent event, so there is nothing to resume and
-    // `CodexSession.resolveApproval` throws unconditionally.
-    return { steer: false, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] };
+  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    if (typeof input.offer.instruction !== 'string') {
+      return { kind: 'reject', reason: 'codex adapter only supports string instructions in M2 (no blob-ref fetch yet)', retryable: false };
+    }
+    const mapping = mapPermissionPolicyToCodexArgs(input.policy);
+    if (!mapping.ok) return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by codex adapter', retryable: false };
+    let modelId: string | undefined;
+    try {
+      modelId = subscriptionModel(input.offer.dispatchSelection);
+    } catch (error) {
+      return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
+    }
+    let command: string;
+    try {
+      command = this.resolveBin().command;
+    } catch (error) {
+      return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
+    }
+    return {
+      kind: 'prepared',
+      operation: {
+        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command),
+      },
+    };
   }
 
-  /**
-   * M5: same deliberate posture as the claude adapter (see its own doc
-   * comment) — codex authenticates via its own `codex login`-managed
-   * ChatGPT OAuth session (`probeAuthPresent` above), not an env var, so
-   * there is no credential env var this adapter needs forwarded; env-based
-   * API-key passthrough remains a separate, pending product decision. No
-   * `baseNames` either: nothing in this adapter reads a codex-specific
-   * config-discovery variable (e.g. `CODEX_HOME`) today.
-   */
-  environmentRequirements(): RuntimeEnvironmentRequirements {
-    return { credentialNames: [] };
-  }
-
-  async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
-    if (typeof task.instruction !== 'string') {
-      throw new PolicyUnsupportedError('codex adapter only supports string instructions in M2 (no blob-ref fetch yet)');
-    }
-
-    const mapping = mapPermissionPolicyToCodexArgs(ctx.policy);
-    if (!mapping.ok) {
-      throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by codex adapter');
-    }
-    const modelId = subscriptionModel(task);
-
-    const bin = this.resolveBin();
+  private async startPrepared(
+    startInput: RuntimeOperationStartInput,
+    policyArgs: readonly string[],
+    modelId: string | undefined,
+    command: string,
+  ): Promise<Session> {
     const queue = new AsyncQueue<AgentEvent>();
     const recordUnmapped = makeUnmappedFrameRecorder(new Map<string, number>());
 
@@ -167,40 +177,44 @@ export class CodexAdapter implements RuntimeAdapter {
     // path (unlike task-runner.ts's own realpath use, which is defending
     // against symlink swaps): `file_change` items report codex's own
     // absolute paths, built from the CHILD PROCESS's `process.cwd()`, which
-    // Node/the OS resolve through any symlink in `ctx.workspaceDir` — a
+    // Node/the OS resolve through any symlink in the manifest workspace — a
     // stock `os.tmpdir()`-based workspace on macOS (`/var/folders/...`,
     // itself a symlink to `/private/var/folders/...`) hits this on literally
     // every run, not just a contrived edge case.
-    const workspaceDir = await resolveRealWorkspaceDir(ctx.workspaceDir);
+    const workspaceDir = await resolveRealWorkspaceDir(startInput.manifest.workspace.workspaceDir);
 
-    const runtimeEnv = withoutProviderCredentials(ctx.env);
+    const runtimeEnv = withoutProviderCredentials(startInput.env);
+    const manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection);
+    if (manifestModelId !== modelId) {
+      throw new PolicyUnsupportedError('prepared codex operation received a manifest with different runtime selection');
+    }
     const { sessionRef, runner } = await runCodexTurn({
-      command: bin.command,
-      resumeRef: task.sessionRef,
-      instruction: task.instruction,
-      modelId,
-      policyArgs: mapping.args,
-      cwd: ctx.workspaceDir,
+      command,
+      resumeRef: startInput.manifest.sessionRef,
+      instruction: startInput.instruction,
+      modelId: manifestModelId,
+      policyArgs: [...policyArgs],
+      cwd: startInput.manifest.workspace.workspaceDir,
       env: runtimeEnv,
       spawnFn: this.options.spawnFn,
       workspaceDir,
       queue,
       recordUnmapped,
-      expectedSessionRef: task.sessionRef,
-      preparedGit: ctx.gitWorkspace !== undefined,
+      expectedSessionRef: startInput.manifest.sessionRef,
+      preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
     });
 
     return new CodexSession({
       sessionRef,
-      command: bin.command,
+      command,
       workspaceDir,
-      env: ctx.env,
+      env: startInput.env,
       spawnFn: this.options.spawnFn,
       queue,
       recordUnmapped,
       initialRunner: runner,
-      preparedGit: ctx.gitWorkspace !== undefined,
-      modelId,
+      preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
+      modelId: manifestModelId,
     });
   }
 
@@ -574,7 +588,7 @@ class CodexSession implements Session {
     if (!mapping.ok) {
       throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by codex adapter');
     }
-    const requestedModel = subscriptionModel(task);
+    const requestedModel = subscriptionModel(task.dispatchSelection);
     if (requestedModel !== undefined && requestedModel !== this.modelId) {
       throw new PolicyUnsupportedError(
         `codex persistent session cannot change model from ${this.modelId ?? '(legacy default)'} to ${requestedModel}`,
@@ -689,8 +703,7 @@ class CodexSession implements Session {
   }
 }
 
-function subscriptionModel(task: TaskOfferPayload): string | undefined {
-  const selection = task.dispatchSelection;
+function subscriptionModel(selection: TaskOfferPayload['dispatchSelection']): string | undefined {
   if (selection === undefined) return undefined;
   if (selection.lane !== 'subscription' || selection.runtimeId !== 'codex') {
     throw new PolicyUnsupportedError(

@@ -3,12 +3,13 @@ import { promisify } from 'node:util';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
+  freezeRuntimeAdapterDescriptor,
   type RuntimeAdapter,
-  type RuntimeCapabilities,
   type RuntimeDetectResult,
-  type RuntimeEnvironmentRequirements,
+  type RuntimeAdapterPrepareInput,
+  type RuntimeAdapterPrepareResult,
+  type RuntimeOperationStartInput,
   type Session,
-  type TaskContext,
 } from '../../types';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
@@ -56,8 +57,17 @@ export interface PiByokLauncherConfig {
 }
 
 export class PiAdapter implements RuntimeAdapter {
-  readonly id = 'pi';
-  readonly supportsDispatchSelection = true;
+  readonly descriptor = freezeRuntimeAdapterDescriptor({
+    id: 'pi',
+    supportsDispatchSelection: true,
+    capabilities: {
+      steer: true,
+      resume: true,
+      approvalInteractive: false,
+      permissionModes: ['auto', 'readonly'],
+    },
+    environmentRequirements: { credentialNames: PROVIDER_CREDENTIAL_ENV_NAMES },
+  });
 
   constructor(private readonly options: PiAdapterOptions = {}) {}
 
@@ -75,33 +85,14 @@ export class PiAdapter implements RuntimeAdapter {
     }
   }
 
-  capabilities(): RuntimeCapabilities {
-    // `approvalInteractive: false` — `PiSession.resolveApproval` throws
-    // unconditionally: pi has no `needs_approval` notion to resume from.
-    return { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] };
-  }
-
-  /**
-   * M5: pi authenticates to its ~30 supported providers via env-var API
-   * keys — `detect()`'s own `authPresent` probe above checks this identical
-   * list — so these MUST keep flowing into pi's spawned process or pi auth
-   * breaks entirely. `KNOWN_PROVIDER_ENV_VARS` above is the single source
-   * of truth, reused here rather than duplicated. No `baseNames`: nothing
-   * in this adapter or `rpc-client.ts` reads a pi-specific config-discovery
-   * variable beyond the platform baseline (`daemon/environment.ts`).
-   */
-  environmentRequirements(): RuntimeEnvironmentRequirements {
-    return { credentialNames: PROVIDER_CREDENTIAL_ENV_NAMES };
-  }
-
-  async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
-    if (typeof task.instruction !== 'string') {
-      throw new PolicyUnsupportedError('pi adapter only supports string instructions in M0 (no blob-ref fetch yet)');
+  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    if (typeof input.offer.instruction !== 'string') {
+      return { kind: 'reject', reason: 'pi adapter only supports string instructions in M0 (no blob-ref fetch yet)', retryable: false };
     }
 
-    const mapping = mapPermissionPolicyToPiArgs(ctx.policy);
+    const mapping = mapPermissionPolicyToPiArgs(input.policy);
     if (!mapping.ok) {
-      throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by pi adapter');
+      return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
     }
 
     const bin = this.resolveBin();
@@ -131,25 +122,20 @@ export class PiAdapter implements RuntimeAdapter {
     // creates a missing session. BYOK deliberately uses `--session` so a
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
-    const resumeSessionId = task.sessionRef;
-    const piArgs = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
-    const selection = task.dispatchSelection;
+    const selection = input.offer.dispatchSelection;
+    const pinnedSelection = selection === undefined ? undefined : Object.freeze({ ...selection });
     let command = bin.command;
-    let args = piArgs;
-    if (selection !== undefined) {
-      if (selection.lane !== 'byok' || selection.runtimeId !== 'pi') {
-        throw new PolicyUnsupportedError(
-          `pi adapter cannot execute ${selection.lane} selection for runtime ${selection.runtimeId}`,
-        );
+    let launcherArgs: string[] | undefined;
+    if (pinnedSelection !== undefined) {
+      if (pinnedSelection.lane !== 'byok' || pinnedSelection.runtimeId !== 'pi') {
+        return { kind: 'reject', reason: `pi adapter cannot execute ${pinnedSelection.lane} selection for runtime ${pinnedSelection.runtimeId}`, retryable: false };
       }
       const launcher = this.options.byokLauncher;
       if (launcher === undefined) {
-        throw new PolicyUnsupportedError(
-          'pi BYOK selection requires a configured credential-custody launcher',
-        );
+        return { kind: 'reject', reason: 'pi BYOK selection requires a configured credential-custody launcher', retryable: false };
       }
       command = launcher.command;
-      args = [
+      launcherArgs = [
         ...(launcher.args ?? []),
         '--pi-bin',
         bin.command,
@@ -161,49 +147,68 @@ export class PiAdapter implements RuntimeAdapter {
           ? ['--secret-service-prefix', launcher.secretServicePrefix]
           : []),
         '--provider',
-        selection.providerId,
+        pinnedSelection.providerId,
         '--model',
-        selection.modelId,
-        '--',
-        ...piArgs,
+        pinnedSelection.modelId,
       ];
     }
 
-    const rpc = new PiRpcClient({
-      command,
-      args,
-      cwd: ctx.workspaceDir,
-      env: selection === undefined ? ctx.env : withoutProviderCredentials(ctx.env),
-      spawnFn: this.options.spawnFn,
-    });
+    return {
+      kind: 'prepared',
+      operation: {
+        start: async (startInput: RuntimeOperationStartInput): Promise<Session> => {
+          const manifestSelection = startInput.manifest.dispatchSelection;
+          if (!sameDispatchSelection(manifestSelection, pinnedSelection)) {
+            throw new PolicyUnsupportedError('prepared pi operation received a manifest with different runtime selection');
+          }
+          const resumeSessionId = startInput.manifest.sessionRef;
+          const piArgs = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
+          const args = launcherArgs === undefined ? piArgs : [...launcherArgs, '--', ...piArgs];
+          const rpc = new PiRpcClient({
+            command,
+            args,
+            cwd: startInput.manifest.workspace.workspaceDir,
+            env: manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env),
+            spawnFn: this.options.spawnFn,
+          });
 
-    const response = await rpc.send({ type: 'prompt', message: task.instruction });
-    if (response.success === false) {
-      rpc.kill();
-      throw new Error(typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt');
-    }
+          const response = await rpc.send({ type: 'prompt', message: startInput.instruction });
+          if (response.success === false) {
+            rpc.kill();
+            throw new Error(typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt');
+          }
 
-    let sessionRef: string;
-    if (resumeSessionId) {
-      sessionRef = resumeSessionId;
-    } else {
-      try {
-        sessionRef = await resolveFreshSessionId(rpc);
-      } catch (err) {
-        // Finding F8: fail closed, not a fabricated id — and don't leak the
-        // process this adapter just spawned (the `response.success===false`
-        // branch above already kills it on ITS failure path; this mirrors
-        // that for get_state's).
-        rpc.kill();
-        throw err;
-      }
-    }
-    return new PiSession(sessionRef, rpc, selection);
+          let sessionRef: string;
+          if (resumeSessionId) {
+            sessionRef = resumeSessionId;
+          } else {
+            try {
+              sessionRef = await resolveFreshSessionId(rpc);
+            } catch (err) {
+              rpc.kill();
+              throw err;
+            }
+          }
+          return new PiSession(sessionRef, rpc, manifestSelection);
+        },
+      },
+    };
   }
 
   private resolveBin(): ResolvedBin {
     return (this.options.resolveBin ?? resolvePiBin)();
   }
+}
+
+function sameDispatchSelection(
+  left: TaskOfferPayload['dispatchSelection'],
+  right: TaskOfferPayload['dispatchSelection'],
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.lane === right.lane &&
+    left.runtimeId === right.runtimeId &&
+    left.providerId === right.providerId &&
+    left.modelId === right.modelId;
 }
 
 /**

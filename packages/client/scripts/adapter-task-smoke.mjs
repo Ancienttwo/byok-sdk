@@ -135,10 +135,17 @@ try {
   console.log(`real @byok-sdk/server listening at ${serverUrl}`);
 
   const fake = (runtime) => path.join(fixtureDir, `fake-${runtime}.mjs`);
+  let piSpawnCount = 0;
   const adapters = [
     new client.ClaudeAdapter({ resolveBin: () => ({ command: fake('claude'), source: 'path' }) }),
     new client.CodexAdapter({ resolveBin: () => ({ command: fake('codex'), source: 'path' }) }),
-    new client.PiAdapter({ resolveBin: () => ({ command: fake('pi'), source: 'path' }) }),
+    new client.PiAdapter({
+      resolveBin: () => ({ command: fake('pi'), source: 'path' }),
+      spawnFn: (command, args, options) => {
+        piSpawnCount += 1;
+        return spawn(command, args, options);
+      },
+    }),
   ];
 
   const pairingCode = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId }).code;
@@ -165,6 +172,37 @@ try {
   await withTimeout(daemon.pair(pairingCode), 'pair');
   await withTimeout(daemon.start(), 'daemon start');
   assert(daemon.status().connected, 'daemon did not reach connected state');
+
+  const preAdmissionPiSpawns = piSpawnCount;
+  const rejected = await withTimeout(
+    byok.dispatch({
+      instruction: 'adapter task smoke: missing Pi BYOK launcher',
+      dispatchSelection: {
+        lane: 'byok',
+        runtimeId: 'pi',
+        providerId: 'openai',
+        modelId: 'gpt-5.2',
+      },
+      policy: { mode: 'auto' },
+    }),
+    'Pi BYOK missing-launcher dispatch',
+  );
+  const rejectedEventsPromise = collectTaskEvents(rejected);
+  const [rejectedEvents, rejectedResult] = await withTimeout(
+    Promise.all([rejectedEventsPromise, rejected.result()]),
+    'Pi BYOK missing-launcher lifecycle',
+  );
+  const rejectedSnapshot = byok.tasks.get(rejected.taskId);
+  const rejectedLocalKinds = localEvents
+    .filter((event) => event.taskId === rejected.taskId)
+    .map((event) => event.kind);
+  assert(rejectedResult.state === 'Failed', `missing launcher result was not Failed: ${JSON.stringify(rejectedResult)}`);
+  assert(rejectedSnapshot?.state === 'Failed', `missing launcher task was not Failed: ${JSON.stringify(rejectedSnapshot)}`);
+  assert(stateNames(rejectedEvents).includes('Failed'), `missing launcher did not reach Failed: ${JSON.stringify(rejectedEvents)}`);
+  assert(rejectedLocalKinds.includes('failed'), `missing launcher did not project local failure: ${JSON.stringify(rejectedLocalKinds)}`);
+  assert(!rejectedLocalKinds.includes('claimed') && !rejectedLocalKinds.includes('started'), `missing launcher published claim/start: ${JSON.stringify(rejectedLocalKinds)}`);
+  assert(piSpawnCount === preAdmissionPiSpawns, `missing launcher spawned Pi before decline (${preAdmissionPiSpawns} -> ${piSpawnCount})`);
+  console.log('PASS pi BYOK missing launcher: decline -> failed without claim/start/spawn');
 
   for (const runtime of runtimes) {
     const handle = await withTimeout(

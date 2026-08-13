@@ -12,7 +12,15 @@ import {
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
-import type { ApprovalChannel, RuntimeAdapter, RuntimeCapabilities, RuntimeDetectResult, Session, TaskContext } from '../types';
+import {
+  freezeRuntimeAdapterDescriptor,
+  type ApprovalChannel,
+  type RuntimeAdapter,
+  type RuntimeAdapterPrepareInput,
+  type RuntimeAdapterPrepareResult,
+  type RuntimeDetectResult,
+  type Session,
+} from '../types';
 import { AsyncQueue } from '../util/async-queue';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
@@ -113,22 +121,31 @@ class ChannelRoutingSession implements Session {
 }
 
 class ChannelRoutingAdapter implements RuntimeAdapter {
-  readonly id = 'channel-routing-stub';
+  readonly descriptor = freezeRuntimeAdapterDescriptor({
+    id: 'channel-routing-stub',
+    supportsDispatchSelection: false,
+    capabilities: { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] },
+    environmentRequirements: { credentialNames: [] },
+  });
   readonly sessions: ChannelRoutingSession[] = [];
 
   async detect(): Promise<RuntimeDetectResult> {
     return { present: true, version: '0.0.0' };
   }
-  capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] };
-  }
-  async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
-    const session = new ChannelRoutingSession(
-      task.sessionRef ?? `channel-session-${this.sessions.length + 1}`,
-      ctx.approvalChannel,
-    );
-    this.sessions.push(session);
-    return session;
+  async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    return {
+      kind: 'prepared',
+      operation: {
+        start: async (input) => {
+          const session = new ChannelRoutingSession(
+            input.manifest.sessionRef ?? `channel-session-${this.sessions.length + 1}`,
+            input.approvalChannel,
+          );
+          this.sessions.push(session);
+          return session;
+        },
+      },
+    };
   }
 }
 

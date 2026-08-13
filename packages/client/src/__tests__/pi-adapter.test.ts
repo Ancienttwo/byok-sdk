@@ -6,7 +6,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import type { Session, TaskContext } from '../types';
+import type { Session } from '../types';
+import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 
@@ -23,9 +24,13 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   return results;
 }
 
-async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<TaskContext> {
+async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-adapter-test-'));
   return { workspaceDir, policy: { mode: 'auto' }, env };
+}
+
+async function startAdapter(adapter: PiAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
+  return startPreparedOperation(adapter, task, resources);
 }
 
 const baseTask: TaskOfferPayload = {
@@ -62,13 +67,13 @@ describe('PiAdapter against the fake-pi fixture', () => {
         throw new Error('required pi runtime is unavailable');
       },
     });
-    await expect(adapter.start(baseTask, await makeCtx())).rejects.toThrow(/required pi runtime is unavailable/);
+    await expect(startAdapter(adapter, baseTask, await makeCtx())).rejects.toThrow(/required pi runtime is unavailable/);
   });
 
   it('start() drives the canned prompt sequence into normalized AgentEvents', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     expect(typeof session.sessionRef).toBe('string');
@@ -113,7 +118,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         modelId: 'gpt-5.2',
       },
     };
-    const session = await adapter.start(
+    const session = await startAdapter(adapter,
       task,
       await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
     );
@@ -160,7 +165,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         modelId: 'gpt-5.2',
       },
     };
-    await expect(fakePiAdapter().start(task, await makeCtx())).rejects.toThrow(
+    await expect(startAdapter(fakePiAdapter(), task, await makeCtx())).rejects.toThrow(
       /requires a configured credential-custody launcher/,
     );
   });
@@ -174,7 +179,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       FAKE_PI_ARTIFACT_NAME: artifactName,
       FAKE_PI_ARTIFACT_SIZE: String(size),
     });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const events = await takeEvents(session, 7);
@@ -203,7 +208,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('FAKE_PI_HANG_AFTER_TOOL keeps the session Running past the tool call; interrupt()+close() still tear it down cleanly (M1-4 cancel-path e2e fixture)', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_HANG_AFTER_TOOL: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const events = await takeEvents(session, 2);
@@ -226,7 +231,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('start() with no sessionRef resolves pi\'s real minted session id via get_state (not a locally-generated UUID)', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_SESSION_ID: 'fixture-minted-session-xyz' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('fixture-minted-session-xyz');
   });
@@ -234,14 +239,14 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('fails closed (never a fabricated UUID) when get_state cannot yield an authoritative session id (finding F8)', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_GET_STATE_FAIL: '1' });
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/did not yield an authoritative session id/);
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/did not yield an authoritative session id/);
   });
 
   it('a task.offer carrying a known sessionRef resumes it via the real `--session <id>` flag', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_SESSION_ID: 'resume-me-123' });
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    const session = await adapter.start(task, ctx);
+    const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('resume-me-123');
   });
@@ -251,13 +256,13 @@ describe('PiAdapter against the fake-pi fixture', () => {
     // FAKE_PI_SESSION_ID defaults to 'fake-session-1' — this ref never matches it.
     const ctx = await makeCtx();
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
-    await expect(adapter.start(task, ctx)).rejects.toThrow(/No session found matching/);
+    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/No session found matching/);
   });
 
   it('interrupt() sends abort and the fake pi settles afterward', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     await takeEvents(session, 5); // drain the initial prompt's events first
@@ -270,14 +275,14 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('surfaces a missing-API-key rejection from the initial prompt as a clean start() failure', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_NO_KEY: '1' });
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/No API key found/);
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/No API key found/);
   });
 
   it('fails closed on a policy pi cannot express, without ever spawning a process', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx();
     ctx.policy = { mode: 'confirm' };
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/cannot express permission mode "confirm"/);
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/cannot express permission mode "confirm"/);
   });
 
   it('fails closed on a blob-ref instruction (no blob fetch in M0)', async () => {
@@ -287,12 +292,12 @@ describe('PiAdapter against the fake-pi fixture', () => {
       ...baseTask,
       instruction: { blobRef: { blobId: 'b1', contentHash: 'sha256:x', size: 10, contentType: 'text/plain' } },
     };
-    await expect(adapter.start(task, ctx)).rejects.toThrow(/only supports string instructions/);
+    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/only supports string instructions/);
   });
 
-  it('capabilities() advertises exactly what the adapter can express', () => {
+  it('descriptor advertises exactly what the adapter can express', () => {
     const adapter = fakePiAdapter();
-    expect(adapter.capabilities()).toEqual({
+    expect(adapter.descriptor.capabilities).toEqual({
       steer: true,
       resume: true,
       // S0/H-002: pi has no needs_approval notion at all
@@ -302,9 +307,9 @@ describe('PiAdapter against the fake-pi fixture', () => {
     });
   });
 
-  it('environmentRequirements() declares the known provider credential env vars (M5) — the same single source of truth detect()\'s own authPresent probe uses', () => {
+  it('descriptor declares the known provider credential env vars — the same single source of truth detect() uses', () => {
     const adapter = fakePiAdapter();
-    expect(adapter.environmentRequirements?.()).toEqual({
+    expect(adapter.descriptor.environmentRequirements).toEqual({
       credentialNames: [
         'ANTHROPIC_API_KEY',
         'ANTHROPIC_OAUTH_TOKEN',

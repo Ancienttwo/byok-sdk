@@ -22,6 +22,31 @@ Describe the product intent, users, workflows, acceptance scenarios, and constra
   MCP definition is owned by the device's local daemon configuration. The
   SaaS may name the toolset but cannot supply its command or credentials.
 
+## Runtime operation authority
+
+`@byok-sdk/client` 0.4.0 has one breaking custom-adapter contract. A
+`RuntimeAdapter` exposes a required frozen `descriptor` and a required,
+side-effect-free `prepare()` method; preparation returns either a fail-closed
+rejection or one `PreparedRuntimeOperation`. There is no direct adapter
+`start()` path and no 0.3 compatibility shape.
+
+For every offer, the daemon snapshots the descriptor, resolves local policy and
+toolset authority, and calls `prepare()` before it claims the task. Preparation
+must not spawn, create a temporary file, mutate or allocate a workspace,
+allocate a session id, or read a credential value. It pins the runtime's
+normalized policy, provider/model/lane and launcher decision. The daemon then
+seals one immutable operation manifest before `task.claim`; its runtime id,
+descriptor, policy, toolset ids, dispatch selection, session/workspace identity
+and forwarded environment **names** are the only authority reused for claim,
+environment projection and prepared-operation start. Credential values never
+enter this manifest, diagnostics, or wire messages.
+
+An unsupported instruction, policy, lane/runtime/model combination, missing
+BYOK custody launcher, or local toolset/session incompatibility is declined
+before claim. A prepared operation receives runtime resources only after the
+sealed manifest exists and claim has succeeded. This is a client-internal
+admission/lifecycle cut: protocol-v1 bytes and runtime ids are unchanged.
+
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm

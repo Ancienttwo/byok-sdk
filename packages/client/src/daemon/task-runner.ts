@@ -20,11 +20,14 @@ import {
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
+  freezeRuntimeAdapterDescriptor,
+  sealRuntimeOperationManifest,
   type McpStdioServerConfig,
   type McpToolsetConfig,
   type RuntimeAdapter,
+  type RuntimeAdapterDescriptor,
+  type RuntimeOperationStartInput,
   type Session,
-  type TaskContext,
 } from '../types';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
@@ -281,7 +284,7 @@ export interface TaskRunnerDeps {
    * methods (`create-daemon.ts` constructs ONE `ApprovalRegistry` and passes
    * the SAME instance here) — see `requestApproval`'s own doc comment for
    * why `TaskRunner` needs a handle on all three. `storeDir`/`productId` are
-   * copied verbatim into every task's `TaskContext.approvalChannel`.
+   * copied verbatim into every prepared operation's approval channel.
    */
   approvalRegistry: ApprovalRegistry;
   storeDir: string;
@@ -397,7 +400,7 @@ interface ActiveTask {
    * resolved (by a real decision or by the timeout). `undefined` whenever
    * nothing is dispatched right now — including while `approvalQueue` below
    * is non-empty but hasn't been dispatched yet. See `requestApproval` and
-   * `TaskContext.approvalChannel.resolve`'s doc comments.
+   * `RuntimeOperationStartInput.approvalChannel.resolve`'s doc comments.
    */
   pendingApprovalId?: string;
   /**
@@ -467,11 +470,11 @@ interface QueuedApprovalRequest {
 }
 
 type PickResult =
-  | { ok: true; adapter: RuntimeAdapter }
+  | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor }
   | { ok: false; reason: string; retryable: boolean };
 
 /**
- * M5 (claimed runtime): `RuntimeAdapter.id` is a bare `string` (`../types.ts`)
+ * M5 (claimed runtime): `RuntimeAdapter.descriptor.id` is a bare `string` (`../types.ts`)
  * — deliberately wider than the frozen wire `RuntimeIdSchema`, so a custom,
  * embedder-supplied adapter for a runtime this protocol doesn't know about
  * can still be plugged in. `task.claim.runtime` (`TaskClaimPayloadSchema`)
@@ -502,7 +505,7 @@ const DEFAULT_RUNTIME_PREFERENCE: readonly RuntimeId[] = ['claude', 'codex', 'pi
  * Reorders `candidates` by `preference` (lower index tried first), appending
  * every candidate whose id isn't named in `preference` at all — e.g. a
  * product-supplied adapter for a runtime id outside the frozen
- * `RuntimeIdSchema` enum (`RuntimeAdapter.id` is deliberately a plain
+ * `RuntimeIdSchema` enum (`RuntimeAdapter.descriptor.id` is deliberately a plain
  * `string`, wider than `RuntimeId` — see `types.ts`'s own doc comment) —
  * after every ranked one, in their original relative order. Safe because
  * `Array.prototype.sort` has been a stable sort since ES2019: two candidates
@@ -513,7 +516,7 @@ const DEFAULT_RUNTIME_PREFERENCE: readonly RuntimeId[] = ['claude', 'codex', 'pi
  */
 function orderByPreference(candidates: readonly RuntimeAdapter[], preference: readonly string[]): RuntimeAdapter[] {
   const rank = new Map(preference.map((id, index) => [id, index]));
-  return [...candidates].sort((a, b) => (rank.get(a.id) ?? preference.length) - (rank.get(b.id) ?? preference.length));
+  return [...candidates].sort((a, b) => (rank.get(a.descriptor.id) ?? preference.length) - (rank.get(b.descriptor.id) ?? preference.length));
 }
 
 /**
@@ -525,26 +528,16 @@ function orderByPreference(candidates: readonly RuntimeAdapter[], preference: re
  * `pickAdapter` below, so a structurally-incapable candidate never pays for
  * a real subprocess probe it could never have won anyway.
  *
- * This is a NEW pre-claim gate (M5 batch-3). The pre-existing POST-claim
- * gate — `adapter.start()` throwing `PolicyUnsupportedError` for a policy it
- * can't express (e.g. pi's own `mapPermissionPolicyToPiArgs` rejecting
- * `confirm`/`plan`, `pi/permission-mapping.ts`) — is UNCHANGED and stays in
- * place as defense-in-depth for any mismatch this capability check doesn't
- * happen to catch (e.g. a future adapter whose declared `permissionModes`
- * doesn't perfectly match its own mapping's real behavior). Before this
- * gate existed, a `confirm`-mode task auto-selected (or explicitly
- * requested) onto an adapter that can't express it would claim first and
- * only discover the mismatch once `adapter.start()` actually threw —
- * needlessly occupying the claim when a capable adapter may have been
- * sitting right there (auto path) or simply wasting a claim/fail round trip
- * for no possible outcome (explicit path).
+ * This is a pre-claim structural gate. Per-offer semantic validation belongs
+ * to the required side-effect-free `prepare()` step below; no policy mismatch
+ * may wait for a post-claim process start.
  */
-function adapterSupportsMode(adapter: RuntimeAdapter, mode: PermissionMode): boolean {
-  return adapter.capabilities().permissionModes.includes(mode);
+function adapterSupportsMode(descriptor: RuntimeAdapterDescriptor, mode: PermissionMode): boolean {
+  return descriptor.capabilities.permissionModes.includes(mode);
 }
 
-function adapterSupportsMcpToolsets(adapter: RuntimeAdapter): boolean {
-  return adapter.capabilities().mcpToolsets === true;
+function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor): boolean {
+  return descriptor.capabilities.mcpToolsets === true;
 }
 
 type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload;
@@ -738,8 +731,8 @@ async function openArtifact(workspaceDir: string, name: string): Promise<OpenArt
 }
 
 /**
- * Per-connection task orchestration: offer -> (decline | claim -> adapter
- * session -> started) -> seq-ordered progress batches -> complete/fail/
+ * Per-connection task orchestration: offer -> (decline | prepare -> seal ->
+ * claim -> prepared operation -> started) -> seq-ordered progress batches -> complete/fail/
  * cancelled, plus approve/reject/cancel/steer handling.
  *
  * M1 rework (docs/protocol.md §3, §5, §10 — `packages/protocol` is frozen,
@@ -758,13 +751,13 @@ export class TaskRunner {
    * Finding F4 (cancel lost during the offer-processing window): a
    * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
    * awaiting adapter detection / instruction resolution / workspace setup /
-   * `adapter.start()`) has no `this.tasks` entry to land on — it used to be
+   * prepared operation `start()`) has no `this.tasks` entry to land on — it used to be
    * silently dropped, and the runtime session `handleOffer` was about to
    * register would then run an unsupervised ("zombie") turn nobody asked
    * for anymore. Recording the taskId here lets `handleOffer` consult it at
    * the two points where it can still safely react (see its body): before
    * claiming at all (decline instead of ever starting a session), and right
-   * after `adapter.start()` resolves but before this task is registered as
+   * after the prepared operation resolves but before this task is registered as
    * active (tear the just-started session down immediately, before its
    * event loop ever pumps a single event). Consumed (deleted) at whichever
    * checkpoint handles it; a cancel for a taskId that's already active,
@@ -790,12 +783,12 @@ export class TaskRunner {
    * checkpoint-2 cancel-teardown, or successful registration into
    * `this.tasks`). Bounded eviction on `pendingCancelled` (below) must never
    * remove an entry for a taskId in this set: doing so is exactly the bug —
-   * block task A in `adapter.start()`, deliver A's own `task.cancel` (so
+   * block task A in prepared-operation `start()`, deliver A's own `task.cancel` (so
    * `pendingCancelled` gets an entry for A while A is still in-flight),
    * then deliver `MAX_TRACKED_TASK_IDS` more cancels for unrelated taskIds
    * nobody ever offered — under naive oldest-wins eviction, A's entry (the
    * single oldest) gets evicted purely because of unrelated churn, so when
-   * `adapter.start()` finally resolves, checkpoint 2 finds no cancel marker
+   * the prepared operation finally resolves, checkpoint 2 finds no cancel marker
    * and the already-cancelled task starts a real session. See
    * `evictPendingCancelled` below for the fix, and
    * `task-runner-bounded-collections.test.ts` for a test mirroring this
@@ -815,7 +808,7 @@ export class TaskRunner {
    * explicitly relies on redelivered handlers being idempotent for exactly
    * this reason). `handleOffer` must treat a redelivered offer for a taskId
    * that's already active (`this.tasks`) or already finished (this set) as
-   * a no-op — never a second `adapter.start()` call, which would orphan the
+   * a no-op — never a second prepared-operation `start()` call, which would orphan the
    * first session.
    *
    * M3-B: unbounded otherwise — a long-lived daemon that's finished many
@@ -1076,7 +1069,7 @@ export class TaskRunner {
     // already finished, can never be "the first time" for it, so there is
     // nothing left to decide. Without this, the stalled-cursor long-poll
     // re-pull (see `ConnectionManager.dedupWatermark`) redelivering this
-    // same offer while its first `adapter.start()` is still in flight (or
+    // same offer while its first prepared operation is still in flight (or
     // well after it already succeeded) would start a SECOND adapter session
     // for the same task, orphaning the first.
     if (this.tasks.has(taskId) || this.finishedTaskIds.has(taskId)) {
@@ -1198,16 +1191,34 @@ export class TaskRunner {
         return;
       }
 
+      const decision = computeEffectivePolicy(payload.policy, this.deps.permissionDefaults);
+      if (!decision.ok) {
+        this.decline(taskId, decision.reason ?? 'policy rejected', false);
+        return;
+      }
+
+      const offered = withoutRequiredToolsets(payload);
       const requestedRuntime = payload.dispatchSelection?.runtimeId ?? payload.runtime;
       const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode, requiredToolsets !== undefined);
       if (!pick.ok) {
         this.decline(taskId, pick.reason, pick.retryable);
         return;
       }
-
-      const decision = computeEffectivePolicy(payload.policy, this.deps.permissionDefaults);
-      if (!decision.ok) {
-        this.decline(taskId, decision.reason ?? 'policy rejected', false);
+      let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
+      try {
+        prepared = await pick.adapter.prepare({
+          offer: offered,
+          policy: decision.policy,
+          descriptor: pick.descriptor,
+          requiredToolsetIds: requiredToolsets ?? [],
+          ...(resolvedMcp?.ok ? { mcpServers: resolvedMcp.servers } : {}),
+        });
+      } catch (error) {
+        this.decline(taskId, `runtime preparation failed: ${errorMessage(error)}`, true);
+        return;
+      }
+      if (prepared.kind === 'reject') {
+        this.decline(taskId, prepared.reason, prepared.retryable);
         return;
       }
 
@@ -1246,6 +1257,7 @@ export class TaskRunner {
           }
         } else {
           workspaceDir = path.join(this.deps.workspaceRoot, taskId);
+          gitWorkspaceId = randomUUID();
         }
         try {
           gitLease = await gitManager.acquireLease(workspaceDir, payload.sessionRef);
@@ -1262,12 +1274,30 @@ export class TaskRunner {
         return;
       }
 
-      // Every check above is local/config-driven (an adapter's `detect()` is
+      const env = buildRuntimeEnv({
+        ambient: process.env,
+        requirements: pick.descriptor.environmentRequirements,
+        locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
+      });
+      const manifest = sealRuntimeOperationManifest({
+        taskId,
+        runtimeId: pick.descriptor.id,
+        descriptor: pick.descriptor,
+        policy: decision.policy,
+        requiredToolsetIds: requiredToolsets ?? [],
+        ...(offered.dispatchSelection === undefined ? {} : { dispatchSelection: offered.dispatchSelection }),
+        ...(known === undefined || payload.sessionRef === undefined ? {} : { sessionRef: payload.sessionRef }),
+        workspace: {
+          workspaceDir,
+          ...(gitWorkspaceId === undefined ? {} : { workspaceId: gitWorkspaceId }),
+          ...(gitBaseline === undefined ? {} : { baseline: gitBaseline }),
+        },
+        forwardedEnvironmentNames: Object.freeze(Object.keys(env).sort()),
+      });
 
-      // the only I/O, and it costs nothing to have run before committing) and
-      // needed no commitment from this device. Only now do we actually take
-      // the task — `task.decline` above is the alternative path for anything
-      // that got this far without claiming.
+      // All semantic admission is now in `prepare()` and the frozen manifest.
+      // Claim is the first externally visible commitment; instruction bytes,
+      // workspace preparation, and process creation remain after it.
       this.deps.send(
         createEnvelope(
           'task.claim',
@@ -1283,7 +1313,7 @@ export class TaskRunner {
             // (the merely REQUESTED runtime): this is what closes the gap
             // where an auto-selected task left the server never learning
             // which runtime actually ran.
-            runtime: isKnownRuntimeId(pick.adapter.id) ? pick.adapter.id : undefined,
+            runtime: isKnownRuntimeId(manifest.descriptor.id) ? manifest.descriptor.id : undefined,
             // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
             // selected adapter's own capability self-report, carried on the
             // same message that establishes the task↔runtime binding. The
@@ -1300,7 +1330,7 @@ export class TaskRunner {
             // Gating them would silently strip a custom steer-capable
             // adapter's own truth and leave the server fail-closing on it
             // forever.
-            capabilities: toRuntimeInfoCapabilities(pick.adapter.capabilities()),
+            capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
           },
           { taskId },
         ),
@@ -1323,7 +1353,7 @@ export class TaskRunner {
           if (gitExisting) {
             observation = await this.deps.gitWorkspaceManager.validateExisting(workspaceDir);
           } else {
-            const workspaceId = randomUUID();
+            const workspaceId = gitWorkspaceId ?? randomUUID();
             const now = new Date().toISOString();
             gitWorkspaceId = workspaceId;
             await this.deps.gitWorkspaceStore?.upsert({
@@ -1375,30 +1405,11 @@ export class TaskRunner {
         }
       }
 
-      const ctx: TaskContext = {
-        workspaceDir,
-        policy: decision.policy,
+      const startInput: RuntimeOperationStartInput = {
+        manifest,
+        instruction: gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction,
+        env,
         ...(resolvedMcp?.ok ? { mcpServers: resolvedMcp.servers } : {}),
-        ...(gitWorkspaceId ? { gitWorkspace: { workspaceId: gitWorkspaceId, baseline: gitBaseline } } : {}),
-        // M5: no longer `process.env` verbatim (see `environment.ts`'s own
-        // module doc comment for the credential-leak gap that closed) —
-        // built fresh per task from the SPECIFIC adapter `pickAdapter`
-        // above already selected, so this always runs after adapter
-        // selection: `pick.adapter.environmentRequirements?.()` (undefined
-        // ⇒ platform baseline only, fail-closed) plus this device's own
-        // `runtimeEnvironment` override, keyed by that same adapter's `id`.
-        env: buildRuntimeEnv({
-          ambient: process.env,
-          requirements: pick.adapter.environmentRequirements?.(),
-          locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.adapter.id]?.allow,
-        }),
-        // M4 Phase 3: adapter-agnostic and cheap to always populate — only an
-        // adapter whose runtime genuinely supports an out-of-band approval
-        // pause (claude, today) ever reads this. `resolve` is a closure over
-        // `taskId` (not a pre-bound approvalId): it looks up whichever
-        // approval is CURRENTLY pending for this task at call time, since one
-        // task/session can face several approval requests, one at a time,
-        // over its life. See `types.ts`'s `ApprovalChannel` doc comment.
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,
@@ -1422,22 +1433,9 @@ export class TaskRunner {
           },
         },
       };
-      const effectiveOffer: TaskOfferPayload = {
-        ...withoutRequiredToolsets(payload),
-        instruction: gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction,
-        // Never forward a sessionRef this device has no recorded workspace
-        // for (stale, from another device, or simply made up) — an adapter
-        // that tries to resume an id it never minted fails outright (pi:
-        // "No session found matching '<id>'", exit 1, empirically confirmed)
-        // instead of silently starting fresh, so an unresolvable sessionRef
-        // must look identical to "none supplied" by the time it reaches the
-        // adapter, not get forwarded as a resume attempt doomed to fail.
-        sessionRef: known ? payload.sessionRef : undefined,
-      };
-
       let session: Session;
       try {
-        session = await pick.adapter.start(effectiveOffer, ctx);
+        session = await prepared.operation.start(startInput);
       } catch (err) {
         const retryable = !(err instanceof PolicyUnsupportedError);
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', 'repository-invalid');
@@ -1447,7 +1445,7 @@ export class TaskRunner {
       }
 
       // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
-      // task.cancel arrived while adapter.start() was in flight — i.e. AFTER
+      // task.cancel arrived while prepared-operation start() was in flight — i.e. AFTER
       // task.claim already went out above, so declining is no longer an
       // option. Tear the just-started session down before it's ever
       // registered as active (this.tasks.set below) or reported task.started,
@@ -1907,7 +1905,7 @@ export class TaskRunner {
    *
    * `inFlightOffers` is naturally tiny (bounded by this device's real
    * concurrent-offer-processing count — normally single digits, driven by
-   * how many `task.offer`s are simultaneously mid-`adapter.start()` — nowhere
+   * how many `task.offer`s are simultaneously mid-prepared-operation start() — nowhere
    * near `MAX_TRACKED_TASK_IDS`), so this scan is cheap in practice: it
    * finds a safe entry at or near the front almost always. The only case
    * where NO entry is safe to evict is every single tracked cancel
@@ -2702,18 +2700,19 @@ export class TaskRunner {
           retryable: false,
         };
       }
-      const adapter = this.deps.adapters.find((a) => a.id === requestedRuntime);
+      const adapter = this.deps.adapters.find((a) => a.descriptor.id === requestedRuntime);
       if (!adapter) {
         return { ok: false, reason: `unknown runtime "${requestedRuntime}"`, retryable: false };
       }
-      if (!adapterSupportsMode(adapter, policyMode)) {
+      const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
+      if (!adapterSupportsMode(descriptor, policyMode)) {
         return {
           ok: false,
           reason: `runtime "${requestedRuntime}" cannot express permission mode "${policyMode}"`,
           retryable: false,
         };
       }
-      if (requiresMcpToolsets && !adapterSupportsMcpToolsets(adapter)) {
+      if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) {
         return {
           ok: false,
           reason: `runtime "${requestedRuntime}" cannot project required MCP toolsets`,
@@ -2728,20 +2727,21 @@ export class TaskRunner {
           retryable: true,
         };
       }
-      return { ok: true, adapter };
+      return { ok: true, adapter, descriptor };
     }
 
-    const eligible = allowlist ? this.deps.adapters.filter((a) => allowlist.includes(a.id)) : this.deps.adapters;
+    const eligible = allowlist ? this.deps.adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this.deps.adapters;
     // M5 batch-3: product decision — pi is the FALLBACK runtime, not the
     // default. Ordered independently of `deps.adapters`'s own construction
     // order (which stays whatever `buildDefaultAdapters`/the embedder built
     // it as — see `ALL_RUNTIME_IDS`'s doc comment, `create-daemon.ts`).
     const candidates = orderByPreference(eligible, this.deps.runtimePreference ?? DEFAULT_RUNTIME_PREFERENCE);
     for (const adapter of candidates) {
-      if (!adapterSupportsMode(adapter, policyMode)) continue;
-      if (requiresMcpToolsets && !adapterSupportsMcpToolsets(adapter)) continue;
+      const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
+      if (!adapterSupportsMode(descriptor, policyMode)) continue;
+      if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
       const detected = await adapter.detect();
-      if (detected.present) return { ok: true, adapter };
+      if (detected.present) return { ok: true, adapter, descriptor };
     }
     return {
       ok: false,

@@ -5,6 +5,18 @@ authenticated on an end user's machine. It includes a local daemon, a
 self-hosted reference coordinator, and a hosted multi-tenant composition over
 Postgres and R2.
 
+## 0.4.0 custom RuntimeAdapter migration
+
+0.4.0 intentionally removes the old `id`, `capabilities()`, optional
+`environmentRequirements()`, `supportsDispatchSelection`, and direct `start()`
+adapter shape. Custom adapters must expose one frozen `descriptor` and a
+required, side-effect-free `prepare()` method that returns either `{ kind:
+'reject', ... }` or `{ kind: 'prepared', operation }`. The operation's
+`start({ manifest, instruction, env, ... })` runs only after the daemon has
+sealed its credential-free manifest and claimed the offer. Do not ship an
+adapter that supports both shapes or allocates process/temp/workspace/session
+resources during `prepare()`; reject unsupported input before claim instead.
+
 ```sh
 npm install byok-sdk
 ```

@@ -27,7 +27,7 @@ import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { loadSqliteModule } from '../daemon/journal/sqlite-support';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { DAEMON_OWNER_FILENAME } from '../daemon/daemon-owner';
-import type { RuntimeAdapter } from '../types';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 
 const dirs: string[] = [];
 
@@ -275,13 +275,14 @@ describe('diagnostics collector', () => {
     const dir = await tempDir();
     await fs.writeFile(path.join(dir, 'device.json'), 'x'.repeat(70 * 1024));
     const hanging: RuntimeAdapter = {
-      id: 'hanging',
+      descriptor: freezeRuntimeAdapterDescriptor({
+        id: 'hanging',
+        supportsDispatchSelection: false,
+        capabilities: { steer: false, resume: false, approvalInteractive: false, permissionModes: [] },
+        environmentRequirements: { credentialNames: [] },
+      }),
       detect: () => new Promise(() => undefined),
-      capabilities: () => ({ steer: false, resume: false, approvalInteractive: false, permissionModes: [] }),
-      environmentRequirements: () => ({ credentialNames: [] }),
-      start: async () => {
-        throw new Error('not used');
-      },
+      prepare: async () => ({ kind: 'reject', reason: 'not used', retryable: false }),
     };
     const started = Date.now();
     const snapshot = await collectDiagnostics(config(dir), dir, {

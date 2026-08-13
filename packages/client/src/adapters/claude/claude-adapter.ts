@@ -7,13 +7,14 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
+  freezeRuntimeAdapterDescriptor,
   type ApprovalChannel,
   type RuntimeAdapter,
-  type RuntimeCapabilities,
   type RuntimeDetectResult,
-  type RuntimeEnvironmentRequirements,
+  type RuntimeAdapterPrepareInput,
+  type RuntimeAdapterPrepareResult,
+  type RuntimeOperationStartInput,
   type Session,
-  type TaskContext,
 } from '../../types';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
@@ -150,8 +151,18 @@ export interface ClaudeAdapterOptions {
  * like a queued follow-up under a name that implies live redirection.
  */
 export class ClaudeAdapter implements RuntimeAdapter {
-  readonly supportsDispatchSelection = true;
-  readonly id = 'claude';
+  readonly descriptor = freezeRuntimeAdapterDescriptor({
+    id: 'claude',
+    supportsDispatchSelection: true,
+    capabilities: {
+      steer: false,
+      resume: true,
+      approvalInteractive: true,
+      mcpToolsets: true,
+      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+    },
+    environmentRequirements: { credentialNames: [] },
+  });
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {}
 
@@ -171,78 +182,76 @@ export class ClaudeAdapter implements RuntimeAdapter {
     }
   }
 
-  capabilities(): RuntimeCapabilities {
-    // M4 Phase 3: 'confirm' added — see permission-mapping.ts's confirm-mode
-    // doc comment for the empirical basis (`--permission-prompt-tool`,
-    // live-verified against the real installed binary).
-    // `approvalInteractive: true` — the confirm path is genuinely wired end
-    // to end: `--permission-prompt-tool` → the out-of-process approval MCP
-    // server (`bin/byok-approval-mcp.ts`) → this daemon's control socket →
-    // `ClaudeSession.resolveApproval` really resuming the paused turn.
+  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    if (typeof input.offer.instruction !== 'string') {
+      return { kind: 'reject', reason: 'claude adapter only supports string instructions in M2 (no blob-ref fetch yet)', retryable: false };
+    }
+    const mapping = mapPermissionPolicyToClaudeArgs(input.policy);
+    if (!mapping.ok) return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by claude adapter', retryable: false };
+    let modelId: string | undefined;
+    try {
+      modelId = subscriptionModel(input.offer.dispatchSelection, 'claude');
+    } catch (error) {
+      return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
+    }
+    if (mapping.needsApprovalMcp && Object.prototype.hasOwnProperty.call(input.mcpServers ?? {}, APPROVAL_MCP_SERVER_NAME)) {
+      return { kind: 'reject', reason: `MCP server name "${APPROVAL_MCP_SERVER_NAME}" is reserved by the claude approval channel`, retryable: false };
+    }
+    let bin: ResolvedBin;
+    try {
+      bin = this.resolveBin();
+    } catch (error) {
+      return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
+    }
+    let approvalMcpBin: ResolvedApprovalMcpBin | undefined;
+    if (mapping.needsApprovalMcp) {
+      try {
+        approvalMcpBin = (this.options.resolveApprovalMcpBin ?? resolveApprovalMcpBin)();
+      } catch (error) {
+        return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
+      }
+    }
     return {
-      steer: false,
-      resume: true,
-      approvalInteractive: true,
-      mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+      kind: 'prepared',
+      operation: {
+        start: (startInput) => this.startPrepared(startInput, mapping, modelId, bin, approvalMcpBin),
+      },
     };
   }
 
-  /**
-   * M5: deliberate product-boundary decision, not an oversight — byok's
-   * current ToS posture for claude is login-state-only (`claude auth
-   * login`'s own OAuth session — see `probeAuthPresent` below), so this
-   * adapter declares NO credential env vars at all; env-based API-key
-   * passthrough for claude is a separate, still-pending product decision.
-   * A product that genuinely needs it can opt in locally per-device via
-   * `DaemonConfig.runtimeEnvironment.claude.allow` (`create-daemon.ts`).
-   * `baseNames` is empty too: nothing in this adapter reads a
-   * claude-specific config-discovery variable (e.g. `CLAUDE_CONFIG_DIR`)
-   * today — if a future version of this adapter starts reading one, it
-   * belongs here, not left to rely on the platform baseline alone.
-   */
-  environmentRequirements(): RuntimeEnvironmentRequirements {
-    return { credentialNames: [] };
-  }
-
-  async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
-    if (typeof task.instruction !== 'string') {
-      throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
-    }
-
-    const mapping = mapPermissionPolicyToClaudeArgs(ctx.policy);
-    if (!mapping.ok) {
-      throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by claude adapter');
-    }
-    const modelId = subscriptionModel(task, 'claude');
+  private async startPrepared(
+    startInput: RuntimeOperationStartInput,
+    initialMapping: ReturnType<typeof mapPermissionPolicyToClaudeArgs>,
+    modelId: string | undefined,
+    bin: ResolvedBin,
+    approvalMcpBin: ResolvedApprovalMcpBin | undefined,
+  ): Promise<Session> {
+    if (!initialMapping.ok) throw new Error('unreachable: prepared claude mapping was rejected');
+    const mapping = { ...initialMapping, args: [...initialMapping.args] };
 
     // M4 Phase 3: `confirm` mode's approval channel. Generating the
     // temp --mcp-config file is a real filesystem side effect (see
     // permission-mapping.ts's `needsApprovalMcp` doc comment for why this
     // lives here, in start(), rather than in the pure mapping function) —
-    // deliberately OUTSIDE ctx.workspaceDir (a fresh, 0700 os.tmpdir()
+    // deliberately OUTSIDE the operation workspace (a fresh, 0700 os.tmpdir()
     // subdirectory instead) so it never shows up to the agent's own
     // workspace-scoped Read/Glob/Grep, even though its contents (a storeDir
     // path, productId, and this taskId — no secret/token material at all;
     // the actual control-socket auth token stays under storeDir, unrelated
     // to this file) would be low-value to an agent that found it anyway.
     let mcpConfigDir: string | undefined;
-    const taskMcpServers = ctx.mcpServers ?? {};
+    const taskMcpServers = startInput.mcpServers ?? {};
     const needsMcpConfig = mapping.needsApprovalMcp || Object.keys(taskMcpServers).length > 0;
     if (mapping.needsApprovalMcp) {
-      if (!ctx.approvalChannel) {
+      if (!startInput.approvalChannel) {
         // Internal-consistency fail-closed: TaskRunner always populates this
         // (see task-runner.ts's handleOffer) — a missing one here means
         // something upstream is badly wired, not a normal policy rejection.
         throw new PolicyUnsupportedError(
-          'claude adapter requires policy.mode "confirm" to be started with an approval channel (TaskContext.approvalChannel) — none was provided',
+          'claude adapter requires policy.mode "confirm" to be started with an approval channel — none was provided',
         );
       }
-      if (Object.prototype.hasOwnProperty.call(taskMcpServers, APPROVAL_MCP_SERVER_NAME)) {
-        throw new PolicyUnsupportedError(
-          `MCP server name "${APPROVAL_MCP_SERVER_NAME}" is reserved by the claude approval channel`,
-        );
-      }
+      if (!approvalMcpBin) throw new Error('unreachable: prepared claude approval MCP binary was not resolved');
     }
 
     if (needsMcpConfig) {
@@ -251,12 +260,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
       const mcpServers: Record<string, unknown> = { ...taskMcpServers };
       if (mapping.needsApprovalMcp) {
-        const approvalChannel = ctx.approvalChannel;
+        const approvalChannel = startInput.approvalChannel;
         if (!approvalChannel) throw new Error('unreachable: approval channel checked above');
-        const approvalMcpBin = (this.options.resolveApprovalMcpBin ?? resolveApprovalMcpBin)();
+        const preparedApprovalMcpBin = approvalMcpBin;
+        if (!preparedApprovalMcpBin) throw new Error('unreachable: prepared claude approval MCP binary was not resolved');
         mcpServers[APPROVAL_MCP_SERVER_NAME] = {
-          command: approvalMcpBin.command,
-          args: approvalMcpBin.args,
+          command: preparedApprovalMcpBin.command,
+          args: preparedApprovalMcpBin.args,
           env: {
             BYOK_STORE_DIR: approvalChannel.storeDir,
             BYOK_PRODUCT_ID: approvalChannel.productId,
@@ -279,8 +289,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ];
     }
 
-    const bin = this.resolveBin();
-    const resumeSessionId = task.sessionRef;
+    const resumeSessionId = startInput.manifest.sessionRef;
+    const manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection, 'claude');
+    if (manifestModelId !== modelId) {
+      throw new PolicyUnsupportedError('prepared claude operation received a manifest with different runtime selection');
+    }
     const args = [
       '-p',
       '--input-format',
@@ -292,7 +305,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // "Error: When using --print, --output-format=stream-json requires
       // --verbose", before spawning any model call.
       '--verbose',
-      ...(modelId ? ['--model', modelId] : []),
+      ...(manifestModelId ? ['--model', manifestModelId] : []),
       ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
       ...mapping.args,
     ];
@@ -300,8 +313,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     const client = new ClaudeProcessClient({
       command: bin.command,
       args,
-      cwd: ctx.workspaceDir,
-      env: withoutProviderCredentials(ctx.env),
+      cwd: startInput.manifest.workspace.workspaceDir,
+      env: withoutProviderCredentials(startInput.env),
       spawnFn: this.options.spawnFn,
     });
 
@@ -313,7 +326,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // `followUp()` afterward (see `ClaudeSession.followUp` /
     // `ClaudeProcessClient.writeUserMessage`) avoids two different
     // send-a-prompt code paths.
-    client.writeUserMessage(task.instruction);
+    client.writeUserMessage(startInput.instruction);
 
     let sessionRef: string;
     try {
@@ -357,10 +370,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return new ClaudeSession(
       sessionRef,
       client,
-      ctx.workspaceDir,
-      ctx.approvalChannel,
+      startInput.manifest.workspace.workspaceDir,
+      startInput.approvalChannel,
       mcpConfigDir,
-      modelId,
+      manifestModelId,
     );
   }
 
@@ -399,10 +412,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
 }
 
 function subscriptionModel(
-  task: TaskOfferPayload,
+  selection: TaskOfferPayload['dispatchSelection'],
   runtimeId: 'claude',
 ): string | undefined {
-  const selection = task.dispatchSelection;
   if (selection === undefined) return undefined;
   if (selection.lane !== 'subscription' || selection.runtimeId !== runtimeId) {
     throw new PolicyUnsupportedError(
@@ -514,7 +526,7 @@ class ClaudeSession implements Session {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
     }
-    const requestedModel = subscriptionModel(task, 'claude');
+    const requestedModel = subscriptionModel(task.dispatchSelection, 'claude');
     if (requestedModel !== undefined && requestedModel !== this.modelId) {
       throw new PolicyUnsupportedError(
         `claude persistent session cannot change model from ${this.modelId ?? '(legacy default)'} to ${requestedModel}`,

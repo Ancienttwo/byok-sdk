@@ -6,7 +6,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
-import { SteerUnsupportedError, type Session, type TaskContext } from '../types';
+import { SteerUnsupportedError, type Session } from '../types';
+import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 
@@ -34,9 +35,13 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   return results;
 }
 
-async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<TaskContext> {
+async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-adapter-test-'));
   return { workspaceDir, policy: { mode: 'auto' }, env };
+}
+
+async function startAdapter(adapter: CodexAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
+  return startPreparedOperation(adapter, task, resources);
 }
 
 const baseTask: TaskOfferPayload = {
@@ -76,9 +81,9 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     }
   });
 
-  it('capabilities() advertises exactly what the adapter can express (no steer, resume yes, auto+readonly only)', () => {
+  it('descriptor advertises exactly what the adapter can express (no steer, resume yes, auto+readonly only)', () => {
     const adapter = fakeCodexAdapter();
-    expect(adapter.capabilities()).toEqual({
+    expect(adapter.descriptor.capabilities).toEqual({
       steer: false,
       resume: true,
       // S0/H-002: codex exec never emits a needs_approval-equivalent event,
@@ -88,15 +93,15 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     });
   });
 
-  it('environmentRequirements() declares no credential env vars (M5 — same deliberate ToS posture as claude: codex authenticates via its own OAuth session, not an env var)', () => {
+  it('descriptor declares no credential env vars (M5 — same deliberate ToS posture as claude: codex authenticates via its own OAuth session, not an env var)', () => {
     const adapter = fakeCodexAdapter();
-    expect(adapter.environmentRequirements?.()).toEqual({ credentialNames: [] });
+    expect(adapter.descriptor.environmentRequirements).toEqual({ credentialNames: [] });
   });
 
   it('start() resolves sessionRef from thread.started and drives the canned sequence into normalized AgentEvents', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     expect(session.sessionRef).toBe('fake-thread-1');
@@ -127,7 +132,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       spawnFn: capturingSpawn(captured),
     });
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 7);
 
@@ -150,7 +155,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
       spawnFn: capturingSpawn(captured, capturedEnvs),
     });
-    const session = await adapter.start(
+    const session = await startAdapter(adapter,
       {
         ...baseTask,
         dispatchSelection: {
@@ -208,11 +213,11 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'prepared-thread' });
     ctx.gitWorkspace = { workspaceId: 'workspace-1', baseline: 'abc123' };
 
-    const fresh = await adapter.start(baseTask, ctx);
+    const fresh = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(fresh);
     await takeEvents(fresh, 7);
 
-    const resumed = await adapter.start({ ...baseTask, sessionRef: 'prepared-thread' }, ctx);
+    const resumed = await startAdapter(adapter, { ...baseTask, sessionRef: 'prepared-thread' }, ctx);
     openSessions.push(resumed);
     await takeEvents(resumed, 7);
 
@@ -244,7 +249,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'resume-me-123' });
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    const session = await adapter.start(task, ctx);
+    const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('resume-me-123');
     await takeEvents(session, 7); // drain the full turn, including the trailing usage + turn_end
@@ -254,7 +259,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx(); // FAKE_CODEX_THREAD_ID defaults to 'fake-thread-1' — this ref never matches it
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
-    await expect(adapter.start(task, ctx)).rejects.toThrow(/no rollout found/);
+    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/no rollout found/);
   });
 
   it('cross-model review (Fix 2): fails closed when codex resume echoes a thread id different from the one requested (never silently continues in a possibly-wrong session)', async () => {
@@ -265,25 +270,25 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       FAKE_CODEX_REPORTED_THREAD_ID: 'some-other-thread', // but thread.started reports a DIFFERENT id
     });
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    await expect(adapter.start(task, ctx)).rejects.toThrow(/echoed a different thread id than requested/);
+    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/echoed a different thread id than requested/);
   });
 
   it('fails closed (never a fabricated sessionRef) when codex does not yield thread.started as its first event', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_NO_THREAD_STARTED: '1' });
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/did not yield thread\.started/);
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/did not yield thread\.started/);
   });
 
   it('surfaces stderr context in the start() failure when codex exits immediately (bad-flag/crash shape)', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_CRASH_WITH_STDERR: 'Error: Unknown option: --bogus' });
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/Unknown option: --bogus/);
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/Unknown option: --bogus/);
   });
 
   it('maps a turn.failed turn to an error AgentEvent and ends the stream without a turn_end (task-runner.ts then reports task.fail)', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_TURN_FAILS: '1', FAKE_CODEX_FAIL_MESSAGE: 'model rejected the request' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     // 4 mapped events total: the always-present skills-budget notice, the
@@ -299,7 +304,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('cross-model review (Fix 1): fake-codex exits after a partial turn with NO terminal event at all — the event stream ENDS (not a hang) and surfaces a synthetic error with stderr context', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_EXIT_NO_TERMINAL: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     // A bare, UNBOUNDED for-await here is the whole point: pre-fix, this is
@@ -324,7 +329,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const artifactName = 'output/result.txt';
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_ARTIFACT_NAME: artifactName, FAKE_CODEX_ARTIFACT_CONTENT: 'artifact body\n' });
     await fs.mkdir(path.join(ctx.workspaceDir, 'output'), { recursive: true });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     // 10 mapped events: skills-budget error, progress, tool_use+tool_result
@@ -342,7 +347,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('followUp() spawns a new resume turn and pushes more events into the same events stream', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 7); // drain the first turn (including usage + turn_end)
 
@@ -356,7 +361,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('cross-model re-review (Fix 2): followUp() fails closed when codex resume echoes a DIFFERENT thread id than the one it asked to resume — never silently migrates this session\'s identity', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a' });
-    const session = await adapter.start(baseTask, ctx); // fresh start, no resume requested
+    const session = await startAdapter(adapter, baseTask, ctx); // fresh start, no resume requested
     openSessions.push(session);
     expect(session.sessionRef).toBe('thread-a');
     await takeEvents(session, 7);
@@ -390,7 +395,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('M4 Fix 2: followUp() failing on a session-identity mismatch ends the shared queue so an in-flight/subsequent consumer terminates instead of hanging forever', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 7); // drain turn 1
 
@@ -433,7 +438,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('M4 Fix 2: followUp() failing on a session-identity mismatch terminates the events stream promptly even when the underlying process would otherwise hang, and close() afterward still resolves cleanly', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a', FAKE_CODEX_HANG: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 1); // only the skills-budget notice arrives before the fixture hangs
 
@@ -473,7 +478,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('followUp() fails closed on a policy codex cannot express, without disturbing the already-open session', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 7);
 
@@ -483,7 +488,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('followUp() fails closed on a blob-ref instruction', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 7);
 
@@ -500,7 +505,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const adapter = new CodexAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn: spawnFn as never });
     const ctx = await makeCtx();
     ctx.policy = { mode: 'plan' };
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/cannot express permission mode "plan"/);
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/cannot express permission mode "plan"/);
     expect(spawnFn).not.toHaveBeenCalled();
   });
 
@@ -511,13 +516,13 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       ...baseTask,
       instruction: { blobRef: { blobId: 'b1', contentHash: 'sha256:x', size: 10, contentType: 'text/plain' } },
     };
-    await expect(adapter.start(task, ctx)).rejects.toThrow(/only supports string instructions/);
+    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/only supports string instructions/);
   });
 
   it('interrupt() SIGTERMs a hanging turn and close() tears it down cleanly (no hang, no orphaned process)', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_HANG: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     // Only the benign skills-budget notice arrives before the fixture hangs.
@@ -533,7 +538,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('close() is idempotent', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 7);
     await session.close();
@@ -543,7 +548,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('steer() throws a typed SteerUnsupportedError rather than silently no-op-ing (codex exec has no in-band mid-turn channel)', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await expect(session.steer('inject this')).rejects.toBeInstanceOf(SteerUnsupportedError);
     await expect(session.steer('inject this')).rejects.toThrow(/does not support steer/);
@@ -553,7 +558,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
   it('resolveApproval() throws honestly rather than silently no-op-ing (codex exec never emits needs_approval)', async () => {
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await expect(session.resolveApproval(true)).rejects.toThrow(/does not support approval resume/);
   });
@@ -562,7 +567,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const adapter = fakeCodexAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CODEX_UNMAPPED_TYPE: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const events = await takeEvents(session, 7); // the 2 unmapped frames are silently absorbed, not pushed

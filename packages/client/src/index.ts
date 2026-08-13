@@ -1,17 +1,21 @@
 export type {
   RuntimeAdapter,
+  RuntimeAdapterDescriptor,
+  RuntimeAdapterPrepareInput,
+  RuntimeAdapterPrepareResult,
+  RuntimeAdapterRejectedOperation,
+  RuntimeAdapterPreparedOperation,
+  PreparedRuntimeOperation,
+  RuntimeOperationManifest,
+  RuntimeOperationStartInput,
   RuntimeCapabilities,
   RuntimeDetectResult,
   Session,
-  TaskContext,
   GitWorkspaceConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
 } from './types';
-export { PolicyUnsupportedError, SteerUnsupportedError } from './types';
-// M5: per-runtime environment allowlist — part of the `RuntimeAdapter`
-// contract's `environmentRequirements()` method (a custom adapter supplied
-// to `createDaemonWithAdapters` implements this too). See `daemon/environment.ts`.
+export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 
 export { GitWorkspaceManager, GitWorkspaceError, isGitWorkspaceConfig, prependGitWorkspaceGuidance } from './daemon/git-workspace';

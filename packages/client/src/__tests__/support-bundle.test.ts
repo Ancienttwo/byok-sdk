@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { DaemonConfig, DeviceRecord, RuntimeAdapter } from '../index';
+import { freezeRuntimeAdapterDescriptor, type DaemonConfig, type DeviceRecord, type RuntimeAdapter } from '../index';
 import type { ConnectControlResult } from '../bin/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
@@ -101,18 +101,19 @@ describe('support bundle privacy and bounds', () => {
   it('projects runtime identifiers and version output through a closed bounded shape', async () => {
     const dir = await tempDir();
     const runtime: RuntimeAdapter = {
-      id: 'SENTINEL_RUNTIME_ID',
-      detect: async () => ({ present: true, version: `SENTINEL_RUNTIME_VERSION\n${'x'.repeat(10_000)}`, authPresent: true }),
-      capabilities: () => ({
-        steer: true,
-        resume: false,
-        approvalInteractive: false,
-        permissionModes: ['SENTINEL_PERMISSION_MODE'],
+      descriptor: freezeRuntimeAdapterDescriptor({
+        id: 'SENTINEL_RUNTIME_ID',
+        supportsDispatchSelection: false,
+        capabilities: {
+          steer: true,
+          resume: false,
+          approvalInteractive: false,
+          permissionModes: ['SENTINEL_PERMISSION_MODE'],
+        },
+        environmentRequirements: { credentialNames: [] },
       }),
-      environmentRequirements: () => ({ credentialNames: [] }),
-      start: async () => {
-        throw new Error('not used');
-      },
+      detect: async () => ({ present: true, version: `SENTINEL_RUNTIME_VERSION\n${'x'.repeat(10_000)}`, authPresent: true }),
+      prepare: async () => ({ kind: 'reject', reason: 'not used', retryable: false }),
     };
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [runtime], connectControl: unreachable });
     const serialized = JSON.stringify(bundle);

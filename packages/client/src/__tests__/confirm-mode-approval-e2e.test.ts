@@ -8,7 +8,15 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOv
 import { connectControlClient } from '../bin/control-client';
 import type { ApprovalsListResult, ApprovalsRequestResult, ControlStatusResult } from '../daemon/control-protocol';
 import type { DaemonEvent } from '../daemon/observer';
-import type { ApprovalChannel, RuntimeAdapter, RuntimeCapabilities, RuntimeDetectResult, Session, TaskContext } from '../types';
+import {
+  freezeRuntimeAdapterDescriptor,
+  type ApprovalChannel,
+  type RuntimeAdapter,
+  type RuntimeAdapterPrepareInput,
+  type RuntimeAdapterPrepareResult,
+  type RuntimeDetectResult,
+  type Session,
+} from '../types';
 import { AsyncQueue } from '../util/async-queue';
 import { TestServer } from './fixtures/test-server';
 
@@ -78,19 +86,28 @@ class ApprovalAwareSession implements Session {
 }
 
 class ApprovalAwareAdapter implements RuntimeAdapter {
-  readonly id = 'confirm-stub';
+  readonly descriptor = freezeRuntimeAdapterDescriptor({
+    id: 'confirm-stub',
+    supportsDispatchSelection: false,
+    capabilities: { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] },
+    environmentRequirements: { credentialNames: [] },
+  });
   readonly sessions: ApprovalAwareSession[] = [];
 
   async detect(): Promise<RuntimeDetectResult> {
     return { present: true, version: '0.0.0' };
   }
-  capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] };
-  }
-  async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
-    const session = new ApprovalAwareSession(task.sessionRef ?? `session-${this.sessions.length + 1}`, ctx.approvalChannel);
-    this.sessions.push(session);
-    return session;
+  async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    return {
+      kind: 'prepared',
+      operation: {
+        start: async (input) => {
+          const session = new ApprovalAwareSession(input.manifest.sessionRef ?? `session-${this.sessions.length + 1}`, input.approvalChannel);
+          this.sessions.push(session);
+          return session;
+        },
+      },
+    };
   }
 }
 

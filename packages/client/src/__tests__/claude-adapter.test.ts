@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
-import { SteerUnsupportedError, type Session, type TaskContext } from '../types';
+import { SteerUnsupportedError, type Session } from '../types';
+import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -24,9 +25,13 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   return results;
 }
 
-async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<TaskContext> {
+async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-adapter-test-'));
   return { workspaceDir, policy: { mode: 'auto' }, env };
+}
+
+async function startAdapter(adapter: ClaudeAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
+  return startPreparedOperation(adapter, task, resources);
 }
 
 const baseTask: TaskOfferPayload = {
@@ -93,9 +98,9 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   }, 8000);
 
-  it('capabilities() advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm mode included as of M4 Phase 3)', () => {
+  it('descriptor advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm mode included as of M4 Phase 3)', () => {
     const adapter = fakeClaudeAdapter();
-    expect(adapter.capabilities()).toEqual({
+    expect(adapter.descriptor.capabilities).toEqual({
       steer: false,
       resume: true,
       // S0/H-002: the confirm path is genuinely wired (permission-prompt-tool
@@ -107,15 +112,15 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     });
   });
 
-  it('environmentRequirements() declares no credential env vars (M5 — deliberate ToS posture: env-based API key passthrough for claude is a separate, pending product decision)', () => {
+  it('descriptor declares no credential env vars (M5 — deliberate ToS posture: env-based API key passthrough for claude is a separate, pending product decision)', () => {
     const adapter = fakeClaudeAdapter();
-    expect(adapter.environmentRequirements?.()).toEqual({ credentialNames: [] });
+    expect(adapter.descriptor.environmentRequirements).toEqual({ credentialNames: [] });
   });
 
   it('start() drives the canned prompt sequence into normalized AgentEvents (Bash tool_use/tool_result, progress, turn_end)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     expect(typeof session.sessionRef).toBe('string');
@@ -143,7 +148,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
         return realSpawn(command, args, options);
       }) as never,
     });
-    const session = await adapter.start(
+    const session = await startAdapter(adapter,
       {
         ...baseTask,
         dispatchSelection: {
@@ -175,7 +180,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: 'resume-me-123' });
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    const session = await adapter.start(task, ctx);
+    const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('resume-me-123');
   });
@@ -188,7 +193,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       FAKE_CLAUDE_REPORTED_SESSION_ID: 'some-other-session', // but system/init reports a DIFFERENT id
     });
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    await expect(adapter.start(task, ctx)).rejects.toThrow(/echoed a different session id than requested/);
+    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/echoed a different session id than requested/);
   });
 
   it('an unresolvable sessionRef surfaces claude\'s real resume rejection as a clean start() failure, not a hang (empirically confirmed against real claude: "No conversation found with session ID: ...", exit 1)', async () => {
@@ -196,13 +201,13 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     // FAKE_CLAUDE_SESSION_ID defaults to 'fake-claude-session-1' — this ref never matches it.
     const ctx = await makeCtx();
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
-    await expect(adapter.start(task, ctx)).rejects.toThrow(/No conversation found with session ID/);
+    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/No conversation found with session ID/);
   });
 
   it('surfaces a bad-flag-class crash\'s stderr in the start() failure (finding #1-class failure, mirroring the pi adapter\'s own stderr-ring-buffer finding)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_CRASH_WITH_STDERR: 'error: simulated crash for stderr-capture test' });
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/simulated crash for stderr-capture test/);
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/simulated crash for stderr-capture test/);
   });
 
   it('M4 Phase 3: confirm mode with no approval channel wired up fails closed (internal-consistency check — TaskRunner always populates one; a missing one means something upstream is badly wired)', async () => {
@@ -210,7 +215,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const ctx = await makeCtx();
     ctx.policy = { mode: 'confirm' };
     // approvalChannel deliberately left unset.
-    await expect(adapter.start(baseTask, ctx)).rejects.toThrow(/requires policy.mode "confirm".*approval channel/);
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/requires policy.mode "confirm".*approval channel/);
   });
 
   it('M4 Phase 3: confirm mode with an approval channel appends --permission-prompt-tool/--mcp-config/--strict-mcp-config on top of the deny-by-default baseline, and writes a matching mcp-config file', async () => {
@@ -239,7 +244,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       resolve: resolveSpy,
     };
 
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     expect(spawnCalls).toHaveLength(1);
@@ -296,7 +301,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] },
     };
 
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     const args = spawnCalls[0]?.args ?? [];
     expect(args).toContain('--mcp-config');
@@ -322,13 +327,13 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       ...baseTask,
       instruction: { blobRef: { blobId: 'b1', contentHash: 'sha256:x', size: 10, contentType: 'text/plain' } },
     };
-    await expect(adapter.start(task, ctx)).rejects.toThrow(/only supports string instructions/);
+    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/only supports string instructions/);
   });
 
   it('FAKE_CLAUDE_HANG_AFTER_TOOL keeps the session running past the tool call; interrupt()+close() still tear it down cleanly via SIGTERM', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_HANG_AFTER_TOOL: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const events = await takeEvents(session, 2);
@@ -347,7 +352,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('a denied (headless auto-deny) tool call surfaces tool_result with isError:true, and the run still completes to turn_end — never a hang, never a paused needs_approval-style event', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_DENY: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const events = await takeEvents(session, 5);
@@ -361,7 +366,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('cross-model re-review (P1 regression): a malformed claude `result` (missing is_error) ends THIS TURN\'s event stream as a failure — never a hang, even though the persistent claude process itself stays alive awaiting a possible followUp', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_RESULT_MALFORMED: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     // A bare, UNBOUNDED for-await here is the whole point: pre-fix, claude's
@@ -388,7 +393,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('followUp() sends a new turn on the SAME persistent process/session, confirmed by an unchanged sessionRef and a second full event cycle', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const firstTurn = await takeEvents(session, 5);
@@ -413,7 +418,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('followUp() fails closed on a blob-ref instruction, same as start()', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 5); // drain the full turn, including the trailing usage + turn_end
 
@@ -425,7 +430,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('emits an artifact AgentEvent for a Write inside the workspace, with a workspace-relative name, and the file genuinely exists on disk', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_ARTIFACT_PATH: 'out.txt', FAKE_CLAUDE_ARTIFACT_CONTENT: 'artifact-body' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     // The spawned child process's own `process.cwd()` (what the fixture
@@ -472,7 +477,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       FAKE_CLAUDE_ARTIFACT_PATH: path.join(outsideDir, 'plan.md'),
       FAKE_CLAUDE_ARTIFACT_CONTENT: 'plan-body',
     });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const events = await takeEvents(session, 5);
@@ -483,7 +488,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('resolveApproval() throws a descriptive not-supported error rather than silently no-op\'ing when no approval channel is wired up (every mode other than confirm — see the adapter\'s own doc comment)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await expect(session.resolveApproval(true)).rejects.toThrow(/no approval channel for this session/);
   });
@@ -491,7 +496,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   it('steer() throws a typed SteerUnsupportedError (mid-turn stdin writes were empirically found to queue, not redirect)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     // Typed, not string-matched: the daemon classifies this as permanently
     // unsupported (non-retryable) rather than a transient handler failure.
@@ -504,7 +509,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_UNKNOWN_TOP_LEVEL: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const events = await takeEvents(session, 5);
@@ -518,7 +523,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_UNKNOWN_SYSTEM_SUBTYPE: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     await takeEvents(session, 5);
 
@@ -530,7 +535,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK: '1' });
-    const session = await adapter.start(baseTask, ctx);
+    const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
 
     const events = await takeEvents(session, 5);

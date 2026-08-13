@@ -19,7 +19,7 @@ import { serveApprovalMcpOverStdio, type ApprovalMcpDeps } from './approval-mcp-
  *   BYOK_STORE_DIR            — this daemon's control-socket storeDir.
  *   BYOK_PRODUCT_ID           — this daemon's productId.
  *   BYOK_TASK_ID              — the task this approval request belongs to.
- *   BYOK_APPROVAL_TIMEOUT_MS  — `TaskContext.approvalChannel.timeoutMs`,
+ *   BYOK_APPROVAL_TIMEOUT_MS  — `RuntimeOperationStartInput.approvalChannel.timeoutMs`,
  *                                echoed here so this process's OWN control
  *                                request waits at least that long (plus
  *                                slop) rather than timing out earlier than

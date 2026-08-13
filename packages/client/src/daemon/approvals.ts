@@ -18,7 +18,7 @@ export type ApprovalDecision = 'approve' | 'reject';
 /**
  * M4 (additive-minor, `task.approval_resolved`): distinguishes a resolution
  * that arrived over the wire (a server-sent `task.approve`/`task.reject`,
- * relayed here via `TaskContext.approvalChannel.resolve` — `task-runner.ts`'s
+ * relayed here via `RuntimeOperationStartInput.approvalChannel.resolve` — `task-runner.ts`'s
  * `handleOffer`) from one this device decided on its own (the local
  * `approvals.resolve` control-socket RPC, a fail-closed `requestApproval`
  * timeout, or a fail-closed finish/eviction rejection). `TaskRunner` uses
@@ -118,7 +118,7 @@ export class ApprovalRegistry {
    * `requestApproval` timeout and `finish()` fail-closed cleanup
    * (`task-runner.ts`) — resolves a decision this device made on its own.
    * The one exception, a server-sent wire `task.approve`/`task.reject`
-   * relayed through `TaskContext.approvalChannel.resolve`
+   * relayed through `RuntimeOperationStartInput.approvalChannel.resolve`
    * (`task-runner.ts`'s `handleOffer`), passes `'wire'` explicitly.
    */
   resolve(approvalId: string, decision: ApprovalDecision, reason?: string, origin: ApprovalOrigin = 'local'): void {

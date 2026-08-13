@@ -36,6 +36,25 @@ evidence.
   [Workspace confinement is a convention, not a sandbox](#workspace-confinement-is-a-convention-not-a-sandbox)
   below — this is the one place this doc most wants to avoid overclaiming.
 
+### Runtime operation admission
+
+The 0.4.0 runtime adapter boundary is a pre-claim security boundary. The daemon
+snapshots the adapter's frozen descriptor and calls required `prepare()` before
+it can claim an offer. Bundled preparation is pure with respect to process
+spawn, temporary files, workspace allocation or mutation, session-id allocation,
+and credential values. A semantic refusal (including a Pi BYOK selection with
+no configured credential-custody launcher) is a `task.decline`, not a
+claim-then-fail path.
+
+After admission, the daemon seals one immutable `RuntimeOperationManifest`.
+It contains only task/runtime/policy/toolset/session/workspace selection metadata
+and forwarded environment names; it contains no environment values, API keys,
+tokens, or credential-storage contents. Claim capability projection,
+environment filtering, provider/model/lane selection, and prepared-operation
+start consume that same manifest. A mutable custom-adapter descriptor cannot
+alter an already admitted operation, and the public interface has no direct
+`start()` fallback.
+
 ### Task-scoped host MCP toolsets
 
 A toolset-aware offer's selector carries logical ids only. Commands and
@@ -140,7 +159,7 @@ without redaction, "helpful audit trail" becomes "durable secret/credential/
 source leak" the moment anything else on the machine can read the file.
 
 **Credential-isolation rule** (`packages/client/src/types.ts`'s
-`RuntimeAdapter` doc comment): subscription adapters spawn only the runtime's
+`RuntimeAdapter` contract): subscription adapters spawn only the runtime's
 official binary and never read, proxy, or forward that runtime's own credential
 storage. The BYOK Pi adapter may instead spawn the separately installed
 `@byok-sdk/keys` launcher, but passes it only non-secret provider/model ids and
@@ -177,8 +196,8 @@ regardless of which runtime ran it. `daemon/environment.ts`'s
 `buildRuntimeEnv` replaces that with an explicit, per-runtime allowlist —
 a small always-included platform baseline (`PATH`/`HOME`/locale/etc), plus
 whichever credential/config variable names the SPECIFIC selected runtime
-adapter declares it actually needs (`RuntimeAdapter.environmentRequirements()`
-— e.g. the legacy direct-Pi path's provider credential names, since Pi can
+adapter declares it actually needs (`RuntimeAdapter.descriptor.environmentRequirements`
+— e.g. a non-BYOK Pi offer's provider credential names, since Pi can
 authenticate via provider env vars; an authoritative BYOK selection strips
 those ambient names before invoking the credential launcher. Claude and Codex
 declare none and also strip those names at their spawn boundary, since both authenticate via their
@@ -787,16 +806,14 @@ path. Two related fixes:
 - **Capability matching at admission.** Before claiming, the daemon now
   checks whether the candidate adapter can even express the offer's
   `PermissionPolicy.mode` (via that adapter's own declared
-  `capabilities().permissionModes`) — pi and codex cannot express
+  `descriptor.capabilities.permissionModes`) — pi and codex cannot express
   `confirm`/`plan`; claude can. Auto-select skips a non-supporting candidate
   and keeps walking the preference order; if nothing eligible supports the
   mode, or an explicitly-requested runtime can't express it, the offer is
   declined fail-closed, pre-claim. Previously this mismatch surfaced only
-  once `adapter.start()` threw `PolicyUnsupportedError` — after the task was
-  already claimed — which both wasted a claim/fail round trip and could pick
-  an incapable adapter over a capable one that was sitting right there. That
-  post-claim `PolicyUnsupportedError` path is unchanged and remains as
-  defense-in-depth.
+  during side-effect-free `prepare()` — before the task is claimed — so an
+  incapable adapter cannot consume a claim/fail round trip or displace a
+  capable adapter that was available.
 
 ## Resource limits: daemon-enforced, not kernel-enforced
 

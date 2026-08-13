@@ -148,7 +148,7 @@ export class ConnectionManager {
    * already-delivered seqs (see its own doc comment) so the failed seq's own
    * redelivery can get through — but that same frozen watermark also means
    * every OTHER seq above it rides along on every re-poll too. Without this,
-   * a seq already mid-flight (e.g. a `task.offer` whose `adapter.start()`
+   * a seq already mid-flight (e.g. a `task.offer` whose prepared operation start()
    * hasn't resolved yet) would be re-enqueued into `processingChain` on
    * every such re-poll, piling up duplicate copies that — once the first
    * finally resolves and the chain unwinds through them — run its handler

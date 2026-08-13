@@ -8,6 +8,24 @@
   identity and namespace are not retained as aliases; releases through `0.3.0`
   remain published under the historical name.
 
+## 0.4.0 — 2026-08-14
+
+Breaking runtime-adapter contract release.
+
+- Replaced custom `RuntimeAdapter` direct-start authority with a frozen
+  descriptor, required side-effect-free per-offer preparation, prepared
+  operation, and credential-free immutable operation manifest.
+- Moved Pi/Claude/Codex semantic admission before `task.claim`; unsupported
+  selection, policy, instruction, launcher, toolset, or session intent now
+  declines without workspace/process/session side effects.
+- Updated custom-adapter authors atomically: there is no 0.3 adapter alias,
+  overload, optional prepare hook, or direct-start fallback. Protocol-v1 wire
+  bytes and runtime ids are unchanged.
+- Advanced the aligned dispatch packages (`core`, `protocol`, `client`,
+  `server`, `cloud`, `cloud-dataplane`, `testkit`, and `byok-sdk`) to 0.4.0;
+  `@byok-sdk/keys` remains independently versioned at 0.1.0. This release is
+  prepared only and was not published by this change.
+
 ## 0.3.0 — 2026-08-13
 
 Salesko integration and hosted correctness release.

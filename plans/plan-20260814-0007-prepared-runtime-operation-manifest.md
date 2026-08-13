@@ -208,13 +208,13 @@ This plan stays Draft. Approval means accepting: the 0.4.0 breaking API cut, the
 ## Task Breakdown
 
 - [x] Freeze the 0.3.0 release commit/publication evidence and record it as this plan's base prerequisite (`v0.3.0^{}` = `a119b5cf4247278a456c285cbc6470d8e3b9815c`; npm client/umbrella 0.3.0 readback verified 2026-08-14).
-- [ ] Cut the public RuntimeAdapter types to descriptor + prepare + prepared operation, with no legacy path.
-- [ ] Reorder TaskRunner admission and seal one credential-free immutable operation manifest before claim.
-- [ ] Migrate Pi, Claude, and Codex validation/start paths without moving provider/model authority into TaskRunner.
-- [ ] Migrate discovery, diagnostics, exports, every test fake, and all compile-time consumers.
-- [ ] Add zero-side-effect rejection, snapshot drift, environment secrecy, claim/start consistency, and positive adapter tests.
-- [ ] Extend the built-entry adapter smoke with a pre-spawn rejection scenario.
-- [ ] Move the aligned dispatch release train metadata to 0.4.0 and add the custom-adapter migration note; do not publish.
+- [x] Cut the public RuntimeAdapter types to descriptor + prepare + prepared operation, with no legacy path.
+- [x] Reorder TaskRunner admission and seal one credential-free immutable operation manifest before claim.
+- [x] Migrate Pi, Claude, and Codex validation/start paths without moving provider/model authority into TaskRunner.
+- [x] Migrate discovery, diagnostics, exports, every test fake, and all compile-time consumers.
+- [x] Add zero-side-effect rejection, snapshot drift, environment secrecy, claim/start consistency, and positive adapter tests.
+- [x] Extend the built-entry adapter smoke with a pre-spawn rejection scenario.
+- [x] Move the aligned dispatch release train metadata to 0.4.0 and add the custom-adapter migration note; do not publish.
 - [ ] Update spec/security/architecture truth and run the complete verification boundary.
 
 ## Annotations
@@ -222,11 +222,11 @@ This plan stays Draft. Approval means accepting: the 0.4.0 breaking API cut, the
 
 ## Task Breakdown
 - [x] Freeze the 0.3.0 release commit/publication evidence and record it as this plan's base prerequisite (`v0.3.0^{}` = `a119b5cf4247278a456c285cbc6470d8e3b9815c`; npm client/umbrella 0.3.0 readback verified 2026-08-14).
-- [ ] Cut the public RuntimeAdapter types to descriptor + prepare + prepared operation, with no legacy path.
-- [ ] Reorder TaskRunner admission and seal one credential-free immutable operation manifest before claim.
-- [ ] Migrate Pi, Claude, and Codex validation/start paths without moving provider/model authority into TaskRunner.
-- [ ] Migrate discovery, diagnostics, exports, every test fake, and all compile-time consumers.
-- [ ] Add zero-side-effect rejection, snapshot drift, environment secrecy, claim/start consistency, and positive adapter tests.
-- [ ] Extend the built-entry adapter smoke with a pre-spawn rejection scenario.
-- [ ] Move the aligned dispatch release train metadata to 0.4.0 and add the custom-adapter migration note; do not publish.
+- [x] Cut the public RuntimeAdapter types to descriptor + prepare + prepared operation, with no legacy path.
+- [x] Reorder TaskRunner admission and seal one credential-free immutable operation manifest before claim.
+- [x] Migrate Pi, Claude, and Codex validation/start paths without moving provider/model authority into TaskRunner.
+- [x] Migrate discovery, diagnostics, exports, every test fake, and all compile-time consumers.
+- [x] Add zero-side-effect rejection, snapshot drift, environment secrecy, claim/start consistency, and positive adapter tests.
+- [x] Extend the built-entry adapter smoke with a pre-spawn rejection scenario.
+- [x] Move the aligned dispatch release train metadata to 0.4.0 and add the custom-adapter migration note; do not publish.
 - [ ] Update spec/security/architecture truth and run the complete verification boundary.

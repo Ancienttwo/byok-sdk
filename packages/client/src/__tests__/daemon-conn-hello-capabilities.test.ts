@@ -7,7 +7,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
-import type { RuntimeAdapter } from '../types';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { TestServer } from './fixtures/test-server';
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
@@ -181,20 +181,22 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
 
   it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {
     const opaquePi: RuntimeAdapter = {
-      id: 'pi',
-      async detect() {
-        return { present: true };
-      },
-      capabilities() {
-        return {
+      descriptor: freezeRuntimeAdapterDescriptor({
+        id: 'pi',
+        supportsDispatchSelection: false,
+        capabilities: {
           steer: false,
           resume: false,
           approvalInteractive: false,
           permissionModes: ['auto'],
-        };
+        },
+        environmentRequirements: { credentialNames: [] },
+      }),
+      async detect() {
+        return { present: true };
       },
-      async start() {
-        throw new Error('not used by capability handshake test');
+      async prepare() {
+        return { kind: 'reject', reason: 'not used by capability handshake test', retryable: false };
       },
     };
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-custom-workspace-');

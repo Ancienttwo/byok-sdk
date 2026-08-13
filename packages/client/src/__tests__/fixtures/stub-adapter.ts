@@ -1,5 +1,14 @@
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, RuntimeCapabilities, RuntimeDetectResult, Session, TaskContext } from '../../types';
+import {
+  freezeRuntimeAdapterDescriptor,
+  type RuntimeAdapter,
+  type RuntimeAdapterPrepareInput,
+  type RuntimeAdapterPrepareResult,
+  type RuntimeCapabilities,
+  type RuntimeDetectResult,
+  type RuntimeOperationStartInput,
+  type Session,
+} from '../../types';
 import { AsyncQueue } from '../../util/async-queue';
 
 /** In-memory Session double: tests push AgentEvents and record interrupt/steer/close/resolveApproval calls. */
@@ -148,11 +157,20 @@ const DEFAULT_STUB_CAPABILITIES: RuntimeCapabilities = {
 
 /** In-memory RuntimeAdapter double: records every start() call and its resulting session. */
 export class StubRuntimeAdapter implements RuntimeAdapter {
-  readonly id: string;
-  readonly startCalls: Array<{ task: TaskOfferPayload; ctx: TaskContext }> = [];
+  readonly descriptor;
+  readonly startCalls: Array<{
+    task: TaskOfferPayload;
+    ctx: {
+      workspaceDir: string;
+      policy: TaskOfferPayload['policy'];
+      env: NodeJS.ProcessEnv;
+      mcpServers?: RuntimeOperationStartInput['mcpServers'];
+      gitWorkspace?: { workspaceId: string; baseline?: string };
+      approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
+    };
+  }> = [];
   readonly sessions: StubSession[] = [];
   private readonly detectResult: RuntimeDetectResult;
-  private readonly capabilitiesResult: RuntimeCapabilities;
   private sessionCounter = 0;
   /** When set, start() throws this instead of returning a session (for testing the daemon's failure paths). */
   startError: Error | undefined;
@@ -173,17 +191,17 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     detectResult: RuntimeDetectResult = { present: true, version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
   ) {
-    this.id = id;
     this.detectResult = detectResult;
-    this.capabilitiesResult = capabilities;
+    this.descriptor = freezeRuntimeAdapterDescriptor({
+      id,
+      supportsDispatchSelection: true,
+      capabilities,
+      environmentRequirements: { credentialNames: [] },
+    });
   }
 
   async detect(): Promise<RuntimeDetectResult> {
     return this.detectResult;
-  }
-
-  capabilities(): RuntimeCapabilities {
-    return this.capabilitiesResult;
   }
 
   /**
@@ -201,12 +219,39 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     return release;
   }
 
-  async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
-    this.startCalls.push({ task, ctx });
+  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    return {
+      kind: 'prepared',
+      operation: {
+        start: (startInput) => this.startPrepared(input, startInput),
+      },
+    };
+  }
+
+  private async startPrepared(prepared: RuntimeAdapterPrepareInput, startInput: RuntimeOperationStartInput): Promise<Session> {
+    this.startCalls.push({
+      task: {
+        instruction: startInput.instruction,
+        policy: startInput.manifest.policy,
+        ...(startInput.manifest.dispatchSelection === undefined ? {} : { dispatchSelection: startInput.manifest.dispatchSelection }),
+        ...(startInput.manifest.sessionRef === undefined ? {} : { sessionRef: startInput.manifest.sessionRef }),
+      },
+      ctx: {
+        workspaceDir: startInput.manifest.workspace.workspaceDir,
+        policy: startInput.manifest.policy,
+        env: startInput.env,
+        ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
+        ...(startInput.manifest.workspace.workspaceId === undefined
+          ? {}
+          : { gitWorkspace: { workspaceId: startInput.manifest.workspace.workspaceId, baseline: startInput.manifest.workspace.baseline } }),
+        ...(startInput.approvalChannel === undefined ? {} : { approvalChannel: startInput.approvalChannel }),
+      },
+    });
+    void prepared;
     if (this.startError) throw this.startError;
     if (this.startGate) await this.startGate;
     this.sessionCounter += 1;
-    const session = new StubSession(task.sessionRef ?? `stub-session-${this.sessionCounter}`);
+    const session = new StubSession(startInput.manifest.sessionRef ?? `stub-session-${this.sessionCounter}`);
     this.sessions.push(session);
     return session;
   }

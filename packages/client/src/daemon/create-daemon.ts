@@ -203,7 +203,7 @@ export interface DaemonConfig {
    * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
    * — tried in listed order; the first candidate that is both PRESENT
    * (`adapter.detect()`) and CAPABLE (declares the offer's
-   * `PermissionPolicy.mode` in its own `capabilities().permissionModes` —
+   * `PermissionPolicy.mode` in its own `descriptor.capabilities.permissionModes` —
    * see `adapterSupportsMode`) wins. Unset defaults to
    * `DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',
    * 'pi']` — pi LAST, deliberately.
@@ -263,7 +263,7 @@ export interface DaemonConfig {
    * an id with no matching adapter is simply never looked up). `allow`
    * entries are exact variable names or `*`-suffixed prefixes, merged in
    * alongside that runtime adapter's own declared
-   * `environmentRequirements()` — this can never override the hard
+   * `descriptor.environmentRequirements` — this can never override the hard
    * `BYOK_*` deny (see `environment.ts`'s own doc comment).
    */
   runtimeEnvironment?: Record<string, { allow?: string[] }>;
@@ -637,16 +637,16 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
   const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await adapter.detect() })));
   const runtimes: RuntimeInfo[] = [];
   for (const { adapter, detected } of detections) {
-    if (!detected.present || !isRuntimeId(adapter.id)) continue;
-    const info: RuntimeInfo = { id: adapter.id };
+    if (!detected.present || !isRuntimeId(adapter.descriptor.id)) continue;
+    const info: RuntimeInfo = { id: adapter.descriptor.id };
     if (detected.version !== undefined) info.version = detected.version;
     if (detected.authPresent !== undefined) info.authPresent = detected.authPresent;
     // Pre-freeze addition (`RuntimeInfo.capabilities`, `messages.ts`):
-    // surfaces this SAME adapter's own `capabilities()` (already used above
+    // surfaces this same adapter descriptor's capabilities (already used above
     // by `computeCapabilities` for the connection-level `steer` flag) into
     // the per-runtime wire field — see `toRuntimeInfoCapabilities`'s doc
     // comment.
-    info.capabilities = toRuntimeInfoCapabilities(adapter.capabilities());
+    info.capabilities = toRuntimeInfoCapabilities(adapter.descriptor.capabilities);
     runtimes.push(info);
   }
   return runtimes;
@@ -675,19 +675,19 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
  */
 function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
-  if (adapters.some((adapter) => adapter.capabilities().steer)) flags.push('steer');
+  if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
   flags.push('approval-targeting');
   const selectionAdapters = adapters.filter((adapter) =>
-    ALL_RUNTIME_IDS.includes(adapter.id as RuntimeId),
+    ALL_RUNTIME_IDS.includes(adapter.descriptor.id as RuntimeId),
   );
   if (
     selectionAdapters.length > 0 &&
-    selectionAdapters.every((adapter) => adapter.supportsDispatchSelection === true)
+    selectionAdapters.every((adapter) => adapter.descriptor.supportsDispatchSelection === true)
   ) {
     flags.push('dispatch-selection');
   }
-  if (adapters.some((adapter) => adapter.capabilities().mcpToolsets === true)) {
+  if (adapters.some((adapter) => adapter.descriptor.capabilities.mcpToolsets === true)) {
     flags.push('toolset-selection');
   }
   return flags;
@@ -1535,7 +1535,7 @@ export function buildDaemonWithAdapters(
       // share (see that field's own construction above) — `TaskRunner
       // .requestApproval` registers into it directly, so a decision arriving
       // via either the server wire or the local CLI resolves the identical
-      // entry. `storeDir`/`productId` let `TaskContext.approvalChannel`
+      // entry. `storeDir`/`productId` let the prepared operation approval channel
       // (populated per-task by `TaskRunner`) tell an out-of-process helper
       // (`bin/byok-approval-mcp.ts`) exactly which control socket to dial.
       approvalRegistry,
@@ -2159,7 +2159,7 @@ export function buildDaemonWithAdapters(
       deviceId: auth.deviceId,
       transport: connectionState,
       activeTasks,
-      runtimeIds: adapters.map((adapter) => adapter.id),
+      runtimeIds: adapters.map((adapter) => adapter.descriptor.id),
       // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
       // active-task map (distinct from `observer.tasks()` above, which is
       // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s

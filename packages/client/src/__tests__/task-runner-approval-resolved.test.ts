@@ -7,13 +7,14 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import { freezeRuntimeAdapterDescriptor } from '../types';
 import type {
   ApprovalChannel,
   RuntimeAdapter,
-  RuntimeCapabilities,
+  RuntimeAdapterPrepareInput,
+  RuntimeAdapterPrepareResult,
   RuntimeDetectResult,
   Session,
-  TaskContext,
 } from '../types';
 import { AsyncQueue } from '../util/async-queue';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -124,19 +125,28 @@ class RelayingSession implements Session {
 }
 
 class RelayingAdapter implements RuntimeAdapter {
-  readonly id = 'relay-stub';
+  readonly descriptor = freezeRuntimeAdapterDescriptor({
+    id: 'relay-stub',
+    supportsDispatchSelection: false,
+    capabilities: { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] },
+    environmentRequirements: { credentialNames: [] },
+  });
   readonly sessions: RelayingSession[] = [];
 
   async detect(): Promise<RuntimeDetectResult> {
     return { present: true, version: '0.0.0' };
   }
-  capabilities(): RuntimeCapabilities {
-    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] };
-  }
-  async start(task: TaskOfferPayload, ctx: TaskContext): Promise<Session> {
-    const session = new RelayingSession(task.sessionRef ?? `relay-session-${this.sessions.length + 1}`, ctx.approvalChannel);
-    this.sessions.push(session);
-    return session;
+  async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    return {
+      kind: 'prepared',
+      operation: {
+        start: async (input) => {
+          const session = new RelayingSession(input.manifest.sessionRef ?? `relay-session-${this.sessions.length + 1}`, input.approvalChannel);
+          this.sessions.push(session);
+          return session;
+        },
+      },
+    };
   }
 }
 

@@ -57,7 +57,7 @@ import { runWorkspacesCommand } from './commands/workspaces';
  * - `runtimes` (and the compact runtime summary inside `status`) is a FRESH
  *   STANDALONE PROBE instead: it constructs the same bundled pi/claude/codex
  *   adapter set `createDaemon` would (see `bin/runtime-probe.ts`) and calls
- *   `detect()`/`capabilities()` directly, independent of whether any daemon
+ *   `detect()` and descriptor capabilities directly, independent of whether any daemon
  *   is running. "What's on this machine right now" is more useful live than
  *   stale, and detection is cheap/side-effect-free, so there's no reason to
  *   read a historical snapshot here instead. The control socket deliberately

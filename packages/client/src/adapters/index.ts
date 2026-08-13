@@ -1,5 +1,13 @@
 export type {
   RuntimeAdapter,
+  RuntimeAdapterDescriptor,
+  RuntimeAdapterPrepareInput,
+  RuntimeAdapterPrepareResult,
+  RuntimeAdapterRejectedOperation,
+  RuntimeAdapterPreparedOperation,
+  PreparedRuntimeOperation,
+  RuntimeOperationManifest,
+  RuntimeOperationStartInput,
   RuntimeCapabilities,
   RuntimeDetectResult,
 } from '../types';

@@ -53,7 +53,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
     // Default stub capabilities include `steer: true` — an honest self-report
     // from an adapter that really does implement `Session.steer`.
     const adapter = new StubRuntimeAdapter();
-    expect(adapter.capabilities().steer).toBe(true);
+    expect(adapter.descriptor.capabilities.steer).toBe(true);
 
     daemon = createDaemonWithAdapters(
       { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
@@ -87,7 +87,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
       steer: true,
       resume: true,
       approvalInteractive: true,
-      permissionModes: adapter.capabilities().permissionModes,
+      permissionModes: adapter.descriptor.capabilities.permissionModes,
     });
 
     // The gate opens: no SteerRejectedError, and the envelope survives the

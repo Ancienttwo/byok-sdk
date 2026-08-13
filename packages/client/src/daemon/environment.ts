@@ -2,7 +2,7 @@
  * M5: per-runtime environment allowlist for spawned agent child processes.
  *
  * Before this module existed, `task-runner.ts` built every task's
- * `TaskContext.env` as `process.env` verbatim — the daemon's OWN full
+ * `RuntimeOperationStartInput.env` as `process.env` verbatim — the daemon's OWN full
  * environment, unfiltered, handed to whichever runtime CLI (`pi`/`claude`/
  * `codex`) `pickAdapter` selected. Any credential-shaped variable sitting in
  * the daemon's own environment for a completely unrelated reason (an
@@ -20,10 +20,9 @@
  *    behave sanely in a non-interactive shell.
  * 2. Whatever ADDITIONAL names the *specific* runtime adapter about to be
  *    spawned declares it actually needs
- *    (`RuntimeAdapter.environmentRequirements()` — see `../types.ts`). An
- *    adapter that declares nothing at all (doesn't implement the optional
- *    method) gets the platform baseline ONLY — fail-closed by construction,
- *    not by an extra check here.
+ *    (`RuntimeAdapter.descriptor.environmentRequirements` — see
+ *    `../types.ts`). A descriptor that declares no names gets the platform
+ *    baseline only; descriptors are required and frozen before claim.
  * 3. A per-device, per-runtime operator override (`DaemonConfig
  *    .runtimeEnvironment` — see `create-daemon.ts`) — a local escape hatch
  *    for a product/operator that knows it needs one more variable forwarded
@@ -40,8 +39,8 @@
 
 /**
  * What one runtime adapter declares it needs beyond the always-included
- * platform baseline. Returned from the optional
- * `RuntimeAdapter.environmentRequirements()` method (`../types.ts`).
+ * platform baseline. Declared in the required frozen
+ * `RuntimeAdapter.descriptor.environmentRequirements` (`../types.ts`).
  */
 export interface RuntimeEnvironmentRequirements {
   /**
@@ -71,8 +70,9 @@ export interface BuildRuntimeEnvOptions {
   ambient: NodeJS.ProcessEnv;
   /**
    * The selected runtime adapter's own declared requirements —
-   * `undefined` (no `environmentRequirements()` implementation on that
-   * adapter) means "platform baseline only," fail-closed.
+   * `undefined` means "platform baseline only" for this helper. The public
+   * RuntimeAdapter descriptor always supplies this object before TaskRunner
+   * invokes the helper.
    */
   requirements?: RuntimeEnvironmentRequirements;
   /**
