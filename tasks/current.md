@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-14T02:07:05+0800 -->
+<!-- updated_at: 2026-08-14T04:22:53+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-14T02:07:05+0800
-> **Source Branch**: codex/prepared-runtime-operation-manifest
-> **Source Commit**: 25a50d2
+> **Updated At**: 2026-08-14T04:22:53+0800
+> **Source Branch**: codex/typed-runtime-failure-taxonomy
+> **Source Commit**: df543e1
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -40,7 +40,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Update spec/security/architecture truth and run the complete verification boundary.
 
 ## Checks
 
@@ -51,16 +51,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260814-0007-prepared-runtime-operation-manifest.md
- D tasks/contracts/20260814-0007-prepared-runtime-operation-manifest.contract.md
- D tasks/notes/20260814-0007-prepared-runtime-operation-manifest.notes.md
- D tasks/reviews/20260814-0007-prepared-runtime-operation-manifest.review.md
+ D plans/plan-20260814-0010-typed-runtime-failure-taxonomy.md
+ D tasks/contracts/20260814-0010-typed-runtime-failure-taxonomy.contract.md
+ D tasks/notes/20260814-0010-typed-runtime-failure-taxonomy.notes.md
+ D tasks/reviews/20260814-0010-typed-runtime-failure-taxonomy.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260814-0007-prepared-runtime-operation-manifest.md
-?? tasks/archive/contract-20260814-0207-prepared-runtime-operation-manifest.md
-?? tasks/archive/notes-20260814-0207-prepared-runtime-operation-manifest.md
-?? tasks/archive/review-20260814-0207-prepared-runtime-operation-manifest.md
-?? tasks/archive/todo-20260814-0207-prepared-runtime-operation-manifest.md
+?? plans/archive/plan-20260814-0010-typed-runtime-failure-taxonomy.md
+?? tasks/archive/contract-20260814-0422-typed-runtime-failure-taxonomy.md
+?? tasks/archive/notes-20260814-0422-typed-runtime-failure-taxonomy.md
+?? tasks/archive/review-20260814-0422-typed-runtime-failure-taxonomy.md
+?? tasks/archive/todo-20260814-0422-typed-runtime-failure-taxonomy.md
 ```
 
 ## Source Artifacts

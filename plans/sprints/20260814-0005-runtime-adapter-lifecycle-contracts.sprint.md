@@ -3,7 +3,7 @@
 > **Status**: Approved
 > **Slug**: runtime-adapter-lifecycle-contracts
 > **Created**: 2026-08-14 00:05
-> **Updated**: 2026-08-14 02:07
+> **Updated**: 2026-08-14 04:22
 > **Source PRD**: (none — source research) `docs/researches/2026-08-13_deepseek-harness-extraction-assessment.md`
 > **Source Spec**: `docs/spec.md`
 > **Goal Mode**: incremental
@@ -86,7 +86,7 @@ execution for small tasks. Every row needs a concrete acceptance line.
 | # | Status | Task | Mode | Acceptance | Plan |
 |---|--------|------|------|------------|------|
 | 1 | [x] | Prepared runtime operation manifest + pre-claim admission cut | contract | `pnpm --filter @byok-sdk/client run typecheck && pnpm --filter @byok-sdk/client run test` exits 0; negative tests prove unsupported selection/blob instruction/missing Pi launcher emit decline with zero claim/start/spawn/workspace side effects, and one frozen manifest supplies capability/env/selection to claim and start | `plans/archive/plan-20260814-0007-prepared-runtime-operation-manifest.md` |
-| 2 | [ ] | Typed runtime failure taxonomy + retryability projection | contract | `pnpm --filter @byok-sdk/client run test` exits 0; tests prove authority/session mismatch is non-retryable, spawn/transport unavailability is retryable, teardown is a distinct typed failure, and production code contains no message-regex or untyped catch-all retryability fallback | plans/plan-20260814-0010-typed-runtime-failure-taxonomy.md |
+| 2 | [x] | Typed runtime failure taxonomy + retryability projection | contract | `pnpm --filter @byok-sdk/client run test` exits 0; tests prove authority/session mismatch is non-retryable, spawn/transport unavailability is retryable, teardown is a distinct typed failure, and production code contains no message-regex or untyped catch-all retryability fallback | `plans/archive/plan-20260814-0010-typed-runtime-failure-taxonomy.md` |
 | 3 | [ ] | Quiescent process-tree disposal + built adapter lifecycle evidence | contract | `pnpm -r run build && pnpm --filter @byok-sdk/client run test && pnpm --filter @byok-sdk/client run smoke:adapters` exits 0; real child+descendant fixtures prove cancel/stop wait for quiescence and Git workspace ownership is not released before settlement on supported CI OSes | plans/plan-20260814-0011-quiescent-runtime-disposal.md |
 
 ## Execution Log
@@ -96,3 +96,4 @@ Keep this section last; `repo-harness run sprint-backlog complete-task` appends 
 | When | Task | Plan | Result |
 |------|------|------|--------|
 | 2026-08-14 02:07 | Prepared runtime operation manifest + pre-claim admission cut | `plans/archive/plan-20260814-0007-prepared-runtime-operation-manifest.md` | done |
+| 2026-08-14 04:22 | Typed runtime failure taxonomy + retryability projection | `plans/archive/plan-20260814-0010-typed-runtime-failure-taxonomy.md` | done |

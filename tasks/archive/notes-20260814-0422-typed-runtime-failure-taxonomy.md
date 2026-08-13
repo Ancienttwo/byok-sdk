@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-14 04:22
+> **Related Plan**: plans/archive/plan-20260814-0010-typed-runtime-failure-taxonomy.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260814-0422
+
 # Implementation Notes: typed-runtime-failure-taxonomy
 
 > **Status**: Active
