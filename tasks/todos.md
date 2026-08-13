@@ -1,7 +1,7 @@
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-13 10:28
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
@@ -33,5 +33,5 @@ Do not duplicate that execution checklist here. Record only work intentionally d
 | Assertion 条件文法（R2）：`DeviceAssertionEnvelopeV1` 增加 capability conditions（操作类型 × 时间窗多维限权），参照 buzz NIP-OA conditions grammar（`docs/nips/NIP-OA.md`） | device assertion broker 尚在收尾，当前 audience scoping 单维已满足 salesko 场景；扩展是 additive-minor，过早引入文法解析面会扩大安全审查范围。 | 单 assertion 不能区分操作权限，需要区分时下游只能申请多个 assertion——可接受的过渡成本。 | 下游需要单 assertion 区分操作权限的第一个真实用例。**执行约束（buzz 教训）**：buzz 定义了该文法但从未对 event 求值（`nip_oa.rs` 仅语法+签名校验，全仓无 evaluation 调用点），安全声明与实现脱节——我们若做，文法与 `verifyDeviceAssertion` 求值点必须同一 slice 交付并有拒绝路径测试（见评估文档 §5.1）。 |
 | 包管理迁移 pnpm → Bun（owner 提案 2026-08-13）：bun 作为 package manager + script/test runner；Node 保持运行时目标与 engines floor，npm 发布产物不变 | R1 contract 已冻结且 exit criteria/CI/release 脚本均绑定 pnpm 语义；混入 feature 刀违反合并单元纪律与追新偏好自带的「迁移必须独立排任务」规则。 | 迁移前继续付 pnpm/bun 双工具认知成本（repo-harness 本身已跑在 bun 上）。迁移刀需单独验证：better-sqlite3 原生模块在 bun install/test 下行为；`scripts/release/pack-and-smoke.mjs` 的 pnpm pack 语义；harness 模板与 CLAUDE.md Required Checks 全量改写。 | R1 Phase 1 合入后立即启动，作为下一个独立 plan；R1 的新测试面顺带成为迁移验证面。 |
 | 会话级单飞行调度纪律（R3）：同一会话 scope 至多一个 prompt 在飞 + in-flight deadline 兜底回收 + 在飞期间去重，参照 buzz `EventQueue`（`crates/buzz-acp/src/queue.rs:230-410`） | 当前任务派发是单触发源，`TASK_TRANSITIONS` 管单任务生命周期已够；这层管的是跨任务调度纪律，无并发触发源时是死代码。 | 多触发源（webhook/A2A mention）并发打向同一 daemon 会话时存在放大循环风险——在那之前风险不存在。 | 第二个并发触发源接入同一会话 scope（同上评估文档 §6）。 |
-| CI 加固：`packages/client` 的 `daemon-owner.ts:324` `acquireStoreMutex` 用确定性 mutex 端口，满仓并发（`pnpm -r run test`）下与真实进程或并行 worker 碰撞抛 `DaemonOwnerActiveError`（overnight 三刀期间反复偶发绊过完成门，隔离/重跑即过） | 是既有 load-sensitive flake，与本轮三刀（B-1/A-1/B-2）均无关，report-only 未在任一刀内修（跨刀 scope）。 | 不修期间完成门/CI 偶发假红，靠重跑绕过——每次重跑是成本且掩盖真实信号的风险。 | 作为独立 CI 加固刀：mutex 端口改为随机化+重试或碰撞可恢复，或测试在竞争下 skipIf。overnight 运行已确认它稳定复现于全仓并发。 |
-| CI 加固：cloud-postgres dataplane 的 MinIO teardown 偶发 `Unexpected HTTP response: 503` + `socket hang up`（测试全过后 teardown 阶段 MinIO 返 503） | B-1 的 undici keep-alive 修复消除了纯 keep-alive socket reset，但 server 端主动 503 是另一失败模式，keep-alive 修复管不了；A-1 ship 时 4 次 dataplane 有 1 次撞上，重跑即过。 | 不修期间 dataplane 偶发假红，靠重跑绕过。 | 作为独立 CI 加固刀：MinIO 容器 teardown 前先 drain/close object 客户端，或对 teardown 阶段的 503 做有界重试；与 daemon-owner flake 可合并为一个「CI 稳定性」刀。 |
+| **已消费（O-1，PR #64 merge `46ad69b`）**：CI 加固——daemon-owner mutex flake | 原假设「满仓并发端口碰撞」被探针证伪：真因是第三方回环监听者（WeChat/VS Code helper/cloudflared 等）占 hash band 端口，probe 判 `uncertain` 即 fail-closed 抛死——同时是终端用户 lockout 缺陷。 | 修复为 store-scoped lock（UDS/named pipe），`uncertain` 结构性不可达；vitest 端口 seam（自身有缺陷）同刀删除；fail-closed 不变量由守卫 B 机检。 | **Closed。** 残余：`control-protocol.ts:70` `controlSocketPath` 带同款 `os.tmpdir()` 缺陷（深 TMPDIR 下 control socket 静默不可用），值得独立 S 刀。 |
+| **已消费（O-1，PR #64 merge `46ad69b`）**：CI 加固——「MinIO teardown 503」 | 探针证明系误归因：503 与 MinIO 无关，来自 `setup-bun@v2` 未 pin 版本的 CDN 重下载假红（无 MinIO 的 job 报同样错为阴性对照；compose down 每次干净收尾）。 | 修复为 ci.yml 两处 `bun-version: 1.3.14` pin + constraints.test.ts 结构守卫。冷 runner 空 tool cache 仍会下载一次，暴露面从 every-run 降到 cache-miss-only。 | **Closed。** 附注：PR #61 动机证据已滚出日志窗口，undici→MinIO 第二模式是否真实存在 unverified（#61 无害保留）。 |
