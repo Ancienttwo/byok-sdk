@@ -95,6 +95,64 @@ describe('the CI dataplane job', () => {
   });
 });
 
+describe('the CI bun toolchain', () => {
+  const workflow = repoFile('.github/workflows/ci.yml');
+
+  /**
+   * The version every `oven-sh/setup-bun` step must name. The repo declares no
+   * bun version anywhere else (no `.bun-version`, no `engines.bun`,
+   * `packageManager` is pnpm), so this file is the single source of truth for
+   * it and the constant below is the assertion, not a copy of one.
+   */
+  const PINNED_BUN_VERSION = '1.3.14';
+
+  /**
+   * The lines belonging to one step: everything under the `uses:` line until
+   * the next sibling key at a shallower indent or the next `- ` list item at
+   * the same indent.
+   */
+  function stepBlock(lines: readonly string[], usesIndex: number): string {
+    const indent = lines[usesIndex]!.search(/\S/);
+    const block: string[] = [];
+    for (let index = usesIndex + 1; index < lines.length; index += 1) {
+      const line = lines[index]!;
+      if (line.trim().length === 0) continue;
+      const lineIndent = line.search(/\S/);
+      if (lineIndent < indent || (lineIndent === indent && line.trimStart().startsWith('- '))) break;
+      block.push(line);
+    }
+    return block.join('\n');
+  }
+
+  it('pins bun-version on every setup-bun step', () => {
+    // An unpinned `oven-sh/setup-bun@v2` resolves "latest" and re-downloads
+    // bun-linux-x64.zip from the GitHub release CDN on EVERY run — the tool
+    // cache never holds a matching entry for an unresolved version. When that
+    // CDN 503s or resets three times in a row, `@actions/tool-cache`
+    // (tool-cache.ts:19, a 3-attempt retry loop) gives up and the job fails
+    // with `Unexpected HTTP response: 503` / `socket hang up` AFTER the tests
+    // have already passed. Recorded in jobs 94208317693, 94247380112 and
+    // 94236390428 — the last one runs no MinIO at all, which is the negative
+    // control that ruled out the "MinIO teardown 503" misattribution.
+    const lines = workflow.split('\n');
+    const setupBunLines = lines
+      .map((line, index) => ({ line, index }))
+      .filter((entry) => entry.line.includes('oven-sh/setup-bun'));
+
+    // Two today: the migration-ordering check and the bun packaging recipe. A
+    // third one added unpinned must fail here rather than in a red CI run.
+    expect(setupBunLines).toHaveLength(2);
+
+    for (const { index } of setupBunLines) {
+      const block = stepBlock(lines, index);
+      expect(block, `setup-bun at ci.yml:${index + 1} has no with: block`).toMatch(/^\s*with:$/m);
+      expect(block, `setup-bun at ci.yml:${index + 1} does not pin bun-version`).toMatch(
+        new RegExp(`^\\s*bun-version:\\s*${PINNED_BUN_VERSION}\\s*$`, 'm'),
+      );
+    }
+  });
+});
+
 describe('the compose substrate', () => {
   const compose = repoFile('docker-compose.test.yml');
 
