@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection, createServer, type Server } from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { ensureSecureDir } from '../util/secure-dir';
 
@@ -76,10 +75,22 @@ const STORE_MUTEX_SOCKET_FILENAME = 'mutex.sock';
 /**
  * Same conservative `sockaddr_un.sun_path` budget `control-protocol.ts`'s
  * `controlSocketPath` uses, for the same reason: macOS caps that field at 104
- * bytes including the NUL, so a socket path comfortably under 100 never hits
- * `ENAMETOOLONG` at `bind()`/`connect()` on the tightest common platform.
+ * bytes including the NUL (Linux 108), and the kernel rejects an over-long
+ * address outright — `EINVAL` at `bind()`, not a truncation this code could
+ * detect afterwards.
  */
 const UNIX_SOCKET_PATH_SOFT_LIMIT = 100;
+/**
+ * The one fixed root the long-path branch below binds under. Deliberately NOT
+ * `os.tmpdir()`, which reads `TMPDIR`/`TMP`/`TEMP`: a mutex address that
+ * varies with the environment is not a mutex. A daemon started by a service
+ * manager and a doctor run from an operator's shell routinely see different
+ * `TMPDIR` values, and would then derive DIFFERENT lock addresses for the same
+ * store and both acquire it — the exact failure this whole file exists to
+ * prevent. A literal `/tmp` is POSIX-guaranteed, environment-independent, and
+ * short enough that this candidate always fits the budget above.
+ */
+const STORE_MUTEX_FALLBACK_ROOT = '/tmp';
 
 function storeMutexIdentity(canonicalStoreDir: string): string {
   return createHash('sha256').update(canonicalStoreDir).digest('hex');
@@ -92,14 +103,27 @@ function storeMutexIdentity(canonicalStoreDir: string): string {
  * store directory, must contend for the same endpoint (see
  * `acquireDaemonOwner`'s own note on resolving aliases before deriving this).
  *
- * POSIX prefers `<storeDir>/mutex.sock`, keeping the lock beside the
- * store state it guards in a directory `ensureSecureDir` has already made
- * 0700; when that would risk {@link UNIX_SOCKET_PATH_SOFT_LIMIT} it falls back
- * to a per-store private subdirectory of `os.tmpdir()`, nested one level deep
- * so the directory itself can be created 0700 BEFORE anything binds inside it
- * — both conventions taken from `controlSocketPath`. win32 has no socket file
- * to place; a named pipe lives in one flat machine-wide namespace, so the name
- * carries the store hash to keep two stores from colliding.
+ * POSIX prefers `<storeDir>/mutex.sock`, keeping the lock beside the store
+ * state it guards in a directory `ensureSecureDir` has already made 0700. A
+ * storeDir can be long enough that no address under it fits
+ * {@link UNIX_SOCKET_PATH_SOFT_LIMIT} — a storeDir alone can exceed the whole
+ * `sun_path` budget — so the second candidate drops the storeDir from the path
+ * entirely and carries it as a hash under {@link STORE_MUTEX_FALLBACK_ROOT},
+ * nested one level deep so that directory can be created 0700 BEFORE anything
+ * binds inside it (the nesting convention is `controlSocketPath`'s).
+ *
+ * `controlSocketPath` reaches for `os.tmpdir()` at this point; this must not,
+ * for two independent reasons proven by CI job 94334133652. Correctness:
+ * `os.tmpdir()` is environment-derived, and a lock address that differs
+ * between two contending processes admits two writers. Reachability: the
+ * caller may have pointed `TMPDIR` INSIDE the very tree that made the natural
+ * path too long — there, `os.tmpdir()` yields an address LONGER than the one
+ * being escaped (152 bytes vs 126 in that job), so the "fallback" cannot bind
+ * at all. A fixed short root is immune to both.
+ *
+ * win32 has no socket file to place; a named pipe lives in one flat
+ * machine-wide namespace, so the name carries the store hash to keep two
+ * stores from colliding, and no length branch is needed.
  *
  * @internal Exported for the regression guard only (never re-exported from
  * `index.ts`): the crashed-holder recovery path can only be exercised by
@@ -114,7 +138,7 @@ export function storeMutexEndpoint(
   if (platform === 'win32') return `\\\\.\\pipe\\byok-store-mutex-${identity.slice(0, 16)}`;
   const candidate = path.join(canonicalStoreDir, STORE_MUTEX_SOCKET_FILENAME);
   if (Buffer.byteLength(candidate, 'utf8') <= UNIX_SOCKET_PATH_SOFT_LIMIT) return candidate;
-  return path.join(os.tmpdir(), `byok-store-mutex-${identity.slice(0, 16)}`, 'sock');
+  return path.join(STORE_MUTEX_FALLBACK_ROOT, `byok-store-mutex-${identity.slice(0, 16)}`, 'sock');
 }
 
 export class DaemonOwnerActiveError extends Error {
@@ -358,7 +382,8 @@ async function clearStaleStoreMutexSocket(endpoint: string, identity: string): P
 
 /**
  * Mirrors `control-server.ts`'s `assertOwnedPrivateDir` (private to that
- * module) for this lock's own `os.tmpdir()` fallback directory: `fs.mkdir` is
+ * module) for this lock's own {@link STORE_MUTEX_FALLBACK_ROOT} directory,
+ * which matters more here than there: `/tmp` is world-writable, `fs.mkdir` is
  * a silent no-op against a directory that already exists and never fixes its
  * ownership, and the fallback name is fully predictable from `storeDir` alone,
  * so another user on the same machine can pre-create it — as a symlink, or

@@ -162,3 +162,40 @@ The same code path is what `byok-agent start` and the doctor acquire. A user who
 onto a port held by WeChat, a VS Code helper, cloudflared or an `ssh -L` tunnel was permanently
 refused their own store's lease, with an error naming a daemon that does not exist and no workaround
 short of moving the store directory or killing the unrelated program.
+
+### Follow-up: the lock address itself was wrong (CI job 94334133652)
+
+The store-scoped lock shipped with a defective long-path fallback. `storeMutexEndpoint` sent the
+over-long case to `os.tmpdir()`, which is wrong twice over:
+
+- **Unreachable address.** `scripts/adapter-task-smoke.mjs` sets `TMPDIR` to a directory INSIDE the
+  same long tree that made the natural path too long (`<workDir>/tmp`, workDir under the CI
+  `.ci-artifacts` root). The "fallback" then measured 152 bytes against a natural path of 126 —
+  the escape hatch was longer than what it escaped, and both blew the `sun_path` budget (104 on
+  darwin, 108 on linux). Locally reproduced: `listen EINVAL` inside `acquireStoreMutex`, at
+  `daemon.pair()`, before the daemon ever reached its control server.
+- **Non-deterministic address.** `os.tmpdir()` reads `TMPDIR`/`TMP`/`TEMP`. A daemon under a service
+  manager and a doctor in an operator shell see different values, derive different lock addresses
+  for the same store, and both acquire it. That is a two-writer window — the precise invariant this
+  file exists to hold — and it was reachable for any storeDir long enough to take the fallback.
+
+Fix: the fallback root is now the fixed literal `/tmp` (`STORE_MUTEX_FALLBACK_ROOT`), never
+`os.tmpdir()`. Both candidates are derived from the canonical storeDir alone, so every contending
+process computes the identical address regardless of environment, and the fallback (43 bytes) always
+fits. The `0700` + `assertOwnedPrivateDir` protection on that directory matters more under a
+world-writable `/tmp` and is unchanged.
+
+Guards added to `daemon-owner-mutex-collision.test.ts`, both RED against the shipped derivation:
+E (long storeDir under a deep `TMPDIR` — address must fit the budget AND still refuse a second
+acquire) and F (the address must not change when `TMPDIR` does).
+
+Why CI failed at the CONTROL socket with `EADDRINUSE` rather than at the mutex: `controlSocketPath`
+has the same `os.tmpdir()`-based fallback and was equally over-long on main, where it degrades
+non-fatally (`control socket failed to start (continuing without it)`) and the job stayed green. The
+mutex has no degrade path — correctly, it is the lease authority. On linux the two over-long paths
+share a 119-byte prefix, so once the mutex bound first the control server's own bind collided; on
+darwin the same condition surfaces as `EINVAL` at the mutex instead. Either errno, one cause.
+
+`controlSocketPath`'s identical latent defect (env-dependent, can exceed `sun_path`) is left alone:
+`control-protocol.ts`/`control-server.ts` are outside this contract's allowed paths, and that socket
+degrades instead of failing closed. Reported, not fixed.

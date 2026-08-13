@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, realpath, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, stat } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -125,6 +125,67 @@ describe('daemon owner store mutex: a store-scoped lock, immune to foreign liste
     const lb = await acquireDaemonOwner(b, 'doctor');
     await la.release();
     await lb.release();
+  }, 60_000);
+
+  it('E: a storeDir too long to hold the lock still gets a bindable address, and stays fail-closed there', async () => {
+    if (process.platform === 'win32') return; // a pipe name has no length branch
+    // A storeDir long enough that no address under it fits `sun_path` — the
+    // shape `scripts/adapter-task-smoke.mjs` produces under a deep TMPDIR, and
+    // the shape that broke CI job 94334133652: the first version of this
+    // branch bound under `os.tmpdir()`, which the smoke had pointed INSIDE the
+    // same long tree, so the escape hatch was longer than what it escaped
+    // (152 bytes vs 126) and `bind()` returned EINVAL.
+    const root = await tmpDir();
+    let storeDir = root;
+    while (Buffer.byteLength(path.join(storeDir, 'mutex.sock'), 'utf8') <= 100) {
+      storeDir = path.join(storeDir, 'deeper-store-directory-segment');
+    }
+    await mkdir(storeDir, { recursive: true, mode: 0o700 });
+    // The smoke's own topology: TMPDIR pointed inside the very tree that made
+    // the natural path too long. Any derivation that reaches for `os.tmpdir()`
+    // here produces an address longer than the one it is escaping.
+    const original = process.env['TMPDIR'];
+    process.env['TMPDIR'] = path.join(storeDir, 'tmp');
+    try {
+      const endpoint = storeMutexEndpoint(storeDir, createHash('sha256').update(storeDir).digest('hex'));
+      expect(Buffer.byteLength(endpoint, 'utf8')).toBeLessThanOrEqual(100);
+
+      const held = await acquireDaemonOwner(storeDir, 'doctor');
+      try {
+        // The fallback branch must be a real lock, not merely a bindable path.
+        await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+      } finally {
+        await held.release();
+      }
+    } finally {
+      if (original === undefined) delete process.env['TMPDIR'];
+      else process.env['TMPDIR'] = original;
+    }
+  }, 60_000);
+
+  it('F: the lock address never depends on the environment', async () => {
+    // `os.tmpdir()` reads TMPDIR/TMP/TEMP. Deriving the lock from it means a
+    // daemon under a service manager and a doctor in an operator shell compute
+    // DIFFERENT addresses for one store and both acquire it — a silent
+    // two-writer window, the one outcome this file must never allow.
+    const storeDir = await tmpDir();
+    const identity = createHash('sha256').update(storeDir).digest('hex');
+    const longStoreDir = path.join(storeDir, 'deeper-store-directory-segment'.repeat(3));
+    const longIdentity = createHash('sha256').update(longStoreDir).digest('hex');
+    const original = process.env['TMPDIR'];
+    try {
+      const under = (tmp: string): readonly [string, string] => {
+        process.env['TMPDIR'] = tmp;
+        return [storeMutexEndpoint(storeDir, identity), storeMutexEndpoint(longStoreDir, longIdentity)] as const;
+      };
+      const [shortA, longA] = under('/tmp');
+      const [shortB, longB] = under(path.join(storeDir, 'a-completely-different-temp-root'));
+      expect(shortB).toBe(shortA);
+      expect(longB).toBe(longA); // the branch that used to read os.tmpdir()
+    } finally {
+      if (original === undefined) delete process.env['TMPDIR'];
+      else process.env['TMPDIR'] = original;
+    }
   }, 60_000);
 
   it('D: a lock socket left behind by a crashed holder is reclaimed, not treated as a live one', async () => {
