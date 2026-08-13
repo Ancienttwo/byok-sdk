@@ -573,73 +573,6 @@ export interface AssertionIssueProbe {
   onIssued(meta: { jti: string; audience: string }): void;
 }
 
-// ---------------------------------------------------------------------------
-// Store-mutex port seam (test-only) — NOT public API, NOT exported from
-// index.ts, NOT on DaemonConfig/DaemonOverrides. Production leaves this unset,
-// so every daemon derives its owner-lease port from the storeDir hash exactly
-// as before (`daemon-owner.ts`), byte-identically.
-//
-// Why it exists: the owner lease is a cross-process port mutex whose port is
-// hash-derived into a bounded band. Under a highly-parallel test runner (many
-// vitest worker PROCESSES each creating daemons), independent stores suffer
-// birthday-paradox collisions on that band; a collision whose holder is
-// mid-teardown and doesn't answer the probe in time fail-closes with
-// `DaemonOwnerActiveError('unknown')` — correct for production, a flake under
-// test parallelism. Handing each test daemon a guaranteed-unique port removes
-// the collision at its source without touching the production fail-closed path.
-// ---------------------------------------------------------------------------
-
-/**
- * An explicitly-installed provider takes precedence (a test may set one via
- * {@link __setStoreMutexPortProviderForTests}). Undefined in production.
- */
-let injectedStoreMutexPortProvider: (() => number | undefined) | undefined;
-
-/**
- * @internal TEST SEAM. Install a provider that returns a unique store-mutex
- * port per call (one call per constructed daemon). Never exported from
- * `index.ts`; a test imports it straight from this module. Pass `undefined` to
- * clear it.
- */
-export function __setStoreMutexPortProviderForTests(provider: (() => number | undefined) | undefined): void {
-  injectedStoreMutexPortProvider = provider;
-}
-
-// A safe deterministic test band: ABOVE the hash band (10000..29999) and BELOW
-// the Linux ephemeral floor (32768) — so it never collides with either the
-// hash-derived production ports or the OS's own ephemeral allocations, on both
-// Linux and macOS.
-const VITEST_MUTEX_PORT_BASE = 30_000;
-const VITEST_MUTEX_BAND_SIZE = 64;
-const VITEST_MUTEX_BANDS = 42; // 30000 + 42*64 = 32688 < 32768
-let vitestDaemonSeq = 0;
-
-/**
- * Default provider used under vitest when no explicit provider was installed —
- * which is what makes EVERY daemon-creating test get a unique port with no
- * per-file wiring. Gated strictly on `VITEST_WORKER_ID`/`VITEST_POOL_ID`, which
- * only the test runner ever sets, so this returns `undefined` in production and
- * the hash derivation is used unchanged.
- *
- * Per-worker disjoint bands (`(workerId-1) % BANDS`) guarantee no cross-worker
- * collision; a small per-worker counter (`% BAND_SIZE`) cycles within the band,
- * and since a worker runs its tests sequentially only a couple of daemons are
- * ever live at once, so the cycle never reuses a still-bound port.
- */
-function defaultVitestStoreMutexPort(): number | undefined {
-  const raw = process.env['VITEST_WORKER_ID'] ?? process.env['VITEST_POOL_ID'];
-  if (raw === undefined) return undefined;
-  const workerId = Number.parseInt(raw, 10);
-  const band = (Number.isFinite(workerId) && workerId > 0 ? (workerId - 1) % VITEST_MUTEX_BANDS : 0) * VITEST_MUTEX_BAND_SIZE;
-  return VITEST_MUTEX_PORT_BASE + band + (vitestDaemonSeq++ % VITEST_MUTEX_BAND_SIZE);
-}
-
-/** Resolve the store-mutex port for one daemon: explicit provider first, then the vitest default, else undefined (production hash derivation). */
-function resolveStoreMutexPort(): number | undefined {
-  if (injectedStoreMutexPortProvider) return injectedStoreMutexPortProvider();
-  return defaultVitestStoreMutexPort();
-}
-
 /**
  * The outbound envelope types that carry a task's terminal, matching the set
  * the cloud records a terminal receipt for (`cloud/src/inbound.ts`'s
@@ -969,12 +902,6 @@ export function buildDaemonWithAdapters(
   let shuttingDown = false;
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
-  // Resolved ONCE per daemon and reused for every owner-lease acquire in this
-  // daemon's lifetime (pair/start/unpair), so the daemon always contends on the
-  // same port. `undefined` in production → `acquireDaemonOwner` derives the port
-  // from the storeDir hash exactly as before. See the store-mutex port seam above.
-  const storeMutexPort = resolveStoreMutexPort();
-  const daemonOwnerOptions = storeMutexPort === undefined ? undefined : { mutexPort: storeMutexPort };
   const store = new DeviceStore(storeDir);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   let fleetJitter: FleetJitter | undefined;
@@ -1230,7 +1157,7 @@ export function buildDaemonWithAdapters(
     // renewal (AuthManager.loadExisting does that under start()'s lease), so a
     // short-lived pair command can release ownership once the write lands.
     const acquiredHere = daemonOwnerLease === undefined;
-    if (acquiredHere) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon', undefined, daemonOwnerOptions);
+    if (acquiredHere) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     // Finding F5: capture whatever device is currently on disk for this
     // serverUrl (if any) BEFORE pairing — `auth.pair()` mints/persists a
     // brand new deviceId (the server always does, even on a same-keypair
@@ -1265,7 +1192,7 @@ export function buildDaemonWithAdapters(
   }
 
   async function startUnderLease(): Promise<void> {
-    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon', undefined, daemonOwnerOptions);
+    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
     // This is the first point at which daemon-owned hosted storage may touch
     // the filesystem. The lease was acquired above, so SQLite open/schema/
@@ -1975,7 +1902,7 @@ export function buildDaemonWithAdapters(
     // stop() releases only after every daemon writer settles. Reacquire before
     // destructive identity cleanup; if another daemon won the gap, fail
     // closed rather than clearing state under it.
-    const cleanupLease = await acquireDaemonOwner(storeDir, 'daemon', undefined, daemonOwnerOptions);
+    const cleanupLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
       // The identity being removed is read under the same lease as both the
       // device and cursor mutations. A pair that wins stop()'s release gap is

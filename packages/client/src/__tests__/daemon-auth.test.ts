@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager, DeviceRevokedError } from '../daemon/auth-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
-import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { quarantineCorruptOperationalHealth } from '../diagnostics/diagnostics';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -712,41 +712,26 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     await aliasLease.release();
   });
 
-  it('routes unrelated stores past a deterministic mutex-port collision', async () => {
-    const parent = await tmpDir('byok-owner-port-collision-');
-    const firstByPort = new Map<number, string>();
-    let collision: [string, string] | undefined;
-    for (let index = 0; index < 2_000 && !collision; index += 1) {
-      const candidate = path.join(parent, `store-${index}`);
-      const digest = createHash('sha256').update(candidate).digest();
-      const port = 10_000 + (digest.readUInt32BE(0) % 20_000);
-      const first = firstByPort.get(port);
-      if (first) collision = [first, candidate];
-      else firstByPort.set(port, candidate);
-    }
-    expect(collision).toBeDefined();
-    const [firstDir, secondDir] = collision!;
-    await fs.mkdir(firstDir);
-    await fs.mkdir(secondDir);
-
-    const firstLease = await acquireDaemonOwner(firstDir, 'doctor');
-    try {
-      const secondLease = await acquireDaemonOwner(secondDir, 'doctor');
-      await secondLease.release();
-    } finally {
-      await firstLease.release();
-    }
-  });
-
-  it('fails closed on a listener that accepts but never proves a different mutex identity', async () => {
+  it('fails closed on a listener that holds this store\'s lock address but never proves the mutex identity', async () => {
+    // The store-scoped counterpart of the two tests this replaces, both of
+    // which were written against the abandoned shared TCP port band: one
+    // demanded that an unrelated store whose hash-derived PORT collided still
+    // get its lease, the other that a foreign listener on that port deny the
+    // lease. The first is now structural (independent addresses — see
+    // `daemon-owner-mutex-collision.test.ts` A/C), the second was the defect
+    // itself: a third-party listener could permanently lock a store out.
+    // What survives is the part that was always about THIS store: a listener
+    // occupying this store's own lock address that never presents the identity
+    // contract cannot be proven absent, so the lease stays refused.
+    if (process.platform === 'win32') return; // binding a foreign listener at the pipe name needs the win32 branch's own precedent
     const storeDir = await tmpDir('byok-owner-foreign-listener-');
     const canonicalStoreDir = await fs.realpath(storeDir);
-    const digest = createHash('sha256').update(canonicalStoreDir).digest();
-    const firstPort = 10_000 + (digest.readUInt32BE(0) % 20_000);
+    const endpoint = storeMutexEndpoint(canonicalStoreDir, createHash('sha256').update(canonicalStoreDir).digest('hex'));
     const foreign = createServer(() => undefined);
+    await fs.mkdir(path.dirname(endpoint), { recursive: true, mode: 0o700 }); // the long-path fallback directory the acquire would have created itself
     await new Promise<void>((resolve, reject) => {
       foreign.once('error', reject);
-      foreign.listen({ host: '127.0.0.1', port: firstPort, exclusive: true }, () => resolve());
+      foreign.listen(endpoint, () => resolve());
     });
     try {
       await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
