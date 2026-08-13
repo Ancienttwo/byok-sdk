@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const releaseVersion = '0.2.0';
+const releaseVersion = '0.3.0';
 const keysVersion = '0.1.0';
 const piVersion = '0.84.1';
 const dispatchPackages = [
