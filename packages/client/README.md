@@ -50,6 +50,11 @@ secrets behind the local MCP process's own credential broker. Toolset offers
 for Pi or Codex are declined because those adapters do not yet expose a strict
 task-scoped MCP configuration boundary.
 
+The daemon derives one sorted `configuredToolsets` snapshot from this
+validated registry. Only those logical IDs are advertised in `conn.hello`
+and hosted presence; command, args, environment, headers, and credentials
+remain local.
+
 For a concrete private host composition, see the
 [`examples/salesko-connector-broker`](../../examples/salesko-connector-broker)
 reference. It keeps `@byok-sdk/client` credential-blind while combining

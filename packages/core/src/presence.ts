@@ -29,6 +29,12 @@ export interface PresenceHint {
   readonly level: PresenceLevel;
   /** Free-form host label, bounded by the composition. Never parsed by core. */
   readonly detail?: string;
+  /**
+   * Logical MCP toolset IDs this daemon reported as configured. Discovery
+   * only: local task acceptance remains the fail-closed authority. Omission
+   * means legacy/unknown; an empty array means known-none.
+   */
+  readonly configuredToolsets?: readonly string[];
   readonly observedAt: string;
   readonly expiresAt: string;
 }
@@ -37,6 +43,8 @@ export interface PresenceHintInput {
   readonly deviceId: string;
   readonly level: PresenceLevel;
   readonly detail?: string;
+  /** Validated logical IDs only; executable connector definitions never belong here. */
+  readonly configuredToolsets?: readonly string[];
   /** Hint lifetime. §12.7.5 suggests 60-120s for presence. */
   readonly ttlMs: number;
   /** Minimum time between accepted publications for this device. `0` explicitly disables throttling. */

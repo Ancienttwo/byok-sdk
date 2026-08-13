@@ -11,6 +11,7 @@ import {
   type RuntimeCapabilities,
   type RuntimeId,
   type RuntimeInfo,
+  type ToolsetId,
 } from '@byok-sdk/protocol';
 import { WebSocket, type RawData } from 'ws';
 import { NONCE_SIGNING_DOMAIN } from '../auth';
@@ -255,6 +256,7 @@ export async function connectFakeDaemonWs(
     productId: string;
     capabilities?: string[];
     runtimes?: RuntimeInfo[];
+    configuredToolsets?: ToolsetId[];
     cursor?: number;
   },
 ): Promise<{ ws: WebSocket; ack: ConnAckPayload }> {
@@ -274,6 +276,7 @@ export async function connectFakeDaemonWs(
       deviceId: opts.deviceId,
       productId: opts.productId,
       runtimes: opts.runtimes,
+      configuredToolsets: opts.configuredToolsets,
       cursor: opts.cursor,
     }),
   );
@@ -294,7 +297,15 @@ export async function connectFakeDaemon(
   baseUrl: string,
   port: number,
   pairingCode: string,
-  opts: { deviceName?: string; productId: string; capabilities?: string[]; runtimes?: RuntimeInfo[]; cursor?: number; identity?: FakeDeviceIdentity },
+  opts: {
+    deviceName?: string;
+    productId: string;
+    capabilities?: string[];
+    runtimes?: RuntimeInfo[];
+    configuredToolsets?: ToolsetId[];
+    cursor?: number;
+    identity?: FakeDeviceIdentity;
+  },
 ): Promise<{
   ws: WebSocket;
   deviceId: string;
@@ -309,6 +320,7 @@ export async function connectFakeDaemon(
     productId: opts.productId,
     capabilities: opts.capabilities,
     runtimes: opts.runtimes,
+    configuredToolsets: opts.configuredToolsets,
     cursor: opts.cursor,
   });
   return { ws, deviceId, accessToken, identity, ack };

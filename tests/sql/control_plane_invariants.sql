@@ -7,6 +7,7 @@
 --   deploy/sql/0003_cloud_cleanup.sql (the three maintenance authority tables)
 --   deploy/sql/0004_device_proof_truth.sql (proof key columns + replay authority table)
 --   deploy/sql/0005_skill_packs.sql   (the two skill-pack tables: manifest + files)
+--   deploy/sql/0006_device_presence_toolsets.sql (nullable logical-toolset inventory column)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has

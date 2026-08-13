@@ -25,6 +25,7 @@ describe('logical MCP toolset dispatch', () => {
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
       productId: PRODUCT_ID,
       capabilities: ['toolset-selection'],
+      configuredToolsets: ['crm.readonly', 'salesko'],
       runtimes: [
         {
           id: 'claude',
@@ -61,8 +62,55 @@ describe('logical MCP toolset dispatch', () => {
     ws = daemon.ws;
 
     await expect(
-      byok.dispatch({ instruction: 'must use Salesko', requiredToolsets: ['salesko'] }),
+      byok.dispatch({
+        deviceId: daemon.deviceId,
+        instruction: 'must use Salesko',
+        requiredToolsets: ['salesko'],
+      }),
     ).rejects.toThrow(/did not advertise toolset-selection/);
+    expect(byok.tasks.list()).toHaveLength(0);
+  });
+
+  it('rejects before task creation when the device inventory is unknown', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      capabilities: ['toolset-selection'],
+    });
+    ws = daemon.ws;
+
+    await expect(
+      byok.dispatch({
+        deviceId: daemon.deviceId,
+        instruction: 'must use Salesko',
+        requiredToolsets: ['salesko'],
+      }),
+    ).rejects.toThrow(/did not advertise its configured toolset inventory/);
+    expect(byok.tasks.list()).toHaveLength(0);
+  });
+
+  it('rejects before task creation when the device is missing a required id', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      capabilities: ['toolset-selection'],
+      configuredToolsets: ['crm.readonly'],
+    });
+    ws = daemon.ws;
+
+    await expect(
+      byok.dispatch({
+        deviceId: daemon.deviceId,
+        instruction: 'must use Salesko',
+        requiredToolsets: ['salesko'],
+      }),
+    ).rejects.toThrow(/missing required MCP toolset/);
     expect(byok.tasks.list()).toHaveLength(0);
   });
 

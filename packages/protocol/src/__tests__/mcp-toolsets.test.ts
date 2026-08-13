@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CONFIGURED_TOOLSETS_MAX_ITEMS,
+  ConfiguredToolsetsSchema,
+  ConnHelloPayloadSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   TaskOfferPayloadSchema,
   TaskOfferWithToolsetsPayloadSchema,
@@ -63,5 +66,32 @@ describe('task.offer_with_toolsets additive control message', () => {
     expect(ToolsetIdSchema.safeParse('salesko.linkedin-read').success).toBe(true);
     expect(ToolsetIdSchema.safeParse('../salesko').success).toBe(false);
     expect(ToolsetIdSchema.safeParse('salesko\nother').success).toBe(false);
+  });
+
+  it('bounds and validates the device configured-toolset inventory independently of a task request', () => {
+    expect(ConfiguredToolsetsSchema.parse([])).toEqual([]);
+    expect(ConfiguredToolsetsSchema.parse(['crm.readonly', 'salesko.connectors'])).toEqual([
+      'crm.readonly',
+      'salesko.connectors',
+    ]);
+    expect(ConfiguredToolsetsSchema.safeParse(['salesko', 'salesko']).success).toBe(false);
+    expect(ConfiguredToolsetsSchema.safeParse(['Salesko']).success).toBe(false);
+    expect(
+      ConfiguredToolsetsSchema.safeParse(
+        Array.from({ length: CONFIGURED_TOOLSETS_MAX_ITEMS + 1 }, (_, index) => `toolset-${index}`),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('adds an optional logical-only inventory to conn.hello', () => {
+    const parsed = ConnHelloPayloadSchema.parse({
+      protocolVersions: [1],
+      capabilities: ['toolset-selection'],
+      deviceId: 'device-1',
+      productId: 'salesko',
+      configuredToolsets: ['salesko.connectors'],
+    });
+    expect(parsed.configuredToolsets).toEqual(['salesko.connectors']);
+    expect(JSON.stringify(parsed)).not.toMatch(/command|args|env|header|secret/i);
   });
 });

@@ -33,13 +33,15 @@ import {
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
-const PRESENCE_COLUMNS = 'tenant_id, device_id, level, detail, observed_at, expires_at';
+const PRESENCE_COLUMNS =
+  'tenant_id, device_id, level, detail, configured_toolsets, observed_at, expires_at';
 
 interface PresenceRow {
   readonly tenant_id: string;
   readonly device_id: string;
   readonly level: string;
   readonly detail: string | null;
+  readonly configured_toolsets: readonly string[] | null;
   readonly observed_at: string;
   readonly expires_at: string;
 }
@@ -59,6 +61,9 @@ function toHint(row: PresenceRow): PresenceHint {
     deviceId: row.device_id,
     level: row.level as PresenceLevel,
     ...(row.detail === null ? {} : { detail: row.detail }),
+    ...(row.configured_toolsets === null
+      ? {}
+      : { configuredToolsets: Object.freeze([...row.configured_toolsets]) }),
     observedAt: row.observed_at,
     expiresAt: row.expires_at,
   };
@@ -110,20 +115,22 @@ export class PostgresPresenceStore implements PresenceStore {
     const allowedBefore = new Date(now.getTime() - input.minimumIntervalMs).toISOString();
     const result = await this.#pool.query<PresenceRow>(
       `INSERT INTO device_presence (${PRESENCE_COLUMNS})
-       VALUES ($1, $2, $3, $4, $5, $6)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
        ON CONFLICT (tenant_id, device_id) DO UPDATE
           SET level       = EXCLUDED.level,
               detail      = EXCLUDED.detail,
+              configured_toolsets = EXCLUDED.configured_toolsets,
               observed_at = EXCLUDED.observed_at,
               expires_at  = EXCLUDED.expires_at
         WHERE device_presence.expires_at <= EXCLUDED.observed_at
-           OR device_presence.observed_at <= $7
+           OR device_presence.observed_at <= $8
        RETURNING ${PRESENCE_COLUMNS}`,
       [
         tenant,
         input.deviceId,
         input.level,
         input.detail ?? null,
+        input.configuredToolsets === undefined ? null : JSON.stringify(input.configuredToolsets),
         observedAt,
         new Date(now.getTime() + input.ttlMs).toISOString(),
         allowedBefore,

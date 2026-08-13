@@ -3,9 +3,15 @@ import {
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
   DEVICE_ASSERTION_MAX_TTL_MS,
 } from '@byok-sdk/core';
-import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS, ToolsetIdSchema } from '@byok-sdk/protocol';
+import {
+  CONFIGURED_TOOLSETS_MAX_ITEMS,
+  createEnvelope,
+  encodeEnvelope,
+  TASK_TRANSITIONS,
+  ToolsetIdSchema,
+} from '@byok-sdk/protocol';
 import { isAbsolute } from 'node:path';
-import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
+import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo, ToolsetId } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -785,7 +791,6 @@ function validatePiByokLauncherConfig(
   }
 }
 
-const MAX_LOCAL_MCP_TOOLSETS = 64;
 const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
 const MAX_LOCAL_MCP_ARGS = 64;
 const MAX_LOCAL_MCP_TOKEN_CHARS = 4096;
@@ -808,8 +813,10 @@ function resolveMcpToolsets(
     throw new Error('DaemonConfig.mcpToolsets must be an object keyed by logical toolset id');
   }
   const toolsetEntries = Object.entries(configured);
-  if (toolsetEntries.length > MAX_LOCAL_MCP_TOOLSETS) {
-    throw new Error(`DaemonConfig.mcpToolsets may contain at most ${MAX_LOCAL_MCP_TOOLSETS} toolsets`);
+  if (toolsetEntries.length > CONFIGURED_TOOLSETS_MAX_ITEMS) {
+    throw new Error(
+      `DaemonConfig.mcpToolsets may contain at most ${CONFIGURED_TOOLSETS_MAX_ITEMS} toolsets`,
+    );
   }
 
   const resolved = new Map<string, McpToolsetConfig>();
@@ -958,6 +965,9 @@ export function buildDaemonWithAdapters(
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
   const mcpToolsets = resolveMcpToolsets(config.mcpToolsets);
+  const configuredToolsets = Object.freeze(
+    [...(mcpToolsets?.keys() ?? [])].sort(),
+  ) as readonly ToolsetId[];
   if (config.piByokLauncher !== undefined) {
     validatePiByokLauncherConfig(config.piByokLauncher);
   }
@@ -1578,6 +1588,7 @@ export function buildDaemonWithAdapters(
       productId: config.productId,
       capabilities,
       runtimes,
+      configuredToolsets,
       auth,
       cursorStore,
       // Finding F3: return (not void-and-forget) so ConnectionManager can
@@ -1725,6 +1736,7 @@ export function buildDaemonWithAdapters(
           presencePublisher ??= new PresencePublisher({
             serverUrl: config.serverUrl,
             auth,
+            configuredToolsets,
             ...presenceCadence,
             onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
           });

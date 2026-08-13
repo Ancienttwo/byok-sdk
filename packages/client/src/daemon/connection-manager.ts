@@ -1,4 +1,10 @@
-import { MAX_MESSAGES_PER_BATCH, type CapabilityFlag, type Envelope, type RuntimeInfo } from '@byok-sdk/protocol';
+import {
+  MAX_MESSAGES_PER_BATCH,
+  type CapabilityFlag,
+  type Envelope,
+  type RuntimeInfo,
+  type ToolsetId,
+} from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
@@ -24,6 +30,8 @@ export interface ConnectionManagerOptions {
   productId: string;
   capabilities: CapabilityFlag[];
   runtimes: RuntimeInfo[];
+  /** Sorted logical IDs from the validated local registry; executable definitions stay local. */
+  configuredToolsets?: readonly ToolsetId[];
   auth: AuthManager;
   cursorStore: CursorStore;
   /**
@@ -211,6 +219,7 @@ export class ConnectionManager {
       productId: opts.productId,
       capabilities: opts.capabilities,
       runtimes: opts.runtimes,
+      configuredToolsets: opts.configuredToolsets,
       getCursor: () => this.cursor,
       onEnvelope: (envelope) => this.deliver(envelope),
       onStateChange: (state) => {

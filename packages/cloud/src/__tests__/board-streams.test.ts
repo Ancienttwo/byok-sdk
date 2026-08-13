@@ -201,10 +201,32 @@ describe('board coordination surface', () => {
       (
         await harness.json(
           '/byok/presence',
-          jsonInit(device, { level: 'online', detail: 'okay' }, 'PUT'),
+          jsonInit(
+            device,
+            {
+              level: 'online',
+              detail: 'okay',
+              configuredToolsets: ['crm.readonly', 'salesko.connectors'],
+            },
+            'PUT',
+          ),
         )
       ).status,
     ).toBe(200);
+    expect(await harness.cloud.listPresence(TENANT_A)).toEqual([
+      expect.objectContaining({
+        deviceId: device.deviceId,
+        configuredToolsets: ['crm.readonly', 'salesko.connectors'],
+      }),
+    ]);
+    expect(
+      (
+        await harness.json(
+          '/byok/presence',
+          jsonInit(device, { level: 'online', configuredToolsets: ['Salesko'] }, 'PUT'),
+        )
+      ).status,
+    ).toBe(400);
     expect(
       (
         await harness.json(

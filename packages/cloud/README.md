@@ -22,6 +22,10 @@ await cloud.enqueueToolsetOffer(tenantId, deviceId, {
 
 Unlike the live self-hosted coordinator, this stateless enqueue API cannot
 infer current device capabilities; the host must route to a device known to
-advertise `toolset-selection`.
+advertise `toolset-selection`. `listPresence(tenant)` includes the optional
+`configuredToolsets` reported by each live daemon, so the host can narrow
+candidate devices before enqueue. This is TTL-bounded discovery, not execution
+authority: the daemon still resolves every required ID locally and declines
+fail-closed if its configuration changed.
 
 MIT licensed. Node.js 22.19.0 or newer.

@@ -192,6 +192,8 @@ export interface MachineInfo {
   lastSeen?: string;
   /** Runtimes detected on this device, as reported in its last `conn.hello` (M1: typed, replaces the old untyped `agents`). */
   runtimes?: RuntimeInfo[];
+  /** Logical toolset IDs reported by the current daemon; omission means legacy/unknown. */
+  configuredToolsets?: ToolsetId[];
 }
 
 /** Snapshot of a task as tracked by the in-memory {@link TaskStore}. */

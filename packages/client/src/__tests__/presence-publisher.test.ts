@@ -85,6 +85,32 @@ describe('PresencePublisher', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('publishes configured logical IDs without projecting local MCP definitions', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return jsonOk();
+    }) as typeof globalThis.fetch;
+
+    const publisher = new PresencePublisher({
+      serverUrl: 'https://example.test',
+      auth: stubAuth(),
+      intervalMs: 30_000,
+      configuredToolsets: ['crm.readonly', 'salesko.connectors'],
+    });
+    publisher.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(bodies).toEqual([
+      {
+        level: 'online',
+        configuredToolsets: ['crm.readonly', 'salesko.connectors'],
+      },
+    ]);
+    expect(JSON.stringify(bodies)).not.toMatch(/command|args|env|header|secret/i);
+    publisher.stop();
+  });
+
   it('renews the device token once on a 401 and keeps beating with the new one', async () => {
     const tokens: string[] = [];
     let renewals = 0;
@@ -270,6 +296,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
       const hints = await handle.listPresence();
       expect(hints).toHaveLength(1);
       expect(hints[0]?.level).toBe('online');
+      expect(hints[0]?.configuredToolsets).toEqual([]);
     });
 
     // Stopping IS the offline signal: no `offline` publish is issued, the hint

@@ -56,11 +56,19 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
     server = started.server;
 
     const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
-    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      configuredToolsets: ['salesko.connectors'],
+    });
     ws = daemon.ws;
 
     expect(byok.machines.list()).toEqual([
-      expect.objectContaining({ deviceId: daemon.deviceId, deviceName: 'test-laptop', connected: true }),
+      expect.objectContaining({
+        deviceId: daemon.deviceId,
+        deviceName: 'test-laptop',
+        connected: true,
+        configuredToolsets: ['salesko.connectors'],
+      }),
     ]);
 
     const handle = await byok.dispatch({ instruction: 'say hello' });

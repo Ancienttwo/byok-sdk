@@ -7,6 +7,7 @@ import {
   type CapabilityFlag,
   type Envelope,
   type RuntimeInfo,
+  type ToolsetId,
 } from '@byok-sdk/protocol';
 import { toWsUrl } from './url';
 
@@ -42,6 +43,8 @@ export interface WsTransportOptions {
   capabilities: CapabilityFlag[];
   /** Detected runtimes, sent on every `conn.hello` (protocol §10 gap #4/#11). */
   runtimes?: RuntimeInfo[];
+  /** Sorted logical IDs configured locally; no MCP executable definition crosses the wire. */
+  configuredToolsets?: readonly ToolsetId[];
   /** The redelivery cursor to send as `conn.hello.cursor` (protocol §9) — read fresh on every connect so a value learned mid-connection is used on the next reconnect. */
   getCursor?: () => number | undefined;
   onEnvelope: (envelope: Envelope) => void;
@@ -196,6 +199,10 @@ export class WsTransport {
         deviceId: this.opts.deviceId,
         productId: this.opts.productId,
         runtimes: this.opts.runtimes,
+        configuredToolsets:
+          this.opts.configuredToolsets === undefined
+            ? undefined
+            : [...this.opts.configuredToolsets],
         cursor: this.opts.getCursor?.(),
       });
       socket.send(encodeEnvelope(hello));
