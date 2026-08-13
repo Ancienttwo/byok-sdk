@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-14 02:07
+> **Related Plan**: plans/archive/plan-20260814-0007-prepared-runtime-operation-manifest.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260814-0207
+
 # Implementation Notes: prepared-runtime-operation-manifest
 
 > **Durable dispatch**: worker `/root/prepared_runtime_operation_manifest`; worktree `/Users/kito/Projects/byok-sdk-wt-prepared-runtime-operation-manifest`; branch `codex/prepared-runtime-operation-manifest`; base `98cea8c534f595314d4bbd67ea434da6feeb0e20`.

@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-14 02:07
+> **Related Plan**: plans/archive/plan-20260814-0007-prepared-runtime-operation-manifest.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260814-0207
+
 # Task Contract: prepared-runtime-operation-manifest
 
 > **Status**: Fulfilled
