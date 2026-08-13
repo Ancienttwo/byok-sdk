@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-13T11:24:34+0800 -->
+<!-- updated_at: 2026-08-13T19:42:09+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-13T11:24:34+0800
-> **Source Branch**: codex/ci-stability-flakes
-> **Source Commit**: 33239ed
+> **Updated At**: 2026-08-13T19:42:09+0800
+> **Source Branch**: codex/control-socket-fallback
+> **Source Commit**: bd2b77e
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -51,16 +51,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260813-1028-ci-stability-flakes.md
- D tasks/contracts/20260813-1028-ci-stability-flakes.contract.md
- D tasks/notes/20260813-1028-ci-stability-flakes.notes.md
- D tasks/reviews/20260813-1028-ci-stability-flakes.review.md
+ D plans/plan-20260813-1925-control-socket-fallback.md
+ D tasks/contracts/20260813-1925-control-socket-fallback.contract.md
+ D tasks/notes/20260813-1925-control-socket-fallback.notes.md
+ D tasks/reviews/20260813-1925-control-socket-fallback.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260813-1028-ci-stability-flakes.md
-?? tasks/archive/contract-20260813-1124-ci-stability-flakes.md
-?? tasks/archive/notes-20260813-1124-ci-stability-flakes.md
-?? tasks/archive/review-20260813-1124-ci-stability-flakes.md
-?? tasks/archive/todo-20260813-1124-ci-stability-flakes.md
+?? plans/archive/plan-20260813-1925-control-socket-fallback.md
+?? tasks/archive/contract-20260813-1942-control-socket-fallback.md
+?? tasks/archive/notes-20260813-1942-control-socket-fallback.md
+?? tasks/archive/review-20260813-1942-control-socket-fallback.md
+?? tasks/archive/todo-20260813-1942-control-socket-fallback.md
 ```
 
 ## Source Artifacts

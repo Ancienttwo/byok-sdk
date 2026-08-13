@@ -26,7 +26,7 @@ describe('control-protocol: endpoint path derivation', () => {
     expect(controlSocketPath('/Users/me/.byok/acme')).toBe('/Users/me/.byok/acme/control.sock');
   });
 
-  it('controlSocketPath falls back to a short, deterministic tmpdir path once the natural path would be too long, nested under a private per-daemon subdirectory (not a bare file directly in the shared tmpdir)', () => {
+  it('controlSocketPath falls back to a short, deterministic fixed-root path once the natural path would be too long, nested under a private per-daemon subdirectory (not a bare file directly in that shared root)', () => {
     const longStoreDir = `/Users/someone/.byok/${'x'.repeat(200)}`;
     const path1 = controlSocketPath(longStoreDir);
     const path2 = controlSocketPath(longStoreDir);
