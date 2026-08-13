@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   state               TEXT NOT NULL,
   instruction         TEXT NOT NULL,
   runtime             TEXT,
+  required_toolsets_json TEXT,
   policy_json         TEXT NOT NULL,
   device_id           TEXT,
   session_ref         TEXT,
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 const ADDITIVE_COLUMNS: ReadonlyArray<{ name: string; ddl: string }> = [
   { name: 'pending_approval_id', ddl: 'ALTER TABLE tasks ADD COLUMN pending_approval_id TEXT' },
   { name: 'claimed_runtime', ddl: 'ALTER TABLE tasks ADD COLUMN claimed_runtime TEXT' },
+  { name: 'required_toolsets_json', ddl: 'ALTER TABLE tasks ADD COLUMN required_toolsets_json TEXT' },
   // S0 (GAP-002): the claim-time `RuntimeCapabilities` snapshot, stored as
   // the JSON text of that closed, protocol-validated object (same idiom as
   // `policy_json`/`result_json` above — no column-per-flag, so a future
@@ -116,12 +118,16 @@ export function ensureAdditiveColumns(db: DatabaseSync): void {
 
 function rowToRecord(row: Record<string, unknown>): TaskRecord {
   const resultJson = row.result_json as string | null;
+  const requiredToolsetsJson = row.required_toolsets_json as string | null;
   const claimedRuntimeCapabilitiesJson = row.claimed_runtime_capabilities_json as string | null;
   return {
     taskId: row.task_id as string,
     state: row.state as TaskState,
     instruction: row.instruction as string,
     runtime: ((row.runtime as string | null) ?? undefined) as TaskRecord['runtime'],
+    requiredToolsets: requiredToolsetsJson
+      ? (JSON.parse(requiredToolsetsJson) as TaskRecord['requiredToolsets'])
+      : undefined,
     policy: JSON.parse(row.policy_json as string) as TaskRecord['policy'],
     deviceId: (row.device_id as string | null) ?? undefined,
     sessionRef: (row.session_ref as string | null) ?? undefined,
@@ -194,8 +200,8 @@ export class SqliteTaskStore implements TaskStore {
       secureSqliteFilePermissions(opts.path);
       this.insertStmt = this.db.prepare(
         `INSERT INTO tasks
-           (task_id, state, instruction, runtime, policy_json, device_id, session_ref, created_at, updated_at, result_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (task_id, state, instruction, runtime, required_toolsets_json, policy_json, device_id, session_ref, created_at, updated_at, result_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       // A separate UPDATE-in-place (rather than reusing `INSERT OR REPLACE`,
       // which is a delete+insert under the hood) so a transitioned task keeps
@@ -210,7 +216,7 @@ export class SqliteTaskStore implements TaskStore {
       // the row is still in that state — see `transition()`'s doc comment.
       this.updateStmt = this.db.prepare(
         `UPDATE tasks SET
-           state = ?, instruction = ?, runtime = ?, policy_json = ?, device_id = ?,
+           state = ?, instruction = ?, runtime = ?, required_toolsets_json = ?, policy_json = ?, device_id = ?,
            session_ref = ?, created_at = ?, updated_at = ?, result_json = ?, pending_approval_id = ?,
            claimed_runtime = ?, claimed_runtime_capabilities_json = ?
          WHERE task_id = ? AND state = ?`,
@@ -250,6 +256,7 @@ export class SqliteTaskStore implements TaskStore {
       state: 'Offered',
       instruction: input.instruction,
       runtime: input.runtime,
+      requiredToolsets: input.requiredToolsets,
       policy: input.policy,
       deviceId: input.deviceId,
       sessionRef: input.sessionRef,
@@ -261,6 +268,7 @@ export class SqliteTaskStore implements TaskStore {
       record.state,
       record.instruction,
       record.runtime ?? null,
+      record.requiredToolsets ? JSON.stringify(record.requiredToolsets) : null,
       JSON.stringify(record.policy),
       record.deviceId ?? null,
       record.sessionRef ?? null,
@@ -326,6 +334,7 @@ export class SqliteTaskStore implements TaskStore {
         updated.state,
         updated.instruction,
         updated.runtime ?? null,
+        updated.requiredToolsets ? JSON.stringify(updated.requiredToolsets) : null,
         JSON.stringify(updated.policy),
         updated.deviceId ?? null,
         updated.sessionRef ?? null,

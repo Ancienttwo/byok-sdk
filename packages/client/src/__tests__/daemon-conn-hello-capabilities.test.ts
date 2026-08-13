@@ -64,6 +64,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
     const runtimes = hello.payload.runtimes ?? [];
+    expect(hello.payload.capabilities).toContain('toolset-selection');
     expect(runtimes).toHaveLength(3);
     const byId = new Map(runtimes.map((r) => [r.id, r.capabilities]));
 
@@ -87,6 +88,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       steer: false,
       resume: true,
       approvalInteractive: true,
+      mcpToolsets: true,
       permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     });
 

@@ -62,6 +62,31 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  examples/salesko-connector-broker:
+    dependencies:
+      '@byok-sdk/keys':
+        specifier: workspace:*
+        version: link:../../packages/keys
+      email-addresses:
+        specifier: 5.0.0
+        version: 5.0.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.19)(tsx@4.23.1)(typescript@7.0.2)(yaml@2.9.0)
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.0)(@types/node@22.20.1)(vite@8.1.5(@types/node@22.20.1)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0))
+
   packages/client:
     dependencies:
       '@byok-sdk/core':
@@ -110,6 +135,9 @@ importers:
       '@byok-sdk/core':
         specifier: workspace:*
         version: link:../core
+      '@byok-sdk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       aws4fetch:
         specifier: 1.0.20
         version: 1.0.20
@@ -1390,6 +1418,9 @@ packages:
 
   ecdsa-sig-formatter@1.0.11:
     resolution: {integrity: sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==}
+
+  email-addresses@5.0.0:
+    resolution: {integrity: sha512-4OIPYlA6JXqtVn8zpHpGiI7vE6EQOAg16aGnDMIAlZVinnoZ8208tW1hAbjWydgN/4PLTT9q+O1K6AH/vALJGw==}
 
   es-module-lexer@2.3.1:
     resolution: {integrity: sha512-shc1dbU90Yl/xq1QrC7QRtfcwURZuVRfPhZbDoldJ1cn1gzDvBaBWlv0eFolj5+0znnPJz5TXLxsN77X/12KTA==}
@@ -3065,6 +3096,8 @@ snapshots:
   ecdsa-sig-formatter@1.0.11:
     dependencies:
       safe-buffer: 5.2.1
+
+  email-addresses@5.0.0: {}
 
   es-module-lexer@2.3.1: {}
 

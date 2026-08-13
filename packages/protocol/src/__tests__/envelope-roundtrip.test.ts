@@ -120,6 +120,24 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('task.offer_with_toolsets', () => {
+    const type = 'task.offer_with_toolsets' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          instruction: 'find qualified leads',
+          policy: { mode: 'auto' },
+          runtime: 'claude',
+          requiredToolsets: ['salesko'],
+        },
+        { taskId: 'task-toolset-1', seq: 3 },
+      ),
+    );
+  });
+
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);

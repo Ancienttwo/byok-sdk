@@ -20,9 +20,16 @@
  * moving `CORE_PORT_*` into core's shipped source was meant to break.
  */
 import { fileURLToPath } from 'node:url';
-import { describe, it } from 'vitest';
-import { createMutableClock } from '@byok-sdk/core';
-import { createWebCrypto } from '@byok-sdk/cloud';
+import { describe, expect, it } from 'vitest';
+import { createMutableClock, tenantId } from '@byok-sdk/core';
+import {
+  CLOUD_CAPABILITIES,
+  createByokCloud,
+  createHmacTokenSigner,
+  createWebCrypto,
+  fullCapabilityDeclaration,
+} from '@byok-sdk/cloud';
+import { decodeEnvelope } from '@byok-sdk/protocol';
 import { runCloudConformance, type CloudCompositionFactory } from '@byok-sdk/conformance';
 import { migrate } from '../migrate';
 import { createPostgresCloudStores } from '../stores/index';
@@ -35,6 +42,7 @@ import {
 } from './support/dataplane';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
+const OFFER_TENANT = tenantId('tenant-offer-sequence');
 
 const postgresFactory: CloudCompositionFactory = {
   async create() {
@@ -94,3 +102,62 @@ if (SKIP_DATAPLANE) {
 } else {
   runCloudConformance('postgres', postgresFactory);
 }
+
+describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
+  it('persists the exact sequence encoded into an offer envelope', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const objectStorage = await createObjectStorageScope();
+      const clock = createMutableClock();
+      const crypto = createWebCrypto();
+      const core = createPostgresCoreStores({ pool: scope.pool, clock });
+      const stores = createPostgresCloudStores({
+        pool: scope.pool,
+        clock,
+        crypto,
+        objectStorage: objectStorage.config,
+      });
+      const full = fullCapabilityDeclaration();
+      const cloud = createByokCloud({
+        core,
+        cloud: stores,
+        crypto,
+        tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
+        clock,
+        capabilities: {
+          ...full,
+          capabilities: full.capabilities.filter(
+            (capability) => capability !== CLOUD_CAPABILITIES.blobsContentProxy,
+          ),
+        },
+      });
+
+      const first = await cloud.enqueueOffer(OFFER_TENANT, 'device-offer-sequence', {
+        payload: { instruction: 'prove the sequence boundary', policy: { mode: 'auto' } },
+      });
+      const second = await cloud.enqueueOffer(OFFER_TENANT, 'device-offer-sequence', {
+        payload: { instruction: 'prove the next sequence too', policy: { mode: 'auto' } },
+      });
+      const page = await core.mailbox.readAfter(OFFER_TENANT, {
+        deviceId: 'device-offer-sequence',
+        afterSeq: 0,
+      });
+
+      expect([first.seq, second.seq]).toEqual([1, 2]);
+      expect(page.messages.map((message) => message.seq)).toEqual([first.seq, second.seq]);
+      expect(page.messages.map((message) => decodeEnvelope(message.body).seq)).toEqual([
+        first.seq,
+        second.seq,
+      ]);
+      await expect(cloud.readTaskAttempt(OFFER_TENANT, first.taskId)).resolves.toMatchObject({
+        status: 'offered',
+      });
+      await expect(cloud.readTaskAttempt(OFFER_TENANT, second.taskId)).resolves.toMatchObject({
+        status: 'offered',
+      });
+    } finally {
+      await scope.dispose();
+    }
+  });
+});

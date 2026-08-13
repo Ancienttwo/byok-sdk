@@ -184,13 +184,5 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
       });
     });
 
-    it('counts delivery sequence separately per tenant', async () => {
-      await withCloudComposition(factory, async ({ stores }) => {
-        expect(await stores.sequence.next(TENANT_A, 'device-1')).toBe(1);
-        expect(await stores.sequence.next(TENANT_A, 'device-1')).toBe(2);
-        // Tenant B starts at 1 even though tenant A is at 2.
-        expect(await stores.sequence.next(TENANT_B, 'device-1')).toBe(1);
-      });
-    });
   });
 }

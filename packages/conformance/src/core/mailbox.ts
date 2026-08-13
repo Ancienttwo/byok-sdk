@@ -16,16 +16,21 @@ const DEVICE = 'device-1';
 function offer(seed: number) {
   return {
     deviceId: DEVICE,
-    body: `{"type":"task.offer","n":${seed}}`,
-    bodyHash: hashOf(seed),
-    byteSize: BigInt(seed + 10),
     messageId: `msg-${seed}`,
+    materialize: (seq: number) => {
+      const body = `{"type":"task.offer","n":${seed},"seq":${seq}}`;
+      return {
+        body,
+        bodyHash: hashOf(seed),
+        byteSize: BigInt(new TextEncoder().encode(body).length),
+      };
+    },
   };
 }
 
 export function runMailboxConformance(factory: CoreCompositionFactory): void {
   describe('mailbox', () => {
-    it('assigns a monotonic per-device seq starting at 1', async () => {
+    it('assigns a monotonic per-device seq and binds the body to it', async () => {
       await withComposition(factory, async ({ stores }) => {
         const first = await stores.mailbox.append(TENANT_A, offer(1));
         const second = await stores.mailbox.append(TENANT_A, offer(2));
@@ -36,8 +41,54 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
 
         expect(first.seq).toBe(1);
         expect(second.seq).toBe(2);
+        expect(JSON.parse(first.body)).toMatchObject({ seq: first.seq });
+        expect(JSON.parse(second.body)).toMatchObject({ seq: second.seq });
         // Sequences are per device, not per tenant: a second device starts over.
         expect(otherDevice.seq).toBe(1);
+      });
+    });
+
+    it('serializes concurrent materialization in commit order', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        const appended = await Promise.all(
+          Array.from({ length: 16 }, (_unused, index) =>
+            stores.mailbox.append(TENANT_A, offer(index + 1)),
+          ),
+        );
+        // Concurrent callers do not own lock-acquisition order. What the
+        // contract promises is one unique monotonic sequence set and rows
+        // visible in sequence order, not that Promise input order wins.
+        expect(appended.map((message) => message.seq).sort((left, right) => left - right)).toEqual(
+          Array.from({ length: 16 }, (_unused, index) => index + 1),
+        );
+
+        const page = await stores.mailbox.readAfter(TENANT_A, {
+          deviceId: DEVICE,
+          afterSeq: 0,
+          limit: 20,
+        });
+        expect(page.messages.map((message) => message.seq)).toEqual(
+          Array.from({ length: 16 }, (_unused, index) => index + 1),
+        );
+        for (const message of page.messages) {
+          expect(JSON.parse(message.body)).toMatchObject({ seq: message.seq });
+        }
+      });
+    });
+
+    it('does not consume a sequence when materialization fails', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await expect(
+          stores.mailbox.append(TENANT_A, {
+            deviceId: DEVICE,
+            messageId: 'broken',
+            materialize: () => {
+              throw new Error('injected materialization failure');
+            },
+          }),
+        ).rejects.toThrow('injected materialization failure');
+
+        await expect(stores.mailbox.append(TENANT_A, offer(1))).resolves.toMatchObject({ seq: 1 });
       });
     });
 
@@ -49,6 +100,30 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
 
         const page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
         expect(page.messages).toHaveLength(1);
+      });
+    });
+
+    it('materializes once under concurrent idempotent append', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        const base = offer(1);
+        let materializations = 0;
+        const input = {
+          ...base,
+          materialize: async (seq: number) => {
+            materializations += 1;
+            await Promise.resolve();
+            return base.materialize(seq);
+          },
+        };
+        const replayed = await Promise.all(
+          Array.from({ length: 8 }, () => stores.mailbox.append(TENANT_A, input)),
+        );
+
+        expect(new Set(replayed.map((message) => message.seq))).toEqual(new Set([1]));
+        expect(materializations).toBe(1);
+        expect(
+          (await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 })).messages,
+        ).toHaveLength(1);
       });
     });
 
@@ -88,6 +163,41 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
 
         const page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
         expect(page.messages.map((message) => message.seq)).toEqual([2]);
+      });
+    });
+
+    it('serializes cursor advancement behind an in-flight materializer', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        let releaseMaterializer!: () => void;
+        let materializerStarted!: () => void;
+        const started = new Promise<void>((resolve) => {
+          materializerStarted = resolve;
+        });
+        const barrier = new Promise<void>((resolve) => {
+          releaseMaterializer = resolve;
+        });
+        const base = offer(1);
+        const append = stores.mailbox.append(TENANT_A, {
+          ...base,
+          materialize: async (seq) => {
+            materializerStarted();
+            await barrier;
+            return base.materialize(seq);
+          },
+        });
+        await started;
+        const advance = stores.mailbox.advanceCursor(TENANT_A, {
+          deviceId: DEVICE,
+          ackedSeq: 1,
+        });
+
+        releaseMaterializer();
+        const [message, cursor] = await Promise.all([append, advance]);
+        expect(message.seq).toBe(1);
+        expect(cursor.ackedSeq).toBe(1);
+        await expect(
+          stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 }),
+        ).resolves.toMatchObject({ messages: [] });
       });
     });
 

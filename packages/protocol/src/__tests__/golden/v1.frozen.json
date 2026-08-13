@@ -7,7 +7,8 @@
     "approval_resolved",
     "approval-targeting",
     "result-document",
-    "dispatch-selection"
+    "dispatch-selection",
+    "toolset-selection"
   ],
   "permissionModes": [
     "auto",
@@ -54,6 +55,7 @@
     "conn.hello",
     "conn.ack",
     "task.offer",
+    "task.offer_with_toolsets",
     "task.approve",
     "task.reject",
     "task.cancel",
@@ -72,6 +74,7 @@
   "serverToDaemonTypes": [
     "conn.ack",
     "task.offer",
+    "task.offer_with_toolsets",
     "task.approve",
     "task.reject",
     "task.cancel",
@@ -109,6 +112,10 @@
       "seq": "required"
     },
     "task.offer": {
+      "taskId": "required",
+      "seq": "required"
+    },
+    "task.offer_with_toolsets": {
       "taskId": "required",
       "seq": "required"
     },
@@ -225,6 +232,9 @@
                     "type": "boolean"
                   },
                   "approvalInteractive": {
+                    "type": "boolean"
+                  },
+                  "mcpToolsets": {
                     "type": "boolean"
                   },
                   "permissionModes": {
@@ -476,6 +486,209 @@
       ],
       "additionalProperties": false
     },
+    "task.offer_with_toolsets": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "instruction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "blobRef": {
+                  "type": "object",
+                  "properties": {
+                    "blobId": {
+                      "type": "string"
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "contentType": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "blobId",
+                    "contentHash",
+                    "size",
+                    "contentType"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "blobRef"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "confirm",
+                "readonly",
+                "plan"
+              ]
+            },
+            "allowTools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "denyTools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workspaceRoot": {
+              "type": "string"
+            },
+            "network": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "runtime": {
+          "type": "string",
+          "enum": [
+            "pi",
+            "claude",
+            "codex"
+          ]
+        },
+        "dispatchSelection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "subscription"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex"
+                  ]
+                },
+                "providerId": {
+                  "type": "null"
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "^[^\\u0000\\r\\n]+$"
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerId",
+                "modelId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "byok"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "const": "pi"
+                },
+                "providerId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "^[^\\u0000\\r\\n]+$"
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "^[^\\u0000\\r\\n]+$"
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerId",
+                "modelId"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "sessionRef": {
+          "type": "string"
+        },
+        "workspaceHint": {
+          "type": "string"
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxDurationMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxTokens": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        "requiredToolsets": {
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+          }
+        }
+      },
+      "required": [
+        "instruction",
+        "policy",
+        "requiredToolsets"
+      ],
+      "additionalProperties": false
+    },
     "task.approve": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -550,6 +763,9 @@
               "type": "boolean"
             },
             "approvalInteractive": {
+              "type": "boolean"
+            },
+            "mcpToolsets": {
               "type": "boolean"
             },
             "permissionModes": {
@@ -1056,6 +1272,9 @@
                         "approvalInteractive": {
                           "type": "boolean"
                         },
+                        "mcpToolsets": {
+                          "type": "boolean"
+                        },
                         "permissionModes": {
                           "type": "array",
                           "items": {
@@ -1424,6 +1643,254 @@
           },
           "type": {
             "type": "string",
+            "const": "task.offer_with_toolsets"
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "session_ref": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "instruction": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "blobRef": {
+                        "type": "object",
+                        "properties": {
+                          "blobId": {
+                            "type": "string"
+                          },
+                          "contentHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "contentType": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "blobId",
+                          "contentHash",
+                          "size",
+                          "contentType"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "blobRef"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "policy": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "confirm",
+                      "readonly",
+                      "plan"
+                    ]
+                  },
+                  "allowTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "denyTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "workspaceRoot": {
+                    "type": "string"
+                  },
+                  "network": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "mode"
+                ],
+                "additionalProperties": false
+              },
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "pi",
+                  "claude",
+                  "codex"
+                ]
+              },
+              "dispatchSelection": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "subscription"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "enum": [
+                          "claude",
+                          "codex"
+                        ]
+                      },
+                      "providerId": {
+                        "type": "null"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^[^\\u0000\\r\\n]+$"
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerId",
+                      "modelId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "byok"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "const": "pi"
+                      },
+                      "providerId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^[^\\u0000\\r\\n]+$"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "^[^\\u0000\\r\\n]+$"
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerId",
+                      "modelId"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "sessionRef": {
+                "type": "string"
+              },
+              "workspaceHint": {
+                "type": "string"
+              },
+              "limits": {
+                "type": "object",
+                "properties": {
+                  "maxDurationMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maxTokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "additionalProperties": false
+              },
+              "requiredToolsets": {
+                "minItems": 1,
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                }
+              }
+            },
+            "required": [
+              "instruction",
+              "policy",
+              "requiredToolsets"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "v",
+          "id",
+          "ts",
+          "type",
+          "task_id",
+          "seq",
+          "payload"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "v": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "type": {
+            "type": "string",
             "const": "task.approve"
           },
           "task_id": {
@@ -1691,6 +2158,9 @@
                     "type": "boolean"
                   },
                   "approvalInteractive": {
+                    "type": "boolean"
+                  },
+                  "mcpToolsets": {
                     "type": "boolean"
                   },
                   "permissionModes": {
@@ -3196,6 +3666,9 @@
                                 "approvalInteractive": {
                                   "type": "boolean"
                                 },
+                                "mcpToolsets": {
+                                  "type": "boolean"
+                                },
                                 "permissionModes": {
                                   "type": "array",
                                   "items": {
@@ -3564,6 +4037,254 @@
                   },
                   "type": {
                     "type": "string",
+                    "const": "task.offer_with_toolsets"
+                  },
+                  "task_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "session_ref": {
+                    "type": "string"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "instruction": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "blobRef": {
+                                "type": "object",
+                                "properties": {
+                                  "blobId": {
+                                    "type": "string"
+                                  },
+                                  "contentHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "blobId",
+                                  "contentHash",
+                                  "size",
+                                  "contentType"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "blobRef"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "policy": {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "auto",
+                              "confirm",
+                              "readonly",
+                              "plan"
+                            ]
+                          },
+                          "allowTools": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "denyTools": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "workspaceRoot": {
+                            "type": "string"
+                          },
+                          "network": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "mode"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "runtime": {
+                        "type": "string",
+                        "enum": [
+                          "pi",
+                          "claude",
+                          "codex"
+                        ]
+                      },
+                      "dispatchSelection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "subscription"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "enum": [
+                                  "claude",
+                                  "codex"
+                                ]
+                              },
+                              "providerId": {
+                                "type": "null"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerId",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerId",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "sessionRef": {
+                        "type": "string"
+                      },
+                      "workspaceHint": {
+                        "type": "string"
+                      },
+                      "limits": {
+                        "type": "object",
+                        "properties": {
+                          "maxDurationMs": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "maxTokens": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "requiredToolsets": {
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "instruction",
+                      "policy",
+                      "requiredToolsets"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "ts",
+                  "type",
+                  "task_id",
+                  "seq",
+                  "payload"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ts": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "type": {
+                    "type": "string",
                     "const": "task.approve"
                   },
                   "task_id": {
@@ -3831,6 +4552,9 @@
                             "type": "boolean"
                           },
                           "approvalInteractive": {
+                            "type": "boolean"
+                          },
+                          "mcpToolsets": {
                             "type": "boolean"
                           },
                           "permissionModes": {
@@ -4764,6 +5488,9 @@
                                 "approvalInteractive": {
                                   "type": "boolean"
                                 },
+                                "mcpToolsets": {
+                                  "type": "boolean"
+                                },
                                 "permissionModes": {
                                   "type": "array",
                                   "items": {
@@ -5132,6 +5859,254 @@
                   },
                   "type": {
                     "type": "string",
+                    "const": "task.offer_with_toolsets"
+                  },
+                  "task_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "session_ref": {
+                    "type": "string"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "instruction": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "blobRef": {
+                                "type": "object",
+                                "properties": {
+                                  "blobId": {
+                                    "type": "string"
+                                  },
+                                  "contentHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "contentType": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "blobId",
+                                  "contentHash",
+                                  "size",
+                                  "contentType"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "blobRef"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "policy": {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "auto",
+                              "confirm",
+                              "readonly",
+                              "plan"
+                            ]
+                          },
+                          "allowTools": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "denyTools": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "workspaceRoot": {
+                            "type": "string"
+                          },
+                          "network": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "mode"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "runtime": {
+                        "type": "string",
+                        "enum": [
+                          "pi",
+                          "claude",
+                          "codex"
+                        ]
+                      },
+                      "dispatchSelection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "subscription"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "enum": [
+                                  "claude",
+                                  "codex"
+                                ]
+                              },
+                              "providerId": {
+                                "type": "null"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerId",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160,
+                                "pattern": "^[^\\u0000\\r\\n]+$"
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerId",
+                              "modelId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "sessionRef": {
+                        "type": "string"
+                      },
+                      "workspaceHint": {
+                        "type": "string"
+                      },
+                      "limits": {
+                        "type": "object",
+                        "properties": {
+                          "maxDurationMs": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "maxTokens": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "requiredToolsets": {
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "instruction",
+                      "policy",
+                      "requiredToolsets"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "ts",
+                  "type",
+                  "task_id",
+                  "seq",
+                  "payload"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ts": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "type": {
+                    "type": "string",
                     "const": "task.approve"
                   },
                   "task_id": {
@@ -5399,6 +6374,9 @@
                             "type": "boolean"
                           },
                           "approvalInteractive": {
+                            "type": "boolean"
+                          },
+                          "mcpToolsets": {
                             "type": "boolean"
                           },
                           "permissionModes": {

@@ -38,6 +38,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
+import { allocateMailboxSequence } from './mailbox-sequence';
 
 const DEFAULT_READ_LIMIT = 50;
 
@@ -95,58 +96,83 @@ export class PostgresMailboxStore implements MailboxStore {
 
   async append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage> {
     this.#requireDeviceId(input.deviceId);
-    const now = this.#now();
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    // One statement. The `allocated` CTE bumps the same per-device allocator
-    // `cloud.sequence` uses — the daemon's redelivery cursor IS that number, so
-    // handing the same one out twice would make an envelope unacknowledgeable.
-    // The main insert's `ON CONFLICT DO NOTHING` is the producer's idempotency
-    // key doing the deciding: a replayed `messageId` enqueues nothing.
-    //
-    // A replay burns an allocation. That is the deliberate trade: `seq` is
-    // contractually monotonic, never contractually gapless, and the alternative
-    // (look first, then allocate) is the racy read-then-write this package does
-    // not do.
-    const inserted = await this.#pool.query<OutboxRow>(
-      `WITH allocated AS (
-         INSERT INTO device_stream (tenant_id, device_id, next_seq, acked_seq, acked_at)
-         VALUES ($1, $2, 2, 0, $7)
-         ON CONFLICT (tenant_id, device_id) DO UPDATE
-            SET next_seq = device_stream.next_seq + 1
-         RETURNING next_seq - 1 AS seq
-       )
-       INSERT INTO outbox (${OUTBOX_COLUMNS})
-       SELECT $1, $2, allocated.seq, $3, $4, $5, $6::bigint, 'pending', $7
-         FROM allocated
-       ON CONFLICT (tenant_id, device_id, message_id) DO NOTHING
-       RETURNING ${OUTBOX_COLUMNS}`,
-      [
-        tenant,
-        input.deviceId,
-        input.messageId,
-        input.body,
-        input.bodyHash,
-        input.byteSize,
-        now,
-      ],
-    );
-    const row = inserted.rows[0];
-    if (row !== undefined) return toMessage(row);
-
-    const existing = await this.#pool.query<OutboxRow>(
-      `SELECT ${OUTBOX_COLUMNS} FROM outbox
-        WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
-      [tenant, input.deviceId, input.messageId],
-    );
-    const replayed = existing.rows[0];
-    // Unreachable in practice: the insert only declines when the row exists.
-    if (replayed === undefined) {
-      throw new ByokCoreError(
-        'mailbox_message_not_found',
-        `Message ${input.messageId} vanished during an idempotent append.`,
+      const existing = await client.query<OutboxRow>(
+        `SELECT ${OUTBOX_COLUMNS} FROM outbox
+          WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
+        [tenant, input.deviceId, input.messageId],
       );
+      const replayed = existing.rows[0];
+      if (replayed !== undefined) {
+        await client.query('COMMIT');
+        return toMessage(replayed);
+      }
+
+      // The device_stream row lock serializes the whole allocate -> materialize
+      // -> insert unit. Releasing it before insertion would let seq N+1 become
+      // visible before N; a daemon could then ack N+1 and permanently skip the
+      // late N row.
+      const seq = await allocateMailboxSequence(client, tenant, input.deviceId, this.#now());
+      const serializedExisting = await client.query<OutboxRow>(
+        `SELECT ${OUTBOX_COLUMNS} FROM outbox
+          WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
+        [tenant, input.deviceId, input.messageId],
+      );
+      const winnerAfterLock = serializedExisting.rows[0];
+      if (winnerAfterLock !== undefined) {
+        await client.query('ROLLBACK');
+        return toMessage(winnerAfterLock);
+      }
+      const materialized = await input.materialize(seq);
+      const now = this.#now();
+      const inserted = await client.query<OutboxRow>(
+        `INSERT INTO outbox (${OUTBOX_COLUMNS})
+         VALUES ($1, $2, $3::bigint, $4, $5, $6, $7::bigint, 'pending', $8)
+         ON CONFLICT (tenant_id, device_id, message_id) DO NOTHING
+         RETURNING ${OUTBOX_COLUMNS}`,
+        [
+          tenant,
+          input.deviceId,
+          seq,
+          input.messageId,
+          materialized.body,
+          materialized.bodyHash,
+          materialized.byteSize,
+          now,
+        ],
+      );
+      const row = inserted.rows[0];
+      if (row !== undefined) {
+        await client.query('COMMIT');
+        return toMessage(row);
+      }
+
+      // A concurrent append with the same idempotency key won while this
+      // transaction waited on the per-device allocator. Roll back our sequence
+      // bump so an idempotent retry consumes neither a row nor a number.
+      const winner = await client.query<OutboxRow>(
+        `SELECT ${OUTBOX_COLUMNS} FROM outbox
+          WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
+        [tenant, input.deviceId, input.messageId],
+      );
+      await client.query('ROLLBACK');
+      const won = winner.rows[0];
+      if (won === undefined) {
+        throw new ByokCoreError(
+          'mailbox_message_not_found',
+          `Message ${input.messageId} vanished during an idempotent append.`,
+        );
+      }
+      return toMessage(won);
+    } catch (cause) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw cause;
+    } finally {
+      client.release();
     }
-    return toMessage(replayed);
   }
 
   async readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage> {
@@ -232,10 +258,9 @@ export class PostgresMailboxStore implements MailboxStore {
       [tenant, deviceId],
     );
     const row = result.rows[0];
-    // No row, or a row `cloud.sequence` created without the mailbox ever having
-    // moved its cursor: the position is 0 and there is no recorded instant to
-    // report, so the read's own clock stands in. Reporting a stored instant
-    // that does not exist would be the one thing worse than reporting this one.
+    // No row, or a row the mailbox created without ever moving its cursor: the
+    // position is 0 and there is no recorded ack instant to report, so the
+    // read's own clock stands in.
     return {
       tenantId: tenant,
       deviceId,

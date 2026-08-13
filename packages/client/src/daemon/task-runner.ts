@@ -15,8 +15,17 @@ import {
   type ResultDocumentCheck,
   type RuntimeId,
   type TaskOfferPayload,
+  type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
-import { PolicyUnsupportedError, SteerUnsupportedError, type RuntimeAdapter, type Session, type TaskContext } from '../types';
+import {
+  PolicyUnsupportedError,
+  SteerUnsupportedError,
+  type McpStdioServerConfig,
+  type McpToolsetConfig,
+  type RuntimeAdapter,
+  type Session,
+  type TaskContext,
+} from '../types';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
@@ -241,6 +250,8 @@ export interface TaskRunnerDeps {
   runtimePreference?: RuntimeId[];
   /** M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment (`create-daemon.ts`) — the per-device, per-runtime env-allowlist override `handleOffer` merges into `buildRuntimeEnv`'s `locallyAllowedNames`. */
   runtimeEnvironment?: Record<string, { allow?: string[] }>;
+  /** Validated, device-local registry keyed by wire-level logical toolset id. */
+  mcpToolsets?: ReadonlyMap<string, McpToolsetConfig>;
   permissionDefaults?: PermissionPolicy;
   workspaceRoot: string;
   deviceId: string;
@@ -349,7 +360,7 @@ export interface TaskRunnerDeps {
    * Optional and absent by default: with no guard supplied, `handleOffer`
    * behaves exactly as it did before this seam existed.
    */
-  admissionGuard?: (offer: { readonly taskId: string; readonly payload: TaskOfferPayload }) => AdmissionGuardDecision;
+  admissionGuard?: (offer: { readonly taskId: string; readonly payload: AcceptedOfferPayload }) => AdmissionGuardDecision;
   /**
    * additive-minor (`task.complete.document`): the host's structured-result
    * extractor, consulted once per task at the moment `task.complete` is
@@ -530,6 +541,19 @@ function orderByPreference(candidates: readonly RuntimeAdapter[], preference: re
  */
 function adapterSupportsMode(adapter: RuntimeAdapter, mode: PermissionMode): boolean {
   return adapter.capabilities().permissionModes.includes(mode);
+}
+
+function adapterSupportsMcpToolsets(adapter: RuntimeAdapter): boolean {
+  return adapter.capabilities().mcpToolsets === true;
+}
+
+type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload;
+
+function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
+  if (!('requiredToolsets' in payload)) return payload;
+  const { requiredToolsets, ...offer } = payload;
+  void requiredToolsets;
+  return offer;
 }
 
 function errorMessage(err: unknown): string {
@@ -1025,6 +1049,9 @@ export class TaskRunner {
       case 'task.offer':
         await this.handleOffer(envelope.task_id, envelope.payload);
         return;
+      case 'task.offer_with_toolsets':
+        await this.handleOffer(envelope.task_id, envelope.payload);
+        return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
@@ -1042,7 +1069,7 @@ export class TaskRunner {
     }
   }
 
-  private async handleOffer(taskId: string, payload: TaskOfferPayload): Promise<void> {
+  private async handleOffer(taskId: string, payload: AcceptedOfferPayload): Promise<void> {
     // Finding P2, Fix 2c (redelivered offer for an already-active/finished
     // task): checked first, ahead of everything below — a redelivered
     // `task.offer` for a taskId this device already claimed/started, or
@@ -1164,8 +1191,15 @@ export class TaskRunner {
         return;
       }
 
+      const requiredToolsets = 'requiredToolsets' in payload ? payload.requiredToolsets : undefined;
+      const resolvedMcp = requiredToolsets ? this.resolveMcpServers(requiredToolsets) : undefined;
+      if (resolvedMcp && !resolvedMcp.ok) {
+        this.decline(taskId, resolvedMcp.reason, true);
+        return;
+      }
+
       const requestedRuntime = payload.dispatchSelection?.runtimeId ?? payload.runtime;
-      const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode);
+      const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode, requiredToolsets !== undefined);
       if (!pick.ok) {
         this.decline(taskId, pick.reason, pick.retryable);
         return;
@@ -1344,6 +1378,7 @@ export class TaskRunner {
       const ctx: TaskContext = {
         workspaceDir,
         policy: decision.policy,
+        ...(resolvedMcp?.ok ? { mcpServers: resolvedMcp.servers } : {}),
         ...(gitWorkspaceId ? { gitWorkspace: { workspaceId: gitWorkspaceId, baseline: gitBaseline } } : {}),
         // M5: no longer `process.env` verbatim (see `environment.ts`'s own
         // module doc comment for the credential-leak gap that closed) —
@@ -1388,7 +1423,7 @@ export class TaskRunner {
         },
       };
       const effectiveOffer: TaskOfferPayload = {
-        ...payload,
+        ...withoutRequiredToolsets(payload),
         instruction: gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction,
         // Never forward a sessionRef this device has no recorded workspace
         // for (stale, from another device, or simply made up) — an adapter
@@ -1503,6 +1538,41 @@ export class TaskRunner {
   private async resolveInstruction(instruction: TaskOfferPayload['instruction']): Promise<string> {
     if (typeof instruction === 'string') return instruction;
     return this.deps.blobClient.resolveInstruction(instruction.blobRef);
+  }
+
+  /** Resolve every requested logical id locally and reject missing/colliding server authority before claim. */
+  private resolveMcpServers(
+    requiredToolsets: readonly string[],
+  ):
+    | { ok: true; servers: Readonly<Record<string, McpStdioServerConfig>> }
+    | { ok: false; reason: string } {
+    const registry = this.deps.mcpToolsets;
+    if (!registry) {
+      return { ok: false, reason: 'offer requires MCP toolsets, but this device has no local mcpToolsets registry' };
+    }
+    const servers = Object.create(null) as Record<string, McpStdioServerConfig>;
+    for (const toolsetId of requiredToolsets) {
+      const toolset = registry.get(toolsetId);
+      if (!toolset) {
+        return { ok: false, reason: `required MCP toolset "${toolsetId}" is not configured on this device` };
+      }
+      for (const [serverName, server] of Object.entries(toolset.mcpServers)) {
+        if (Object.prototype.hasOwnProperty.call(servers, serverName)) {
+          return {
+            ok: false,
+            reason: `required MCP toolsets collide on server name "${serverName}"; refusing ambiguous projection`,
+          };
+        }
+        servers[serverName] = Object.freeze({
+          command: server.command,
+          ...(server.args ? { args: Object.freeze([...server.args]) } : {}),
+        });
+      }
+    }
+    if (Object.keys(servers).length === 0) {
+      return { ok: false, reason: 'required MCP toolsets resolved to no servers; refusing to run without tools' };
+    }
+    return { ok: true, servers: Object.freeze(servers) };
   }
 
   private async pump(active: ActiveTask): Promise<void> {
@@ -2617,7 +2687,11 @@ export class TaskRunner {
    * is device-specific (which runtimes happen to be installed here), so a
    * different device's installed runtime set might satisfy it.
    */
-  private async pickAdapter(requestedRuntime: string | undefined, policyMode: PermissionMode): Promise<PickResult> {
+  private async pickAdapter(
+    requestedRuntime: string | undefined,
+    policyMode: PermissionMode,
+    requiresMcpToolsets: boolean,
+  ): Promise<PickResult> {
     const allowlist = this.deps.runtimeAllowlist;
 
     if (requestedRuntime) {
@@ -2636,6 +2710,13 @@ export class TaskRunner {
         return {
           ok: false,
           reason: `runtime "${requestedRuntime}" cannot express permission mode "${policyMode}"`,
+          retryable: false,
+        };
+      }
+      if (requiresMcpToolsets && !adapterSupportsMcpToolsets(adapter)) {
+        return {
+          ok: false,
+          reason: `runtime "${requestedRuntime}" cannot project required MCP toolsets`,
           retryable: false,
         };
       }
@@ -2658,12 +2739,15 @@ export class TaskRunner {
     const candidates = orderByPreference(eligible, this.deps.runtimePreference ?? DEFAULT_RUNTIME_PREFERENCE);
     for (const adapter of candidates) {
       if (!adapterSupportsMode(adapter, policyMode)) continue;
+      if (requiresMcpToolsets && !adapterSupportsMcpToolsets(adapter)) continue;
       const detected = await adapter.detect();
       if (detected.present) return { ok: true, adapter };
     }
     return {
       ok: false,
-      reason: `no available runtime on this device can express permission mode "${policyMode}"`,
+      reason: requiresMcpToolsets
+        ? `no available runtime on this device can express permission mode "${policyMode}" with required MCP toolsets`
+        : `no available runtime on this device can express permission mode "${policyMode}"`,
       retryable: true,
     };
   }

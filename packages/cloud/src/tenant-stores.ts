@@ -123,10 +123,6 @@ export interface TenantBoundQuota {
   abortReservation(reservationId: string): Promise<StorageReservation>;
 }
 
-export interface TenantBoundSequence {
-  next(deviceId: string): Promise<number>;
-}
-
 export interface TenantBoundRateLimiter {
   consume(deviceId: string): Promise<boolean>;
 }
@@ -144,7 +140,6 @@ export interface TenantStores {
   readonly receipts: TenantBoundReceipts;
   readonly blobs: TenantBoundBlobs;
   readonly quota: TenantBoundQuota;
-  readonly sequence: TenantBoundSequence;
   readonly rateLimiter: TenantBoundRateLimiter;
 }
 
@@ -212,9 +207,6 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       reserve: (input) => core.quota.reserve(tenant, input),
       finalizeReservation: (input) => core.quota.finalizeReservation(tenant, input),
       abortReservation: (reservationId) => core.quota.abortReservation(tenant, reservationId),
-    },
-    sequence: {
-      next: (deviceId) => cloud.sequence.next(tenant, deviceId),
     },
     rateLimiter: {
       consume: (deviceId) => cloud.rateLimiter.consume(tenant, deviceId),

@@ -4,6 +4,7 @@ import {
   createEnvelope,
   DAEMON_TO_SERVER_TYPES,
   DispatchSelectionSchema,
+  RequiredToolsetsSchema,
   encodeEnvelope,
   PROTOCOL_VERSION,
   TASK_STATES,
@@ -176,7 +177,7 @@ type TaskPatch = Partial<
  * handlers below no longer carry their own device-mismatch checks.
  *
  * Outbound delivery (M1, §1.2/§9): every server -> daemon envelope
- * (`conn.ack`, `task.offer/approve/reject/cancel/steer`) gets a fresh
+ * (`conn.ack`, either task offer, `task.approve/reject/cancel/steer`) gets a fresh
  * per-device monotonic `seq` and is retained in a capped ring buffer
  * ({@link OUTBOX_RING_CAPACITY} entries) so it can be redelivered — in `seq`
  * order, skipping anything whose task has since reached a terminal state —
@@ -1465,6 +1466,10 @@ export class ConnectionHub {
       input.dispatchSelection === undefined
         ? undefined
         : DispatchSelectionSchema.parse(input.dispatchSelection);
+    const requiredToolsets =
+      input.requiredToolsets === undefined
+        ? undefined
+        : RequiredToolsetsSchema.parse(input.requiredToolsets);
     const deviceId = input.deviceId ?? this.pickFirstConnectedDevice();
     // M0 routing has no queue-until-connect: reject clearly instead of
     // silently queuing a task nothing will ever claim.
@@ -1486,6 +1491,15 @@ export class ConnectionHub {
     }
 
     if (
+      requiredToolsets !== undefined &&
+      !(this.getDeviceCapabilities(deviceId)?.includes('toolset-selection') ?? false)
+    ) {
+      throw new Error(
+        `device ${deviceId} did not advertise toolset-selection capability; refusing a task whose semantics require local MCP tools`,
+      );
+    }
+
+    if (
       dispatchSelection !== undefined &&
       input.runtime !== undefined &&
       input.runtime !== dispatchSelection.runtimeId
@@ -1503,6 +1517,7 @@ export class ConnectionHub {
       instruction: input.instruction,
       runtime,
       policy,
+      requiredToolsets,
       deviceId,
       sessionRef: input.sessionRef,
     });
@@ -1516,18 +1531,23 @@ export class ConnectionHub {
     queue.push({ kind: 'state', state: record.state, at: record.createdAt });
     this.serverEvents.push({ kind: 'task.created', taskId, at: record.createdAt });
 
-    this.sendToDevice(
-      deviceId,
-      'task.offer',
-      {
-        instruction: input.instruction,
-        policy,
-        runtime,
-        dispatchSelection,
-        sessionRef: input.sessionRef,
-      },
-      { taskId, sessionRef: input.sessionRef },
-    );
+    const commonOffer = {
+      instruction: input.instruction,
+      policy,
+      runtime,
+      dispatchSelection,
+      sessionRef: input.sessionRef,
+    };
+    if (requiredToolsets === undefined) {
+      this.sendToDevice(deviceId, 'task.offer', commonOffer, { taskId, sessionRef: input.sessionRef });
+    } else {
+      this.sendToDevice(
+        deviceId,
+        'task.offer_with_toolsets',
+        { ...commonOffer, requiredToolsets },
+        { taskId, sessionRef: input.sessionRef },
+      );
+    }
 
     return this.buildTaskHandle(taskId);
   }
@@ -1711,7 +1731,7 @@ export class ConnectionHub {
    * (everything except `conn.ack`), same as calling `createEnvelope`
    * directly would require.
    */
-  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer'>(
+  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer'>(
     deviceId: string,
     type: T,
     payload: Parameters<typeof createEnvelope<T>>[1],

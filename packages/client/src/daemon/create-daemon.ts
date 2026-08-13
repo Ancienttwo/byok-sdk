@@ -3,13 +3,13 @@ import {
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
   DEVICE_ASSERTION_MAX_TTL_MS,
 } from '@byok-sdk/core';
-import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS } from '@byok-sdk/protocol';
+import { createEnvelope, encodeEnvelope, TASK_TRANSITIONS, ToolsetIdSchema } from '@byok-sdk/protocol';
 import { isAbsolute } from 'node:path';
 import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, GitWorkspaceConfig } from '../types';
+import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig } from '../types';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { APPROVAL_MCP_SERVER_NAME, ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
@@ -261,6 +261,13 @@ export interface DaemonConfig {
    * `BYOK_*` deny (see `environment.ts`'s own doc comment).
    */
   runtimeEnvironment?: Record<string, { allow?: string[] }>;
+  /**
+   * Device-local registry behind wire-level `requiredToolsets` ids. Only
+   * logical ids cross the SaaS wire; MCP executable definitions stay here.
+   * The first slice supports stdio servers (`command` + `args`) only and
+   * deliberately has no task-provided env/header/secret surface.
+   */
+  mcpToolsets?: Record<string, McpToolsetConfig>;
   /**
    * M5: explicit escape hatch for `url.ts`'s `assertServerUrlAllowed` — see
    * that function's own doc comment for the full allow/deny rule. Default
@@ -597,9 +604,9 @@ function terminalKindOf(type: string): 'complete' | 'failed' | 'cancelled' | und
  * the cloud's own terminal receipt makes.
  *
  * `opensTask` is decided here, from the envelope's own type, rather than
- * inside the journal: `task.offer` is the one inbound type that brings a task
- * into existence on this device, and that is protocol knowledge this file
- * already has and the journal should not acquire a second copy of.
+ * inside the journal: the two offer variants are the inbound types that bring
+ * a task into existence on this device, and that is protocol knowledge this
+ * file already has and the journal should not acquire a second copy of.
  */
 function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity): ReceivedEnvelopeRecord {
   const bytes = encodeEnvelope(envelope);
@@ -611,7 +618,7 @@ function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity):
     bytes,
     bytesHash: journalHash(bytes),
     receivedAt: new Date().toISOString(),
-    opensTask: envelope.type === 'task.offer',
+    opensTask: envelope.type === 'task.offer' || envelope.type === 'task.offer_with_toolsets',
   };
 }
 
@@ -673,6 +680,9 @@ function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
     selectionAdapters.every((adapter) => adapter.supportsDispatchSelection === true)
   ) {
     flags.push('dispatch-selection');
+  }
+  if (adapters.some((adapter) => adapter.capabilities().mcpToolsets === true)) {
+    flags.push('toolset-selection');
   }
   return flags;
 }
@@ -775,6 +785,103 @@ function validatePiByokLauncherConfig(
   }
 }
 
+const MAX_LOCAL_MCP_TOOLSETS = 64;
+const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
+const MAX_LOCAL_MCP_ARGS = 64;
+const MAX_LOCAL_MCP_TOKEN_CHARS = 4096;
+
+function isNonEmptySingleLine(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.trim().length > 0 &&
+    value.length <= MAX_LOCAL_MCP_TOKEN_CHARS &&
+    !/[\u0000\r\n]/u.test(value)
+  );
+}
+
+/** Validate and snapshot the device-local MCP registry once at construction. */
+function resolveMcpToolsets(
+  configured: DaemonConfig['mcpToolsets'],
+): ReadonlyMap<string, McpToolsetConfig> | undefined {
+  if (configured === undefined) return undefined;
+  if (configured === null || typeof configured !== 'object' || Array.isArray(configured)) {
+    throw new Error('DaemonConfig.mcpToolsets must be an object keyed by logical toolset id');
+  }
+  const toolsetEntries = Object.entries(configured);
+  if (toolsetEntries.length > MAX_LOCAL_MCP_TOOLSETS) {
+    throw new Error(`DaemonConfig.mcpToolsets may contain at most ${MAX_LOCAL_MCP_TOOLSETS} toolsets`);
+  }
+
+  const resolved = new Map<string, McpToolsetConfig>();
+  for (const [toolsetId, rawToolset] of toolsetEntries) {
+    const parsedId = ToolsetIdSchema.safeParse(toolsetId);
+    if (!parsedId.success) {
+      throw new Error(`DaemonConfig.mcpToolsets contains invalid toolset id ${JSON.stringify(toolsetId)}`);
+    }
+    if (rawToolset === null || typeof rawToolset !== 'object' || Array.isArray(rawToolset)) {
+      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} must be an object`);
+    }
+    const toolsetKeys = Object.keys(rawToolset);
+    if (toolsetKeys.some((key) => key !== 'mcpServers')) {
+      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} accepts only the mcpServers field`);
+    }
+    const rawServers = (rawToolset as { mcpServers?: unknown }).mcpServers;
+    if (rawServers === null || typeof rawServers !== 'object' || Array.isArray(rawServers)) {
+      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers must be an object`);
+    }
+    const serverEntries = Object.entries(rawServers);
+    if (serverEntries.length === 0 || serverEntries.length > MAX_LOCAL_MCP_SERVERS_PER_TOOLSET) {
+      throw new Error(
+        `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers must contain 1-${MAX_LOCAL_MCP_SERVERS_PER_TOOLSET} servers`,
+      );
+    }
+
+    const servers: Record<string, { command: string; args?: readonly string[] }> = {};
+    for (const [serverName, rawServer] of serverEntries) {
+      if (!ToolsetIdSchema.safeParse(serverName).success) {
+        throw new Error(
+          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers contains invalid server name ${JSON.stringify(serverName)}`,
+        );
+      }
+      if (serverName === APPROVAL_MCP_SERVER_NAME) {
+        throw new Error(
+          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} uses a server name reserved by the daemon`,
+        );
+      }
+      if (rawServer === null || typeof rawServer !== 'object' || Array.isArray(rawServer)) {
+        throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} must be an object`);
+      }
+      const serverKeys = Object.keys(rawServer);
+      if (serverKeys.some((key) => key !== 'command' && key !== 'args')) {
+        throw new Error(
+          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} accepts only command and args; env, headers, and remote task data are not supported`,
+        );
+      }
+      const server = rawServer as { command?: unknown; args?: unknown };
+      if (!isNonEmptySingleLine(server.command)) {
+        throw new Error(
+          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.command must be a non-empty single-line string no longer than ${MAX_LOCAL_MCP_TOKEN_CHARS} characters`,
+        );
+      }
+      if (server.args !== undefined && !Array.isArray(server.args)) {
+        throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.args must be an array`);
+      }
+      const args = server.args ?? [];
+      if (args.length > MAX_LOCAL_MCP_ARGS || args.some((arg) => !isNonEmptySingleLine(arg))) {
+        throw new Error(
+          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.args must contain at most ${MAX_LOCAL_MCP_ARGS} non-empty single-line strings`,
+        );
+      }
+      servers[serverName] = Object.freeze({
+        command: server.command,
+        ...(args.length > 0 ? { args: Object.freeze([...args]) as readonly string[] } : {}),
+      });
+    }
+    resolved.set(toolsetId, Object.freeze({ mcpServers: Object.freeze(servers) }));
+  }
+  return resolved;
+}
+
 /**
  * Plan `device-assertion-broker`: validates `DaemonConfig.deviceAssertion
  * .audiences` and resolves it to the exact-match `Set` the `assertion.issue`
@@ -850,6 +957,7 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
+  const mcpToolsets = resolveMcpToolsets(config.mcpToolsets);
   if (config.piByokLauncher !== undefined) {
     validatePiByokLauncherConfig(config.piByokLauncher);
   }
@@ -1387,6 +1495,7 @@ export function buildDaemonWithAdapters(
       deviceId: record.deviceId,
       // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
       runtimeEnvironment: config.runtimeEnvironment,
+      ...(mcpToolsets ? { mcpToolsets } : {}),
       // M3-2a: `send` is already this file's OWN closure (not something
       // `TaskRunner` builds) — every `task.claim`/`task.started`/
       // `task.progress`/`task.artifact`/`task.await_approval`/

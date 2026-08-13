@@ -182,9 +182,9 @@ I might have missed after N." See [§9](#9-at-least-once-delivery--idempotency)
 for the full redelivery procedure.
 
 Server → daemon types (`seq` required): `conn.ack`, `task.offer`,
-`task.approve`, `task.reject`, `task.cancel`, `task.steer`. Every other type
-is daemon → server and leaves `seq` optional — M1 only specifies
-server-to-daemon redelivery, not the reverse.
+`task.offer_with_toolsets`, `task.approve`, `task.reject`, `task.cancel`,
+`task.steer`. Every other type is daemon → server and leaves `seq` optional —
+M1 only specifies server-to-daemon redelivery, not the reverse.
 
 **Do not confuse this with `task.progress`'s payload-level `seq`.** That field
 (`TaskProgressPayload.seq`) is unrelated — it orders progress batches *within
@@ -223,6 +223,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `runtimes?`, `cursor?` | Opening (or reopening) the WSS connection |
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
+| `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -258,6 +259,26 @@ Pi, provider) to the runtime. No layer may infer a missing provider/model or
 fall back to another target. The field is additive in frozen v1; offers that do
 not use provider selection retain the pre-existing `runtime?` behavior, but the
 new path never degrades into it after a selection was supplied.
+
+**`task.offer_with_toolsets` is a distinct additive message, not an optional
+field on `task.offer`.** `requiredToolsets` carries only bounded logical ids
+such as `salesko.crm`; it never carries an executable command, environment,
+header, token, cookie, or connector credential. The daemon resolves every id
+against its operator-owned local `mcpToolsets` configuration before claiming
+the task. Missing ids, duplicate MCP server names, an empty resolved set, or a
+runtime without `mcpToolsets` support all produce `task.decline` and no child
+process starts.
+
+The separate message type is the backward-safety boundary: a frozen-v1 daemon
+may skip an unknown additive message, but it cannot silently strip a new field
+and run the instruction without its required tools. The self-hosted server
+therefore requires the live connection's `toolset-selection` capability before
+creating the task. A hosted caller uses `enqueueToolsetOffer()` and must route
+only to a device it knows is toolset-capable. Claude is currently the sole
+bundled runtime that advertises `mcpToolsets`; the daemon projects the selected
+local stdio servers into one task-scoped `--mcp-config` and always supplies
+`--strict-mcp-config`. Confirm mode's internal approval server is merged into
+that same file. Pi and Codex decline these offers fail-closed.
 
 **`TaskOfferPayload.workspaceHint` is RESERVED — currently ignored end to
 end.** The field exists on the wire (`TaskOfferPayloadSchema`,
@@ -1238,7 +1259,7 @@ does not fix server/client**; that is M1-2/M1-3's job against this document.
 | # | Change | Was (M0) | Now (M1) |
 |---|---|---|---|
 | 1 | `envelope.task_id` requiredness | Optional for every type | **Required** for every `task.*` type; stays optional for `conn.*` |
-| 2 | `envelope.seq` requiredness | Always optional | **Required** for server→daemon types (`conn.ack`, `task.offer`, `task.approve`, `task.reject`, `task.cancel`, `task.steer`); stays optional for daemon→server types |
+| 2 | `envelope.seq` requiredness | Always optional | **Required** for server→daemon types (`conn.ack`, `task.offer`, `task.offer_with_toolsets`, `task.approve`, `task.reject`, `task.cancel`, `task.steer`); stays optional for daemon→server types |
 | 3 | `TaskOfferPayload.taskId` | Present (duplicated routing key) | **Removed** — envelope `task_id` is the sole routing key |
 | 4 | `TaskClaimPayload.taskId` | Present (duplicated routing key) | **Removed** — envelope `task_id` is the sole routing key |
 | 5 | `ConnHelloPayload.agents` | `unknown`, untyped, best-effort-normalized by the server | **Renamed and retyped**: `runtimes?: { id: 'pi'\|'claude'\|'codex', version?, authPresent? }[]` |
@@ -1389,6 +1410,7 @@ actively misleading in more than one case).
 | `plan` mode | rejected (no plan-only mode without a custom extension) | **supported** — see the residual below | rejected (no plan-only mode) |
 | `allowTools` | supported | supported (via the replacive `--tools`) | rejected always (no per-tool surface) |
 | `denyTools` | supported (resolved to an equivalent allowlist in-process) | supported only within `readonly`'s own allowlist-intersection; rejected fail-closed otherwise | rejected always |
+| task-scoped host MCP toolsets | no | **supported** — logical ids resolve through device-local config and run under `--strict-mcp-config` | no |
 | `network: false` | rejected, fail-closed (no sandbox) | rejected, fail-closed (no sandbox for the Bash tool) | supported (both sandbox modes this adapter ever selects default to no network) |
 | `network: true` | supported (nothing to enforce) | supported (nothing to enforce) | rejected, fail-closed (empirically doesn't restore real network access on the installed build) |
 | `interactive-approval` | no (RESERVED, §5.1) | no¹ | no |

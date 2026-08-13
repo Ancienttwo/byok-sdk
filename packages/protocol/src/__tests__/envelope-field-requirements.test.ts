@@ -34,6 +34,8 @@ function minimalPayload(type: MessageType): unknown {
       return { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() };
     case 'task.offer':
       return { instruction: 'do it', policy: { mode: 'auto' } };
+    case 'task.offer_with_toolsets':
+      return { instruction: 'find leads', policy: { mode: 'auto' }, requiredToolsets: ['salesko'] };
     case 'task.approve':
       return {};
     case 'task.reject':

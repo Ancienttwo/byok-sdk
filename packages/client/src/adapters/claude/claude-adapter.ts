@@ -24,7 +24,7 @@ import { ClaudeProcessClient, type SpawnFn } from './process-client';
 import { APPROVAL_TOOL_NAME } from '../../bin/approval-mcp-server';
 
 /** The MCP server NAME this adapter registers `byok-approval-mcp` under in the generated `--mcp-config` (arbitrary, local to this file) — combined with {@link APPROVAL_TOOL_NAME} (imported, single-sourced from `bin/approval-mcp-server.ts` so the two can never independently drift) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. */
-const APPROVAL_MCP_SERVER_NAME = 'byokapproval';
+export const APPROVAL_MCP_SERVER_NAME = 'byokapproval';
 
 const execFileAsync = promisify(execFile);
 
@@ -35,8 +35,8 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Best-effort teardown of the temp `--mcp-config` directory `start()` creates for `confirm` mode (see its own doc comment) — never throws, since a cleanup failure must never mask the real error/result it's cleaning up after. No-ops when `dir` is `undefined` (every mode other than `confirm`). */
-async function cleanupApprovalMcpConfigDir(dir: string | undefined): Promise<void> {
+/** Best-effort teardown of the task-scoped temp `--mcp-config` directory. */
+async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
   if (!dir) return;
   await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
 }
@@ -179,7 +179,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // to end: `--permission-prompt-tool` → the out-of-process approval MCP
     // server (`bin/byok-approval-mcp.ts`) → this daemon's control socket →
     // `ClaudeSession.resolveApproval` really resuming the paused turn.
-    return { steer: false, resume: true, approvalInteractive: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] };
+    return {
+      steer: false,
+      resume: true,
+      approvalInteractive: true,
+      mcpToolsets: true,
+      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+    };
   }
 
   /**
@@ -220,7 +226,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // path, productId, and this taskId — no secret/token material at all;
     // the actual control-socket auth token stays under storeDir, unrelated
     // to this file) would be low-value to an agent that found it anyway.
-    let approvalMcpConfigDir: string | undefined;
+    let mcpConfigDir: string | undefined;
+    const taskMcpServers = ctx.mcpServers ?? {};
+    const needsMcpConfig = mapping.needsApprovalMcp || Object.keys(taskMcpServers).length > 0;
     if (mapping.needsApprovalMcp) {
       if (!ctx.approvalChannel) {
         // Internal-consistency fail-closed: TaskRunner always populates this
@@ -230,34 +238,43 @@ export class ClaudeAdapter implements RuntimeAdapter {
           'claude adapter requires policy.mode "confirm" to be started with an approval channel (TaskContext.approvalChannel) — none was provided',
         );
       }
-      const approvalMcpBin = (this.options.resolveApprovalMcpBin ?? resolveApprovalMcpBin)();
-      approvalMcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-approval-mcp-'));
-      await fs.chmod(approvalMcpConfigDir, 0o700).catch(() => {});
-      const mcpConfigPath = path.join(approvalMcpConfigDir, 'mcp-config.json');
-      const mcpConfig = {
-        mcpServers: {
-          [APPROVAL_MCP_SERVER_NAME]: {
-            command: approvalMcpBin.command,
-            args: approvalMcpBin.args,
-            env: {
-              BYOK_STORE_DIR: ctx.approvalChannel.storeDir,
-              BYOK_PRODUCT_ID: ctx.approvalChannel.productId,
-              BYOK_TASK_ID: ctx.approvalChannel.taskId,
-              BYOK_APPROVAL_TIMEOUT_MS: String(ctx.approvalChannel.timeoutMs),
-            },
+      if (Object.prototype.hasOwnProperty.call(taskMcpServers, APPROVAL_MCP_SERVER_NAME)) {
+        throw new PolicyUnsupportedError(
+          `MCP server name "${APPROVAL_MCP_SERVER_NAME}" is reserved by the claude approval channel`,
+        );
+      }
+    }
+
+    if (needsMcpConfig) {
+      mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-mcp-'));
+      await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
+      const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
+      const mcpServers: Record<string, unknown> = { ...taskMcpServers };
+      if (mapping.needsApprovalMcp) {
+        const approvalChannel = ctx.approvalChannel;
+        if (!approvalChannel) throw new Error('unreachable: approval channel checked above');
+        const approvalMcpBin = (this.options.resolveApprovalMcpBin ?? resolveApprovalMcpBin)();
+        mcpServers[APPROVAL_MCP_SERVER_NAME] = {
+          command: approvalMcpBin.command,
+          args: approvalMcpBin.args,
+          env: {
+            BYOK_STORE_DIR: approvalChannel.storeDir,
+            BYOK_PRODUCT_ID: approvalChannel.productId,
+            BYOK_TASK_ID: approvalChannel.taskId,
+            BYOK_APPROVAL_TIMEOUT_MS: String(approvalChannel.timeoutMs),
           },
-        },
-      };
-      await fs.writeFile(mcpConfigPath, JSON.stringify(mcpConfig), { mode: 0o600 });
+        };
+      }
+      await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
       mapping.args = [
         ...mapping.args,
-        '--permission-prompt-tool',
-        `mcp__${APPROVAL_MCP_SERVER_NAME}__${APPROVAL_TOOL_NAME}`,
+        ...(mapping.needsApprovalMcp
+          ? ['--permission-prompt-tool', `mcp__${APPROVAL_MCP_SERVER_NAME}__${APPROVAL_TOOL_NAME}`]
+          : []),
         '--mcp-config',
         mcpConfigPath,
-        // Never let this task's confirm-mode run pick up some OTHER MCP
-        // server from ambient project/user config — the approval channel is
-        // the only MCP server this invocation should ever see.
+        // The generated file is the complete task-scoped MCP authority.
+        // Never merge ambient user/project MCP configuration into it.
         '--strict-mcp-config',
       ];
     }
@@ -317,7 +334,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       sessionRef = await client.waitForInit();
     } catch (err) {
       client.kill();
-      await cleanupApprovalMcpConfigDir(approvalMcpConfigDir);
+      await cleanupMcpConfigDir(mcpConfigDir);
       throw err;
     }
 
@@ -331,7 +348,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // to the caller at all. Fail closed instead of trusting the assumption.
     if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
       client.kill();
-      await cleanupApprovalMcpConfigDir(approvalMcpConfigDir);
+      await cleanupMcpConfigDir(mcpConfigDir);
       throw new Error(
         `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef}) — refusing to continue in a possibly-wrong session (fail-closed)`,
       );
@@ -342,7 +359,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       client,
       ctx.workspaceDir,
       ctx.approvalChannel,
-      approvalMcpConfigDir,
+      mcpConfigDir,
       modelId,
     );
   }
@@ -404,8 +421,8 @@ class ClaudeSession implements Session {
     private readonly workspaceDir: string,
     /** M4 Phase 3: set only when this session was started under `policy.mode: 'confirm'` — see `resolveApproval()`. */
     private readonly approvalChannel?: ApprovalChannel,
-    /** M4 Phase 3: the temp `--mcp-config` directory `start()` created for this session, if any — removed in `close()`. */
-    private readonly approvalMcpConfigDir?: string,
+    /** Task-scoped temp `--mcp-config` directory, if any — removed in `close()`. */
+    private readonly mcpConfigDir?: string,
     private readonly modelId?: string,
   ) {}
 
@@ -530,7 +547,7 @@ class ClaudeSession implements Session {
 
   async close(): Promise<void> {
     this.client.kill();
-    await cleanupApprovalMcpConfigDir(this.approvalMcpConfigDir);
+    await cleanupMcpConfigDir(this.mcpConfigDir);
   }
 
   /**

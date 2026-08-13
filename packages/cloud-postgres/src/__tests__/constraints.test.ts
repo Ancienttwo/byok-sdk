@@ -276,6 +276,7 @@ describe('dependency boundaries', () => {
     const allowed = new Set([
       '@byok-sdk/core',
       '@byok-sdk/cloud',
+      '@byok-sdk/protocol',
       'pg',
       'aws4fetch',
       'fast-xml-parser',

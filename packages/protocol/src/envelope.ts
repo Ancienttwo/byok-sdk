@@ -60,6 +60,7 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   // task.* server -> daemon: task_id required (routing key) + seq required
   // (per-device redelivery cursor).
   envelopeShape('task.offer', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('task.offer_with_toolsets', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.approve', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.reject', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.cancel', REQUIRED_TASK_ID, REQUIRED_SEQ),
