@@ -11,5 +11,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- [ ] 2026-08-13T23:42:07+0800 [medium] `packages/cloud-postgres/package.json` -> [root](requests/root.md)
+- [ ] 2026-08-14T00:14:09+0800 [medium] `packages/client/package.json` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
