@@ -1,6 +1,6 @@
 # Task Contract: ci-stability-flakes
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260813-1028-ci-stability-flakes.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict

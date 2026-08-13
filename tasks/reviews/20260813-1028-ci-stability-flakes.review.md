@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:037edaaaba7f5e055eca6cfdcf043df35e0efa2fbb56b8536414eb5babd32842
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 9277b4ec5297f0291caa211e05b326bff5abce96
+> **Verification Evidence SHA256**: sha256:bc33982ce5bd2113e3142a27ca17c77935b3278fba7c103884e59001345cd954
+> **Issued At**: 2026-08-13T03:23:44.912Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: gatekeeper PASS: two proven root causes fixed (setup-bun CDN pin; store-scoped mutex lock replacing shared TCP namespace), fail-closed invariant machine-checked (guard B), vitest seam removed, 9/9 exit criteria green, pre-fix RED artifacts on record
 - Findings: none
 
 ## Behavior Diff Notes
