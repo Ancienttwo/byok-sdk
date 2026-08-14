@@ -28,4 +28,25 @@ candidate devices before enqueue. This is TTL-bounded discovery, not execution
 authority: the daemon still resolves every required ID locally and declines
 fail-closed if its configuration changed.
 
+Reading a task's outcome goes through the same first terminal fact twice:
+`readTerminalReceipt(tenant, taskId)` returns the stored envelope raw, and
+`readTaskResult(tenant, taskId)` decodes that same receipt into a typed
+`TerminalResult` — the state, plus `summary`/`sessionRef`/`artifactRefs`/
+`document` on a completion or `reason`/`retryable` on a failure — projected
+verbatim with no re-validation:
+
+```ts
+const result = await cloud.readTaskResult(tenantId, taskId);
+if (result === undefined) {
+  // No terminal fact yet. A declined task records none — read the attempt
+  // status with `readTaskAttempt(tenant, taskId)` for that case.
+} else if (result.state === 'failed' && result.retryable) {
+  // re-offer
+}
+```
+
+`document` is absent, never null, when the daemon sent none; a receipt whose
+stored body is not a terminal envelope throws `ByokCloudError` rather than
+returning a best-effort shape.
+
 MIT licensed. Node.js 22.19.0 or newer.

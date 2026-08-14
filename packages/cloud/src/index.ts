@@ -100,6 +100,10 @@ export type { CloudCrypto } from './crypto/port';
 export { handleInboundEnvelope, terminalReceiptKey } from './inbound';
 export type { InboundOutcome } from './inbound';
 
+// Typed terminal read model (the receipt `readTerminalReceipt` hands back raw)
+export { projectTerminalResult } from './terminal-result';
+export type { TerminalResult } from './terminal-result';
+
 // Tenant facade (layer 2 of §12.6.2)
 export { tenantStoresFor } from './tenant-stores';
 export type {

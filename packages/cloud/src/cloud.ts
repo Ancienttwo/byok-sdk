@@ -121,6 +121,7 @@ import type {
   RequestReceipt,
   TaskAttempt,
 } from './stores/ports';
+import { projectTerminalResult, type TerminalResult } from './terminal-result';
 import { tenantStoresFor, type CloudRootStores } from './tenant-stores';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 
@@ -229,6 +230,19 @@ export interface ByokCloud {
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
+  /**
+   * Host control plane: the same first terminal, decoded into the typed read
+   * model ({@link TerminalResult}) so a host reads result fields, not envelope
+   * prose. `undefined` ONLY means no terminal fact is recorded yet:
+   * first-terminal-wins is inherited from the receipt store
+   * ({@link ByokCloud.readTerminalReceipt} reads the same row), and a declined
+   * task records no terminal at all — use {@link ByokCloud.readTaskAttempt}
+   * for that attempt status. An absent `document` covers both a legacy
+   * pre-`result-document` daemon build and a daemon with no `resultDocument`
+   * extractor; a receipt whose body is not a terminal envelope throws rather
+   * than returning a best-effort shape.
+   */
+  readTaskResult(tenant: TenantId, taskId: string): Promise<TerminalResult | undefined>;
   listDevices(tenant: TenantId): Promise<readonly DeviceRecord[]>;
   revokeDevice(tenant: TenantId, deviceId: string): Promise<void>;
   /** Host control plane: create a board row from explicit producer labels. */
@@ -533,6 +547,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     readTerminalReceipt(tenant, taskId) {
       return tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+    },
+
+    async readTaskResult(tenant, taskId) {
+      const receipt = await tenantStoresFor(controlPlane(tenant), root).receipts.get(
+        terminalReceiptKey(taskId),
+      );
+      return receipt === undefined ? undefined : projectTerminalResult(taskId, receipt);
     },
 
     listDevices(tenant) {

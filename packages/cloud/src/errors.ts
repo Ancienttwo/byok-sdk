@@ -33,6 +33,13 @@ export const CLOUD_ERROR_CODES = {
   capability_over_declared: 'capability_over_declared',
   /** Host-supplied board labels or coordination input exceeded the explicit contract. */
   coordination_input_invalid: 'coordination_input_invalid',
+  /**
+   * A terminal receipt whose stored body is not a terminal envelope — either
+   * undecodable or a non-terminal type. Whatever wrote that row broke the
+   * receipt-store contract, so the typed read model fails closed instead of
+   * projecting a best-effort shape.
+   */
+  terminal_receipt_unreadable: 'terminal_receipt_unreadable',
   /** A progress/activity batch exceeded the configured event or byte ceiling. */
   activity_batch_too_large: 'activity_batch_too_large',
 } as const;

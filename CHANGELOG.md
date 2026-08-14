@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added `readTaskResult()` to `@byok-sdk/cloud`: a typed host control-plane
+  read that decodes the first terminal receipt into a `TerminalResult` (state,
+  summary, sessionRef, artifactRefs, document, reason, retryable, recordedAt)
+  instead of leaving hosts to hand-decode `readTerminalReceipt`'s raw
+  envelope. The fail-closed projection is exported as `projectTerminalResult`;
+  `undefined` still means only that no terminal fact is recorded yet.
 - Renamed the production hosted composition from
   `@byok-sdk/cloud-postgres` to `@byok-sdk/cloud-dataplane`, and renamed the
   umbrella namespace from `cloudPostgres` to `cloudDataplane`. The old package
