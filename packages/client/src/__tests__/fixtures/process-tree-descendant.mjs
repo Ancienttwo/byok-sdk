@@ -20,7 +20,7 @@
 // processes behind indefinitely.
 
 import { spawn } from 'node:child_process';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 
 const [receiptFile, rootPid, ignoreTerm, escapeLog] = process.argv.slice(2);
 
@@ -33,11 +33,15 @@ if (grandchild.pid === undefined) {
   process.exit(1);
 }
 
-writeFileSync(receiptFile, JSON.stringify({
+// Published by rename so a reader can never observe a half-written receipt:
+// the smoke reads this file once, with no retry.
+const receiptBody = JSON.stringify({
   rootPid: Number(rootPid),
   descendantPid: process.pid,
   grandchildPid: grandchild.pid,
-}));
+});
+writeFileSync(`${receiptFile}.tmp`, receiptBody);
+renameSync(`${receiptFile}.tmp`, receiptFile);
 
 if (escapeLog) {
   setInterval(() => {

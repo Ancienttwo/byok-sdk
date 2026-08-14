@@ -92,14 +92,10 @@
 //                                    ./process-tree-descendant.mjs.
 
 import { writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
+import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
 
 const argv = process.argv.slice(2);
-
-/** Levels 2 and 3 of the owned tree, shared with fake-claude/fake-codex; it writes the pid receipt itself. */
-const PROCESS_TREE_DESCENDANT = fileURLToPath(new URL('./process-tree-descendant.mjs', import.meta.url));
 
 if (argv.includes('--version')) {
   process.stdout.write(`${process.env.FAKE_PI_VERSION ?? '0.0.0-fake'}\n`);
@@ -146,17 +142,13 @@ const processTreeFile = process.env.FAKE_PI_PROCESS_TREE_FILE;
 if (processTreeFile) {
   const ignoreTerm = process.env.FAKE_PI_IGNORE_TERM === '1';
   if (ignoreTerm) process.on('SIGTERM', () => {});
-  const descendant = spawn(process.execPath, [
-    PROCESS_TREE_DESCENDANT,
-    processTreeFile,
-    String(process.pid),
-    ignoreTerm ? '1' : '0',
-    process.env.FAKE_PI_ESCAPE_LOG ?? '',
-  ], { stdio: 'ignore' });
-  if (descendant.pid === undefined) {
-    process.stderr.write('fake-pi: descendant did not receive a pid\n');
-    process.exit(1);
-  }
+  // Awaited: the receipt must be complete before the first protocol frame.
+  await spawnProcessTreeDescendant({
+    receiptFile: processTreeFile,
+    rootPid: process.pid,
+    ignoreTerm,
+    escapeLog: process.env.FAKE_PI_ESCAPE_LOG ?? '',
+  });
 }
 
 const sessionIdx = argv.indexOf('--session');

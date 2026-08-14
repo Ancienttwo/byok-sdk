@@ -325,14 +325,27 @@ try {
         () => localEvents.some((event) => event.taskId === handle.taskId && event.kind === 'started'),
         `${runtime} lifecycle start`,
       );
+      // The fixture blocks until this receipt is complete before emitting its
+      // first frame, so a single read after `started` is sufficient — see
+      // src/__tests__/fixtures/process-tree-receipt.mjs.
       const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8'));
-      assert(processExists(receipt.rootPid), `${runtime} root was not live before cancellation`);
-      assert(processExists(receipt.descendantPid), `${runtime} descendant was not live before cancellation`);
+      const tree = [
+        ['root', receipt.rootPid],
+        ['descendant', receipt.descendantPid],
+        // Third level: a direct-child-only termination and a one-level sweep
+        // are indistinguishable without it.
+        ['grandchild', receipt.grandchildPid],
+      ];
+      for (const [level, pid] of tree) {
+        assert(Number.isSafeInteger(pid) && pid > 0, `${runtime} receipt did not record a ${level} pid`);
+        assert(processExists(pid), `${runtime} ${level} was not live before cancellation`);
+      }
       await withTimeout(handle.cancel('lifecycle smoke cancellation'), `${runtime} lifecycle cancel`);
       await waitFor(() => daemon.status().activeTaskCount === 0, `${runtime} quiescent disposal`);
-      assert(!processExists(receipt.rootPid), `${runtime} root remained live after TaskRunner released ownership`);
-      assert(!processExists(receipt.descendantPid), `${runtime} descendant remained live after TaskRunner released ownership`);
-      console.log(`PASS ${runtime} lifecycle: cancel -> quiescent root+descendant disposal`);
+      for (const [level, pid] of tree) {
+        assert(!processExists(pid), `${runtime} ${level} remained live after TaskRunner released ownership`);
+      }
+      console.log(`PASS ${runtime} lifecycle: cancel -> quiescent root+descendant+grandchild disposal`);
     } finally {
       delete process.env[envNames.receipt];
       delete process.env[envNames.hang];
