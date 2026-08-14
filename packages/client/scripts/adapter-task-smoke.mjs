@@ -124,15 +124,32 @@ try {
   // the isolated temp files; the daemon's environment allowlist is exercised on
   // top of this already-synthetic ambient environment.
   const hostPath = process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin';
+  const platformEnvironment = process.platform === 'win32'
+    ? {
+        USERPROFILE: home,
+        TEMP: tmpDir,
+        TMP: tmpDir,
+      }
+    : {
+        TMPDIR: tmpDir,
+        SHELL: process.env.SHELL ?? '/bin/sh',
+      };
   originalEnvironment = replaceProcessEnvironment({
     PATH: hostPath,
     HOME: home,
-    TMPDIR: tmpDir,
+    ...platformEnvironment,
     LANG: 'C',
     LC_ALL: 'C',
     TZ: 'UTC',
-    SHELL: process.env.SHELL ?? '/bin/sh',
   });
+  assert(
+    path.resolve(os.tmpdir()) === path.resolve(tmpDir),
+    `synthetic temp authority escaped isolation: ${os.tmpdir()}`,
+  );
+  assert(
+    path.resolve(os.homedir()) === path.resolve(home),
+    `synthetic home authority escaped isolation: ${os.homedir()}`,
+  );
 
   const [{ createByokServer }, { serve }, client] = await Promise.all([
     import(pathToFileURL(serverDistIndex).href),
