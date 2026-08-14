@@ -124,8 +124,13 @@ try {
   // the isolated temp files; the daemon's environment allowlist is exercised on
   // top of this already-synthetic ambient environment.
   const hostPath = process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin';
+  const systemRoot = process.env.SystemRoot;
+  if (process.platform === 'win32') {
+    assert(systemRoot, 'Windows smoke requires SystemRoot to execute system tools');
+  }
   const platformEnvironment = process.platform === 'win32'
     ? {
+        SystemRoot: systemRoot,
         USERPROFILE: home,
         TEMP: tmpDir,
         TMP: tmpDir,
