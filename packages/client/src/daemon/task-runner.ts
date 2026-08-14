@@ -28,7 +28,12 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../types';
-import { projectRuntimeBoundaryFailure } from '../runtime-failure';
+import {
+  RuntimeDisposalFailure,
+  isRuntimeDisposalFailure,
+  projectRuntimeBoundaryFailure,
+  type RuntimeDisposalStage,
+} from '../runtime-failure';
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
@@ -278,6 +283,13 @@ export interface TaskRunnerDeps {
     observation?: GitWorkspaceObservation;
     errorCategory?: string;
   }) => void;
+  /** Local-only evidence that a semantic terminal outcome could not yet release its runtime ownership. */
+  onRuntimeDisposalFailure?: (event: {
+    taskId: string;
+    runtimeId: string;
+    stage: RuntimeDisposalStage;
+    reason: string;
+  }) => void;
   /**
    * M4 Phase 3: this daemon's control-socket identity + the shared registry
    * backing the control socket's own `approvals.list`/`approvals.resolve`
@@ -317,7 +329,7 @@ export interface TaskRunnerDeps {
    * to supply one — mirrors `onStaleApprovalDecision`'s own contract.
    */
   onApprovalDispatched?: (taskId: string, approvalId: string) => void;
-  /** Finding F5(a): overrides {@link DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS} — see `teardownActiveTask`'s own doc comment. Also the grace window `teardownActiveTask`'s hard-kill escalation (`session.close()`) gets once `session.interrupt()` itself fails to settle in time — see that method's own doc comment for why the same window is reused for both steps. */
+  /** Overrides the bounded soft-interrupt window before authoritative `Session.close()` disposal begins. */
   shutdownInterruptTimeoutMs?: number;
   /**
    * M5 batch-3 (workstream 2): overrides {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}
@@ -430,31 +442,16 @@ interface ActiveTask {
    * wire-byte accountant).
    */
   outputBytesSoFar: number;
-  /**
-   * M5 batch-3 (workstream 2): set at the very start of
-   * `teardownActiveTask`, before either `session.interrupt()` or its
-   * hard-kill `session.close()` escalation runs. Both are real teardown
-   * primitives that MAY end this task's own `session.events` iterable as a
-   * side effect (e.g. claude's `interrupt()`/`close()` are both
-   * `client.kill()`, which SIGTERMs the process — killing it ends the
-   * stdout stream that backs `events`). Without this flag, `pump()`'s own
-   * "the events iterable ended without an explicit turn_end" contract guard
-   * (which exists for an unexpected adapter termination) can't
-   * tell that apart from a teardown *this* runner itself just triggered, and
-   * would report its OWN adapter-contract `task.fail` — racing
-   * `teardownActiveTask`'s own
-   * intended, more specific outcome, and potentially winning it: for a
-   * fast-closing session, `pump()`'s reaction to the queue ending is a
-   * SHORTER chain than `teardownActiveTask`'s own remaining steps (a
-   * possible hard-kill await, an identity re-check, then send+finish).
-   * `finish()` deletes this task from `this.tasks` BEFORE calling
-   * `session.close()` for exactly the same reason (see `handleCancel`'s own
-   * doc comment on `pump`'s identity check) — this flag covers the
-   * additional window `teardownActiveTask`'s own PRE-finish() hard-kill
-   * `close()` call opens that the delete-before-close ordering alone
-   * doesn't.
-   */
+  /** Distinguishes runner-initiated teardown from an unexpected event-stream end. */
   beingTornDown?: boolean;
+  /** Set before the first disposal await so no racing path can publish a second semantic terminal. */
+  finalizationStarted?: boolean;
+  /** Reserved synchronously by the one path allowed to publish this task's terminal envelope. */
+  semanticTerminalReserved?: boolean;
+  semanticTerminalSettled?: Promise<boolean>;
+  resolveSemanticTerminalSettled?: (disposed: boolean) => void;
+  /** Shared receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
+  disposalAttempt?: Promise<void>;
 }
 
 /** One not-yet-dispatched `requestApproval` call waiting its turn — see `ActiveTask.approvalQueue`. */
@@ -884,10 +881,9 @@ export class TaskRunner {
   }
 
   /**
-   * M4 Phase 2: best-effort shutdown of every currently ACTIVE task, for the
-   * control socket's `shutdown` RPC. Mirrors `handleCancel`'s best-effort
-   * `session.interrupt()` style (an interrupt failure is swallowed; the
-   * terminal message is sent either way) but reports `task.fail` rather than
+   * Shutdown of every currently ACTIVE task for the control socket's
+   * `shutdown` RPC. Soft interrupt remains bounded, but each task's
+   * authoritative close receipt must settle successfully. Reports `task.fail` rather than
    * `task.cancelled` — these tasks aren't ending because the SERVER
    * cancelled them, they're ending because this device is shutting down.
    * `retryable: true` throughout: nothing about the task/policy itself was
@@ -942,28 +938,13 @@ export class TaskRunner {
    * unconditionally, so a hung `interrupt()` (a misbehaving adapter) can
    * never block `task.fail` from being sent at all.
    *
-   * New in this batch — hard-kill escalation: when `interrupt()` does NOT
-   * settle within that same grace window, `session.close()` is tried next
-   * (ALSO raced against `timeoutMs`, for the identical reason: a hung
-   * `close()` must not be able to block this forever either — which matters
-   * far more here than it used to for the pre-existing graceful-shutdown-only
-   * caller, since THAT path is additionally bounded by an outer deadline
-   * (`SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS`/`DaemonConfig.shutdownGraceMs`,
-   * `create-daemon.ts`), while resource-limit enforcement fires during
-   * ordinary operation with no such outer bound watching it). `close()` is
-   * every adapter's harder teardown primitive — an actual process-level kill
-   * (SIGTERM, or `taskkill /F` on Windows — see e.g.
-   * `ClaudeProcessClient.kill()`/`PiRpcClient.kill()`) as opposed to pi's own
-   * soft in-band `interrupt()` (an RPC `abort` message that leaves the
-   * process alive and resumable) — so escalating to it is the closest thing
-   * to a "hard kill" the `Session` interface exposes. `finish()` below calls
-   * `session.close()` again regardless (documented idempotent) — this isn't
-   * a substitute for that, only an earlier, bounded attempt at actually
-   * stopping a stuck runtime before this method gives up and reports failure
-   * anyway.
+   * After the bounded soft interrupt, `finish()` always awaits the authoritative
+   * `Session.close()` receipt. A failed receipt retains active/Git ownership;
+   * shutdown surfaces the rejection while resource enforcement leaves local
+   * evidence for a later retry.
    *
    * Re-checks task identity (`this.tasks.get(...) === active`) immediately
-   * before sending `task.fail`: the interrupt/hard-kill race above has await
+   * before sending `task.fail`: the interrupt race above has await
    * points during which a DIFFERENT path (a racing `task.cancel`/
    * `task.reject`, or the session completing normally on its own) may have
    * already finished this exact task and sent its own terminal message.
@@ -971,25 +952,29 @@ export class TaskRunner {
    * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
    * identity-check guard for the same class of race.
    */
-  private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean): Promise<void> {
-    // See `ActiveTask.beingTornDown`'s own doc comment: must be set BEFORE
-    // either step below, since either one (not just the hard-kill escalation)
-    // can end this task's `session.events` iterable as a side effect.
+  private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean): Promise<boolean> {
+    if (active.finalizationStarted) return this.finish(active.taskId);
+    if (!this.reserveSemanticTerminal(active)) return active.semanticTerminalSettled ?? false;
+    // A soft interrupt may end the event stream; mark it as runner-initiated
+    // before crossing that boundary.
     active.beingTornDown = true;
     await this.observeGit(active, 'salvage');
     const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
-    const interrupted = await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
-    if (!interrupted) {
-      await raceSettleFirst(() => active.session.close(), timeoutMs);
-    }
-    if (this.tasks.get(active.taskId) !== active) return;
+    await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
+    if (this.tasks.get(active.taskId) !== active) return true;
     this.deps.send(createEnvelope('task.fail', { reason, retryable }, { taskId: active.taskId }));
-    await this.finish(active.taskId);
+    return this.finish(active.taskId);
   }
 
   /** Graceful-shutdown caller of {@link teardownActiveTask} — see `shutdownActiveTasks`'s own doc comment. `retryable: true`: nothing about the task/policy itself was ever at fault, only this device's own availability right now. */
   private async shutdownTask(active: ActiveTask, reason: string): Promise<void> {
-    await this.teardownActiveTask(active, `daemon shutting down: ${reason}`, true);
+    const disposed = await this.teardownActiveTask(active, `daemon shutting down: ${reason}`, true);
+    if (!disposed) {
+      throw new RuntimeDisposalFailure({
+        stage: 'quiescence',
+        reason: `${active.adapter.descriptor.id} runtime ownership remains active after shutdown disposal failed`,
+      });
+    }
   }
 
   /**
@@ -1447,6 +1432,23 @@ export class TaskRunner {
         return;
       }
 
+      const active: ActiveTask = {
+        taskId,
+        adapter: pick.adapter,
+        session,
+        workspaceDir,
+        gitWorkspaceId,
+        gitLease,
+        gitBaseline,
+        summaryParts: [],
+        batcher: new ProgressBatcher(
+          (seq, events) => this.deps.send(createEnvelope('task.progress', { seq, events }, { taskId, seq })),
+          this.deps.batcherOptions,
+        ),
+        approvalQueue: [],
+        outputBytesSoFar: 0,
+      };
+
       // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
       // task.cancel arrived while prepared-operation start() was in flight — i.e. AFTER
       // task.claim already went out above, so declining is no longer an
@@ -1458,19 +1460,16 @@ export class TaskRunner {
       if (this.pendingCancelled.has(taskId)) {
         const reason = this.pendingCancelled.get(taskId);
         this.pendingCancelled.delete(taskId);
+        this.tasks.set(taskId, active);
+        this.reserveSemanticTerminal(active);
         try {
           await session.interrupt();
         } catch {
           // best-effort — still report cancellation below
         }
-        try {
-          await session.close();
-        } catch {
-          // best-effort teardown
-        }
-        gitLease?.release();
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
         this.deps.send(createEnvelope('task.cancelled', { reason }, { taskId }));
+        await this.finish(taskId);
         return;
       }
 
@@ -1488,22 +1487,6 @@ export class TaskRunner {
       // sessionWorkspaces write (below) before registering `active` and broke
       // exactly this: a cancel racing a task.offer lost its `interrupt()`/
       // `task.cancelled` entirely.
-      const active: ActiveTask = {
-        taskId,
-        adapter: pick.adapter,
-        session,
-        workspaceDir,
-        gitWorkspaceId,
-        gitLease,
-        gitBaseline,
-        summaryParts: [],
-        batcher: new ProgressBatcher(
-          (seq, events) => this.deps.send(createEnvelope('task.progress', { seq, events }, { taskId, seq })),
-          this.deps.batcherOptions,
-        ),
-        approvalQueue: [],
-        outputBytesSoFar: 0,
-      };
       this.tasks.set(taskId, active);
       // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
       // comment — still inside the synchronous construct -> register -> arm
@@ -1579,6 +1562,7 @@ export class TaskRunner {
   private async pump(active: ActiveTask): Promise<void> {
     try {
       for await (const event of active.session.events) {
+        if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
         // A concurrent task.cancel/task.reject may already have finished
         // (and deleted) this task while this loop was awaiting the next
         // event — e.g. the runtime's own interrupt handling settles with a
@@ -1707,6 +1691,7 @@ export class TaskRunner {
           const outcome = await this.resolveResultDocument(active, finalOutput);
           if (!outcome.deliver) return; // already reported task.fail and finished
           await this.observeGit(active, 'completed');
+          if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
           // F3 (codex adversarial review, P1): the capability was checked
           // inside `resolveResultDocument` — but `observeGit` above is an
           // await, and a reconnect landing in that window can replace the
@@ -1727,6 +1712,7 @@ export class TaskRunner {
             );
             return;
           }
+          if (!this.reserveSemanticTerminal(active)) return;
           this.deps.send(
             createEnvelope(
               'task.complete',
@@ -1869,6 +1855,14 @@ export class TaskRunner {
       // identical in effect to the old silent-drop behavior for that case
       // (M3-B: except now bounded — see `setPendingCancelled`).
       this.setPendingCancelled(taskId, reason);
+      return;
+    }
+    if (active.finalizationStarted) {
+      await this.finish(taskId);
+      return;
+    }
+    if (!this.reserveSemanticTerminal(active)) {
+      await active.semanticTerminalSettled;
       return;
     }
     try {
@@ -2386,6 +2380,10 @@ export class TaskRunner {
   private async handleReject(taskId: string, reason: string | undefined, approvalId: string | undefined): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
+    if (active.finalizationStarted) {
+      await this.finish(taskId);
+      return;
+    }
     // M5 (approval targeting): same validate-first mismatch check as
     // handleApprove above — see that method's own comment for the full
     // race this closes. Returned early here means NONE of the
@@ -2423,6 +2421,10 @@ export class TaskRunner {
     // back to a server that already knows this decision (it sent this
     // task.reject itself) if this hadn't already cleared it as 'wire' here.
     this.clearPendingApproval(resolvedId, 'reject', reason);
+    if (!this.reserveSemanticTerminal(active)) {
+      await active.semanticTerminalSettled;
+      return;
+    }
     try {
       await active.session.interrupt();
     } catch {
@@ -2444,6 +2446,14 @@ export class TaskRunner {
 
   private async fail(taskId: string, reason: string, retryable: boolean): Promise<void> {
     const active = this.tasks.get(taskId);
+    if (active?.finalizationStarted) {
+      await this.finish(taskId);
+      return;
+    }
+    if (active && !this.reserveSemanticTerminal(active)) {
+      await active.semanticTerminalSettled;
+      return;
+    }
     if (active) await this.observeGit(active, 'salvage');
     this.deps.send(createEnvelope('task.fail', { reason, retryable }, { taskId }));
     await this.finish(taskId);
@@ -2595,22 +2605,24 @@ export class TaskRunner {
     await this.deps.gitWorkspaceStore.upsert({ ...current, phase, ...(errorCategory ? { errorCategory } : {}) }).catch(() => {});
   }
 
-  private async finish(taskId: string): Promise<void> {
+  private async finish(taskId: string): Promise<boolean> {
     const active = this.tasks.get(taskId);
-    if (!active) return;
+    if (!active) return true;
     // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
     // comment — `finish()` is the single choke point every terminal outcome
     // (normal completion, fail, cancel, or daemon shutdown) already funnels
     // through, so clearing here (unconditionally, before anything else)
     // guarantees no leaked timer and no stray fail after this task has
     // already ended a different way.
-    if (active.maxDurationTimer) {
-      clearTimeout(active.maxDurationTimer);
-      active.maxDurationTimer = undefined;
-    }
-    active.batcher.stop();
-    this.tasks.delete(taskId);
-    this.addFinishedTaskId(taskId); // finding P2 (Fix 2c) — see its own doc comment
+    if (!active.finalizationStarted) {
+      active.finalizationStarted = true;
+      active.beingTornDown = true;
+      if (active.maxDurationTimer) {
+        clearTimeout(active.maxDurationTimer);
+        active.maxDurationTimer = undefined;
+      }
+      active.batcher.stop();
+      this.addFinishedTaskId(taskId); // semantic terminal is authoritative even while disposal ownership is retained
 
     // M4 Phase 4 (gatekeeper LOW advisory): a task can finish (complete,
     // fail, or cancel) while ONE approval is still DISPATCHED
@@ -2628,30 +2640,59 @@ export class TaskRunner {
     // an already-empty queue and dispatches nothing. Order matters: doing
     // it the other way around would let that callback pull the first
     // queued entry and dispatch it for real.
-    const queued = active.approvalQueue.splice(0);
-    for (const request of queued) {
-      request.resolve({
-        approved: false,
-        reason: `task ${taskId} finished before this queued approval request could be dispatched`,
-      });
-    }
-    if (active.pendingApprovalId !== undefined) {
-      try {
-        this.deps.approvalRegistry.resolve(active.pendingApprovalId, 'reject', `task ${taskId} finished`);
-      } catch {
-        // Already resolved by a real decision/timeout that raced this —
-        // benign, same "first resolution wins" guarantee ApprovalRegistry
-        // already documents; nothing left to do.
+      const queued = active.approvalQueue.splice(0);
+      for (const request of queued) {
+        request.resolve({
+          approved: false,
+          reason: `task ${taskId} finished before this queued approval request could be dispatched`,
+        });
+      }
+      if (active.pendingApprovalId !== undefined) {
+        try {
+          this.deps.approvalRegistry.resolve(active.pendingApprovalId, 'reject', `task ${taskId} finished`);
+        } catch {
+          // Already resolved by a real decision/timeout that raced this.
+        }
       }
     }
 
-    if (active.gitLease) active.gitLease.release();
-
+    const attempt = active.disposalAttempt ?? active.session.close();
+    active.disposalAttempt = attempt;
     try {
-      await active.session.close();
-    } catch {
-      // best-effort teardown
+      await attempt;
+    } catch (caught) {
+      if (active.disposalAttempt === attempt) active.disposalAttempt = undefined;
+      const failure = isRuntimeDisposalFailure(caught)
+        ? caught
+        : new RuntimeDisposalFailure({
+            stage: 'quiescence',
+            reason: `${active.adapter.descriptor.id} session.close() returned an untyped disposal failure`,
+          }, { cause: caught });
+      console.error(`[byok/client] runtime disposal failed for task ${taskId}: ${failure.message}`);
+      this.deps.onRuntimeDisposalFailure?.({
+        taskId,
+        runtimeId: active.adapter.descriptor.id,
+        stage: failure.stage,
+        reason: failure.message,
+      });
+      active.resolveSemanticTerminalSettled?.(false);
+      return false;
     }
+    if (this.tasks.get(taskId) !== active) return true;
+    active.gitLease?.release();
+    this.tasks.delete(taskId);
+    active.resolveSemanticTerminalSettled?.(true);
+    return true;
+  }
+
+  private reserveSemanticTerminal(active: ActiveTask): boolean {
+    if (active.semanticTerminalReserved || active.finalizationStarted) return false;
+    active.semanticTerminalReserved = true;
+    active.beingTornDown = true;
+    active.semanticTerminalSettled = new Promise<boolean>((resolve) => {
+      active.resolveSemanticTerminalSettled = resolve;
+    });
+    return true;
   }
 
   /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */

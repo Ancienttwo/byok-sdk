@@ -38,6 +38,25 @@ describe('daemon local observability (DaemonObserver)', () => {
     await server.close();
   });
 
+  it('emits runtime disposal evidence without creating a semantic task projection', () => {
+    const observer = new DaemonObserver();
+    const events: DaemonEvent[] = [];
+    observer.subscribe((event) => events.push(event));
+    observer.noteRuntimeDisposalFailure({
+      taskId: 'task-disposal',
+      runtimeId: 'claude',
+      stage: 'cleanup',
+      reason: 'claude task-scoped MCP configuration could not be removed',
+    });
+    expect(events).toEqual([expect.objectContaining({
+      kind: 'runtime-disposal-failed',
+      taskId: 'task-disposal',
+      runtimeId: 'claude',
+      stage: 'cleanup',
+    })]);
+    expect(observer.tasks()).toEqual([]);
+  });
+
   async function setupDaemon(
     adapter: StubRuntimeAdapter,
     storeDirOverride?: string,

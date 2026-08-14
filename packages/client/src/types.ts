@@ -108,7 +108,12 @@ export interface Session {
   followUp(task: TaskOfferPayload): Promise<void>;
   /** Best-effort abort of the current turn (used for `task.cancel`). */
   interrupt(): Promise<void>;
-  /** Tear down the underlying runtime process/session. Idempotent. */
+  /**
+   * Bounded, idempotent disposal receipt. Resolution proves every
+   * adapter-owned process and task-scoped resource is quiescent. Expected
+   * failure rejects with `RuntimeDisposalFailure` and never changes task
+   * semantics.
+   */
   close(): Promise<void>;
   /**
    * Resolve a session paused on `needs_approval` (protocol §5). The

@@ -389,7 +389,7 @@ class PiSession implements Session {
   }
 
   async close(): Promise<void> {
-    this.rpc.kill();
+    await this.rpc.dispose();
   }
 
   async resolveApproval(): Promise<void> {

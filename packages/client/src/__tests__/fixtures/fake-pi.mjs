@@ -82,8 +82,11 @@
 //                                    path to complete correctly.
 //   FAKE_PI_AUTO_RETRY_FAIL=1    -> emit an exhausted native retry terminal
 //                                    instead of agent_settled.
+//   FAKE_PI_IGNORE_TERM=1        -> root and lifecycle descendant ignore
+//                                    SIGTERM, proving close escalates to SIGKILL.
 
 import { writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
 const argv = process.argv.slice(2);
@@ -120,6 +123,26 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const sessionId = process.env.FAKE_PI_SESSION_ID ?? 'fake-session-1';
+
+// Row 3 lifecycle fixture: the adapter-owned runtime root launches a real
+// descendant that deliberately outlives a direct-child-only SIGTERM. The PID
+// receipt lets tests prove process-tree quiescence without mocking process
+// APIs. It is opt-in so the ordinary fixture remains byte-for-byte equivalent
+// in behavior for every pre-existing adapter test.
+const processTreeFile = process.env.FAKE_PI_PROCESS_TREE_FILE;
+if (processTreeFile) {
+  const ignoreTerm = process.env.FAKE_PI_IGNORE_TERM === '1';
+  if (ignoreTerm) process.on('SIGTERM', () => {});
+  const descendantScript = `${ignoreTerm ? "process.on('SIGTERM', () => {});" : ''}setInterval(() => {}, 1_000)`;
+  const descendant = spawn(process.execPath, ['-e', descendantScript], {
+    stdio: 'ignore',
+  });
+  if (descendant.pid === undefined) {
+    process.stderr.write('fake-pi: descendant did not receive a pid\n');
+    process.exit(1);
+  }
+  writeFileSync(processTreeFile, JSON.stringify({ rootPid: process.pid, descendantPid: descendant.pid }));
+}
 
 const sessionIdx = argv.indexOf('--session');
 if (sessionIdx !== -1) {

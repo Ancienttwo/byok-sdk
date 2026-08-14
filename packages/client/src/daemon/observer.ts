@@ -115,6 +115,7 @@ export type DaemonEvent =
    */
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reason?: string }
   | { kind: 'git-workspace'; ts: string; taskId: string; workspaceId: string; phase: string; headChanged?: boolean; commitsSinceBaseline?: number; dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number }; errorCategory?: string }
+  | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reason: string }
   /**
    * Plan `device-assertion-broker`: one `assertion.issue` control call
    * resolved — either an assertion was minted (`issued`) or one of the six
@@ -439,6 +440,15 @@ export class DaemonObserver {
     errorCategory?: string;
   }): void {
     this.emit({ kind: 'git-workspace', ts: nowIso(), ...event });
+  }
+
+  noteRuntimeDisposalFailure(event: {
+    taskId: string;
+    runtimeId: string;
+    stage: 'signal' | 'quiescence' | 'cleanup';
+    reason: string;
+  }): void {
+    this.emit({ kind: 'runtime-disposal-failed', ts: nowIso(), ...event });
   }
   /**
    * Finding F4: wired from `TaskRunnerDeps.onApprovalDispatched`, called

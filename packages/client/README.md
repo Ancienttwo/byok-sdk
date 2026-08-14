@@ -24,6 +24,14 @@ transport-free adapter surface:
 import { PiAdapter, ClaudeAdapter, CodexAdapter } from '@byok-sdk/client/adapters';
 ```
 
+Version 0.4.0 intentionally breaks custom adapters: they expose a frozen
+descriptor and side-effect-free `prepare()` that returns one prepared
+operation; the old direct `start()` surface is removed. A published
+`Session.close()` is a bounded quiescent-disposal receipt. It resolves only
+after the adapter-owned process tree and task resources are gone, or rejects
+with `RuntimeDisposalFailure`. The daemon keeps active/Git ownership after a
+rejection and never rewrites the task's already-established terminal result.
+
 Claude tasks can select operator-owned local stdio MCP servers by logical id.
 The toolset selector carries no MCP command or connector credential:
 

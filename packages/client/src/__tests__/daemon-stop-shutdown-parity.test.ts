@@ -13,6 +13,7 @@ import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { OperationalHealthTracker } from '../daemon/operational-health';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { RuntimeDisposalFailure } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -171,6 +172,39 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
     });
   });
+
+  it('retains daemon ownership when runtime disposal rejects, then a clean retry releases it without a second terminal', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const built = await pairedAndStarted('acme-stop-runtime-disposal-barrier', adapter);
+    daemon = built.daemon;
+    server.send(createEnvelope(
+      'task.offer',
+      { instruction: 'long task', policy: { mode: 'auto' } },
+      { taskId: 't-disposal-barrier', seq: server.nextSeq() },
+    ));
+    await server.waitFor((event) => event.type === 'task.started');
+    const session = adapter.sessions[0]!;
+    const close = session.close.bind(session);
+    let attempts = 0;
+    session.close = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new RuntimeDisposalFailure({ stage: 'quiescence', reason: 'fixture process tree remains live' });
+      }
+      await close();
+    };
+
+    await expect(daemon.stop()).rejects.toBeInstanceOf(RuntimeDisposalFailure);
+    await expect(acquireDaemonOwner(built.storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+    expect(await isControlDaemonGone(built.storeDir, built.config.productId)).toBe(false);
+    expect(server.received.filter((event) => event.type === 'task.fail' && event.task_id === 't-disposal-barrier')).toHaveLength(1);
+
+    await expect(daemon.stop()).resolves.toBeUndefined();
+    expect(attempts).toBe(2);
+    expect(server.received.filter((event) => event.type === 'task.fail' && event.task_id === 't-disposal-barrier')).toHaveLength(1);
+    const doctorLease = await acquireDaemonOwner(built.storeDir, 'doctor');
+    await doctorLease.release();
+  }, 10000);
 
   it('idempotency: a control-socket shutdown followed by daemon.stop() does not double-fail the task or throw', async () => {
     const adapter = new StubRuntimeAdapter('pi');

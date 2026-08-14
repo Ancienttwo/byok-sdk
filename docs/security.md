@@ -136,7 +136,7 @@ The daemon never makes a checkpoint commit or changes Git identity. It does not 
 
 ### Interruption, redispatch, and local recovery
 
-A prepared-operation start failure after claim produces one sanitized protocol failure and leaves the directory intact. On runtime failure, cancellation, approval rejection, resource-limit teardown, shutdown, or other interruption, the daemon takes a bounded best-effort local observation, marks the private record for recovery, releases the writer lease, and preserves all files and `.git`. A daemon restart marks records left in `preparing` or `active` as `interrupted`; it does not revive the old protocol task and emits no synthetic wire continuation. A later valid redispatch may reuse the exact recorded directory only through its matching session/workspace records and the one-writer lease. Disabling the feature does not delete or convert existing directories.
+A prepared-operation start failure after claim produces one sanitized protocol failure and leaves the directory intact. On runtime failure, cancellation, approval rejection, resource-limit teardown, shutdown, or other interruption, the daemon takes a bounded best-effort local observation and marks the private record for recovery. It releases the writer lease only after `Session.close()` proves the owned process tree and task resources quiescent; typed disposal failure keeps the lease fail-closed and emits local audit evidence without changing the already-published semantic terminal. A daemon restart marks records left in `preparing` or `active` as `interrupted`; it does not revive the old protocol task and emits no synthetic wire continuation. A later valid redispatch may reuse the exact recorded directory only through its matching session/workspace records and the one-writer lease. Disabling the feature does not delete or convert existing directories.
 
 ### Private ledger and audit boundary
 
@@ -841,9 +841,8 @@ resource ceilings:
 
 - **`TaskOfferPayload.limits.maxDurationMs`** (wire field) — a per-task
   wall-clock timer, armed when the task is claimed and registered as active.
-  On expiry: best-effort `session.interrupt()`, escalating to a hard
-  `session.close()` if `interrupt()` doesn't settle within the same grace
-  window (`shutdownInterruptTimeoutMs`), then `task.fail` with `retryable:
+  On expiry: bounded `session.interrupt()`, then authoritative
+  `session.close()` disposal, followed by `task.fail` with `retryable:
   false` and a reason prefixed `resource limit exceeded: maxDurationMs`. The
   timer is cleared on every terminal outcome, so a task that finishes
   normally is never affected.
@@ -858,14 +857,12 @@ unlike the two limits above, no bundled adapter counts tokens at all, so
 there is nothing here to enforce.
 
 Both enforcement mechanisms above are DAEMON-SIDE only — a `setTimeout` and
-an in-process byte counter, not a kernel/cgroup/rlimit-level ceiling. A
-misbehaving or compromised runtime process that ignores `interrupt()`/
-`close()` (a hung syscall, or a process that traps or ignores SIGTERM) can
-still consume wall-clock time or produce output beyond these limits for as
-long as the underlying OS process keeps running — the daemon's own
-accounting and teardown attempt simply stop once it reports the task
-failed. Treat these as cooperative resource governance for well-behaved
-runtimes, not a sandbox boundary — the same caveat this document's
+an in-process byte counter, not a kernel/cgroup/rlimit-level ceiling. Bundled
+runtime disposal owns the full subprocess tree and escalates TERM to KILL, but
+a kernel-level uninterruptible process or OS authority failure can still make
+the receipt reject. In that case active/Git ownership remains held and the
+failure is locally visible; it is never treated as successful cleanup. Treat
+the limits as process-tree lifecycle governance, not a sandbox boundary — the same caveat this document's
 "Workspace confinement is a convention, not a sandbox" section already
 applies to filesystem confinement.
 

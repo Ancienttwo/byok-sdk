@@ -311,6 +311,8 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       // redaction rule as `failed`/`cancelled` above) — `decision` is just
       // the fixed 'approve'|'reject' identifier, kept verbatim.
       return { ...base, taskId: event.taskId, decision: event.decision, reasonSize: byteSize(event.reason) };
+    case 'runtime-disposal-failed':
+      return { ...base, taskId: event.taskId, runtimeId: event.runtimeId, stage: event.stage, reason: event.reason };
     case 'device-assertion':
       // Plan `device-assertion-broker`. There is no signature or envelope to
       // drop here — the event type cannot carry either (see `observer.ts`'s
@@ -491,6 +493,15 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
         reason: reasonSize === undefined ? undefined : placeholderFor(reasonSize),
       };
     }
+    case 'runtime-disposal-failed':
+      return {
+        kind: 'runtime-disposal-failed',
+        ts,
+        taskId: str(raw.taskId),
+        runtimeId: str(raw.runtimeId),
+        stage: str(raw.stage) as 'signal' | 'quiescence' | 'cleanup',
+        reason: str(raw.reason),
+      };
     case 'device-assertion': {
       // Read-side inverse of `redactForAudit`'s own `device-assertion` case.
       // Anything that is not exactly `'issued'` reconstructs as `denied` — a

@@ -16,7 +16,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
-import { RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
 import { resolveApprovalMcpBin, type ResolvedApprovalMcpBin } from './resolve-approval-mcp-bin';
@@ -37,10 +37,17 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Best-effort teardown of the task-scoped temp `--mcp-config` directory. */
+/** Task-owned cleanup is part of the close receipt and must fail visibly. */
 async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
   if (!dir) return;
-  await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  try {
+    await fs.rm(dir, { recursive: true, force: true });
+  } catch (cause) {
+    throw new RuntimeDisposalFailure({
+      stage: 'cleanup',
+      reason: 'claude task-scoped MCP configuration could not be removed',
+    }, { cause });
+  }
 }
 
 export interface ClaudeAdapterOptions {
@@ -489,6 +496,7 @@ function subscriptionModel(
 
 class ClaudeSession implements Session {
   private readonly correlation: ToolUseCorrelation = createToolUseCorrelation();
+  private closeAttempt: Promise<void> | undefined;
 
   constructor(
     public readonly sessionRef: string,
@@ -644,8 +652,17 @@ class ClaudeSession implements Session {
   }
 
   async close(): Promise<void> {
-    this.client.kill();
-    await cleanupMcpConfigDir(this.mcpConfigDir);
+    if (!this.closeAttempt) {
+      const attempt = (async () => {
+        await this.client.dispose();
+        await cleanupMcpConfigDir(this.mcpConfigDir);
+      })();
+      this.closeAttempt = attempt.catch((error: unknown) => {
+        this.closeAttempt = undefined;
+        throw error;
+      });
+    }
+    await this.closeAttempt;
   }
 
   /**

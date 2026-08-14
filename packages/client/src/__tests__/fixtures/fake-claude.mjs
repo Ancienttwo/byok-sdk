@@ -140,6 +140,11 @@ import { createInterface } from 'node:readline';
 
 const argv = process.argv.slice(2);
 
+if (process.env.FAKE_CLAUDE_PROCESS_TREE_FILE && argv.includes('-p')) {
+  const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60_000)'], { stdio: 'ignore' });
+  writeFileSync(process.env.FAKE_CLAUDE_PROCESS_TREE_FILE, JSON.stringify({ rootPid: process.pid, descendantPid: descendant.pid }));
+}
+
 async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
   const configIndex = argv.indexOf('--mcp-config');
   if (configIndex === -1 || !argv[configIndex + 1]) {

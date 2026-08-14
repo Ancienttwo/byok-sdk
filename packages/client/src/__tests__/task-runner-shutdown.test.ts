@@ -7,6 +7,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 /**
@@ -33,7 +34,7 @@ const unusedBlobClient: BlobResolver = {
 async function makeRunner(
   adapter: StubRuntimeAdapter,
   sent: Envelope[],
-  overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs'>> = {},
+  overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs' | 'onRuntimeDisposalFailure'>> = {},
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = {
     adapters: [adapter],
@@ -48,6 +49,7 @@ async function makeRunner(
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
     shutdownInterruptTimeoutMs: overrides.shutdownInterruptTimeoutMs,
+    onRuntimeDisposalFailure: overrides.onRuntimeDisposalFailure,
   };
   return new TaskRunner(deps);
 }
@@ -186,6 +188,39 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     expect(runner.activeTaskCount).toBe(0);
     expect(sent.some((e) => e.type === 'task.fail' && e.task_id === 'task-a')).toBe(true);
     expect(sent.some((e) => e.type === 'task.fail' && e.task_id === 'task-b')).toBe(true);
+  });
+
+  it('retains runtime ownership after disposal failure and retries without publishing a second terminal', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const disposalEvidence: Array<{ taskId: string; reason: string }> = [];
+    const runner = await makeRunner(adapter, sent, {
+      onRuntimeDisposalFailure: (event) => disposalEvidence.push(event),
+    });
+
+    await runner.handleEnvelope(
+      createEnvelope('task.offer', { instruction: 'do work', policy: { mode: 'auto' } }, { taskId: 'task-disposal', seq: 1 }),
+    );
+    const session = adapter.sessions[0]!;
+    const close = session.close.bind(session);
+    let closeAttempts = 0;
+    session.close = async () => {
+      closeAttempts += 1;
+      if (closeAttempts === 1) {
+        throw new RuntimeDisposalFailure({ stage: 'quiescence', reason: 'fixture process tree remains live' });
+      }
+      await close();
+    };
+
+    await expect(runner.shutdownActiveTasks('operator')).rejects.toBeInstanceOf(RuntimeDisposalFailure);
+    expect(runner.activeTaskCount).toBe(1);
+    expect(sent.filter((event) => event.type === 'task.fail' && event.task_id === 'task-disposal')).toHaveLength(1);
+    expect(disposalEvidence).toEqual([{ taskId: 'task-disposal', runtimeId: 'stub', stage: 'quiescence', reason: 'fixture process tree remains live' }]);
+
+    await expect(runner.shutdownActiveTasks('operator retry')).resolves.toBeUndefined();
+    expect(closeAttempts).toBe(2);
+    expect(runner.activeTaskCount).toBe(0);
+    expect(sent.filter((event) => event.type === 'task.fail' && event.task_id === 'task-disposal')).toHaveLength(1);
   });
 
   it('is a no-op when there are no active tasks', async () => {

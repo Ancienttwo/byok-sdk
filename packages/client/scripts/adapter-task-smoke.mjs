@@ -75,6 +75,23 @@ function indexOfOrThrow(values, value, label) {
   return index;
 }
 
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== 'ESRCH';
+  }
+}
+
+async function waitFor(predicate, label, ms = timeoutMs) {
+  const deadline = Date.now() + ms;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`${label} timed out after ${ms}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 let failed = false;
 let workDir;
 let daemon;
@@ -135,17 +152,35 @@ try {
   console.log(`real @byok-sdk/server listening at ${serverUrl}`);
 
   const fake = (runtime) => path.join(fixtureDir, `fake-${runtime}.mjs`);
+  const spawnFixture = (command, args, options) =>
+    process.platform === 'win32'
+      ? spawn(process.execPath, [command, ...args], options)
+      : spawn(command, args, options);
+  const lifecycleAdapter = (adapter) =>
+    process.platform === 'win32'
+      ? {
+          descriptor: adapter.descriptor,
+          detect: async () => ({ present: true, version: 'fixture' }),
+          prepare: (input) => adapter.prepare(input),
+        }
+      : adapter;
   let piSpawnCount = 0;
   const adapters = [
-    new client.ClaudeAdapter({ resolveBin: () => ({ command: fake('claude'), source: 'path' }) }),
-    new client.CodexAdapter({ resolveBin: () => ({ command: fake('codex'), source: 'path' }) }),
-    new client.PiAdapter({
+    lifecycleAdapter(new client.ClaudeAdapter({
+      resolveBin: () => ({ command: fake('claude'), source: 'path' }),
+      spawnFn: spawnFixture,
+    })),
+    lifecycleAdapter(new client.CodexAdapter({
+      resolveBin: () => ({ command: fake('codex'), source: 'path' }),
+      spawnFn: spawnFixture,
+    })),
+    lifecycleAdapter(new client.PiAdapter({
       resolveBin: () => ({ command: fake('pi'), source: 'path' }),
       spawnFn: (command, args, options) => {
         piSpawnCount += 1;
-        return spawn(command, args, options);
+        return spawnFixture(command, args, options);
       },
-    }),
+    })),
   ];
 
   const pairingCode = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId }).code;
@@ -158,6 +193,11 @@ try {
       storeDir,
       runtimeAllowlist: runtimes,
       runtimePreference: runtimes,
+      runtimeEnvironment: {
+        claude: { allow: ['FAKE_CLAUDE_PROCESS_TREE_FILE', 'FAKE_CLAUDE_HANG_AFTER_TOOL'] },
+        codex: { allow: ['FAKE_CODEX_PROCESS_TREE_FILE', 'FAKE_CODEX_HANG'] },
+        pi: { allow: ['FAKE_PI_PROCESS_TREE_FILE', 'FAKE_PI_HANG_AFTER_TOOL'] },
+      },
       shutdownGraceMs: 2_000,
     },
     adapters,
@@ -244,6 +284,39 @@ try {
     );
   }
 
+  const lifecycleEnv = {
+    claude: { receipt: 'FAKE_CLAUDE_PROCESS_TREE_FILE', hang: 'FAKE_CLAUDE_HANG_AFTER_TOOL' },
+    codex: { receipt: 'FAKE_CODEX_PROCESS_TREE_FILE', hang: 'FAKE_CODEX_HANG' },
+    pi: { receipt: 'FAKE_PI_PROCESS_TREE_FILE', hang: 'FAKE_PI_HANG_AFTER_TOOL' },
+  };
+  for (const runtime of runtimes) {
+    const receiptFile = path.join(workDir, `${runtime}-process-tree.json`);
+    const envNames = lifecycleEnv[runtime];
+    process.env[envNames.receipt] = receiptFile;
+    process.env[envNames.hang] = '1';
+    try {
+      const handle = await withTimeout(
+        byok.dispatch({ instruction: `adapter lifecycle smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
+        `${runtime} lifecycle dispatch`,
+      );
+      await waitFor(
+        () => localEvents.some((event) => event.taskId === handle.taskId && event.kind === 'started'),
+        `${runtime} lifecycle start`,
+      );
+      const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8'));
+      assert(processExists(receipt.rootPid), `${runtime} root was not live before cancellation`);
+      assert(processExists(receipt.descendantPid), `${runtime} descendant was not live before cancellation`);
+      await withTimeout(handle.cancel('lifecycle smoke cancellation'), `${runtime} lifecycle cancel`);
+      await waitFor(() => daemon.status().activeTaskCount === 0, `${runtime} quiescent disposal`);
+      assert(!processExists(receipt.rootPid), `${runtime} root remained live after TaskRunner released ownership`);
+      assert(!processExists(receipt.descendantPid), `${runtime} descendant remained live after TaskRunner released ownership`);
+      console.log(`PASS ${runtime} lifecycle: cancel -> quiescent root+descendant disposal`);
+    } finally {
+      delete process.env[envNames.receipt];
+      delete process.env[envNames.hang];
+    }
+  }
+
   console.log('adapter-task-smoke: PASS');
 } catch (error) {
   failed = true;
@@ -257,8 +330,14 @@ try {
     });
   }
   byok?.stop();
-  await closeHttpServer(httpServer);
-  if (workDir) await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  await withTimeout(closeHttpServer(httpServer), 'HTTP server cleanup', 10_000).catch((error) => {
+    console.error(`HTTP server cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  if (workDir) {
+    await withTimeout(fs.rm(workDir, { recursive: true, force: true }), 'workspace cleanup', 10_000).catch((error) => {
+      console.error(`workspace cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
   if (originalEnvironment) restoreProcessEnvironment(originalEnvironment);
 }
 

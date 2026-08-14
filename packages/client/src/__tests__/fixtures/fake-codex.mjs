@@ -89,6 +89,9 @@
 //                                        listener here) matches the real
 //                                        binary's own empirically-confirmed
 //                                        SIGTERM-terminates-it behavior.
+//   FAKE_CODEX_HANG_BEFORE_THREAD=1    -> never emit thread.started; used to
+//                                        race Session.close() against an
+//                                        in-flight followUp() spawn.
 //   FAKE_CODEX_EXIT_NO_TERMINAL=1      -> cross-model review finding (the
 //                                        "pi-hang class"): emit ONE partial
 //                                        item.started frame, then exit(1)
@@ -112,10 +115,16 @@
 //                                        identity fail-closed check and its
 //                                        followUp()-uses-current-id fix.
 
+import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const argv = process.argv.slice(2);
+
+if (process.env.FAKE_CODEX_PROCESS_TREE_FILE && argv[0] === 'exec') {
+  const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60_000)'], { stdio: 'ignore' });
+  writeFileSync(process.env.FAKE_CODEX_PROCESS_TREE_FILE, JSON.stringify({ rootPid: process.pid, descendantPid: descendant.pid }));
+}
 
 function send(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
@@ -197,6 +206,10 @@ if (process.env.FAKE_CODEX_NO_THREAD_STARTED === '1') {
 }
 
 const reportedThreadId = process.env.FAKE_CODEX_REPORTED_THREAD_ID ?? threadId;
+if (process.env.FAKE_CODEX_HANG_BEFORE_THREAD === '1') {
+  setInterval(() => {}, 60_000);
+  await new Promise(() => {});
+}
 send({ type: 'thread.started', thread_id: reportedThreadId });
 send({ type: 'turn.started' });
 

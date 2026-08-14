@@ -7,6 +7,15 @@ export type RuntimeFailureCategory = 'semantic' | 'infrastructure' | 'authority'
 /** The adapter's explicit retry judgment consumed by TaskRunner. */
 export type RuntimeRetryDisposition = 'retryable' | 'non-retryable';
 
+/** Disposal is deliberately separate from start/run retryability authority. */
+export type RuntimeDisposalStage = 'signal' | 'quiescence' | 'cleanup';
+
+export interface RuntimeDisposalFailureInput {
+  stage: RuntimeDisposalStage;
+  /** Audit-safe operational reason. It must not contain task instructions or provider credentials. */
+  reason: string;
+}
+
 export interface RuntimeExecutionFailureInput {
   phase: RuntimeFailurePhase;
   category: RuntimeFailureCategory;
@@ -20,6 +29,44 @@ export interface RuntimeExecutionFailureInput {
 // recognizable by TaskRunner loaded through `@byok-sdk/client`; `instanceof`
 // would split authority across the two constructor copies.
 const RUNTIME_EXECUTION_FAILURE_BRAND = Symbol.for('@byok-sdk/client/RuntimeExecutionFailure/v1');
+const RUNTIME_DISPOSAL_FAILURE_BRAND = Symbol.for('@byok-sdk/client/RuntimeDisposalFailure/v1');
+
+/**
+ * Expected failure of an owned runtime-resource disposal barrier. This never
+ * carries task retryability: semantic terminal authority may already have
+ * been published when disposal begins.
+ */
+export class RuntimeDisposalFailure extends Error {
+  readonly stage: RuntimeDisposalStage;
+
+  constructor(input: RuntimeDisposalFailureInput, options?: ErrorOptions) {
+    if (!isRuntimeDisposalStage(input.stage) || typeof input.reason !== 'string' || input.reason.length === 0) {
+      throw new TypeError('invalid RuntimeDisposalFailure input');
+    }
+    super(input.reason, options);
+    this.name = 'RuntimeDisposalFailure';
+    this.stage = input.stage;
+    Object.defineProperty(this, RUNTIME_DISPOSAL_FAILURE_BRAND, { value: true });
+    Object.freeze(this);
+  }
+}
+
+function isRuntimeDisposalStage(value: unknown): value is RuntimeDisposalStage {
+  return value === 'signal' || value === 'quiescence' || value === 'cleanup';
+}
+
+export function isRuntimeDisposalFailure(value: unknown): value is RuntimeDisposalFailure {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as {
+    readonly [RUNTIME_DISPOSAL_FAILURE_BRAND]?: unknown;
+    readonly stage?: unknown;
+    readonly message?: unknown;
+  };
+  return candidate[RUNTIME_DISPOSAL_FAILURE_BRAND] === true
+    && isRuntimeDisposalStage(candidate.stage)
+    && typeof candidate.message === 'string'
+    && candidate.message.length > 0;
+}
 
 /**
  * The only expected post-admission failure value accepted from a runtime

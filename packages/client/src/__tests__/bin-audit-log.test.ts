@@ -25,6 +25,19 @@ function connectionEvent(state: 'open' | 'closed' | 'connecting' | 'degraded' | 
 }
 
 describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
+  it('round-trips audit-safe runtime disposal evidence', async () => {
+    const storeDir = await tmpDir('byok-audit-runtime-disposal-');
+    const event: DaemonEvent = {
+      kind: 'runtime-disposal-failed',
+      ts: '2026-01-01T00:00:00.000Z',
+      taskId: 'task-disposal',
+      runtimeId: 'codex',
+      stage: 'quiescence',
+      reason: 'codex runtime process group remained live after SIGKILL',
+    };
+    await appendAuditEvent(storeDir, event);
+    expect(await readAuditEvents(storeDir)).toEqual([event]);
+  });
   it('appends events as one JSON line each, oldest first, and reads them back', async () => {
     const storeDir = await tmpDir('byok-audit-');
     const e1 = connectionEvent('open', '2026-01-01T00:00:00.000Z');

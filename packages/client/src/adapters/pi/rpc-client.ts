@@ -1,5 +1,6 @@
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncQueue } from '../../util/async-queue';
+import { disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
 export type SpawnFn = typeof spawn;
 
@@ -61,6 +62,9 @@ export class PiRpcClient {
   private readonly eventQueue = new AsyncQueue<PiRpcMessage>();
   private closed = false;
   private exitError: Error | undefined;
+  private readonly closedPromise: Promise<void>;
+  private resolveClosed!: () => void;
+  private disposalAttempt: Promise<void> | undefined;
   /** Bounded tail of recent stderr lines — pi discarded this entirely before (nothing ever read `child.stderr`), which is exactly why finding #1 (`Error: Unknown option: --session-id`, exit 1) had to be root-caused by hand instead of reading it off a thrown error. See `buildExitError`. */
   private readonly stderrRing: string[] = [];
   /** Count of pi RPC message types `PiSession` (pi-adapter.ts) has told us have no `AgentEvent` mapping and aren't routine bookkeeping — see `recordUnmappedFrame`. */
@@ -68,11 +72,14 @@ export class PiRpcClient {
 
   constructor(options: PiRpcClientOptions) {
     const spawnFn = options.spawnFn ?? spawn;
-    this.child = spawnFn(options.command, options.args, {
+    this.child = spawnFn(options.command, options.args, withOwnedProcessTree({
       cwd: options.cwd,
       env: options.env,
       stdio: ['pipe', 'pipe', 'pipe'],
-    }) as ChildProcessWithoutNullStreams;
+    })) as ChildProcessWithoutNullStreams;
+    this.closedPromise = new Promise((resolve) => {
+      this.resolveClosed = resolve;
+    });
 
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
@@ -140,15 +147,33 @@ export class PiRpcClient {
     }
   }
 
-  /** Best-effort teardown. SIGTERM on POSIX; `taskkill /T /F` on Windows to also reap child processes pi itself spawned (e.g. bash). */
+  /** Immediate process-tree termination request. `dispose()` is the settlement receipt. */
   kill(): void {
-    if (this.closed) return;
-    const pid = this.child.pid;
-    if (process.platform === 'win32' && pid !== undefined) {
-      spawnSync('taskkill', ['/pid', String(pid), '/T', '/F']);
-    } else {
-      this.child.kill('SIGTERM');
+    requestOwnedProcessTreeTermination(this.processTreeOptions());
+  }
+
+  waitClosed(): Promise<void> {
+    return this.closedPromise;
+  }
+
+  dispose(): Promise<void> {
+    if (!this.disposalAttempt) {
+      const attempt = disposeOwnedProcessTree(this.processTreeOptions());
+      this.disposalAttempt = attempt.catch((error: unknown) => {
+        this.disposalAttempt = undefined;
+        throw error;
+      });
     }
+    return this.disposalAttempt;
+  }
+
+  private processTreeOptions() {
+    return {
+      child: this.child,
+      waitClosed: () => this.closedPromise,
+      isClosed: () => this.closed,
+      label: 'pi',
+    };
   }
 
   private onData(chunk: string): void {
@@ -242,6 +267,7 @@ export class PiRpcClient {
     if (this.closed) return;
     this.closed = true;
     this.exitError = err;
+    this.resolveClosed();
     for (const [, waiter] of this.pending) waiter.reject(err);
     this.pending.clear();
     this.eventQueue.end();

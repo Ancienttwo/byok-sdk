@@ -324,6 +324,7 @@ interface RunTurnParams {
   preparedGit?: boolean;
   failurePhase: RuntimeFailurePhase;
   terminal: RuntimeTurnTerminal;
+  onRunnerCreated?: (runner: CodexProcessRunner) => void;
 }
 
 interface RuntimeTurnTerminal {
@@ -453,6 +454,7 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
       reason: 'codex runtime process could not be spawned',
     }, { cause });
   }
+  params.onRunnerCreated?.(runner);
 
   /**
    * Cross-model review finding (the "pi-hang class" — a task that never
@@ -597,7 +599,10 @@ class CodexSession implements Session {
   private readonly modelId: string | undefined;
   private terminal: RuntimeTurnTerminal;
   private currentRunner: CodexProcessRunner | undefined;
+  private readonly ownedRunners = new Set<CodexProcessRunner>();
+  private readonly followUpAttempts = new Set<Promise<void>>();
   private closed = false;
+  private closeAttempt: Promise<void> | undefined;
 
   constructor(options: CodexSessionOptions) {
     this.sessionRef = options.sessionRef;
@@ -611,6 +616,7 @@ class CodexSession implements Session {
     this.modelId = options.modelId;
     this.terminal = options.terminal;
     this.currentRunner = options.initialRunner;
+    this.ownedRunners.add(options.initialRunner);
     void this.forgetRunnerOnceClosed(options.initialRunner);
   }
 
@@ -685,7 +691,14 @@ class CodexSession implements Session {
    * stale id even after codex had moved on) — it just can now only ever be
    * the SAME id this call asked to resume, never a silently-different one.
    */
-  async followUp(task: TaskOfferPayload): Promise<void> {
+  followUp(task: TaskOfferPayload): Promise<void> {
+    const attempt = this.runFollowUp(task);
+    this.followUpAttempts.add(attempt);
+    void attempt.finally(() => this.followUpAttempts.delete(attempt)).catch(() => {});
+    return attempt;
+  }
+
+  private async runFollowUp(task: TaskOfferPayload): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('codex adapter only supports string instructions in M2 (no blob-ref fetch yet)');
     }
@@ -730,6 +743,10 @@ class CodexSession implements Session {
         preparedGit: this.preparedGit,
         failurePhase: 'run',
         terminal,
+        onRunnerCreated: (created) => {
+          this.ownedRunners.add(created);
+          void this.forgetRunnerOnceClosed(created);
+        },
       }));
     } catch (err) {
       // Fix (queue-leak-on-failure): confirmed empirically with a diagnostic
@@ -772,10 +789,13 @@ class CodexSession implements Session {
       };
       throw err;
     }
+    if (this.closed) {
+      await runner.dispose();
+      throw new Error('codex session closed while follow-up was starting');
+    }
     this.terminal = terminal;
     this.sessionRef = sessionRef;
     this.currentRunner = runner;
-    void this.forgetRunnerOnceClosed(runner);
   }
 
   /** Best-effort abort of the current turn. SIGTERM's the currently-running child, if any — see `process-runner.ts`'s `kill()` doc comment for why SIGTERM (not SIGINT) and why this is safe: the underlying codex thread survives and stays resumable, confirmed empirically. A no-op when no turn is currently in flight. */
@@ -784,10 +804,21 @@ class CodexSession implements Session {
   }
 
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.currentRunner?.kill();
-    this.queue.end();
+    if (!this.closeAttempt) {
+      this.closed = true;
+      this.queue.end();
+      const attempt = (async () => {
+        const runners = [...this.ownedRunners];
+        await Promise.all(runners.map((runner) => runner.dispose()));
+        for (const runner of runners) this.ownedRunners.delete(runner);
+        await Promise.allSettled([...this.followUpAttempts]);
+      })();
+      this.closeAttempt = attempt.catch((error: unknown) => {
+        this.closeAttempt = undefined;
+        throw error;
+      });
+    }
+    await this.closeAttempt;
   }
 
   /**

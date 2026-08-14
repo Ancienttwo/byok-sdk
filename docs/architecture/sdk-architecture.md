@@ -465,7 +465,7 @@ Library exports 分成六组：
 | 组 | 主要 public API |
 | --- | --- |
 | daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、`AuthManager`、`DeviceRevokedError`、`BlobClient` |
-| adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`PolicyUnsupportedError` |
+| adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
 | bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter` 与 options |
 | observability | `DaemonObserver`、event/task projection types |
 | Git workspace | `GitWorkspaceManager`、`GitWorkspaceStore`、ledger/lease/observation types |
@@ -493,6 +493,14 @@ untyped throw、wrong-phase failure、或 iterator 无 `turn_end` 直接 clean e
 虽分别 bundle，此 failure authority 用 versioned global-symbol brand 加 closed
 field validation 跨 entry 识别，不依赖会分裂 constructor identity 的
 `instanceof`。
+
+`Session.close()` 是 bounded ownership receipt：POSIX bundled runtime 以
+独立 process group 启动并按 group TERM→KILL，Windows 用 `taskkill /T /F`；
+只有 root stdio close、process tree 不再存在且 task-scoped cleanup 完成后才
+resolve。`TaskRunner` 先冻结一次 semantic terminal，但在 close 成功前继续
+持有 active entry 与 Git writer lease。typed disposal rejection 只进入本机
+`runtime-disposal-failed` observer/audit，不重写 wire terminal；后续 shutdown
+可重试同一 ownership barrier。
 
 `byok-agent` 命令面：
 
@@ -577,7 +585,7 @@ flowchart LR
   Config --> Secure --> Local --> Control --> Detect --> Runner --> Connect --> Ack
 ```
 
-统一 graceful shutdown 顺序是：停止接收新 offer → bounded teardown active tasks → bounded drain outbox → stop connection/auth → close control socket。取消、shutdown RPC 与 library `stop()` 共用同一条序列，避免三套不同清理语义。
+统一 graceful shutdown 顺序是：停止接收新 offer → 发布每个 active task 的单一 terminal → 等待 quiescent runtime disposal（成功后才释放 task/Git ownership）→ bounded drain outbox → stop connection/auth → close control socket。disposal rejection 保持 mutation barrier 未闭合并阻止 daemon-owner lease 提前释放。取消、shutdown RPC 与 library `stop()` 共用同一条序列，避免三套不同清理语义。
 
 ## 5. Local control plane 与 approval
 

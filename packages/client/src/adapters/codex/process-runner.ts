@@ -1,5 +1,6 @@
-import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
+import { disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
 export type SpawnFn = typeof spawn;
 
@@ -70,15 +71,16 @@ export class CodexProcessRunner {
   private exitSignal: NodeJS.Signals | null = null;
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
+  private disposalAttempt: Promise<void> | undefined;
 
   constructor(options: CodexProcessOptions) {
     this.onEvent = options.onEvent;
     const spawnFn = options.spawnFn ?? spawn;
-    this.child = spawnFn(options.command, options.args, {
+    this.child = spawnFn(options.command, options.args, withOwnedProcessTree({
       cwd: options.cwd,
       env: options.env,
       stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    })) as CodexChildProcess;
 
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
@@ -123,7 +125,7 @@ export class CodexProcessRunner {
   }
 
   /**
-   * Best-effort teardown. SIGTERM on POSIX: SIGINT was empirically confirmed
+   * Immediate tree termination request. SIGTERM on POSIX: SIGINT was empirically confirmed
    * to be silently ignored by `codex exec` (a real, direct test — a 60s
    * shell `sleep` ran to full, unaffected completion despite SIGINT sent at
    * t=4s) — a genuine, evidence-based correction to this task's own initial
@@ -136,13 +138,27 @@ export class CodexProcessRunner {
    * `../pi/rpc-client.ts`'s own cross-platform convention.
    */
   kill(): void {
-    if (this.closed) return;
-    const pid = this.child.pid;
-    if (process.platform === 'win32' && pid !== undefined) {
-      spawnSync('taskkill', ['/pid', String(pid), '/T', '/F']);
-    } else {
-      this.child.kill('SIGTERM');
+    requestOwnedProcessTreeTermination(this.processTreeOptions());
+  }
+
+  dispose(): Promise<void> {
+    if (!this.disposalAttempt) {
+      const attempt = disposeOwnedProcessTree(this.processTreeOptions());
+      this.disposalAttempt = attempt.catch((error: unknown) => {
+        this.disposalAttempt = undefined;
+        throw error;
+      });
     }
+    return this.disposalAttempt;
+  }
+
+  private processTreeOptions() {
+    return {
+      child: this.child,
+      waitClosed: () => this.closedPromise,
+      isClosed: () => this.closed,
+      label: 'codex',
+    };
   }
 
   /** Builds a descriptive error folding in the exit code/signal and the stderr tail — mirrors `PiRpcClient.buildExitError`'s reasoning: a post-mortem on a failed start/resume should never need separately re-running codex by hand with a raw JSONL logger to learn why. */

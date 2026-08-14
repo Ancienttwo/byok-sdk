@@ -19,13 +19,17 @@ export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDesc
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export {
   RuntimeExecutionFailure,
+  RuntimeDisposalFailure,
   RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON,
+  isRuntimeDisposalFailure,
   isRuntimeExecutionFailure,
   projectRuntimeBoundaryFailure,
   projectRuntimeExecutionFailure,
 } from './runtime-failure';
 export type {
   RuntimeExecutionFailureInput,
+  RuntimeDisposalFailureInput,
+  RuntimeDisposalStage,
   RuntimeFailureCategory,
   RuntimeFailurePhase,
   RuntimeFailureProjection,

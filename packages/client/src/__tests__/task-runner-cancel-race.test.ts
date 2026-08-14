@@ -65,6 +65,30 @@ async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promis
  * the only way to exercise it directly.
  */
 describe('TaskRunner: cancel arriving during the offer-processing window (finding F4)', () => {
+  it('reserves cancellation before interrupt can end the event stream, so pump cannot publish a competing failure', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+    const taskId = 'task-cancel-terminal-race';
+    await runner.handleEnvelope(createEnvelope(
+      'task.offer',
+      { instruction: 'cancel me', policy: { mode: 'auto' } },
+      { taskId, seq: 1 },
+    ));
+    const session = adapter.sessions[0]!;
+    session.interrupt = async () => {
+      session.interruptCalled = true;
+      session.endAbruptly();
+      await Promise.resolve();
+    };
+
+    await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'operator' }, { taskId, seq: 2 }));
+    await Promise.resolve();
+
+    expect(sent.filter((event) => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type)).map((event) => event.type)).toEqual(['task.cancelled']);
+    expect(runner.activeTaskCount).toBe(0);
+  });
+
   it('a cancel processed concurrently with a still-in-flight offer for the same taskId tears the session down instead of running a zombie turn', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];

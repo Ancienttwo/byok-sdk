@@ -12,8 +12,10 @@ export type {
   RuntimeDetectResult,
 } from '../types';
 export type { RuntimeEnvironmentRequirements } from '../daemon/environment';
-export { RuntimeExecutionFailure } from '../runtime-failure';
+export { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 export type {
+  RuntimeDisposalFailureInput,
+  RuntimeDisposalStage,
   RuntimeExecutionFailureInput,
   RuntimeFailureCategory,
   RuntimeFailurePhase,

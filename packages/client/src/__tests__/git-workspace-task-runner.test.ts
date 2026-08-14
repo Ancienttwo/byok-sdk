@@ -10,6 +10,7 @@ import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import type { Session } from '../types';
+import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 
 const dirs: string[] = [];
@@ -267,6 +268,39 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1_000, interv
       const lease = await deps.gitWorkspaceManager!.acquireLease(path.join(deps.workspaceRoot, `task-${kind}`));
       lease.release();
     }
+  });
+
+  it('retains the Git workspace lease until a failed disposal is retried successfully', async () => {
+    const sent: Envelope[] = [];
+    const adapter = new StubRuntimeAdapter();
+    const { deps, root } = await makeDeps({ enabled: true, adapter, sent });
+    const disposalEvents: Array<{ taskId: string }> = [];
+    deps.onRuntimeDisposalFailure = (event) => disposalEvents.push(event);
+    const runner = new TaskRunner(deps);
+    await runner.handleEnvelope(envelope('lease-barrier', 'lease-barrier', payload()));
+    const session = adapter.sessions[0]!;
+    const close = session.close.bind(session);
+    let closeAttempts = 0;
+    session.close = async () => {
+      closeAttempts += 1;
+      if (closeAttempts === 1) {
+        throw new RuntimeDisposalFailure({ stage: 'quiescence', reason: 'fixture tree remains live' });
+      }
+      await close();
+    };
+
+    session.emit({ type: 'turn_end' });
+    await waitForAssertion(() => expect(disposalEvents).toHaveLength(1));
+    expect(terminal(sent, 'lease-barrier').map((event) => event.type)).toEqual(['task.complete']);
+    expect(runner.activeTaskCount).toBe(1);
+    await expect(deps.gitWorkspaceManager!.acquireLease(path.join(root, 'lease-barrier'))).rejects.toThrow(/busy/i);
+
+    await runner.shutdownActiveTasks('retry disposal');
+    expect(closeAttempts).toBe(2);
+    expect(runner.activeTaskCount).toBe(0);
+    expect(terminal(sent, 'lease-barrier').map((event) => event.type)).toEqual(['task.complete']);
+    const reacquired = await deps.gitWorkspaceManager!.acquireLease(path.join(root, 'lease-barrier'));
+    reacquired.release();
   });
 
   it('observes before complete, tolerates observation degradation, and keeps wire envelopes Git-free', async () => {

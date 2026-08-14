@@ -8,7 +8,7 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
 import { SteerUnsupportedError, type Session } from '../types';
-import { RuntimeExecutionFailure } from '../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -297,10 +297,36 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await session.resolveApproval(true, 'approved by test');
     expect(resolveSpy).toHaveBeenCalledWith(true, 'approved by test');
 
-    // close() removes the temp mcp-config directory (best-effort cleanup).
+    // close() removes the temp mcp-config directory as part of its receipt.
     await session.close();
     openSessions.pop();
     await expect(fs.access(mcpConfigPath)).rejects.toThrow();
+  });
+
+  it('surfaces task-scoped MCP cleanup failure as typed disposal evidence and permits a clean retry', async () => {
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      resolveApprovalMcpBin: () => ({ command: 'fake-approval-mcp-command', args: [], source: 'env' }),
+    });
+    const ctx = await makeCtx();
+    ctx.policy = { mode: 'confirm' };
+    ctx.approvalChannel = {
+      taskId: 'task-cleanup-failure',
+      storeDir: '/fake/store-dir',
+      productId: 'fake-product',
+      timeoutMs: 1000,
+      resolve: async () => {},
+    };
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    const rm = vi.spyOn(fs, 'rm').mockRejectedValueOnce(new Error('fixture cleanup denial'));
+
+    const failure = await session.close().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeDisposalFailure);
+    expect(failure).toMatchObject({ stage: 'cleanup' });
+    rm.mockRestore();
+    await expect(session.close()).resolves.toBeUndefined();
+    openSessions.pop();
   });
 
   it('projects task-scoped local MCP servers through one strict config without enabling the approval tool', async () => {

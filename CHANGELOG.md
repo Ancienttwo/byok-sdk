@@ -21,6 +21,10 @@ Breaking runtime-adapter contract release.
 - Updated custom-adapter authors atomically: there is no 0.3 adapter alias,
   overload, optional prepare hook, or direct-start fallback. Protocol-v1 wire
   bytes and runtime ids are unchanged.
+- Made `Session.close()` a typed, bounded quiescent-disposal receipt. Bundled
+  adapters now own and terminate full process trees; TaskRunner retains active
+  and Git workspace ownership until disposal succeeds and records local
+  disposal failure without duplicating or rewriting the wire terminal.
 - Advanced the aligned dispatch packages (`core`, `protocol`, `client`,
   `server`, `cloud`, `cloud-dataplane`, `testkit`, and `byok-sdk`) to 0.4.0;
   `@byok-sdk/keys` remains independently versioned at 0.1.0. This release is

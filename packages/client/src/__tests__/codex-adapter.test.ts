@@ -16,6 +16,15 @@ function fakeCodexAdapter(): CodexAdapter {
   return new CodexAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }) });
 }
 
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
 function capturingSpawn(
   captured: string[][],
   capturedEnvs?: NodeJS.ProcessEnv[],
@@ -570,6 +579,33 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     await takeEvents(session, 7);
     await session.close();
     await expect(session.close()).resolves.toBeUndefined();
+  });
+
+  it('close() joins an in-flight followUp spawn before proving session quiescence', async () => {
+    const env = { ...process.env };
+    const children: ReturnType<typeof spawn>[] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+        const child = spawn(command, args, options);
+        children.push(child);
+        return child;
+      }) as never,
+    });
+    const ctx = await makeCtx(env);
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    await takeEvents(session, 7);
+
+    env.FAKE_CODEX_HANG_BEFORE_THREAD = '1';
+    const followUp = session.followUp({ instruction: 'race close', policy: { mode: 'auto' } });
+    await vi.waitFor(() => expect(children).toHaveLength(2));
+    const followUpPid = children[1]?.pid;
+    expect(followUpPid).toBeGreaterThan(0);
+
+    await expect(session.close()).resolves.toBeUndefined();
+    await expect(followUp).rejects.toBeInstanceOf(Error);
+    expect(processExists(followUpPid!)).toBe(false);
   });
 
   it('steer() throws a typed SteerUnsupportedError rather than silently no-op-ing (codex exec has no in-band mid-turn channel)', async () => {

@@ -74,6 +74,21 @@ TaskRunner projects the typed retry disposition onto the existing
 event variants do not change. Interruption/close evidence is a separate
 teardown lifecycle and cannot rewrite an already established semantic result.
 
+### Quiescent runtime disposal
+
+`Session.close()` is a bounded ownership receipt, not a best-effort signal. It
+is idempotent and single-flight; it resolves only after the adapter-owned
+process tree and task-scoped resources are quiescent. Expected failure is a
+typed `RuntimeDisposalFailure` with closed stage `signal`, `quiescence`, or
+`cleanup` and an audit-safe reason. It carries no retry disposition.
+
+Bundled adapters create an owned POSIX process group and terminate the group
+with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. TaskRunner records
+the semantic terminal once, but retains its active entry and Git workspace
+lease until close succeeds. A failed attempt emits local
+`runtime-disposal-failed` evidence and may be retried by shutdown without
+publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
+
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
