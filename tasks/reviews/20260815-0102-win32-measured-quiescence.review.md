@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 8a662ef4dd5cc850dbc4c0e2b4a643e96f090397
+> **Verification Evidence SHA256**: sha256:ed89858b00949243384b557459a07859cf4cff83cb143e2b7b33f690973f49bf
+> **Issued At**: 2026-08-14T17:51:25.917Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Gatekeeper PASS: measured win32 tree quiescence; 10/10 exit criteria via full typecheck/test/build; four gate findings applied red-first; built adapter smoke restored to green across 3 OSes after fixture receipt race fix
 - Findings: none
 
 ## Behavior Diff Notes
