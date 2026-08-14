@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-15 02:16
+> **Related Plan**: plans/archive/plan-20260815-0205-client-dependency-purity.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260815-0216
+
 # Implementation Notes: client-dependency-purity
 
 > **Status**: Active

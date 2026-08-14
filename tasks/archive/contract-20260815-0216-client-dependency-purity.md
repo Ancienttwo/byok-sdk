@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-15 02:16
+> **Related Plan**: plans/archive/plan-20260815-0205-client-dependency-purity.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260815-0216
+
 # Task Contract: client-dependency-purity
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260815-0205-client-dependency-purity.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->

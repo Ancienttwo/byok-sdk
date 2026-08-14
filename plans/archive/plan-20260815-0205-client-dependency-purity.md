@@ -1,6 +1,6 @@
 # Plan: Client Dependency Purity Rule
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260815-0205
 > **Slug**: client-dependency-purity
 > **Planning Source**: waza-think
