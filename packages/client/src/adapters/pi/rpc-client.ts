@@ -147,9 +147,15 @@ export class PiRpcClient {
     }
   }
 
-  /** Immediate process-tree termination request. `dispose()` is the settlement receipt. */
+  /**
+   * Immediate process-tree termination request. `dispose()` is the settlement
+   * receipt, so this stays fire-and-forget: an interrupt must not block on a
+   * terminator. A request that could not be spawned is left unrecorded, so
+   * `dispose()` re-issues it and raises the typed `stage:'signal'` failure —
+   * swallowing it here loses nothing.
+   */
   kill(): void {
-    requestOwnedProcessTreeTermination(this.processTreeOptions());
+    void requestOwnedProcessTreeTermination(this.processTreeOptions()).catch(() => {});
   }
 
   waitClosed(): Promise<void> {

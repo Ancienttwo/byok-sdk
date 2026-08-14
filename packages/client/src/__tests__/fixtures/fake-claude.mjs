@@ -137,12 +137,23 @@ import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
 
+/** Levels 2 and 3 of the owned tree, shared with fake-pi/fake-codex; it writes the pid receipt itself. */
+const PROCESS_TREE_DESCENDANT = fileURLToPath(new URL('./process-tree-descendant.mjs', import.meta.url));
+
+// Three levels (root -> descendant -> grandchild); the descendant writes the
+// pid receipt itself. See ./process-tree-descendant.mjs for why.
 if (process.env.FAKE_CLAUDE_PROCESS_TREE_FILE && argv.includes('-p')) {
-  const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60_000)'], { stdio: 'ignore' });
-  writeFileSync(process.env.FAKE_CLAUDE_PROCESS_TREE_FILE, JSON.stringify({ rootPid: process.pid, descendantPid: descendant.pid }));
+  spawn(process.execPath, [
+    PROCESS_TREE_DESCENDANT,
+    process.env.FAKE_CLAUDE_PROCESS_TREE_FILE,
+    String(process.pid),
+    '0',
+    '',
+  ], { stdio: 'ignore' });
 }
 
 async function callConfiguredMcpTool(serverName, toolName, toolArguments) {

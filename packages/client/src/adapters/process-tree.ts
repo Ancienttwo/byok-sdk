@@ -1,11 +1,29 @@
-import { spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { RuntimeDisposalFailure } from '../runtime-failure';
+import { walkTaskkillPidSet } from './taskkill-pid-set';
 
 const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
 const POLL_MS = 20;
-const terminationRequested = new WeakSet<ChildProcess>();
-const terminationRequestFailed = new WeakSet<ChildProcess>();
+
+type KillFn = (pid: number, signal: NodeJS.Signals | number) => void;
+
+interface OwnedTerminationState {
+  /** True only once a termination request actually reached the OS. A request that could not be spawned leaves this false so disposal re-issues it and surfaces the typed failure. */
+  requested: boolean;
+  /** win32 only: the process ids `taskkill /T /F` reported walking. This set — not taskkill's exit status — is what disposal measures for quiescence. */
+  acceptedPids: Set<number>;
+}
+
+const terminationState = new WeakMap<ChildProcess, OwnedTerminationState>();
+
+function stateFor(child: ChildProcess): OwnedTerminationState {
+  const existing = terminationState.get(child);
+  if (existing) return existing;
+  const created: OwnedTerminationState = { requested: false, acceptedPids: new Set<number>() };
+  terminationState.set(child, created);
+  return created;
+}
 
 export interface OwnedProcessTreeOptions {
   child: ChildProcess;
@@ -14,6 +32,16 @@ export interface OwnedProcessTreeOptions {
   label: string;
   termGraceMs?: number;
   killGraceMs?: number;
+  /** DI seam — defaults to `process.platform`. Lets the win32 branch be exercised from POSIX CI, mirroring `util/secure-dir.ts`'s identical convention. */
+  platform?: NodeJS.Platform;
+  /** DI seam for the win32 `taskkill` sweep — defaults to `node:child_process`'s `spawn`. */
+  spawnFn?: typeof spawn;
+  /** DI seam for liveness probing — defaults to `process.kill`. */
+  killFn?: KillFn;
+}
+
+function defaultKill(pid: number, signal: NodeJS.Signals | number): void {
+  process.kill(pid, signal);
 }
 
 /**
@@ -40,9 +68,9 @@ function positivePid(child: ChildProcess, label: string): number | undefined {
   return pid;
 }
 
-function groupExists(pid: number, label: string): boolean {
+function groupExists(pid: number, label: string, kill: KillFn): boolean {
   try {
-    process.kill(-pid, 0);
+    kill(-pid, 0);
     return true;
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException).code;
@@ -55,9 +83,25 @@ function groupExists(pid: number, label: string): boolean {
   }
 }
 
-function signalGroup(pid: number, signal: NodeJS.Signals, label: string): void {
+/** win32 counterpart of {@link groupExists} for one walked pid; EPERM carries the identical "taken by a live process" reading. */
+function processExists(pid: number, label: string, kill: KillFn): boolean {
   try {
-    process.kill(-pid, signal);
+    kill(pid, 0);
+    return true;
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return false;
+    if (code === 'EPERM') return true;
+    throw new RuntimeDisposalFailure({
+      stage: 'quiescence',
+      reason: `${label} runtime process ${pid} state could not be verified`,
+    }, { cause });
+  }
+}
+
+function signalGroup(pid: number, signal: NodeJS.Signals, label: string, kill: KillFn): void {
+  try {
+    kill(-pid, signal);
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException).code;
     // macOS can transiently report EPERM for an orphaned group containing
@@ -69,6 +113,56 @@ function signalGroup(pid: number, signal: NodeJS.Signals, label: string): void {
       reason: `${label} runtime process group ${pid} could not receive ${signal} (${code ?? 'unknown'})`,
     }, { cause });
   }
+}
+
+/**
+ * Runs `taskkill /PID <pid> /T /F` and returns its combined output.
+ *
+ * The exit status is deliberately never read: taskkill reports non-zero for a
+ * root that already exited, which is quiescence rather than a failed request.
+ * Only a taskkill that could not be SPAWNED is a `stage:'signal'` failure —
+ * everything else is decided by measuring the walked pid set afterwards.
+ *
+ * Output is captured as raw bytes and decoded latin1; see
+ * `./taskkill-pid-set.ts` for why that is the byte-safe choice under every
+ * console OEM codepage.
+ */
+async function runTaskkill(pid: number, options: OwnedProcessTreeOptions): Promise<string> {
+  const spawnFn = options.spawnFn ?? spawn;
+  return new Promise<string>((resolve, reject) => {
+    const signalFailure = (cause: unknown): void => {
+      reject(new RuntimeDisposalFailure({
+        stage: 'signal',
+        reason: `${options.label} runtime process tree termination could not be requested`,
+      }, { cause }));
+    };
+    let taskkill: ChildProcess;
+    try {
+      taskkill = spawnFn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (cause) {
+      signalFailure(cause);
+      return;
+    }
+    const chunks: Buffer[] = [];
+    taskkill.stdout?.on('data', (chunk: Buffer) => chunks.push(chunk));
+    taskkill.stderr?.on('data', (chunk: Buffer) => chunks.push(chunk));
+    // A failed spawn emits `error` before `close`, so the first settle is the
+    // failure; a spawned taskkill settles on `close`, after every byte arrived.
+    taskkill.once('error', signalFailure);
+    taskkill.once('close', () => resolve(Buffer.concat(chunks).toString('latin1')));
+  });
+}
+
+/** win32: the subset of the walked pid set that is still holding a live process. */
+function liveAcceptedPids(accepted: Iterable<number>, label: string, kill: KillFn): number[] {
+  const live: number[] = [];
+  for (const pid of accepted) {
+    if (processExists(pid, label, kill)) live.push(pid);
+  }
+  return live;
 }
 
 async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
@@ -110,36 +204,71 @@ async function waitWithDeadline(promise: Promise<void>, timeoutMs: number): Prom
   });
 }
 
-/** Immediate termination request used by interrupt paths; close remains the receipt. */
-export function requestOwnedProcessTreeTermination(options: OwnedProcessTreeOptions): void {
-  if (options.isClosed()) return;
+/**
+ * Immediate termination request used by interrupt paths; close remains the
+ * receipt. On win32 the request also RECORDS the pid set taskkill walked,
+ * which is what {@link disposeOwnedProcessTree} later measures — so an
+ * interrupt that is fired and forgotten still leaves disposal a measurable
+ * tree. A request that could not be spawned records nothing, which makes
+ * disposal re-issue it and surface `stage:'signal'` itself.
+ */
+export async function requestOwnedProcessTreeTermination(options: OwnedProcessTreeOptions): Promise<void> {
+  const platform = options.platform ?? process.platform;
+  // win32 deliberately has NO `isClosed()` short-circuit: a root that exited on
+  // its own leaves descendants Windows never re-parents, so skipping the walk
+  // here would let disposal claim quiescence it never measured. A dead root
+  // simply makes taskkill report nothing beyond itself — a cheap sweep for a
+  // measured receipt. POSIX keeps the short-circuit: its group signal is
+  // already the whole-tree operation.
+  if (platform !== 'win32' && options.isClosed()) return;
   const pid = positivePid(options.child, options.label);
   if (pid === undefined) return;
-  if (process.platform === 'win32') {
-    const result = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
-    if (result.error) {
-      throw new RuntimeDisposalFailure({
-        stage: 'signal',
-        reason: `${options.label} runtime process tree could not be terminated`,
-      }, { cause: result.error });
-    }
-    terminationRequested.add(options.child);
-    // A one-shot runtime can exit after the last protocol frame but before
-    // Node delivers its `close` event. `spawnSync` blocks that delivery, so a
-    // non-zero taskkill status is only a failed request candidate; `close`
-    // remains the authoritative quiescence receipt below.
-    if (result.status !== 0) terminationRequestFailed.add(options.child);
+  if (platform === 'win32') {
+    const output = await runTaskkill(pid, options);
+    const state = stateFor(options.child);
+    // The root's own line names THIS process as its parent; accepting that pid
+    // would make quiescence unreachable by construction.
+    for (const walked of walkTaskkillPidSet(output, pid, [process.pid])) state.acceptedPids.add(walked);
+    state.requested = true;
     return;
   }
-  signalGroup(pid, 'SIGTERM', options.label);
-  terminationRequested.add(options.child);
+  signalGroup(pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
+  stateFor(options.child).requested = true;
 }
 
-/** Resolve only after the adapter-owned root and descendants are quiescent. */
+/**
+ * Resolve only after the adapter-owned root and descendants are quiescent.
+ *
+ * POSIX measures the owned process GROUP; win32 measures the pid set taskkill
+ * reported walking (`stage:'quiescence'` names how many of those were still
+ * alive at the deadline). Neither platform reads a terminator's exit status:
+ * on win32 `stage:'signal'` now means only that taskkill could not be spawned.
+ * `close` stays the final receipt on both — it is the stdio-flush guarantee,
+ * not the liveness proof.
+ *
+ * Grace budget: each phase carries its own full grace on both platforms. On
+ * win32 the quiescence poll gets `killGraceMs` and the close wait that follows
+ * gets a fresh `killGraceMs`; POSIX likewise gives the SIGTERM wait
+ * `termGraceMs`, the SIGKILL wait `killGraceMs`, and the close wait another
+ * `killGraceMs`. Worst-case disposal is therefore bounded by the sum, never by
+ * one shared deadline that could starve the close wait after a slow drain.
+ *
+ * Residual boundary, stated honestly. Three cases this mechanism cannot cover:
+ * a descendant whose intermediate parent died before any sweep observed it is
+ * unreachable, because Windows does not re-parent orphans — nothing in the
+ * surviving tree links back to it and `taskkill /T` cannot find it. The same
+ * window means a recycled pid could read as alive. And if taskkill's output is
+ * empty or unparseable, the walked set collapses to `{root}`: disposal then
+ * measures the root alone and reports quiescence on that basis, which is a
+ * narrower claim than the tree, not a false one. Preventing orphans left behind
+ * by a DAEMON crash is a separate job-object concern, explicitly out of scope.
+ */
 export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions): Promise<void> {
   const pid = positivePid(options.child, options.label);
   const termGraceMs = options.termGraceMs ?? DEFAULT_TERM_GRACE_MS;
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
+  const platform = options.platform ?? process.platform;
+  const kill = options.killFn ?? defaultKill;
 
   if (pid === undefined) {
     if (await waitWithDeadline(options.waitClosed(), killGraceMs)) return;
@@ -149,28 +278,56 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
     });
   }
 
-  if (process.platform === 'win32') {
-    if (!options.isClosed() && !terminationRequested.has(options.child)) requestOwnedProcessTreeTermination(options);
-    if (await waitWithDeadline(options.waitClosed(), killGraceMs)) return;
-    if (terminationRequestFailed.has(options.child)) {
+  if (platform === 'win32') {
+    // No `isClosed()` guard: at least one taskkill walk must precede any
+    // quiescence claim, or a root that exited on its own would let unmeasured
+    // descendants pass as quiescent.
+    if (!terminationState.get(options.child)?.requested) {
+      await requestOwnedProcessTreeTermination(options);
+    }
+    const accepted = terminationState.get(options.child)?.acceptedPids ?? new Set<number>();
+    const deadline = Date.now() + killGraceMs;
+    const resweepAt = Date.now() + Math.floor(killGraceMs / 2);
+    let reswept = false;
+    let live = liveAcceptedPids(accepted, options.label, kill);
+    while (live.length > 0) {
+      if (Date.now() >= deadline) {
+        throw new RuntimeDisposalFailure({
+          stage: 'quiescence',
+          reason: `${options.label} runtime process tree did not quiesce: ${live.length} of ${accepted.size} walked process ids were still alive at the disposal deadline`,
+        });
+      }
+      if (!reswept && Date.now() >= resweepAt) {
+        reswept = true;
+        // Re-issue against what is still live rather than the original root:
+        // an intermediate that has since exited would hide its own subtree.
+        for (const livePid of live) {
+          for (const walked of walkTaskkillPidSet(await runTaskkill(livePid, options), livePid, [process.pid])) {
+            accepted.add(walked);
+          }
+        }
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, POLL_MS);
+      });
+      live = liveAcceptedPids(accepted, options.label, kill);
+    }
+    if (!(await waitWithDeadline(options.waitClosed(), killGraceMs))) {
       throw new RuntimeDisposalFailure({
-        stage: 'signal',
-        reason: `${options.label} runtime process tree could not be terminated`,
+        stage: 'quiescence',
+        reason: `${options.label} runtime root did not emit close after its process tree quiesced`,
       });
     }
-    throw new RuntimeDisposalFailure({
-      stage: 'quiescence',
-      reason: `${options.label} runtime process tree did not close before the disposal deadline`,
-    });
+    return;
   }
 
-  if (groupExists(pid, options.label) && !terminationRequested.has(options.child)) {
-    signalGroup(pid, 'SIGTERM', options.label);
-    terminationRequested.add(options.child);
+  if (groupExists(pid, options.label, kill) && !terminationState.get(options.child)?.requested) {
+    signalGroup(pid, 'SIGTERM', options.label, kill);
+    stateFor(options.child).requested = true;
   }
-  if (!(await waitUntil(() => groupExists(pid, options.label), termGraceMs))) {
-    signalGroup(pid, 'SIGKILL', options.label);
-    if (!(await waitUntil(() => groupExists(pid, options.label), killGraceMs))) {
+  if (!(await waitUntil(() => groupExists(pid, options.label, kill), termGraceMs))) {
+    signalGroup(pid, 'SIGKILL', options.label, kill);
+    if (!(await waitUntil(() => groupExists(pid, options.label, kill), killGraceMs))) {
       throw new RuntimeDisposalFailure({
         stage: 'quiescence',
         reason: `${options.label} runtime process group remained live after SIGKILL`,

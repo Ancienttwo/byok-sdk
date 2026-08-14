@@ -84,12 +84,22 @@
 //                                    instead of agent_settled.
 //   FAKE_PI_IGNORE_TERM=1        -> root and lifecycle descendant ignore
 //                                    SIGTERM, proving close escalates to SIGKILL.
+//   FAKE_PI_ESCAPE_LOG=<path>    -> escape-race fixture: the descendant spawns
+//                                    a fresh child every 100ms and appends each
+//                                    pid to this file, so a test can assert
+//                                    close() never resolves while a recorded pid
+//                                    is still alive. See
+//                                    ./process-tree-descendant.mjs.
 
 import { writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
+
+/** Levels 2 and 3 of the owned tree, shared with fake-claude/fake-codex; it writes the pid receipt itself. */
+const PROCESS_TREE_DESCENDANT = fileURLToPath(new URL('./process-tree-descendant.mjs', import.meta.url));
 
 if (argv.includes('--version')) {
   process.stdout.write(`${process.env.FAKE_PI_VERSION ?? '0.0.0-fake'}\n`);
@@ -125,23 +135,28 @@ for (let i = 0; i < argv.length; i++) {
 const sessionId = process.env.FAKE_PI_SESSION_ID ?? 'fake-session-1';
 
 // Row 3 lifecycle fixture: the adapter-owned runtime root launches a real
-// descendant that deliberately outlives a direct-child-only SIGTERM. The PID
-// receipt lets tests prove process-tree quiescence without mocking process
-// APIs. It is opt-in so the ordinary fixture remains byte-for-byte equivalent
-// in behavior for every pre-existing adapter test.
+// descendant, which launches a real grandchild — three levels, because a
+// direct-child-only termination and a one-level sweep look identical at two.
+// Both deliberately outlive a direct-child-only SIGTERM. The PID receipt (see
+// ./process-tree-descendant.mjs, which writes it) lets tests prove process-tree
+// quiescence without mocking process APIs. It is opt-in so the ordinary fixture
+// remains byte-for-byte equivalent in behavior for every pre-existing adapter
+// test.
 const processTreeFile = process.env.FAKE_PI_PROCESS_TREE_FILE;
 if (processTreeFile) {
   const ignoreTerm = process.env.FAKE_PI_IGNORE_TERM === '1';
   if (ignoreTerm) process.on('SIGTERM', () => {});
-  const descendantScript = `${ignoreTerm ? "process.on('SIGTERM', () => {});" : ''}setInterval(() => {}, 1_000)`;
-  const descendant = spawn(process.execPath, ['-e', descendantScript], {
-    stdio: 'ignore',
-  });
+  const descendant = spawn(process.execPath, [
+    PROCESS_TREE_DESCENDANT,
+    processTreeFile,
+    String(process.pid),
+    ignoreTerm ? '1' : '0',
+    process.env.FAKE_PI_ESCAPE_LOG ?? '',
+  ], { stdio: 'ignore' });
   if (descendant.pid === undefined) {
     process.stderr.write('fake-pi: descendant did not receive a pid\n');
     process.exit(1);
   }
-  writeFileSync(processTreeFile, JSON.stringify({ rootPid: process.pid, descendantPid: descendant.pid }));
 }
 
 const sessionIdx = argv.indexOf('--session');

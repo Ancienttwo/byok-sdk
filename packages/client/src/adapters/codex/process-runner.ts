@@ -136,9 +136,14 @@ export class CodexProcessRunner {
    * cleanly resumable afterward via `codex exec resume` (no corruption from
    * killing mid-turn). `taskkill /T /F` on Windows, mirroring
    * `../pi/rpc-client.ts`'s own cross-platform convention.
+   *
+   * Fire-and-forget by design: an interrupt must not block on a terminator,
+   * and `dispose()` is the settlement receipt. A request that could not be
+   * spawned is left unrecorded, so `dispose()` re-issues it and raises the
+   * typed `stage:'signal'` failure — swallowing it here loses nothing.
    */
   kill(): void {
-    requestOwnedProcessTreeTermination(this.processTreeOptions());
+    void requestOwnedProcessTreeTermination(this.processTreeOptions()).catch(() => {});
   }
 
   dispose(): Promise<void> {
