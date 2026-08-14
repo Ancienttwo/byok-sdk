@@ -112,8 +112,10 @@ function storeMutexIdentity(canonicalStoreDir: string): string {
  * nested one level deep so that directory can be created 0700 BEFORE anything
  * binds inside it (the nesting convention is `controlSocketPath`'s).
  *
- * `controlSocketPath` reaches for `os.tmpdir()` at this point; this must not,
- * for two independent reasons proven by CI job 94334133652. Correctness:
+ * `controlSocketPath`'s fallback now binds under its own FIXED `/tmp` root
+ * (`control-protocol.ts`'s `CONTROL_SOCKET_FALLBACK_ROOT` — not
+ * `os.tmpdir()`); this mutex must not regress to `os.tmpdir()` for the same
+ * two independent reasons proven by CI job 94334133652. Correctness:
  * `os.tmpdir()` is environment-derived, and a lock address that differs
  * between two contending processes admits two writers. Reachability: the
  * caller may have pointed `TMPDIR` INSIDE the very tree that made the natural
@@ -407,9 +409,10 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
   if (!isPipe) {
     const endpointDir = path.dirname(endpoint);
     // A no-op for the common `<storeDir>/mutex.sock` case (the caller
-    // already ran `ensureSecureDir` on it); real work only for the tmpdir
-    // fallback, whose subdirectory does not exist the first time a given
-    // store lands there.
+    // already ran `ensureSecureDir` on it); real work only for the fixed
+    // `/tmp` fallback (see STORE_MUTEX_FALLBACK_ROOT — not `os.tmpdir()`),
+    // whose subdirectory does not exist the first time a given store lands
+    // there.
     if (endpointDir !== canonicalStoreDir) {
       await ensureSecureDir(endpointDir);
       await assertOwnedPrivateDir(endpointDir);

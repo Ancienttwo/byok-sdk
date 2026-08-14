@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Made the git workspace category/phase member lists a single source of
+  truth: `@byok-sdk/client`'s daemon now exports `GIT_ERROR_CATEGORIES` and
+  `GIT_WORKSPACE_PHASES` with a compile-time exhaustiveness proof against
+  their unions, and the CLI's stable-output validators (`format`, `audit
+  log`, `tasks` view, `workspaces` command) project from them instead of
+  carrying literal copies; a drift-guard test pins the projection. Also
+  documented that the artifact-path `O_NOFOLLOW` symlink guard is POSIX-only
+  (on Windows the flag is a no-op and the guarantee does not hold — see
+  `docs/security.md` on workspace confinement) and gated the symlink/TOCTOU
+  tests to skip on win32 instead of passing vacuously.
 - Added `readTaskResult()` to `@byok-sdk/cloud`: a typed host control-plane
   read that decodes the first terminal receipt into a `TerminalResult` (state,
   summary, sessionRef, artifactRefs, document, reason, retryable, recordedAt)

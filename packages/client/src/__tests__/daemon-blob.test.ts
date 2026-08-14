@@ -408,7 +408,15 @@ describe('blob client (protocol §7)', () => {
     });
 
     describe('TOCTOU symlink race (finding F7/N5) — open-then-verify-on-fd', () => {
-      it('rejects an artifact name that is already a symlink pointing outside the workspace', async () => {
+      // POSIX-only assertions: these prove rejection by the O_NOFOLLOW
+      // final-component guard / the symlink-resolving containment checks,
+      // and fs.constants.O_NOFOLLOW is undefined on Windows — there the
+      // `?? 0` in `openArtifact` (task-runner.ts) no-ops the flag and the
+      // same rejections would pass vacuously (e.g. ENOENT on a nonexistent
+      // `/etc/hosts` target) instead of proving the guard. Gated per-test
+      // rather than per-describe so any non-symlink test added under this
+      // describe keeps running on every platform.
+      it.skipIf(process.platform === 'win32')('rejects an artifact name that is already a symlink pointing outside the workspace', async () => {
         const adapter = new StubRuntimeAdapter();
         await setupDaemon(adapter);
 
@@ -447,7 +455,7 @@ describe('blob client (protocol §7)', () => {
         expect(progressWithError).toBeDefined();
       });
 
-      it('rejects an artifact name whose INTERMEDIATE directory component is a symlink pointing outside the workspace (finding P4/Codex) — a lexical containment check alone would wrongly pass this', async () => {
+      it.skipIf(process.platform === 'win32')('rejects an artifact name whose INTERMEDIATE directory component is a symlink pointing outside the workspace (finding P4/Codex) — a lexical containment check alone would wrongly pass this', async () => {
         const adapter = new StubRuntimeAdapter();
         await setupDaemon(adapter);
 
@@ -506,7 +514,7 @@ describe('blob client (protocol §7)', () => {
         expect(progressWithError).toBeDefined();
       });
 
-      it('rejects an artifact swapped from a regular file to an outside-pointing symlink inside openArtifact\'s own internal gap — the narrowest TOCTOU window the fix leaves, still closed by O_NOFOLLOW', async () => {
+      it.skipIf(process.platform === 'win32')('rejects an artifact swapped from a regular file to an outside-pointing symlink inside openArtifact\'s own internal gap — the narrowest TOCTOU window the fix leaves, still closed by O_NOFOLLOW', async () => {
         const adapter = new StubRuntimeAdapter();
         await setupDaemon(adapter);
 

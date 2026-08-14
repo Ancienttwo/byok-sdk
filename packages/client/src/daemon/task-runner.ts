@@ -664,11 +664,24 @@ type OpenArtifactResult = { ok: true; handle: FileHandle } | { ok: false; reason
  * (resolve-and-open as one atomic, symlink-constrained operation), which
  * Node's stdlib doesn't expose, and isn't implemented cross-platform here.
  *
- * M3 TODO (Windows): `fs.constants.O_NOFOLLOW` is `undefined` on Windows,
- * so the `?? 0` below no-ops the flag there (reparse-point/symlink handling
- * for that platform isn't implemented yet) — the realpath+prefix
- * containment checks remain the floor of protection on Windows until it
- * is.
+ * Windows (M3 TODO): the `O_NOFOLLOW` guard is POSIX-only. On Windows
+ * `fs.constants.O_NOFOLLOW` does not exist, so the `?? 0` below no-ops the
+ * flag there and the final-component symlink guarantee does NOT hold: a
+ * symlinked final component is opened and followed like any other file
+ * (reparse-point/symlink handling for that platform isn't implemented yet).
+ * It is deliberately NOT papered over with a pre-open `lstat` rejection —
+ * `lstat`-then-`open` re-opens the exact check-then-use TOCTOU window
+ * `O_NOFOLLOW` exists to close atomically, which would be racy security
+ * theater, not a guard. The lexical + realpath containment checks above
+ * still run on Windows and remain its floor of protection, but they are
+ * defense-in-depth, not an equivalent; until a real Windows-side mechanism
+ * exists, workspace confinement there stays a convention, not an enforced
+ * boundary (see `docs/security.md`'s "Workspace confinement is a
+ * convention, not a sandbox"). For the same reason the symlink/TOCTOU
+ * rejection tests in `__tests__/daemon-blob.test.ts` are skipIf-gated to
+ * win32 — on Windows they would pass vacuously (a rejected open for the
+ * wrong reason, e.g. `ENOENT` on a nonexistent target) and green CI there
+ * must never be mistaken for the guard having held.
  */
 async function openArtifact(workspaceDir: string, name: string): Promise<OpenArtifactResult> {
   // Workspace root is daemon-created (see `resolveWorkspaceDir`) and

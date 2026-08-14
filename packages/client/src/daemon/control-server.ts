@@ -146,8 +146,10 @@ async function handleStaleUnixSocket(socketPath: string): Promise<void> {
  * Hardening finding (P2 re-gate): `fs.chmod` just above/below this call is
  * fire-and-forget (`.catch(() => {})`) because tightening the mode on a
  * directory this process doesn't OWN fails with `EPERM` — not because that
- * failure is safe to ignore. On a shared, world-writable `os.tmpdir()` (the
- * long-storeDir-path fallback branch of `controlSocketPath`), an attacker on
+ * failure is safe to ignore. On the shared, world-writable FIXED `/tmp` root
+ * (`control-protocol.ts`'s `CONTROL_SOCKET_FALLBACK_ROOT` — not
+ * `os.tmpdir()`) that the long-storeDir-path fallback branch of
+ * `controlSocketPath` binds under, an attacker on
  * the same machine can pre-create the exact deterministic `byok-<hash>`
  * directory name (derived from a hash of `storeDir` alone, so it's fully
  * predictable ahead of time) — e.g. as a symlink to somewhere else, or
@@ -167,7 +169,7 @@ async function handleStaleUnixSocket(socketPath: string): Promise<void> {
  * there is either a symlink or not owned by this exact process's own uid —
  * the two properties a same-machine attacker could control that "the
  * directory exists" alone can't rule out once `chmod` has already failed
- * silently. Applied unconditionally (not just in the tmpdir-fallback
+ * silently. Applied unconditionally (not just in the fixed-`/tmp`-fallback
  * branch): a no-op in the common `storeDir` case (already owned + 0700 by
  * this same process — see `startControlServer`), genuine defense-in-depth
  * where it actually matters.
@@ -203,7 +205,7 @@ async function bindControlEndpoint(server: net.Server, endpoint: string): Promis
     // traversing into it, regardless of the socket file's transient mode
     // between `listen()` creating it and the `chmod` below tightening it.
     // A no-op re-assertion for the common (storeDir) case, already 0700 —
-    // this only does real work for the tmpdir long-path fallback, whose
+    // this only does real work for the fixed-`/tmp` long-path fallback, whose
     // parent subdirectory doesn't exist yet the first time a given
     // storeDir hits it.
     const endpointDir = path.dirname(endpoint);

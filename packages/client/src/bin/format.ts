@@ -1,5 +1,6 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo } from '../index';
+import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ProbedRuntime } from './runtime-probe';
 import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
@@ -33,20 +34,19 @@ function redactedByteCountPlaceholder(text: string): string {
   return `[redacted: ${Buffer.byteLength(text, 'utf8')} bytes]`;
 }
 
-/** Git failures are rendered only from the closed stable category set. */
-const STABLE_GIT_ERROR_CATEGORIES = new Set([
-  'git-unavailable',
-  'git-timeout',
-  'git-output-limit',
-  'git-command-failed',
-  'workspace-root-invalid',
-  'workspace-root-conflict',
-  'workspace-not-owned',
-  'repository-root-mismatch',
-  'repository-invalid',
-  'lease-busy',
-  'ledger-invalid',
-]);
+/**
+ * Git failures are rendered only from the closed stable category set —
+ * projected from `daemon/git-workspace.ts`'s `GIT_ERROR_CATEGORIES` (the
+ * single source of truth for the `GitErrorCategory` union) rather than
+ * carrying a literal copy that could drift from it; the runtime half of
+ * that guarantee is `__tests__/git-category-drift.test.ts`. Typed
+ * `Set<string>` (not `Set<GitErrorCategory>`) because what it filters is
+ * unvalidated ledger strings, never typed values.
+ *
+ * @internal Exported for the drift-guard test only (never re-exported from
+ * `index.ts`).
+ */
+export const STABLE_GIT_ERROR_CATEGORIES = new Set<string>(GIT_ERROR_CATEGORIES);
 
 function stableGitErrorCategory(value: string | undefined): string | undefined {
   return value !== undefined && STABLE_GIT_ERROR_CATEGORIES.has(value) ? value : undefined;

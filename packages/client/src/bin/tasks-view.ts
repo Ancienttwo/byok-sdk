@@ -1,5 +1,6 @@
 import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
 import { type ConnectionState, type DaemonEvent, type DaemonTaskInfo } from '../index';
+import { GIT_ERROR_CATEGORIES, GIT_WORKSPACE_PHASES } from '../daemon/git-workspace';
 
 export interface TaskGitStatus {
   /** Opaque local correlation ID; never a path or commit ID. */
@@ -13,20 +14,19 @@ export interface TaskGitStatus {
 
 export type DerivedTaskInfo = DaemonTaskInfo & { git?: TaskGitStatus };
 
-const STABLE_GIT_PHASES = new Set(['preparing', 'active', 'completed', 'failed', 'cancelled', 'interrupted', 'salvage']);
-const STABLE_GIT_ERROR_CATEGORIES = new Set([
-  'git-unavailable',
-  'git-timeout',
-  'git-output-limit',
-  'git-command-failed',
-  'workspace-root-invalid',
-  'workspace-root-conflict',
-  'workspace-not-owned',
-  'repository-root-mismatch',
-  'repository-invalid',
-  'lease-busy',
-  'ledger-invalid',
-]);
+/**
+ * Both stable-set filters below are projected from `daemon/git-workspace.ts`'s
+ * `GIT_WORKSPACE_PHASES`/`GIT_ERROR_CATEGORIES` (the single sources of truth
+ * for the `GitWorkspacePhase`/`GitErrorCategory` unions) rather than carrying
+ * literal copies that could drift from them; the runtime half of that
+ * guarantee is `__tests__/git-category-drift.test.ts`. Same projection-of-
+ * union idiom as `TASK_STATES` from `@byok-sdk/protocol` above.
+ *
+ * @internal Exported for the drift-guard test only (never re-exported from
+ * `index.ts`).
+ */
+export const STABLE_GIT_PHASES = new Set<string>(GIT_WORKSPACE_PHASES);
+export const STABLE_GIT_ERROR_CATEGORIES = new Set<string>(GIT_ERROR_CATEGORIES);
 
 function nonNegativeSafeInteger(value: number | undefined): number | undefined {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;

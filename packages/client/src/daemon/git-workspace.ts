@@ -2,6 +2,7 @@ import { execFile, type ExecFileException } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import type { GitWorkspacePhase } from './git-workspace-store';
 
 export interface GitWorkspaceConfig {
   mode: 'local-checkpoints';
@@ -19,6 +20,53 @@ export type GitErrorCategory =
   | 'repository-invalid'
   | 'lease-busy'
   | 'ledger-invalid';
+
+/**
+ * Runtime projection of {@link GitErrorCategory}: every union member, once,
+ * in union order — the single source of truth the CLI's stable-output
+ * validators (`bin/format.ts`, `bin/audit-log.ts`, `bin/tasks-view.ts`,
+ * `bin/commands/workspaces.ts`) project from when deciding which category
+ * strings from ledger records are stable enough to render, so those filters
+ * can never drift from the union. The `satisfies` half rejects a string
+ * that isn't a union member; the `AssertExhaustive` proof below rejects a
+ * union member missing from this list — extending either side alone is a
+ * compile error. The runtime half (no duplicates, every consumer projects
+ * exactly this list) is `__tests__/git-category-drift.test.ts`.
+ */
+export const GIT_ERROR_CATEGORIES = [
+  'git-unavailable',
+  'git-timeout',
+  'git-output-limit',
+  'git-command-failed',
+  'workspace-root-invalid',
+  'workspace-root-conflict',
+  'workspace-not-owned',
+  'repository-root-mismatch',
+  'repository-invalid',
+  'lease-busy',
+  'ledger-invalid',
+] as const satisfies readonly GitErrorCategory[];
+
+/**
+ * Runtime projection of `GitWorkspacePhase` (the type itself lives in
+ * `git-workspace-store.ts`; the projection lives here beside
+ * {@link GIT_ERROR_CATEGORIES} so both category/phase single sources ship
+ * from one module) — same exhaustiveness contract, consumed by
+ * `bin/tasks-view.ts`'s phase filter.
+ */
+export const GIT_WORKSPACE_PHASES = [
+  'preparing',
+  'active',
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+  'salvage',
+] as const satisfies readonly GitWorkspacePhase[];
+
+type AssertExhaustive<T extends never> = T;
+type _GitErrorCategoryExhaustive = AssertExhaustive<Exclude<GitErrorCategory, (typeof GIT_ERROR_CATEGORIES)[number]>>;
+type _GitWorkspacePhaseExhaustive = AssertExhaustive<Exclude<GitWorkspacePhase, (typeof GIT_WORKSPACE_PHASES)[number]>>;
 
 export class GitWorkspaceError extends Error {
   constructor(
