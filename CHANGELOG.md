@@ -44,6 +44,16 @@ toolset inventory advertisement, and the typed terminal read model.
   (on Windows the flag is a no-op and the guarantee does not hold — see
   `docs/security.md` on workspace confinement) and gated the symlink/TOCTOU
   tests to skip on win32 instead of passing vacuously.
+- Hardened the Windows client path found while cutting this release:
+  ownership-probe disconnects no longer abort daemon startup, and the adapter
+  task smoke preserves Windows temp and system-tool authority.
+- Made Windows process-tree disposal a measured claim: `taskkill /T /F` now
+  runs asynchronously and its own output supplies the walked PID set (with
+  the daemon's PID excluded), which disposal polls to absence like the POSIX
+  group loop, re-sweeping at half grace for post-snapshot children. The
+  taskkill exit status no longer carries any authority — `signal`-stage
+  failure means only that taskkill could not be spawned, and a
+  `quiescence`-stage failure reports how many walked PIDs stayed alive.
 - Advanced the aligned dispatch packages (`core`, `protocol`, `client`,
   `server`, `cloud`, `cloud-dataplane`, `testkit`, and `byok-sdk`) to 0.4.0;
   `@byok-sdk/keys` remains independently versioned at 0.1.0.

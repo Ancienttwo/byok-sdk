@@ -57,6 +57,22 @@ gets a fresh `killGraceMs` rather than the remainder of the quiescence poll's
 budget, matching POSIX, where the SIGTERM, SIGKILL and close waits each carry
 their own. A slow drain can no longer starve the close wait.
 
+## Fixture receipt contract (CI regression, run 31824908529)
+
+Moving the pid receipt to the descendant — the only process that knows the
+grandchild's pid — broke an invariant nothing had written down: the receipt used
+to exist before the root emitted any protocol frame, because the root wrote it
+itself. `scripts/adapter-task-smoke.mjs` reads the file exactly once, with no
+retry, as soon as the task reports `started`, so the asynchronous write turned
+into an ENOENT on all three OSes. The unit tests missed it because
+`runtime-process-tree.test.ts` polls.
+
+`src/__tests__/fixtures/process-tree-receipt.mjs` now owns the contract: it
+spawns levels 2 and 3 and blocks (bounded, 5s, fail-closed) until the complete
+receipt is on disk, and the descendant publishes it by rename so no reader can
+see a partial write. Do not make that spawn fire-and-forget again. The smoke now
+also asserts the grandchild, so its evidence covers all three levels.
+
 ## Residual boundary (documented in the module, restated here)
 
 A descendant whose intermediate parent died before any sweep observed it is

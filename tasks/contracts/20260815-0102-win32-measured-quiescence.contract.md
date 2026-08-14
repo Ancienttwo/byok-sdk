@@ -75,6 +75,12 @@ allowed_paths:
   - packages/client/src/__tests__/
   - packages/client/scripts/
   - scripts/release/check-package-graph.mjs
+  # Closeout surfaces, user-delegated 2026-08-15 ("你来"): changelog rewrite of
+  # the superseded taskkill clause, harness-regenerated architecture timestamps,
+  # and session research artifacts.
+  - CHANGELOG.md
+  - docs/architecture/
+  - docs/researches/
 ```
 
 ## Evidence Requirements
