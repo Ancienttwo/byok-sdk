@@ -5,6 +5,7 @@ const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
 const POLL_MS = 20;
 const terminationRequested = new WeakSet<ChildProcess>();
+const terminationRequestFailed = new WeakSet<ChildProcess>();
 
 export interface OwnedProcessTreeOptions {
   child: ChildProcess;
@@ -116,13 +117,18 @@ export function requestOwnedProcessTreeTermination(options: OwnedProcessTreeOpti
   if (pid === undefined) return;
   if (process.platform === 'win32') {
     const result = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
-    if (result.error || (result.status !== 0 && !options.isClosed())) {
+    if (result.error) {
       throw new RuntimeDisposalFailure({
         stage: 'signal',
         reason: `${options.label} runtime process tree could not be terminated`,
       }, { cause: result.error });
     }
     terminationRequested.add(options.child);
+    // A one-shot runtime can exit after the last protocol frame but before
+    // Node delivers its `close` event. `spawnSync` blocks that delivery, so a
+    // non-zero taskkill status is only a failed request candidate; `close`
+    // remains the authoritative quiescence receipt below.
+    if (result.status !== 0) terminationRequestFailed.add(options.child);
     return;
   }
   signalGroup(pid, 'SIGTERM', options.label);
@@ -146,6 +152,12 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   if (process.platform === 'win32') {
     if (!options.isClosed() && !terminationRequested.has(options.child)) requestOwnedProcessTreeTermination(options);
     if (await waitWithDeadline(options.waitClosed(), killGraceMs)) return;
+    if (terminationRequestFailed.has(options.child)) {
+      throw new RuntimeDisposalFailure({
+        stage: 'signal',
+        reason: `${options.label} runtime process tree could not be terminated`,
+      });
+    }
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
       reason: `${options.label} runtime process tree did not close before the disposal deadline`,
