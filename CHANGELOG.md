@@ -1,32 +1,9 @@
 # Changelog
 
-## Unreleased
-
-- Made the git workspace category/phase member lists a single source of
-  truth: `@byok-sdk/client`'s daemon now exports `GIT_ERROR_CATEGORIES` and
-  `GIT_WORKSPACE_PHASES` with a compile-time exhaustiveness proof against
-  their unions, and the CLI's stable-output validators (`format`, `audit
-  log`, `tasks` view, `workspaces` command) project from them instead of
-  carrying literal copies; a drift-guard test pins the projection. Also
-  documented that the artifact-path `O_NOFOLLOW` symlink guard is POSIX-only
-  (on Windows the flag is a no-op and the guarantee does not hold — see
-  `docs/security.md` on workspace confinement) and gated the symlink/TOCTOU
-  tests to skip on win32 instead of passing vacuously.
-- Added `readTaskResult()` to `@byok-sdk/cloud`: a typed host control-plane
-  read that decodes the first terminal receipt into a `TerminalResult` (state,
-  summary, sessionRef, artifactRefs, document, reason, retryable, recordedAt)
-  instead of leaving hosts to hand-decode `readTerminalReceipt`'s raw
-  envelope. The fail-closed projection is exported as `projectTerminalResult`;
-  `undefined` still means only that no terminal fact is recorded yet.
-- Renamed the production hosted composition from
-  `@byok-sdk/cloud-postgres` to `@byok-sdk/cloud-dataplane`, and renamed the
-  umbrella namespace from `cloudPostgres` to `cloudDataplane`. The old package
-  identity and namespace are not retained as aliases; releases through `0.3.0`
-  remain published under the historical name.
-
 ## 0.4.0 — 2026-08-14
 
-Breaking runtime-adapter contract release.
+Breaking runtime-adapter contract release, plus the `cloud-dataplane` rename,
+toolset inventory advertisement, and the typed terminal read model.
 
 - Replaced custom `RuntimeAdapter` direct-start authority with a frozen
   descriptor, required side-effect-free per-offer preparation, prepared
@@ -41,10 +18,35 @@ Breaking runtime-adapter contract release.
   adapters now own and terminate full process trees; TaskRunner retains active
   and Git workspace ownership until disposal succeeds and records local
   disposal failure without duplicating or rewriting the wire terminal.
+- Renamed the production hosted composition from
+  `@byok-sdk/cloud-postgres` to `@byok-sdk/cloud-dataplane`, and renamed the
+  umbrella namespace from `cloudPostgres` to `cloudDataplane`. The old package
+  identity and namespace are not retained as aliases; releases through `0.3.0`
+  remain published under the historical name.
+- Daemons now advertise their configured logical toolset inventory: the ids appear
+  in `conn.hello.configuredToolsets` and in presence heartbeats, and hosted
+  `listPresence()` projects them to the host. Ids only — never commands, args, env,
+  headers, or secrets — bounded at 64 items; the daemon-local registry remains the
+  sole dispatch authority.
+- Added `readTaskResult()` to `@byok-sdk/cloud`: a typed host control-plane
+  read that decodes the first terminal receipt into a `TerminalResult` (state,
+  summary, sessionRef, artifactRefs, document, reason, retryable, recordedAt)
+  instead of leaving hosts to hand-decode `readTerminalReceipt`'s raw
+  envelope. The fail-closed projection is exported as `projectTerminalResult`;
+  `undefined` still means only that no terminal fact is recorded yet.
+- Made the git workspace category/phase member lists a single source of
+  truth: `@byok-sdk/client`'s daemon now exports `GIT_ERROR_CATEGORIES` and
+  `GIT_WORKSPACE_PHASES` with a compile-time exhaustiveness proof against
+  their unions, and the CLI's stable-output validators (`format`, `audit
+  log`, `tasks` view, `workspaces` command) project from them instead of
+  carrying literal copies; a drift-guard test pins the projection. Also
+  documented that the artifact-path `O_NOFOLLOW` symlink guard is POSIX-only
+  (on Windows the flag is a no-op and the guarantee does not hold — see
+  `docs/security.md` on workspace confinement) and gated the symlink/TOCTOU
+  tests to skip on win32 instead of passing vacuously.
 - Advanced the aligned dispatch packages (`core`, `protocol`, `client`,
   `server`, `cloud`, `cloud-dataplane`, `testkit`, and `byok-sdk`) to 0.4.0;
-  `@byok-sdk/keys` remains independently versioned at 0.1.0. This release is
-  prepared only and was not published by this change.
+  `@byok-sdk/keys` remains independently versioned at 0.1.0.
 
 ## 0.3.0 — 2026-08-13
 
