@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,6 +19,71 @@ const keys = ['packages/keys', '@byok-sdk/keys'];
 const publicPackages = [...dispatchPackages, umbrella, keys];
 const expectedUmbrellaDependencies = dispatchPackages.map(([, name]) => name).sort();
 const errors = [];
+
+// @byok-sdk/client must install as pure JavaScript: a direct dependency that ships a prebuilt
+// `.node` addon or runs an install script turns an end user's install into a compile/download step
+// and breaks the SEA/bun single-file packagability invariant. Direct dependencies only — the
+// transitive closure is deliberately out of scope, since scoping it would require an allowlist.
+const installScriptFields = ['preinstall', 'install', 'postinstall'];
+
+/** Walks the node_modules chain upward, mirroring Node's own resolution; pnpm symlinks resolve to their real store location. */
+function resolvePackageDir(fromDirectory, name) {
+  let current = fromDirectory;
+  for (;;) {
+    const candidate = path.join(current, 'node_modules', name);
+    if (existsSync(path.join(candidate, 'package.json'))) return realpathSync(candidate);
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+/** Returns the first shipped `.node` addon path relative to the package directory, or undefined. Nested node_modules are another package's problem. */
+function findNativeAddon(packageDirectory) {
+  const stack = [packageDirectory];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+        continue;
+      }
+      if (entry.isFile() && entry.name.endsWith('.node')) return path.relative(packageDirectory, entryPath);
+    }
+  }
+  return undefined;
+}
+
+/** Returns the purity violations of one installed package directory, prefixed with the caller's label. */
+function auditPackagePurity(label, packageDirectory) {
+  const violations = [];
+  const manifest = JSON.parse(readFileSync(path.join(packageDirectory, 'package.json'), 'utf8'));
+  for (const field of installScriptFields) {
+    if (manifest.scripts?.[field]) violations.push(`${label} declares a ${field} script`);
+  }
+  const addon = findNativeAddon(packageDirectory);
+  if (addon) violations.push(`${label} ships a native addon (${addon})`);
+  return violations;
+}
+
+// Negative control for the rule above: audit one installed package directory and nothing else, so
+// the scan can be proven red against a known violating input instead of only green on today's graph.
+const selfTestIndex = process.argv.indexOf('--self-test');
+if (selfTestIndex !== -1) {
+  const target = process.argv[selfTestIndex + 1];
+  if (!target) {
+    console.error('[release-graph] --self-test requires an installed package directory');
+    process.exit(2);
+  }
+  const targetDirectory = path.resolve(target);
+  const violations = auditPackagePurity(`self-test ${targetDirectory}`, targetDirectory);
+  for (const violation of violations) console.error(`[release-graph] ${violation}`);
+  if (violations.length > 0) process.exit(1);
+  console.log(`[release-graph] self-test OK: ${targetDirectory} is pure JavaScript`);
+  process.exit(0);
+}
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(repoRoot, relativePath), 'utf8'));
@@ -107,6 +172,17 @@ if (
   clientManifest?.exports?.['./adapters']?.types !== './dist/adapters/index.d.ts'
 ) {
   errors.push('packages/client/package.json: adapter-only import/types exports are incomplete');
+}
+
+const clientDirectory = path.join(repoRoot, 'packages/client');
+for (const dependency of Object.keys(clientManifest?.dependencies ?? {})) {
+  const label = `packages/client/package.json: direct dependency ${dependency}`;
+  const dependencyDirectory = resolvePackageDir(clientDirectory, dependency);
+  if (!dependencyDirectory) {
+    errors.push(`${label} could not be resolved under node_modules`);
+    continue;
+  }
+  errors.push(...auditPackagePurity(label, dependencyDirectory));
 }
 
 const umbrellaSource = readFileSync(path.join(repoRoot, 'packages/sdk/src/index.ts'), 'utf8');
