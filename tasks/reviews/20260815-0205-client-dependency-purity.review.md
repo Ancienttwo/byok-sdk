@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Claude
+> **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:072fdb3b2d5bbe22864c5acbc34f8a222325d8f28e969bc4935c232fc958e620
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: be7931be4784d7c9077e88e3ea667b9e7f770032
+> **Verification Evidence SHA256**: sha256:efa8fb3e5e5e9ebe81b7deafd35254bbb3c73da198c457767a2eddfbb7e4809e
+> **Issued At**: 2026-08-14T18:14:25.099Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Direct verification by orchestrator: purity rule green on today's graph (exit 0), negative control red on pi-tui .node shipper and @google/genai preinstall (exit 1), full typecheck/test/build green (2703 tests)
 - Findings: none
 
 ## Behavior Diff Notes
