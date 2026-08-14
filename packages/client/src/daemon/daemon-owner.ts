@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
-import { createConnection, createServer, type Server } from 'node:net';
+import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
 import { ensureSecureDir } from '../util/secure-dir';
 
@@ -36,6 +36,19 @@ interface LivenessListener {
 interface StoreMutexLock {
   endpoint: string;
   close(): Promise<void>;
+}
+
+/**
+ * These ownership listeners only answer a liveness/identity probe and retain
+ * no per-connection state. A probe may close as soon as it has established
+ * that the endpoint is bound, before this response reaches the kernel. Node
+ * then reports the expected peer reset as `ECONNRESET`/`EPIPE` on the accepted
+ * socket; consume it here so it cannot become an uncaught process error.
+ */
+function endOwnershipProbe(socket: Socket, response?: string): void {
+  socket.on('error', () => {});
+  if (response === undefined) socket.end();
+  else socket.end(response);
 }
 
 // A STORE-SCOPED lock endpoint is the cross-process mutex for the
@@ -286,7 +299,7 @@ async function portIsBound(port: number): Promise<boolean> {
 }
 
 async function createLivenessListener(): Promise<LivenessListener> {
-  const server: Server = createServer((socket) => socket.end());
+  const server: Server = createServer((socket) => endOwnershipProbe(socket));
   const port = await new Promise<number>((resolve, reject) => {
     server.once('error', reject);
     server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
@@ -419,7 +432,7 @@ async function acquireStoreMutex(canonicalStoreDir: string): Promise<StoreMutexL
     }
     await clearStaleStoreMutexSocket(endpoint, identity);
   }
-  const server: Server = createServer((socket) => socket.end(`${STORE_MUTEX_ID_PREFIX}${identity}\n`));
+  const server: Server = createServer((socket) => endOwnershipProbe(socket, `${STORE_MUTEX_ID_PREFIX}${identity}\n`));
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);

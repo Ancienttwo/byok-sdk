@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, stat } from 'node:fs/promises';
-import { createServer, type Server, type Socket } from 'node:net';
+import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -92,6 +92,20 @@ async function createStaleSocketFile(socketPath: string): Promise<void> {
   });
   child.kill('SIGKILL');
   await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+}
+
+async function abruptMutexProbe(endpoint: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const socket = createConnection(endpoint);
+    socket.once('connect', () => {
+      // A caller only asking "is this endpoint bound?" needs no response and
+      // may close immediately. The holder's identity write must tolerate that
+      // ordinary probe lifecycle on every supported transport.
+      socket.destroy();
+      resolve();
+    });
+    socket.once('error', reject);
+  });
 }
 
 describe('daemon owner store mutex: a store-scoped lock, immune to foreign listeners', () => {
@@ -203,5 +217,19 @@ describe('daemon owner store mutex: a store-scoped lock, immune to foreign liste
 
     const lease = await acquireDaemonOwner(storeDir, 'doctor');
     await lease.release();
+  }, 60_000);
+
+  it('E: abrupt bound-only probes cannot surface an unhandled peer-reset error from the holder', async () => {
+    const storeDir = await tmpDir();
+    const identity = createHash('sha256').update(storeDir).digest('hex');
+    const endpoint = storeMutexEndpoint(storeDir, identity);
+    const held = await acquireDaemonOwner(storeDir, 'doctor');
+    try {
+      await Promise.all(Array.from({ length: 64 }, () => abruptMutexProbe(endpoint)));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+    } finally {
+      await held.release();
+    }
   }, 60_000);
 });
