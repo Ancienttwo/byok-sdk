@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-15 02:05
+> **Related Plan**: plans/archive/plan-20260815-0102-win32-measured-quiescence.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260815-0205
+
 # Task Contract: win32-measured-quiescence
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260815-0102-win32-measured-quiescence.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->

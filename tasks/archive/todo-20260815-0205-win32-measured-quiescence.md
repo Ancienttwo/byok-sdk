@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-15 02:05
+> **Related Plan**: plans/archive/plan-20260815-0102-win32-measured-quiescence.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260815-0205
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: 2026-08-15 02:05
+> **Updated**: 2026-08-15 01:02
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

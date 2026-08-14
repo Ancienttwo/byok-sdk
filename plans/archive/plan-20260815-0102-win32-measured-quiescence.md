@@ -1,6 +1,6 @@
 # Plan: Stage 1: Measured Windows Process-Tree Quiescence
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260815-0102
 > **Slug**: win32-measured-quiescence
 > **Planning Source**: waza-think

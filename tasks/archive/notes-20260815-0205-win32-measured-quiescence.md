@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-15 02:05
+> **Related Plan**: plans/archive/plan-20260815-0102-win32-measured-quiescence.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260815-0205
+
 # Implementation Notes: Measured Windows Process-Tree Quiescence
 
 > Plan: `plans/plan-20260815-0102-win32-measured-quiescence.md`

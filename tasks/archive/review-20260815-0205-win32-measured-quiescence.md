@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-15 02:05
+> **Related Plan**: plans/archive/plan-20260815-0102-win32-measured-quiescence.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260815-0205
+
 # Task Review: win32-measured-quiescence
 
 > **Status**: Pending
@@ -53,13 +59,13 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewer**: Claude
 > **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
+> **Reviewed Subject SHA256**: sha256:357f9a621c4db948aff47c512d165de36e7897b25cd62ddf1a63bd9e59eac9bd
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 8a662ef4dd5cc850dbc4c0e2b4a643e96f090397
-> **Verification Evidence SHA256**: sha256:ed89858b00949243384b557459a07859cf4cff83cb143e2b7b33f690973f49bf
-> **Issued At**: 2026-08-14T17:51:25.917Z
+> **Reviewed Target Revision**: be7931be4784d7c9077e88e3ea667b9e7f770032
+> **Verification Evidence SHA256**: sha256:9e639142686411471e68e5039dc198f12431fe6ca2f23860965b4a4f5663c838
+> **Issued At**: 2026-08-14T18:05:06.028Z
 
-- Summary: Gatekeeper PASS: measured win32 tree quiescence; 10/10 exit criteria via full typecheck/test/build; four gate findings applied red-first; built adapter smoke restored to green across 3 OSes after fixture receipt race fix
+- Summary: Gatekeeper PASS: measured win32 tree quiescence; 10/10 exit criteria; CI run 31825959035 green on all OSes incl. windows-latest and 3-level smoke
 - Findings: none
 
 ## Behavior Diff Notes
