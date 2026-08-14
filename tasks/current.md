@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-14T04:22:53+0800 -->
+<!-- updated_at: 2026-08-14T14:45:44+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-14T04:22:53+0800
-> **Source Branch**: codex/typed-runtime-failure-taxonomy
-> **Source Commit**: df543e1
+> **Updated At**: 2026-08-14T14:45:44+0800
+> **Source Branch**: codex/quiescent-runtime-disposal
+> **Source Commit**: f93b0e8
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -40,7 +40,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Update spec/security/architecture truth and run the complete verification boundary.
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -51,16 +51,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260814-0010-typed-runtime-failure-taxonomy.md
- D tasks/contracts/20260814-0010-typed-runtime-failure-taxonomy.contract.md
- D tasks/notes/20260814-0010-typed-runtime-failure-taxonomy.notes.md
- D tasks/reviews/20260814-0010-typed-runtime-failure-taxonomy.review.md
+ D plans/plan-20260814-0947-quiescent-runtime-disposal.md
+ D tasks/contracts/20260814-0947-quiescent-runtime-disposal.contract.md
+ D tasks/notes/20260814-0947-quiescent-runtime-disposal.notes.md
+ D tasks/reviews/20260814-0947-quiescent-runtime-disposal.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260814-0010-typed-runtime-failure-taxonomy.md
-?? tasks/archive/contract-20260814-0422-typed-runtime-failure-taxonomy.md
-?? tasks/archive/notes-20260814-0422-typed-runtime-failure-taxonomy.md
-?? tasks/archive/review-20260814-0422-typed-runtime-failure-taxonomy.md
-?? tasks/archive/todo-20260814-0422-typed-runtime-failure-taxonomy.md
+?? plans/archive/plan-20260814-0947-quiescent-runtime-disposal.md
+?? tasks/archive/contract-20260814-1445-quiescent-runtime-disposal.md
+?? tasks/archive/notes-20260814-1445-quiescent-runtime-disposal.md
+?? tasks/archive/review-20260814-1445-quiescent-runtime-disposal.md
+?? tasks/archive/todo-20260814-1445-quiescent-runtime-disposal.md
 ```
 
 ## Source Artifacts

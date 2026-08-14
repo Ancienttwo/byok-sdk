@@ -1,6 +1,6 @@
 # Plan: Quiescent Runtime Disposal
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260814-0947
 > **Slug**: quiescent-runtime-disposal
 > **Planning Source**: repo-harness-plan

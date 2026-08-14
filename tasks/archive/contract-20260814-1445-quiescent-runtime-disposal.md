@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-14 14:45
+> **Related Plan**: plans/archive/plan-20260814-0947-quiescent-runtime-disposal.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260814-1445
+
 # Task Contract: quiescent-runtime-disposal
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260814-0947-quiescent-runtime-disposal.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict

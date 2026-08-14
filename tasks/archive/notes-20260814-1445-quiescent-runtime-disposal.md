@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-14 14:45
+> **Related Plan**: plans/archive/plan-20260814-0947-quiescent-runtime-disposal.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260814-1445
+
 # Implementation Notes: quiescent-runtime-disposal
 
 > **Status**: Active

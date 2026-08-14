@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-14 14:45
+> **Related Plan**: plans/archive/plan-20260814-0947-quiescent-runtime-disposal.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260814-1445
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-14 09:49
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
