@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:8003e9580986e1a5303d18ad8d7059088a5a36a8ad18b0b6d7901fe2980ff83c
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 22fd8e0837598fa06f30b99a7978c2d3277148d8
+> **Verification Evidence SHA256**: sha256:a06b36a4154916f77be142d9462d366ddd51e081084c2aa2ac87ec04157c88e7
+> **Issued At**: 2026-08-15T05:54:59.865Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Owner explicitly invoked ship after being offered user-waiver acceptance or Claude review; authorize this Bun and Node 22.22 migration subject to passing frozen verification.
 - Findings: none
 
 ## Behavior Diff Notes
