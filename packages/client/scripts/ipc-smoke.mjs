@@ -34,12 +34,12 @@
 // stub) to give the daemon something genuine to pair/connect against — both
 // `@byok-sdk/server` and `@hono/node-server` are already `@byok-sdk/client`
 // devDependencies (see `src/__tests__/fixtures/real-server.ts`, which this
-// mirrors) and are built by the same `pnpm -r build` this script requires
+// mirrors) and are built by the same `bun run build` this script requires
 // first.
 //
 // Usage: node packages/client/scripts/ipc-smoke.mjs
 //   Requires @byok-sdk/client and @byok-sdk/server already built
-//   (`pnpm -r build` — @byok-sdk/protocol too, transitively).
+//   (`bun run build` — @byok-sdk/protocol too, transitively).
 
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -63,7 +63,7 @@ for (const [label, file] of [
   try {
     await fs.stat(file);
   } catch {
-    console.error(`FAIL: ${file} not found -- run "pnpm -r build" first (needed: ${label})`);
+    console.error(`FAIL: ${file} not found -- run "bun run build" first (needed: ${label})`);
     process.exit(1);
   }
 }

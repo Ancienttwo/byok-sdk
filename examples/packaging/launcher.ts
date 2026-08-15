@@ -12,7 +12,7 @@
 // `import.meta.resolve(PI_PACKAGE_NAME)` to find pi's required package
 // install. tsup marks that package `external` (never bundled into
 // @byok-sdk/client's own dist), so a single-file product must inject its
-// required Node 22.19+ pi sidecar with BYOK_PI_BIN. `detect()` reports
+// required Node 22.22+ pi sidecar with BYOK_PI_BIN. `detect()` reports
 // `present: false` when neither the package nor that explicit sidecar is
 // reachable. What's NOT
 // exercised anywhere else is whether `import.meta.resolve` still behaves

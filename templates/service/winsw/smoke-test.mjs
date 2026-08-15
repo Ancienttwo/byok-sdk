@@ -25,7 +25,7 @@
 // Usage (Windows only):
 //   WINSW_BIN=C:\path\to\WinSW-x64.exe node templates/service/winsw/smoke-test.mjs
 //
-// Requires @byok-sdk/client already built (`pnpm --filter @byok-sdk/client build`).
+// Requires @byok-sdk/client already built (`bun run --filter @byok-sdk/client build`).
 
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -54,7 +54,7 @@ const clientDistIndex = path.join(repoRoot, 'packages', 'client', 'dist', 'index
 try {
   await fs.stat(clientDistIndex);
 } catch {
-  console.error(`FAIL: ${clientDistIndex} not found -- run "pnpm --filter @byok-sdk/client build" first`);
+  console.error(`FAIL: ${clientDistIndex} not found -- run "bun run --filter @byok-sdk/client build" first`);
   process.exit(1);
 }
 

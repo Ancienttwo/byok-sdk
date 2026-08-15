@@ -24,7 +24,7 @@ set -euo pipefail
 # was NOT reliably functional on Node 22.22.3 (the version this was built
 # against) as of this writing -- see the README's "why CJS, not ESM" note.
 # This recipe uses the battle-tested CJS path so it actually works on the
-# Node versions this SDK targets (engines.node >=22.19.0).
+# Node versions this SDK targets (engines.node >=22.22.0).
 
 ENTRY="${1:?usage: build.sh <entry.ts> <output-dir>}"
 OUT_DIR="${2:?usage: build.sh <entry.ts> <output-dir>}"
@@ -53,23 +53,17 @@ fi
 #   1. $ESBUILD_BIN, if the caller set one explicitly.
 #   2. The launcher's own package-local node_modules/.bin/esbuild -- this
 #      recipe's own examples/packaging lists `esbuild` as a direct
-#      devDependency for exactly this reason: pnpm then guarantees a
-#      deterministic .bin shim right next to the entry point, regardless of
-#      hoisting. If you copy this recipe, add `esbuild` as a devDependency of
-#      your own launcher's package.json the same way.
-#   3. `pnpm exec esbuild` as a last resort (works when esbuild is
-#      reachable somewhere in the workspace's dependency graph, but do not
-#      rely on this alone -- empirically inconsistent between a
-#      locally-accumulated install and a clean `pnpm install
-#      --frozen-lockfile` checkout, e.g. in CI, since pnpm's own bin
-#      resolution for `exec` is not guaranteed to see every transitive bin).
+#      devDependency for exactly this reason: Bun materializes a deterministic
+#      .bin shim next to the entry point. If you copy this recipe, add `esbuild`
+#      as a devDependency of your own launcher's package.json the same way.
 ENTRY_DIR="$(cd "$(dirname "$ENTRY")" && pwd)"
 if [ -n "${ESBUILD_BIN:-}" ]; then
   ESBUILD_CMD=("$ESBUILD_BIN")
 elif [ -x "$ENTRY_DIR/node_modules/.bin/esbuild" ]; then
   ESBUILD_CMD=("$ENTRY_DIR/node_modules/.bin/esbuild")
 else
-  ESBUILD_CMD=(pnpm exec esbuild)
+  echo "FAIL: esbuild is unavailable; install it as a direct devDependency or set ESBUILD_BIN" >&2
+  exit 1
 fi
 echo "==> bundling $ENTRY to a single CommonJS file (${ESBUILD_CMD[*]})"
 "${ESBUILD_CMD[@]}" "$ENTRY" --bundle --platform=node --format=cjs --outfile="$BUNDLE"
@@ -131,10 +125,15 @@ if [ "$OS" = "macOS" ]; then
   # platform's command omits it).
   POSTJECT_ARGS+=(--macho-segment-name NODE_SEA)
 fi
-# Pin postject to an exact version rather than resolving a mutable latest,
-# so CI/build can't silently execute a changed upstream release. Bump
-# deliberately; this is the version the Node.js SEA docs pair with this flow.
-npx --yes postject@1.0.0-alpha.6 "$OUT_BIN" NODE_SEA_BLOB "$BLOB" "${POSTJECT_ARGS[@]}"
+# Pin postject as a direct devDependency rather than downloading a tool while
+# the build is running. Products copying this recipe must pin the same tool or
+# provide an explicit POSTJECT_BIN.
+POSTJECT_BIN="${POSTJECT_BIN:-$ENTRY_DIR/node_modules/.bin/postject}"
+if [ ! -x "$POSTJECT_BIN" ]; then
+  echo "FAIL: postject is unavailable; install postject@1.0.0-alpha.6 directly or set POSTJECT_BIN" >&2
+  exit 1
+fi
+"$POSTJECT_BIN" "$OUT_BIN" NODE_SEA_BLOB "$BLOB" "${POSTJECT_ARGS[@]}"
 
 if [ "$OS" = "macOS" ]; then
   echo "==> re-signing (ad-hoc, macOS)"

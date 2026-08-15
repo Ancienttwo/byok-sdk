@@ -26,7 +26,7 @@ const errors = [];
 // transitive closure is deliberately out of scope, since scoping it would require an allowlist.
 const installScriptFields = ['preinstall', 'install', 'postinstall'];
 
-/** Walks the node_modules chain upward, mirroring Node's own resolution; pnpm symlinks resolve to their real store location. */
+/** Walks the node_modules chain upward, mirroring Node's own resolution; Bun's workspace links resolve to their real package location. */
 function resolvePackageDir(fromDirectory, name) {
   let current = fromDirectory;
   for (;;) {
@@ -99,7 +99,7 @@ for (const [directory, expectedName] of publicPackages) {
   if (manifest.version !== expectedVersion) errors.push(`${manifestPath}: expected version ${expectedVersion}, got ${manifest.version}`);
   if (manifest.license !== 'MIT') errors.push(`${manifestPath}: license must be MIT`);
   if (manifest.publishConfig?.access !== 'public') errors.push(`${manifestPath}: publishConfig.access must be public`);
-  const expectedEngine = expectedName === keys[1] ? '>=20' : '>=22.19.0';
+  const expectedEngine = expectedName === keys[1] ? '>=20' : '>=22.22.0';
   if (manifest.engines?.node !== expectedEngine) errors.push(`${manifestPath}: engines.node must be ${expectedEngine}`);
   if (manifest.repository?.url !== 'git+https://github.com/Ancienttwo/byok-sdk.git') {
     errors.push(`${manifestPath}: repository URL is not canonical`);
@@ -207,8 +207,7 @@ const scanRoots = [
   'docs/security-review-m5-pilot-entry.md',
   'ARCHITECTURE-PROPOSAL-byok-platform.md',
   'package.json',
-  'pnpm-lock.yaml',
-  'pnpm-workspace.yaml',
+  'bun.lock',
   'README.md',
   'CHANGELOG.md',
 ];
@@ -229,7 +228,7 @@ function collect(relativePath) {
     for (const entry of readdirSync(absolutePath)) collect(path.join(relativePath, entry));
     return;
   }
-  if (textExtensions.has(path.extname(relativePath)) || ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'].includes(relativePath)) {
+  if (textExtensions.has(path.extname(relativePath)) || ['package.json', 'bun.lock'].includes(relativePath)) {
     scanFiles.push(relativePath);
   }
 }
@@ -244,8 +243,8 @@ const conformance = readJson('packages/conformance/package.json');
 if (conformance.name !== '@byok-sdk/conformance' || conformance.private !== true) {
   errors.push('packages/conformance/package.json: conformance must remain private @byok-sdk/conformance');
 }
-if (conformance.engines?.node !== '>=22.19.0') {
-  errors.push('packages/conformance/package.json: engines.node must be >=22.19.0');
+if (conformance.engines?.node !== '>=22.22.0') {
+  errors.push('packages/conformance/package.json: engines.node must be >=22.22.0');
 }
 
 if (errors.length > 0) {

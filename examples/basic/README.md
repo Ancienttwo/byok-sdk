@@ -10,13 +10,13 @@ Not published — this package is `private` and lives under `examples/`.
 
 ## Prerequisites
 
-Node.js 22.19.0 or newer is required.
+Node.js 22.22.0 or newer is required.
 
 From the repo root:
 
 ```sh
-pnpm install
-pnpm -r build
+bun install
+bun run build
 ```
 
 The workspace install includes the exact supported
@@ -29,7 +29,7 @@ override for a version-matched Node sidecar or test fixture.
 **Terminal 1 — the server:**
 
 ```sh
-pnpm --filter @byok-sdk/example-basic dev
+bun run --filter @byok-sdk/example-basic dev
 ```
 
 Starts the hono app on `http://localhost:8787` (override with `PORT`).
@@ -114,10 +114,10 @@ restart, persisted under `examples/basic/data/` (gitignored):
 > scope for the M3 reference stores.
 
 ```sh
-BYOK_STORE=sqlite pnpm --filter @byok-sdk/example-basic dev
+BYOK_STORE=sqlite bun run --filter @byok-sdk/example-basic dev
 ```
 
-The repository's Node.js 22.19+ baseline includes `node:sqlite`; unsupported
+The repository's Node.js 22.22+ baseline includes `node:sqlite`; unsupported
 runtimes still fail fast with a clear capability error (see
 `packages/server/src/sqlite-support.ts`).
 

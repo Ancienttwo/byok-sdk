@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-15T02:16:06+0800 -->
+<!-- updated_at: 2026-08-15T14:05:44+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-15T02:16:06+0800
-> **Source Branch**: codex/client-dependency-purity
-> **Source Commit**: 1d087fe
+> **Updated At**: 2026-08-15T14:05:44+0800
+> **Source Branch**: codex/bun-package-manager-migration
+> **Source Commit**: fb2029a
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -40,7 +40,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: (none)
+- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
 
 ## Checks
 
@@ -48,19 +48,18 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 9 changed/untracked path(s)
 
 ```
- D plans/plan-20260815-0205-client-dependency-purity.md
- D tasks/contracts/20260815-0205-client-dependency-purity.contract.md
- D tasks/notes/20260815-0205-client-dependency-purity.notes.md
- D tasks/reviews/20260815-0205-client-dependency-purity.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260815-0205-client-dependency-purity.md
-?? tasks/archive/contract-20260815-0216-client-dependency-purity.md
-?? tasks/archive/notes-20260815-0216-client-dependency-purity.md
-?? tasks/archive/review-20260815-0216-client-dependency-purity.md
-?? tasks/archive/todo-20260815-0216-client-dependency-purity.md
+ D plans/plan-20260815-1301-bun-package-manager-migration.md
+ D tasks/contracts/20260815-1301-bun-package-manager-migration.contract.md
+ D tasks/notes/20260815-1301-bun-package-manager-migration.notes.md
+ D tasks/reviews/20260815-1301-bun-package-manager-migration.review.md
+?? plans/archive/plan-20260815-1301-bun-package-manager-migration.md
+?? tasks/archive/contract-20260815-1405-bun-package-manager-migration.md
+?? tasks/archive/notes-20260815-1405-bun-package-manager-migration.md
+?? tasks/archive/review-20260815-1405-bun-package-manager-migration.md
+?? tasks/archive/todo-20260815-1405-bun-package-manager-migration.md
 ```
 
 ## Source Artifacts

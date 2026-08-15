@@ -23,4 +23,4 @@ composition examples and operational boundaries.
 
 ## License
 
-MIT. Node.js 22.19.0 or newer.
+MIT. Node.js 22.22.0 or newer.

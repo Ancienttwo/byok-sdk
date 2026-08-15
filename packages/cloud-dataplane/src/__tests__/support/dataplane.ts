@@ -12,7 +12,7 @@
  *   green, and `packages/cloud-dataplane/src/__tests__/constraints.test.ts`
  *   pins the job that sets it.
  *
- * `process.env.CI` is deliberately NOT the gate: `pnpm -r test` already runs
+ * `process.env.CI` is deliberately NOT the gate: `bun run test` already runs
  * with `CI=true` inside the ordinary build-test job, where these services do
  * not exist, so keying off it would turn every unrelated CI run red.
  *

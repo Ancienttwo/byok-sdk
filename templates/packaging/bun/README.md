@@ -12,7 +12,7 @@ release pipeline.
 
 - [bun](https://bun.com) installed (`curl -fsSL https://bun.com/install | bash`,
   or see bun's own install docs for your platform).
-- Node.js 22.19.0 or newer for the external pi CLI sidecar. `bun install`
+- Node.js 22.22.0 or newer for the external pi CLI sidecar. `bun install`
   may install the npm graph, but pi's supported production runtime is Node.
 - Your product's launcher entry point built against `@byok-sdk/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
@@ -33,7 +33,7 @@ recipe (`../sea/`): bun's bundler already understands ESM and
 
 This is a packageability smoke, not a declaration that the complete BYOK
 daemon is supported under Bun's JavaScript runtime. Downstream projects may
-use `bun install`; production BYOK/pi execution remains on Node 22.19+, and a
+use `bun install`; production BYOK/pi execution remains on Node 22.22+, and a
 Bun-compiled launcher must inject that Node-executed sidecar with
 `BYOK_PI_BIN`.
 
@@ -61,7 +61,7 @@ Empirically confirmed while building this recipe (see
   deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
-  the version-matched Node 22.19+ pi binary at that path is detected correctly
+  the version-matched Node 22.22+ pi binary at that path is detected correctly
   (`present: true`) even inside the compiled executable.
 
 **claude and codex are never a hazard here.** Both adapters'

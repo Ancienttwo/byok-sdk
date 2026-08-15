@@ -129,7 +129,7 @@ credential-provider chain is installed.
 
 Schema is authored in the repository's `deploy/sql/` directory as plain SQL
 files named `NNNN_description.sql`. The four-digit prefix is the only ordering
-authority — the same one `pnpm run check:deploy-sql` enforces in CI.
+authority — the same one `bun run check:deploy-sql` enforces in CI.
 
 Those files ship inside this package: the build copies them into `dist/sql/`,
 and `migrationsDir()` returns that directory from wherever the package is
@@ -188,7 +188,7 @@ The suites need a real Postgres, and get one from the repository's
 docker compose -f docker-compose.test.yml up -d --wait
 export BYOK_TEST_POSTGRES_URL=postgres://byok:byok@127.0.0.1:5433/byok_test
 export BYOK_TEST_S3_ENDPOINT=http://127.0.0.1:9100
-pnpm --filter @byok-sdk/cloud-dataplane test
+bun run --filter @byok-sdk/cloud-dataplane test
 ```
 
 Both variables, one gate: the compose file starts Postgres and MinIO together,
@@ -221,4 +221,4 @@ test rather than a step someone remembers. What runs:
 
 ## License
 
-MIT. Node.js 22.19.0 or newer.
+MIT. Node.js 22.22.0 or newer.

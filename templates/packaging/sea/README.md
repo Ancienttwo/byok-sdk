@@ -12,19 +12,18 @@ repo and adapt it to your own entry point, signing, and release pipeline.
 
 ## Prerequisites
 
-- Node.js >= 22.19.0 (this repo and the required pi runtime share this floor).
+- Node.js >= 22.22.0 (this repo and the required pi runtime share this floor).
 - [`esbuild`](https://esbuild.github.io) to flatten the launcher + its
   dependency graph into a single file first (see "Why bundle to CommonJS
   first" below) — any bundler that can produce a single CJS file works.
   `examples/packaging` lists `esbuild` as a direct devDependency for exactly
   this reason: a *transitive* dependency (this repo also pulls esbuild in
   via `tsup`) is not reliably reachable through a fixed `node_modules/.bin`
-  path once pnpm's hoisting is strict (confirmed empirically — see
-  `build.sh`'s comments) — list it directly in your own launcher's
+  path across arbitrary dependency layouts — list it directly in your own launcher's
   package.json the same way.
-- [`postject`](https://www.npmjs.com/package/postject) to inject the
-  generated blob (`npx postject` works with no separate install; pin it as
-  a devDependency instead if you want hermetic/offline builds).
+- [`postject@1.0.0-alpha.6`](https://www.npmjs.com/package/postject) as a
+  direct devDependency to inject the generated blob; the build fails closed
+  when it is absent instead of downloading a tool at execution time.
 - Your product's launcher entry point built against `@byok-sdk/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
   it constructs a daemon, calls `.status()`, and probes runtime detection
@@ -87,7 +86,7 @@ crashes before any application code — including our own try/catch —
 ever runs). That's a Node-version/tooling gap in the ESM path specifically,
 not a defect in pi's resolve-bin.ts. This recipe uses the CJS path instead,
 because it actually works on the Node versions this SDK targets
-(`engines.node >= 22.19.0`); revisit `mainFormat: "module"` once it's reliably
+(`engines.node >= 22.22.0`); revisit `mainFormat: "module"` once it's reliably
 supported on your floor.
 
 ### A Windows note: `BYOK_PI_BIN` and `.cmd`/`.bat` don't mix with `execFile`
@@ -122,7 +121,7 @@ assertions):
   deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
-  version-matched Node 22.19+ pi binary at that path is detected correctly
+  version-matched Node 22.22+ pi binary at that path is detected correctly
   (`present: true`) even inside the SEA binary.
 
 **claude and codex are never a hazard here.** Both adapters'

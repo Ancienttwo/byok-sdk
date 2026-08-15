@@ -149,7 +149,7 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
    * `@ts-expect-error` line asserts a genuine type error is produced right
    * there; if the call actually type-checked, the directive itself becomes
    * an "Unused '@ts-expect-error' directive" compile error, failing
-   * `pnpm -r typecheck` — i.e. this whole block IS the test, enforced by
+   * `bun run typecheck` — i.e. this whole block IS the test, enforced by
    * the project's typecheck script rather than by anything vitest runs.
    */
   function typeOnlyRejectedShapes(): void {

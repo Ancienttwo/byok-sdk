@@ -49,4 +49,4 @@ if (result === undefined) {
 stored body is not a terminal envelope throws `ByokCloudError` rather than
 returning a best-effort shape.
 
-MIT licensed. Node.js 22.19.0 or newer.
+MIT licensed. Node.js 22.22.0 or newer.

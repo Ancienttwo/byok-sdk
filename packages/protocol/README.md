@@ -14,4 +14,4 @@ the additive field and silently executing a runtime-only offer.
 import { encodeEnvelope, decodeEnvelope } from '@byok-sdk/protocol';
 ```
 
-MIT licensed. Node.js 22.19.0 or newer.
+MIT licensed. Node.js 22.22.0 or newer.

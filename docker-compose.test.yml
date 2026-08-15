@@ -16,7 +16,7 @@
 # Absent, the dataplane suites `describe.skipIf` themselves and print the
 # command above. `BYOK_REQUIRE_DATAPLANE=1` — set ONLY by CI's `dataplane` job —
 # turns that absence into a hard failure, so the skip path can never be how CI
-# stays green. `process.env.CI` is deliberately not the gate: `pnpm -r test`
+# stays green. `process.env.CI` is deliberately not the gate: `bun run test`
 # already runs with `CI=true` inside the ordinary build-test job, where these
 # services do not exist.
 #

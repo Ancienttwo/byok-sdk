@@ -65,7 +65,7 @@ for (const [label, file] of [
   try {
     await fs.stat(file);
   } catch {
-    console.error(`FAIL: ${file} not found -- run "pnpm -r build" first (needed: ${label})`);
+    console.error(`FAIL: ${file} not found -- run "bun run build" first (needed: ${label})`);
     process.exit(1);
   }
 }

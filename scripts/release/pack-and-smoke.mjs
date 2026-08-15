@@ -10,26 +10,21 @@ const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const releaseVersion = '0.4.0';
 const piVersion = '0.84.1';
 const packages = [
-  '@byok-sdk/core',
-  '@byok-sdk/protocol',
-  '@byok-sdk/server',
-  '@byok-sdk/cloud',
-  '@byok-sdk/client',
-  '@byok-sdk/cloud-dataplane',
-  '@byok-sdk/testkit',
-  'byok-sdk',
+  { name: '@byok-sdk/core', directory: 'packages/core' },
+  { name: '@byok-sdk/protocol', directory: 'packages/protocol' },
+  { name: '@byok-sdk/server', directory: 'packages/server' },
+  { name: '@byok-sdk/cloud', directory: 'packages/cloud' },
+  { name: '@byok-sdk/client', directory: 'packages/client' },
+  { name: '@byok-sdk/cloud-dataplane', directory: 'packages/cloud-dataplane' },
+  { name: '@byok-sdk/testkit', directory: 'packages/testkit' },
+  { name: 'byok-sdk', directory: 'packages/sdk' },
 ];
 const nodeBin = process.execPath;
-const pnpmInvocation = process.platform === 'win32'
-  ? { command: nodeBin, prefix: [process.env.npm_execpath ?? ''] }
-  : { command: 'pnpm', prefix: [] };
+const bunBin = process.platform === 'win32' ? 'bun.exe' : 'bun';
 const npmCliPath = path.join(path.dirname(nodeBin), 'node_modules', 'npm', 'bin', 'npm-cli.js');
 const npmInvocation = process.platform === 'win32'
   ? { command: nodeBin, prefix: [npmCliPath] }
   : { command: 'npm', prefix: [] };
-if (process.platform === 'win32' && !pnpmInvocation.prefix[0]) {
-  throw new Error('Windows release-pack must be launched through pnpm so npm_execpath identifies the pnpm JS entrypoint');
-}
 if (process.platform === 'win32' && !existsSync(npmCliPath)) {
   throw new Error(`Windows npm CLI entrypoint is missing: ${npmCliPath}`);
 }
@@ -140,13 +135,13 @@ try {
   }
   mkdirSync(outDir, { recursive: true });
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
-  run(pnpmInvocation.command, [...pnpmInvocation.prefix, '-r', 'run', 'build']);
+  run(bunBin, ['run', 'build']);
 
   const tarballs = [];
   let migrationFiles;
-  for (const packageName of packages) {
+  for (const { name: packageName, directory } of packages) {
     const before = new Set(readdirSync(outDir));
-    run(pnpmInvocation.command, [...pnpmInvocation.prefix, '--filter', packageName, 'pack', '--pack-destination', outDir]);
+    run(bunBin, ['pm', 'pack', '--destination', outDir], path.join(repoRoot, directory));
     const created = readdirSync(outDir).filter((entry) => entry.endsWith('.tgz') && !before.has(entry));
     if (created.length !== 1) throw new Error(`${packageName}: expected one tarball, created ${created.length}`);
     const file = created[0];

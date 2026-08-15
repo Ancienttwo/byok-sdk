@@ -6,7 +6,7 @@
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=22.22.0"
   },
   "bin": {
     "salesko-connector-mcp": "./dist/bin/salesko-connector-mcp.js"
