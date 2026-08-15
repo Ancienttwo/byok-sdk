@@ -179,25 +179,24 @@ export class ConnectionManager {
    */
   private cancelPendingDrainRetry: (() => void) | undefined;
   /**
-   * The capabilities the CURRENTLY connected server advertised in its
-   * `conn.ack` — untyped `string[]` (forward-compat: a server may advertise
-   * a flag this build doesn't recognize yet), populated by {@link onAcked}
-   * and read by {@link getServerCapabilities}. Empty until the very first
-   * successful handshake.
+   * The capabilities the CURRENT transport's server advertised — untyped
+   * `string[]` for forward compatibility. WS populates it from `conn.ack`;
+   * long-poll populates it from each successful events response. Empty until
+   * the active transport supplies an advertisement.
    *
    * Finding R2 (cross-model re-review — was P1): strictly PER-CONNECTION,
    * not per-daemon-lifetime. Cleared to `[]` the instant the acked WS
    * connection ends for ANY reason — an ordinary disconnect (`onWsOutcome`'s
    * `acked` branch), `stop()`, or a transport switch to long-poll
-   * (`enterLongPoll`) — and only ever repopulated by a FRESH `conn.ack`.
+   * (`enterLongPoll`) — and only repopulated by a fresh advertisement from
+   * the transport that is still current.
    * The previous version of this doc comment claimed long-poll mode simply
    * "stays at whatever the last real WS `conn.ack` said" — that was the bug:
    * a daemon that once learned e.g. `approval_resolved` from an earlier WS
    * session kept believing it applied to whatever it's connected to NOW,
    * even after a disconnect/degrade where nothing has actually confirmed
    * that's still true (a reconnect could land on a DIFFERENT server behind a
-   * load balancer; long-poll fallback itself never performs an equivalent
-   * handshake at all). Concretely, `TaskRunner.sendApprovalResolved` gates
+   * load balancer). Concretely, `TaskRunner.sendApprovalResolved` gates
    * `task.approval_resolved` on this list — sending it to a server that
    * doesn't actually understand it over the long-poll path would get a
    * batch-level 400 from `MessagesSendRequestSchema` (protocol §8.2), which
@@ -243,6 +242,13 @@ export class ConnectionManager {
       // re-attempted.
       getCursor: () => this.dedupWatermark(),
       onEnvelope: (envelope) => this.deliver(envelope),
+      onServerCapabilities: (capabilities) => {
+        // A WS probe can ack and switch `mode` while an older long-poll GET
+        // is still resolving. Only the transport that remains authoritative
+        // may publish its capabilities; otherwise that stale HTTP response
+        // could overwrite the fresh `conn.ack` from the restored socket.
+        if (this.mode === 'long-poll') this.serverCapabilities = capabilities;
+      },
       onRevoked: () => this.enterRevoked(),
       // M4 Phase 4 (version-negotiation drill fix): a batch entry
       // LongPollClient couldn't parse into a known Envelope at all (an
@@ -398,13 +404,10 @@ export class ConnectionManager {
   }
 
   /**
-   * The capabilities the CURRENTLY connected server advertised in its
-   * `conn.ack` — e.g. lets a caller gate a daemon->server message on whether
-   * THIS server understands it before sending (see `task-runner.ts`'s
-   * `sendApprovalResolved`, gated on `approval_resolved`). Empty before the
-   * first handshake completes, AND (finding R2) once again empty after any
-   * disconnect/degrade — see `serverCapabilities`'s own doc comment for why
-   * this is strictly per-connection rather than "sticky" across one.
+   * The capabilities the CURRENT transport's server advertised: from
+   * `conn.ack` on WS, or the latest successful `GET /byok/events` response
+   * on long-poll. Empty before either transport has supplied its current
+   * advertisement, and cleared across disconnect/switch boundaries.
    */
   getServerCapabilities(): readonly string[] {
     return this.serverCapabilities;
@@ -849,9 +852,8 @@ export class ConnectionManager {
     this.mode = 'long-poll';
     // Finding R2: defensive/belt-and-suspenders — in practice the acked
     // disconnect that precedes this already cleared it via `onWsOutcome`
-    // above, but long-poll performs no equivalent handshake of its own
-    // (docs/protocol.md §8.1), so this transport must never be able to
-    // observe a stale, non-empty `serverCapabilities` from here on either.
+    // above. The first successful poll will provide this transport's fresh
+    // advertisement; until then it must never observe stale WS capabilities.
     this.serverCapabilities = [];
     this.ws.stopAutoReconnect();
     this.opts.onStateChange?.('degraded');

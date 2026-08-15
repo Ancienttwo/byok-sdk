@@ -24,6 +24,9 @@ import type { Context } from 'hono';
 import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
 import { authenticateDevice, type DeviceRouteDeps } from './shared';
 
+/** Protocol features this cloud build accepts from a long-poll daemon. */
+const CLOUD_PROTOCOL_CAPABILITIES = ['result-document'];
+
 export interface EventsRouteDeps extends DeviceRouteDeps {
   /** How long an empty poll is held open, ms. */
   readonly longPollHoldMs: number;
@@ -65,13 +68,21 @@ export function eventsHandler(deps: EventsRouteDeps) {
       });
       if (page.messages.length > 0) {
         const events: Envelope[] = page.messages.map((message) => decodeEnvelope(message.body));
-        const response: EventsPollResponse = { events, cursor: page.nextSeq };
+        const response: EventsPollResponse = {
+          events,
+          cursor: page.nextSeq,
+          capabilities: CLOUD_PROTOCOL_CAPABILITIES,
+        };
         return c.json(response, 200);
       }
       if (attempt < attempts - 1) await sleep(deps.longPollIntervalMs);
     }
 
-    const response: EventsPollResponse = { events: [], cursor };
+    const response: EventsPollResponse = {
+      events: [],
+      cursor,
+      capabilities: CLOUD_PROTOCOL_CAPABILITIES,
+    };
     return c.json(response, 200);
   };
 }

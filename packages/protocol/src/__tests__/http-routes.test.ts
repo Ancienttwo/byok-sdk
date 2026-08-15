@@ -27,7 +27,17 @@ import {
   byokBlobFinalizePath,
   byokBlobUrlPath,
   byokBlobContentPath,
+  EventsPollResponseSchema,
 } from '../index';
+
+describe('events poll capability advertisement is additive', () => {
+  it('accepts both an N-1 response without capabilities and a new response with unknown future flags', () => {
+    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0 })).toEqual({ events: [], cursor: 0 });
+    expect(
+      EventsPollResponseSchema.parse({ events: [], cursor: 0, capabilities: ['result-document', 'future-flag'] }),
+    ).toEqual({ events: [], cursor: 0, capabilities: ['result-document', 'future-flag'] });
+  });
+});
 
 /**
  * Byte-drift net for the consolidated `/byok/*` route paths (B-2). Every

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createEnvelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
@@ -29,10 +30,11 @@ async function tmpDir(prefix: string): Promise<string> {
  * `task-runner-approval-resolved.test.ts` — see its "capability absent"
  * case) is NOT what's under test here: this suite proves the thing THAT
  * gate actually depends on — `ConnectionManager.getServerCapabilities()`
- * itself — is honestly empty exactly when nothing has actually confirmed
- * the capability applies to the CURRENT connection.
+ * itself — follows only the CURRENT transport's explicit advertisement:
+ * empty before confirmation, populated by WS ack or long-poll response, and
+ * never inherited across a transport switch.
  */
-describe('ConnectionManager.getServerCapabilities is strictly per-connection (finding R2)', () => {
+describe('ConnectionManager.getServerCapabilities follows the current transport advertisement', () => {
   let server: TestServer;
   let connection: ConnectionManager | undefined;
 
@@ -79,6 +81,10 @@ describe('ConnectionManager.getServerCapabilities is strictly per-connection (fi
     // comment documents this exact "close->reconnect->ack can complete
     // faster than a poll interval" hazard for the identical fixture).
     server.setRejectWs(true);
+    // Model an N-1 HTTP responder behind the degraded route. The old WS
+    // advertisement must be cleared and must not leak across the switch;
+    // a new responder's explicit long-poll advertisement is covered below.
+    server.setAdvertiseLongPollCapabilities(false);
     server.dropConnection();
 
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
@@ -98,7 +104,7 @@ describe('ConnectionManager.getServerCapabilities is strictly per-connection (fi
     expect(connection!.isConnected()).toBe(true);
   });
 
-  it('a connection that degrades to long-poll WITHOUT ever acking never reports stale/phantom capabilities', async () => {
+  it('a connection that degrades to long-poll learns capabilities from the current poll response without a WS ack', async () => {
     server = await TestServer.start();
     server.setAckCapabilities(['approval_resolved']); // would be advertised IF a WS handshake ever completed
     server.setRejectWs(true); // force long-poll from the very first attempt — no ack ever happens
@@ -106,6 +112,14 @@ describe('ConnectionManager.getServerCapabilities is strictly per-connection (fi
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
+    let capabilitiesSeenByHandler: readonly string[] | undefined;
+    server.pushLongPollEvent(
+      createEnvelope(
+        'task.offer',
+        { instruction: 'prove capability ordering', policy: { mode: 'auto' } },
+        { taskId: 'task-capability-order', seq: 1 },
+      ),
+    );
 
     connection = new ConnectionManager({
       serverUrl: server.url,
@@ -115,6 +129,41 @@ describe('ConnectionManager.getServerCapabilities is strictly per-connection (fi
       runtimes: [],
       auth,
       cursorStore,
+      onEnvelope: () => {
+        capabilitiesSeenByHandler = connection?.getServerCapabilities();
+      },
+      wsFailureThreshold: 1,
+      longPollRetryDelayMs: 20,
+      longPollIdleDelayMs: 20,
+    });
+    await connection.start();
+    await connection.waitForAck();
+
+    expect(connection.isTransportDegraded()).toBe(true);
+    await vi.waitFor(() => expect(capabilitiesSeenByHandler).toEqual(['approval_resolved']));
+    expect(connection.getServerCapabilities()).toEqual(['approval_resolved']);
+
+    server.setFailEventsPolls(true);
+    await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
+  });
+
+  it('an N-1 long-poll responder that omits capabilities remains fail-closed', async () => {
+    server = await TestServer.start();
+    server.setAckCapabilities(['approval_resolved']);
+    server.setAdvertiseLongPollCapabilities(false);
+    server.setRejectWs(true);
+    const storeDir = await tmpDir('byok-server-caps-old-long-poll-');
+    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const record = await auth.pair('pairing-code');
+
+    connection = new ConnectionManager({
+      serverUrl: server.url,
+      deviceId: record.deviceId,
+      productId: 'test-product',
+      capabilities: [],
+      runtimes: [],
+      auth,
+      cursorStore: new CursorStore(storeDir),
       onEnvelope: () => {},
       wsFailureThreshold: 1,
       longPollRetryDelayMs: 20,
@@ -124,6 +173,9 @@ describe('ConnectionManager.getServerCapabilities is strictly per-connection (fi
     await connection.waitForAck();
 
     expect(connection.isTransportDegraded()).toBe(true);
+    await vi.waitFor(() =>
+      expect(server.httpRequests.some((request) => request.pathname === '/byok/events')).toBe(true),
+    );
     expect(connection.getServerCapabilities()).toEqual([]);
   });
 

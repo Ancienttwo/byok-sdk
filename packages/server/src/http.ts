@@ -10,6 +10,7 @@ import {
   BYOK_MESSAGES_PATH,
   BYOK_PAIR_PATH,
   BYOK_TOKEN_PATH,
+  CAPABILITY_FLAGS,
   ChallengeRequestSchema,
   CreateBlobRequestSchema,
   MessagesSendRequestSchema,
@@ -306,7 +307,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     }
 
     const result = await deps.hub.pollEvents(principal.deviceId, cursor, deps.longPollHoldMs);
-    const response: EventsPollResponse = result;
+    const response: EventsPollResponse = { ...result, capabilities: [...CAPABILITY_FLAGS] };
     return c.json(response, 200);
   });
 

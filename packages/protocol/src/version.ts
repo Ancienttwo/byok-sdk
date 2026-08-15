@@ -74,7 +74,8 @@ export const PROTOCOL_VERSION = 1;
  * `approval-targeting`.
  *
  * This is the N/N-1 answer for that new daemon -> server FIELD. An old
- * server's `CAPABILITY_FLAGS`/`conn.ack.capabilities` never includes it, and
+ * server's transport advertisement (`conn.ack.capabilities` on WS or
+ * `EventsPollResponse.capabilities` on long-poll) never includes it, and
  * its `TaskCompletePayloadSchema` is a tolerant (non-`.strict()`)
  * `z.object()`, so a `document` sent to it would be silently STRIPPED on
  * parse and vanish without a trace. That is exactly why emission is gated

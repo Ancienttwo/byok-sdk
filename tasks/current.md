@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-15T14:05:44+0800 -->
+<!-- updated_at: 2026-08-16T00:34:27+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-15T14:05:44+0800
-> **Source Branch**: codex/bun-package-manager-migration
-> **Source Commit**: fb2029a
+> **Updated At**: 2026-08-16T00:34:27+0800
+> **Source Branch**: codex/long-poll-capability-negotiation
+> **Source Commit**: a7c7167
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -48,18 +48,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 9 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260815-1301-bun-package-manager-migration.md
- D tasks/contracts/20260815-1301-bun-package-manager-migration.contract.md
- D tasks/notes/20260815-1301-bun-package-manager-migration.notes.md
- D tasks/reviews/20260815-1301-bun-package-manager-migration.review.md
-?? plans/archive/plan-20260815-1301-bun-package-manager-migration.md
-?? tasks/archive/contract-20260815-1405-bun-package-manager-migration.md
-?? tasks/archive/notes-20260815-1405-bun-package-manager-migration.md
-?? tasks/archive/review-20260815-1405-bun-package-manager-migration.md
-?? tasks/archive/todo-20260815-1405-bun-package-manager-migration.md
+ D plans/plan-20260815-1532-long-poll-capability-negotiation.md
+ D tasks/contracts/20260815-1532-long-poll-capability-negotiation.contract.md
+ D tasks/notes/20260815-1532-long-poll-capability-negotiation.notes.md
+ D tasks/reviews/20260815-1532-long-poll-capability-negotiation.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260815-1532-long-poll-capability-negotiation.md
+?? tasks/archive/contract-20260816-0034-long-poll-capability-negotiation.md
+?? tasks/archive/notes-20260816-0034-long-poll-capability-negotiation.md
+?? tasks/archive/review-20260816-0034-long-poll-capability-negotiation.md
+?? tasks/archive/todo-20260816-0034-long-poll-capability-negotiation.md
 ```
 
 ## Source Artifacts

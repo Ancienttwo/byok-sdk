@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const releaseVersion = '0.4.0';
+const releaseVersion = '0.4.1';
 const piVersion = '0.84.1';
 const packages = [
   { name: '@byok-sdk/core', directory: 'packages/core' },

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.1 — 2026-08-16
+
+Long-poll capability negotiation fix for structured task results.
+
+- Added an optional `capabilities` field to the long-poll events response so
+  pure `@byok-sdk/cloud` deployments can advertise the same protocol features
+  as WebSocket `conn.ack` without changing wire-v1 compatibility.
+- Made `@byok-sdk/client` apply each poll response's capability set before
+  delivering its events. Missing fields and failed or malformed polls clear
+  the set, while a late poll response cannot overwrite a newer WebSocket ack.
+- Made both hosted cloud and self-hosted server long-poll responders advertise
+  their implemented `result-document` capability, allowing
+  `task.complete.document` to remain the task's single terminal authority.
+- Advanced the aligned dispatch packages (`core`, `protocol`, `client`,
+  `server`, `cloud`, `cloud-dataplane`, `testkit`, and `byok-sdk`) to 0.4.1;
+  `@byok-sdk/keys` remains independently versioned at 0.1.0.
+
 ## 0.4.0 — 2026-08-14
 
 Breaking runtime-adapter contract release, plus the `cloud-dataplane` rename,
