@@ -1,6 +1,6 @@
 # Plan: Bun package-manager migration
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260815-1301
 > **Slug**: bun-package-manager-migration
 > **Planning Source**: codex-plan

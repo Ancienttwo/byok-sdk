@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-15 14:05
+> **Related Plan**: plans/archive/plan-20260815-1301-bun-package-manager-migration.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260815-1405
+
 # Implementation Notes: bun-package-manager-migration
 
 > **Status**: Active
