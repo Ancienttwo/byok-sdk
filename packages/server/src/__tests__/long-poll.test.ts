@@ -55,9 +55,10 @@ describe('long-poll fallback (§8)', () => {
     const elapsedMs = Date.now() - triggeredAt;
 
     expect(pollRes.status).toBe(200);
-    const body = (await pollRes.json()) as { events: Envelope[]; cursor: number };
+    const body = (await pollRes.json()) as { events: Envelope[]; cursor: number; capabilities?: string[] };
     expect(body.events.map((e) => e.type)).toEqual(['task.offer']);
     expect(body.events[0]?.task_id).toBe(handle.taskId);
+    expect(body.capabilities).toContain('result-document');
     expect(elapsedMs).toBeLessThan(SHORT_HOLD_MS);
   });
 

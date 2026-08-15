@@ -341,9 +341,10 @@ export interface TaskRunnerDeps {
    */
   maxTaskOutputBytes?: number;
   /**
-   * M4 (additive-minor, `task.approval_resolved`): the negotiated
-   * `conn.ack.capabilities` of the CURRENTLY (or most recently) connected
-   * server — read fresh at call time (mirrors `getCursor`/`getToken`'s own
+   * M4 (additive-minor, `task.approval_resolved`): the capabilities advertised
+   * by the CURRENT transport's server (`conn.ack` on WS, the latest successful
+   * events response on long-poll) — read fresh at call time (mirrors
+   * `getCursor`/`getToken`'s own
    * "read fresh, not captured once" convention elsewhere in this codebase),
    * since the capability is learned asynchronously, after this `TaskRunner`
    * is already constructed (`create-daemon.ts`'s `start()` builds `deps`
@@ -1708,10 +1709,10 @@ export class TaskRunner {
           // F3 (codex adversarial review, P1): the capability was checked
           // inside `resolveResultDocument` — but `observeGit` above is an
           // await, and a reconnect landing in that window can replace the
-          // connection with one whose `conn.ack` never advertised
-          // `result-document` (`ConnectionManager.onWsOutcome` clears the
-          // learned capabilities on any acked-then-closed connection, and
-          // only a fresh ack repopulates them). The queued envelope would
+          // connection with one whose current transport never advertised
+          // `result-document` (`ConnectionManager` clears learned capabilities
+          // across transport boundaries, and only a fresh WS ack or poll
+          // response repopulates them). The queued envelope would
           // then drain to a server that strips the document silently — the
           // exact loss this whole gate exists to prevent. So the flag is
           // re-read here, after the last await, immediately before the
@@ -2582,9 +2583,9 @@ export class TaskRunner {
   /**
    * Whether the CURRENTLY connected server advertised `result-document` —
    * read fresh on every call, never captured, because the answer changes
-   * across a reconnect (`ConnectionManager.getServerCapabilities` returns
-   * `[]` from the moment an acked connection closes until a fresh
-   * `conn.ack` repopulates it). An absent `getServerCapabilities` seam is
+   * across a reconnect or transport switch (`ConnectionManager` clears the
+   * old advertisement at the boundary, then repopulates it from a fresh WS
+   * ack or successful poll response). An absent `getServerCapabilities` seam is
    * "no capabilities", the fail-closed reading.
    */
   private hasResultDocumentCapability(): boolean {

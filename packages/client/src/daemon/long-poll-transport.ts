@@ -8,6 +8,12 @@ export interface LongPollClientOptions {
   auth: AuthManager;
   getCursor: () => number | undefined;
   onEnvelope: (envelope: Envelope) => void;
+  /**
+   * Capabilities advertised by the server that produced the current poll
+   * response. Called before any envelopes from that response are delivered.
+   * An older responder omitting the additive field is reported as `[]`.
+   */
+  onServerCapabilities?: (capabilities: string[]) => void;
   /** Called once the device is found to be revoked (401 surfaced through {@link AuthManager}) — the loop stops itself rather than retrying. */
   onRevoked?: () => void;
   /**
@@ -99,6 +105,7 @@ interface LooseEventsPollResponse {
   /** Raw, not-yet-validated entries — see `parseLooseEventsPollResponse`'s own doc comment for why each is validated individually, not as one array. */
   events: unknown[];
   cursor: number;
+  capabilities: string[];
 }
 
 /** Finding R1: soft cap on `LongPollClient`'s own `warnedValidationFailureSeqs` bookkeeping — see that field's own doc comment for why this is a simple "clear outright" reset rather than an eviction policy: a rare/pathological path, not a hot one. */
@@ -125,14 +132,24 @@ function parseLooseEventsPollResponse(raw: unknown): LooseEventsPollResponse {
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('events poll response is not an object');
   }
-  const { events, cursor } = raw as { events?: unknown; cursor?: unknown };
+  const { events, cursor, capabilities } = raw as {
+    events?: unknown;
+    cursor?: unknown;
+    capabilities?: unknown;
+  };
   if (!Array.isArray(events)) {
     throw new Error('events poll response.events is not an array');
   }
   if (typeof cursor !== 'number' || !Number.isInteger(cursor)) {
     throw new Error('events poll response.cursor is not an integer');
   }
-  return { events, cursor };
+  if (
+    capabilities !== undefined &&
+    (!Array.isArray(capabilities) || capabilities.some((flag) => typeof flag !== 'string'))
+  ) {
+    throw new Error('events poll response.capabilities is not an array of strings');
+  }
+  return { events, cursor, capabilities: capabilities ?? [] };
 }
 
 /**
@@ -246,6 +263,11 @@ export class LongPollClient {
 
         const res = await authedFetch(url, { method: 'GET' }, this.opts.auth);
         if (!res.ok) {
+          // Long-poll has no persistent peer identity: a failed request no
+          // longer proves that the responder behind the NEXT request supports
+          // what the last successful one advertised. Match WS disconnect
+          // discipline and withdraw the advertisement immediately.
+          this.opts.onServerCapabilities?.([]);
           this.opts.onOperationalOutcome?.('failure');
           const baseMs = this.opts.retryDelayMs ?? 2000;
           await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs);
@@ -295,6 +317,7 @@ export class LongPollClient {
         //     this seq alive, and holds back anything delivered after it
         //     too, until a corrected version is actually processed.
         const parsed = parseLooseEventsPollResponse(await res.json());
+        this.opts.onServerCapabilities?.(parsed.capabilities);
         // Finding R1 (Codex's new P2): true the moment THIS batch contains
         // at least one validation-failed entry — used below to apply the
         // stalled backoff on the VERY SAME cycle the failure is first
@@ -363,6 +386,7 @@ export class LongPollClient {
           this.opts.onOperationalOutcome?.('success');
         }
       } catch (err) {
+        this.opts.onServerCapabilities?.([]);
         if (err instanceof DeviceRevokedError) {
           this.running = false;
           this.opts.onRevoked?.();

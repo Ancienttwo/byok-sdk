@@ -146,7 +146,7 @@ describe('tenant isolation across every device-class resource', () => {
     // 1. The mailbox: B polls and sees its own (empty) mailbox, never A's.
     const events = await harness.json('/byok/events', { headers: mallory.authorization });
     expect(events.status).toBe(200);
-    expect(events.body).toEqual({ events: [], cursor: 0 });
+    expect(events.body).toEqual({ events: [], cursor: 0, capabilities: ['result-document'] });
     expect(JSON.stringify(events.body)).not.toContain('secret work');
 
     // 2. Inbound: B claims A's task id. Accepted at the wire level (an unowned

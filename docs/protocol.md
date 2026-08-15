@@ -966,8 +966,10 @@ exactly as designed) — and silently losing the task's primary structured
 result is data loss, not the harmless dropped-observability-hint case that
 tolerance exists for. So:
 
-- Old server, new daemon: the flag is absent from `conn.ack.capabilities`,
-  so the daemon never sends `document`. If its extractor did produce one,
+- Old server, new daemon: the flag is absent from the current transport's
+  advertisement (`conn.ack.capabilities` on WS,
+  `EventsPollResponse.capabilities` on long-poll), so the daemon never sends
+  `document`. If its extractor did produce one,
   the daemon reports `task.fail` (`retryable: false` — the same server will
   strip it on every retry too) with a reason prefixed `result document
   undeliverable`, rather than reporting a success that quietly deleted the
@@ -981,9 +983,9 @@ tolerance exists for. So:
 The capability is read fresh at BOTH ends of the completion path — once when
 the document is resolved, and again immediately before the envelope is handed
 to the transport — because a reconnect in between can replace the connection
-with one whose `conn.ack` never advertised the flag (a daemon drops its
-learned capabilities the moment an acked connection closes, and only a fresh
-ack repopulates them). A rollback caught in that window is the same
+with one whose current transport never advertised the flag (a daemon drops
+learned capabilities at every transport boundary, then only a fresh WS ack or
+successful poll response repopulates them). A rollback caught in that window is the same
 fail-closed `task.fail`, not a silent send.
 
 **Residual window (known, bounded, deliberately not worked around).** Even
@@ -1019,7 +1021,7 @@ task state.
 ```
 GET /byok/events?cursor=N
   Query    (EventsPollQuerySchema):    { cursor? }
-  Response (EventsPollResponseSchema): { events: Envelope[], cursor }
+  Response (EventsPollResponseSchema): { events: Envelope[], cursor, capabilities?: string[] }
 ```
 
 Authed (bearer access token); holds the request open for ~50 seconds waiting
@@ -1030,7 +1032,15 @@ using long-poll instead of WSS establishes its per-device session through the
 HTTP layer's own auth rather than through a `conn.hello` frame: it sends NO
 `conn.hello` at all (`conn.hello` is a WSS-only frame — see
 `DAEMON_TO_SERVER_TYPES`, which deliberately excludes it from the inbound
-message gate). Anything a server needs for a per-task decision must therefore
+message gate). `capabilities` is the HTTP transport's equivalent of
+`conn.ack.capabilities`: it describes the server that produced THIS response,
+is refreshed on every successful poll, and is applied before the response's
+events are delivered. The field is additive and optional only for N/N-1 wire
+tolerance; a new daemon reads absence as `[]`, never as an assumed default.
+An HTTP/network/response-validation failure withdraws the last advertisement
+immediately: long-poll has no persistent peer whose earlier capability claim
+could remain authoritative across that failed request.
+Anything a server needs for a per-task decision must therefore
 travel on a `task.*` message, not be inferred from connection state — this is
 exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
 `conn.hello.runtimes[]`. The event *shapes* returned are identical `Envelope`

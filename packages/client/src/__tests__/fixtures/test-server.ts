@@ -78,10 +78,12 @@ export class TestServer {
   /** One-shot gate that holds the next `/byok/pair` handler open — see `blockNextPair`. */
   private pairGate: Promise<void> | undefined;
   private rejectWs = false;
+  private failEventsPolls = false;
   private failBlobUploads = false;
   private dropNextBlobFinalizeResponse = false;
   /** Finding R2: capabilities advertised in every subsequent `conn.ack` — see `setAckCapabilities`. */
   private ackCapabilities: string[] = [];
+  private advertiseLongPollCapabilities = true;
 
   private constructor(
     private readonly httpServer: http.Server,
@@ -129,6 +131,16 @@ export class TestServer {
   /** Finding R2: capabilities to advertise in every SUBSEQUENT `conn.ack` (default `[]`, matching the wire's real "additive-minor, absent means not understood" convention) — used to test capability-gated client behavior (e.g. `approval_resolved`) without needing the real `@byok-sdk/server`. */
   setAckCapabilities(capabilities: string[]): void {
     this.ackCapabilities = capabilities;
+  }
+
+  /** Simulate an N-1 responder whose additive events response predates `capabilities`. */
+  setAdvertiseLongPollCapabilities(advertise: boolean): void {
+    this.advertiseLongPollCapabilities = advertise;
+  }
+
+  /** Return 500 from every events poll while true, without changing auth. */
+  setFailEventsPolls(fail: boolean): void {
+    this.failEventsPolls = fail;
   }
 
   /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
@@ -523,12 +535,20 @@ export class TestServer {
   /** `cursor` is accepted per the schema but not used to filter — this stub always drains its whole queue (in push order — see `pendingLongPollEntries`'s own doc comment) rather than tracking per-request replay. */
   private async handleEventsPoll(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.requireBearer(req, res)) return;
+    if (this.failEventsPolls) {
+      respondJson(res, 500, { error: 'simulated events poll failure' });
+      return;
+    }
     const entries = this.pendingLongPollEntries.splice(0);
     // Not re-validated here — this response is hand-serialized exactly like
     // the real server's `EventsPollResponse`, so a raw entry queued via
     // `pushRawLongPollEvent` rides along unchanged, the same way a genuinely
     // future message type would arrive from a real future server.
-    respondJson(res, 200, { events: entries, cursor: this.longPollCursor });
+    respondJson(res, 200, {
+      events: entries,
+      cursor: this.longPollCursor,
+      ...(this.advertiseLongPollCapabilities ? { capabilities: this.ackCapabilities } : {}),
+    });
   }
 
   /** `POST /byok/messages` (finding F6): the daemon's outbound send path while long-polling — same recording/waiter-resolution as a live WS message. */

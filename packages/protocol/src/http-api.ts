@@ -121,6 +121,13 @@ export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;
 export const EventsPollResponseSchema = z.object({
   events: z.array(EnvelopeSchema),
   cursor: z.number().int(),
+  /**
+   * Server capabilities for THIS long-poll response. This is the HTTP
+   * transport's equivalent of `conn.ack.capabilities`: a new daemon treats
+   * absence as no advertised capabilities, so old responders remain
+   * fail-closed for gated daemon -> server fields and messages.
+   */
+  capabilities: z.array(z.string()).optional(),
 });
 export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
 
