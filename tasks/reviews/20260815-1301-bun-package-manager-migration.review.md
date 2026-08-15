@@ -53,13 +53,13 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewer**: User
 > **Source**: user-waiver
 > **Actor**: kito
-> **Reviewed Subject SHA256**: sha256:8003e9580986e1a5303d18ad8d7059088a5a36a8ad18b0b6d7901fe2980ff83c
+> **Reviewed Subject SHA256**: sha256:3bba4f244b9da89424096b0a33e7256bed2d4a6f763c2fdac0762adcfae005ad
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 22fd8e0837598fa06f30b99a7978c2d3277148d8
-> **Verification Evidence SHA256**: sha256:a06b36a4154916f77be142d9462d366ddd51e081084c2aa2ac87ec04157c88e7
-> **Issued At**: 2026-08-15T05:54:59.865Z
+> **Verification Evidence SHA256**: sha256:f83a3fcdb1b778da955ef2130a5be5057b35a8040a9ac04f434809eaba4c1e6f
+> **Issued At**: 2026-08-15T06:05:15.909Z
 
-- Summary: Owner explicitly invoked ship after being offered user-waiver acceptance or Claude review; authorize this Bun and Node 22.22 migration subject to passing frozen verification.
+- Summary: User authorized deleting the unrecoverable stale architecture queue card and continuing the requested ship.
 - Findings: none
 
 ## Behavior Diff Notes
