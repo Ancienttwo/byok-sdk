@@ -1,6 +1,6 @@
 # Plan: Long-poll capability negotiation
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260815-1532
 > **Slug**: long-poll-capability-negotiation
 > **Planning Source**: repo-harness-plan

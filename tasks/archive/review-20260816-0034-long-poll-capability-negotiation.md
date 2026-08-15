@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-16 00:34
+> **Related Plan**: plans/archive/plan-20260815-1532-long-poll-capability-negotiation.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260816-0034
+
 # Task Review: long-poll-capability-negotiation
 
 > **Status**: Pass
@@ -48,17 +54,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:5495f5f1e99d374196a54969b3bbe49b1a1291d687618750691c770283969755
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 27de48a2e30ce24461827f9c05fe2fd081260544
+> **Verification Evidence SHA256**: sha256:2179b3b3648d54154645fb6130bf0fcb93636dc1ee2b10ad93efa1d5a016afb2
+> **Issued At**: 2026-08-15T16:33:45.942Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: User accepted candidate a7c7167 for the long-poll result-document capability negotiation fix.
 - Findings: none
 
 ## Behavior Diff Notes
