@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T00:34:27+0800 -->
+<!-- updated_at: 2026-08-16T01:08:40+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-16T00:34:27+0800
+> **Updated At**: 2026-08-16T01:08:40+0800
 > **Source Branch**: codex/long-poll-capability-negotiation
-> **Source Commit**: a7c7167
+> **Source Commit**: 06f1576
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -40,7 +40,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Run required repo gates, release graph, frozen pack/install smoke, and fresh pre-landing review.
 
 ## Checks
 
@@ -51,16 +51,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260815-1532-long-poll-capability-negotiation.md
- D tasks/contracts/20260815-1532-long-poll-capability-negotiation.contract.md
- D tasks/notes/20260815-1532-long-poll-capability-negotiation.notes.md
- D tasks/reviews/20260815-1532-long-poll-capability-negotiation.review.md
+ D plans/plan-20260816-0037-v0-4-1-release.md
+ D tasks/contracts/20260816-0037-v0-4-1-release.contract.md
+ D tasks/notes/20260816-0037-v0-4-1-release.notes.md
+ D tasks/reviews/20260816-0037-v0-4-1-release.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260815-1532-long-poll-capability-negotiation.md
-?? tasks/archive/contract-20260816-0034-long-poll-capability-negotiation.md
-?? tasks/archive/notes-20260816-0034-long-poll-capability-negotiation.md
-?? tasks/archive/review-20260816-0034-long-poll-capability-negotiation.md
-?? tasks/archive/todo-20260816-0034-long-poll-capability-negotiation.md
+?? plans/archive/plan-20260816-0037-v0-4-1-release.md
+?? tasks/archive/contract-20260816-0108-v0-4-1-release.md
+?? tasks/archive/notes-20260816-0108-v0-4-1-release.md
+?? tasks/archive/review-20260816-0108-v0-4-1-release.md
+?? tasks/archive/todo-20260816-0108-v0-4-1-release.md
 ```
 
 ## Source Artifacts
