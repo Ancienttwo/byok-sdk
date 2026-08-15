@@ -25,6 +25,10 @@
 
 ## Deviations From Plan Or Spec
 
+- Ship closeout found that the legacy root architecture card claimed six edits
+  while the surviving append-only log could reconstruct only three unique
+  events. The owner explicitly chose cleanup instead of recovery, so the stale
+  pending card was removed and the generated index was rebuilt.
 - `bun run --sequential --workspaces build` and the equivalent sequential
   wildcard filter do not preserve dependency order: a clean build starts client
   before protocol/core and fails. Build therefore uses Bun's dependency-aware

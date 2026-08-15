@@ -29,7 +29,8 @@ tarball contents, and sequential test execution.
 
 - In scope: root workspace/lockfile authority, exact Node development/CI pin,
   public Node floor, CI, release pack tooling, package lifecycle scripts, active
-  operator docs/templates, and structural tests.
+  operator docs/templates, structural tests, and removal of the unrecoverable
+  stale root architecture queue card authorized during ship closeout.
 - Out of scope: replacing Vitest with `bun:test`, changing unrelated dependency
   versions, changing npm package semantics, or rewriting history.
 - Taste constraints: atomic authority cut; no pnpm fallback or dual lockfile.
@@ -93,6 +94,8 @@ allowed_paths:
   - CLAUDE.md
   - README.md
   - docs/spec.md
+  - docs/architecture/index.md
+  - docs/architecture/requests/root.md
   - docs/architecture/sdk-architecture.md
   - docker-compose.test.yml
   - deploy/scripts/migrate
