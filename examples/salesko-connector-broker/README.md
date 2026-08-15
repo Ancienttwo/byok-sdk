@@ -61,7 +61,7 @@ example, then pipe this exact private JSON shape over stdin. Do not put the
 client secret in argv, shell history, or logs:
 
 ```sh
-pnpm --filter @byok-sdk/example-salesko-connector-broker run build
+bun run --filter @byok-sdk/example-salesko-connector-broker build
 node dist/bin/salesko-connector-mcp.js configure --profile default < /secure/ephemeral/google-desktop-client.json
 node dist/bin/salesko-connector-mcp.js login --profile default
 node dist/bin/salesko-connector-mcp.js status --profile default
@@ -149,5 +149,5 @@ Bundled third-party license text is recorded in
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ```sh
-pnpm --filter @byok-sdk/example-salesko-connector-broker run test
+bun run --filter @byok-sdk/example-salesko-connector-broker test
 ```

@@ -25,4 +25,4 @@ live device advertises `toolset-selection` and its `configuredToolsets`
 inventory contains every required ID. `machines.list()` projects that same
 logical-ID-only inventory; MCP commands and credentials remain device-local.
 
-MIT licensed. Node.js 22.19.0 or newer.
+MIT licensed. Node.js 22.22.0 or newer.

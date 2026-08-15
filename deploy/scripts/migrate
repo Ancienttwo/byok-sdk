@@ -33,7 +33,7 @@ adapter="$repo_root/packages/cloud-dataplane/dist/index.js"
 if [ ! -f "$adapter" ]; then
   # Built output, not source: this script is meant to run in a deployment image
   # as readily as in a checkout, and neither should need a TypeScript loader.
-  echo "migrate: $adapter is missing. Run 'pnpm -r build' first." >&2
+  echo "migrate: $adapter is missing. Run 'bun run build' first." >&2
   exit 2
 fi
 

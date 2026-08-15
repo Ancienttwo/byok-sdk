@@ -27,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ENTRY="${LAUNCHER_ENTRY:-$REPO_ROOT/examples/packaging/launcher.ts}"
 
-# esbuild resolution (pnpm exec by default, or $ESBUILD_BIN override) is
+# esbuild resolution (Bun workspace binary by default, or $ESBUILD_BIN override) is
 # handled inside build.sh -- see its comments for why a plain `esbuild` on
 # PATH can't be assumed here.
 

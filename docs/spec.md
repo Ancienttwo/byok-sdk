@@ -94,7 +94,7 @@ publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
 artifact `@earendil-works/pi-coding-agent@0.84.1`; the SDK does not accept an
 unversioned global `pi` on `PATH` as an implicit substitute. All workspace
-dispatch packages and private conformance tests require Node.js `>=22.19.0`,
+dispatch packages and private conformance tests require Node.js `>=22.22.0`,
 matching pi's published engine floor. The independent
 `@byok-sdk/keys@0.1.0` package remains outside the dispatch graph and retains
 its Node.js 20 floor. A host that enables the BYOK lane installs its
@@ -106,11 +106,11 @@ The coding-agent package owns and installs its non-optional `pi-agent-core`,
 declare or import those packages separately because the CLI/RPC boundary is
 the sole version authority.
 
-The package manager is not the runtime authority. This repository uses pnpm,
-and downstream pnpm projects install the standard npm registry artifact through
-pnpm's isolated layout. A downstream may use `bun install` to materialize the
-same dependency, but supported production execution remains Node.js 22.19 or
-newer. Bun runtime compatibility is not claimed. A Bun-compiled or Node SEA
+The package manager is not the runtime authority. This repository uses Bun
+1.3.14 with its isolated workspace linker and one committed `bun.lock`.
+Downstreams install the standard npm registry artifacts with their chosen npm
+client; supported production execution remains Node.js 22.22 or newer. Bun
+runtime compatibility is not claimed. A Bun-compiled or Node SEA
 single-file launcher cannot embed pi's external CLI package; that deployment
 must provide the version-matched, Node-executed pi sidecar explicitly through
 `BYOK_PI_BIN`.

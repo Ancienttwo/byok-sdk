@@ -70,4 +70,4 @@ OS-backed refresh-token custody, a PKCE desktop Google OAuth flow, exact domain
 policy, a real read-only Gmail metadata adapter, and a closed metadata-only MCP
 result.
 
-MIT licensed. Node.js 22.19.0 or newer.
+MIT licensed. Node.js 22.22.0 or newer.

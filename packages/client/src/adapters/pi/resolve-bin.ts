@@ -46,7 +46,7 @@ function readPackageJson(dir: string): MinimalPackageJson | undefined {
  * only ever constructs `new PiAdapter()` with no options (see `createDaemon`),
  * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
  * in the fake-pi fixture, or a single-file product injecting its required
- * Node 22.19+ pi sidecar) has no other seam to use.
+ * Node 22.22+ pi sidecar) has no other seam to use.
  *
  * Deliberately does NOT use `createRequire(...).resolve()`: this package is
  * pure ESM with no `require` export condition (`exports["."]` only offers
@@ -79,11 +79,11 @@ export function resolvePiBin(): ResolvedBin {
     }
   } catch (cause) {
     throw new Error(
-      `Required ${PI_PACKAGE_NAME} could not be resolved; install @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 22.19+ pi sidecar`,
+      `Required ${PI_PACKAGE_NAME} could not be resolved; install @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,
       { cause },
     );
   }
   throw new Error(
-    `Required ${PI_PACKAGE_NAME} does not expose the pi CLI; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 22.19+ pi sidecar`,
+    `Required ${PI_PACKAGE_NAME} does not expose the pi CLI; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,
   );
 }

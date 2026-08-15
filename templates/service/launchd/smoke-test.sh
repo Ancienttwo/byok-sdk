@@ -21,7 +21,7 @@ set -euo pipefail
 # own (expected, in this throwaway setup) pairing failure.
 #
 # Usage: templates/service/launchd/smoke-test.sh
-#   Requires @byok-sdk/client already built (`pnpm --filter @byok-sdk/client build`).
+#   Requires @byok-sdk/client already built (`bun run --filter @byok-sdk/client build`).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -33,7 +33,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 if [ ! -f "$CLIENT_DIST" ]; then
-  echo "FAIL: $CLIENT_DIST not found -- run 'pnpm --filter @byok-sdk/client build' first"
+  echo "FAIL: $CLIENT_DIST not found -- run 'bun run --filter @byok-sdk/client build' first"
   exit 1
 fi
 

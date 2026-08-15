@@ -13,7 +13,7 @@ quietly green against nothing the moment upstream changes any of it.
 Runtime dependencies are `@byok-sdk/core` and `@byok-sdk/protocol`, and nothing
 else — **no test framework**. The negative assertions are async functions
 returning structured results, so the same checks run under vitest, under a plain
-CI script, and inside a Worker. Requires Node ≥ 22.19 (or any runtime exposing
+CI script, and inside a Worker. Requires Node ≥ 22.22 (or any runtime exposing
 WebCrypto Ed25519 on `globalThis.crypto.subtle`).
 
 ## Install

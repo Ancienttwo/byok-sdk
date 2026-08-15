@@ -106,7 +106,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库是 Node `>=20`、pnpm workspace。当前有九个 workspace package：八个 public manifest（六个 dispatch package、`byok-sdk` umbrella、独立 `@byok-sdk/keys`）与一个只供测试使用的 private `@byok-sdk/conformance`。S7-c 的七个 dispatch artifacts 已从同一 source tree `aebe6b6` 发布；registry `dist.integrity` 与 frozen manifest 的 SHA-512 逐包一致，fresh exact install/import 已证明 umbrella 六 namespace 与六个 direct packages 可用，且安装图不含 keys。下图画实际 runtime、release 与 test-only edges。
+仓库以 Bun 1.3.14 管理 workspace 与 lockfile，Node `>=22.22.0` 仍是 dispatch/runtime authority。当前有十三个 workspace package：八个 public dispatch manifest（六个 dispatch package、`byok-sdk` umbrella、`@byok-sdk/testkit`）、独立 public `@byok-sdk/keys`、三个 private examples 与一个只供测试使用的 private `@byok-sdk/conformance`。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画实际 runtime、release 与 test-only edges。
 
 ```mermaid
 flowchart LR
@@ -1909,9 +1909,9 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 文档验证要求：抽取并渲染每个 Mermaid fence；随后运行仓库必需检查：
 
 ```bash
-pnpm -r run typecheck
-pnpm -r run test
-pnpm -r run build
+bun run build
+bun run typecheck
+bun run test
 repo-harness run check-task-workflow --strict
 ```
 
@@ -1933,7 +1933,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 
 ### 16.2 平台线附加验证面（目标设计）
 
-涉及 SQL 时追加 `pnpm run check:deploy-sql`；涉及协议时追加 `git diff --exit-code packages/protocol/src/__tests__/golden/`。涉及本架构文档时另需检查：canonical 文档唯一、无 dangling file reference、状态标记（已实现/目标设计/RAFT 参考）前后一致。
+涉及 SQL 时追加 `bun run check:deploy-sql`；涉及协议时追加 `git diff --exit-code packages/protocol/src/__tests__/golden/`。涉及本架构文档时另需检查：canonical 文档唯一、无 dangling file reference、状态标记（已实现/目标设计/RAFT 参考）前后一致。
 
 ---
 

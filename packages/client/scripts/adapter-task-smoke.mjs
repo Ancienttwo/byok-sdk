@@ -33,7 +33,7 @@ async function assertFile(file, label) {
   try {
     await fs.stat(file);
   } catch {
-    throw new Error(`${label} not found at ${file}; run "pnpm -r build" first`);
+    throw new Error(`${label} not found at ${file}; run "bun run build" first`);
   }
 }
 

@@ -13,7 +13,7 @@
  *
  * The golden fixture (`golden/device-assertion-v1.canonical.json`) plays the
  * same role it does for the device proof: regenerate deliberately with
- * `BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok-sdk/core test`, and treat any
+ * `BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test`, and treat any
  * resulting diff as a breaking change to the signing format.
  */
 import { createPublicKey, generateKeyPairSync, randomBytes, sign, verify, type KeyObject } from 'node:crypto';
@@ -118,7 +118,7 @@ function buildGolden(): GoldenFile {
   return {
     schema: DEVICE_ASSERTION_SCHEMA_ID,
     domainPrefix: DEVICE_ASSERTION_DOMAIN_PREFIX,
-    note: 'Canonical signing bytes for byok-device-assertion-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 pnpm --filter @byok-sdk/core test, and treat any diff as a breaking change to the signature format.',
+    note: 'Canonical signing bytes for byok-device-assertion-v1. Regenerate with BYOK_CORE_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/core test, and treat any diff as a breaking change to the signature format.',
     cases: GOLDEN_INPUTS.map((input) => {
       const claims = parseClaims(input.claims);
       return {

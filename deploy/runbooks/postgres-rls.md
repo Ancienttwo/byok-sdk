@@ -80,7 +80,7 @@ Three consequences an operator must accept before doing this:
 There is nothing to verify here, and that is the ruling being recorded. The layers that ARE
 relied upon are verified by:
 
-- `pnpm -r test` — the conformance suite's tenant-isolation dimension on both compositions
+- `bun run test` — the conformance suite's tenant-isolation dimension on both compositions
   (`packages/conformance/src/cloud/tenant-isolation.ts`, `.../core/tenant-isolation.ts`).
 - `packages/cloud-dataplane/src/__tests__/invariants.test.ts` — the catalog assertions in
   `tests/sql/control_plane_invariants.sql`, including its own mutation check.

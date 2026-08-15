@@ -12,7 +12,7 @@ This is the root routing contract for Claude Code and Codex. Load this before ta
 
 ## Required Checks
 
-- `pnpm -r run typecheck`
-- `pnpm -r run test`
-- `pnpm -r run build`
+- `bun run build`
+- `bun run typecheck`
+- `bun run test`
 - `repo-harness run check-task-workflow --strict`

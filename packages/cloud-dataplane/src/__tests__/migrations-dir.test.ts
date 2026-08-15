@@ -9,8 +9,8 @@
  * edited copy all fail here — the same property the release smoke asserts on
  * the tarball, one step earlier and without a pack.
  *
- * Needs a build first, like the rest of this workspace (`pnpm -r build` runs
- * before `pnpm -r test` in CI for the same reason). Missing `dist/` is a hard
+ * Needs a build first, like the rest of this workspace (`bun run build` runs
+ * before `bun run test` in CI for the same reason). Missing `dist/` is a hard
  * failure rather than a skip: a silently skipped projection check is exactly
  * the hole this file exists to close.
  */

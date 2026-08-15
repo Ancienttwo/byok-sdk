@@ -13,7 +13,7 @@ copying `templates/packaging/{bun,sea}/`, can compile something real and
 observe whether a missing pi sidecar is reported cleanly and an explicit
 `BYOK_PI_BIN` sidecar is detected under a real single-file bundle.
 
-- `pnpm start` (`tsx launcher.ts`) — run it directly with plain Node, no
+- `bun run --filter @byok-sdk/example-packaging start` (`tsx launcher.ts`) — run it directly with plain Node, no
   bundling. Useful for a quick sanity check while iterating.
 - `templates/packaging/bun/smoke-test.sh` — compile with `bun build --compile`
   and run the same two assertions (pi sidecar absent / `BYOK_PI_BIN` stub
