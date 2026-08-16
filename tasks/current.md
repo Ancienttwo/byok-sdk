@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T22:37:23+0800 -->
+<!-- updated_at: 2026-08-16T22:38:29+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-16T22:37:23+0800
+> **Status**: Idle
+> **Updated At**: 2026-08-16T22:38:29+0800
 > **Source Branch**: main
-> **Source Commit**: 3b3fcf5
+> **Source Commit**: 9fb0ae0
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: live-activity-timeline-v1-complete
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: ManualClearedWithActiveWork
+- Status: Idle
 - Active Plan: (none)
 - Plan Status: (none)
-- Next Task: inspect active worktree marker(s)
-- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
+- Next Task: (none)
+- Clear Note: (none)
 
 ## Mainline Snapshot Reading
 
@@ -31,12 +31,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime: plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
-- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime
-- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr4-host-integration: plans/plan-20260816-2138-live-activity-timeline-pr5-approval-authority.md
-- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr4-host-integration: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr4-host-integration
-- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr5-approval: plans/plan-20260816-2212-live-activity-timeline-pr6-approval-projection.md
-- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr5-approval: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr5-approval
+- (none)
 ## Active Sprint
 
 - Sprint: (none)
@@ -53,19 +48,10 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: clean
 
 ```
- D plans/plan-20260816-2212-live-activity-timeline-pr6-approval-projection.md
- D tasks/contracts/20260816-2212-live-activity-timeline-pr6-approval-projection.contract.md
- D tasks/notes/20260816-2212-live-activity-timeline-pr6-approval-projection.notes.md
- D tasks/reviews/20260816-2212-live-activity-timeline-pr6-approval-projection.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260816-2212-live-activity-timeline-pr6-approval-projection.md
-?? tasks/archive/contract-20260816-2237-live-activity-timeline-pr6-approval-projection.md
-?? tasks/archive/notes-20260816-2237-live-activity-timeline-pr6-approval-projection.md
-?? tasks/archive/review-20260816-2237-live-activity-timeline-pr6-approval-projection.md
-?? tasks/archive/todo-20260816-2237-live-activity-timeline-pr6-approval-projection.md
+(none)
 ```
 
 ## Source Artifacts
