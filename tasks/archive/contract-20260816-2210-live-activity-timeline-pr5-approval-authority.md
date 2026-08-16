@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-16 22:10
+> **Related Plan**: plans/archive/plan-20260816-2138-live-activity-timeline-pr5-approval-authority.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260816-2210
+
 # Task Contract: live-activity-timeline-pr5-approval-authority
 
 > **Status**: Fulfilled

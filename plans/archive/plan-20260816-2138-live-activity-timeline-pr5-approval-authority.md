@@ -1,6 +1,6 @@
 # Plan: Live Activity Timeline PR5 — Approval Persistence Authority
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260816-2138
 > **Slug**: live-activity-timeline-pr5-approval-authority
 > **Planning Source**: waza-think

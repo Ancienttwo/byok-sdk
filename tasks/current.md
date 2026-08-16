@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T21:33:05+0800 -->
+<!-- updated_at: 2026-08-16T22:10:35+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-16T21:33:05+0800
+> **Updated At**: 2026-08-16T22:10:35+0800
 > **Source Branch**: main
-> **Source Commit**: 3b8af3d
+> **Source Commit**: c918e6e
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -33,6 +33,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 - /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime: plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
 - /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime
+- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr4-host-integration: plans/plan-20260816-2138-live-activity-timeline-pr5-approval-authority.md
+- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr4-host-integration: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr4-host-integration
 ## Active Sprint
 
 - Sprint: (none)
@@ -52,16 +54,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260816-2112-live-activity-timeline-pr4-host-integration.md
- D tasks/contracts/20260816-2112-live-activity-timeline-pr4-host-integration.contract.md
- D tasks/notes/20260816-2112-live-activity-timeline-pr4-host-integration.notes.md
- D tasks/reviews/20260816-2112-live-activity-timeline-pr4-host-integration.review.md
+ D plans/plan-20260816-2138-live-activity-timeline-pr5-approval-authority.md
+ D tasks/contracts/20260816-2138-live-activity-timeline-pr5-approval-authority.contract.md
+ D tasks/notes/20260816-2138-live-activity-timeline-pr5-approval-authority.notes.md
+ D tasks/reviews/20260816-2138-live-activity-timeline-pr5-approval-authority.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260816-2112-live-activity-timeline-pr4-host-integration.md
-?? tasks/archive/contract-20260816-2133-live-activity-timeline-pr4-host-integration.md
-?? tasks/archive/notes-20260816-2133-live-activity-timeline-pr4-host-integration.md
-?? tasks/archive/review-20260816-2133-live-activity-timeline-pr4-host-integration.md
-?? tasks/archive/todo-20260816-2133-live-activity-timeline-pr4-host-integration.md
+?? plans/archive/plan-20260816-2138-live-activity-timeline-pr5-approval-authority.md
+?? tasks/archive/contract-20260816-2210-live-activity-timeline-pr5-approval-authority.md
+?? tasks/archive/notes-20260816-2210-live-activity-timeline-pr5-approval-authority.md
+?? tasks/archive/review-20260816-2210-live-activity-timeline-pr5-approval-authority.md
+?? tasks/archive/todo-20260816-2210-live-activity-timeline-pr5-approval-authority.md
 ```
 
 ## Source Artifacts
