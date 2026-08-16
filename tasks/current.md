@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T20:18:25+0800 -->
+<!-- updated_at: 2026-08-16T20:42:06+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-16T20:18:25+0800
-> **Source Branch**: codex/live-activity-timeline-pr2-typed-activity-projection-impl
-> **Source Commit**: 4c9707c
+> **Updated At**: 2026-08-16T20:42:06+0800
+> **Source Branch**: main
+> **Source Commit**: cc098c8
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: ensure-task-workflow
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -18,9 +18,9 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Current Focus
 
 - Status: ManualClearedWithActiveWork
-- Active Plan: plans/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
-- Plan Status: Executing
-- Next Task: Document the stop-writer → one TTL drain → start typed reader/writer cutover and verify the full workspace.
+- Active Plan: (none)
+- Plan Status: (none)
+- Next Task: inspect active worktree marker(s)
 - Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
@@ -31,69 +31,40 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- .: plans/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
-- .: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr2-typed-activity-projection
-- /Users/kito/Projects/byok-sdk: stale active-plan marker -> plans/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
-- /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
+- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr2-typed-activity-projection: plans/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
+- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr2-typed-activity-projection: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr2-typed-activity-projection
 ## Active Sprint
 
-- Sprint: (none)
+- Sprint: `plans/sprints/20260814-0005-runtime-adapter-lifecycle-contracts.sprint.md`
+- Sprint Status: Done
+- Backlog: 3/3
+- Next Sprint Task: (none)
 ## Workstreams
 
 - (none)
 ## Handoff
 
-- Exact Next Step: (none)
+- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
 
 ## Checks
 
-- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
+- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 42 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
- M docs/spec.md
- M packages/client/src/__tests__/fixtures/real-cloud.ts
- M packages/cloud-dataplane/src/__tests__/board-concurrency.test.ts
- M packages/cloud-dataplane/src/stores/core/index.ts
- M packages/cloud-dataplane/src/stores/core/presence.ts
- M packages/cloud-dataplane/src/stores/index.ts
- M packages/cloud/src/__tests__/board-streams.test.ts
- M packages/cloud/src/__tests__/constraints.test.ts
- M packages/cloud/src/__tests__/inbound-gate.test.ts
- M packages/cloud/src/cloud.ts
- M packages/cloud/src/coordination.ts
- M packages/cloud/src/handlers/presence.ts
- M packages/cloud/src/inbound.ts
- M packages/cloud/src/index.ts
- M packages/cloud/src/stores/in-memory/index.ts
- M packages/cloud/src/stores/ports-contract.ts
- M packages/cloud/src/stores/ports.ts
- M packages/cloud/src/tenant-stores.ts
- M packages/conformance/src/cloud/harness.ts
- M packages/conformance/src/cloud/index.ts
- M packages/conformance/src/cloud/tenant-isolation.ts
- M packages/conformance/src/compositions/in-memory-cloud.test.ts
- M packages/conformance/src/core/presence.ts
- M packages/conformance/src/core/tenant-isolation.ts
- M packages/conformance/src/index.ts
- M packages/core/src/__tests__/constraints.test.ts
- M packages/core/src/in-memory/index.ts
- M packages/core/src/in-memory/presence.ts
- M packages/core/src/index.ts
- M packages/core/src/ports-contract.ts
- M packages/core/src/presence.ts
- M packages/core/src/stores.ts
- M plans/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
- M tasks/contracts/20260816-1958-live-activity-timeline-pr2-typed-activity-projection.contract.md
- M tasks/notes/20260816-1958-live-activity-timeline-pr2-typed-activity-projection.notes.md
-?? deploy/runbooks/activity-tail-cutover.md
-?? packages/cloud-dataplane/src/__tests__/activity-conformance.test.ts
-?? packages/cloud-dataplane/src/stores/core/activity.ts
-?? packages/cloud/src/__tests__/activity-store-conformance.test.ts
-?? packages/cloud/src/activity.ts
+ D plans/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
+ D tasks/contracts/20260816-1958-live-activity-timeline-pr2-typed-activity-projection.contract.md
+ D tasks/notes/20260816-1958-live-activity-timeline-pr2-typed-activity-projection.notes.md
+ D tasks/reviews/20260816-1958-live-activity-timeline-pr2-typed-activity-projection.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
+?? tasks/archive/contract-20260816-2042-live-activity-timeline-pr2-typed-activity-projection.md
+?? tasks/archive/notes-20260816-2042-live-activity-timeline-pr2-typed-activity-projection.md
+?? tasks/archive/review-20260816-2042-live-activity-timeline-pr2-typed-activity-projection.md
+?? tasks/archive/todo-20260816-2042-live-activity-timeline-pr2-typed-activity-projection.md
 ```
 
 ## Source Artifacts
