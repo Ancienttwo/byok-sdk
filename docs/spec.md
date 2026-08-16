@@ -121,6 +121,87 @@ one low-level agent run and is not task completion. Only `agent_settled`, which
 arrives after automatic retry, compaction, and queued continuations are done,
 maps to BYOK `turn_end`. The SDK does not carry parallel 0.74.x semantics.
 
+## Live activity timeline product boundary
+
+The SDK product boundary includes a future `@byok-sdk/ui-runtime` package for a
+host-facing **Live Activity Timeline**. V1 is a bounded, lossy, read-only
+projection of task activity. It is not a conversation transcript, a durable
+event log, a browser application, or a message-composition runtime. The package
+is React-free and deterministic: it folds typed activity events into a BYOK-owned
+view model and owns no network, authentication, persistence, or presentation.
+
+The staged implementation has three authorities. Protocol events carry
+observations, the activity tail is the one bounded read model, and the host BFF
+is the browser security boundary. Until the corresponding implementation work
+packages land, this section is product intent rather than a claim that the
+current string activity tail or wire events already satisfy the contract.
+
+### Tool observation contract
+
+The first protocol slice adds only additive optional observability fields:
+
+- `tool_use.toolCallId?: string` and `tool_result.toolCallId?: string` identify
+  the same native tool call. A generic `id` is forbidden because envelope IDs,
+  RPC request IDs, and approval IDs have different authorities.
+- `tool_result.isError?: boolean` is the only runtime-neutral tool outcome
+  authority. `false` projects to `output-available`, `true` to `output-error`,
+  and absence to `output-unknown`. Consumers must not inspect opaque provider
+  output, exit text, tool names, timing, or adjacency to recreate this value.
+
+Bundled adapters map native IDs and outcome flags only from their pinned runtime
+contracts. If a bundled runtime contract requires a field and the frame omits or
+malforms it, that is a typed adapter authority failure, not an `unpaired`
+fallback. The BYOK fields remain optional so older wire peers and honest custom
+adapters can omit observations they do not have. A reader that receives no
+`toolCallId` renders an explicit `unpaired-use` or `unpaired-result`; it never
+pairs by FIFO, tool name, payload content, or time proximity.
+
+Approval does not reuse tool-call identity. The existing `approvalId` on
+`task.await_approval` and `task.approval_resolved` remains the sole approval
+authority. Approval projection is a later slice after cloud retains both
+lifecycle messages.
+
+### Typed bounded activity authority
+
+The current public `ActivityEntry { at, detail }` and `readActivity()` string
+tail will be replaced as one coordinated breaking SDK change. The replacement
+entry retains `sourceEnvelopeId`, `taskId`, `batchSeq`, `eventIndex`,
+`receivedAt`, and the parsed `AgentEventOrUnknown`. Event identity is
+`(sourceEnvelopeId, eventIndex)`; ordering and gap detection use
+`(taskId, batchSeq, eventIndex)`. Dedup identity and display order are distinct
+contracts.
+
+`readActivity()` remains the single host control-plane read port and returns the
+typed bounded tail with `dropped`, `capacity`, `expiresAt`, and a revision or
+cursor. There is no parallel legacy string endpoint, dual-write, or reader that
+parses historical `detail` strings. Because the tail is explicitly ephemeral,
+the deployment migration stops old writers and waits one full activity TTL
+before enabling the new reader and writer; expired hints are discarded rather
+than translated into new semantics.
+
+Unknown event types retain their original event index and render as neutral
+placeholders. Known but malformed variants fail closed. Each `progress.text`
+remains an ordered fragment. The fold may group adjacent fragments for view
+organization but preserves every fragment boundary and never claims a canonical
+assistant message without a future `messageId`, `textMode`, and message-boundary
+contract. Dropped count, detected gaps, capacity, and expiry are user-visible
+state, not logging details the UI may hide.
+
+### Host and scale boundary
+
+The SDK cloud does not expose a device-authenticated browser GET for this
+feature. A consuming host BFF resolves the SaaS user and tenant, calls the host
+control-plane read port, applies content and secret redaction, then serves its
+own browser API or stream. Raw tool input and output never gain browser authority
+from possession of a device credential.
+
+At 10x activity volume, the first expected pressure is whole-row JSONB tail
+updates, per-task hot-row contention, and host polling—not the bounded O(events)
+fold. Store conformance and a targeted burst test gate the typed-tail slice. If
+the hint store or polling transport fails that envelope, the remedy is a
+replaceable activity store or host transport, not a second projection authority
+or a general-purpose UI runtime framework.
+
 ## Skill pack delivery
 
 A SaaS product using this SDK can distribute curated, declarative content — an
