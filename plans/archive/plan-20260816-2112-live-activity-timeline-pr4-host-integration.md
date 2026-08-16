@@ -1,6 +1,6 @@
 # Plan: Live Activity Timeline PR4 — host/BFF reference integration
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260816-2112
 > **Slug**: live-activity-timeline-pr4-host-integration
 > **Planning Source**: waza-think
