@@ -1,10 +1,9 @@
 /**
- * Presence and activity conformance (§12.3).
+ * Presence conformance (§12.3).
  *
- * Two properties, both about honesty: an expired hint must be *absent* rather
- * than stale, and a truncated activity tail must say how much it lost. Both are
- * asserted through the injected clock, so a composition cannot pass by being
- * slow enough that nothing expires during the test.
+ * An expired hint must be *absent* rather than stale. The behavior is asserted
+ * through the injected clock, so a composition cannot pass by being slow
+ * enough that nothing expires during the test.
  */
 import { describe, expect, it } from 'vitest';
 import { isCoreError } from '@byok-sdk/core';
@@ -96,68 +95,6 @@ export function runPresenceConformance(factory: CoreCompositionFactory): void {
             })
           ).level,
         ).toBe('working');
-      });
-    });
-  });
-
-  describe('activity', () => {
-    it('bounds the tail and counts what it dropped', async () => {
-      await withComposition(factory, async ({ stores }) => {
-        let tail = await stores.activity.append(TENANT_A, {
-          taskId: 'task-1',
-          details: ['entry-0'],
-          dropped: 0,
-          ttlMs: 300_000,
-          capacity: 3,
-        });
-        for (let index = 1; index < 6; index += 1) {
-          tail = await stores.activity.append(TENANT_A, {
-            taskId: 'task-1',
-            details: [`entry-${index}`],
-            dropped: 0,
-            ttlMs: 300_000,
-            capacity: 3,
-          });
-        }
-
-        expect(tail.entries).toHaveLength(3);
-        expect(tail.entries.map((entry) => entry.detail)).toEqual([
-          'entry-3',
-          'entry-4',
-          'entry-5',
-        ]);
-        // Lossiness is in the data, not implied by a gap the reader must notice.
-        expect(tail.dropped).toBe(3);
-      });
-    });
-
-    it('treats an expired tail as absent', async () => {
-      await withComposition(factory, async (handle) => {
-        const { stores } = handle;
-        await stores.activity.append(TENANT_A, {
-          taskId: 'task-1',
-          details: ['entry-0'],
-          dropped: 0,
-          ttlMs: 300_000,
-        });
-        expect(await stores.activity.read(TENANT_A, 'task-1')).toBeDefined();
-
-        await handle.advanceTime(300_000);
-        expect(await stores.activity.read(TENANT_A, 'task-1')).toBeUndefined();
-      });
-    });
-
-    it('adds producer drops to capacity eviction', async () => {
-      await withComposition(factory, async ({ stores }) => {
-        const tail = await stores.activity.append(TENANT_A, {
-          taskId: 'task-dropped',
-          details: ['one', 'two', 'three'],
-          dropped: 4,
-          ttlMs: 300_000,
-          capacity: 2,
-        });
-        expect(tail.entries.map((entry) => entry.detail)).toEqual(['two', 'three']);
-        expect(tail.dropped).toBe(5);
       });
     });
   });

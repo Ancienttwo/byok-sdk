@@ -17,6 +17,7 @@
 import type { CloudStoreName } from './ports';
 
 export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string[]>> = {
+  activity: ['append', 'read'],
   devices: ['register', 'get', 'revoke', 'list', 'resolveByDeviceId'],
   pairingCodes: ['issue', 'redeem'],
   nonces: ['issue', 'validate', 'markUsed'],
@@ -33,6 +34,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
 
 /** The interface each port name is declared as, for a source-side scan. */
 export const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>> = {
+  activity: 'ActivityStore',
   devices: 'DeviceDirectory',
   pairingCodes: 'PairingCodeStore',
   nonces: 'NonceStore',

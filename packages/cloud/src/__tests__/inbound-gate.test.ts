@@ -113,6 +113,16 @@ describe('the inbound gate', () => {
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'task-nobody-offered')).toBeUndefined();
   });
 
+  it('rejects malformed activity order before recording the envelope in dedup', async () => {
+    const malformed = createEnvelope(
+      'task.progress',
+      { seq: -1, events: [{ type: 'turn_end' }] },
+      { taskId: 'task-invalid-progress' },
+    );
+    expect(await handleInboundEnvelope(stores, deviceId, malformed)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, malformed)).toBe('rejected');
+  });
+
   it('step 3: a repeated envelope id is a duplicate, not a rejection, and re-runs nothing', async () => {
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
     const envelope = claim(taskId, deviceId);

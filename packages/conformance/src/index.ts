@@ -23,6 +23,8 @@ export type {
   CloudConformancePortName,
   CloudConformanceStores,
 } from './cloud/index';
+export { runActivityConformance } from './cloud/activity';
+export type { ActivityCompositionFactory, ActivityCompositionHandle } from './cloud/activity';
 
 export {
   runPairingSimulatorConformance,

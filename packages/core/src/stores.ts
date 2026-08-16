@@ -17,7 +17,7 @@
  * omission: "move this to another tenant" is the one operation that would make
  * every cross-tenant assertion in the conformance suite unfalsifiable.
  */
-import type { ActivityStore, PresenceStore } from './presence';
+import type { PresenceStore } from './presence';
 import type { BoardStore } from './board';
 import type { MailboxStore } from './mailbox';
 import type { ObjectStore } from './blob';
@@ -29,7 +29,7 @@ import type { TruthStore } from './truth';
 /**
  * Injected time.
  *
- * TTL semantics (presence expiry, activity expiry, reservation expiry) are
+ * TTL semantics (presence expiry and reservation expiry) are
  * behavior the conformance suite has to assert deterministically, which is
  * impossible against a wall clock. Compositions inject one; nothing in core
  * calls `Date.now()` directly.
@@ -50,7 +50,6 @@ export interface CoreStores {
   readonly board: BoardStore;
   readonly truth: TruthStore;
   readonly presence: PresenceStore;
-  readonly activity: ActivityStore;
   readonly objects: ObjectStore;
   readonly quota: QuotaStore;
   /**
@@ -69,7 +68,6 @@ export const CORE_STORE_NAMES = [
   'board',
   'truth',
   'presence',
-  'activity',
   'objects',
   'quota',
   'skillPacks',

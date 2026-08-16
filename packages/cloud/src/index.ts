@@ -135,6 +135,21 @@ export {
   DEFAULT_PRESENCE_TTL_MS,
 } from './coordination';
 export type { ActivityBounds } from './coordination';
+export {
+  TimelineEventSchema,
+  ActivityAppendRequestSchema,
+  activityCursor,
+  parseTimelineEvents,
+  projectTimelineEvents,
+  validateActivityAppend,
+} from './activity';
+export type {
+  ActivityAppendInput,
+  ActivityCursor,
+  ActivityStore,
+  ActivityTail,
+  TimelineEvent,
+} from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
 export type {
   BoardFeedClientOptions,
@@ -220,6 +235,7 @@ export {
   DEDUP_RING_CAPACITY,
   InMemoryBlobContentProxy,
   InMemoryCloudBlobStore,
+  InMemoryActivityStore,
   InMemoryDeviceDirectory,
   InMemoryInboundDedupStore,
   InMemoryNonceStore,

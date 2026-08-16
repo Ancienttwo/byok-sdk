@@ -17,7 +17,6 @@
 import {
   contentHash,
   parseCapabilityDeclaration,
-  type ActivityTail,
   type BoardItem,
   type BoardItemInput,
   type BoardListQuery,
@@ -30,6 +29,7 @@ import {
   type SkillPackStore,
   type TenantId,
 } from '@byok-sdk/core';
+import type { ActivityTail } from './activity';
 import {
   BYOK_ACTIVITY_PATH,
   BYOK_BLOB_CONTENT_ROUTE,

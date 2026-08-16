@@ -131,10 +131,10 @@ is React-free and deterministic: it folds typed activity events into a BYOK-owne
 view model and owns no network, authentication, persistence, or presentation.
 
 The staged implementation has three authorities. Protocol events carry
-observations, the activity tail is the one bounded read model, and the host BFF
-is the browser security boundary. Until the corresponding implementation work
-packages land, this section is product intent rather than a claim that the
-current string activity tail or wire events already satisfy the contract.
+observations, the typed activity tail is the one bounded read model, and the
+host BFF is the browser security boundary. Protocol tool correlation and the
+typed activity projection are implemented; the UI fold and host integration
+remain staged work described below.
 
 ### Tool observation contract
 
@@ -163,20 +163,20 @@ lifecycle messages.
 
 ### Typed bounded activity authority
 
-The current public `ActivityEntry { at, detail }` and `readActivity()` string
-tail will be replaced as one coordinated breaking SDK change. The replacement
-entry retains `sourceEnvelopeId`, `taskId`, `batchSeq`, `eventIndex`,
+The public activity authority is a typed bounded tail; the former
+`ActivityEntry { at, detail }` string shape is removed. Each entry retains
+`sourceEnvelopeId`, `taskId`, `batchSeq`, `eventIndex`,
 `receivedAt`, and the parsed `AgentEventOrUnknown`. Event identity is
 `(sourceEnvelopeId, eventIndex)`; ordering and gap detection use
 `(taskId, batchSeq, eventIndex)`. Dedup identity and display order are distinct
 contracts.
 
-`readActivity()` remains the single host control-plane read port and returns the
+`readActivity()` is the single host control-plane read port and returns the
 typed bounded tail with `dropped`, `capacity`, `expiresAt`, and a revision or
 cursor. There is no parallel legacy string endpoint, dual-write, or reader that
 parses historical `detail` strings. Because the tail is explicitly ephemeral,
 the deployment migration stops old writers and waits one full activity TTL
-before enabling the new reader and writer; expired hints are discarded rather
+before enabling the typed reader and writer; expired hints are discarded rather
 than translated into new semantics.
 
 Unknown event types retain their original event index and render as neutral

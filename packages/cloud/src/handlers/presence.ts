@@ -1,8 +1,9 @@
 import { isCoreError, PRESENCE_LEVELS } from '@byok-sdk/core';
-import { AgentEventOrUnknownSchema, ConfiguredToolsetsSchema } from '@byok-sdk/protocol';
+import { ConfiguredToolsetsSchema } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { appendActivityEvents, type ActivityBounds } from '../coordination';
+import { ActivityAppendRequestSchema } from '../activity';
 import { isCloudError } from '../errors';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
 
@@ -20,12 +21,6 @@ const PresenceBodySchema = z.object({
   level: z.enum(PRESENCE_LEVELS),
   detail: z.string().optional(),
   configuredToolsets: ConfiguredToolsetsSchema.optional(),
-});
-
-const ActivityBodySchema = z.object({
-  taskId: z.string().min(1).max(200),
-  events: z.array(AgentEventOrUnknownSchema),
-  dropped: z.number().int().nonnegative(),
 });
 
 export function presencePublishHandler(deps: PresenceRouteDeps) {
@@ -67,7 +62,7 @@ export function activityAppendHandler(deps: ActivityRouteDeps) {
   return async (c: Context): Promise<Response> => {
     const authenticated = await authenticateDevice(c, deps);
     if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
-    const parsed = ActivityBodySchema.safeParse(await readJsonBody(c));
+    const parsed = ActivityAppendRequestSchema.safeParse(await readJsonBody(c));
     if (!parsed.success) return c.json({ error: 'invalid activity body' }, 400);
     try {
       return c.json(

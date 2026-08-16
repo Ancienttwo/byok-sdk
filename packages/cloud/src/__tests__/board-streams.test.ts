@@ -171,10 +171,15 @@ describe('board coordination surface', () => {
     const activity = await harness.cloud.readActivity(TENANT_A, 'projected');
     expect(activity?.entries).toHaveLength(2);
     expect(activity?.dropped).toBe(1);
-    expect(activity?.entries.map((entry) => JSON.parse(entry.detail).type)).toEqual([
+    expect(activity?.entries.map((entry) => entry.event.type)).toEqual([
       'progress',
       'turn_end',
     ]);
+    expect(activity?.entries.map((entry) => [entry.sourceEnvelopeId, entry.batchSeq, entry.eventIndex])).toEqual([
+      [progress.id, 1, 1],
+      [progress.id, 1, 2],
+    ]);
+    expect(activity?.cursor).toEqual({ batchSeq: 1, eventIndex: 2 });
   });
 
   it('bounds producer labels, presence cadence/detail, and activity events/bytes', async () => {
@@ -245,10 +250,23 @@ describe('board coordination surface', () => {
       ).status,
     ).toBe(413);
 
+    expect(
+      await harness.json(
+        '/byok/activity',
+        jsonInit(device, {
+          taskId: 'activity-without-order-authority',
+          events: [{ type: 'turn_end' }],
+          dropped: 0,
+        }),
+      ),
+    ).toEqual({ status: 400, body: { error: 'invalid activity body' } });
+
     const tooMany = await harness.json(
       '/byok/activity',
       jsonInit(device, {
         taskId: 'activity',
+        sourceEnvelopeId: 'activity-envelope',
+        batchSeq: 1,
         events: [
           { type: 'turn_end' },
           { type: 'turn_end' },

@@ -33,7 +33,7 @@ import {
   type MessageType,
 } from '@byok-sdk/protocol';
 import {
-  activityDetails,
+  validateActivityBatch,
   appendActivityEvents,
   DEFAULT_ACTIVITY_BOUNDS,
   type ActivityBounds,
@@ -69,7 +69,16 @@ export async function handleInboundEnvelope(
 
   if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
     try {
-      activityDetails(envelope.payload.events, 0, activityBounds);
+      validateActivityBatch(
+        {
+          taskId,
+          sourceEnvelopeId: envelope.id,
+          batchSeq: envelope.payload.seq,
+          events: envelope.payload.events,
+          dropped: 0,
+        },
+        activityBounds,
+      );
     } catch (caught) {
       if (
         isCloudError(caught, 'activity_batch_too_large') ||
@@ -115,7 +124,13 @@ async function applyLifecycle(
       if (envelope.payload.events.length > 0) {
         await appendActivityEvents(
           stores.activity,
-          { taskId, events: envelope.payload.events, dropped: 0 },
+          {
+            taskId,
+            sourceEnvelopeId: envelope.id,
+            batchSeq: envelope.payload.seq,
+            events: envelope.payload.events,
+            dropped: 0,
+          },
           activityBounds,
         );
       }

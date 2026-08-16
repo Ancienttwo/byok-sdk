@@ -1,10 +1,11 @@
 /**
  * The Postgres composition of the cloud-local ports.
  *
- * Seven durable stores, one object-storage blob store, one in-memory limiter:
+ * Eight durable stores, one object-storage blob store, one in-memory limiter:
  *
  * - Six durable ones have rows in `deploy/sql/0001_cloud_local.sql`; S6's
- *   proof receipt authority is the seventh, in `0004_device_proof_truth.sql`.
+ *   proof receipt authority is the seventh, in `0004_device_proof_truth.sql`;
+ *   typed activity uses the JSONB tail row in `0002_core_domain.sql`.
  * - `blobs` is the R2 adapter over the `object_manifest` row the core store
  *   already owns: metadata in Postgres, bytes in the object store, one
  *   reserve/verify protocol binding them (design §6). It supplies grants only,
@@ -30,6 +31,7 @@ import { PostgresPairingCodeStore } from './pairing-codes';
 import { PostgresRequestReceiptStore } from './receipts';
 import { PostgresProofRequestReceiptStore } from './proof-receipts';
 import { PostgresTaskAttemptStore } from './task-attempts';
+import { PostgresActivityStore } from './activity';
 
 export { PostgresDeviceDirectory } from './devices';
 export { PostgresInboundDedupStore } from './dedup';
@@ -38,6 +40,7 @@ export { PostgresPairingCodeStore } from './pairing-codes';
 export { PostgresRequestReceiptStore } from './receipts';
 export { PostgresProofRequestReceiptStore } from './proof-receipts';
 export { PostgresTaskAttemptStore } from './task-attempts';
+export { PostgresActivityStore } from './activity';
 export {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_PRESIGN_TTL_SECONDS,
@@ -59,7 +62,7 @@ export type {
   R2ObjectPage,
 } from './r2-blobs';
 
-/** Every cloud-local port. All nine, or it is not a composition. */
+/** Every cloud-local port. All ten, or it is not a composition. */
 export type PostgresCloudStores = CloudStores;
 
 /** Everything the blob store needs that is not already a composition-wide input. */
@@ -87,6 +90,7 @@ export function createPostgresCloudStores(
 ): PostgresCloudStores {
   const { pool, clock, crypto } = options;
   return {
+    activity: new PostgresActivityStore(pool, clock),
     devices: new PostgresDeviceDirectory(pool),
     pairingCodes: new PostgresPairingCodeStore(pool, clock),
     nonces: new PostgresNonceStore(pool, clock, crypto),

@@ -1,8 +1,8 @@
 /**
- * Postgres {@link PresenceStore} and {@link ActivityStore} (§12.3).
+ * Postgres {@link PresenceStore} (§12.3).
  *
- * Both are lossy, TTL-bounded, unsigned, and never authoritative, and both are
- * bounded upserts: one row per device, one row per task. Nothing here may be
+ * Presence is lossy, TTL-bounded, unsigned, and never authoritative. It is a
+ * bounded upsert with one row per device. Nothing here may be
  * used to derive coordination state, execution state, authorization, billing or
  * recovery — which is why this file shares no vocabulary with `board.ts` and
  * none with the frozen wire states.
@@ -19,11 +19,6 @@
  */
 import {
   ByokCoreError,
-  DEFAULT_ACTIVITY_CAPACITY,
-  type ActivityAppendInput,
-  type ActivityEntry,
-  type ActivityStore,
-  type ActivityTail,
   type Clock,
   type PresenceHint,
   type PresenceHintInput,
@@ -46,15 +41,6 @@ interface PresenceRow {
   readonly expires_at: string;
 }
 
-interface TailRow {
-  readonly tenant_id: string;
-  readonly task_id: string;
-  readonly entries: readonly ActivityEntry[];
-  readonly dropped: number;
-  readonly capacity: number;
-  readonly expires_at: string;
-}
-
 function toHint(row: PresenceRow): PresenceHint {
   return {
     tenantId: row.tenant_id as TenantId,
@@ -65,17 +51,6 @@ function toHint(row: PresenceRow): PresenceHint {
       ? {}
       : { configuredToolsets: Object.freeze([...row.configured_toolsets]) }),
     observedAt: row.observed_at,
-    expiresAt: row.expires_at,
-  };
-}
-
-function toTail(row: TailRow): ActivityTail {
-  return {
-    tenantId: row.tenant_id as TenantId,
-    taskId: row.task_id,
-    entries: row.entries,
-    dropped: row.dropped,
-    capacity: row.capacity,
     expiresAt: row.expires_at,
   };
 }
@@ -164,112 +139,6 @@ export class PostgresPresenceStore implements PresenceStore {
       [tenant, this.#now()],
     );
     return result.rows.map(toHint);
-  }
-
-  #expiry(ttlMs: number): string {
-    return new Date(this.#clock.now().getTime() + ttlMs).toISOString();
-  }
-
-  #now(): string {
-    return this.#clock.now().toISOString();
-  }
-}
-
-export class PostgresActivityStore implements ActivityStore {
-  readonly #pool: Pool;
-  readonly #clock: Clock;
-
-  constructor(pool: Pool, clock: Clock) {
-    this.#pool = pool;
-    this.#clock = clock;
-  }
-
-  async append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail> {
-    assertTtl(input.ttlMs);
-    const capacity = input.capacity ?? DEFAULT_ACTIVITY_CAPACITY;
-    if (!Number.isSafeInteger(capacity) || capacity <= 0) {
-      throw new ByokCoreError(
-        'activity_capacity_invalid',
-        `Activity capacity must be a positive integer, received ${String(capacity)}.`,
-      );
-    }
-    if (input.details.length === 0 || !Number.isSafeInteger(input.dropped) || input.dropped < 0) {
-      throw new ByokCoreError(
-        'activity_batch_invalid',
-        'Activity batches require at least one detail and a non-negative integer dropped count.',
-      );
-    }
-
-    const now = this.#now();
-    const incoming = input.details.map((detail) => ({ at: now, detail }));
-
-    // One statement. The INSERT arm trims a new batch. The conflict arm builds
-    // from `activity_tail` itself, which Postgres re-reads AFTER acquiring the
-    // conflicting row lock; building EXCLUDED from a pre-lock SELECT would let
-    // two concurrent batches both append to the same old snapshot and the
-    // second writer would erase the first. Expired rows restart from empty.
-    const result = await this.#pool.query<TailRow>(
-      `WITH trimmed AS (
-         SELECT COALESCE(
-                  (SELECT jsonb_agg(entry ORDER BY ordinality)
-                     FROM jsonb_array_elements($4::jsonb)
-                          WITH ORDINALITY AS element(entry, ordinality)
-                    WHERE ordinality > GREATEST(jsonb_array_length($4::jsonb) - $6, 0)),
-                  '[]'::jsonb) AS entries,
-                $5::integer + GREATEST(jsonb_array_length($4::jsonb) - $6, 0) AS dropped
-       )
-       INSERT INTO activity_tail (tenant_id, task_id, entries, dropped, capacity, expires_at)
-       SELECT $1, $2, trimmed.entries, trimmed.dropped, $6, $7 FROM trimmed
-       ON CONFLICT (tenant_id, task_id) DO UPDATE
-          SET entries    = (
-                SELECT COALESCE(jsonb_agg(entry ORDER BY ordinality), '[]'::jsonb)
-                  FROM jsonb_array_elements(
-                         (CASE WHEN activity_tail.expires_at > $3
-                               THEN activity_tail.entries ELSE '[]'::jsonb END) || $4::jsonb
-                       ) WITH ORDINALITY AS element(entry, ordinality)
-                 WHERE ordinality > GREATEST(
-                   jsonb_array_length(
-                     (CASE WHEN activity_tail.expires_at > $3
-                           THEN activity_tail.entries ELSE '[]'::jsonb END) || $4::jsonb
-                   ) - $6,
-                   0
-                 )
-              ),
-              dropped    = (CASE WHEN activity_tail.expires_at > $3
-                                 THEN activity_tail.dropped ELSE 0 END)
-                           + $5::integer
-                           + GREATEST(
-                               jsonb_array_length(
-                                 (CASE WHEN activity_tail.expires_at > $3
-                                       THEN activity_tail.entries ELSE '[]'::jsonb END) || $4::jsonb
-                               ) - $6,
-                               0
-                             ),
-              capacity   = EXCLUDED.capacity,
-              expires_at = EXCLUDED.expires_at
-       RETURNING tenant_id, task_id, entries, dropped, capacity, expires_at`,
-      [
-        tenant,
-        input.taskId,
-        now,
-        JSON.stringify(incoming),
-        input.dropped,
-        capacity,
-        this.#expiry(input.ttlMs),
-      ],
-    );
-    return toTail(result.rows[0]!);
-  }
-
-  async read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined> {
-    const result = await this.#pool.query<TailRow>(
-      `SELECT tenant_id, task_id, entries, dropped, capacity, expires_at
-         FROM activity_tail
-        WHERE tenant_id = $1 AND task_id = $2 AND expires_at > $3`,
-      [tenant, taskId, this.#now()],
-    );
-    const row = result.rows[0];
-    return row === undefined ? undefined : toTail(row);
   }
 
   #expiry(ttlMs: number): string {

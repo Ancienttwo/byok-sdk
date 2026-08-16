@@ -90,13 +90,9 @@ export type {
   TruthStore,
 } from './truth';
 
-// Presence + activity (§12.3)
-export { PRESENCE_LEVELS, DEFAULT_ACTIVITY_CAPACITY } from './presence';
+// Presence (§12.3)
+export { PRESENCE_LEVELS } from './presence';
 export type {
-  ActivityAppendInput,
-  ActivityEntry,
-  ActivityStore,
-  ActivityTail,
   PresenceHint,
   PresenceHintInput,
   PresenceLevel,
@@ -283,7 +279,6 @@ export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
 // In-memory reference implementation
 export {
   IN_MEMORY_CLOCK_EPOCH,
-  InMemoryActivityStore,
   InMemoryBoardStore,
   InMemoryMailboxStore,
   InMemoryObjectStore,

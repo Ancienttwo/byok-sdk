@@ -103,18 +103,6 @@ export function runTenantIsolationConformance(factory: CoreCompositionFactory): 
       });
     });
 
-    it('does not leak activity tails', async () => {
-      await withComposition(factory, async ({ stores }) => {
-        await stores.activity.append(TENANT_A, {
-          taskId: 'task-1',
-          details: ['entry'],
-          dropped: 0,
-          ttlMs: 300_000,
-        });
-        expect(await stores.activity.read(TENANT_B, 'task-1')).toBeUndefined();
-      });
-    });
-
     it('does not share object manifests across tenants', async () => {
       await withComposition(factory, async ({ stores }) => {
         const hash = hashOf(9);

@@ -1,7 +1,7 @@
 /**
- * Presence and activity hints (§12.3).
+ * Presence hints (§12.3).
  *
- * Both are lossy, TTL-bounded, unsigned, and never authoritative. Expiry means
+ * Presence is lossy, TTL-bounded, unsigned, and never authoritative. Expiry means
  * *absence*, not a stale value: a hint past its TTL is invisible to readers, so
  * nothing downstream can mistake an old level for a live one.
  *
@@ -12,9 +12,6 @@
  * names. A device that looks busy is not evidence that any particular work item
  * moved anywhere.
  *
- * The activity tail is bounded by count and carries an explicit `dropped`
- * counter: lossiness is written into the data instead of being hidden behind a
- * stream that pretends to be complete.
  */
 import type { TenantId } from './tenant';
 
@@ -51,39 +48,6 @@ export interface PresenceHintInput {
   readonly minimumIntervalMs: number;
 }
 
-/** One entry of a task's lossy tail. */
-export interface ActivityEntry {
-  readonly at: string;
-  readonly detail: string;
-}
-
-/**
- * A task's bounded tail.
- *
- * `dropped` counts entries evicted by `capacity`, so a reader can tell the
- * difference between "nothing happened" and "we lost the middle".
- */
-export interface ActivityTail {
-  readonly tenantId: TenantId;
-  readonly taskId: string;
-  readonly entries: readonly ActivityEntry[];
-  readonly dropped: number;
-  readonly capacity: number;
-  readonly expiresAt: string;
-}
-
-export interface ActivityAppendInput {
-  readonly taskId: string;
-  /** One ProgressBatcher-shaped batch. Empty batches are rejected. */
-  readonly details: readonly string[];
-  /** Events the producer dropped before this batch reached the store. */
-  readonly dropped: number;
-  /** Tail lifetime. §12.7.5 suggests 5-15 minutes for activity. */
-  readonly ttlMs: number;
-  /** Maximum retained entries. Must be a positive integer. */
-  readonly capacity?: number;
-}
-
 /**
  * Presence port. Tenant-first, async.
  *
@@ -95,18 +59,3 @@ export interface PresenceStore {
   read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
   list(tenant: TenantId): Promise<readonly PresenceHint[]>;
 }
-
-/**
- * Activity port. Tenant-first, async.
- *
- * Raises: `activity_capacity_invalid` (non-positive or non-integer capacity —
- * an unbounded tail is exactly what this contract exists to prevent),
- * `activity_batch_invalid` (empty batch or invalid producer drop count).
- */
-export interface ActivityStore {
-  append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
-  read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
-}
-
-/** Default tail capacity when an append does not specify one. */
-export const DEFAULT_ACTIVITY_CAPACITY = 50;

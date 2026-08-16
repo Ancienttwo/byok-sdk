@@ -31,6 +31,20 @@ import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 export function runCloudTenantIsolationConformance(factory: CloudCompositionFactory): void {
   describe('tenant isolation', () => {
+    it('does not leak activity tails', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.activity.append(TENANT_A, {
+          taskId: 'task-1',
+          sourceEnvelopeId: 'envelope-1',
+          batchSeq: 1,
+          events: [{ type: 'turn_end' }],
+          dropped: 0,
+          ttlMs: 300_000,
+        });
+        expect(await stores.activity.read(TENANT_B, 'task-1')).toBeUndefined();
+      });
+    });
+
     it('does not leak device rows or listings', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.devices.register(TENANT_A, registration('device-1'));

@@ -38,6 +38,7 @@ export {
   PostgresProofRequestReceiptStore,
   PostgresRequestReceiptStore,
   PostgresTaskAttemptStore,
+  PostgresActivityStore,
   createPostgresCloudStores,
 } from './stores/index';
 export type {
@@ -71,10 +72,9 @@ export type {
 } from './stores/index';
 
 // The core port implementations, and the composition that bundles them. All
-// eight ship together because `runCoreConformance` certifies a composition as
+// seven ship together because `runCoreConformance` certifies a composition as
 // a whole — a partial `CoreStores` is not something the suite can run.
 export {
-  PostgresActivityStore,
   PostgresBoardStore,
   PostgresMailboxStore,
   PostgresObjectStore,
