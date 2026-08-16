@@ -1,13 +1,13 @@
 # Task Contract: live-activity-timeline-pr4-host-integration
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260816-2112-live-activity-timeline-pr4-host-integration.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-16 21:12
+> **Last Updated**: 2026-08-16 21:32
 > **Review File**: `tasks/reviews/20260816-2112-live-activity-timeline-pr4-host-integration.review.md`
 > **Notes File**: `tasks/notes/20260816-2112-live-activity-timeline-pr4-host-integration.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
