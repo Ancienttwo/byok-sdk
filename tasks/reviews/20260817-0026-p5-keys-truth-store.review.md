@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:140633966584fd8aef653a1b8045ef06a59441868d7f8de5a76df6cdb6e3d559
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 1458604b8cf20adaa79501d045efe5854ff51307
+> **Verification Evidence SHA256**: sha256:a2614e00230ebdea10c94f6164779ba2a69dba8faeeac12411f71490246aa26e
+> **Issued At**: 2026-08-16T16:48:10.961Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: PASS: async profile authority is coherent across InMemory, SQLite, and TruthStore; aggregate CAS, tenant/integrity validation, secret rollback, package graph, tarball metadata, and full workspace evidence satisfy the frozen contract with no P0/P1 findings.
 - Findings: none
 
 ## Behavior Diff Notes

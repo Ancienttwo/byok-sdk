@@ -177,7 +177,7 @@ Error paths: invalid tenant/profile/body/hash/size/revision and TruthStore confl
 - [x] T3 Add conformance and negative tests: empty registry, configure/update/delete/default selection, created-at preservation, one-enabled invariant, deterministic bytes/hash/size, stale writer conflict, malformed/object/hash/size/duplicate/secret-shaped body rejection, tenant isolation.
 - [x] T4 Update public exports, keys/core dependency graph, Node/version metadata, lockfile and release graph rules; prove keys reaches core but never protocol and dispatch packages never reach keys.
 - [x] T5 Update spec/security/architecture/README to record the authority, conflict, migration, launcher, and non-secret boundaries; remove the completed P5 Todo row at workflow closeout.
-- [ ] T6 Run targeted keys/core/package-graph tests, then full build/typecheck/test and strict workflow verification; freeze review subject and complete independent semantic acceptance.
+- [x] T6 Run targeted keys/core/package-graph tests, then full build/typecheck/test and strict workflow verification; freeze review subject and complete independent semantic acceptance.
 
 ## Stop Conditions
 
@@ -225,4 +225,4 @@ Stop without adding a fallback if:
 - [x] T3 Add conformance and negative tests: empty registry, configure/update/delete/default selection, created-at preservation, one-enabled invariant, deterministic bytes/hash/size, stale writer conflict, malformed/object/hash/size/duplicate/secret-shaped body rejection, tenant isolation.
 - [x] T4 Update public exports, keys/core dependency graph, Node/version metadata, lockfile and release graph rules; prove keys reaches core but never protocol and dispatch packages never reach keys.
 - [x] T5 Update spec/security/architecture/README to record the authority, conflict, migration, launcher, and non-secret boundaries; remove the completed P5 Todo row at workflow closeout.
-- [ ] T6 Run targeted keys/core/package-graph tests, then full build/typecheck/test and strict workflow verification; freeze review subject and complete independent semantic acceptance.
+- [x] T6 Run targeted keys/core/package-graph tests, then full build/typecheck/test and strict workflow verification; freeze review subject and complete independent semantic acceptance.
