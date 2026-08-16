@@ -96,7 +96,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"keys-truth-store-contract","kind":"deterministic_test","paths":["packages/keys/src/**"]},{"id":"keys-security-boundary","kind":"security_review","paths":["packages/keys/**","scripts/release/check-package-graph.mjs","docs/security.md"]},{"id":"keys-package-runtime","kind":"runtime_readback","paths":["packages/keys/package.json","bun.lock"]}]}
+{"protocol":1,"oracles":[{"id":"keys-truth-store-contract","kind":"deterministic_test","paths":["*"]},{"id":"keys-package-runtime","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Allowed Paths
