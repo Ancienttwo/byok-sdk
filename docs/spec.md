@@ -161,7 +161,8 @@ pairs by FIFO, tool name, payload content, or time proximity.
 Approval does not reuse tool-call identity. The existing `approvalId` on
 `task.await_approval` and `task.approval_resolved` remains the sole approval
 authority. Cloud retains both lifecycle messages in a separate bounded
-`ApprovalTimelineTail`; approval UI projection remains a later slice.
+`ApprovalTimelineTail`; the UI runtime projects that stream separately from
+activity as described below.
 
 ### Bounded approval lifecycle authority
 
@@ -182,9 +183,15 @@ request from an older peer with no `approvalId` remains explicit
 unpaired source data. Frozen wire v1 still parses its existing string field,
 but the cloud persistence authority rejects empty or whitespace-only IDs.
 Cloud does not infer `pending`, `approved`, or `rejected`, pair by adjacency, or
-associate an approval with a tool call. Those presentation states belong to a
-separate pure-fold slice. Persisted request summaries are capped at 16 KiB of
-UTF-8 data so the count-bounded JSONB tail is also byte-bounded in practice.
+associate an approval with a tool call. The separate pure UI fold projects
+`approval-requested | approval-responded`, `pending | approved | rejected`, and
+`paired | unpaired-request | unpaired-resolution`. It correlates only by native
+`approvalId`; resolution-before-request converges, while a missing request ID or
+an unmatched resolution stays explicit. Reusing one ID for conflicting request
+or resolution authority fails closed. Replay and incremental folding are
+deterministically equal and exact overlap is idempotent. Persisted request
+summaries are capped at 16 KiB of UTF-8 data so the count-bounded JSONB tail is
+also byte-bounded in practice.
 
 ### Typed bounded activity authority
 
@@ -222,11 +229,16 @@ from possession of a device credential.
 
 The private reference host composes that path as a Fetch handler. Browser input
 names only a task; injected host authentication and authorization resolve the
-tenant, `readActivity()` reads inside that binding, mandatory redaction runs
-before the UI fold, and a host presentation callback receives only the
-sanitized snapshot. It uses representation-revision-aware conditional GET over
-the bounded cursor. Authentication, authorization, and the tenant-scoped read
-all happen before a 304 response. The reference does not define a SaaS identity
+tenant, `readActivity()` and `readApprovalTimeline()` read inside that binding,
+mandatory per-stream redaction runs before either UI fold, and a host
+presentation callback receives separate sanitized `activity` and `approvals`
+snapshots. Approval summary content may be redacted, but native approval
+identity, revision, decision, resolver, and resolution time may not change. A
+missing approval tail projects an empty approval snapshot; it does not create an
+approval or retention claim. The combined ETag covers both independent cursors
+and retention metadata without asserting a cross-stream order. Authentication,
+authorization, and both tenant-scoped reads happen before a 304 response. The
+reference remains GET-only and does not define an approval action, SaaS identity
 provider, public browser route, SSE lifecycle, or `ThreadMessageLike` contract.
 
 At 10x activity volume, the first expected pressure is whole-row JSONB tail

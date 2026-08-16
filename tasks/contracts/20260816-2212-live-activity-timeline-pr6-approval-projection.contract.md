@@ -3,6 +3,7 @@
 > **Status**: Active
 > **Plan**: plans/plan-20260816-2212-live-activity-timeline-pr6-approval-projection.md
 > **Task Profile**: code-change
+> **Workflow Profile**: strict
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
@@ -73,6 +74,7 @@ allowed_paths:
   - docs/spec.md
   - packages/ui-runtime/src/
   - examples/live-activity-host/src/
+  - examples/live-activity-host/README.md
   - plans/
   - plans/archive/
   - tasks/todos.md
@@ -143,7 +145,7 @@ exit_criteria:
     - path: examples/live-activity-host/src/__tests__/host.test.ts
   commands_succeed:
     - bun run --filter @byok-sdk/ui-runtime test
-    - bun run --filter @byok-sdk/live-activity-host test
+    - bun run --filter @byok-sdk/example-live-activity-host test
     - bun run build
     - bun run typecheck
     - bun run test

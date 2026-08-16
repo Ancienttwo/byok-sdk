@@ -153,10 +153,10 @@ PR6 projects the persisted approval observation stream into a pure, deterministi
 
 ## Task Breakdown
 
-- [ ] T1: Freeze the PR6 public projection vocabulary and trace cloud approval authority through the existing UI-runtime and host boundaries.
-- [ ] T2: Implement approval projection types, validation, pure incremental fold/replay, exports, and focused tests.
-- [ ] T3: Extend the host reference with authorized approval reads, binding validation, authority-preserving redaction, dual-stream ETag/presentation, and tests.
-- [ ] T4: Update `docs/spec.md`, implementation notes, and contract evidence without changing protocol, persistence, or approval mutation surfaces.
+- [x] T1: Freeze the PR6 public projection vocabulary and trace cloud approval authority through the existing UI-runtime and host boundaries.
+- [x] T2: Implement approval projection types, validation, pure incremental fold/replay, exports, and focused tests.
+- [x] T3: Extend the host reference with authorized approval reads, binding validation, authority-preserving redaction, dual-stream ETag/presentation, and tests.
+- [x] T4: Update `docs/spec.md`, implementation notes, and contract evidence without changing protocol, persistence, or approval mutation surfaces.
 - [ ] T5: Run targeted UI-runtime/host tests, build, typecheck, full test suite, strict workflow/contract verification, and one Codex acceptance review; fix only in-scope findings.
 - [ ] T6: Merge PR6, archive the workflow, update durable project memory, and close the Live Activity Timeline V1 milestone.
 
@@ -190,9 +190,9 @@ The design is invalid if the persisted approval tail lacks stable native identit
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] T1: Freeze the PR6 public projection vocabulary and trace cloud approval authority through the existing UI-runtime and host boundaries.
-- [ ] T2: Implement approval projection types, validation, pure incremental fold/replay, exports, and focused tests.
-- [ ] T3: Extend the host reference with authorized approval reads, binding validation, authority-preserving redaction, dual-stream ETag/presentation, and tests.
-- [ ] T4: Update `docs/spec.md`, implementation notes, and contract evidence without changing protocol, persistence, or approval mutation surfaces.
+- [x] T1: Freeze the PR6 public projection vocabulary and trace cloud approval authority through the existing UI-runtime and host boundaries.
+- [x] T2: Implement approval projection types, validation, pure incremental fold/replay, exports, and focused tests.
+- [x] T3: Extend the host reference with authorized approval reads, binding validation, authority-preserving redaction, dual-stream ETag/presentation, and tests.
+- [x] T4: Update `docs/spec.md`, implementation notes, and contract evidence without changing protocol, persistence, or approval mutation surfaces.
 - [ ] T5: Run targeted UI-runtime/host tests, build, typecheck, full test suite, strict workflow/contract verification, and one Codex acceptance review; fix only in-scope findings.
 - [ ] T6: Merge PR6, archive the workflow, update durable project memory, and close the Live Activity Timeline V1 milestone.
