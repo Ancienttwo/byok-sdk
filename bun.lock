@@ -25,6 +25,20 @@
         "typescript": "^7.0.2",
       },
     },
+    "examples/live-activity-host": {
+      "name": "@byok-sdk/example-live-activity-host",
+      "version": "0.0.1",
+      "dependencies": {
+        "@byok-sdk/cloud": "workspace:*",
+        "@byok-sdk/ui-runtime": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^22.20.1",
+        "tsup": "^8.5.1",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+      },
+    },
     "examples/packaging": {
       "name": "@byok-sdk/example-packaging",
       "version": "0.0.1",
@@ -248,6 +262,8 @@
     "@byok-sdk/core": ["@byok-sdk/core@workspace:packages/core"],
 
     "@byok-sdk/example-basic": ["@byok-sdk/example-basic@workspace:examples/basic"],
+
+    "@byok-sdk/example-live-activity-host": ["@byok-sdk/example-live-activity-host@workspace:examples/live-activity-host"],
 
     "@byok-sdk/example-packaging": ["@byok-sdk/example-packaging@workspace:examples/packaging"],
 

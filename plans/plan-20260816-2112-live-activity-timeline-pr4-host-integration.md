@@ -136,8 +136,8 @@ The example exports `createLiveActivityHost(options)` with:
 - `authenticate(request)` — returns an opaque host user/session or `undefined`.
 - `authorize(user, taskId)` — returns an authorized tenant/task binding or `undefined`; the returned task ID must equal the route task ID.
 - `readActivity(tenantId, taskId)` — a narrow injectable port intended to bind to `cloud.readActivity`.
-- `redact(user, event)` — mandatory async event redaction. Returned events must pass `TimelineEventSchema`; timeline identity/order/type and tool name/call ID/outcome authority stay unchanged.
-- `present(user, snapshot)` — mandatory host presentation adapter receiving sanitized projection only.
+- `redact(event, context)` — mandatory async event redaction. Returned events must pass `TimelineEventSchema`; timeline identity/order/type and tool name/call ID/outcome authority stay unchanged.
+- `present(snapshot, context)` — mandatory host presentation adapter receiving sanitized projection only.
 - `representationRevision` — a required nonblank deployment value that invalidates cached representations when redaction/presentation policy changes.
 
 The example exports its option/context types and a typed `LiveActivityHostError` for direct host testing, while the HTTP boundary maps internal failures to generic status bodies. It does not export or implement `toThreadMessageLike()` because that adapter is optional and no real consumer currently proves the shape.
@@ -181,16 +181,16 @@ The example is private and owns no durable data. Rollback is removal of the exam
 
 ## Task Breakdown
 
-- [ ] Add the private Fetch-based host/BFF reference package with injected authenticate, authorize, read, redact, and present authorities.
-- [ ] Enforce tenant derivation, redaction invariants, generic failure responses, and representation-revision-aware conditional polling.
-- [ ] Add security-path, redaction, projection, cursor/ETag, and failure-containment tests plus runnable composition documentation.
+- [x] Add the private Fetch-based host/BFF reference package with injected authenticate, authorize, read, redact, and present authorities.
+- [x] Enforce tenant derivation, redaction invariants, generic failure responses, and representation-revision-aware conditional polling.
+- [x] Add security-path, redaction, projection, cursor/ETag, and failure-containment tests plus runnable composition documentation.
 - [ ] Update product implementation status, run targeted/full/contract verification, record semantic acceptance, and ship the isolated PR.
 
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Add the private Fetch-based host/BFF reference package with injected authenticate, authorize, read, redact, and present authorities.
-- [ ] Enforce tenant derivation, redaction invariants, generic failure responses, and representation-revision-aware conditional polling.
-- [ ] Add security-path, redaction, projection, cursor/ETag, and failure-containment tests plus runnable composition documentation.
+- [x] Add the private Fetch-based host/BFF reference package with injected authenticate, authorize, read, redact, and present authorities.
+- [x] Enforce tenant derivation, redaction invariants, generic failure responses, and representation-revision-aware conditional polling.
+- [x] Add security-path, redaction, projection, cursor/ETag, and failure-containment tests plus runnable composition documentation.
 - [ ] Update product implementation status, run targeted/full/contract verification, record semantic acceptance, and ship the isolated PR.
