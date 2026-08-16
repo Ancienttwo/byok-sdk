@@ -7,5 +7,11 @@
     "rootDir": "src",
     "outDir": "dist"
   },
+  // Pinned rather than inherited: the dev tsconfig also covers the
+  // worker-smoke fixture, whose declarations must not land in `dist/` and
+  // which sits outside `rootDir`. `src/runtime.ts` needs no entry here — it
+  // is shipped source, so the declaration build emits `dist/runtime.d.ts`
+  // with the rest of `src/`.
+  "include": ["src"],
   "exclude": ["src/**/*.test.ts", "src/__tests__/**"]
 }

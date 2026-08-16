@@ -7,8 +7,19 @@ import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const releaseVersion = '0.4.1';
-const piVersion = '0.84.1';
+
+// Version authority: the manifests, never a constant here. The release train
+// version is whatever packages/core ships; the pi pin comes from
+// packages/client. Every assertion below compares against these derived values.
+const exactVersion = /^\d+\.\d+\.\d+$/;
+const releaseVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
+const piVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')).dependencies?.['@earendil-works/pi-coding-agent'];
+if (typeof releaseVersion !== 'string' || !exactVersion.test(releaseVersion)) {
+  throw new Error('packages/core/package.json: version must be an exact x.y.z release train version');
+}
+if (typeof piVersion !== 'string' || !exactVersion.test(piVersion)) {
+  throw new Error('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
+}
 const packages = [
   { name: '@byok-sdk/core', directory: 'packages/core' },
   { name: '@byok-sdk/protocol', directory: 'packages/protocol' },
@@ -44,6 +55,20 @@ function run(command, args, cwd = repoRoot) {
   return result.stdout.trim();
 }
 
+// sourceGitSha must identify the exact artifact contents: refuse to pack a dirty worktree.
+const worktreeStatus = run('git', [
+  'status',
+  '--porcelain=v1',
+  '--untracked-files=all',
+]);
+
+if (worktreeStatus !== '') {
+  throw new Error(
+    'release pack requires a clean worktree so sourceGitSha identifies the exact artifact contents; commit or remove these changes before packing:\n' +
+      worktreeStatus,
+  );
+}
+
 function sha256(filePath) {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
@@ -76,14 +101,13 @@ function readDeploySql() {
 }
 
 /**
- * Reads an npm tarball into `path -> sha256`, without shelling out to `tar`:
- * this script is a release hard gate and runs on Windows runners too, so it
- * depends on node builtins only. Plain ustar walk — 512-byte header blocks,
- * octal size, contents padded to the next block.
+ * Walks an npm tarball without shelling out to `tar`: this script is a release
+ * hard gate and runs on Windows runners too, so it depends on node builtins
+ * only. Plain ustar walk — 512-byte header blocks, octal size, contents padded
+ * to the next block. Yields every regular file as `name -> Buffer`.
  */
-function readTarballDigests(tarballPath) {
+function* iterateTarballFiles(tarballPath) {
   const tar = gunzipSync(readFileSync(tarballPath));
-  const digests = new Map();
   for (let offset = 0; offset + 512 <= tar.length; ) {
     const header = tar.subarray(offset, offset + 512);
     if (header.every((byte) => byte === 0)) break;
@@ -96,11 +120,25 @@ function readTarballDigests(tarballPath) {
     // '0'/'\0' are regular files; 'x'/'g'/'L' are metadata records, and the
     // long-name forms would matter only for paths this package cannot produce.
     if (typeFlag === '0' || typeFlag === '\0') {
-      digests.set(name, createHash('sha256').update(body).digest('hex'));
+      yield [name, body];
     }
     offset += 512 + Math.ceil(size / 512) * 512;
   }
+}
+
+function readTarballDigests(tarballPath) {
+  const digests = new Map();
+  for (const [name, body] of iterateTarballFiles(tarballPath)) {
+    digests.set(name, createHash('sha256').update(body).digest('hex'));
+  }
   return digests;
+}
+
+function readTarballEntry(tarballPath, entryName) {
+  for (const [name, body] of iterateTarballFiles(tarballPath)) {
+    if (name === entryName) return body;
+  }
+  return undefined;
 }
 
 function assertTarballCarriesMigrations(tarballPath) {
@@ -129,6 +167,90 @@ function assertTarballCarriesMigrations(tarballPath) {
   return [...expected.keys()];
 }
 
+// --- Frozen-artifact dependency edge guard: `bun pm pack` rewrites
+// `workspace:*` edges from bun.lock's workspace records, not from the
+// manifests, so a stale lockfile publishes tarballs whose internal @byok-sdk
+// edges point at the previous train — the split registry graph v0.4.1 shipped
+// with. The packed package.json is the only artifact that proves what npm will
+// actually resolve, so every internal edge is asserted at pack time.
+function assertTarballInternalEdges(tarballPath, packageName) {
+  const entry = readTarballEntry(tarballPath, 'package/package.json');
+  if (entry === undefined) throw new Error(`${path.basename(tarballPath)}: carries no package/package.json`);
+  const packed = JSON.parse(entry.toString('utf8'));
+  if (packed.name !== packageName) {
+    throw new Error(`${path.basename(tarballPath)}: packed name is ${packed.name}, expected ${packageName}`);
+  }
+  if (packed.version !== releaseVersion) {
+    throw new Error(`${path.basename(tarballPath)}: packed version is ${packed.version}, expected ${releaseVersion}`);
+  }
+  for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+    for (const [dependency, range] of Object.entries(packed[field] ?? {})) {
+      if (dependency === 'byok-sdk' || dependency.startsWith('@byok-sdk/')) {
+        if (range !== releaseVersion) {
+          throw new Error(
+            `${path.basename(tarballPath)}: ${field}.${dependency} is ${range}, expected ${releaseVersion} — ` +
+              'bun.lock workspace records were stale when this tarball was packed',
+          );
+        }
+      }
+    }
+  }
+  console.log(`[release-pack] ${path.basename(tarballPath)} internal @byok-sdk edges all pin ${releaseVersion}`);
+}
+
+/**
+ * Asserts an install tree's @byok-sdk graph closes to exactly one version set:
+ * every installed @byok-sdk package (umbrella included) sits at the release
+ * version, and no copy hides under a second node_modules — the nested-copy
+ * fallback npm takes when published internal edges disagree. Follows
+ * node_modules chains only, so the walk stays cheap on large trees.
+ */
+function assertSingleVersionSet(installDirectory, expected) {
+  const root = path.join(installDirectory, 'node_modules');
+  const found = [];
+  const visit = (nodeModulesDirectory) => {
+    const umbrella = path.join(nodeModulesDirectory, 'byok-sdk', 'package.json');
+    if (existsSync(umbrella)) found.push(umbrella);
+    const scope = path.join(nodeModulesDirectory, '@byok-sdk');
+    if (existsSync(scope)) {
+      for (const entry of readdirSync(scope)) {
+        const manifest = path.join(scope, entry, 'package.json');
+        if (existsSync(manifest)) found.push(manifest);
+      }
+    }
+    for (const entry of readdirSync(nodeModulesDirectory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      if (entry.name.startsWith('@')) {
+        for (const scoped of readdirSync(path.join(nodeModulesDirectory, entry.name))) {
+          const nested = path.join(nodeModulesDirectory, entry.name, scoped, 'node_modules');
+          if (existsSync(nested)) visit(nested);
+        }
+        continue;
+      }
+      const nested = path.join(nodeModulesDirectory, entry.name, 'node_modules');
+      if (existsSync(nested)) visit(nested);
+    }
+  };
+  visit(root);
+  if (found.length === 0) throw new Error(`${installDirectory}: no @byok-sdk packages found under node_modules`);
+  const allowedParents = new Set([path.join(root, 'byok-sdk')]);
+  const scopeRoot = path.join(root, '@byok-sdk');
+  if (existsSync(scopeRoot)) {
+    for (const entry of readdirSync(scopeRoot)) allowedParents.add(path.join(scopeRoot, entry));
+  }
+  const nestedCopies = found.filter((manifestPath) => !allowedParents.has(path.dirname(manifestPath)));
+  if (nestedCopies.length > 0) {
+    throw new Error(`split @byok-sdk version set — nested copies installed:\n  ${nestedCopies.join('\n  ')}`);
+  }
+  for (const manifestPath of found) {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest.version !== expected) {
+      throw new Error(`${manifestPath}: version ${manifest.version}, expected ${expected} — the @byok-sdk graph does not close to one version set`);
+    }
+  }
+  console.log(`[release-pack] install tree closes to a single @byok-sdk version set (${expected}, ${found.length} package(s))`);
+}
+
 try {
   if (existsSync(outDir) && readdirSync(outDir).length > 0) {
     throw new Error(`release output directory must be empty: ${outDir}`);
@@ -146,6 +268,7 @@ try {
     if (created.length !== 1) throw new Error(`${packageName}: expected one tarball, created ${created.length}`);
     const file = created[0];
     const tarballPath = path.join(outDir, file);
+    assertTarballInternalEdges(tarballPath, packageName);
     if (packageName === '@byok-sdk/cloud-dataplane') {
       migrationFiles = assertTarballCarriesMigrations(tarballPath);
     }
@@ -183,7 +306,7 @@ try {
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane']) await import(name);\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime']) await import(name);\n` +
         `for (const name of ['byok-sdk','@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane']) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, '${releaseVersion}', name);\n` +
@@ -200,6 +323,17 @@ try {
     run(nodeBin, ['smoke.mjs'], smokeDir);
     if (existsSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys'))) {
       throw new Error('isolated umbrella install unexpectedly contains @byok-sdk/keys');
+    }
+    assertSingleVersionSet(smokeDir, releaseVersion);
+    // The worker runtime subpath must stay deployable outside Node: the smoke
+    // import above proves it loads, this proves it never grew node: builtins.
+    const runtimePath = path.join(smokeDir, 'node_modules', '@byok-sdk', 'cloud-dataplane', 'dist', 'runtime.js');
+    if (!existsSync(runtimePath)) {
+      throw new Error(`isolated install is missing @byok-sdk/cloud-dataplane/dist/runtime.js (${runtimePath})`);
+    }
+    const nodeBuiltinSpecifier = /(?:\bimport\b[^'"`\n]*|\brequire\b[^'"`\n]*)['"`]node:/;
+    if (nodeBuiltinSpecifier.test(readFileSync(runtimePath, 'utf8'))) {
+      throw new Error('@byok-sdk/cloud-dataplane/dist/runtime.js must not reference node: builtins (worker runtime)');
     }
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
     if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {

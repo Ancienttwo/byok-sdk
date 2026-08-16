@@ -1,0 +1,33 @@
+// The Workers packaging probe for `@byok-sdk/cloud-dataplane/runtime`.
+//
+// This is a build/probe fixture, not a product surface and not a conformance
+// suite: it exists so CI can prove the runtime subpath actually bundles and
+// runs on workerd. It is outside the package `files` whitelist, so it never
+// ships in the tarball, and outside `tsconfig.build.json`'s include, so it
+// never lands in `dist/`.
+//
+// `localConnectionString` is the Hyperdrive binding's local-dev shape: no
+// provisioned Hyperdrive is needed for `--dry-run` or `wrangler dev --local`.
+// It points at the same throwaway substrate the Postgres suites use
+// (docker-compose.test.yml at the repository root).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "byok-worker-smoke",
+  "main": "src.ts",
+  "compatibility_date": "2026-08-01",
+  // nodejs_compat is what satisfies `pg` on workerd: node:net/node:tls/
+  // node:crypto/node:events are real there. `pg` stays external in the
+  // package's own build; the host bundler (wrangler/esbuild) bundles it
+  // against these flags.
+  "compatibility_flags": ["nodejs_compat"],
+  "hyperdrive": [
+    {
+      "binding": "BYOK_PG",
+      // A placeholder id, never a provisioned Hyperdrive: --dry-run builds
+      // without touching the API, and `wrangler dev --local` routes through
+      // localConnectionString, so this identifier is never resolved anywhere.
+      "id": "byok-worker-smoke-local",
+      "localConnectionString": "postgres://byok:byok@127.0.0.1:5433/byok_test"
+    }
+  ]
+}

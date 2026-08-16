@@ -100,6 +100,18 @@ describe('the CI dataplane job', () => {
     expect(workflow).toContain('bun run --filter @byok-sdk/conformance test');
   });
 
+  it('opts the live workerd runtime E2E into the same job', () => {
+    // The Worker E2E (worker-e2e.test.ts) is opt-in locally — it spawns
+    // `wrangler dev`, heavier than a suite — so its gate is a second env pair
+    // on the same substrate law: BYOK_TEST_WORKER_DATAPLANE opts in,
+    // BYOK_REQUIRE_WORKER_DATAPLANE makes an unmet gate a hard failure
+    // instead of a skip. Deleted here, that suite goes back to skipping
+    // everywhere and nothing else notices — the same hole the flag above
+    // exists to close, pinned the same way.
+    expect(workflow).toContain('BYOK_REQUIRE_WORKER_DATAPLANE');
+    expect(workflow).toContain('BYOK_TEST_WORKER_DATAPLANE');
+  });
+
   it('uses the repository Node pin in every job', () => {
     const setups = workflow.match(/actions\/setup-node@v7/g) ?? [];
     const versionFiles = workflow.match(/node-version-file: \.node-version/g) ?? [];

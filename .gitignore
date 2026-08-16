@@ -91,3 +91,6 @@ tasks/.current.md.tmp.*
 .claude/.active-plan
 .claude/.plan-state/
 # END: repo-harness generated-runtime
+
+# wrangler local-dev scratch (worker-smoke E2E); state itself goes to --persist-to tmp
+packages/cloud-dataplane/worker-smoke/.wrangler/

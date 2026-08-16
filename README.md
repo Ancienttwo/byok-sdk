@@ -38,6 +38,9 @@ same modules are also directly installable as `@byok-sdk/client`,
 - Hosted: use `cloud` for stateless device routes and `cloudDataplane` for the
   durable Postgres + R2 data plane. The host owns authentication, scheduling,
   migration execution, deployment, signing, updater channels, and operations.
+  The same data plane also hosts on Cloudflare Workers via Hyperdrive through
+  the `@byok-sdk/cloud-dataplane/runtime` subpath — see
+  [`@byok-sdk/cloud-dataplane`'s deployment compositions](packages/cloud-dataplane#deployment-compositions).
 
 Both profiles share the frozen v1 protocol, tenant isolation, durable device
 proof, truth CAS, explicit capabilities, and fail-closed policy handling.

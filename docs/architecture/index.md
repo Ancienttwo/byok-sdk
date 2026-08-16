@@ -4,7 +4,7 @@
 
 ## Current Snapshot
 
-- Latest snapshot: (none yet)
+- Latest snapshot: `snapshots/20260816-0420-cloud-dataplane-runtime-subpath.md`
 - Semantic diagram source: (none yet)
 - Latest human diagram: (none yet)
 

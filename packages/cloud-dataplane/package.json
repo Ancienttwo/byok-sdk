@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/cloud-dataplane",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "BYOK SDK hosted data plane: canonical Postgres + R2 stores, migrations, truth transactions, and maintenance",
   "type": "module",
   "license": "MIT",
@@ -25,6 +25,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -40,6 +44,7 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:worker": "vitest run src/__tests__/runtime-entry.test.ts src/__tests__/worker-packaging.test.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -54,6 +59,7 @@
   "devDependencies": {
     "@byok-sdk/conformance": "workspace:*",
     "@types/pg": "^8.20.4",
-    "undici": "8.9.0"
+    "undici": "8.9.0",
+    "wrangler": "4.123.0"
   }
 }

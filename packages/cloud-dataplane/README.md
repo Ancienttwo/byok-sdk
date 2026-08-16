@@ -40,6 +40,48 @@ gets no table by design: persisting an allow-all would be a table that is always
 empty, and a real limiter is edge work rather than a per-request write. `blobs`
 is the R2 adapter described below.
 
+## Deployment compositions
+
+Two entries, one data plane, and the host picks the composition explicitly —
+the SDK never detects where it is running and never falls back between the two.
+
+- **Node/VPS resident service.** Import the package root
+  (`@byok-sdk/cloud-dataplane`) and talk to Postgres and R2/S3 directly. The
+  migration runner and the cleanup/maintenance composition run in-process:
+  this is the entry that carries the Node-only operations.
+- **Cloudflare Workers.** Import `@byok-sdk/cloud-dataplane/runtime` — the
+  online request path alone (pool, both store compositions, R2 blob store,
+  truth committer). Its graph never reaches a node builtin beyond what
+  `nodejs_compat` provides, so `pg` stays external in this package's build and
+  is satisfied by the platform: Hyperdrive terminates the database connection,
+  and R2 is reached over `fetch` with `aws4fetch`. Migrations and cleanup have
+  no place on a Worker — they read files off disk — so run them from a CI job
+  or an operator's Node process against the direct DSN:
+
+  ```ts
+  import { createByokPool, createPostgresCloudStores } from '@byok-sdk/cloud-dataplane/runtime';
+
+  const pool = createByokPool({ connectionString: env.BYOK_PG.connectionString });
+  ```
+
+  Pool lifecycle follows the composition. On Node/VPS the Pool is
+  process-scoped, and the host calls `pool.end()` at shutdown. On Workers,
+  create the Pool inside each `fetch`/`queue` handler — per invocation,
+  exactly like the `worker-smoke` probes already do — and never hold one in
+  module or global scope: cross-request pool reuse is forbidden, not a
+  preference. A Worker invocation's end cleans up its client connections, so
+  `pool.end()` is usually unnecessary there.
+
+Same contracts, same SQL, same Postgres + R2 authority either way. There is no
+D1 and no Durable Objects variant, and the runtime entry is a strict subset of
+the root rather than a second implementation: `src/index.ts` re-exports
+`src/runtime.ts` wholesale, so the two surfaces cannot drift. The boundary is
+build-enforced — the runtime entry compiles under the neutral platform, which
+fails the build the moment its graph reaches a node builtin — and CI exercises
+the Worker composition for real through the `worker-smoke/` fixture (packaged
+with `wrangler deploy --dry-run`, served by `wrangler dev` against the test
+substrate; see Testing below).
+
 ## Blobs
 
 `blobs` mints grants and never carries a byte. `createUpload` writes the
@@ -218,6 +260,13 @@ test rather than a step someone remembers. What runs:
   SigV4 implementation, and nothing stubs a signature check. The two that are
   about retry semantics go through a fault injector wrapped around `fetch`,
   which replaces individual attempts and never answers a request itself.
+- The worker suites, always for packaging and opt-in for serving:
+  `worker-packaging.test.ts` dry-runs `wrangler deploy` over `worker-smoke/`
+  on every run, and `worker-e2e.test.ts` additionally serves that fixture with
+  `wrangler dev` (local workerd) against the same Postgres when you set
+  `BYOK_TEST_WORKER_DATAPLANE=1`. CI's `dataplane` job sets it, plus the
+  `BYOK_REQUIRE_WORKER_DATAPLANE` flag that turns an unmet gate into a hard
+  failure.
 
 ## License
 

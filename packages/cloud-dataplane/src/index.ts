@@ -11,11 +11,24 @@
  * authority and R2/S3-compatible storage remains the byte plane; a future
  * alternative composition must use a distinct package name rather than making
  * this authority conditional at runtime.
+ *
+ * Two entries, one online surface:
+ *
+ * - `.` (this file) is the superset: the online request path plus the Node-only
+ *   operations — the migration runner, the migrations directory, and the
+ *   cleanup/maintenance composition — that a resident Node/VPS service runs
+ *   in-process.
+ * - `./runtime` is the Worker-loadable online surface alone, and is the single
+ *   authority for the online export list: this file re-exports it wholesale
+ *   rather than duplicating it, so the two entries cannot drift.
+ *
+ * The invariant that makes the split real: the `./runtime` subgraph must never
+ * reach a node builtin. It is enforced at build time by the neutral-platform
+ * tsup pass over `src/runtime.ts`, and pinned by the runtime-entry test.
  */
 
-// The pool factory (int8 parsing configured per-pool, never globally)
-export { createByokPool } from './pool';
-export type { ByokPoolOptions } from './pool';
+// The online surface — pool, stores, truth — owned by `./runtime`.
+export * from './runtime';
 
 // The forward-only migration runner, and the migration files it applies. The
 // SQL is authored in the repository's `deploy/sql/` and copied into this
@@ -24,61 +37,6 @@ export type { ByokPoolOptions } from './pool';
 export { MigrationChecksumMismatchError, MigrationFilenameError, migrate, readMigrationFiles } from './migrate';
 export type { MigrationFile, MigrationResult } from './migrate';
 export { migrationsDir } from './migrations-dir';
-
-// The cloud-local port implementations, and the composition that bundles them
-export {
-  PostgresDeviceDirectory,
-  PostgresInboundDedupStore,
-  PostgresNonceStore,
-  PostgresPairingCodeStore,
-  PostgresRequestReceiptStore,
-  PostgresTaskAttemptStore,
-  createPostgresCloudStores,
-} from './stores/index';
-export type {
-  PostgresCloudStoreOptions,
-  PostgresCloudStores,
-  PostgresObjectStorageOptions,
-} from './stores/index';
-
-// The object-storage half of blobs. Grants only: this composition supplies no
-// `BlobContentProxy`, because a device uploading straight to R2 is exactly what
-// having no byte-proxy path means.
-export {
-  DEFAULT_MAX_ATTEMPTS,
-  DEFAULT_PRESIGN_TTL_SECONDS,
-  DEFAULT_RETRY_DELAY_MS,
-  MAX_PRESIGN_TTL_SECONDS,
-  MIN_PRESIGN_TTL_SECONDS,
-  ObjectStoreRequestError,
-  R2_BLOB_ERROR_CODES,
-  R2BlobStoreError,
-  R2CloudBlobStore,
-  R2ObjectMaintenanceStore,
-} from './stores/index';
-export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
-export type {
-  R2DeleteResult,
-  R2ListedObject,
-  R2ObjectMaintenance,
-  R2ObjectMaintenanceOptions,
-  R2ObjectPage,
-} from './stores/index';
-
-// The seven core port implementations, and the composition that bundles them.
-// All seven ship together because `runCoreConformance` certifies a composition
-// as a whole — a partial `CoreStores` is not something the suite can run.
-export {
-  PostgresActivityStore,
-  PostgresBoardStore,
-  PostgresMailboxStore,
-  PostgresObjectStore,
-  PostgresPresenceStore,
-  PostgresQuotaStore,
-  PostgresTruthStore,
-  createPostgresCoreStores,
-} from './stores/core/index';
-export type { PostgresCoreStoreOptions } from './stores/core/index';
 
 // Host-owned retention/dead-letter/R2 GC and reconciliation. This is separate
 // from CoreStores because it coordinates one concrete SQL authority with one
@@ -90,8 +48,6 @@ export {
   createPostgresCloudMaintenance,
 } from './cleanup';
 
-export { PostgresTruthCommitter } from './truth-committer';
-export type { PostgresTruthCommitterOptions } from './truth-committer';
 export type {
   CleanupJobState,
   CloudCleanupErrorCode,

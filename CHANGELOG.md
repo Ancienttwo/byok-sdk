@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.4.2 — 2026-08-16
+
+Portable-dataplane release: the Worker-loadable `runtime` subpath, the dual
+deployment verification that proves it, and the release-graph fix that closes
+the split dependency train 0.4.1 published.
+
+- Fixed the published dependency graph: the 0.4.1 train carried stale
+  `0.4.0` internal edges (`bun pm pack` resolves `workspace:*` from bun.lock's
+  workspace records, which a version-only bump does not refresh), so a fresh
+  install nested two SDK versions. 0.4.2 pins every internal `@byok-sdk/*`
+  edge to the release version, and consumers holding 0.4.1 should repin.
+- Hardened the release gates to hold that closed: the pack smoke now asserts
+  every packed tarball's internal edges equal the release version and that an
+  isolated install resolves to exactly one `@byok-sdk` version set; the
+  registry readback validates published dependency edges via `npm view`, not
+  just version and integrity; and the graph check fails when a bun.lock
+  workspace record disagrees with its manifest — the exact drift that produced
+  the 0.4.1 split.
+- Made the release pack reject a dirty worktree: `pack-and-smoke` now fails
+  the moment `git status --porcelain=v1 --untracked-files=all` reports
+  anything, so tracked, staged, and untracked source all block packing while
+  ignored build outputs stay unaffected.
+- Pinned what the manifest's `sourceGitSha` certifies: it must accurately
+  identify the packed artifact's contents, which is exactly what the
+  clean-worktree gate guarantees — the packed bytes are the committed bytes
+  the sha names.
+- Made the manifests the single source of the release version: the three
+  release scripts derive the train, keys, and Pi versions from `package.json`
+  files instead of hardcoding them.
+- Added `@byok-sdk/cloud-dataplane/runtime`, the online request path alone —
+  `createByokPool`, both Postgres store compositions, the R2 blob store, and
+  the truth committer. It loads on Cloudflare Workers (`nodejs_compat` +
+  Hyperdrive for Postgres, `aws4fetch` for R2) and on Node; the package root
+  keeps the Node-only migration runner and cleanup composition and re-exports
+  the runtime entry wholesale, so the two surfaces cannot drift. The runtime
+  subgraph compiles under the neutral platform, which fails the build the
+  moment it reaches a node builtin, and no code detects its host or falls
+  back between the two compositions.
+- Added the Worker verification tier: a `worker-smoke` fixture exercised by a
+  `wrangler deploy --dry-run` packaging test on every run, plus a live
+  workerd E2E (`wrangler dev` over Hyperdrive's local connection string
+  against the compose Postgres) covering pairing, mailbox, truth, and R2
+  blob grant/verify round-trips — opt-in locally, required in CI's dataplane
+  job.
+- Pinned the Pool lifecycle per composition: Node/VPS hosts keep the Pool
+  process-scoped and call `pool.end()` at shutdown, while the Workers
+  composition creates its Pool inside each `fetch`/`queue` handler — per
+  invocation, like the `worker-smoke` probes — and module-scope cross-request
+  reuse is forbidden there.
+- Advanced the aligned dispatch packages (`core`, `protocol`, `client`,
+  `server`, `cloud`, `cloud-dataplane`, `testkit`, and `byok-sdk`) to 0.4.2;
+  `@byok-sdk/keys` remains independently versioned at 0.1.0.
+
 ## 0.4.1 — 2026-08-16
 
 Long-poll capability negotiation fix for structured task results.

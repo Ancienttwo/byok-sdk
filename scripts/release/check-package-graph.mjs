@@ -3,9 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
-const releaseVersion = '0.4.1';
-const keysVersion = '0.1.0';
-const piVersion = '0.84.1';
 const dispatchPackages = [
   ['packages/core', '@byok-sdk/core'],
   ['packages/protocol', '@byok-sdk/protocol'],
@@ -89,6 +86,25 @@ function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(repoRoot, relativePath), 'utf8'));
 }
 
+// Version authority: the manifests themselves, never a constant in this file.
+// The release train version is whatever packages/core ships, keys versions
+// independently from packages/keys, and the pi pin from packages/client.
+// Every check below compares against these derived values, so a train bump
+// cannot desync the gate from the manifests it guards.
+const exactVersion = /^\d+\.\d+\.\d+$/;
+const releaseVersion = readJson('packages/core/package.json').version;
+const keysVersion = readJson('packages/keys/package.json').version;
+const piVersion = readJson('packages/client/package.json').dependencies?.['@earendil-works/pi-coding-agent'];
+if (typeof releaseVersion !== 'string' || !exactVersion.test(releaseVersion)) {
+  errors.push('packages/core/package.json: version must be an exact x.y.z release train version');
+}
+if (typeof keysVersion !== 'string' || !exactVersion.test(keysVersion)) {
+  errors.push('packages/keys/package.json: version must be an exact x.y.z version');
+}
+if (typeof piVersion !== 'string' || !exactVersion.test(piVersion)) {
+  errors.push('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
+}
+
 const manifests = new Map();
 for (const [directory, expectedName] of publicPackages) {
   const manifestPath = `${directory}/package.json`;
@@ -116,6 +132,74 @@ for (const [directory, expectedName] of publicPackages) {
   }
   if (readFileSync(path.join(repoRoot, directory, 'LICENSE'), 'utf8') !== readFileSync(path.join(repoRoot, 'LICENSE'), 'utf8')) {
     errors.push(`${directory}/LICENSE: must match the root license byte-for-byte`);
+  }
+}
+
+// --- bun.lock drift guard -------------------------------------------------
+// `bun pm pack` resolves `workspace:*` edges from bun.lock's workspace
+// records, not from the manifests, and `bun install` does NOT rewrite those
+// records on version-only bumps. A stale record publishes tarballs whose
+// internal @byok-sdk edges point at the previous train — the split registry
+// graph v0.4.1 shipped with. The lockfile is therefore compared directly
+// against every workspace manifest, and a mismatch is a hand-edit error:
+// re-running bun install will not fix it.
+
+/** Parses bun.lock, which is JSONC-like: trailing commas are legal and must be dropped before JSON.parse. */
+function parseLockfile(text) {
+  let cleaned = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '"') {
+      cleaned += character;
+      index += 1;
+      while (index < text.length) {
+        cleaned += text[index];
+        if (text[index] === '\\') {
+          index += 1;
+          cleaned += text[index] ?? '';
+        } else if (text[index] === '"') {
+          break;
+        }
+        index += 1;
+      }
+      continue;
+    }
+    if (character === ',') {
+      let lookahead = index + 1;
+      while (lookahead < text.length && /\s/.test(text[lookahead])) lookahead += 1;
+      if (text[lookahead] === '}' || text[lookahead] === ']') continue;
+    }
+    cleaned += character;
+  }
+  return JSON.parse(cleaned);
+}
+
+const lockfileText = readFileSync(path.join(repoRoot, 'bun.lock'), 'utf8');
+let workspaceRecords;
+try {
+  workspaceRecords = parseLockfile(lockfileText).workspaces ?? {};
+} catch (error) {
+  errors.push(`bun.lock: unparseable (${error.message})`);
+  workspaceRecords = {};
+}
+for (const [directory, record] of Object.entries(workspaceRecords)) {
+  if (directory === '') continue; // the workspace root record carries no version
+  const manifestPath = `${directory}/package.json`;
+  if (!existsSync(path.join(repoRoot, manifestPath))) {
+    errors.push(`bun.lock: workspace record ${directory} has no ${manifestPath}`);
+    continue;
+  }
+  const manifestVersion = readJson(manifestPath).version;
+  if (record.version !== manifestVersion) {
+    errors.push(
+      `bun.lock: workspace record for ${directory} says version ${record.version}, but ${manifestPath} says ${manifestVersion} — ` +
+        'correct the bun.lock record by hand; bun install will not fix it on version-only bumps',
+    );
+  }
+}
+for (const directory of [...dispatchPackages.map(([dir]) => dir), 'packages/sdk', 'packages/testkit']) {
+  if (!workspaceRecords[directory]) {
+    errors.push(`bun.lock: missing workspace record for ${directory} — bun pm pack cannot resolve its workspace edges without it`);
   }
 }
 
@@ -161,9 +245,6 @@ for (const field of [...runtimeFields, 'devDependencies']) {
 }
 
 const clientManifest = manifests.get('@byok-sdk/client');
-if (clientManifest?.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
-  errors.push(`packages/client/package.json: required pi dependency must be exactly ${piVersion}`);
-}
 if (clientManifest?.optionalDependencies?.['@earendil-works/pi-coding-agent']) {
   errors.push('packages/client/package.json: pi must be required, not optional');
 }
@@ -172,6 +253,14 @@ if (
   clientManifest?.exports?.['./adapters']?.types !== './dist/adapters/index.d.ts'
 ) {
   errors.push('packages/client/package.json: adapter-only import/types exports are incomplete');
+}
+
+const cloudDataplaneManifest = manifests.get('@byok-sdk/cloud-dataplane');
+if (
+  cloudDataplaneManifest?.exports?.['./runtime']?.import !== './dist/runtime.js' ||
+  cloudDataplaneManifest?.exports?.['./runtime']?.types !== './dist/runtime.d.ts'
+) {
+  errors.push('packages/cloud-dataplane/package.json: worker runtime subpath import/types exports are incomplete');
 }
 
 const clientDirectory = path.join(repoRoot, 'packages/client');
