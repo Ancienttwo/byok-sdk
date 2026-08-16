@@ -82,7 +82,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"ui-runtime-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"ui-runtime-isolated-package-smoke","kind":"runtime_readback","paths":["packages/ui-runtime/package.json","packages/ui-runtime/src/index.ts","packages/sdk/package.json","packages/sdk/src/index.ts","scripts/release/check-package-graph.mjs","scripts/release/pack-and-smoke.mjs","scripts/release/registry-readback.mjs","bun.lock"]}]}
+{"protocol":1,"oracles":[{"id":"ui-runtime-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"ui-runtime-isolated-package-smoke","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
