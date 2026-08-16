@@ -356,7 +356,7 @@ export interface CloudStores {
   readonly rateLimiter: InboundRateLimiter;
 }
 
-/** Names of the ports in {@link CloudStores}, in contract order. */
+/** Names of every port in {@link CloudStores}, in contract order. */
 export const CLOUD_STORE_NAMES = [
   'activity',
   'approvals',

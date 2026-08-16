@@ -167,7 +167,7 @@ describe('tenant plumbing', () => {
   it('never lets a byte proxy onto the port bundle', () => {
     // The whole point of the split: `CloudStores` stays all-or-nothing, and
     // "this composition cannot carry bytes" is expressed by the proxy being
-    // absent from `createByokCloud`'s options — not by a tenth port, and not by
+    // absent from `createByokCloud`'s options — not by another port, and not by
     // three methods that throw.
     const ports = shipped('stores/ports.ts');
     const bundle = ports.slice(ports.indexOf('export interface CloudStores {'));
