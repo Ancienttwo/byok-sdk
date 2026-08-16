@@ -160,7 +160,7 @@ try {
     path.join(smokeDir, 'readback.mjs'),
     `import assert from 'node:assert/strict';\n` +
       `const sdk = await import('byok-sdk');\n` +
-      `assert.deepEqual(Object.keys(sdk).sort(), ['client','cloud','cloudDataplane','core','protocol','server']);\n` +
+      `assert.deepEqual(Object.keys(sdk).sort(), ['client','cloud','cloudDataplane','core','protocol','server','uiRuntime']);\n` +
       `assert.equal('keys' in sdk, false);\n` +
       `await import('@byok-sdk/client/adapters');\n` +
       `await import('@byok-sdk/cloud-dataplane/runtime');\n` +
