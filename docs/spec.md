@@ -176,7 +176,9 @@ source envelope ID, host receive time, request summary and optional native
 `readApprovalTimeline()` is a host control-plane read returning a bounded,
 lossy tail with `dropped`, `capacity`, `expiresAt`, and its revision cursor. It
 is observation authority, not a durable audit log and not an approval action
-surface. A request from an older peer with no `approvalId` remains explicit
+surface. `CloudStores` therefore gains one required `approvals` port in the
+coordinated SDK release; there is no optional no-op store or dual authority. A
+request from an older peer with no `approvalId` remains explicit
 unpaired source data. Frozen wire v1 still parses its existing string field,
 but the cloud persistence authority rejects empty or whitespace-only IDs.
 Cloud does not infer `pending`, `approved`, or `rejected`, pair by adjacency, or

@@ -88,7 +88,12 @@ export class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
       }
 
       const revision = live === undefined ? 1 : Number(stored!.next_revision);
-      if (!Number.isSafeInteger(revision) || revision <= 0) {
+      const expectedRevision = (live?.cursor ?? 0) + 1;
+      if (
+        !Number.isSafeInteger(revision) ||
+        revision <= 0 ||
+        revision !== expectedRevision
+      ) {
         throw new ByokCloudError(
           'coordination_input_invalid',
           'Approval timeline revision authority is malformed.',
