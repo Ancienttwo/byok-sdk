@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-16 20:42
+> **Related Plan**: plans/archive/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260816-2042
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: 2026-08-16 20:45
+> **Updated**: 2026-08-16 19:58
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

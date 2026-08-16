@@ -1,6 +1,6 @@
 # Plan: Live Activity Timeline PR 2 Typed Activity Projection
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260816-1958
 > **Slug**: live-activity-timeline-pr2-typed-activity-projection
 > **Planning Source**: codex-plan-or-waza-think
@@ -319,4 +319,4 @@ deepseek-harness `ui-primitives` 移植维持既有结论：MIT 可搬、Cordis-
 - [x] Implement equivalent in-memory and Postgres typed tails with deterministic cursor, dropped/capacity/TTL semantics and no legacy parser.
 - [x] Add shared conformance, tenant isolation, unknown/malformed, concurrency and bounded burst coverage; update affected callers and exports.
 - [x] Document the stop-writer → one TTL drain → start typed reader/writer cutover and verify the full workspace.
-- [ ] Run Deep Waza `$check`, fix every blocking finding, bind exact-target evidence, and promote through PR/CI/merge.
+- [x] Run Deep Waza `$check`, fix every blocking finding, bind exact-target evidence, and promote through PR/CI/merge.

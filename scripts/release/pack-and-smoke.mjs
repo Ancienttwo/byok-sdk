@@ -27,6 +27,7 @@ const packages = [
   { name: '@byok-sdk/cloud', directory: 'packages/cloud' },
   { name: '@byok-sdk/client', directory: 'packages/client' },
   { name: '@byok-sdk/cloud-dataplane', directory: 'packages/cloud-dataplane' },
+  { name: '@byok-sdk/ui-runtime', directory: 'packages/ui-runtime' },
   { name: '@byok-sdk/testkit', directory: 'packages/testkit' },
   { name: 'byok-sdk', directory: 'packages/sdk' },
 ];
@@ -302,12 +303,12 @@ try {
         `import { readdirSync, statSync } from 'node:fs';\n` +
         `import { createRequire } from 'node:module';\n` +
         `const require = createRequire(import.meta.url);\n` +
-        `const expected = ['client','cloud','cloudDataplane','core','protocol','server'];\n` +
+        `const expected = ['client','cloud','cloudDataplane','core','protocol','server','uiRuntime'];\n` +
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime']) await import(name);\n` +
-        `for (const name of ['byok-sdk','@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane']) {\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime']) await import(name);\n` +
+        `for (const name of ['byok-sdk','@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/ui-runtime']) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, '${releaseVersion}', name);\n` +
         `}\n` +

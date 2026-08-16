@@ -10,3 +10,4 @@ export * as client from '@byok-sdk/client';
 export * as server from '@byok-sdk/server';
 export * as cloud from '@byok-sdk/cloud';
 export * as cloudDataplane from '@byok-sdk/cloud-dataplane';
+export * as uiRuntime from '@byok-sdk/ui-runtime';

@@ -149,6 +149,7 @@
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
         "@byok-sdk/server": "workspace:*",
+        "@byok-sdk/ui-runtime": "workspace:*",
       },
     },
     "packages/server": {
@@ -171,6 +172,14 @@
       "version": "0.4.2",
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
+        "@byok-sdk/protocol": "workspace:*",
+      },
+    },
+    "packages/ui-runtime": {
+      "name": "@byok-sdk/ui-runtime",
+      "version": "0.4.2",
+      "dependencies": {
+        "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
       },
     },
@@ -251,6 +260,8 @@
     "@byok-sdk/server": ["@byok-sdk/server@workspace:packages/server"],
 
     "@byok-sdk/testkit": ["@byok-sdk/testkit@workspace:packages/testkit"],
+
+    "@byok-sdk/ui-runtime": ["@byok-sdk/ui-runtime@workspace:packages/ui-runtime"],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 

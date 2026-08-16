@@ -123,7 +123,7 @@ maps to BYOK `turn_end`. The SDK does not carry parallel 0.74.x semantics.
 
 ## Live activity timeline product boundary
 
-The SDK product boundary includes a future `@byok-sdk/ui-runtime` package for a
+The SDK product boundary includes the `@byok-sdk/ui-runtime` package for a
 host-facing **Live Activity Timeline**. V1 is a bounded, lossy, read-only
 projection of task activity. It is not a conversation transcript, a durable
 event log, a browser application, or a message-composition runtime. The package
@@ -132,9 +132,9 @@ view model and owns no network, authentication, persistence, or presentation.
 
 The staged implementation has three authorities. Protocol events carry
 observations, the typed activity tail is the one bounded read model, and the
-host BFF is the browser security boundary. Protocol tool correlation and the
-typed activity projection are implemented; the UI fold and host integration
-remain staged work described below.
+host BFF is the browser security boundary. Protocol tool correlation, the
+typed activity projection, and the React-free UI fold are implemented; host
+integration remains staged work described below.
 
 ### Tool observation contract
 

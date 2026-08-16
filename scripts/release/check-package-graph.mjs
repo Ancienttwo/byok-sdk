@@ -10,6 +10,7 @@ const dispatchPackages = [
   ['packages/server', '@byok-sdk/server'],
   ['packages/cloud', '@byok-sdk/cloud'],
   ['packages/cloud-dataplane', '@byok-sdk/cloud-dataplane'],
+  ['packages/ui-runtime', '@byok-sdk/ui-runtime'],
 ];
 const umbrella = ['packages/sdk', 'byok-sdk'];
 const keys = ['packages/keys', '@byok-sdk/keys'];

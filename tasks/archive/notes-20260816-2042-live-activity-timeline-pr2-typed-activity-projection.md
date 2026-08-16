@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-16 20:42
+> **Related Plan**: plans/archive/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260816-2042
+
 # Implementation Notes: live-activity-timeline-pr2-typed-activity-projection
 
 > **Status**: Active

@@ -25,6 +25,7 @@ const packages = [
   '@byok-sdk/cloud',
   '@byok-sdk/client',
   '@byok-sdk/cloud-dataplane',
+  '@byok-sdk/ui-runtime',
   '@byok-sdk/testkit',
   'byok-sdk',
 ];
