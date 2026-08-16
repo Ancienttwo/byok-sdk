@@ -35,6 +35,7 @@
  * bytes (see the blobs section below).
  */
 import type { StorageReservation, TenantId } from '@byok-sdk/core';
+import type { ActivityStore } from '../activity';
 
 // ---------------------------------------------------------------------------
 // Device directory (S1's `DeviceRegistry`, tenant-first)
@@ -341,6 +342,7 @@ export interface InboundRateLimiter {
  * bundle can stay all-or-nothing while byte proxying stays optional.
  */
 export interface CloudStores {
+  readonly activity: ActivityStore;
   readonly devices: DeviceDirectory;
   readonly pairingCodes: PairingCodeStore;
   readonly nonces: NonceStore;
@@ -354,6 +356,7 @@ export interface CloudStores {
 
 /** Names of the ports in {@link CloudStores}, in contract order. */
 export const CLOUD_STORE_NAMES = [
+  'activity',
   'devices',
   'pairingCodes',
   'nonces',

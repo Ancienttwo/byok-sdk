@@ -1,6 +1,6 @@
 # Task Contract: live-activity-timeline-pr2-typed-activity-projection
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260816-1958-live-activity-timeline-pr2-typed-activity-projection.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
@@ -87,7 +87,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"sdk-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"activity-store-conformance","kind":"deterministic_test","paths":["packages/cloud/src/activity.ts","packages/cloud/src/stores/in-memory/activity.ts","packages/cloud-dataplane/src/stores/core/presence.ts","packages/conformance/src/cloud/activity.ts"]},{"id":"postgres-activity-burst","kind":"runtime_readback","paths":["packages/cloud-dataplane/src/__tests__/board-concurrency.test.ts"]}]}
+{"protocol":1,"oracles":[{"id":"sdk-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"activity-store-conformance","kind":"deterministic_test","paths":["packages/cloud/src/activity.ts","packages/cloud/src/stores/in-memory/activity.ts","packages/cloud-dataplane/src/stores/activity.ts","packages/conformance/src/cloud/activity.ts"]},{"id":"postgres-activity-burst","kind":"runtime_readback","paths":["packages/cloud-dataplane/src/__tests__/board-concurrency.test.ts"]}]}
 ```
 
 ## Acceptance Policy
@@ -129,8 +129,10 @@ allowed_paths:
   - packages/cloud/src/stores/in-memory/
   - packages/cloud/src/__tests__/
   - packages/cloud-dataplane/src/stores/core/
+  - packages/cloud-dataplane/src/stores/activity.ts
   - packages/cloud-dataplane/src/stores/index.ts
   - packages/cloud-dataplane/src/runtime.ts
+  - packages/cloud-dataplane/README.md
   - packages/cloud-dataplane/src/__tests__/
   - packages/conformance/src/core/
   - packages/conformance/src/cloud/

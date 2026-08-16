@@ -1,5 +1,10 @@
-import type { ActivityTail } from '@byok-sdk/core';
 import type { AgentEventOrUnknown } from '@byok-sdk/protocol';
+import {
+  DEFAULT_ACTIVITY_CAPACITY,
+  validateActivityAppend,
+  type ActivityAppendInput,
+  type ActivityTail,
+} from './activity';
 import { ByokCloudError } from './errors';
 import type { TenantBoundActivity } from './tenant-stores';
 
@@ -7,7 +12,7 @@ export const DEFAULT_BOARD_CHANNEL_MAX_BYTES = 128;
 export const DEFAULT_BOARD_TITLE_MAX_BYTES = 512;
 export const DEFAULT_ACTIVITY_MAX_EVENTS = 50;
 export const DEFAULT_ACTIVITY_MAX_BYTES = 64 * 1024;
-export const DEFAULT_ACTIVITY_CAPACITY = 50;
+export { DEFAULT_ACTIVITY_CAPACITY } from './activity';
 export const DEFAULT_ACTIVITY_TTL_MS = 10 * 60_000;
 export const DEFAULT_PRESENCE_TTL_MS = 90_000;
 export const DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS = 5_000;
@@ -48,11 +53,11 @@ export function assertBoardLabels(
   }
 }
 
-export function activityDetails(
+export function validateActivityEvents(
   events: readonly AgentEventOrUnknown[],
   dropped: number,
   bounds: ActivityBounds,
-): readonly string[] {
+): void {
   if (!Number.isSafeInteger(dropped) || dropped < 0) {
     throw new ByokCloudError(
       'coordination_input_invalid',
@@ -72,21 +77,33 @@ export function activityDetails(
       `Activity batch exceeds ${bounds.maxBytes} UTF-8 bytes.`,
     );
   }
-  return events.map((event) => JSON.stringify(event));
+}
+
+export function validateActivityBatch(
+  input: Omit<ActivityAppendInput, 'ttlMs' | 'capacity'>,
+  bounds: ActivityBounds,
+): void {
+  validateActivityEvents(input.events, input.dropped, bounds);
+  validateActivityAppend({ ...input, ttlMs: bounds.ttlMs, capacity: bounds.capacity });
 }
 
 export async function appendActivityEvents(
   activity: TenantBoundActivity,
   input: {
     readonly taskId: string;
+    readonly sourceEnvelopeId: string;
+    readonly batchSeq: number;
     readonly events: readonly AgentEventOrUnknown[];
     readonly dropped: number;
   },
   bounds: ActivityBounds,
 ): Promise<ActivityTail> {
+  validateActivityBatch(input, bounds);
   return activity.append({
     taskId: input.taskId,
-    details: activityDetails(input.events, input.dropped, bounds),
+    sourceEnvelopeId: input.sourceEnvelopeId,
+    batchSeq: input.batchSeq,
+    events: input.events,
     dropped: input.dropped,
     ttlMs: bounds.ttlMs,
     capacity: bounds.capacity,

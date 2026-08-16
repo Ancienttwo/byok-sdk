@@ -9,7 +9,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { migrate } from '../migrate';
 import { PostgresBoardStore } from '../stores/core/board';
-import { PostgresActivityStore } from '../stores/core/presence';
+import { PostgresActivityStore } from '../stores/activity';
 import { createDataplaneScope, SKIP_DATAPLANE } from './support/dataplane';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
@@ -76,29 +76,28 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres board concurrency and I6', () => {
     }
   });
 
-  it('serializes concurrent activity batches without losing either writer', async () => {
-    const scope = await createDataplaneScope(8);
+  it('serializes a 100-batch activity burst without loss and returns stable order', async () => {
+    const scope = await createDataplaneScope(32);
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const activity = new PostgresActivityStore(scope.pool, createMutableClock());
-      await Promise.all([
-        activity.append(TENANT_A, {
+      await Promise.all(
+        Array.from({ length: 100 }, (_, index) => activity.append(TENANT_A, {
           taskId: 'activity-race',
-          details: ['left'],
+          sourceEnvelopeId: `envelope-${index + 1}`,
+          batchSeq: index + 1,
+          events: [{ type: 'progress', text: `event-${index + 1}` }],
           dropped: 0,
           ttlMs: 60_000,
-          capacity: 10,
-        }),
-        activity.append(TENANT_A, {
-          taskId: 'activity-race',
-          details: ['right'],
-          dropped: 0,
-          ttlMs: 60_000,
-          capacity: 10,
-        }),
-      ]);
+          capacity: 100,
+        })),
+      );
       const tail = await activity.read(TENANT_A, 'activity-race');
-      expect(tail?.entries.map((entry) => entry.detail).sort()).toEqual(['left', 'right']);
+      expect(tail?.entries).toHaveLength(100);
+      expect(tail?.entries.map((entry) => entry.batchSeq)).toEqual(
+        Array.from({ length: 100 }, (_, index) => index + 1),
+      );
+      expect(tail?.cursor).toEqual({ batchSeq: 100, eventIndex: 0 });
       expect(tail?.dropped).toBe(0);
     } finally {
       await scope.dispose();

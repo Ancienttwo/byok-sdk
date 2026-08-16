@@ -1,5 +1,5 @@
 /**
- * In-memory {@link PresenceStore} and {@link ActivityStore} reference (§12.3).
+ * In-memory {@link PresenceStore} reference (§12.3).
  *
  * Expiry is absence. A hint past its `expiresAt` is filtered out of every read
  * and lazily dropped, so no reader can ever observe a stale level and mistake
@@ -8,11 +8,6 @@
  */
 import { ByokCoreError } from '../errors';
 import {
-  DEFAULT_ACTIVITY_CAPACITY,
-  type ActivityAppendInput,
-  type ActivityEntry,
-  type ActivityStore,
-  type ActivityTail,
   type PresenceHint,
   type PresenceHintInput,
   type PresenceStore,
@@ -105,72 +100,5 @@ export class InMemoryPresenceStore implements PresenceStore {
 
   #isExpired(expiresAt: string): boolean {
     return this.#clock.now().toISOString() >= expiresAt;
-  }
-}
-
-export class InMemoryActivityStore implements ActivityStore {
-  readonly #tails = new Map<string, ActivityTail>();
-  readonly #clock: Clock;
-
-  constructor(clock: Clock) {
-    this.#clock = clock;
-  }
-
-  async append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail> {
-    assertTtl(input.ttlMs);
-    const capacity = input.capacity ?? DEFAULT_ACTIVITY_CAPACITY;
-    if (!Number.isSafeInteger(capacity) || capacity <= 0) {
-      throw new ByokCoreError(
-        'activity_capacity_invalid',
-        `Activity capacity must be a positive integer, received ${String(capacity)}.`,
-      );
-    }
-    if (input.details.length === 0 || !Number.isSafeInteger(input.dropped) || input.dropped < 0) {
-      throw new ByokCoreError(
-        'activity_batch_invalid',
-        'Activity batches require at least one detail and a non-negative integer dropped count.',
-      );
-    }
-
-    const now = this.#clock.now();
-    const key = tenantKey(tenant, input.taskId);
-    const existing = this.#tails.get(key);
-    const live =
-      existing !== undefined && now.toISOString() < existing.expiresAt ? existing : undefined;
-
-    const appended: ActivityEntry[] = input.details.map((detail) => ({
-      at: now.toISOString(),
-      detail,
-    }));
-    const entries = [...(live?.entries ?? []), ...appended];
-    let dropped = (live?.dropped ?? 0) + input.dropped;
-    while (entries.length > capacity) {
-      entries.shift();
-      // Lossiness is data, not an omission: a reader can tell "nothing
-      // happened" from "we lost the middle".
-      dropped += 1;
-    }
-
-    const tail: ActivityTail = {
-      tenantId: tenant,
-      taskId: input.taskId,
-      entries,
-      dropped,
-      capacity,
-      expiresAt: new Date(now.getTime() + input.ttlMs).toISOString(),
-    };
-    this.#tails.set(key, tail);
-    return tail;
-  }
-
-  async read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined> {
-    const key = tenantKey(tenant, taskId);
-    const tail = this.#tails.get(key);
-    if (tail === undefined) return undefined;
-    if (this.#clock.now().toISOString() >= tail.expiresAt) {
-      this.#tails.delete(key);
-      return undefined;
-    }
-    return tail;
   }
 }

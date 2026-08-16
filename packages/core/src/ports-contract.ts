@@ -45,7 +45,6 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
   board: ['create', 'get', 'list', 'claim', 'unclaim', 'updateStatus'],
   truth: ['writeTerminal', 'writeSnapshot', 'getRecord', 'listManifest'],
   presence: ['publish', 'read', 'list'],
-  activity: ['append', 'read'],
   objects: [
     'putManifest',
     'commit',
@@ -77,7 +76,6 @@ export const CORE_PORT_INTERFACES: Readonly<Record<CoreStoreName, string>> = {
   board: 'BoardStore',
   truth: 'TruthStore',
   presence: 'PresenceStore',
-  activity: 'ActivityStore',
   objects: 'ObjectStore',
   quota: 'QuotaStore',
   skillPacks: 'SkillPackStore',

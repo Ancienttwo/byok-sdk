@@ -24,6 +24,7 @@ const inMemoryFactory: CloudCompositionFactory = {
       // suite asserts the key set, so a composition cannot quietly hand over
       // extra surface the other compositions do not owe.
       stores: {
+        activity: stores.activity,
         devices: stores.devices,
         pairingCodes: stores.pairingCodes,
         nonces: stores.nonces,

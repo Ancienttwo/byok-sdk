@@ -12,3 +12,5 @@ export type {
   CloudConformancePortName,
   CloudConformanceStores,
 } from './harness';
+export { runActivityConformance } from './activity';
+export type { ActivityCompositionFactory, ActivityCompositionHandle } from './activity';

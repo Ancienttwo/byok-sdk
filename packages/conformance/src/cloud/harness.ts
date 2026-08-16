@@ -51,6 +51,7 @@ import { runCloudTenantIsolationConformance } from './tenant-isolation';
  * it — there is no honest behavioral assertion to make about allow-all.
  */
 export const CLOUD_CONFORMANCE_PORTS = [
+  'activity',
   'devices',
   'pairingCodes',
   'nonces',

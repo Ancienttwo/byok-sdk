@@ -12,13 +12,14 @@ import { serve } from '@hono/node-server';
 // nothing that ships is touched. S6-c adds the intended `client -> core` edge
 // for canonical device-proof bytes and truth selector contracts; it still does
 // not make the daemon depend on the hosted implementation.
-import type { ActivityTail, PresenceHint } from '@byok-sdk/core';
+import type { PresenceHint } from '@byok-sdk/core';
 import type { TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import {
   createInMemoryByokCloud,
   fullCapabilityDeclaration,
   tenantId,
   type ByokCloud,
+  type ActivityTail,
   type EnqueuedOffer,
   type PairingCodeInfo,
   type TaskAttempt,

@@ -8,7 +8,7 @@
  * a database, which is what makes the same assertions meaningful when a
  * Postgres + R2 composition runs them later.
  */
-import { InMemoryActivityStore, InMemoryPresenceStore } from './presence';
+import { InMemoryPresenceStore } from './presence';
 import { InMemoryBoardStore } from './board';
 import { InMemoryMailboxStore } from './mailbox';
 import { InMemoryObjectStore } from './blob';
@@ -22,7 +22,7 @@ export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock';
 export { InMemoryMailboxStore } from './mailbox';
 export { InMemoryBoardStore } from './board';
 export { InMemoryTruthStore } from './truth';
-export { InMemoryPresenceStore, InMemoryActivityStore } from './presence';
+export { InMemoryPresenceStore } from './presence';
 export { InMemoryObjectStore } from './blob';
 export { InMemoryQuotaStore } from './quota';
 export { InMemorySkillPackStore } from './skill-pack';
@@ -48,7 +48,6 @@ export function createInMemoryCoreStores(
     board: new InMemoryBoardStore(clock),
     truth: new InMemoryTruthStore(clock),
     presence: new InMemoryPresenceStore(clock),
-    activity: new InMemoryActivityStore(clock),
     objects,
     quota: new InMemoryQuotaStore(clock, objects),
     skillPacks: new InMemorySkillPackStore(),

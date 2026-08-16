@@ -18,6 +18,7 @@ import { InMemoryPairingCodeStore } from './pairing-codes';
 import { InMemoryRequestReceiptStore } from './receipts';
 import { InMemoryProofRequestReceiptStore } from './proof-receipts';
 import { InMemoryTaskAttemptStore } from './task-attempts';
+import { InMemoryActivityStore } from './activity';
 
 export { AllowAllRateLimiter } from './rate-limiter';
 export {
@@ -34,6 +35,7 @@ export { InMemoryPairingCodeStore } from './pairing-codes';
 export { InMemoryRequestReceiptStore } from './receipts';
 export { InMemoryProofRequestReceiptStore } from './proof-receipts';
 export { InMemoryTaskAttemptStore } from './task-attempts';
+export { InMemoryActivityStore } from './activity';
 
 /**
  * The port bundle plus the byte proxy, in the shape `createInMemoryCoreStores`
@@ -57,6 +59,7 @@ export function createInMemoryCloudStores(
   const blobs = createInMemoryBlobs(clock, crypto, objects);
   return {
     stores: {
+      activity: new InMemoryActivityStore(clock),
       devices: new InMemoryDeviceDirectory(),
       pairingCodes: new InMemoryPairingCodeStore(clock),
       nonces: new InMemoryNonceStore(clock, crypto),

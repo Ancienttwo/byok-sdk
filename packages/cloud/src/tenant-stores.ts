@@ -23,8 +23,6 @@
  */
 import {
   principalTenant,
-  type ActivityAppendInput,
-  type ActivityTail,
   type BoardClaimInput,
   type BoardItem,
   type BoardItemInput,
@@ -48,6 +46,7 @@ import {
   type StorageReservationInput,
   type TenantId,
 } from '@byok-sdk/core';
+import type { ActivityAppendInput, ActivityTail } from './activity';
 import type {
   BlobObservation,
   CloudStores,
@@ -176,8 +175,8 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       list: () => core.presence.list(tenant),
     },
     activity: {
-      append: (input) => core.activity.append(tenant, input),
-      read: (taskId) => core.activity.read(tenant, taskId),
+      append: (input) => cloud.activity.append(tenant, input),
+      read: (taskId) => cloud.activity.read(tenant, taskId),
     },
     devices: {
       get: (deviceId) => cloud.devices.get(tenant, deviceId),

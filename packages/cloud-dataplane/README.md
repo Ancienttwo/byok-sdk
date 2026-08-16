@@ -1,15 +1,15 @@
 # @byok-sdk/cloud-dataplane
 
 The durable data plane for the BYOK SDK's hosted device surface: Postgres
-implementations of **all nine cloud-local store ports and all seven `@byok-sdk/core`
+implementations of **all ten cloud-local store ports and all seven `@byok-sdk/core`
 ports**, the R2/S3 object adapter that backs the blob port, and the forward-only
 migration runner that creates the tables they read.
 
 Three store/maintenance compositions plus one transaction authority ship from here. `createPostgresCloudStores` supplies the full
-`CloudStores` bundle (`devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
+`CloudStores` bundle (`activity`, `devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
 `receipts`, `proofReceipts`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
 supplies the full `CoreStores` bundle (`mailbox`, `board`, `truth`, `presence`,
-`activity`, `objects`, `quota`). Both return every port rather than a subset,
+`objects`, `quota`, `skillPacks`). Both return every port rather than a subset,
 because the conformance suites certify a composition as a whole — there is no
 partial bundle for them to run. `createPostgresCloudMaintenance` is the third,
 host-only operational composition; it is deliberately outside both port

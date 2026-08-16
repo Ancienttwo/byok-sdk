@@ -314,9 +314,9 @@ deepseek-harness `ui-primitives` 移植维持既有结论：MIT 可搬、Cordis-
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Move the activity DTO/store authority from protocol-free core into cloud and remove the legacy string-detail surface in the same change.
-- [ ] Project envelope ID, batch sequence and event index through inbound and direct activity POST paths with fail-closed validation.
-- [ ] Implement equivalent in-memory and Postgres typed tails with deterministic cursor, dropped/capacity/TTL semantics and no legacy parser.
-- [ ] Add shared conformance, tenant isolation, unknown/malformed, concurrency and bounded burst coverage; update affected callers and exports.
-- [ ] Document the stop-writer → one TTL drain → start typed reader/writer cutover and verify the full workspace.
+- [x] Move the activity DTO/store authority from protocol-free core into cloud and remove the legacy string-detail surface in the same change.
+- [x] Project envelope ID, batch sequence and event index through inbound and direct activity POST paths with fail-closed validation.
+- [x] Implement equivalent in-memory and Postgres typed tails with deterministic cursor, dropped/capacity/TTL semantics and no legacy parser.
+- [x] Add shared conformance, tenant isolation, unknown/malformed, concurrency and bounded burst coverage; update affected callers and exports.
+- [x] Document the stop-writer → one TTL drain → start typed reader/writer cutover and verify the full workspace.
 - [ ] Run Deep Waza `$check`, fix every blocking finding, bind exact-target evidence, and promote through PR/CI/merge.
