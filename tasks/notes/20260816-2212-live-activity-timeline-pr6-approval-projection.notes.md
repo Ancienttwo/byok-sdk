@@ -36,9 +36,10 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Targeted `@byok-sdk/ui-runtime`: 3 files / 14 tests passed; build and typecheck passed.
+- Targeted `@byok-sdk/ui-runtime`: 3 files / 15 tests passed; build and typecheck passed.
 - Targeted `@byok-sdk/example-live-activity-host`: 1 file / 21 tests passed; typecheck passed.
 - Full workspace `bun run build` and `bun run typecheck` passed before subject freeze.
+- Final strict contract: 15/15 exit criteria passed, including the full workspace test suite and strict workflow check.
 
 ## Promotion Filter
 
