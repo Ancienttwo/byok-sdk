@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:e0b2b917c41eab14f6efd5a0ddcb05590d7240dc6122ae8ef43c953a93d37f09
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: c4f52a72747eba342ea3a5e141d1869b943a8324
+> **Verification Evidence SHA256**: sha256:1f53dd16fe8c56a3b91cde130a11f0466ac93877b3e0d948a6c80ca0c2a87716
+> **Issued At**: 2026-08-16T12:33:00.197Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Deep review passed after moving Postgres activity ownership to cloud-dataplane, enforcing fail-closed order collisions and legacy JSONB rejection, bounding direct identity input, and covering the typed projection with shared in-memory/Postgres conformance plus real Postgres concurrency readback.
 - Findings: none
 
 ## Behavior Diff Notes
