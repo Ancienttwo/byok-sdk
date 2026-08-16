@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isRoutineCodexEvent, mapCodexEventToAgentEvents, ROUTINE_CODEX_EVENT_TYPES, unmappedFrameKey } from '../adapters/codex/events';
 import type { CodexRawEvent } from '../adapters/codex/process-runner';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 
 const WORKSPACE = '/workspace/task-1';
 
@@ -71,7 +72,7 @@ describe('mapCodexEventToAgentEvents', () => {
       item: { id: 'item_2', type: 'command_execution', command: 'echo hi', aggregated_output: '', exit_code: null, status: 'in_progress' },
     };
     expect(mapCodexEventToAgentEvents(evt, WORKSPACE)).toEqual([
-      { type: 'tool_use', tool: 'command_execution', input: { command: 'echo hi' } },
+      { type: 'tool_use', tool: 'command_execution', input: { command: 'echo hi' }, toolCallId: 'item_2' },
     ]);
   });
 
@@ -85,6 +86,7 @@ describe('mapCodexEventToAgentEvents', () => {
         type: 'tool_result',
         tool: 'command_execution',
         output: { command: 'echo hi', aggregatedOutput: 'hi\n', exitCode: 0, status: 'completed' },
+        toolCallId: 'item_2',
       },
     ]);
   });
@@ -104,6 +106,7 @@ describe('mapCodexEventToAgentEvents', () => {
         type: 'tool_result',
         tool: 'file_change',
         output: { changes: [{ path: `${WORKSPACE}/output.txt`, kind: 'add' }], status: 'completed' },
+        toolCallId: 'item_3',
       },
       { type: 'artifact', name: 'output.txt', contentType: 'text/plain' },
     ]);
@@ -133,7 +136,7 @@ describe('mapCodexEventToAgentEvents', () => {
       item: { id: 'item_3', type: 'file_change', changes: [{ path: `${WORKSPACE}/gone.txt`, kind: 'delete' }], status: 'completed' },
     };
     expect(mapCodexEventToAgentEvents(evt, WORKSPACE)).toEqual([
-      { type: 'tool_result', tool: 'file_change', output: { changes: [{ path: `${WORKSPACE}/gone.txt`, kind: 'delete' }], status: 'completed' } },
+      { type: 'tool_result', tool: 'file_change', output: { changes: [{ path: `${WORKSPACE}/gone.txt`, kind: 'delete' }], status: 'completed' }, toolCallId: 'item_3' },
     ]);
   });
 
@@ -160,6 +163,36 @@ describe('mapCodexEventToAgentEvents', () => {
       item: { id: 'item_0', type: 'error', message: 'Exceeded skills context budget of 2%.' },
     };
     expect(mapCodexEventToAgentEvents(evt, WORKSPACE)).toEqual([{ type: 'error', message: 'Exceeded skills context budget of 2%.' }]);
+  });
+
+  it('keeps same-name concurrent command calls distinct by item.id', () => {
+    const first = mapCodexEventToAgentEvents({ type: 'item.started', item: { id: 'call_a', type: 'command_execution', command: 'echo one' } }, WORKSPACE);
+    const second = mapCodexEventToAgentEvents({ type: 'item.started', item: { id: 'call_b', type: 'command_execution', command: 'echo two' } }, WORKSPACE);
+    expect(first[0]).toMatchObject({ type: 'tool_use', tool: 'command_execution', toolCallId: 'call_a' });
+    expect(second[0]).toMatchObject({ type: 'tool_use', tool: 'command_execution', toolCallId: 'call_b' });
+  });
+
+  it('does not derive an outcome from Codex status or exit code', () => {
+    const [event] = mapCodexEventToAgentEvents({
+      type: 'item.completed',
+      item: { id: 'item_2', type: 'command_execution', command: 'false', exit_code: 1, status: 'failed' },
+    }, WORKSPACE);
+    expect(event).toMatchObject({ type: 'tool_result', toolCallId: 'item_2' });
+    expect(event).not.toHaveProperty('isError');
+  });
+
+  it.each([
+    { type: 'item.started', item: { type: 'command_execution', command: 'echo hi' } },
+    { type: 'item.completed', item: { id: '', type: 'file_change', changes: [] } },
+    { type: 'item.completed', item: { id: '  ', type: 'file_change', changes: [] } },
+  ] satisfies CodexRawEvent[])('fails closed when a bundled tool item has no valid native ID: %j', (evt) => {
+    try {
+      mapCodexEventToAgentEvents(evt, WORKSPACE);
+      throw new Error('expected RuntimeExecutionFailure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(error).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
+    }
   });
 
   it('drops thread.started/turn.started (routine — thread.started is consumed upstream in codex-adapter.ts)', () => {

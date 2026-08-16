@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from '../adapters/pi/events';
 import type { PiRpcMessage } from '../adapters/pi/rpc-client';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 
 describe('mapPiMessageToAgentEvent', () => {
   it('maps a text_delta message_update to a progress event', () => {
@@ -28,7 +29,7 @@ describe('mapPiMessageToAgentEvent', () => {
       toolName: 'bash',
       args: { command: 'ls' },
     };
-    expect(mapPiMessageToAgentEvent(msg)).toEqual({ type: 'tool_use', tool: 'bash', input: { command: 'ls' } });
+    expect(mapPiMessageToAgentEvent(msg)).toEqual({ type: 'tool_use', tool: 'bash', input: { command: 'ls' }, toolCallId: 'call_1' });
   });
 
   it('maps tool_execution_end to tool_result, carrying isError', () => {
@@ -42,8 +43,54 @@ describe('mapPiMessageToAgentEvent', () => {
     expect(mapPiMessageToAgentEvent(msg)).toEqual({
       type: 'tool_result',
       tool: 'bash',
-      output: { result: { content: [{ type: 'text', text: 'ok' }] }, isError: false },
+      output: { result: { content: [{ type: 'text', text: 'ok' }] } },
+      toolCallId: 'call_1',
+      isError: false,
     });
+  });
+
+  it('maps a native error outcome', () => {
+    expect(mapPiMessageToAgentEvent({ type: 'tool_execution_end', toolCallId: 'call_error', toolName: 'bash', result: 'nope', isError: true })).toEqual({
+      type: 'tool_result', tool: 'bash', output: { result: 'nope' }, toolCallId: 'call_error', isError: true,
+    });
+  });
+
+  it('keeps same-name concurrent calls distinct by their native IDs', () => {
+    const first = mapPiMessageToAgentEvent({
+      type: 'tool_execution_start', toolCallId: 'call_a', toolName: 'bash', args: { command: 'echo one' },
+    });
+    const second = mapPiMessageToAgentEvent({
+      type: 'tool_execution_start', toolCallId: 'call_b', toolName: 'bash', args: { command: 'echo two' },
+    });
+    expect(first).toMatchObject({ type: 'tool_use', tool: 'bash', toolCallId: 'call_a' });
+    expect(second).toMatchObject({ type: 'tool_use', tool: 'bash', toolCallId: 'call_b' });
+  });
+
+  it.each([
+    { type: 'tool_execution_start', toolName: 'bash', args: {} },
+    { type: 'tool_execution_end', toolCallId: '', toolName: 'bash', result: 'x' },
+    { type: 'tool_execution_end', toolCallId: '  ', toolName: 'bash', result: 'x' },
+  ] satisfies PiRpcMessage[])('fails closed when a bundled tool frame has no valid native ID: %j', (msg) => {
+    try {
+      mapPiMessageToAgentEvent(msg);
+      throw new Error('expected RuntimeExecutionFailure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(error).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
+    }
+  });
+
+  it.each([
+    { type: 'tool_execution_end', toolCallId: 'call_missing', toolName: 'bash', result: 'x' },
+    { type: 'tool_execution_end', toolCallId: 'call_bad', toolName: 'bash', result: 'x', isError: 'false' },
+  ] satisfies PiRpcMessage[])('fails closed when a bundled tool result has no valid native outcome: %j', (msg) => {
+    try {
+      mapPiMessageToAgentEvent(msg);
+      throw new Error('expected RuntimeExecutionFailure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(error).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
+    }
   });
 
   it('maps only agent_settled to BYOK turn_end', () => {

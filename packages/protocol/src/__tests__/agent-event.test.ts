@@ -146,6 +146,48 @@ describe('unknown AgentEvent variant tolerance', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tool observation fields (additive)
+// ---------------------------------------------------------------------------
+
+describe('tool observation fields', () => {
+  it('accepts provider-native tool correlation and tri-state outcome at the top level', () => {
+    expect(AgentEventSchema.parse({ type: 'tool_use', tool: 'bash', toolCallId: 'call_1' })).toEqual({
+      type: 'tool_use', tool: 'bash', toolCallId: 'call_1',
+    });
+    expect(AgentEventSchema.parse({ type: 'tool_result', tool: 'bash', toolCallId: 'call_1', isError: false })).toEqual({
+      type: 'tool_result', tool: 'bash', toolCallId: 'call_1', isError: false,
+    });
+  });
+
+  it('continues to parse old v1 tool events without the optional observation fields', () => {
+    const parsed = TaskProgressPayloadSchema.parse({
+      seq: 1,
+      events: [
+        { type: 'tool_use', tool: 'bash', input: { command: 'ls' } },
+        { type: 'tool_result', tool: 'bash', output: { stdout: 'ok' } },
+      ],
+    });
+    expect(parsed.events).toEqual([
+      { type: 'tool_use', tool: 'bash', input: { command: 'ls' } },
+      { type: 'tool_result', tool: 'bash', output: { stdout: 'ok' } },
+    ]);
+  });
+
+  it('rejects malformed observation field types', () => {
+    expect(AgentEventSchema.safeParse({ type: 'tool_use', tool: 'bash', toolCallId: 1 }).success).toBe(false);
+    expect(AgentEventSchema.safeParse({ type: 'tool_result', tool: 'bash', isError: 'false' }).success).toBe(false);
+    expect(AgentEventSchema.safeParse({ type: 'tool_use', tool: 'bash', toolCallId: '' }).success).toBe(false);
+    expect(AgentEventSchema.safeParse({ type: 'tool_result', tool: 'bash', toolCallId: '   ' }).success).toBe(false);
+  });
+
+  it('leaves needs_approval unchanged', () => {
+    expect(AgentEventSchema.parse({ type: 'needs_approval', summary: 'approve Bash' })).toEqual({
+      type: 'needs_approval', summary: 'approve Bash',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // `usage` AgentEvent variant (additive)
 // ---------------------------------------------------------------------------
 

@@ -129,8 +129,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
     const events = await takeEvents(session, 5);
     expect(events).toEqual([
-      { type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' } },
-      { type: 'tool_result', tool: 'Bash', output: { content: 'hi\n', isError: false } },
+      { type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' }, toolCallId: 'toolu_fake_1' },
+      { type: 'tool_result', tool: 'Bash', output: { content: 'hi\n' }, toolCallId: 'toolu_fake_1', isError: false },
       { type: 'progress', text: 'reply-1:say hi' },
       // Pre-freeze protocol addition: the result frame's usage now maps to
       // a usage AgentEvent (emitted before turn_end — see events.ts's
@@ -385,8 +385,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
     const events = await takeEvents(session, 2);
     expect(events).toEqual([
-      { type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' } },
-      { type: 'tool_result', tool: 'Bash', output: { content: 'hi\n', isError: false } },
+      { type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' }, toolCallId: 'toolu_fake_1' },
+      { type: 'tool_result', tool: 'Bash', output: { content: 'hi\n' }, toolCallId: 'toolu_fake_1', isError: false },
     ]);
 
     // No turn_end ever arrives on its own — mirrors the daemon's real cancel
@@ -403,8 +403,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     openSessions.push(session);
 
     const events = await takeEvents(session, 5);
-    expect(events[0]).toEqual({ type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' } });
-    expect(events[1]).toMatchObject({ type: 'tool_result', tool: 'Bash', output: { isError: true } });
+    expect(events[0]).toEqual({ type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' }, toolCallId: 'toolu_fake_1' });
+    expect(events[1]).toMatchObject({ type: 'tool_result', tool: 'Bash', toolCallId: 'toolu_fake_1', isError: true });
     expect(events[2]).toEqual({ type: 'progress', text: 'reply-1:say hi' });
     expect(events[3]).toEqual({ type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 });
     expect(events[4]).toEqual({ type: 'turn_end' });
@@ -457,8 +457,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
     const secondTurn = await takeEvents(session, 5);
     expect(secondTurn).toEqual([
-      { type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' } },
-      { type: 'tool_result', tool: 'Bash', output: { content: 'hi\n', isError: false } },
+      { type: 'tool_use', tool: 'Bash', input: { command: 'echo hi' }, toolCallId: 'toolu_fake_2' },
+      { type: 'tool_result', tool: 'Bash', output: { content: 'hi\n' }, toolCallId: 'toolu_fake_2', isError: false },
       { type: 'progress', text: 'reply-2:say bye' },
       { type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 },
       { type: 'turn_end' },
@@ -502,11 +502,13 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
     const events = await takeEvents(session, 6);
     expect(events).toEqual([
-      { type: 'tool_use', tool: 'Write', input: { file_path: path.join(realWorkspaceDir, 'out.txt'), content: 'artifact-body' } },
+      { type: 'tool_use', tool: 'Write', input: { file_path: path.join(realWorkspaceDir, 'out.txt'), content: 'artifact-body' }, toolCallId: 'toolu_fake_1' },
       {
         type: 'tool_result',
         tool: 'Write',
-        output: { content: `File created successfully at: ${path.join(realWorkspaceDir, 'out.txt')}`, isError: false },
+        output: { content: `File created successfully at: ${path.join(realWorkspaceDir, 'out.txt')}` },
+        toolCallId: 'toolu_fake_1',
+        isError: false,
       },
       { type: 'artifact', name: 'out.txt', contentType: 'text/plain' },
       { type: 'progress', text: 'reply-1:say hi' },

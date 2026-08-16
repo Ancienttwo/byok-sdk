@@ -68,6 +68,19 @@ export interface MapClaudeMessageResult {
   unmappedLabel?: string;
 }
 
+function missingToolCallIdFailure(frame: 'tool_use' | 'tool_result'): RuntimeExecutionFailure {
+  return new RuntimeExecutionFailure({
+    phase: 'run',
+    category: 'authority',
+    retry: 'non-retryable',
+    reason: `claude ${frame} frame had no authoritative tool call id`,
+  });
+}
+
+function isAuthoritativeToolCallId(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 /**
  * `system` frame subtypes empirically observed on real stream-json output
  * from the installed claude 2.1.212 binary that carry no `AgentEvent`
@@ -153,9 +166,12 @@ function mapAssistant(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation)
         break;
 
       case 'tool_use':
-        if (typeof block.id === 'string' && typeof block.name === 'string') {
+        if (!isAuthoritativeToolCallId(block.id)) {
+          return { events: [], terminalFailure: missingToolCallIdFailure('tool_use') };
+        }
+        if (typeof block.name === 'string') {
           correlation.toolNameByUseId.set(block.id, block.name);
-          events.push({ type: 'tool_use', tool: block.name, input: block.input });
+          events.push({ type: 'tool_use', tool: block.name, input: block.input, toolCallId: block.id });
         }
         break;
 
@@ -228,18 +244,24 @@ function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, opti
       continue;
     }
 
-    const toolUseId = typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined;
-    // Falls back to 'unknown' rather than dropping the event: the
-    // AgentEventSchema requires a non-empty `tool` string, and a
-    // correlation miss here would mean this adapter's own
-    // tool_use<->tool_result bookkeeping has a bug — worth surfacing to the
-    // caller as a (still-delivered) event with an honest sentinel name,
-    // never silently swallowing real tool-result data.
-    const tool = (toolUseId && correlation.toolNameByUseId.get(toolUseId)) || 'unknown';
-    const isError = block.is_error === true;
-    events.push({ type: 'tool_result', tool, output: { content: block.content, isError } });
+    if (!isAuthoritativeToolCallId(block.tool_use_id)) {
+      return { events: [], terminalFailure: missingToolCallIdFailure('tool_result') };
+    }
+    // The tool name is a display label only. A valid native ID with no prior
+    // local use frame remains explicitly unpaired; it is never matched by
+    // name or by output content.
+    const tool = correlation.toolNameByUseId.get(block.tool_use_id) ?? 'unknown';
+    const isError = typeof block.is_error === 'boolean' ? block.is_error : undefined;
+    const event: Extract<AgentEvent, { type: 'tool_result' }> = {
+      type: 'tool_result',
+      tool,
+      output: { content: block.content },
+      toolCallId: block.tool_use_id,
+    };
+    if (isError !== undefined) event.isError = isError;
+    events.push(event);
 
-    if (!isError && FILE_WRITING_TOOLS.has(tool)) {
+    if (isError === false && FILE_WRITING_TOOLS.has(tool)) {
       const artifact = tryBuildArtifactEvent(msg, options.workspaceDir);
       if (artifact) events.push(artifact);
     }

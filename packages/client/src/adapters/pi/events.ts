@@ -1,5 +1,26 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
+import { RuntimeExecutionFailure } from '../../runtime-failure';
 import type { PiRpcMessage } from './rpc-client';
+
+function requireToolCallId(msg: PiRpcMessage): string {
+  if (typeof msg.toolCallId === 'string' && msg.toolCallId.trim().length > 0) return msg.toolCallId;
+  throw new RuntimeExecutionFailure({
+    phase: 'run',
+    category: 'authority',
+    retry: 'non-retryable',
+    reason: `pi ${msg.type} frame had no authoritative tool call id`,
+  });
+}
+
+function requireToolResultOutcome(msg: PiRpcMessage): boolean {
+  if (typeof msg.isError === 'boolean') return msg.isError;
+  throw new RuntimeExecutionFailure({
+    phase: 'run',
+    category: 'authority',
+    retry: 'non-retryable',
+    reason: 'pi tool_execution_end frame had no authoritative isError outcome',
+  });
+}
 
 /**
  * Map pi 0.84.1 RPC frames into BYOK's runtime-neutral event contract.
@@ -25,17 +46,23 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
     }
 
     case 'tool_execution_start': {
+      const toolCallId = requireToolCallId(msg);
       if (typeof msg.toolName !== 'string') return undefined;
-      return { type: 'tool_use', tool: msg.toolName, input: msg.args };
+      return { type: 'tool_use', tool: msg.toolName, input: msg.args, toolCallId };
     }
 
     case 'tool_execution_end': {
+      const toolCallId = requireToolCallId(msg);
+      const isError = requireToolResultOutcome(msg);
       if (typeof msg.toolName !== 'string') return undefined;
-      return {
+      const event: Extract<AgentEvent, { type: 'tool_result' }> = {
         type: 'tool_result',
         tool: msg.toolName,
-        output: { result: msg.result, isError: msg.isError === true },
+        output: { result: msg.result },
+        toolCallId,
+        isError,
       };
+      return event;
     }
 
     case 'agent_settled':
