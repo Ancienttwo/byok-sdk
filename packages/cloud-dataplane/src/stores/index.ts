@@ -32,6 +32,7 @@ import { PostgresRequestReceiptStore } from './receipts';
 import { PostgresProofRequestReceiptStore } from './proof-receipts';
 import { PostgresTaskAttemptStore } from './task-attempts';
 import { PostgresActivityStore } from './activity';
+import { PostgresApprovalTimelineStore } from './approval-timeline';
 
 export { PostgresDeviceDirectory } from './devices';
 export { PostgresInboundDedupStore } from './dedup';
@@ -41,6 +42,7 @@ export { PostgresRequestReceiptStore } from './receipts';
 export { PostgresProofRequestReceiptStore } from './proof-receipts';
 export { PostgresTaskAttemptStore } from './task-attempts';
 export { PostgresActivityStore } from './activity';
+export { PostgresApprovalTimelineStore } from './approval-timeline';
 export {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_PRESIGN_TTL_SECONDS,
@@ -91,6 +93,7 @@ export function createPostgresCloudStores(
   const { pool, clock, crypto } = options;
   return {
     activity: new PostgresActivityStore(pool, clock),
+    approvals: new PostgresApprovalTimelineStore(pool, clock),
     devices: new PostgresDeviceDirectory(pool),
     pairingCodes: new PostgresPairingCodeStore(pool, clock),
     nonces: new PostgresNonceStore(pool, clock, crypto),

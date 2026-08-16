@@ -25,6 +25,7 @@ const inMemoryFactory: CloudCompositionFactory = {
       // extra surface the other compositions do not owe.
       stores: {
         activity: stores.activity,
+        approvals: stores.approvals,
         devices: stores.devices,
         pairingCodes: stores.pairingCodes,
         nonces: stores.nonces,

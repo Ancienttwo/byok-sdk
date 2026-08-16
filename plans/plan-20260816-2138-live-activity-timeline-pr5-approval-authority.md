@@ -103,7 +103,7 @@ Cloud must persist approval lifecycle as its own bounded, tenant-scoped read aut
 
 ## P1 — Architecture Map
 
-- Protocol authority: `packages/protocol/src/messages.ts` owns approval payloads; `approvalId` identifies a daemon-generated approval request and must be nonblank when present.
+- Protocol authority: `packages/protocol/src/messages.ts` owns frozen-v1 approval payloads; `approvalId` identifies a daemon-generated approval request. Existing wire field constraints cannot be tightened without protocol v2, so PR5 validates persisted identity at the cloud authority boundary.
 - Producer path: `packages/client/src/daemon/task-runner.ts` generates UUID approval IDs and emits await/resolved envelopes through the existing out-of-band MCP approval seam.
 - Inbound boundary: `packages/cloud/src/inbound.ts` validates and deduplicates daemon envelopes, but currently drops both approval lifecycle messages from durable projection.
 - Storage boundary: `packages/cloud/src/stores/ports.ts` and `packages/cloud/src/tenant-stores.ts` expose tenant-bound ports; in-memory and Postgres implementations must share one conformance contract.
@@ -117,21 +117,21 @@ Cloud must persist approval lifecycle as its own bounded, tenant-scoped read aut
 3. After accepted lifecycle processing, cloud appends one typed approval observation to the tenant-bound approval store. The store assigns a monotonic per-task `revision` under the same atomic row update used for retention.
 4. The bounded tail preserves `sourceEnvelopeId`, host `receivedAt`, native lifecycle fields, `dropped`, `capacity`, and `expiresAt`.
 5. `ByokCloud.readApprovalTimeline(tenant, taskId)` returns the host-only typed tail. It does not fold pending/approved/rejected and does not merge ordering with `ActivityTail`.
-6. Missing optional request `approvalId` remains explicit source data for a future unpaired projection; malformed nonblank-required IDs fail schema validation. Resolution always requires a nonblank ID.
+6. Missing optional request `approvalId` remains explicit source data for a future unpaired projection; empty/blank persisted identities fail at the cloud authority boundary. Frozen wire v1 is unchanged.
 
 ## P3 — Design Decision
 
 - Add a dedicated `ApprovalTimelineStore`, not fields on `ActivityStore`. Its authority is envelope arrival order, represented by a store-assigned monotonic revision; activity ordering remains `(taskId, batchSeq, eventIndex)`.
 - Store typed requested/resolved observations in a bounded JSONB tail per tenant/task. Default retention is capacity 50 and TTL 10 minutes, matching the live-observation product boundary without claiming a durable audit log.
 - Use one Postgres row transaction/lock to allocate revision, enforce capacity, and update dropped/expiry atomically. At 10x load the first pressure point is the per-task hot JSONB row; the port permits later storage replacement without changing the public DTO.
-- Tighten approval IDs to trim-aware nonblank strings at the wire boundary. Do not trim or rewrite values; validation rejects malformed authority.
+- Validate approval IDs as trim-aware nonblank strings at the cloud persistence boundary. Do not trim or rewrite values; frozen wire v1 remains unchanged because in-place constraint tightening requires protocol v2.
 - Fail closed on malformed store input and conflicting task identity. Do not pair, infer, or translate semantic state in cloud.
 
 This plan assumes approval messages continue to pass the existing authenticated/deduplicated inbound gate. If that ceases to hold, persistence must stop at the gate rather than introduce a second authentication or deduplication authority.
 
 ## Scope
 
-- Protocol approval-ID validation and regression coverage.
+- Cloud approval-ID validation and regression coverage; protocol v1 remains byte-for-byte frozen.
 - Public typed approval timeline DTO/store port and exports.
 - In-memory and Postgres bounded-tail implementations plus shared conformance tests.
 - Cloud store composition, tenant facade, inbound lifecycle append, and host-only read method.
@@ -152,15 +152,15 @@ This plan assumes approval messages continue to pass the existing authenticated/
 - `ApprovalTail`: tenant/task identity, ordered retained observations, cursor revision, dropped count, capacity, and expiry.
 - `ApprovalTimelineStore.append/read` at the root store boundary and a tenant-bound facade.
 - `ByokCloud.readApprovalTimeline(tenant, taskId)` as a host control-plane read.
-- Protocol schemas accept an omitted request approval ID for the frozen additive contract, but reject empty/whitespace IDs; resolved approval IDs are required and nonblank.
+- Protocol schemas remain unchanged. Cloud accepts an omitted request approval ID as explicit unpaired source data, but rejects empty/whitespace persisted IDs; resolved persisted IDs are nonblank.
 
 ## Task Breakdown
 
-- [ ] T1: Add protocol nonblank approval-ID validation, focused round-trip/schema tests, and regenerate the frozen golden only if its encoded contract changes.
-- [ ] T2: Define approval timeline DTOs, bounds, validation, store port, exports, tenant facade, and in-memory implementation.
-- [ ] T3: Persist accepted await/resolved envelopes in `handleInboundEnvelope` and expose `readApprovalTimeline`; prove auth/tenant/dedup behavior through the real inbound path.
-- [ ] T4: Add `deploy/sql/0007_approval_timeline.sql`, Postgres implementation, composition, cleanup/expiry integration as required, and shared in-memory/Postgres conformance.
-- [ ] T5: Update `docs/spec.md`, targeted tests, implementation notes, and freeze the implementation subject.
+- [x] T1: Verify frozen-v1 constraints and keep protocol/golden unchanged; put nonblank approval-ID validation at the new cloud persistence boundary.
+- [x] T2: Define approval timeline DTOs, bounds, validation, store port, exports, tenant facade, and in-memory implementation.
+- [x] T3: Persist accepted await/resolved envelopes in `handleInboundEnvelope` and expose `readApprovalTimeline`; prove auth/tenant/dedup behavior through the real inbound path.
+- [x] T4: Add `deploy/sql/0007_approval_timeline.sql`, Postgres implementation, composition, cleanup/expiry integration as required, and shared in-memory/Postgres conformance.
+- [x] T5: Update `docs/spec.md`, targeted tests, implementation notes, and freeze the implementation subject.
 - [ ] T6: Run targeted protocol/cloud/dataplane tests, build, typecheck, full test suite, strict workflow check, contract verification, and one Codex acceptance review; fix only in-scope findings.
 - [ ] T7: Merge the independently usable PR5, archive its workflow artifacts, then capture PR6 for approval UI projection.
 
@@ -169,7 +169,7 @@ This plan assumes approval messages continue to pass the existing authenticated/
 - Await and resolved envelopes accepted by the real inbound gate are readable from the correct tenant/task tail and never leak across tenants.
 - Duplicate envelope delivery appends once; distinct observations receive strictly increasing revisions even under concurrent append.
 - Capacity eviction increments `dropped`; TTL expiry resets the bounded observation window according to the declared contract.
-- Request without approvalId remains faithfully represented and is never paired; empty/whitespace IDs are rejected by protocol validation.
+- Request without approvalId remains faithfully represented and is never paired; empty/whitespace IDs are rejected before cloud persistence.
 - Resolution preserves exact decision, resolver, and native resolved time; cloud does not infer pending/approved/rejected.
 - Activity ordering and approval revision remain distinct; no API claims a cross-stream total order.
 - In-memory and Postgres stores pass one conformance suite, including concurrency, tenant isolation, capacity, and TTL.
@@ -181,7 +181,7 @@ The design is invalid if current wire/runtime evidence provides an authoritative
 
 ## Verification
 
-- Focused protocol message-schema and envelope-roundtrip tests.
+- Frozen protocol freeze-guard plus focused cloud validation tests.
 - Focused cloud inbound, store-conformance, tenant-isolation, and Postgres tests with the repository's existing Postgres fixture.
 - `bun run build`
 - `bun run typecheck`
@@ -206,10 +206,10 @@ Appending approvals into `ActivityTail` was rejected because it would invent a t
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] T1: Add protocol nonblank approval-ID validation, focused round-trip/schema tests, and regenerate the frozen golden only if its encoded contract changes.
-- [ ] T2: Define approval timeline DTOs, bounds, validation, store port, exports, tenant facade, and in-memory implementation.
-- [ ] T3: Persist accepted await/resolved envelopes in `handleInboundEnvelope` and expose `readApprovalTimeline`; prove auth/tenant/dedup behavior through the real inbound path.
-- [ ] T4: Add `deploy/sql/0007_approval_timeline.sql`, Postgres implementation, composition, cleanup/expiry integration as required, and shared in-memory/Postgres conformance.
-- [ ] T5: Update `docs/spec.md`, targeted tests, implementation notes, and freeze the implementation subject.
+- [x] T1: Verify frozen-v1 constraints and keep protocol/golden unchanged; put nonblank approval-ID validation at the new cloud persistence boundary.
+- [x] T2: Define approval timeline DTOs, bounds, validation, store port, exports, tenant facade, and in-memory implementation.
+- [x] T3: Persist accepted await/resolved envelopes in `handleInboundEnvelope` and expose `readApprovalTimeline`; prove auth/tenant/dedup behavior through the real inbound path.
+- [x] T4: Add `deploy/sql/0007_approval_timeline.sql`, Postgres implementation, composition, cleanup/expiry integration as required, and shared in-memory/Postgres conformance.
+- [x] T5: Update `docs/spec.md`, targeted tests, implementation notes, and freeze the implementation subject.
 - [ ] T6: Run targeted protocol/cloud/dataplane tests, build, typecheck, full test suite, strict workflow check, contract verification, and one Codex acceptance review; fix only in-scope findings.
 - [ ] T7: Merge the independently usable PR5, archive its workflow artifacts, then capture PR6 for approval UI projection.

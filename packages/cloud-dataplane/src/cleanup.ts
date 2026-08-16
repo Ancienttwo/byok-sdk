@@ -746,6 +746,10 @@ export class PostgresCloudCleanup {
            DELETE FROM activity_tail
             WHERE tenant_id = $1 AND expires_at <= $4
            RETURNING 1
+         ), approvals AS (
+           DELETE FROM approval_timeline_tail
+            WHERE tenant_id = $1 AND expires_at <= $4
+           RETURNING 1
          ), accounted AS (
            UPDATE storage_usage u
               SET mailbox_bytes = u.mailbox_bytes - released.bytes, updated_at = $4
@@ -762,7 +766,8 @@ export class PostgresCloudCleanup {
                  + (SELECT count(*) FROM pairing_codes)
                  + (SELECT count(*) FROM receipts)
                  + (SELECT count(*) FROM presence)
-                 + (SELECT count(*) FROM activity))::bigint AS ttl_rows_deleted`,
+                 + (SELECT count(*) FROM activity)
+                 + (SELECT count(*) FROM approvals))::bigint AS ttl_rows_deleted`,
         [tenant, ackedBefore, expireBefore, now, receiptBefore],
       );
       const result = swept.rows[0]!;

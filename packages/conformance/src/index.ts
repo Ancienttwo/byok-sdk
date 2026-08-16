@@ -25,6 +25,11 @@ export type {
 } from './cloud/index';
 export { runActivityConformance } from './cloud/activity';
 export type { ActivityCompositionFactory, ActivityCompositionHandle } from './cloud/activity';
+export { runApprovalTimelineConformance } from './cloud/approval-timeline';
+export type {
+  ApprovalTimelineCompositionFactory,
+  ApprovalTimelineCompositionHandle,
+} from './cloud/approval-timeline';
 
 export {
   runPairingSimulatorConformance,

@@ -218,6 +218,7 @@ describe('the public surface', () => {
   it('exports every cloud-local port name', () => {
     expect([...publicApi.CLOUD_STORE_NAMES]).toEqual([
       'activity',
+      'approvals',
       'devices',
       'pairingCodes',
       'nonces',

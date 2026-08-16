@@ -258,13 +258,20 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
                  '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.500Z')`,
         [TENANT],
       );
+      await scope.pool.query(
+        `INSERT INTO approval_timeline_tail
+           (tenant_id, task_id, entries, next_revision, dropped, capacity, expires_at)
+         VALUES ($1, 'task-expired-approval', '[]'::jsonb, 1, 0, 50,
+                 '2026-01-01T00:00:00.500Z')`,
+        [TENANT],
+      );
       clock.set('2026-01-01T00:00:02.000Z');
 
       const result = await cleanup.runTenant(TENANT, 'retention-1');
       expect(result.mailboxDeletedCount).toBe(1n);
       expect(result.mailboxExpiredCount).toBe(1n);
       expect(result.mailboxReleasedBytes).toBe(first.byteSize);
-      expect(result.ttlRowsDeleted).toBe(3n);
+      expect(result.ttlRowsDeleted).toBe(4n);
       expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(second.byteSize);
 
       const dead = await cleanup.listDeadLetters(TENANT, { deviceId: 'device-a' });

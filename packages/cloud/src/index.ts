@@ -108,6 +108,7 @@ export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
 export type {
   TenantBoundActivity,
+  TenantBoundApprovalTimeline,
   TenantBoundBoard,
   CloudRootStores,
   TenantBoundBlobs,
@@ -121,6 +122,24 @@ export type {
   TenantBoundTaskAttempts,
   TenantStores,
 } from './tenant-stores';
+
+export {
+  ApprovalObservationSchema,
+  ApprovalTimelineEventSchema,
+  APPROVAL_SUMMARY_MAX_BYTES,
+  DEFAULT_APPROVAL_TIMELINE_CAPACITY,
+  DEFAULT_APPROVAL_TIMELINE_TTL_MS,
+  approvalTimelineCursor,
+  parseApprovalObservations,
+  validateApprovalTimelineAppend,
+} from './approval-timeline';
+export type {
+  ApprovalObservation,
+  ApprovalTimelineAppendInput,
+  ApprovalTimelineEvent,
+  ApprovalTimelineStore,
+  ApprovalTimelineTail,
+} from './approval-timeline';
 
 export {
   DEFAULT_ACTIVITY_BOUNDS,

@@ -26,16 +26,17 @@ activity streams or leak one tenant's approval summaries to another.
 Add a bounded, tenant-scoped approval timeline authority with typed requested
 and resolved observations, store-assigned monotonic per-task revisions,
 in-memory/Postgres conformance, real inbound persistence, and a host-only
-`readApprovalTimeline` control-plane method. Tighten approval identifiers to
-trim-aware nonblank wire values while preserving the existing optional request
-field. Do not project UI state or claim a cross-stream total order.
+`readApprovalTimeline` control-plane method. Validate persisted approval
+identifiers as trim-aware nonblank values while leaving frozen wire v1
+unchanged. Do not project UI state or claim a cross-stream total order.
 
 ## Scope
 
-- In scope: protocol approval-ID validation; approval DTO and store port;
+- In scope: frozen-protocol verification; cloud approval-ID validation;
+  approval DTO and store port;
   tenant-bound facade; in-memory and Postgres stores; additive SQL table;
   authenticated/deduplicated inbound append; host-only read API; conformance,
-  concurrency, TTL, capacity, tenant-isolation and protocol tests; spec and
+  concurrency, TTL, capacity, tenant-isolation and freeze tests; spec and
   workflow artifacts.
 - Out of scope:
   - `AgentEvent.needs_approval`, UI fold/presentation, approval mutation/control, and any guessed relation between approvalId and toolCallId.
@@ -99,10 +100,11 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 allowed_paths:
   - docs/spec.md
   - deploy/sql/0007_approval_timeline.sql
-  - packages/protocol/src/messages.ts
   - packages/protocol/src/__tests__/
   - packages/cloud/src/
   - packages/cloud-dataplane/src/
+  - packages/conformance/src/cloud/
+  - tests/sql/control_plane_invariants.sql
   - plans/
   - plans/archive/
   - tasks/todos.md
@@ -170,7 +172,7 @@ exit_criteria:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260816-2138-live-activity-timeline-pr5-approval-authority.notes.md
   tests_pass:
-    - path: packages/protocol/src/__tests__/message-schema-changes.test.ts
+    - path: packages/protocol/src/__tests__/freeze-guard.test.ts
     - path: packages/cloud/src/__tests__/approval-timeline-store-conformance.test.ts
     - path: packages/cloud/src/__tests__/inbound-gate.test.ts
   commands_succeed:

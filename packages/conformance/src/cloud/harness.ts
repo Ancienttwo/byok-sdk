@@ -52,6 +52,7 @@ import { runCloudTenantIsolationConformance } from './tenant-isolation';
  */
 export const CLOUD_CONFORMANCE_PORTS = [
   'activity',
+  'approvals',
   'devices',
   'pairingCodes',
   'nonces',
