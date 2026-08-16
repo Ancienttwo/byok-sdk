@@ -87,7 +87,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"sdk-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"activity-store-conformance","kind":"deterministic_test","paths":["packages/cloud/src/activity.ts","packages/cloud/src/stores/in-memory/activity.ts","packages/cloud-dataplane/src/stores/activity.ts","packages/conformance/src/cloud/activity.ts"]},{"id":"postgres-activity-burst","kind":"runtime_readback","paths":["packages/cloud-dataplane/src/__tests__/board-concurrency.test.ts"]}]}
+{"protocol":1,"oracles":[{"id":"sdk-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"verified-runtime-readback","kind":"runtime_readback","paths":["*"]},{"id":"activity-store-conformance","kind":"deterministic_test","paths":["packages/cloud/src/activity.ts","packages/cloud/src/stores/in-memory/activity.ts","packages/cloud-dataplane/src/stores/activity.ts","packages/conformance/src/cloud/activity.ts"]},{"id":"postgres-activity-burst","kind":"runtime_readback","paths":["packages/cloud-dataplane/src/__tests__/board-concurrency.test.ts"]}]}
 ```
 
 ## Acceptance Policy
@@ -126,6 +126,7 @@ allowed_paths:
   - packages/cloud/src/tenant-stores.ts
   - packages/cloud/src/handlers/presence.ts
   - packages/cloud/src/stores/ports.ts
+  - packages/cloud/src/stores/ports-contract.ts
   - packages/cloud/src/stores/in-memory/
   - packages/cloud/src/__tests__/
   - packages/cloud-dataplane/src/stores/core/
@@ -137,6 +138,7 @@ allowed_paths:
   - packages/conformance/src/core/
   - packages/conformance/src/cloud/
   - packages/conformance/src/index.ts
+  - packages/conformance/src/compositions/in-memory-cloud.test.ts
   - packages/client/src/__tests__/fixtures/real-cloud.ts
   - packages/client/src/__tests__/real-cloud-salesko-mcp-e2e.test.ts
 ```
