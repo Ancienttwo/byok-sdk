@@ -103,7 +103,7 @@ allowed_paths:
   - packages/protocol/src/__tests__/
   - packages/cloud/src/
   - packages/cloud-dataplane/src/
-  - packages/conformance/src/cloud/
+  - packages/conformance/src/
   - tests/sql/control_plane_invariants.sql
   - plans/
   - plans/archive/
