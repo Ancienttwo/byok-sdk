@@ -11,5 +11,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- (none)
+- [ ] 2026-08-16T20:52:03+0800 [medium] `package.json` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
