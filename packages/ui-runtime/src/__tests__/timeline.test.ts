@@ -88,6 +88,17 @@ describe('Live Activity Timeline fold', () => {
     ]);
   });
 
+  it('converges when a result is ordered before its matching use', () => {
+    const snapshot = replayTimeline(tail([
+      timelineEvent(0, 0, { type: 'tool_result', tool: 'shell', toolCallId: 'early', output: 'done', isError: false }),
+      timelineEvent(1, 0, { type: 'tool_use', tool: 'shell', toolCallId: 'early', input: 'command' }),
+    ]));
+    expect(snapshot.items).toMatchObject([{
+      kind: 'tool', toolCallId: 'early', state: 'output-available', input: 'command', output: 'done',
+      eventKeys: [{ sourceEnvelopeId: 'env-0', eventIndex: 0 }, { sourceEnvelopeId: 'env-1', eventIndex: 0 }],
+    }]);
+  });
+
   it('keeps missing IDs explicitly unpaired and maps only native error authority', () => {
     const snapshot = replayTimeline(tail([
       timelineEvent(0, 0, { type: 'tool_use', tool: 'custom', input: 'same' }),
@@ -142,6 +153,9 @@ describe('Live Activity Timeline fold', () => {
     expectCode(() => foldTimelineEvent(state, {
       ...base, sourceEnvelopeId: 'bad', batchSeq: 2, event: { type: 'progress' },
     } as unknown as TimelineEvent), 'timeline_input_invalid');
+    expectCode(() => foldTimelineEvent(state, timelineEvent(2, 0, {
+      type: 'tool_use', tool: 'shell', input: new Map([['not', 'wire-json']]),
+    })), 'timeline_input_invalid');
 
     const useState = foldTimelineEvent(createTimelineState('task-1'),
       timelineEvent(0, 0, { type: 'tool_use', tool: 'shell', toolCallId: 'reused' }));

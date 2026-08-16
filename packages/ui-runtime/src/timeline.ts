@@ -76,9 +76,33 @@ function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   return Object.freeze(value);
 }
 
+function assertWireValue(value: unknown, seen = new WeakSet<object>()): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (Number.isFinite(value)) return;
+    fail('timeline_input_invalid', 'Timeline event payload numbers must be finite JSON values.');
+  }
+  if (typeof value !== 'object') {
+    fail('timeline_input_invalid', 'Timeline event payloads must contain JSON-compatible values.');
+  }
+  if (seen.has(value)) fail('timeline_input_invalid', 'Timeline event payloads must not contain cycles.');
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const entry of value) assertWireValue(entry, seen);
+  } else {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      fail('timeline_input_invalid', 'Timeline event payload objects must be plain JSON records.');
+    }
+    for (const entry of Object.values(value as Record<string, unknown>)) assertWireValue(entry, seen);
+  }
+  seen.delete(value);
+}
+
 function parseEvent(value: TimelineEvent): TimelineEvent {
   try {
     const parsed = TimelineEventSchema.parse(value);
+    assertWireValue(parsed);
     return deepFreeze(structuredClone(parsed)) as TimelineEvent;
   } catch (error) {
     fail('timeline_input_invalid', 'Timeline events must satisfy the typed cloud activity authority.', error);
@@ -347,7 +371,9 @@ export function projectTimeline(state: TimelineState): TaskTimelineSnapshot {
 }
 
 export function replayTimeline(tail: ActivityTail): TaskTimelineSnapshot {
-  if (!validTaskId(tail.taskId)) fail('timeline_input_invalid', 'Activity tail taskId is invalid.');
+  if (tail === null || typeof tail !== 'object' || !validTaskId(tail.taskId) || !Array.isArray(tail.entries)) {
+    fail('timeline_input_invalid', 'Activity tail must contain a valid taskId and entries array.');
+  }
   let state = createTimelineState(tail.taskId, {
     dropped: tail.dropped,
     capacity: tail.capacity,
