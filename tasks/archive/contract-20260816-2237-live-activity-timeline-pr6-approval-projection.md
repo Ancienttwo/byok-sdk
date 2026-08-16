@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-16 22:37
+> **Related Plan**: plans/archive/plan-20260816-2212-live-activity-timeline-pr6-approval-projection.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260816-2237
+
 # Task Contract: live-activity-timeline-pr6-approval-projection
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260816-2212-live-activity-timeline-pr6-approval-projection.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict

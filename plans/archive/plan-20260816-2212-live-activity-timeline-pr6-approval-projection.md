@@ -1,6 +1,6 @@
 # Plan: Live Activity Timeline PR6 — Approval UI Projection
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260816-2212
 > **Slug**: live-activity-timeline-pr6-approval-projection
 > **Planning Source**: waza-think
@@ -158,7 +158,7 @@ PR6 projects the persisted approval observation stream into a pure, deterministi
 - [x] T3: Extend the host reference with authorized approval reads, binding validation, authority-preserving redaction, dual-stream ETag/presentation, and tests.
 - [x] T4: Update `docs/spec.md`, implementation notes, and contract evidence without changing protocol, persistence, or approval mutation surfaces.
 - [x] T5: Run targeted UI-runtime/host tests, build, typecheck, full test suite, strict workflow/contract verification, and one Codex acceptance review; fix only in-scope findings.
-- [ ] T6: Merge PR6, archive the workflow, update durable project memory, and close the Live Activity Timeline V1 milestone.
+- [x] T6: Merge PR6, archive the workflow, update durable project memory, and close the Live Activity Timeline V1 milestone.
 
 ## Acceptance Criteria
 
@@ -195,4 +195,4 @@ The design is invalid if the persisted approval tail lacks stable native identit
 - [x] T3: Extend the host reference with authorized approval reads, binding validation, authority-preserving redaction, dual-stream ETag/presentation, and tests.
 - [x] T4: Update `docs/spec.md`, implementation notes, and contract evidence without changing protocol, persistence, or approval mutation surfaces.
 - [x] T5: Run targeted UI-runtime/host tests, build, typecheck, full test suite, strict workflow/contract verification, and one Codex acceptance review; fix only in-scope findings.
-- [ ] T6: Merge PR6, archive the workflow, update durable project memory, and close the Live Activity Timeline V1 milestone.
+- [x] T6: Merge PR6, archive the workflow, update durable project memory, and close the Live Activity Timeline V1 milestone.
