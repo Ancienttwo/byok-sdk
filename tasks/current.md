@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T20:59:23+0800 -->
+<!-- updated_at: 2026-08-16T21:08:40+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Active
-> **Updated At**: 2026-08-16T20:59:23+0800
-> **Source Branch**: codex/live-activity-timeline-pr3-ui-runtime
-> **Source Commit**: d419ad4
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-16T21:08:40+0800
+> **Source Branch**: main
+> **Source Commit**: 7d82bba
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: code-freeze
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Active
-- Active Plan: plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
-- Plan Status: Executing
-- Next Task: Run Deep Waza `$check`, fix every blocking finding, bind exact-target evidence, pass CI, merge, and archive the work package.
-- Clear Note: (none)
+- Status: ManualClearedWithActiveWork
+- Active Plan: (none)
+- Plan Status: (none)
+- Next Task: inspect active worktree marker(s)
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,11 +31,14 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- .: plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
-- .: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime
+- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime: plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
+- /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime
 ## Active Sprint
 
-- Sprint: (none)
+- Sprint: `plans/sprints/20260814-0005-runtime-adapter-lifecycle-contracts.sprint.md`
+- Sprint Status: Done
+- Backlog: 3/3
+- Next Sprint Task: (none)
 ## Workstreams
 
 - (none)
@@ -45,15 +48,25 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Checks
 
-- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
+- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 2 changed/untracked path(s)
+- Summary: 12 changed/untracked path(s)
 
 ```
- M plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
- M tasks/notes/20260816-2045-live-activity-timeline-pr3-ui-runtime.notes.md
+ M docs/architecture/index.md
+ M docs/architecture/requests/root.md
+ D plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
+ D tasks/contracts/20260816-2045-live-activity-timeline-pr3-ui-runtime.contract.md
+ D tasks/notes/20260816-2045-live-activity-timeline-pr3-ui-runtime.notes.md
+ D tasks/reviews/20260816-2045-live-activity-timeline-pr3-ui-runtime.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
+?? tasks/archive/contract-20260816-2108-live-activity-timeline-pr3-ui-runtime.md
+?? tasks/archive/notes-20260816-2108-live-activity-timeline-pr3-ui-runtime.md
+?? tasks/archive/review-20260816-2108-live-activity-timeline-pr3-ui-runtime.md
+?? tasks/archive/todo-20260816-2108-live-activity-timeline-pr3-ui-runtime.md
 ```
 
 ## Source Artifacts
