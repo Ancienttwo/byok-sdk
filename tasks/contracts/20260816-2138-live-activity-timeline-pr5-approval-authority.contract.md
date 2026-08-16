@@ -1,6 +1,6 @@
 # Task Contract: live-activity-timeline-pr5-approval-authority
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260816-2138-live-activity-timeline-pr5-approval-authority.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict

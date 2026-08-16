@@ -161,7 +161,7 @@ This plan assumes approval messages continue to pass the existing authenticated/
 - [x] T3: Persist accepted await/resolved envelopes in `handleInboundEnvelope` and expose `readApprovalTimeline`; prove auth/tenant/dedup behavior through the real inbound path.
 - [x] T4: Add `deploy/sql/0007_approval_timeline.sql`, Postgres implementation, composition, cleanup/expiry integration as required, and shared in-memory/Postgres conformance.
 - [x] T5: Update `docs/spec.md`, targeted tests, implementation notes, and freeze the implementation subject.
-- [ ] T6: Run targeted protocol/cloud/dataplane tests, build, typecheck, full test suite, strict workflow check, contract verification, and one Codex acceptance review; fix only in-scope findings.
+- [x] T6: Run targeted protocol/cloud/dataplane tests, build, typecheck, full test suite, strict workflow check, contract verification, and one Codex acceptance review; fix only in-scope findings.
 - [ ] T7: Merge the independently usable PR5, archive its workflow artifacts, then capture PR6 for approval UI projection.
 
 ## Acceptance Criteria
@@ -211,5 +211,5 @@ Appending approvals into `ActivityTail` was rejected because it would invent a t
 - [x] T3: Persist accepted await/resolved envelopes in `handleInboundEnvelope` and expose `readApprovalTimeline`; prove auth/tenant/dedup behavior through the real inbound path.
 - [x] T4: Add `deploy/sql/0007_approval_timeline.sql`, Postgres implementation, composition, cleanup/expiry integration as required, and shared in-memory/Postgres conformance.
 - [x] T5: Update `docs/spec.md`, targeted tests, implementation notes, and freeze the implementation subject.
-- [ ] T6: Run targeted protocol/cloud/dataplane tests, build, typecheck, full test suite, strict workflow check, contract verification, and one Codex acceptance review; fix only in-scope findings.
+- [x] T6: Run targeted protocol/cloud/dataplane tests, build, typecheck, full test suite, strict workflow check, contract verification, and one Codex acceptance review; fix only in-scope findings.
 - [ ] T7: Merge the independently usable PR5, archive its workflow artifacts, then capture PR6 for approval UI projection.

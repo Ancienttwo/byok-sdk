@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:95d1664e04dfb1f18b7aa73f34624dc2ff4d3ea008955bea12fa0a51614a91df
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 6ed270bf2c9bfd00ee680c1edd23b37f34b68d8a
+> **Verification Evidence SHA256**: sha256:87096c3a43a87163ac9bcdc3df77c01725ff91ac449035bef807f8a908706805
+> **Issued At**: 2026-08-16T14:02:47.180Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Deep review passed: separate tenant-scoped approval authority, bounded input/retention, exact native lifecycle preservation, concurrent revision serialization, frozen-v1 compliance, and no synthetic activity ordering. One revision-drift finding was fixed and regression-tested before acceptance.
 - Findings: none
 
 ## Behavior Diff Notes
