@@ -1,6 +1,6 @@
 # Plan: Live Activity Timeline PR 1 Tool Correlation
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260816-1550
 > **Slug**: live-activity-timeline-pr1-tool-correlation
 > **Planning Source**: codex-plan-or-waza-think

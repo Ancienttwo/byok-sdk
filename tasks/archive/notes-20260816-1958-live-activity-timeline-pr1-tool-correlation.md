@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-16 19:58
+> **Related Plan**: plans/archive/plan-20260816-1550-live-activity-timeline-pr1-tool-correlation.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260816-1958
+
 # Implementation Notes: live-activity-timeline-pr1-tool-correlation
 
 > **Status**: Complete

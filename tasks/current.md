@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T01:08:40+0800 -->
+<!-- updated_at: 2026-08-16T19:58:09+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-16T01:08:40+0800
-> **Source Branch**: codex/long-poll-capability-negotiation
-> **Source Commit**: 06f1576
+> **Updated At**: 2026-08-16T19:58:09+0800
+> **Source Branch**: main
+> **Source Commit**: c4f52a7
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -34,13 +34,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Active Sprint
 
-- Sprint: (none)
+- Sprint: `plans/sprints/20260814-0005-runtime-adapter-lifecycle-contracts.sprint.md`
+- Sprint Status: Done
+- Backlog: 3/3
+- Next Sprint Task: (none)
 ## Workstreams
 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Run required repo gates, release graph, frozen pack/install smoke, and fresh pre-landing review.
+- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
 
 ## Checks
 
@@ -51,16 +54,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260816-0037-v0-4-1-release.md
- D tasks/contracts/20260816-0037-v0-4-1-release.contract.md
- D tasks/notes/20260816-0037-v0-4-1-release.notes.md
- D tasks/reviews/20260816-0037-v0-4-1-release.review.md
+ D plans/plan-20260816-1550-live-activity-timeline-pr1-tool-correlation.md
+ D tasks/contracts/20260816-1550-live-activity-timeline-pr1-tool-correlation.contract.md
+ D tasks/notes/20260816-1550-live-activity-timeline-pr1-tool-correlation.notes.md
+ D tasks/reviews/20260816-1550-live-activity-timeline-pr1-tool-correlation.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260816-0037-v0-4-1-release.md
-?? tasks/archive/contract-20260816-0108-v0-4-1-release.md
-?? tasks/archive/notes-20260816-0108-v0-4-1-release.md
-?? tasks/archive/review-20260816-0108-v0-4-1-release.md
-?? tasks/archive/todo-20260816-0108-v0-4-1-release.md
+?? plans/archive/plan-20260816-1550-live-activity-timeline-pr1-tool-correlation.md
+?? tasks/archive/contract-20260816-1958-live-activity-timeline-pr1-tool-correlation.md
+?? tasks/archive/notes-20260816-1958-live-activity-timeline-pr1-tool-correlation.md
+?? tasks/archive/review-20260816-1958-live-activity-timeline-pr1-tool-correlation.md
+?? tasks/archive/todo-20260816-1958-live-activity-timeline-pr1-tool-correlation.md
 ```
 
 ## Source Artifacts
