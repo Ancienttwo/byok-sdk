@@ -204,7 +204,7 @@ The package is additive and owns no data. Before release, rollback is removal of
 - [x] Define immutable timeline state, item/gap/tool DTOs, typed failures, and metadata projection without React/network/persistence dependencies.
 - [x] Implement shared replay/incremental folding with schema validation, stable identity/order, idempotence, and fail-closed collision handling.
 - [x] Implement tool correlation, three-state outcomes, text fragments, unknown/unsupported placeholders, and gap/loss/TTL projection.
-- [ ] Add exhaustive reducer, package-boundary, release-graph, and isolated-pack tests; update product status documentation.
+- [x] Add exhaustive reducer, package-boundary, release-graph, and isolated-pack tests; update product status documentation.
 - [ ] Run Deep Waza `$check`, fix every blocking finding, bind exact-target evidence, pass CI, merge, and archive the work package.
 
 ## Annotations
@@ -215,5 +215,5 @@ The package is additive and owns no data. Before release, rollback is removal of
 - [x] Define immutable timeline state, item/gap/tool DTOs, typed failures, and metadata projection without React/network/persistence dependencies.
 - [x] Implement shared replay/incremental folding with schema validation, stable identity/order, idempotence, and fail-closed collision handling.
 - [x] Implement tool correlation, three-state outcomes, text fragments, unknown/unsupported placeholders, and gap/loss/TTL projection.
-- [ ] Add exhaustive reducer, package-boundary, release-graph, and isolated-pack tests; update product status documentation.
+- [x] Add exhaustive reducer, package-boundary, release-graph, and isolated-pack tests; update product status documentation.
 - [ ] Run Deep Waza `$check`, fix every blocking finding, bind exact-target evidence, pass CI, merge, and archive the work package.

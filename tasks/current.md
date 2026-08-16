@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T20:57:04+0800 -->
+<!-- updated_at: 2026-08-16T20:59:23+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Active
-> **Updated At**: 2026-08-16T20:57:04+0800
+> **Updated At**: 2026-08-16T20:59:23+0800
 > **Source Branch**: codex/live-activity-timeline-pr3-ui-runtime
-> **Source Commit**: 39d96a7
+> **Source Commit**: d419ad4
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: implementation
+> **Reason**: code-freeze
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -20,7 +20,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Status: Active
 - Active Plan: plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
 - Plan Status: Executing
-- Next Task: Add exhaustive reducer, package-boundary, release-graph, and isolated-pack tests; update product status documentation.
+- Next Task: Run Deep Waza `$check`, fix every blocking finding, bind exact-target evidence, pass CI, merge, and archive the work package.
 - Clear Note: (none)
 
 ## Mainline Snapshot Reading
@@ -49,23 +49,11 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 14 changed/untracked path(s)
+- Summary: 2 changed/untracked path(s)
 
 ```
- M README.md
- M bun.lock
- M docs/spec.md
- M packages/sdk/package.json
- M packages/sdk/src/index.test.ts
- M packages/sdk/src/index.ts
  M plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
- M scripts/release/check-package-graph.mjs
- M scripts/release/pack-and-smoke.mjs
- M scripts/release/registry-readback.mjs
- M tasks/contracts/20260816-2045-live-activity-timeline-pr3-ui-runtime.contract.md
- M tasks/current.md
  M tasks/notes/20260816-2045-live-activity-timeline-pr3-ui-runtime.notes.md
-?? packages/ui-runtime/
 ```
 
 ## Source Artifacts

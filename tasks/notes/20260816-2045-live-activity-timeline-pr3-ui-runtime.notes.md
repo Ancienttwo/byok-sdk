@@ -20,6 +20,10 @@
   explicit timeline items.
 - Unknown events expose only identity/type classification. Their opaque payload
   is not projected into the view model.
+- Deep review found and closed two fail-open edges: a future protocol variant
+  newly classified as known now becomes an unsupported-known placeholder
+  instead of disappearing, and opaque values must be finite, acyclic JSON data
+  before entering immutable state.
 
 ## Deviations From Plan Or Spec
 
@@ -41,8 +45,10 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Targeted reducer/constraint tests: 8/8 pass.
+- Targeted reducer/constraint tests: 9/9 pass.
 - Release graph: 8 dispatch manifests / 7 umbrella namespaces pass.
+- Isolated package smoke: 9 packages install at one 0.4.2 version set and
+  `@byok-sdk/ui-runtime` imports successfully from its packed tarball.
 
 ## Promotion Filter
 
