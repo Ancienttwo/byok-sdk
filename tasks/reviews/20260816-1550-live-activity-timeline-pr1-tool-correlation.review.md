@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:860a308144e5254b7cc0c769a8b22962302bae6222be5aacd5e9ecca19a6c495
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 0d99be9d4690e0d1bbed7ca78cbca069b65084f4
+> **Verification Evidence SHA256**: sha256:128223d088c072e51f7d5676b9a6129853ed91e59ed817b2873c0c3424c1eb10
+> **Issued At**: 2026-08-16T11:52:11.978Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Deep Waza check passed after both blocking findings were fixed; no remaining product findings.
 - Findings: none
 
 ## Behavior Diff Notes
