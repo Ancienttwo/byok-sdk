@@ -55,8 +55,26 @@ function parseObservation(value: ApprovalObservation): ApprovalObservation {
   }
 }
 
-function structurallyEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function structurallyEqual(left: unknown, right: unknown, seen = new WeakMap<object, object>()): boolean {
+  if (Object.is(left, right)) return true;
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const prior = seen.get(left);
+  if (prior !== undefined) return prior === right;
+  seen.set(left, right);
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length
+      && left.every((entry, index) => structurallyEqual(entry, right[index], seen));
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord).sort();
+  const rightKeys = Object.keys(rightRecord).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every(
+      (key, index) => key === rightKeys[index]
+        && structurallyEqual(leftRecord[key], rightRecord[key], seen),
+    );
 }
 
 function freezeItem(item: ApprovalProjectionItem): ApprovalProjectionItem {
@@ -229,7 +247,23 @@ export function foldApprovalTail(
   if (tail.cursor !== revisions.at(-1)) {
     fail('approval_input_invalid', 'Approval tail cursor must equal its last retained revision.');
   }
-  let next = withApprovalProjectionMetadata(state, {
+  const stateCursor = state.observations.at(-1)?.revision;
+  if (stateCursor !== undefined && (tail.cursor === undefined || tail.cursor < stateCursor)) {
+    fail('approval_input_invalid', 'Approval tail cursor must not move behind incremental state.');
+  }
+  for (const observation of tail.entries) {
+    const sameIdentity = state.observations.find(
+      ({ sourceEnvelopeId }) => sourceEnvelopeId === observation.sourceEnvelopeId,
+    );
+    if (sameIdentity !== undefined && !structurallyEqual(sameIdentity, observation)) {
+      fail('approval_identity_collision', 'Approval source identity changed across tail snapshots.');
+    }
+    const sameRevision = state.observations.find(({ revision }) => revision === observation.revision);
+    if (sameRevision !== undefined && sameRevision.sourceEnvelopeId !== observation.sourceEnvelopeId) {
+      fail('approval_revision_collision', 'Approval revision changed source identity across tail snapshots.');
+    }
+  }
+  let next = createApprovalProjectionState(state.taskId, {
     dropped: tail.dropped,
     capacity: tail.capacity,
     expiresAt: tail.expiresAt,

@@ -134,6 +134,28 @@ describe('approval timeline projection', () => {
     expectCode(() => projectApprovalTimeline(conflictingResolution), 'approval_authority_collision');
   });
 
+  it('replaces evicted tail entries and rejects a stale tail cursor', () => {
+    const first = tail([
+      observation(1, { type: 'approval_requested', approvalId: 'old', summary: 'Old' }),
+      observation(2, { type: 'approval_requested', approvalId: 'kept', summary: 'Kept' }),
+    ]);
+    let state = foldApprovalTail(createApprovalProjectionState('task-1'), first);
+    const advanced: ApprovalTimelineTail = {
+      ...tail([
+        observation(2, { type: 'approval_requested', approvalId: 'kept', summary: 'Kept' }),
+        observation(3, { type: 'approval_requested', approvalId: 'new', summary: 'New' }),
+      ]),
+      dropped: 4,
+    };
+    state = foldApprovalTail(state, advanced);
+    expect(projectApprovalTimeline(state)).toMatchObject({
+      dropped: 4,
+      cursor: 3,
+      items: [{ approvalId: 'kept' }, { approvalId: 'new' }],
+    });
+    expectCode(() => foldApprovalTail(state, first), 'approval_input_invalid');
+  });
+
   it('rejects malformed tail metadata and observations instead of repairing authority', () => {
     expectCode(() => replayApprovalTimeline({ ...tail([]), dropped: -1 }), 'approval_input_invalid');
     expectCode(() => replayApprovalTimeline({ ...tail([]), cursor: 0 }), 'approval_input_invalid');
