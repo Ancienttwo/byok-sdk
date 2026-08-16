@@ -72,6 +72,12 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
 - Completion gate: run `verify-sprint --prepare-acceptance`, record one typed AcceptanceReceipt under the frozen policy below, then run `verify-sprint`; review Markdown is projection only.
 
+## Change Assessment
+
+```json
+{"protocol":1,"oracles":[{"id":"sdk-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"pi-0841-installed-rpc-probe","kind":"runtime_readback","paths":["packages/client/src/__tests__/fixtures/pi-rpc-0.84.1-live-probe.mjs","packages/client/src/__tests__/pi-rpc-packaging-probe.test.ts","packages/client/src/adapters/pi/events.ts"]}]}
+```
+
 ## Acceptance Policy
 
 ```json
