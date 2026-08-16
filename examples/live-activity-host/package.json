@@ -1,0 +1,28 @@
+{
+  "name": "@byok-sdk/example-live-activity-host",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Private reference BFF for authorized and redacted BYOK live activity timelines",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@byok-sdk/cloud": "workspace:*",
+    "@byok-sdk/ui-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.10"
+  }
+}

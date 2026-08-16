@@ -134,7 +134,9 @@ The staged implementation has three authorities. Protocol events carry
 observations, the typed activity tail is the one bounded read model, and the
 host BFF is the browser security boundary. Protocol tool correlation, the
 typed activity projection, and the React-free UI fold are implemented; host
-integration remains staged work described below.
+integration is demonstrated by the private `examples/live-activity-host`
+reference BFF described below. It is composition guidance, not a public SDK
+auth or transport contract.
 
 ### Tool observation contract
 
@@ -194,6 +196,15 @@ feature. A consuming host BFF resolves the SaaS user and tenant, calls the host
 control-plane read port, applies content and secret redaction, then serves its
 own browser API or stream. Raw tool input and output never gain browser authority
 from possession of a device credential.
+
+The private reference host composes that path as a Fetch handler. Browser input
+names only a task; injected host authentication and authorization resolve the
+tenant, `readActivity()` reads inside that binding, mandatory redaction runs
+before the UI fold, and a host presentation callback receives only the
+sanitized snapshot. It uses representation-revision-aware conditional GET over
+the bounded cursor. Authentication, authorization, and the tenant-scoped read
+all happen before a 304 response. The reference does not define a SaaS identity
+provider, public browser route, SSE lifecycle, or `ThreadMessageLike` contract.
 
 At 10x activity volume, the first expected pressure is whole-row JSONB tail
 updates, per-task hot-row contention, and host polling—not the bounded O(events)
