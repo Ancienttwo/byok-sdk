@@ -9,7 +9,17 @@
 
 ## Design Decisions
 
-- ...
+- `@byok-sdk/cloud` remains the typed tail/schema authority and
+  `@byok-sdk/protocol` remains the known/unknown event authority. The UI
+  runtime imports both rather than copying DTOs or discriminants.
+- Public state is immutable and stores one validated, ordered event set. Items
+  and gaps are pure projections, so overlap and out-of-order incremental input
+  converge without a second mutable correlation authority.
+- Tool items stay at their earliest contributing event and pair only by native
+  `toolCallId`. Missing IDs and unsupported approval observations remain
+  explicit timeline items.
+- Unknown events expose only identity/type classification. Their opaque payload
+  is not projected into the view model.
 
 ## Deviations From Plan Or Spec
 
@@ -19,7 +29,9 @@
 
 | Option | Decision | Reason |
 |--------|----------|--------|
-| ... | ... | ... |
+| Reducer inside `@byok-sdk/cloud` | Rejected | Storage/host ownership would absorb a separately consumable UI view-model boundary. |
+| Incrementally mutate derived item maps | Rejected | The bounded tail makes deterministic reprojection simpler and makes out-of-order convergence structural. |
+| Import cloud/protocol authorities | Adopted | Avoids duplicate schemas and keeps direct dependencies inside the BYOK release train. |
 
 ## Open Questions
 
@@ -29,6 +41,8 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
+- Targeted reducer/constraint tests: 8/8 pass.
+- Release graph: 8 dispatch manifests / 7 umbrella namespaces pass.
 
 ## Promotion Filter
 

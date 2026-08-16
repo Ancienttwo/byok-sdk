@@ -10,6 +10,7 @@ describe('byok-sdk umbrella', () => {
       'core',
       'protocol',
       'server',
+      'uiRuntime',
     ]);
     expect('keys' in sdk).toBe(false);
   });

@@ -110,6 +110,7 @@ allowed_paths:
   - packages/ui-runtime/
   - packages/sdk/package.json
   - packages/sdk/src/index.ts
+  - packages/sdk/src/index.test.ts
   - scripts/release/check-package-graph.mjs
   - scripts/release/pack-and-smoke.mjs
   - scripts/release/registry-readback.mjs

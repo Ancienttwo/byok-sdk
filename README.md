@@ -22,13 +22,13 @@ npm install byok-sdk
 ```
 
 ```ts
-import { client, cloud, cloudDataplane, core, protocol, server } from 'byok-sdk';
+import { client, cloud, cloudDataplane, core, protocol, server, uiRuntime } from 'byok-sdk';
 ```
 
 The umbrella uses namespaces so each contract keeps its package owner. The
 same modules are also directly installable as `@byok-sdk/client`,
 `@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`,
-`@byok-sdk/core`, and `@byok-sdk/protocol`.
+`@byok-sdk/core`, `@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`.
 
 ## Choose a composition
 
@@ -41,6 +41,9 @@ same modules are also directly installable as `@byok-sdk/client`,
   The same data plane also hosts on Cloudflare Workers via Hyperdrive through
   the `@byok-sdk/cloud-dataplane/runtime` subpath — see
   [`@byok-sdk/cloud-dataplane`'s deployment compositions](packages/cloud-dataplane#deployment-compositions).
+- Timeline projection: use `uiRuntime` to fold a typed cloud activity tail into
+  a deterministic, React-free Live Activity Timeline view model. Browser auth,
+  redaction, transport, and presentation remain host responsibilities.
 
 Both profiles share the frozen v1 protocol, tenant isolation, durable device
 proof, truth CAS, explicit capabilities, and fail-closed policy handling.

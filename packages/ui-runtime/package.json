@@ -1,13 +1,13 @@
 {
-  "name": "byok-sdk",
+  "name": "@byok-sdk/ui-runtime",
   "version": "0.4.2",
-  "description": "Bring-your-own-agent SDK for local daemons, self-hosted coordination, and hosted multi-tenant BYOK infrastructure",
+  "description": "React-free deterministic Live Activity Timeline projection for BYOK task activity",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ancienttwo/byok-sdk.git",
-    "directory": "packages/sdk"
+    "directory": "packages/ui-runtime"
   },
   "bugs": {
     "url": "https://github.com/Ancienttwo/byok-sdk/issues"
@@ -44,12 +44,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@byok-sdk/client": "workspace:*",
     "@byok-sdk/cloud": "workspace:*",
-    "@byok-sdk/cloud-dataplane": "workspace:*",
-    "@byok-sdk/core": "workspace:*",
-    "@byok-sdk/protocol": "workspace:*",
-    "@byok-sdk/server": "workspace:*",
-    "@byok-sdk/ui-runtime": "workspace:*"
+    "@byok-sdk/protocol": "workspace:*"
   }
 }
