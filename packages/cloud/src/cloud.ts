@@ -30,6 +30,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
+import type { ApprovalTimelineTail } from './approval-timeline';
 import {
   BYOK_ACTIVITY_PATH,
   BYOK_BLOB_CONTENT_ROUTE,
@@ -252,6 +253,10 @@ export interface ByokCloud {
   acceptBoardItem(tenant: TenantId, itemId: string): Promise<BoardItem>;
   listPresence(tenant: TenantId): Promise<readonly PresenceHint[]>;
   readActivity(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
+  readApprovalTimeline(
+    tenant: TenantId,
+    taskId: string,
+  ): Promise<ApprovalTimelineTail | undefined>;
 }
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
@@ -590,6 +595,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     readActivity(tenant, taskId) {
       return tenantStoresFor(controlPlane(tenant), root).activity.read(taskId);
+    },
+
+    readApprovalTimeline(tenant, taskId) {
+      return tenantStoresFor(controlPlane(tenant), root).approvals.read(taskId);
     },
   };
 }

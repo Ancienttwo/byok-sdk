@@ -39,6 +39,7 @@ export {
   PostgresRequestReceiptStore,
   PostgresTaskAttemptStore,
   PostgresActivityStore,
+  PostgresApprovalTimelineStore,
   createPostgresCloudStores,
 } from './stores/index';
 export type {

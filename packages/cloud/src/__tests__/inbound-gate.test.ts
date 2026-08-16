@@ -132,6 +132,79 @@ describe('the inbound gate', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.ownerDeviceId).toBe(deviceId);
   });
 
+  it('persists approval lifecycle after the real ownership and dedup gate', async () => {
+    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, {
+      payload: offerPayload(),
+    });
+    const requested = createEnvelope(
+      'task.await_approval',
+      { summary: 'Allow write', approvalId: 'approval-1' },
+      { taskId },
+    );
+    const resolved = createEnvelope(
+      'task.approval_resolved',
+      {
+        approvalId: 'approval-1',
+        decision: 'approve',
+        resolvedBy: 'local',
+        at: '2026-08-16T12:00:00.000Z',
+      },
+      { taskId },
+    );
+
+    expect(await handleInboundEnvelope(stores, deviceId, requested)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, requested)).toBe('duplicate');
+    expect(await handleInboundEnvelope(stores, deviceId, resolved)).toBe('accepted');
+
+    const tail = await harness.cloud.readApprovalTimeline(TENANT_A, taskId);
+    expect(tail?.entries.map((entry) => entry.event)).toEqual([
+      { type: 'approval_requested', summary: 'Allow write', approvalId: 'approval-1' },
+      {
+        type: 'approval_resolved',
+        approvalId: 'approval-1',
+        decision: 'approve',
+        resolvedBy: 'local',
+        at: '2026-08-16T12:00:00.000Z',
+      },
+    ]);
+    expect(tail?.entries.map((entry) => entry.revision)).toEqual([1, 2]);
+    expect(await harness.cloud.readApprovalTimeline(TENANT_B, taskId)).toBeUndefined();
+  });
+
+  it('preserves a legacy request without approvalId as explicitly unpaired source data', async () => {
+    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, {
+      payload: offerPayload(),
+    });
+    const requested = createEnvelope(
+      'task.await_approval',
+      { summary: 'Legacy request' },
+      { taskId },
+    );
+    expect(await handleInboundEnvelope(stores, deviceId, requested)).toBe('accepted');
+    expect((await harness.cloud.readApprovalTimeline(TENANT_A, taskId))?.entries[0]?.event).toEqual({
+      type: 'approval_requested',
+      summary: 'Legacy request',
+    });
+  });
+
+  it('rejects blank approval identity before recording the envelope in dedup', async () => {
+    const malformed = createEnvelope(
+      'task.approval_resolved',
+      {
+        approvalId: '   ',
+        decision: 'approve',
+        resolvedBy: 'local',
+        at: '2026-08-16T12:00:00.000Z',
+      },
+      { taskId: 'task-invalid-approval' },
+    );
+    expect(await handleInboundEnvelope(stores, deviceId, malformed)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, malformed)).toBe('rejected');
+    expect(
+      await harness.cloud.readApprovalTimeline(TENANT_A, 'task-invalid-approval'),
+    ).toBeUndefined();
+  });
+
   it('step 3: dedup is per device — the same id from another device is not a duplicate', async () => {
     const other = await harness.pairDevice(TENANT_A);
     const otherStores = tenantStoresFor(devicePrincipal(TENANT_A, other.deviceId), {

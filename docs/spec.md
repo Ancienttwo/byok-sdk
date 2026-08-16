@@ -160,8 +160,31 @@ pairs by FIFO, tool name, payload content, or time proximity.
 
 Approval does not reuse tool-call identity. The existing `approvalId` on
 `task.await_approval` and `task.approval_resolved` remains the sole approval
-authority. Approval projection is a later slice after cloud retains both
-lifecycle messages.
+authority. Cloud retains both lifecycle messages in a separate bounded
+`ApprovalTimelineTail`; approval UI projection remains a later slice.
+
+### Bounded approval lifecycle authority
+
+Approval observations do not enter `ActivityTail` and do not reinterpret
+`AgentEvent.needs_approval`. The protocol has no monotonic order key shared by
+`task.progress`, `task.await_approval`, and `task.approval_resolved`, so cloud
+must not fabricate a cross-stream total order. Instead, the approval store
+assigns a monotonic per-task `revision` in arrival order and preserves the
+source envelope ID, host receive time, request summary and optional native
+`approvalId`, or the exact resolution decision, resolver and resolution time.
+
+`readApprovalTimeline()` is a host control-plane read returning a bounded,
+lossy tail with `dropped`, `capacity`, `expiresAt`, and its revision cursor. It
+is observation authority, not a durable audit log and not an approval action
+surface. `CloudStores` therefore gains one required `approvals` port in the
+coordinated SDK release; there is no optional no-op store or dual authority. A
+request from an older peer with no `approvalId` remains explicit
+unpaired source data. Frozen wire v1 still parses its existing string field,
+but the cloud persistence authority rejects empty or whitespace-only IDs.
+Cloud does not infer `pending`, `approved`, or `rejected`, pair by adjacency, or
+associate an approval with a tool call. Those presentation states belong to a
+separate pure-fold slice. Persisted request summaries are capped at 16 KiB of
+UTF-8 data so the count-bounded JSONB tail is also byte-bounded in practice.
 
 ### Typed bounded activity authority
 

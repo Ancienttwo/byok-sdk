@@ -1,10 +1,16 @@
+> **Archived**: 2026-08-16 21:33
+> **Related Plan**: plans/archive/plan-20260816-2112-live-activity-timeline-pr4-host-integration.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260816-2133
+
 # Implementation Notes: live-activity-timeline-pr4-host-integration
 
 > **Status**: Active
 > **Plan**: plans/plan-20260816-2112-live-activity-timeline-pr4-host-integration.md
 > **Contract**: tasks/contracts/20260816-2112-live-activity-timeline-pr4-host-integration.contract.md
 > **Review**: tasks/reviews/20260816-2112-live-activity-timeline-pr4-host-integration.review.md
-> **Last Updated**: 2026-08-16 21:19
+> **Last Updated**: 2026-08-16 21:32
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -40,6 +46,7 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
+- Delivery: PR #75 merged to `main` as `2b15d45e739a2d5b396c8d503f80289d96453d12` after 42/42 GitHub checks passed.
 
 ## Promotion Filter
 

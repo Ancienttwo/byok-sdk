@@ -48,6 +48,10 @@ import {
 } from '@byok-sdk/core';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type {
+  ApprovalTimelineAppendInput,
+  ApprovalTimelineTail,
+} from './approval-timeline';
+import type {
   BlobObservation,
   CloudStores,
   DeviceRecord,
@@ -82,6 +86,11 @@ export interface TenantBoundPresence {
 export interface TenantBoundActivity {
   append(input: ActivityAppendInput): Promise<ActivityTail>;
   read(taskId: string): Promise<ActivityTail | undefined>;
+}
+
+export interface TenantBoundApprovalTimeline {
+  append(input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
+  read(taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 
 export interface TenantBoundDevices {
@@ -133,6 +142,7 @@ export interface TenantStores {
   readonly board: TenantBoundBoard;
   readonly presence: TenantBoundPresence;
   readonly activity: TenantBoundActivity;
+  readonly approvals: TenantBoundApprovalTimeline;
   readonly devices: TenantBoundDevices;
   readonly tasks: TenantBoundTaskAttempts;
   readonly dedup: TenantBoundDedup;
@@ -177,6 +187,10 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     activity: {
       append: (input) => cloud.activity.append(tenant, input),
       read: (taskId) => cloud.activity.read(tenant, taskId),
+    },
+    approvals: {
+      append: (input) => cloud.approvals.append(tenant, input),
+      read: (taskId) => cloud.approvals.read(tenant, taskId),
     },
     devices: {
       get: (deviceId) => cloud.devices.get(tenant, deviceId),

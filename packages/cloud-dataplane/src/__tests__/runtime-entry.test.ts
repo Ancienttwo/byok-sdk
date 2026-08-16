@@ -58,6 +58,7 @@ const ONLINE_EXPORTS = [
   'R2ObjectMaintenanceStore',
   // core stores
   'PostgresActivityStore',
+  'PostgresApprovalTimelineStore',
   'PostgresBoardStore',
   'PostgresMailboxStore',
   'PostgresObjectStore',

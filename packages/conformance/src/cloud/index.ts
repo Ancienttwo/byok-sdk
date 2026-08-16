@@ -14,3 +14,8 @@ export type {
 } from './harness';
 export { runActivityConformance } from './activity';
 export type { ActivityCompositionFactory, ActivityCompositionHandle } from './activity';
+export { runApprovalTimelineConformance } from './approval-timeline';
+export type {
+  ApprovalTimelineCompositionFactory,
+  ApprovalTimelineCompositionHandle,
+} from './approval-timeline';

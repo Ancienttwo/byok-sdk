@@ -38,6 +38,10 @@ import {
   DEFAULT_ACTIVITY_BOUNDS,
   type ActivityBounds,
 } from './coordination';
+import {
+  validateApprovalTimelineAppend,
+  type ApprovalTimelineAppendInput,
+} from './approval-timeline';
 import { isCloudError } from './errors';
 import { projectTerminalToReview } from './board-projection';
 import type { TenantStores } from './tenant-stores';
@@ -90,6 +94,16 @@ export async function handleInboundEnvelope(
     }
   }
 
+  const approvalInput = approvalTimelineAppendInput(taskId, envelope);
+  if (approvalInput !== undefined) {
+    try {
+      validateApprovalTimelineAppend(approvalInput);
+    } catch (caught) {
+      if (isCloudError(caught, 'coordination_input_invalid')) return 'rejected';
+      throw caught;
+    }
+  }
+
   if (await stores.dedup.checkAndRecord(deviceId, envelope.id)) return 'duplicate';
 
   await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds);
@@ -98,10 +112,10 @@ export async function handleInboundEnvelope(
 
 /**
  * The lifecycle half. Deliberately thin: S3a records ownership, the coarse
- * attempt status, and the terminal receipt. Progress/artifact/approval traffic
- * is accepted and carried, but the durable record of what a task *produced*
- * belongs to the truth and board planes (S5/S6) and to S3b's journal — not to
- * a map in this package.
+ * attempt status, the terminal receipt, and bounded activity/approval
+ * observations. Artifacts are accepted and carried, but the durable record of
+ * what a task *produced* belongs to the truth and board planes (S5/S6) and to
+ * S3b's journal — not to a map in this package.
  */
 async function applyLifecycle(
   stores: TenantStores,
@@ -135,6 +149,12 @@ async function applyLifecycle(
         );
       }
       return;
+    case 'task.await_approval':
+      await stores.approvals.append(approvalTimelineAppendInput(taskId, envelope)!);
+      return;
+    case 'task.approval_resolved':
+      await stores.approvals.append(approvalTimelineAppendInput(taskId, envelope)!);
+      return;
     case 'task.complete':
       await recordTerminal(stores, taskId, envelope, 'complete');
       return;
@@ -146,6 +166,40 @@ async function applyLifecycle(
       return;
     default:
       return;
+  }
+}
+
+function approvalTimelineAppendInput(
+  taskId: string,
+  envelope: Envelope,
+): ApprovalTimelineAppendInput | undefined {
+  switch (envelope.type) {
+    case 'task.await_approval':
+      return {
+        taskId,
+        sourceEnvelopeId: envelope.id,
+        event: {
+          type: 'approval_requested',
+          summary: envelope.payload.summary,
+          ...(envelope.payload.approvalId === undefined
+            ? {}
+            : { approvalId: envelope.payload.approvalId }),
+        },
+      };
+    case 'task.approval_resolved':
+      return {
+        taskId,
+        sourceEnvelopeId: envelope.id,
+        event: {
+          type: 'approval_resolved',
+          approvalId: envelope.payload.approvalId,
+          decision: envelope.payload.decision,
+          resolvedBy: envelope.payload.resolvedBy,
+          at: envelope.payload.at,
+        },
+      };
+    default:
+      return undefined;
   }
 }
 

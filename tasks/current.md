@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T21:08:40+0800 -->
+<!-- updated_at: 2026-08-16T21:33:05+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-16T21:08:40+0800
+> **Updated At**: 2026-08-16T21:33:05+0800
 > **Source Branch**: main
-> **Source Commit**: 7d82bba
+> **Source Commit**: 3b8af3d
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -35,10 +35,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-live-activity-timeline-pr3-ui-runtime
 ## Active Sprint
 
-- Sprint: `plans/sprints/20260814-0005-runtime-adapter-lifecycle-contracts.sprint.md`
-- Sprint Status: Done
-- Backlog: 3/3
-- Next Sprint Task: (none)
+- Sprint: (none)
 ## Workstreams
 
 - (none)
@@ -52,21 +49,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 12 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
- M docs/architecture/index.md
- M docs/architecture/requests/root.md
- D plans/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
- D tasks/contracts/20260816-2045-live-activity-timeline-pr3-ui-runtime.contract.md
- D tasks/notes/20260816-2045-live-activity-timeline-pr3-ui-runtime.notes.md
- D tasks/reviews/20260816-2045-live-activity-timeline-pr3-ui-runtime.review.md
+ D plans/plan-20260816-2112-live-activity-timeline-pr4-host-integration.md
+ D tasks/contracts/20260816-2112-live-activity-timeline-pr4-host-integration.contract.md
+ D tasks/notes/20260816-2112-live-activity-timeline-pr4-host-integration.notes.md
+ D tasks/reviews/20260816-2112-live-activity-timeline-pr4-host-integration.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260816-2045-live-activity-timeline-pr3-ui-runtime.md
-?? tasks/archive/contract-20260816-2108-live-activity-timeline-pr3-ui-runtime.md
-?? tasks/archive/notes-20260816-2108-live-activity-timeline-pr3-ui-runtime.md
-?? tasks/archive/review-20260816-2108-live-activity-timeline-pr3-ui-runtime.md
-?? tasks/archive/todo-20260816-2108-live-activity-timeline-pr3-ui-runtime.md
+?? plans/archive/plan-20260816-2112-live-activity-timeline-pr4-host-integration.md
+?? tasks/archive/contract-20260816-2133-live-activity-timeline-pr4-host-integration.md
+?? tasks/archive/notes-20260816-2133-live-activity-timeline-pr4-host-integration.md
+?? tasks/archive/review-20260816-2133-live-activity-timeline-pr4-host-integration.md
+?? tasks/archive/todo-20260816-2133-live-activity-timeline-pr4-host-integration.md
 ```
 
 ## Source Artifacts

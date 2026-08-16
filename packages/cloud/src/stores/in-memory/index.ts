@@ -19,6 +19,7 @@ import { InMemoryRequestReceiptStore } from './receipts';
 import { InMemoryProofRequestReceiptStore } from './proof-receipts';
 import { InMemoryTaskAttemptStore } from './task-attempts';
 import { InMemoryActivityStore } from './activity';
+import { InMemoryApprovalTimelineStore } from './approval-timeline';
 
 export { AllowAllRateLimiter } from './rate-limiter';
 export {
@@ -36,6 +37,7 @@ export { InMemoryRequestReceiptStore } from './receipts';
 export { InMemoryProofRequestReceiptStore } from './proof-receipts';
 export { InMemoryTaskAttemptStore } from './task-attempts';
 export { InMemoryActivityStore } from './activity';
+export { InMemoryApprovalTimelineStore } from './approval-timeline';
 
 /**
  * The port bundle plus the byte proxy, in the shape `createInMemoryCoreStores`
@@ -60,6 +62,7 @@ export function createInMemoryCloudStores(
   return {
     stores: {
       activity: new InMemoryActivityStore(clock),
+      approvals: new InMemoryApprovalTimelineStore(clock),
       devices: new InMemoryDeviceDirectory(),
       pairingCodes: new InMemoryPairingCodeStore(clock),
       nonces: new InMemoryNonceStore(clock, crypto),

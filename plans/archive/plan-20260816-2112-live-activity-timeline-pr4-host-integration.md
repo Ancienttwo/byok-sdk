@@ -1,6 +1,6 @@
 # Plan: Live Activity Timeline PR4 — host/BFF reference integration
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260816-2112
 > **Slug**: live-activity-timeline-pr4-host-integration
 > **Planning Source**: waza-think
@@ -184,7 +184,7 @@ The example is private and owns no durable data. Rollback is removal of the exam
 - [x] Add the private Fetch-based host/BFF reference package with injected authenticate, authorize, read, redact, and present authorities.
 - [x] Enforce tenant derivation, redaction invariants, generic failure responses, and representation-revision-aware conditional polling.
 - [x] Add security-path, redaction, projection, cursor/ETag, and failure-containment tests plus runnable composition documentation.
-- [ ] Update product implementation status, run targeted/full/contract verification, record semantic acceptance, and ship the isolated PR.
+- [x] Update product implementation status, run targeted/full/contract verification, record semantic acceptance, and ship the isolated PR.
 
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
@@ -193,4 +193,4 @@ The example is private and owns no durable data. Rollback is removal of the exam
 - [x] Add the private Fetch-based host/BFF reference package with injected authenticate, authorize, read, redact, and present authorities.
 - [x] Enforce tenant derivation, redaction invariants, generic failure responses, and representation-revision-aware conditional polling.
 - [x] Add security-path, redaction, projection, cursor/ETag, and failure-containment tests plus runnable composition documentation.
-- [ ] Update product implementation status, run targeted/full/contract verification, record semantic acceptance, and ship the isolated PR.
+- [x] Update product implementation status, run targeted/full/contract verification, record semantic acceptance, and ship the isolated PR.

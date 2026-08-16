@@ -8,6 +8,7 @@
 --   deploy/sql/0004_device_proof_truth.sql (proof key columns + replay authority table)
 --   deploy/sql/0005_skill_packs.sql   (the two skill-pack tables: manifest + files)
 --   deploy/sql/0006_device_presence_toolsets.sql (nullable logical-toolset inventory column)
+--   deploy/sql/0007_approval_timeline.sql (bounded approval lifecycle tail)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -47,7 +48,9 @@
 --
 -- Without this block the two below pass trivially against an empty schema, and
 -- a green result would mean "nothing was checked" rather than "nothing is
--- wrong". 24 is 0001's seven plus 0002's eleven plus 0003's three plus 0004's one plus 0005's two; a later migration may only
+-- wrong". 25 is 0001's seven plus 0002's eleven plus 0003's three plus
+-- 0004's one plus 0005's two plus 0007's one; migrations that only alter an
+-- existing table do not add to the count. A later migration may only
 -- raise it.
 DO $$
 DECLARE
@@ -60,9 +63,9 @@ BEGIN
      AND t.relkind = 'r'
      AND t.relname <> 'byok_schema_migration';
 
-  IF port_tables < 24 THEN
+  IF port_tables < 25 THEN
     RAISE EXCEPTION
-      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 24 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql)',
+      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 25 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql)',
       current_database(), current_schema(), port_tables;
   END IF;
 END $$;
