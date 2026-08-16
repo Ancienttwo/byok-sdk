@@ -120,11 +120,12 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     expect(events).toEqual([
       { type: 'error', message: 'Exceeded skills context budget of 2%. All skill descriptions were removed and 54 additional skills were not included in the model-visible skills list.' },
       { type: 'progress', text: 'Running the command now.' },
-      { type: 'tool_use', tool: 'command_execution', input: { command: '/bin/sh -c "echo hi"' } },
+      { type: 'tool_use', tool: 'command_execution', input: { command: '/bin/sh -c "echo hi"' }, toolCallId: 'item_2' },
       {
         type: 'tool_result',
         tool: 'command_execution',
         output: { command: '/bin/sh -c "echo hi"', aggregatedOutput: 'hi\n', exitCode: 0, status: 'completed' },
+        toolCallId: 'item_2',
       },
       { type: 'progress', text: 'Done.' },
       // Pre-freeze protocol addition: turn.completed.usage now maps to a
@@ -349,7 +350,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     }
 
     expect(events.some((e) => e.type === 'turn_end')).toBe(false);
-    expect(events).toContainEqual({ type: 'tool_use', tool: 'command_execution', input: { command: '/bin/sh -c "long-running-thing"' } });
+    expect(events).toContainEqual({ type: 'tool_use', tool: 'command_execution', input: { command: '/bin/sh -c "long-running-thing"' }, toolCallId: 'item_1' });
     const lastEvent = events[events.length - 1] as { type: string; message?: string };
     expect(lastEvent.type).toBe('error');
     expect(lastEvent.message).toMatch(/exited without completing the turn/);

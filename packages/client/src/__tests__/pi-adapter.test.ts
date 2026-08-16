@@ -82,11 +82,11 @@ describe('PiAdapter against the fake-pi fixture', () => {
 
     const events = await takeEvents(session, 5);
     expect(events).toEqual([
-      { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' } },
+      { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' }, toolCallId: 'call_1' },
       {
         type: 'tool_result',
         tool: 'bash',
-        output: { result: { content: [{ type: 'text', text: 'hi\n' }] }, isError: false },
+        output: { result: { content: [{ type: 'text', text: 'hi\n' }] } }, toolCallId: 'call_1', isError: false,
       },
       { type: 'progress', text: 'Hello ' },
       { type: 'progress', text: 'world' },
@@ -202,17 +202,17 @@ describe('PiAdapter against the fake-pi fixture', () => {
 
     const events = await takeEvents(session, 7);
     expect(events).toEqual([
-      { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' } },
+      { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' }, toolCallId: 'call_1' },
       {
         type: 'tool_result',
         tool: 'bash',
-        output: { result: { content: [{ type: 'text', text: 'hi\n' }] }, isError: false },
+        output: { result: { content: [{ type: 'text', text: 'hi\n' }] } }, toolCallId: 'call_1', isError: false,
       },
-      { type: 'tool_use', tool: 'write', input: { path: artifactName, content: `<${size} bytes written by fake-pi>` } },
+      { type: 'tool_use', tool: 'write', input: { path: artifactName, content: `<${size} bytes written by fake-pi>` }, toolCallId: 'call_artifact' },
       {
         type: 'tool_result',
         tool: 'write',
-        output: { result: { content: [{ type: 'text', text: `Successfully wrote ${size} bytes to ${artifactName}` }] }, isError: false },
+        output: { result: { content: [{ type: 'text', text: `Successfully wrote ${size} bytes to ${artifactName}` }] } }, toolCallId: 'call_artifact', isError: false,
       },
       { type: 'artifact', name: artifactName, contentType: 'application/octet-stream' },
       { type: 'progress', text: 'Hello ' },
@@ -231,11 +231,11 @@ describe('PiAdapter against the fake-pi fixture', () => {
 
     const events = await takeEvents(session, 2);
     expect(events).toEqual([
-      { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' } },
+      { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' }, toolCallId: 'call_1' },
       {
         type: 'tool_result',
         tool: 'bash',
-        output: { result: { content: [{ type: 'text', text: 'hi\n' }] }, isError: false },
+        output: { result: { content: [{ type: 'text', text: 'hi\n' }] } }, toolCallId: 'call_1', isError: false,
       },
     ]);
 

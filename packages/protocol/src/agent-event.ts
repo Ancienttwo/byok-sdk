@@ -7,8 +7,19 @@ import { z } from 'zod';
  */
 export const AgentEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('progress'), text: z.string() }),
-  z.object({ type: z.literal('tool_use'), tool: z.string(), input: z.unknown().optional() }),
-  z.object({ type: z.literal('tool_result'), tool: z.string(), output: z.unknown().optional() }),
+  z.object({
+    type: z.literal('tool_use'),
+    tool: z.string(),
+    input: z.unknown().optional(),
+    toolCallId: z.string().regex(/\S/, 'toolCallId must contain a non-whitespace character').optional(),
+  }),
+  z.object({
+    type: z.literal('tool_result'),
+    tool: z.string(),
+    output: z.unknown().optional(),
+    toolCallId: z.string().regex(/\S/, 'toolCallId must contain a non-whitespace character').optional(),
+    isError: z.boolean().optional(),
+  }),
   z.object({ type: z.literal('artifact'), name: z.string(), contentType: z.string() }),
   z.object({ type: z.literal('needs_approval'), summary: z.string() }),
   z.object({ type: z.literal('turn_end') }),

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
+import { RuntimeExecutionFailure } from '../../runtime-failure';
 import type { CodexRawEvent } from './process-runner';
 
 /**
@@ -140,6 +141,16 @@ function toNonNegativeInt(value: unknown): number | undefined {
 
 type ItemPhase = 'started' | 'completed';
 
+function requireToolCallId(item: Record<string, unknown>): string {
+  if (typeof item.id === 'string' && item.id.trim().length > 0) return item.id;
+  throw new RuntimeExecutionFailure({
+    phase: 'run',
+    category: 'authority',
+    retry: 'non-retryable',
+    reason: 'codex tool item had no authoritative tool call id',
+  });
+}
+
 function mapItem(rawItem: unknown, phase: ItemPhase, workspaceDir: string): AgentEvent[] {
   if (!rawItem || typeof rawItem !== 'object') return [];
   const item = rawItem as Record<string, unknown>;
@@ -159,9 +170,10 @@ function mapItem(rawItem: unknown, phase: ItemPhase, workspaceDir: string): Agen
     }
 
     case 'command_execution': {
+      const toolCallId = requireToolCallId(item);
       const command = typeof item.command === 'string' ? item.command : undefined;
       if (phase === 'started') {
-        return command !== undefined ? [{ type: 'tool_use', tool: 'command_execution', input: { command } }] : [];
+        return command !== undefined ? [{ type: 'tool_use', tool: 'command_execution', input: { command }, toolCallId }] : [];
       }
       return [
         {
@@ -173,17 +185,19 @@ function mapItem(rawItem: unknown, phase: ItemPhase, workspaceDir: string): Agen
             exitCode: item.exit_code,
             status: item.status,
           },
+          toolCallId,
         },
       ];
     }
 
     case 'file_change': {
+      const toolCallId = requireToolCallId(item);
       const changes = Array.isArray(item.changes) ? item.changes : [];
       if (phase === 'started') {
-        return [{ type: 'tool_use', tool: 'file_change', input: { changes } }];
+        return [{ type: 'tool_use', tool: 'file_change', input: { changes }, toolCallId }];
       }
       return [
-        { type: 'tool_result', tool: 'file_change', output: { changes, status: item.status } },
+        { type: 'tool_result', tool: 'file_change', output: { changes, status: item.status }, toolCallId },
         ...extractArtifactEvents(changes, workspaceDir),
       ];
     }

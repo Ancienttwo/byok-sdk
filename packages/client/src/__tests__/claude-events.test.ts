@@ -46,7 +46,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
       message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }] },
     };
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
-    expect(result.events).toEqual([{ type: 'tool_use', tool: 'Bash', input: { command: 'ls' } }]);
+    expect(result.events).toEqual([{ type: 'tool_use', tool: 'Bash', input: { command: 'ls' }, toolCallId: 'toolu_1' }]);
     expect(correlation.toolNameByUseId.get('toolu_1')).toBe('Bash');
   });
 
@@ -71,10 +71,10 @@ describe('mapClaudeMessageToAgentEvents', () => {
     correlation.toolNameByUseId.set('toolu_1', 'Bash');
     const msg: ClaudeStreamMessage = {
       type: 'user',
-      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'hi\n' }] },
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'hi\n', is_error: false }] },
     };
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
-    expect(result.events).toEqual([{ type: 'tool_result', tool: 'Bash', output: { content: 'hi\n', isError: false } }]);
+    expect(result.events).toEqual([{ type: 'tool_result', tool: 'Bash', output: { content: 'hi\n' }, toolCallId: 'toolu_1', isError: false }]);
   });
 
   it('maps a denied tool_result (is_error:true) faithfully — the real headless auto-deny shape', () => {
@@ -98,19 +98,52 @@ describe('mapClaudeMessageToAgentEvents', () => {
       {
         type: 'tool_result',
         tool: 'Write',
-        output: { content: "Claude requested permissions to write to /x/out.txt, but you haven't granted it yet.", isError: true },
+        output: { content: "Claude requested permissions to write to /x/out.txt, but you haven't granted it yet." },
+        toolCallId: 'toolu_1',
+        isError: true,
       },
     ]);
   });
 
-  it('falls back to "unknown" (never drops the event) when a tool_result has no matching tool_use correlation', () => {
+  it('keeps a valid but locally unpaired native ID without deriving a tool match', () => {
     const correlation = createToolUseCorrelation();
     const msg: ClaudeStreamMessage = {
       type: 'user',
       message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_never_seen', content: 'x' }] },
     };
     const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir: '/tmp/ws' });
-    expect(result.events).toEqual([{ type: 'tool_result', tool: 'unknown', output: { content: 'x', isError: false } }]);
+    expect(result.events).toEqual([{ type: 'tool_result', tool: 'unknown', output: { content: 'x' }, toolCallId: 'toolu_never_seen' }]);
+  });
+
+  it('keeps same-name concurrent tool calls distinct by their native IDs', () => {
+    const correlation = createToolUseCorrelation();
+    const uses = mapClaudeMessageToAgentEvents({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'toolu_a', name: 'Bash', input: { command: 'one' } },
+          { type: 'tool_use', id: 'toolu_b', name: 'Bash', input: { command: 'two' } },
+        ],
+      },
+    }, correlation, { workspaceDir: '/tmp/ws' });
+    expect(uses.events.map((event) => event.type === 'tool_use' ? event.toolCallId : undefined)).toEqual(['toolu_a', 'toolu_b']);
+
+    const result = mapClaudeMessageToAgentEvents({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_b', content: 'two', is_error: false }] },
+    }, correlation, { workspaceDir: '/tmp/ws' });
+    expect(result.events).toEqual([{ type: 'tool_result', tool: 'Bash', output: { content: 'two' }, toolCallId: 'toolu_b', isError: false }]);
+  });
+
+  it.each([
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: '', name: 'Bash' }] } },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: '  ', name: 'Bash' }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 42, content: 'x' }] } },
+  ] satisfies ClaudeStreamMessage[])('fails closed when a bundled tool frame has no valid native ID: %j', (msg) => {
+    const result = mapClaudeMessageToAgentEvents(msg, createToolUseCorrelation(), { workspaceDir: '/tmp/ws' });
+    expect(result.events).toEqual([]);
+    expect(result.terminalFailure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(result.terminalFailure).toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
   });
 
   it('flags a non-tool_result user content block as unmapped', () => {
@@ -319,12 +352,12 @@ describe('mapClaudeMessageToAgentEvents', () => {
       const filePath = path.join(workspaceDir, 'out.txt');
       const msg: ClaudeStreamMessage = {
         type: 'user',
-        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: `File created successfully at: ${filePath}` }] },
+        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: `File created successfully at: ${filePath}`, is_error: false }] },
         tool_use_result: { type: 'create', filePath, content: 'hi', structuredPatch: [], originalFile: null, userModified: false },
       };
       const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir });
       expect(result.events).toEqual([
-        { type: 'tool_result', tool: 'Write', output: { content: `File created successfully at: ${filePath}`, isError: false } },
+        { type: 'tool_result', tool: 'Write', output: { content: `File created successfully at: ${filePath}` }, toolCallId: 'toolu_1', isError: false },
         { type: 'artifact', name: 'out.txt', contentType: 'text/plain' },
       ]);
     });
@@ -337,12 +370,12 @@ describe('mapClaudeMessageToAgentEvents', () => {
       const filePath = path.join(outsideDir, 'plan.md');
       const msg: ClaudeStreamMessage = {
         type: 'user',
-        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: `File created successfully at: ${filePath}` }] },
+        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: `File created successfully at: ${filePath}`, is_error: false }] },
         tool_use_result: { type: 'create', filePath, content: 'plan', structuredPatch: [], originalFile: null, userModified: false },
       };
       const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir });
       expect(result.events).toEqual([
-        { type: 'tool_result', tool: 'Write', output: { content: `File created successfully at: ${filePath}`, isError: false } },
+        { type: 'tool_result', tool: 'Write', output: { content: `File created successfully at: ${filePath}` }, toolCallId: 'toolu_1', isError: false },
       ]);
     });
 
@@ -369,9 +402,11 @@ describe('mapClaudeMessageToAgentEvents', () => {
       const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir });
       expect(result.events).toEqual([
         {
-          type: 'tool_result',
-          tool: 'Write',
-          output: { content: `Claude requested permissions to write to ${filePath}, but you haven't granted it yet.`, isError: true },
+        type: 'tool_result',
+        tool: 'Write',
+        output: { content: `Claude requested permissions to write to ${filePath}, but you haven't granted it yet.` },
+        toolCallId: 'toolu_1',
+        isError: true,
         },
       ]);
     });
@@ -383,7 +418,7 @@ describe('mapClaudeMessageToAgentEvents', () => {
       const filePath = path.join(workspaceDir, 'data.bin');
       const msg: ClaudeStreamMessage = {
         type: 'user',
-        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] },
+        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok', is_error: false }] },
         tool_use_result: { type: 'create', filePath, content: '', structuredPatch: [], originalFile: null, userModified: false },
       };
       const result = mapClaudeMessageToAgentEvents(msg, correlation, { workspaceDir });
@@ -399,6 +434,6 @@ describe('mapClaudeMessageToAgentEvents', () => {
 describe('fixture path', () => {
   it('fake-claude.mjs exists', async () => {
     const fixturePath = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
-    await expect(fs.access(fixturePath)).resolves.toBeUndefined();
+    await fs.access(fixturePath);
   });
 });

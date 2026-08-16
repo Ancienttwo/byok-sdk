@@ -427,7 +427,15 @@ async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
           }
           return;
         }
-        const mapped = mapCodexEventToAgentEvents(evt, params.workspaceDir);
+        let mapped: AgentEvent[];
+        try {
+          mapped = mapCodexEventToAgentEvents(evt, params.workspaceDir);
+        } catch (cause) {
+          if (!isRuntimeExecutionFailure(cause)) throw cause;
+          params.terminal.failure = cause;
+          params.queue.end();
+          return;
+        }
         for (const agentEvent of mapped) {
           if (agentEvent.type === 'turn_end') turnEnded = true;
           params.queue.push(agentEvent);

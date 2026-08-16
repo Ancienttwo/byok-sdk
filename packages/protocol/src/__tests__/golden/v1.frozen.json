@@ -857,7 +857,11 @@
                       "tool": {
                         "type": "string"
                       },
-                      "input": {}
+                      "input": {},
+                      "toolCallId": {
+                        "type": "string",
+                        "pattern": "\\S"
+                      }
                     },
                     "required": [
                       "type",
@@ -875,7 +879,14 @@
                       "tool": {
                         "type": "string"
                       },
-                      "output": {}
+                      "output": {},
+                      "toolCallId": {
+                        "type": "string",
+                        "pattern": "\\S"
+                      },
+                      "isError": {
+                        "type": "boolean"
+                      }
                     },
                     "required": [
                       "type",
@@ -2394,7 +2405,11 @@
                             "tool": {
                               "type": "string"
                             },
-                            "input": {}
+                            "input": {},
+                            "toolCallId": {
+                              "type": "string",
+                              "pattern": "\\S"
+                            }
                           },
                           "required": [
                             "type",
@@ -2412,7 +2427,14 @@
                             "tool": {
                               "type": "string"
                             },
-                            "output": {}
+                            "output": {},
+                            "toolCallId": {
+                              "type": "string",
+                              "pattern": "\\S"
+                            },
+                            "isError": {
+                              "type": "boolean"
+                            }
                           },
                           "required": [
                             "type",
@@ -3034,7 +3056,11 @@
           "tool": {
             "type": "string"
           },
-          "input": {}
+          "input": {},
+          "toolCallId": {
+            "type": "string",
+            "pattern": "\\S"
+          }
         },
         "required": [
           "type",
@@ -3052,7 +3078,14 @@
           "tool": {
             "type": "string"
           },
-          "output": {}
+          "output": {},
+          "toolCallId": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "isError": {
+            "type": "boolean"
+          }
         },
         "required": [
           "type",
@@ -3200,7 +3233,11 @@
               "tool": {
                 "type": "string"
               },
-              "input": {}
+              "input": {},
+              "toolCallId": {
+                "type": "string",
+                "pattern": "\\S"
+              }
             },
             "required": [
               "type",
@@ -3218,7 +3255,14 @@
               "tool": {
                 "type": "string"
               },
-              "output": {}
+              "output": {},
+              "toolCallId": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "isError": {
+                "type": "boolean"
+              }
             },
             "required": [
               "type",
@@ -4798,7 +4842,11 @@
                                     "tool": {
                                       "type": "string"
                                     },
-                                    "input": {}
+                                    "input": {},
+                                    "toolCallId": {
+                                      "type": "string",
+                                      "pattern": "\\S"
+                                    }
                                   },
                                   "required": [
                                     "type",
@@ -4816,7 +4864,14 @@
                                     "tool": {
                                       "type": "string"
                                     },
-                                    "output": {}
+                                    "output": {},
+                                    "toolCallId": {
+                                      "type": "string",
+                                      "pattern": "\\S"
+                                    },
+                                    "isError": {
+                                      "type": "boolean"
+                                    }
                                   },
                                   "required": [
                                     "type",
@@ -6636,7 +6691,11 @@
                                     "tool": {
                                       "type": "string"
                                     },
-                                    "input": {}
+                                    "input": {},
+                                    "toolCallId": {
+                                      "type": "string",
+                                      "pattern": "\\S"
+                                    }
                                   },
                                   "required": [
                                     "type",
@@ -6654,7 +6713,14 @@
                                     "tool": {
                                       "type": "string"
                                     },
-                                    "output": {}
+                                    "output": {},
+                                    "toolCallId": {
+                                      "type": "string",
+                                      "pattern": "\\S"
+                                    },
+                                    "isError": {
+                                      "type": "boolean"
+                                    }
                                   },
                                   "required": [
                                     "type",

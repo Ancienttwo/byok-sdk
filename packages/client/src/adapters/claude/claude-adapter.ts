@@ -556,8 +556,9 @@ class ClaudeSession implements Session {
               const buffered = pending.shift();
               if (buffered) return { value: buffered, done: false };
 
+              if (terminalFailure) throw terminalFailure;
+
               if (turnSettled) {
-                if (terminalFailure) throw terminalFailure;
                 return { value: undefined as never, done: true };
               }
 

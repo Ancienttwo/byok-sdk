@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
@@ -84,6 +84,7 @@ import {
  */
 
 const goldenDir = fileURLToPath(new URL('./golden/', import.meta.url));
+const frozenGoldenPath = `${goldenDir}v1.frozen.json`;
 
 // ---------------------------------------------------------------------------
 // Part 1 — schema fingerprint snapshot
@@ -238,13 +239,23 @@ function buildFrozenSnapshot() {
   };
 }
 
+/**
+ * Regenerate only after reviewing a failing freeze diff and proving it is
+ * additive. This mirrors the repository's other deliberate golden-update
+ * gates and keeps the writer beside the fingerprint authority:
+ * `BYOK_PROTOCOL_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/protocol test -- freeze-guard.test.ts`.
+ */
+if (process.env['BYOK_PROTOCOL_UPDATE_GOLDEN'] === '1') {
+  writeFileSync(frozenGoldenPath, `${JSON.stringify(buildFrozenSnapshot(), null, 2)}\n`, 'utf8');
+}
+
 const FREEZE_DIFF_MESSAGE =
   'v1 frozen schema fingerprint drifted from golden/v1.frozen.json. If this diff is purely additive (a new optional field, a new message type, a new AgentEvent variant, a new capability flag), regenerate the golden and say so — with justification — in the commit message. If it changes, removes, or retypes anything that already existed, that is a breaking change and needs a PROTOCOL_VERSION bump instead, per docs/protocol.md "Freeze rule" — do not just regenerate the golden to make this pass.';
 
 describe('freeze guard: v1 schema fingerprint snapshot', () => {
   it('matches the committed golden/v1.frozen.json exactly', () => {
     const fresh = buildFrozenSnapshot();
-    const golden = JSON.parse(readFileSync(`${goldenDir}v1.frozen.json`, 'utf8'));
+    const golden = JSON.parse(readFileSync(frozenGoldenPath, 'utf8'));
     expect(fresh, FREEZE_DIFF_MESSAGE).toEqual(golden);
   });
 

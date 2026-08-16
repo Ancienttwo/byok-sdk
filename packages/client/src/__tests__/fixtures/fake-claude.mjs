@@ -413,7 +413,7 @@ function runProbeOrTurnFlow() {
       mcpResultText = mcpResult?.content?.[0]?.text ?? JSON.stringify(mcpResult);
       send({
         type: 'user',
-        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: mcpResultText }] },
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: mcpResultText, is_error: false }] },
         tool_use_result: mcpResult,
         session_id: reportedSessionId,
       });
@@ -437,7 +437,7 @@ function runProbeOrTurnFlow() {
         writeFileSync(resolved, process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body');
         send({
           type: 'user',
-          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: `File created successfully at: ${resolved}` }] },
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: `File created successfully at: ${resolved}`, is_error: false }] },
           tool_use_result: { type: 'create', filePath: resolved, content: process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body', structuredPatch: [], originalFile: null, userModified: false },
           session_id: reportedSessionId,
         });
@@ -459,7 +459,7 @@ function runProbeOrTurnFlow() {
       } else {
         send({
           type: 'user',
-          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'hi\n' }] },
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'hi\n', is_error: false }] },
           tool_use_result: { stdout: 'hi\n', stderr: '', interrupted: false, isImage: false },
           session_id: reportedSessionId,
         });
