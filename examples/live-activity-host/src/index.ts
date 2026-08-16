@@ -1,11 +1,21 @@
 import {
+  ApprovalObservationSchema,
   isTenantId,
   TimelineEventSchema,
   type ActivityTail,
+  type ApprovalObservation,
+  type ApprovalTimelineTail,
   type TenantId,
   type TimelineEvent,
 } from '@byok-sdk/cloud';
-import { replayTimeline, type TaskTimelineSnapshot } from '@byok-sdk/ui-runtime';
+import {
+  createApprovalProjectionState,
+  projectApprovalTimeline,
+  replayApprovalTimeline,
+  replayTimeline,
+  type TaskApprovalSnapshot,
+  type TaskTimelineSnapshot,
+} from '@byok-sdk/ui-runtime';
 
 export const LIVE_ACTIVITY_ROUTE_PREFIX = '/api/tasks/';
 export const LIVE_ACTIVITY_ROUTE_SUFFIX = '/activity';
@@ -14,6 +24,7 @@ export const LIVE_ACTIVITY_HOST_ERROR_CODES = [
   'configuration_invalid',
   'authorization_binding_invalid',
   'activity_binding_invalid',
+  'approval_binding_invalid',
   'redaction_invalid',
 ] as const;
 
@@ -47,6 +58,11 @@ export interface LiveActivityPresentationContext<User> {
   readonly etag: string;
 }
 
+export interface LiveActivitySnapshots {
+  readonly activity: TaskTimelineSnapshot;
+  readonly approvals: TaskApprovalSnapshot;
+}
+
 export interface LiveActivityHostOptions<User, Representation> {
   readonly representationRevision: string;
   readonly authenticate: (request: Request) => User | undefined | Promise<User | undefined>;
@@ -58,12 +74,20 @@ export interface LiveActivityHostOptions<User, Representation> {
     tenantId: TenantId,
     taskId: string,
   ) => ActivityTail | undefined | Promise<ActivityTail | undefined>;
+  readonly readApprovals: (
+    tenantId: TenantId,
+    taskId: string,
+  ) => ApprovalTimelineTail | undefined | Promise<ApprovalTimelineTail | undefined>;
   readonly redact: (
     event: TimelineEvent,
     context: LiveActivityRedactionContext<User>,
   ) => TimelineEvent | Promise<TimelineEvent>;
+  readonly redactApproval: (
+    observation: ApprovalObservation,
+    context: LiveActivityRedactionContext<User>,
+  ) => ApprovalObservation | Promise<ApprovalObservation>;
   readonly present: (
-    snapshot: TaskTimelineSnapshot,
+    snapshots: LiveActivitySnapshots,
     context: LiveActivityPresentationContext<User>,
   ) => Representation | Promise<Representation>;
 }
@@ -169,14 +193,96 @@ export async function redactActivityTail<User>(
   return { ...tail, entries: Object.freeze(entries) };
 }
 
-async function timelineEtag(tail: ActivityTail, representationRevision: string): Promise<string> {
+function assertApprovalRedactionPreservesAuthority(
+  original: ApprovalObservation,
+  redacted: ApprovalObservation,
+): void {
+  const stableObservation = original.taskId === redacted.taskId
+    && original.sourceEnvelopeId === redacted.sourceEnvelopeId
+    && original.revision === redacted.revision
+    && original.receivedAt === redacted.receivedAt
+    && original.event.type === redacted.event.type;
+  if (!stableObservation) {
+    throw new LiveActivityHostError(
+      'redaction_invalid',
+      'Approval redaction must preserve task, source identity, revision, timestamp, and event type.',
+    );
+  }
+  if (
+    original.event.type === 'approval_requested'
+    && redacted.event.type === 'approval_requested'
+    && original.event.approvalId !== redacted.event.approvalId
+  ) {
+    throw new LiveActivityHostError(
+      'redaction_invalid',
+      'Approval redaction must preserve native request identity.',
+    );
+  }
+  if (
+    original.event.type === 'approval_resolved'
+    && redacted.event.type === 'approval_resolved'
+    && (
+      original.event.approvalId !== redacted.event.approvalId
+      || original.event.decision !== redacted.event.decision
+      || original.event.resolvedBy !== redacted.event.resolvedBy
+      || original.event.at !== redacted.event.at
+    )
+  ) {
+    throw new LiveActivityHostError(
+      'redaction_invalid',
+      'Approval redaction must preserve native resolution authority.',
+    );
+  }
+}
+
+export async function redactApprovalTail<User>(
+  tail: ApprovalTimelineTail,
+  user: User,
+  redact: LiveActivityHostOptions<User, unknown>['redactApproval'],
+): Promise<ApprovalTimelineTail> {
+  const entries: ApprovalObservation[] = [];
+  for (const value of tail.entries) {
+    const original = ApprovalObservationSchema.parse(value) as ApprovalObservation;
+    let redacted: ApprovalObservation;
+    try {
+      redacted = ApprovalObservationSchema.parse(
+        await redact(original, { user, tenantId: tail.tenantId, taskId: tail.taskId }),
+      ) as ApprovalObservation;
+    } catch (error) {
+      if (error instanceof LiveActivityHostError) throw error;
+      throw new LiveActivityHostError(
+        'redaction_invalid',
+        'Approval redactor returned an invalid observation.',
+        { cause: error },
+      );
+    }
+    assertApprovalRedactionPreservesAuthority(original, redacted);
+    entries.push(redacted);
+  }
+  return { ...tail, entries: Object.freeze(entries) };
+}
+
+async function timelineEtag(
+  tail: ActivityTail,
+  approvals: ApprovalTimelineTail | undefined,
+  representationRevision: string,
+): Promise<string> {
   const payload = JSON.stringify({
     representationRevision,
-    taskId: tail.taskId,
-    cursor: tail.cursor ?? null,
-    dropped: tail.dropped,
-    capacity: tail.capacity,
-    expiresAt: tail.expiresAt,
+    activity: {
+      taskId: tail.taskId,
+      cursor: tail.cursor ?? null,
+      dropped: tail.dropped,
+      capacity: tail.capacity,
+      expiresAt: tail.expiresAt,
+    },
+    approvals: approvals === undefined ? null : {
+      taskId: approvals.taskId,
+      cursor: approvals.cursor ?? null,
+      dropped: approvals.dropped,
+      capacity: approvals.capacity,
+      expiresAt: approvals.expiresAt,
+    },
   });
   const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload)));
   const hex = [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -225,7 +331,10 @@ export function createLiveActivityHost<User, Representation>(
           );
         }
 
-        const tail = await options.readActivity(authorized.tenantId, authorized.taskId);
+        const [tail, approvals] = await Promise.all([
+          options.readActivity(authorized.tenantId, authorized.taskId),
+          options.readApprovals(authorized.tenantId, authorized.taskId),
+        ]);
         if (tail === undefined) return jsonResponse(404, { error: 'not_found' });
         if (tail.tenantId !== authorized.tenantId || tail.taskId !== authorized.taskId) {
           throw new LiveActivityHostError(
@@ -233,8 +342,17 @@ export function createLiveActivityHost<User, Representation>(
             'Activity read returned a tail outside the authorized tenant/task binding.',
           );
         }
+        if (
+          approvals !== undefined
+          && (approvals.tenantId !== authorized.tenantId || approvals.taskId !== authorized.taskId)
+        ) {
+          throw new LiveActivityHostError(
+            'approval_binding_invalid',
+            'Approval read returned a tail outside the authorized tenant/task binding.',
+          );
+        }
 
-        const etag = await timelineEtag(tail, options.representationRevision);
+        const etag = await timelineEtag(tail, approvals, options.representationRevision);
         const responseHeaders = new Headers({
           'cache-control': 'private, no-cache',
           etag,
@@ -245,8 +363,16 @@ export function createLiveActivityHost<User, Representation>(
         }
 
         const sanitizedTail = await redactActivityTail(tail, user, options.redact);
-        const snapshot = replayTimeline(sanitizedTail);
-        const representation = await options.present(snapshot, {
+        const sanitizedApprovals = approvals === undefined
+          ? undefined
+          : await redactApprovalTail(approvals, user, options.redactApproval);
+        const snapshots: LiveActivitySnapshots = Object.freeze({
+          activity: replayTimeline(sanitizedTail),
+          approvals: sanitizedApprovals === undefined
+            ? projectApprovalTimeline(createApprovalProjectionState(authorized.taskId))
+            : replayApprovalTimeline(sanitizedApprovals),
+        });
+        const representation = await options.present(snapshots, {
           user,
           tenantId: authorized.tenantId,
           taskId: authorized.taskId,

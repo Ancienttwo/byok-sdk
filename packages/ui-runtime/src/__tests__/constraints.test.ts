@@ -18,15 +18,20 @@ describe('@byok-sdk/ui-runtime package boundary', () => {
       readFileSync(path.join(packageRoot, 'src/index.ts'), 'utf8'),
       readFileSync(path.join(packageRoot, 'src/timeline.ts'), 'utf8'),
       readFileSync(path.join(packageRoot, 'src/types.ts'), 'utf8'),
+      readFileSync(path.join(packageRoot, 'src/approval-timeline.ts'), 'utf8'),
+      readFileSync(path.join(packageRoot, 'src/approval-types.ts'), 'utf8'),
     ].join('\n');
     expect(source).not.toMatch(/from ['"](?:node:|react|react-dom)/);
     expect(source).not.toMatch(/\b(?:fetch|WebSocket|EventSource|localStorage|indexedDB)\b/);
   });
 
   it('uses the cloud/protocol authorities instead of copying their schemas', () => {
-    const source = readFileSync(path.join(packageRoot, 'src/timeline.ts'), 'utf8');
-    expect(source).toContain('TimelineEventSchema');
-    expect(source).toContain('isKnownAgentEvent');
-    expect(source).not.toContain('partitionAgentEvents');
+    const activitySource = readFileSync(path.join(packageRoot, 'src/timeline.ts'), 'utf8');
+    const approvalSource = readFileSync(path.join(packageRoot, 'src/approval-timeline.ts'), 'utf8');
+    expect(activitySource).toContain('TimelineEventSchema');
+    expect(activitySource).toContain('isKnownAgentEvent');
+    expect(activitySource).not.toContain('partitionAgentEvents');
+    expect(approvalSource).toContain('ApprovalObservationSchema');
+    expect(approvalSource).not.toContain('toolCallId');
   });
 });

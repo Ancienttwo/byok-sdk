@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
-import { tenantId, type ActivityTail, type TimelineEvent } from '@byok-sdk/cloud';
+import {
+  tenantId,
+  type ActivityTail,
+  type ApprovalObservation,
+  type ApprovalTimelineTail,
+  type TimelineEvent,
+} from '@byok-sdk/cloud';
 import {
   createLiveActivityHost,
   LiveActivityHostError,
+  redactApprovalTail,
   redactActivityTail,
   type LiveActivityHostOptions,
 } from '../index';
@@ -38,6 +45,31 @@ function activityTail(entries: readonly TimelineEvent[]): ActivityTail {
   };
 }
 
+function approvalObservation(
+  revision: number,
+  event: ApprovalObservation['event'],
+): ApprovalObservation {
+  return {
+    taskId: 'task-1',
+    sourceEnvelopeId: `approval-envelope-${revision}`,
+    revision,
+    receivedAt: NOW,
+    event,
+  };
+}
+
+function approvalTail(entries: readonly ApprovalObservation[]): ApprovalTimelineTail {
+  return {
+    tenantId: AUTHORIZED_TENANT,
+    taskId: 'task-1',
+    entries,
+    cursor: entries.at(-1)?.revision,
+    dropped: 0,
+    capacity: 50,
+    expiresAt: '2026-08-16T14:00:00.000Z',
+  };
+}
+
 type TestUser = { readonly id: string };
 
 function hostOptions(
@@ -49,8 +81,10 @@ function hostOptions(
       request.headers.get('authorization') === 'Bearer valid' ? { id: 'user-1' } : undefined,
     authorize: (_user, taskId) => ({ tenantId: AUTHORIZED_TENANT, taskId }),
     readActivity: () => activityTail([timelineEvent({ type: 'progress', text: 'working' })]),
+    readApprovals: () => undefined,
     redact: (event) => event,
-    present: (snapshot) => ({ timeline: snapshot }),
+    redactApproval: (observation) => observation,
+    present: ({ activity, approvals }) => ({ timeline: activity, approvals }),
     ...overrides,
   };
 }
@@ -64,7 +98,9 @@ function request(path = '/api/tasks/task-1/activity', init: RequestInit = {}): R
 
 describe('live activity host security boundary', () => {
   it('authenticates first and makes denial indistinguishable from an absent tail', async () => {
-    const unauthenticated = createLiveActivityHost(hostOptions());
+    const readActivity = vi.fn(hostOptions().readActivity);
+    const readApprovals = vi.fn(hostOptions().readApprovals);
+    const unauthenticated = createLiveActivityHost(hostOptions({ readActivity, readApprovals }));
     const noSession = await unauthenticated.fetch(
       new Request('https://host.example/api/tasks/task-1/activity'),
     );
@@ -72,6 +108,8 @@ describe('live activity host security boundary', () => {
     expect(await noSession.json()).toEqual({ error: 'unauthorized' });
     expect(noSession.headers.get('cache-control')).toBe('private, no-store');
     expect(noSession.headers.get('vary')).toBe('Authorization, Cookie');
+    expect(readActivity).not.toHaveBeenCalled();
+    expect(readApprovals).not.toHaveBeenCalled();
 
     const denied = await createLiveActivityHost(
       hostOptions({ authorize: () => undefined }),
@@ -88,7 +126,8 @@ describe('live activity host security boundary', () => {
     const readActivity = vi.fn((tenant: typeof AUTHORIZED_TENANT, taskId: string) =>
       activityTail([timelineEvent({ type: 'progress', text: taskId })]),
     );
-    const host = createLiveActivityHost(hostOptions({ readActivity }));
+    const readApprovals = vi.fn(() => undefined);
+    const host = createLiveActivityHost(hostOptions({ readActivity, readApprovals }));
     const response = await host.fetch(
       request('/api/tasks/task-1/activity?tenantId=tenant-attacker', {
         headers: {
@@ -100,6 +139,7 @@ describe('live activity host security boundary', () => {
 
     expect(response.status).toBe(200);
     expect(readActivity).toHaveBeenCalledWith(AUTHORIZED_TENANT, 'task-1');
+    expect(readApprovals).toHaveBeenCalledWith(AUTHORIZED_TENANT, 'task-1');
   });
 
   it('redacts tool input and output before presentation or browser serialization', async () => {
@@ -110,7 +150,7 @@ describe('live activity host security boundary', () => {
         { eventIndex: 1 },
       ),
     ]);
-    const present = vi.fn((snapshot) => ({ timeline: snapshot }));
+    const present = vi.fn(({ activity, approvals }) => ({ timeline: activity, approvals }));
     const host = createLiveActivityHost(
       hostOptions({
         readActivity: () => tail,
@@ -192,8 +232,12 @@ describe('live activity host security boundary', () => {
           return { tenantId: AUTHORIZED_TENANT, taskId };
         },
         readActivity: () => {
-          calls.push('read');
+          calls.push('read-activity');
           return activityTail([timelineEvent({ type: 'progress', text: 'working' })]);
+        },
+        readApprovals: () => {
+          calls.push('read-approvals');
+          return undefined;
         },
         redact: (entry) => {
           calls.push('redact');
@@ -210,7 +254,7 @@ describe('live activity host security boundary', () => {
     const second = await host.fetch(request(undefined, { headers: { authorization: 'Bearer valid', 'if-none-match': etag! } }));
     expect(second.status).toBe(304);
     expect(await second.text()).toBe('');
-    expect(calls).toEqual(['authenticate', 'authorize', 'read']);
+    expect(calls).toEqual(['authenticate', 'authorize', 'read-activity', 'read-approvals']);
     expect(second.headers.get('cache-control')).toBe('private, no-cache');
   });
 
@@ -232,6 +276,99 @@ describe('live activity host security boundary', () => {
       }),
     ).fetch(request());
     expect(first.headers.get('etag')).not.toBe(movedCursor.headers.get('etag'));
+
+    const movedApprovalCursor = await createLiveActivityHost(
+      hostOptions({
+        readApprovals: () => approvalTail([
+          approvalObservation(1, {
+            type: 'approval_requested', approvalId: 'approval-1', summary: 'Continue?',
+          }),
+        ]),
+      }),
+    ).fetch(request());
+    expect(first.headers.get('etag')).not.toBe(movedApprovalCursor.headers.get('etag'));
+  });
+
+  it('redacts approval summaries before folding while preserving native authority', async () => {
+    const raw = approvalTail([
+      approvalObservation(1, {
+        type: 'approval_requested', approvalId: 'approval-1', summary: 'secret approval details',
+      }),
+      approvalObservation(2, {
+        type: 'approval_resolved', approvalId: 'approval-1', decision: 'approve',
+        resolvedBy: 'local', at: '2026-08-16T13:01:00.000Z',
+      }),
+    ]);
+    const response = await createLiveActivityHost(hostOptions({
+      readApprovals: () => raw,
+      redactApproval: (observation) => observation.event.type === 'approval_requested'
+        ? { ...observation, event: { ...observation.event, summary: '[redacted-approval]' } }
+        : observation,
+    })).fetch(request());
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).not.toContain('secret approval details');
+    expect(body).toContain('[redacted-approval]');
+    expect(JSON.parse(body)).toMatchObject({
+      approvals: { items: [{ approvalId: 'approval-1', correlation: 'paired', status: 'approved' }] },
+    });
+  });
+
+  it.each([
+    ['identity', (entry: ApprovalObservation) => ({ ...entry, sourceEnvelopeId: 'changed' })],
+    ['revision', (entry: ApprovalObservation) => ({ ...entry, revision: entry.revision + 1 })],
+    [
+      'approval ID',
+      (entry: ApprovalObservation) => entry.event.type === 'approval_requested'
+        ? { ...entry, event: { ...entry.event, approvalId: 'changed' } }
+        : entry,
+    ],
+    [
+      'resolution decision',
+      (entry: ApprovalObservation) => entry.event.type === 'approval_resolved'
+        ? { ...entry, event: { ...entry.event, decision: 'reject' as const } }
+        : entry,
+    ],
+  ])('fails closed when approval redaction changes %s authority', async (_name, mutate) => {
+    const requested = approvalObservation(1, {
+      type: 'approval_requested', approvalId: 'approval-1', summary: 'secret',
+    });
+    const resolved = approvalObservation(2, {
+      type: 'approval_resolved', approvalId: 'approval-1', decision: 'approve',
+      resolvedBy: 'local', at: '2026-08-16T13:01:00.000Z',
+    });
+    const response = await createLiveActivityHost(hostOptions({
+      readApprovals: () => approvalTail(_name === 'resolution decision' ? [resolved] : [requested]),
+      redactApproval: mutate,
+    })).fetch(request());
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'internal_error' });
+  });
+
+  it('exposes typed approval redaction failure for direct host tests', async () => {
+    const tail = approvalTail([
+      approvalObservation(1, { type: 'approval_requested', approvalId: 'approval-1', summary: 'secret' }),
+    ]);
+    await expect(redactApprovalTail(tail, { id: 'user-1' }, (entry) => ({
+      ...entry,
+      event: entry.event.type === 'approval_requested'
+        ? { ...entry.event, approvalId: 'changed' }
+        : entry.event,
+    }))).rejects.toMatchObject({ name: 'LiveActivityHostError', code: 'redaction_invalid' });
+  });
+
+  it('rejects approval tails outside the authorized binding', async () => {
+    const wrongTenant = await createLiveActivityHost(hostOptions({
+      readApprovals: () => ({ ...approvalTail([]), tenantId: tenantId('tenant-other') }),
+    })).fetch(request());
+    const wrongTask = await createLiveActivityHost(hostOptions({
+      readApprovals: () => ({ ...approvalTail([]), taskId: 'task-other' }),
+    })).fetch(request());
+
+    expect(wrongTenant.status).toBe(500);
+    expect(wrongTask.status).toBe(500);
   });
 
   it('preserves unknown events and loss/gap metadata through the host path', async () => {
