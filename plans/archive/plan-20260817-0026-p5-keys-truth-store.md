@@ -1,6 +1,6 @@
 # Plan: P5 Keys Provider Profiles on TruthStore
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260817-0026
 > **Slug**: p5-keys-truth-store
 > **Planning Source**: repo-harness-plan

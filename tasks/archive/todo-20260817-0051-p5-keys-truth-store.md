@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-17 00:51
+> **Related Plan**: plans/archive/plan-20260817-0026-p5-keys-truth-store.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260817-0051
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-17 00:26
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

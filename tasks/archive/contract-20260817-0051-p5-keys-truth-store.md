@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-17 00:51
+> **Related Plan**: plans/archive/plan-20260817-0026-p5-keys-truth-store.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260817-0051
+
 # Task Contract: p5-keys-truth-store
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260817-0026-p5-keys-truth-store.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
