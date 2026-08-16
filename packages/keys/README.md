@@ -3,11 +3,13 @@
 Key-based BYOK: a validated provider profile, credential-backed auth headers, and
 direct transports to OpenAI-compatible and Anthropic providers.
 
-Status: **K3 + Pi provider launcher done** — the pure-function layer (K0), the `SecretStore` layer
+Status: **P5 + Pi provider launcher done** — the pure-function layer (K0), the `SecretStore` layer
 backed by the macOS Keychain and the Windows Credential Manager (K1), and the
 configure/resolve registry with pluggable profile persistence (K2) have all
 landed. K3 settled the settings-page question, recorded under
-[Not in this package](#not-in-this-package). Next is K4, the aip-main-open swap.
+[Not in this package](#not-in-this-package). P5 adds the tenant-bound
+`TruthStoreProviderProfileStore` without moving provider secrets out of the OS
+credential store.
 
 ## Security boundary
 
@@ -33,6 +35,9 @@ Three consequences hold today and are the package's standing constraints:
    process-scoped Pi projection, reconstructs the Pi child environment from a
    closed platform/proxy baseline plus the exact key, and inherits stdio. It
    opens no listener and never returns the key to the daemon.
+4. `@byok-sdk/keys` may depend on protocol-free `@byok-sdk/core` for
+   `TruthStore`; it must not depend on `protocol`, `client`, `server`, `cloud`,
+   or `cloud-dataplane`, and none of those packages may depend on `keys`.
 
 The full declaration of the boundary between the two security models is
 [`docs/security.md`](../../docs/security.md), section *Key management
@@ -90,13 +95,14 @@ path now.
 
 ## Node version and storage backends
 
-`engines.node` is `>=20`, and that floor is deliberate: the package is fully
-usable on Node 20.
+`engines.node` is `>=22.22.0`, aligned with its `@byok-sdk/core` contract
+dependency and the workspace release floor.
 
 | Backend | Requirement | Behaviour below it |
 | --- | --- | --- |
-| `InMemoryProviderProfileStore` | Node 20+ | — the whole configure/resolve lifecycle works |
+| `InMemoryProviderProfileStore` | Node 22.22+ | — the whole configure/resolve lifecycle works |
 | `SqliteProviderProfileStore` | Node 22.5+ (`node:sqlite`) | fails closed with `PROVIDER_STORE_UNAVAILABLE` |
+| `TruthStoreProviderProfileStore` | Node 22.22+ plus an injected tenant-bound `TruthStore` | stale CAS or malformed/hash-mismatched authority fails closed; never falls back to SQLite |
 | `byok-pi-provider-launcher` | Node 22.5+ (`node:sqlite`) and macOS/Windows for authenticated profiles | fails closed; `auth_mode: none` does not require a credential backend |
 
 Only on-disk profile persistence needs the newer runtime. `node:sqlite` shipped
@@ -106,11 +112,11 @@ a version-number comparison would be wrong in both directions; call
 without it throws `ByokKeysError` with code `PROVIDER_STORE_UNAVAILABLE` rather
 than degrading to a plaintext file.
 
-The floor rises only when a consumer needs on-disk persistence as an
-install-time guarantee rather than a runtime capability — that is, when
-"`@byok-sdk/keys` installed successfully" must by itself imply
-`SqliteProviderProfileStore` will construct. Until then, raising it would drop
-Node 20 hosts that are served perfectly well by the in-memory store.
+All profile-store methods are asynchronous. InMemory and SQLite remain
+independently selected local authorities; the TruthStore adapter is another
+authority selection, not a mirror, migration shim, cache, or dual-write path.
+It stores the complete four-ID provider registry as one versioned deterministic
+snapshot so delete and the one-enabled invariant share one CAS decision.
 
 ## Module inventory
 
@@ -135,6 +141,7 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `command-runner.ts` | The `CommandRunner` injection seam both OS backends are written against, so no unit test touches a real credential store |
 | `profile-store.ts` | The `ProviderProfileStore` persistence contract, plus the in-memory implementation |
 | `sqlite-profile-store.ts` | `SqliteProviderProfileStore` — on-disk profile persistence on `node:sqlite` |
+| `truth-profile-store.ts` | `TruthStoreProviderProfileStore` — tenant-bound deterministic registry snapshot with CAS and integrity validation |
 | `sqlite-support.ts` | Runtime `node:sqlite` capability detection and owner-only database file/directory creation |
 | `registry.ts` | `ProviderRegistry` — the configure / list / resolve / delete lifecycle that binds a profile store to a secret store and hands back a ready client |
 | `pi-provider-projection.ts` | Credential-blind Pi `models.json` projection for one validated profile/model |

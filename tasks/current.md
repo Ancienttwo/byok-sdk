@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-16T22:38:29+0800 -->
+<!-- updated_at: 2026-08-17T00:43:36+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Idle
-> **Updated At**: 2026-08-16T22:38:29+0800
-> **Source Branch**: main
-> **Source Commit**: 9fb0ae0
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-17T00:43:36+0800
+> **Source Branch**: codex/p5-keys-truth-store
+> **Source Commit**: 1458604
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: live-activity-timeline-v1-complete
+> **Reason**: ensure-task-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Idle
-- Active Plan: (none)
-- Plan Status: (none)
-- Next Task: (none)
-- Clear Note: (none)
+- Status: ManualClearedWithActiveWork
+- Active Plan: plans/plan-20260817-0026-p5-keys-truth-store.md
+- Plan Status: Executing
+- Next Task: T1 Freeze the async profile-store contract and update InMemory/SQLite implementations, registry, launcher, and shared tests in one coordinated cut.
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,7 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- (none)
+- .: plans/plan-20260817-0026-p5-keys-truth-store.md
+- .: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-p5-keys-truth-store
 ## Active Sprint
 
 - Sprint: (none)
@@ -44,14 +45,33 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: clean
+- Summary: 20 changed/untracked path(s)
 
 ```
-(none)
+ M ARCHITECTURE-PROPOSAL-byok-platform.md
+ M bun.lock
+ M docs/architecture/sdk-architecture.md
+ M docs/security.md
+ M docs/spec.md
+ M packages/keys/README.md
+ M packages/keys/package.json
+ M packages/keys/src/bin/pi-provider-launcher.ts
+ M packages/keys/src/errors.ts
+ M packages/keys/src/index.ts
+ M packages/keys/src/profile-store.test.ts
+ M packages/keys/src/profile-store.ts
+ M packages/keys/src/registry.golden.test.ts
+ M packages/keys/src/registry.test.ts
+ M packages/keys/src/registry.ts
+ M packages/keys/src/sqlite-profile-store.test.ts
+ M packages/keys/src/sqlite-profile-store.ts
+ M scripts/release/check-package-graph.mjs
+?? packages/keys/src/truth-profile-store.test.ts
+?? packages/keys/src/truth-profile-store.ts
 ```
 
 ## Source Artifacts

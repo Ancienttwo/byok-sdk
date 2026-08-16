@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { AnthropicMessagesClient } from './anthropic-client';
+import { ByokKeysError } from './errors';
 import { OpenAiCompatibleChatClient } from './openai-client';
 import { InMemoryProviderProfileStore } from './profile-store';
+import type { ProviderProfileStore } from './profile-store';
 import { ProviderRegistry, type ProviderConfiguration } from './registry';
 import { InMemorySecretStore } from './secret-store';
 import type { ModelProviderSecretName } from './secret-store';
@@ -53,13 +55,13 @@ describe('ProviderRegistry.configure', () => {
       provider_id: 'openai',
       secret_configured: true,
     });
-    expect(profiles.get('openai')?.model).toBe('gpt-5.2');
+    expect((await profiles.get('openai'))?.model).toBe('gpt-5.2');
     await expect(secrets.get('model-openai-api-key')).resolves.toBe(CANARY);
   });
 
   it('never puts the secret into the profile store', async () => {
     await registry().configure(OPENAI, CANARY);
-    expect(JSON.stringify(profiles.list())).not.toContain(CANARY);
+    expect(JSON.stringify(await profiles.list())).not.toContain(CANARY);
   });
 
   it('never puts the secret into the returned status', async () => {
@@ -104,7 +106,7 @@ describe('ProviderRegistry.configure', () => {
 
   it('does not persist a profile it had to reject for a missing secret', async () => {
     await expect(registry().configure(OPENAI)).rejects.toThrow();
-    expect(profiles.get('openai')).toBeUndefined();
+    await expect(profiles.get('openai')).resolves.toBeUndefined();
   });
 
   it('rejects an empty secret rather than storing it', async () => {
@@ -142,6 +144,30 @@ describe('ProviderRegistry.configure', () => {
     ).rejects.toThrowError(
       expect.objectContaining({ code: 'PROVIDER_URL_INVALID' }),
     );
+  });
+
+  it('does not alter the credential when a profile write conflicts', async () => {
+    await registry().configure(OPENAI, CANARY);
+    const rejectingProfiles: ProviderProfileStore = {
+      close: () => profiles.close(),
+      delete: (providerId) => profiles.delete(providerId),
+      get: (providerId) => profiles.get(providerId),
+      getEnabled: () => profiles.getEnabled(),
+      list: () => profiles.list(),
+      save: async () => {
+        throw new ByokKeysError('PROVIDER_PROFILE_CONFLICT', 'stale profile revision');
+      },
+      setEnabled: (providerId) => profiles.setEnabled(providerId),
+    };
+    const subject = new ProviderRegistry({
+      profileStore: rejectingProfiles,
+      secretStore: secrets,
+    });
+
+    await expect(subject.configure(OPENAI, 'replacement-secret')).rejects.toMatchObject({
+      code: 'PROVIDER_PROFILE_CONFLICT',
+    });
+    await expect(secrets.get('model-openai-api-key')).resolves.toBe(CANARY);
   });
 
   it('keeps only one provider enabled across configures', async () => {
@@ -245,7 +271,7 @@ describe('ProviderRegistry lifecycle', () => {
     const subject = registry();
     await subject.configure(OPENAI, CANARY);
     await expect(subject.delete('openai')).resolves.toBe(true);
-    expect(profiles.get('openai')).toBeUndefined();
+    await expect(profiles.get('openai')).resolves.toBeUndefined();
     await expect(secrets.has('model-openai-api-key')).resolves.toBe(false);
   });
 

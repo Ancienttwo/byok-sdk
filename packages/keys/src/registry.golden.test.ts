@@ -83,8 +83,8 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
-  profiles.close();
+afterEach(async () => {
+  await profiles.close();
   rmSync(directory, { force: true, recursive: true });
 });
 
@@ -125,7 +125,7 @@ describe.skipIf(!sqliteReady)('BYOK registry golden parity (HANDOFF §4.3)', () 
     await subject.configure(OPENAI, CANARY);
     const client = await subject.resolveDefaultModelProvider();
     await client?.testConnection();
-    profiles.close();
+    await profiles.close();
 
     const database = readFileSync(databasePath);
     expect(database.includes(Buffer.from(CANARY))).toBe(false);
@@ -156,14 +156,14 @@ describe.skipIf(!sqliteReady)('BYOK registry golden parity (HANDOFF §4.3)', () 
 
   it('survives a reopen of the same file, still without the key on disk', async () => {
     await registry().configure(OPENAI, CANARY);
-    profiles.close();
+    await profiles.close();
 
     profiles = new SqliteProviderProfileStore({ path: databasePath });
     const reopened = registry();
     expect((await reopened.get('openai'))?.model).toBe('gpt-5.2');
     const client = await reopened.resolveDefaultModelProvider();
     expect(client?.model).toBe('gpt-5.2');
-    profiles.close();
+    await profiles.close();
     expect(readFileSync(databasePath).includes(Buffer.from(CANARY))).toBe(false);
   });
 });

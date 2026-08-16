@@ -116,7 +116,7 @@ for (const [directory, expectedName] of publicPackages) {
   if (manifest.version !== expectedVersion) errors.push(`${manifestPath}: expected version ${expectedVersion}, got ${manifest.version}`);
   if (manifest.license !== 'MIT') errors.push(`${manifestPath}: license must be MIT`);
   if (manifest.publishConfig?.access !== 'public') errors.push(`${manifestPath}: publishConfig.access must be public`);
-  const expectedEngine = expectedName === keys[1] ? '>=20' : '>=22.22.0';
+  const expectedEngine = '>=22.22.0';
   if (manifest.engines?.node !== expectedEngine) errors.push(`${manifestPath}: engines.node must be ${expectedEngine}`);
   if (manifest.repository?.url !== 'git+https://github.com/Ancienttwo/byok-sdk.git') {
     errors.push(`${manifestPath}: repository URL is not canonical`);
@@ -239,10 +239,20 @@ for (const [, packageName] of [...dispatchPackages, umbrella]) {
 const keysManifest = manifests.get(keys[1]);
 for (const field of [...runtimeFields, 'devDependencies']) {
   for (const dependency of Object.keys(keysManifest?.[field] ?? {})) {
-    if (dependency.startsWith('@byok-sdk/') && dependency !== keys[1]) {
+    if (
+      dependency.startsWith('@byok-sdk/') &&
+      dependency !== keys[1] &&
+      dependency !== '@byok-sdk/core'
+    ) {
       errors.push(`packages/keys/package.json: ${field} crosses into dispatch package ${dependency}`);
     }
   }
+}
+if (keysManifest?.dependencies?.['@byok-sdk/core'] !== 'workspace:*') {
+  errors.push('packages/keys/package.json: @byok-sdk/core must be the one workspace contract dependency');
+}
+if (runtimeEdges(keysManifest ?? {}).includes('@byok-sdk/protocol')) {
+  errors.push('packages/keys/package.json: keys must not depend on @byok-sdk/protocol');
 }
 
 const clientManifest = manifests.get('@byok-sdk/client');

@@ -165,7 +165,7 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
-| BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only the separate `byok-pi-provider-launcher` reads it. The launcher opens the non-secret profile database read-only, writes a credential-blind process-scoped Pi projection, and injects the key into the Pi child environment; `auth_mode: none` never constructs a keychain backend. `protocol`, `server`, and the client daemon never receive the value |
+| BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only `@byok-sdk/keys` provider clients or the separate `byok-pi-provider-launcher` read it. Profile metadata may use a tenant-bound `TruthStore`, but truth bodies, hashes, labels, status, protocol, server, cloud provider code, and the client daemon never receive the value. The launcher keeps its explicit read-only SQLite profile composition and injects the key only into the Pi child environment; `auth_mode: none` never constructs a keychain backend |
 | The daemon's own ambient environment (`process.env` — may hold secrets unrelated to any runtime: `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc., set for the daemon's own deployment) | Whatever process/container/service manager launched the daemon | **M5: no longer forwarded to a spawned agent in full.** `task-runner.ts` builds each task's child-process environment from a per-runtime allowlist (`daemon/environment.ts`'s `buildRuntimeEnv`) instead of handing over `process.env` verbatim — see the env-allowlist paragraph below |
 
 The audit log is itself worth calling out as a defended asset, not just a
@@ -891,9 +891,10 @@ diluted by the mere presence of a key-management package in the same repo:
 - **`protocol`, `server`, and `client` must not depend on `keys`.** The
   dependency graph is the enforcement: the audited claim that the dispatch
   path never touches a credential holds only while that path cannot import a
-  package whose purpose is to hold one. `@byok-sdk/keys` may depend on nothing in
-  the dispatch packages either; the two product lines share the monorepo's
-  toolchain and nothing else.
+  package whose purpose is to hold one. `@byok-sdk/keys` may depend only on
+  protocol-free `@byok-sdk/core` for the tenant-first `TruthStore` contract;
+  package-graph checks forbid `keys -> protocol`, every other dispatch-package
+  edge, and every reverse dispatch-to-keys edge.
 - **The isolation claim is scoped to the dispatch packages, never to
   `@byok-sdk/keys`.** A consumer that installs `@byok-sdk/keys` is opting into a
   key-custody component with its own posture (OS-credential-store backing,
@@ -921,3 +922,14 @@ scope envelope, fail-closed provider transports) is documented in that
 package's `README.md` and will be expanded as its `SecretStore` (K1) and
 registry (K2) layers land; this section exists to fix the boundary between the
 two security models, not to restate that package's internals.
+
+The optional P5 TruthStore adapter persists the whole closed provider registry
+as one deterministic inline `profile` snapshot under `expectedRev` CAS. It
+validates tenant/key/kind/revision, exact schema, canonical bytes, byte size,
+SHA-256, provider uniqueness, and the one-enabled invariant on every read.
+Object bodies, unknown or secret-shaped fields, duplicate providers, stale
+writes, and mismatched write confirmations fail closed. The adapter never
+auto-merges, retries, or dual-writes SQLite. Secrets stay in the local
+`SecretStore`; if a configure call changed a secret before its profile CAS
+failed, the registry restores the previous local value and reports a distinct
+failure if restoration itself fails.

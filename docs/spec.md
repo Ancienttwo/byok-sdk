@@ -22,6 +22,30 @@ Describe the product intent, users, workflows, acceptance scenarios, and constra
   MCP definition is owned by the device's local daemon configuration. The
   SaaS may name the toolset but cannot supply its command or credentials.
 
+## Provider profile truth authority
+
+`@byok-sdk/keys` 0.2.0 exposes one asynchronous `ProviderProfileStore`
+contract with three independently selected adapters: in-memory, SQLite, and a
+tenant-bound core `TruthStore`. Selecting the TruthStore adapter makes one
+versioned snapshot of the complete, bounded model-provider registry the
+non-secret profile authority. One CAS revision covers configure, delete, and
+default-provider changes, so the invariant “at most one enabled profile” never
+depends on a multi-record transaction.
+
+The TruthStore body contains only validated provider metadata in deterministic
+JSON. Its byte size and SHA-256 must match, its body must be inline and
+canonical, and unknown fields, duplicate providers, stale revisions, or
+malformed authority fail closed. The adapter never retries, merges, or mirrors
+to SQLite. A host resolves a CAS conflict against the current authority.
+
+Provider secrets remain exclusively in the host's local `SecretStore`; they
+never enter TruthStore, protocol, cloud provider clients, or status output. A
+failed profile write restores a secret changed by that same configure call or
+surfaces an explicit rollback failure. The standalone Pi custody launcher
+continues to use an explicitly selected, read-only SQLite profile database; P5
+does not add a network listener, remote secret provisioning, or a dispatch-to-
+keys dependency.
+
 ## Runtime operation authority
 
 `@byok-sdk/client` 0.4.0 has one breaking custom-adapter contract. A
@@ -96,8 +120,9 @@ artifact `@earendil-works/pi-coding-agent@0.84.1`; the SDK does not accept an
 unversioned global `pi` on `PATH` as an implicit substitute. All workspace
 dispatch packages and private conformance tests require Node.js `>=22.22.0`,
 matching pi's published engine floor. The independent
-`@byok-sdk/keys@0.1.0` package remains outside the dispatch graph and retains
-its Node.js 20 floor. A host that enables the BYOK lane installs its
+`@byok-sdk/keys@0.2.0` package remains outside the dispatch graph, depends only
+on protocol-free `@byok-sdk/core`, and shares the Node.js `>=22.22.0` floor. A
+host that enables the BYOK lane installs its
 `byok-pi-provider-launcher` binary separately and gives the client only the
 launcher command plus non-secret profile/session paths; this executable
 process boundary does not create a package dependency edge.

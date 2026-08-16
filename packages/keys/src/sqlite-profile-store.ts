@@ -110,44 +110,45 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
    * routinely closed both by the code that finished with it and by a test's
    * teardown.
    */
-  close(): void {
+  async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
     this.#database.close();
   }
 
-  delete(providerId: ModelProviderId): boolean {
+  async delete(providerId: ModelProviderId): Promise<boolean> {
     const result = this.#database
       .prepare('DELETE FROM provider_profile WHERE provider_id = ?')
       .run(providerId);
     return Number(result.changes) === 1;
   }
 
-  get(providerId: ModelProviderId): ModelProviderProfile | undefined {
+  async get(providerId: ModelProviderId): Promise<ModelProviderProfile | undefined> {
     const row = this.#database
       .prepare('SELECT * FROM provider_profile WHERE provider_id = ?')
       .get(providerId) as ProfileRow | undefined;
     return row === undefined ? undefined : parseRow(row);
   }
 
-  getEnabled(): ModelProviderProfile | undefined {
+  async getEnabled(): Promise<ModelProviderProfile | undefined> {
     const row = this.#database
       .prepare('SELECT * FROM provider_profile WHERE enabled = 1')
       .get() as ProfileRow | undefined;
     return row === undefined ? undefined : parseRow(row);
   }
 
-  list(): ModelProviderProfile[] {
+  async list(): Promise<ModelProviderProfile[]> {
     const rows = this.#database
       .prepare('SELECT * FROM provider_profile ORDER BY provider_id ASC')
       .all() as unknown as ProfileRow[];
     return rows.map(parseRow);
   }
 
-  save(profile: ModelProviderProfile): ModelProviderProfile {
+  async save(profile: ModelProviderProfile): Promise<ModelProviderProfile> {
+    const existing = await this.get(profile.provider_id);
     const validated = parseModelProviderProfile({
       ...profile,
-      created_at: this.get(profile.provider_id)?.created_at ?? profile.created_at,
+      created_at: existing?.created_at ?? profile.created_at,
     });
     this.#transaction(() => {
       if (validated.enabled) {
@@ -185,11 +186,11 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
           validated.updated_at,
         );
     });
-    return this.get(validated.provider_id) as ModelProviderProfile;
+    return (await this.get(validated.provider_id)) as ModelProviderProfile;
   }
 
-  setEnabled(providerId: ModelProviderId): ModelProviderProfile {
-    const existing = this.get(providerId);
+  async setEnabled(providerId: ModelProviderId): Promise<ModelProviderProfile> {
+    const existing = await this.get(providerId);
     if (existing === undefined) throw providerNotConfigured(providerId);
     return this.save({ ...existing, enabled: true });
   }

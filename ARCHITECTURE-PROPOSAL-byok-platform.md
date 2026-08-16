@@ -694,7 +694,7 @@ K2 的 `ProfileStore` 從第一版就是 async（`@byok-sdk/keys` 的 `SecretSto
 | 5 | **P2** | SQL（Postgres/Hyperdrive + D1）與 R2/S3 實現；`deploy/sql/` migration | store conformance 套件同一份測試跑四種 composition（§10）；`check:deploy-sql` 過；T3 |
 | 6 | **P3** | board 層：5 態 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/輪詢雙路徑 + 兩級提示 | claim 併發測試；SSE 與輪詢兩條路徑跑同一份行為測試；120s 對賬能修復人為製造的漏事件；T4、I6 |
 | 7 | **P4** | client 側 device proof 上行 + memory manifest/selector seam + **`signNonce` domain separation 修復** | `device-proof-v1.golden.json` 凍結 canonical bytes；pair/token 的 breaking 變更在同一 PR 內兩側同步 |
-| 8 | **P5** | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore` | 掛在 K4 之後。keys 依賴圖仍不含 protocol；aip-main-open 黃金測試原樣通過 |
+| 8 | **P5（已完成 2026-08-17）** | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore` | 完整 bounded registry 以單一 deterministic CAS snapshot 落地；secret 保持 OS-local；keys 依賴圖不含 protocol；registry golden parity 通過 |
 | 儲備 | C1-C3 | v1 的 doctor/logs/setup、channel/upgrade/rollback、退避/watchdog/併發閘 | 排在 P3 之後 |
 
 ### 9.3 時序理由

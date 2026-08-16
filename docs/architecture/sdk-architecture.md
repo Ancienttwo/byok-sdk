@@ -1032,7 +1032,7 @@ flowchart TB
   Client --> Protocol
   Server -.-> Core
   Server --> Protocol
-  Keys -.->|"P5: contracts only"| Core
+  Keys -->|"P5: TruthStore contract"| Core
   Node --> CloudPg
   Workers -.-> Cloud
   Conformance --> Cloud
@@ -1045,9 +1045,9 @@ flowchart TB
   SDK --> CloudPg
 ```
 
-`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`CloudPostgres → Cloud/Core`、`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge只用于 canonical proof bytes 与 truth contracts。`byok-sdk` 的六条边是 S7-c release distribution edge；`server/keys → core` 仍是虚线目标边，其中 keys edge 只可能由 post-RC P5 独立计划引入。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`CloudPostgres → Cloud/Core`、`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge只用于 canonical proof bytes 与 truth contracts。`byok-sdk` 的六条边是 S7-c release distribution edge；`server → core` 仍是虚线目标边，`keys → core` 已由 post-RC P5 独立计划落地，且 package graph 明确禁止它继续穿透到 protocol。
 
-关键 invariant：`core` 必须 protocol-free，才能让 future `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok-sdk/server` 留作 self-hosted embedded coordinator；`@byok-sdk/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
+关键 invariant：`core` 必须 protocol-free，才能让现有 `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok-sdk/server` 留作 self-hosted embedded coordinator；`@byok-sdk/cloud` 才是 stateless hosted surface。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
 
 ### 12.2 `@byok-sdk/core` 与 `@byok-sdk/cloud` 职责与状态
 
@@ -1627,7 +1627,7 @@ R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 
 | P2 | Postgres + R2 主生产实现，含 entitlement/usage/reservation/quota 与 GC；`deploy/sql/` migration |
 | P3 | board 层：5 态 + claim CAS + `expectedStatus` CAS + `board_seq` 增量 + SSE/轮询双路径 + 两级提示；**已实现（S5）** |
 | P4 | device proof + truth/memory：S6-a verifier/key/receipt、S6-b atomic truth routes、S6-c client signer/manifest selector/selected fetch/rehash/filter implementation 已交付；default-on 仍等独立 security acceptance；`signNonce` domain separation / GAP-004 已提前随 S1 交付 |
-| P5 | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore`。**Deferred standalone plan，不在本 sprint program（S0-S7）内**；触发条件是 K4/K4.1 完成且 TruthStore 的 production composition 可用，两者都满足后单独立计划，不占 S 线任何 slot |
+| P5 | `@byok-sdk/keys` 的 profile 持久化接上 core 的 `TruthStore`；**已实现（2026-08-17，独立 post-RC plan）**。完整 provider registry 是单一 versioned CAS snapshot；secret 留在本机 credential store，keys 依赖图不含 protocol |
 
 K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 
@@ -1642,9 +1642,9 @@ K 线（`K2/K3/K4`）是 key 管理线，独立闭环，不阻塞 P 线。
 | S4 | Postgres + R2 composition、quota/reservation 与 cloud GC | P2 |
 | S5 | Board + presence + SSE/poll（已实现；PR gate 见 sprint ledger） | P3 |
 | S6 | Device proof + memory | P4 |
-| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b/S7-c 与 `v0.1.0` release 已完成；后续 adapter-only `v0.1.1` security release 亦已完成） | 不对应 P5；P5 是独立 deferred plan |
+| S7 | operations/release RC + keys dependency boundary + npm distribution（S7-a/S7-b/S7-c 与 `v0.1.0` release 已完成；后续 adapter-only `v0.1.1` security release 亦已完成） | 不对应 P5；P5 后续以独立 plan 完成 |
 | 并行 | K4/K4.1 aip swap | K 线，不阻塞 P0/P1 |
-| — | P5：keys profile → `TruthStore` | Deferred standalone plan，触发条件见上表 |
+| — | P5：keys profile → `TruthStore` | 已完成（独立于 S0-S7） |
 
 ```mermaid
 flowchart LR
@@ -1661,12 +1661,12 @@ flowchart LR
   S6(["S6 device proof + memory / P4"]):::stage
   S7(["S7 operations / release"]):::stage
   K4(["K4/K4.1 aip swap"]):::parallel
-  P5(["P5 keys profile → TruthStore<br/>deferred standalone plan"]):::deferred
+  P5(["P5 keys profile → TruthStore<br/>completed 2026-08-17"]):::stage
 
   S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
   K4 -.->|"umbrella RC parity only"| S7
-  K4 -.->|"trigger"| P5
-  S4 -.->|"TruthStore production composition"| P5
+  K4 -->|"prerequisite satisfied"| P5
+  S4 -->|"TruthStore production composition"| P5
 ```
 
 两个 RC 验证 profile 分开定义，但 npm distribution 不把两种安全模型压进同一个 dependency graph：

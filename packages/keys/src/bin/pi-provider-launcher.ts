@@ -44,7 +44,7 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
   });
   let projectionDir: string | undefined;
   try {
-    const profile = profiles.get(options.providerId);
+    const profile = await profiles.get(options.providerId);
     if (profile === undefined) {
       throw new Error(`provider ${options.providerId} is not configured`);
     }
@@ -97,7 +97,7 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
       process.off('SIGTERM', onSigterm);
     }
   } finally {
-    profiles.close();
+    await profiles.close();
     if (projectionDir) {
       await fs.rm(projectionDir, { recursive: true, force: true });
     }

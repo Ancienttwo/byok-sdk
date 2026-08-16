@@ -54,82 +54,82 @@ afterEach(() => {
 });
 
 describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
-  it('creates its parent directory owner-only', () => {
+  it('creates its parent directory owner-only', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
-    store.close();
+    await store.close();
     expect(statSync(join(directory, 'nested')).mode & 0o777).toBe(0o700);
   });
 
-  it('locks the database file to owner-only read/write', () => {
+  it('locks the database file to owner-only read/write', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
-    store.close();
+    await store.close();
     expect(statSync(databasePath).mode & 0o777).toBe(0o600);
   });
 
-  it('persists a profile across a reopen', () => {
+  it('persists a profile across a reopen', async () => {
     const first = new SqliteProviderProfileStore({ path: databasePath });
-    first.save(profile('openai'));
-    first.close();
+    await first.save(profile('openai'));
+    await first.close();
 
     const second = new SqliteProviderProfileStore({ path: databasePath });
-    expect(second.get('openai')).toMatchObject({
+    await expect(second.get('openai')).resolves.toMatchObject({
       model: 'gpt-5.2',
       provider_id: 'openai',
     });
-    second.close();
+    await second.close();
   });
 
-  it('opens an existing profile database read-only and never creates a missing one', () => {
+  it('opens an existing profile database read-only and never creates a missing one', async () => {
     const writer = new SqliteProviderProfileStore({ path: databasePath });
-    writer.save(profile('openai'));
-    writer.close();
+    await writer.save(profile('openai'));
+    await writer.close();
 
     const reader = new SqliteProviderProfileStore({ path: databasePath, readOnly: true });
-    expect(reader.get('openai')?.model).toBe('gpt-5.2');
-    reader.close();
+    expect((await reader.get('openai'))?.model).toBe('gpt-5.2');
+    await reader.close();
 
     const missingPath = join(directory, 'missing', 'profiles.sqlite');
     expect(() => new SqliteProviderProfileStore({ path: missingPath, readOnly: true })).toThrow();
     expect(existsSync(missingPath)).toBe(false);
   });
 
-  it('re-validates a row on read, so a reopen cannot hand back a bad profile', () => {
+  it('re-validates a row on read, so a reopen cannot hand back a bad profile', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
-    store.save(profile('openai'));
-    store.close();
+    await store.save(profile('openai'));
+    await store.close();
 
     const reopened = new SqliteProviderProfileStore({ path: databasePath });
-    expect(reopened.get('openai')?.enabled).toBe(true);
-    expect(typeof reopened.get('openai')?.enabled).toBe('boolean');
-    reopened.close();
+    expect((await reopened.get('openai'))?.enabled).toBe(true);
+    expect(typeof (await reopened.get('openai'))?.enabled).toBe('boolean');
+    await reopened.close();
   });
 
-  it('lets the database itself enforce the one-enabled invariant', () => {
+  it('lets the database itself enforce the one-enabled invariant', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
-    store.save(profile('openai'));
-    store.save(profile('deepseek', { base_url: 'https://api.deepseek.com' }));
-    store.close();
+    await store.save(profile('openai'));
+    await store.save(profile('deepseek', { base_url: 'https://api.deepseek.com' }));
+    await store.close();
 
     const reopened = new SqliteProviderProfileStore({ path: databasePath });
-    expect(reopened.list().filter((entry) => entry.enabled)).toHaveLength(1);
-    reopened.close();
+    expect((await reopened.list()).filter((entry) => entry.enabled)).toHaveLength(1);
+    await reopened.close();
   });
 
-  it('rolls back a failed save rather than leaving a partial row', () => {
+  it('rolls back a failed save rather than leaving a partial row', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
-    store.save(profile('openai'));
-    expect(() =>
+    await store.save(profile('openai'));
+    await expect(
       store.save(profile('deepseek', { base_url: 'http://evil.example.com' })),
-    ).toThrow();
-    expect(store.get('deepseek')).toBeUndefined();
-    expect(store.get('openai')?.enabled).toBe(true);
-    store.close();
+    ).rejects.toThrow();
+    await expect(store.get('deepseek')).resolves.toBeUndefined();
+    expect((await store.get('openai'))?.enabled).toBe(true);
+    await store.close();
   });
 
-  it('declares no column that could hold a secret', () => {
+  it('declares no column that could hold a secret', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
-    store.save(profile('openai'));
-    store.close();
+    await store.save(profile('openai'));
+    await store.close();
 
     // Asserted structurally rather than by sniffing the file for substrings:
     // the schema legitimately contains "x_api_key" (the auth-mode enum) and a
@@ -139,9 +139,9 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     // against a real secret in `registry.golden.test.ts`.
     const reopened = new SqliteProviderProfileStore({ path: databasePath });
     const columns = Object.keys(
-      reopened.get('openai') as Record<string, unknown>,
+      (await reopened.get('openai')) as Record<string, unknown>,
     ).sort();
-    reopened.close();
+    await reopened.close();
 
     expect(columns).toEqual([
       'adapter',

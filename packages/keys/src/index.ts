@@ -103,6 +103,12 @@ export {
 export { SqliteProviderProfileStore } from './sqlite-profile-store';
 export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
 
+export {
+  PROVIDER_PROFILE_TRUTH_RECORD_KEY,
+  TruthStoreProviderProfileStore,
+} from './truth-profile-store';
+export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
+
 export { ProviderRegistry } from './registry';
 export type {
   ModelProviderClient,

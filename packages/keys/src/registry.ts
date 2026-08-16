@@ -8,6 +8,7 @@ import {
   type ModelProviderId,
   type ModelProviderProfile,
   type ProviderAuthMode,
+  parseModelProviderProfile,
 } from './provider-profile';
 import {
   type ModelProviderSecretName,
@@ -102,8 +103,8 @@ export class ProviderRegistry {
     this.#secrets = options.secretStore;
   }
 
-  close(): void {
-    this.#profiles.close();
+  async close(): Promise<void> {
+    await this.#profiles.close();
   }
 
   /**
@@ -120,15 +121,17 @@ export class ProviderRegistry {
     secret?: string,
   ): Promise<ProviderStatus> {
     const timestamp = this.#now().toISOString();
-    const previous = this.#profiles.get(configuration.provider_id);
-    const profile = {
+    const previous = await this.#profiles.get(configuration.provider_id);
+    const profile = parseModelProviderProfile({
       ...configuration,
       created_at: previous?.created_at ?? timestamp,
       enabled: configuration.enabled ?? true,
       kind: 'model',
       updated_at: timestamp,
-    } as ModelProviderProfile;
+    });
     const secretName = modelProviderSecretName(configuration.provider_id);
+    let previousSecret: string | undefined;
+    let secretWritten = false;
 
     if (configuration.auth_mode === 'none' && secret !== undefined) {
       throw new ByokKeysError(
@@ -143,7 +146,9 @@ export class ProviderRegistry {
           'Provider secret cannot be empty',
         );
       }
+      previousSecret = await this.#secrets.get(secretName);
       await this.#secrets.set(secretName, secret);
+      secretWritten = true;
     }
     if (
       configuration.auth_mode !== 'none' &&
@@ -155,7 +160,27 @@ export class ProviderRegistry {
       );
     }
 
-    const saved = this.#profiles.save(profile);
+    let saved: ModelProviderProfile;
+    try {
+      saved = await this.#profiles.save(profile);
+    } catch (cause) {
+      if (secretWritten) {
+        try {
+          if (previousSecret === undefined) {
+            await this.#secrets.delete(secretName);
+          } else {
+            await this.#secrets.set(secretName, previousSecret);
+          }
+        } catch (rollbackCause) {
+          throw new ByokKeysError(
+            'PROVIDER_SECRET_ROLLBACK_FAILED',
+            'Provider profile write failed and the previous secret could not be restored',
+            { cause: new AggregateError([cause, rollbackCause]) },
+          );
+        }
+      }
+      throw cause;
+    }
     if (saved.auth_mode === 'none') {
       await this.#secrets.delete(secretName);
     }
@@ -164,19 +189,19 @@ export class ProviderRegistry {
 
   /** Remove a provider's profile and its secret together. */
   async delete(providerId: ModelProviderId): Promise<boolean> {
-    const removed = this.#profiles.delete(providerId);
+    const removed = await this.#profiles.delete(providerId);
     await this.#secrets.delete(modelProviderSecretName(providerId));
     return removed;
   }
 
   async get(providerId: ModelProviderId): Promise<ProviderStatus | undefined> {
-    const profile = this.#profiles.get(providerId);
+    const profile = await this.#profiles.get(providerId);
     return profile === undefined ? undefined : this.#status(profile);
   }
 
   async list(): Promise<ProviderStatus[]> {
     return Promise.all(
-      this.#profiles.list().map((profile) => this.#status(profile)),
+      (await this.#profiles.list()).map((profile) => this.#status(profile)),
     );
   }
 
@@ -188,7 +213,7 @@ export class ProviderRegistry {
    * missing secret or an unusable profile is a fault, not an absence.
    */
   async resolveDefaultModelProvider(): Promise<ModelProviderClient | undefined> {
-    const profile = this.#profiles.getEnabled();
+    const profile = await this.#profiles.getEnabled();
     if (profile === undefined) return undefined;
     const secret = await this.#secrets.get(
       modelProviderSecretName(profile.provider_id),
@@ -203,7 +228,7 @@ export class ProviderRegistry {
   async setDefaultModelProvider(
     providerId: ModelProviderId,
   ): Promise<ProviderStatus> {
-    return this.#status(this.#profiles.setEnabled(providerId));
+    return this.#status(await this.#profiles.setEnabled(providerId));
   }
 
   async #status(profile: ModelProviderProfile): Promise<ProviderStatus> {
