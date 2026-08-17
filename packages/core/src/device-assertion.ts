@@ -45,6 +45,8 @@
 import { z } from 'zod';
 import { canonicalizeJson, type JsonObject, type JsonValue } from './attestation';
 import { ByokCoreError } from './errors';
+import type { DevicePrincipal } from './principals';
+import { isTenantId, type TenantId } from './tenant';
 
 /** Envelope schema id, self-consistent with the domain prefix below. */
 export const DEVICE_ASSERTION_SCHEMA_ID = 'byok-device-assertion-v1';
@@ -380,4 +382,147 @@ export async function verifyDeviceAssertion(
   if (!verified) return undefined;
 
   return claims;
+}
+
+// ---------------------------------------------------------------------------
+// Authenticate + consume once
+// ---------------------------------------------------------------------------
+
+/** The verifier's complete current row. Claims remain lookup keys, never authority. */
+export interface DeviceAssertionAuthorityRow extends DeviceAssertionDeviceRow {
+  readonly tenantId: TenantId;
+  readonly productId: string;
+  readonly deviceId: string;
+}
+
+/** Trusted deployment values the host compares with exact string equality. */
+export interface DeviceAssertionExpectedBinding {
+  readonly issuer: string;
+  readonly productId: string;
+  readonly audience: string;
+}
+
+/** One replay key. Every field is derived from verified claims/current authority. */
+export interface DeviceAssertionReplayConsumeInput {
+  readonly tenantId: TenantId;
+  readonly issuer: string;
+  readonly productId: string;
+  readonly deviceId: string;
+  readonly audience: string;
+  readonly jti: string;
+  readonly expiresAt: string;
+}
+
+/**
+ * Atomic single-use authority. `true` means this caller inserted the key;
+ * `false` means it was already consumed. Operational failures throw and must
+ * never be translated into authenticated success.
+ */
+export interface DeviceAssertionReplayAuthority {
+  consume(input: DeviceAssertionReplayConsumeInput): Promise<boolean>;
+}
+
+export interface AuthenticateDeviceAssertionDeps {
+  readonly verifier: DeviceAssertionVerifier;
+  readonly lookupDevice: (
+    deviceId: string,
+  ) => Promise<DeviceAssertionAuthorityRow | undefined> | DeviceAssertionAuthorityRow | undefined;
+  readonly replay: DeviceAssertionReplayAuthority;
+  readonly expected: DeviceAssertionExpectedBinding;
+  readonly now: Date;
+  readonly maxLifetimeMs?: number;
+}
+
+/** Audit-safe result of a consumed assertion; no credential or signature is retained. */
+export interface AuthenticatedDeviceAssertion {
+  readonly device: DevicePrincipal;
+  readonly issuer: string;
+  readonly audience: string;
+  readonly jti: string;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+}
+
+function isNonEmptyExactString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
+function isAuthorityRow(row: unknown, requestedDeviceId: string): row is DeviceAssertionAuthorityRow {
+  if (row === null || typeof row !== 'object') return false;
+  const candidate = row as Partial<DeviceAssertionAuthorityRow>;
+  return (
+    isTenantId(candidate.tenantId) &&
+    isNonEmptyExactString(candidate.productId) &&
+    candidate.deviceId === requestedDeviceId
+  );
+}
+
+/**
+ * Authenticate one device assertion and atomically consume its JTI.
+ *
+ * All invalid authentication states collapse to `undefined`. Replay-store
+ * operational failures reject the promise, allowing a host to return an
+ * availability error without ever degrading to signature-only acceptance.
+ */
+export async function authenticateDeviceAssertion(
+  input: unknown,
+  deps: AuthenticateDeviceAssertionDeps,
+): Promise<AuthenticatedDeviceAssertion | undefined> {
+  if (
+    !isNonEmptyExactString(deps.expected.issuer) ||
+    !isNonEmptyExactString(deps.expected.productId) ||
+    !isNonEmptyExactString(deps.expected.audience) ||
+    utf8ByteLength(deps.expected.audience) > DEVICE_ASSERTION_AUDIENCE_MAX_BYTES
+  ) {
+    return undefined;
+  }
+
+  let authorityRow: DeviceAssertionAuthorityRow | undefined;
+  const claims = await verifyDeviceAssertion(input, {
+    verifier: deps.verifier,
+    lookupDevice: async (deviceId) => {
+      const row = await deps.lookupDevice(deviceId);
+      if (!isAuthorityRow(row, deviceId)) return undefined;
+      authorityRow = row;
+      return { publicKeyJwkX: row.publicKeyJwkX, revoked: row.revoked };
+    },
+    now: deps.now,
+    ...(deps.maxLifetimeMs === undefined ? {} : { maxLifetimeMs: deps.maxLifetimeMs }),
+  });
+  if (claims === undefined || authorityRow === undefined) return undefined;
+
+  if (
+    claims.issuer !== deps.expected.issuer ||
+    claims.productId !== deps.expected.productId ||
+    claims.audience !== deps.expected.audience ||
+    authorityRow.productId !== deps.expected.productId ||
+    authorityRow.deviceId !== claims.deviceId
+  ) {
+    return undefined;
+  }
+
+  const consumed = await deps.replay.consume({
+    tenantId: authorityRow.tenantId,
+    issuer: claims.issuer,
+    productId: authorityRow.productId,
+    deviceId: authorityRow.deviceId,
+    audience: claims.audience,
+    jti: claims.jti,
+    expiresAt: claims.expiresAt,
+  });
+  if (!consumed) return undefined;
+
+  return {
+    device: {
+      kind: 'device',
+      tenantId: authorityRow.tenantId,
+      productId: authorityRow.productId,
+      deviceId: authorityRow.deviceId,
+    },
+    issuer: claims.issuer,
+    audience: claims.audience,
+    jti: claims.jti,
+    issuedAt: claims.issuedAt,
+    expiresAt: claims.expiresAt,
+  };
 }

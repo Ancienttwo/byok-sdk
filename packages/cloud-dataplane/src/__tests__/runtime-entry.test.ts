@@ -37,6 +37,7 @@ const ONLINE_EXPORTS = [
   // pool
   'createByokPool',
   // cloud-local stores
+  'PostgresDeviceAssertionReplayAuthority',
   'PostgresDeviceDirectory',
   'PostgresInboundDedupStore',
   'PostgresNonceStore',

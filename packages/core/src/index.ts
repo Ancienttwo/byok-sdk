@@ -248,6 +248,7 @@ export type {
 // domain prefix, separate error code — see `device-assertion.ts`'s own doc
 // comment for why none of it is folded into the device proof above.
 export {
+  authenticateDeviceAssertion,
   DEVICE_ASSERTION_ALGORITHMS,
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
@@ -264,10 +265,16 @@ export {
   verifyDeviceAssertion,
 } from './device-assertion';
 export type {
+  AuthenticateDeviceAssertionDeps,
+  AuthenticatedDeviceAssertion,
   DeviceAssertionAlgorithm,
+  DeviceAssertionAuthorityRow,
   DeviceAssertionClaims,
   DeviceAssertionDeviceRow,
   DeviceAssertionEnvelopeV1,
+  DeviceAssertionExpectedBinding,
+  DeviceAssertionReplayConsumeInput,
+  DeviceAssertionReplayAuthority,
   DeviceAssertionVerifier,
   DeviceAssertionVerifyDeps,
   DeviceAssertionVerifyInput,
@@ -281,6 +288,7 @@ export {
   IN_MEMORY_CLOCK_EPOCH,
   InMemoryBoardStore,
   InMemoryMailboxStore,
+  InMemoryDeviceAssertionReplayAuthority,
   InMemoryObjectStore,
   InMemoryPresenceStore,
   InMemoryQuotaStore,

@@ -6,6 +6,25 @@ logic but no durable database or object-storage driver.
 
 Pair it with `@byok-sdk/cloud-dataplane` for Postgres + R2 production storage.
 
+`authenticateHostedDeviceAssertion()` is the hosted connector-binding auth
+composition. It adapts the current `DeviceDirectory` row and `CloudCrypto` to
+core's single-use authenticator; callers must inject a replay authority and
+trusted deployment bindings. Create durable connector state only after it
+returns a principal. OAuth refresh tokens and the resulting long-lived profile
+remain host-owned and are never stored by this API.
+
+```ts
+const authenticated = await authenticateHostedDeviceAssertion(assertion, {
+  devices,
+  crypto,
+  replay,
+  clock,
+  expected: { issuer, productId, audience: 'connector-binding' },
+});
+if (authenticated === undefined) throw new Error('unauthorized');
+await connectorProfiles.bind(authenticated.device, providerLogin);
+```
+
 Hosted compositions enqueue the distinct toolset offer message explicitly:
 
 ```ts

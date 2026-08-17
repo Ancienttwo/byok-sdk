@@ -6,6 +6,16 @@ connector catalogue: `@byok-sdk/client` remains credential-blind, while this
 separate stdio process explicitly depends on `@byok-sdk/keys` for OS-backed
 secret custody.
 
+When a host exposes long-lived connector profiles, setup should first request a
+fresh device assertion with the host's exact connector-binding audience and
+exchange it through `authenticateHostedDeviceAssertion()`. The assertion is
+single-use and authorizes only that binding operation; it is not cached as the
+profile login. After successful authentication, this broker continues to own
+the Google refresh token in the OS credential store and the host owns any
+durable profile/session metadata. A failed profile bind consumes the assertion
+and requires a fresh one. BYOK device revocation blocks future exchanges but is
+not Google token revocation.
+
 The closed path is:
 
 ```text

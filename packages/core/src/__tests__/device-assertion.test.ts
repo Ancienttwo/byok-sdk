@@ -26,6 +26,7 @@ import {
   DEVICE_ASSERTION_MAX_TTL_MS,
   DEVICE_ASSERTION_SCHEMA_ID,
   DeviceAssertionClaimsSchema,
+  authenticateDeviceAssertion,
   deviceAssertionCanonicalClaims,
   deviceAssertionCanonicalJson,
   deviceAssertionSigningInput,
@@ -33,10 +34,13 @@ import {
   verifyDeviceAssertion,
   type DeviceAssertionClaims,
   type DeviceAssertionEnvelopeV1,
+  type DeviceAssertionReplayAuthority,
   type DeviceAssertionVerifier,
 } from '../device-assertion';
 import { DEVICE_PROOF_DOMAIN_PREFIX, deviceProofSigningInput, DeviceProofProtectedClaimsSchema } from '../attestation';
 import { isCoreError } from '../errors';
+import { InMemoryDeviceAssertionReplayAuthority } from '../in-memory/device-assertion-replay';
+import { tenantId } from '../tenant';
 
 const GOLDEN_URL = new URL('./golden/device-assertion-v1.canonical.json', import.meta.url);
 
@@ -591,5 +595,137 @@ describe('verifyDeviceAssertion', () => {
         verifyDeviceAssertion(input, { ...base, now: new Date('2026-08-12T04:45:01.000Z') }),
       ).resolves.toBeUndefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// authenticateDeviceAssertion
+// ---------------------------------------------------------------------------
+
+describe('authenticateDeviceAssertion', () => {
+  const keys = generateKeyPairSync('ed25519');
+  const devicePublicKey = (keys.publicKey.export({ format: 'jwk' }) as { x: string }).x;
+  const expected = {
+    issuer: 'https://api.example.com',
+    productId: 'product-a',
+    audience: 'salesko-api',
+  } as const;
+
+  function deps(replay: DeviceAssertionReplayAuthority = new InMemoryDeviceAssertionReplayAuthority()) {
+    return {
+      verifier: nodeVerifier,
+      lookupDevice: () => ({
+        tenantId: tenantId('tenant-a'),
+        productId: 'product-a',
+        deviceId: 'device-1',
+        publicKeyJwkX: devicePublicKey,
+        revoked: false,
+      }),
+      replay,
+      expected,
+      now: new Date('2026-08-12T04:45:01.000Z'),
+    } as const;
+  }
+
+  it('returns a row-derived principal and consumes a valid assertion exactly once', async () => {
+    const envelope = signedEnvelope(keys.privateKey);
+    const replay = new InMemoryDeviceAssertionReplayAuthority();
+
+    await expect(authenticateDeviceAssertion(envelope, deps(replay))).resolves.toMatchObject({
+      device: {
+        kind: 'device',
+        tenantId: 'tenant-a',
+        productId: 'product-a',
+        deviceId: 'device-1',
+      },
+      issuer: expected.issuer,
+      audience: expected.audience,
+      jti: envelope.protected.jti,
+    });
+    await expect(authenticateDeviceAssertion(envelope, deps(replay))).resolves.toBeUndefined();
+  });
+
+  it('lets exactly one concurrent consumer authenticate the same assertion', async () => {
+    const envelope = signedEnvelope(keys.privateKey);
+    const replay = new InMemoryDeviceAssertionReplayAuthority();
+    const results = await Promise.all(
+      Array.from({ length: 16 }, () => authenticateDeviceAssertion(envelope, deps(replay))),
+    );
+    expect(results.filter((result) => result !== undefined)).toHaveLength(1);
+  });
+
+  it('rejects every trusted-binding mismatch before consuming the JTI', async () => {
+    const envelope = signedEnvelope(keys.privateKey);
+    for (const patch of [
+      { issuer: 'https://other.example.com' },
+      { productId: 'product-b' },
+      { audience: 'other-api' },
+    ]) {
+      let consumed = false;
+      await expect(
+        authenticateDeviceAssertion(envelope, {
+          ...deps({
+            consume: () => {
+              consumed = true;
+              return Promise.resolve(true);
+            },
+          }),
+          expected: { ...expected, ...patch },
+        }),
+      ).resolves.toBeUndefined();
+      expect(consumed).toBe(false);
+    }
+  });
+
+  it('rejects a row whose product or device identity does not match the requested authority', async () => {
+    const envelope = signedEnvelope(keys.privateKey);
+    for (const rowPatch of [
+      { productId: 'product-b' },
+      { deviceId: 'device-2' },
+    ]) {
+      await expect(
+        authenticateDeviceAssertion(envelope, {
+          ...deps(),
+          lookupDevice: () => ({
+            tenantId: tenantId('tenant-a'),
+            productId: 'product-a',
+            deviceId: 'device-1',
+            publicKeyJwkX: devicePublicKey,
+            revoked: false,
+            ...rowPatch,
+          }),
+        }),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('propagates replay-authority failures instead of degrading to signature-only auth', async () => {
+    const envelope = signedEnvelope(keys.privateKey);
+    await expect(
+      authenticateDeviceAssertion(
+        envelope,
+        deps({
+          consume: () => Promise.reject(new Error('replay authority unavailable')),
+        }),
+      ),
+    ).rejects.toThrow('replay authority unavailable');
+  });
+
+  it('cleans only expired replay keys and honors the cleanup limit', async () => {
+    const replay = new InMemoryDeviceAssertionReplayAuthority();
+    const input = {
+      tenantId: tenantId('tenant-a'),
+      issuer: expected.issuer,
+      productId: expected.productId,
+      deviceId: 'device-1',
+      audience: expected.audience,
+      jti: freshJti(),
+      expiresAt: '2026-08-12T04:47:00.000Z',
+    } as const;
+    await expect(replay.consume(input)).resolves.toBe(true);
+    await expect(replay.deleteExpired(new Date('2026-08-12T04:46:59.999Z'), 1)).resolves.toBe(0);
+    await expect(replay.consume(input)).resolves.toBe(false);
+    await expect(replay.deleteExpired(new Date(input.expiresAt), 1)).resolves.toBe(1);
+    await expect(replay.consume(input)).resolves.toBe(true);
   });
 });

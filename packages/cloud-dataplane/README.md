@@ -15,6 +15,13 @@ partial bundle for them to run. `createPostgresCloudMaintenance` is the third,
 host-only operational composition; it is deliberately outside both port
 inventories.
 
+`PostgresDeviceAssertionReplayAuthority` is a separate online security
+authority for connector-binding exchanges. Its unique key makes consumption an
+atomic `INSERT ... ON CONFLICT DO NOTHING` decision, and bounded expiry cleanup
+keeps the short-lived ledger finite. It is intentionally not a `CloudStores`
+member: hosts opt into assertion exchange explicitly, while connector sessions
+and provider credentials stay outside this package.
+
 `PostgresTruthCommitter` is the S6 transaction authority rather than another
 raw store bundle. It owns the one transaction that couples proof receipt,
 terminal/snapshot preconditions, committed object checks, object references,

@@ -30,6 +30,11 @@ export type {
   ApprovalTimelineCompositionFactory,
   ApprovalTimelineCompositionHandle,
 } from './cloud/approval-timeline';
+export { runDeviceAssertionReplayConformance } from './device-assertion-replay';
+export type {
+  DeviceAssertionReplayCompositionFactory,
+  DeviceAssertionReplayCompositionHandle,
+} from './device-assertion-replay';
 
 export {
   runPairingSimulatorConformance,

@@ -40,6 +40,7 @@ export {
   PostgresTaskAttemptStore,
   PostgresActivityStore,
   PostgresApprovalTimelineStore,
+  PostgresDeviceAssertionReplayAuthority,
   createPostgresCloudStores,
 } from './stores/index';
 export type {

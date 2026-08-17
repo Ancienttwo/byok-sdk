@@ -26,6 +26,7 @@ export { InMemoryPresenceStore } from './presence';
 export { InMemoryObjectStore } from './blob';
 export { InMemoryQuotaStore } from './quota';
 export { InMemorySkillPackStore } from './skill-pack';
+export { InMemoryDeviceAssertionReplayAuthority } from './device-assertion-replay';
 
 export interface InMemoryCoreOptions {
   /** Defaults to a fresh {@link createMutableClock}, so TTL behavior is deterministic. */
