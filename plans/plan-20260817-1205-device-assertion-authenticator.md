@@ -179,7 +179,7 @@ Malformed/invalid input never reaches replay storage; replay never reaches a bin
 - [x] T4 Implement in-memory and Postgres replay stores plus ordered migration and bounded cleanup; prove one success under real concurrent Postgres exchange.
 - [x] T5 Add negative/conformance matrices and a host-side connector-binding callback test proving authentication precedes binding and failed binding spends the assertion.
 - [x] T6 Update spec/architecture/package/reference docs; keep OAuth secrets and provider lifecycle outside SDK authority.
-- [ ] T7 Run targeted tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, architecture sync for touched scope, frozen-subject review, and independent acceptance.
+- [x] T7 Run targeted tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, architecture sync for touched scope, frozen-subject review, and independent acceptance.
 
 ## Stop Conditions
 
@@ -221,4 +221,4 @@ Stop without fallback if one current row cannot determine the principal; replay 
 - [x] T4 Implement in-memory and Postgres replay stores plus ordered migration and bounded cleanup; prove one success under real concurrent Postgres exchange.
 - [x] T5 Add negative/conformance matrices and a host-side connector-binding callback test proving authentication precedes binding and failed binding spends the assertion.
 - [x] T6 Update spec/architecture/package/reference docs; keep OAuth secrets and provider lifecycle outside SDK authority.
-- [ ] T7 Run targeted tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, architecture sync for touched scope, frozen-subject review, and independent acceptance.
+- [x] T7 Run targeted tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, architecture sync for touched scope, frozen-subject review, and independent acceptance.

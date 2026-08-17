@@ -1,10 +1,10 @@
 # Implementation Notes: device-assertion-authenticator
 
-> **Status**: Active
+> **Status**: Complete
 > **Plan**: plans/plan-20260817-1205-device-assertion-authenticator.md
 > **Contract**: tasks/contracts/20260817-1205-device-assertion-authenticator.contract.md
 > **Review**: tasks/reviews/20260817-1205-device-assertion-authenticator.review.md
-> **Last Updated**: 2026-08-17 12:21
+> **Last Updated**: 2026-08-17 12:40
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -49,6 +49,11 @@
 - Real Postgres: `device-assertion-replay.test.ts` passed 4 tests against the
   Docker substrate, including 64 concurrent full exchanges with exactly one
   authenticated principal plus shared replay conformance and bounded cleanup.
+- Independent gatekeeper: PASS against frozen normalized subject
+  `sha256:d89865df0995a80c924007557d6856afd71a9b185647eb46c1e051af76cefed6`;
+  no findings. Typed AcceptanceReceipt protocol 2 recorded as `external_pass`
+  with verification evidence
+  `sha256:c969d0f3c4fba24e455877eede456be2002803c373eef91324f930779eca57ee`.
 
 ## Promotion Filter
 
