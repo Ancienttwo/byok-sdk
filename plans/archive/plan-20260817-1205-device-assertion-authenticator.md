@@ -1,6 +1,6 @@
 # Plan: Device Assertion Authenticator for Connector Binding
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260817-1205
 > **Slug**: device-assertion-authenticator
 > **Planning Source**: repo-harness-plan
