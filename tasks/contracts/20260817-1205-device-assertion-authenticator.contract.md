@@ -122,6 +122,7 @@ allowed_paths:
   - packages/cloud/README.md
   - packages/cloud-dataplane/src/stores/
   - packages/cloud-dataplane/src/index.ts
+  - packages/cloud-dataplane/src/runtime.ts
   - packages/cloud-dataplane/src/__tests__/
   - packages/cloud-dataplane/README.md
   - packages/conformance/src/
