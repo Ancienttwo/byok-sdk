@@ -175,7 +175,7 @@ describe('tenant plumbing', () => {
     expect(bundle).not.toContain('contentProxy');
   });
 
-  it('reaches the pre-tenant device lookup from the auth plane only', () => {
+  it('reaches the pre-tenant device lookup from authentication compositions only', () => {
     // The two files that DECLARE the method are excluded, not the ones that
     // call it: `ports.ts` states the signature, `ports-contract.ts` states the
     // method inventory. Naming a method in a contract is not reaching for it.
@@ -183,7 +183,11 @@ describe('tenant plumbing', () => {
     const callers = SHIPPED.filter(
       (file) => !declarations.has(file.path) && /resolveByDeviceId/.test(code(file.text)),
     ).map((file) => file.path);
-    expect(callers.sort()).toEqual(['auth/plane.ts', 'stores/in-memory/device-directory.ts']);
+    expect(callers.sort()).toEqual([
+      'auth/device-assertion.ts',
+      'auth/plane.ts',
+      'stores/in-memory/device-directory.ts',
+    ]);
   });
 });
 

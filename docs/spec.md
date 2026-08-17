@@ -273,6 +273,23 @@ the hint store or polling transport fails that envelope, the remedy is a
 replaceable activity store or host transport, not a second projection authority
 or a general-purpose UI runtime framework.
 
+### Device assertion exchange for durable connector binding
+
+A connector may use a device assertion to authenticate one setup or binding
+operation, but the assertion is never the connector's long-lived login state.
+The host exact-matches its configured issuer, product and single audience,
+resolves the current non-revoked device row, verifies the signature and time
+window, then atomically consumes the JTI before returning the row-derived
+tenant/product/device principal. A replay or replay-authority outage fails
+closed. Binding failure after authentication spends the assertion and requires
+a newly issued one.
+
+Only after that exchange may host glue create its durable connector profile or
+session. Provider refresh tokens remain in the connector's OS credential store;
+they do not enter the assertion envelope, replay ledger, core stores, or cloud
+store bundle. BYOK device revocation blocks future assertion exchanges but does
+not claim to revoke or delete an already established provider credential.
+
 ## Skill pack delivery
 
 A SaaS product using this SDK can distribute curated, declarative content — an

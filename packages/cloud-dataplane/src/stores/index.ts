@@ -44,6 +44,7 @@ export { PostgresProofRequestReceiptStore } from './proof-receipts';
 export { PostgresTaskAttemptStore } from './task-attempts';
 export { PostgresActivityStore } from './activity';
 export { PostgresApprovalTimelineStore } from './approval-timeline';
+export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
 export {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_PRESIGN_TTL_SECONDS,

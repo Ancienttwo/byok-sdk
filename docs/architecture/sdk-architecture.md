@@ -266,6 +266,16 @@ flowchart TB
 不存在 command、env、header、token 或 cookie 字段；任意 instruction 文本不在此
 保护之内，host 不得将凭证写入其中，connector 凭证仍由本地 broker 管理。
 
+Connector 首次建立长期绑定时，可把 daemon 签发的 device assertion 作为一次性
+exchange credential 交给 host。`@byok-sdk/core` 的高层 authenticator 负责 exact
+issuer/product/audience、当前 row authority 与原子 JTI consumption；
+`@byok-sdk/cloud` 只把 `DeviceDirectory.resolveByDeviceId()` 和 `CloudCrypto`
+接到该契约；`@byok-sdk/cloud-dataplane` 的 Postgres replay authority 用唯一键
+裁决并发。成功返回的 principal 完全来自 row。Assertion 不升级为 connector
+cookie/token；长期 profile/session 与 OAuth refresh credential 仍由 connector host
+及 OS credential store 持有。绑定 callback 失败时 JTI 已消耗，必须重新签发，
+不允许 signature-only fallback 或 read-then-write replay check。
+
 ### 2.3 执行状态机
 
 ```mermaid

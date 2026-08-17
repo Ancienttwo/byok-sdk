@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-17T02:36:54+0800 -->
+<!-- updated_at: 2026-08-17T12:42:19+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-17T02:36:54+0800
-> **Source Branch**: main
-> **Source Commit**: 9e869b8
+> **Updated At**: 2026-08-17T12:42:19+0800
+> **Source Branch**: codex/device-assertion-authenticator
+> **Source Commit**: 4485823
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: post-release-closeout
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -34,10 +34,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Active Sprint
 
-- Sprint: `plans/sprints/20260814-0005-runtime-adapter-lifecycle-contracts.sprint.md`
-- Sprint Status: Done
-- Backlog: 3/3
-- Next Sprint Task: (none)
+- Sprint: (none)
 ## Workstreams
 
 - (none)
@@ -51,10 +48,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: clean
+- Summary: 10 changed/untracked path(s)
 
 ```
-(none)
+ D plans/plan-20260817-1205-device-assertion-authenticator.md
+ D tasks/contracts/20260817-1205-device-assertion-authenticator.contract.md
+ D tasks/notes/20260817-1205-device-assertion-authenticator.notes.md
+ D tasks/reviews/20260817-1205-device-assertion-authenticator.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260817-1205-device-assertion-authenticator.md
+?? tasks/archive/contract-20260817-1242-device-assertion-authenticator.md
+?? tasks/archive/notes-20260817-1242-device-assertion-authenticator.md
+?? tasks/archive/review-20260817-1242-device-assertion-authenticator.md
+?? tasks/archive/todo-20260817-1242-device-assertion-authenticator.md
 ```
 
 ## Source Artifacts

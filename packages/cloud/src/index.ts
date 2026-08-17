@@ -84,6 +84,8 @@ export type {
   DeviceProofAuthDeps,
   DeviceProofRequestBinding,
 } from './auth/device-proof';
+export { authenticateHostedDeviceAssertion } from './auth/device-assertion';
+export type { HostedDeviceAssertionAuthDeps } from './auth/device-assertion';
 export {
   DEVICE_IDENTITY_PROOF_KEY_EPOCH,
   DEVICE_IDENTITY_PROOF_KEY_ID,
