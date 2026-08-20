@@ -27,7 +27,18 @@ coverage/
 
 # External references
 _ref/
-.archcontext/
+.archcontext/*
+!.archcontext/manifest.yaml
+!.archcontext/product.yaml
+!.archcontext/model/
+.archcontext/model/*
+!.archcontext/model/nodes/
+!.archcontext/model/relations/
+!.archcontext/model/flows/
+!.archcontext/decisions/
+!.archcontext/policies/
+!.archcontext/practices/
+!.archcontext/projections/
 .codegraph/
 
 # Local operations state
@@ -67,6 +78,7 @@ tasks/.current.md.tmp.*
 .ai/harness/handoff/resume.md
 .ai/harness/capability-context/
 .ai/harness/journal/
+.ai/harness/architecture-projection/
 .ai/harness/security/*
 !.ai/harness/security/.gitkeep
 .ai/harness/planning/*
@@ -85,8 +97,7 @@ tasks/.current.md.tmp.*
 .ai/harness/chatgpt/sessions/
 .ai/harness/triage/*
 !.ai/harness/triage/.gitkeep
-.repo-harness/chatgpt-browser.local.json
-.repo-harness/chatgpt-browser.tokens.json
+.repo-harness/
 .codex/*
 .claude/.active-plan
 .claude/.plan-state/
