@@ -142,7 +142,7 @@ declare or import those packages separately because the CLI/RPC boundary is
 the sole version authority.
 
 The package manager is not the runtime authority. This repository uses Bun
-1.3.14 with its isolated workspace linker and one committed `bun.lock`.
+1.4.0 with its isolated workspace linker and one committed `bun.lock`.
 Downstreams install the standard npm registry artifacts with their chosen npm
 client; supported production execution remains Node.js 22.22 or newer. Bun
 runtime compatibility is not claimed. A Bun-compiled or Node SEA

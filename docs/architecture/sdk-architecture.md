@@ -107,7 +107,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库以 Bun 1.3.14 管理 workspace 与 lockfile，Node `>=22.22.0` 仍是 dispatch/runtime authority。当前有十三个 workspace package：八个 public dispatch manifest（六个 dispatch package、`byok-sdk` umbrella、`@byok-sdk/testkit`）、独立 public `@byok-sdk/keys`、三个 private examples 与一个只供测试使用的 private `@byok-sdk/conformance`。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画实际 runtime、release 与 test-only edges。
+仓库以 Bun 1.4.0 管理 workspace 与 lockfile，Node `>=22.22.0` 仍是 dispatch/runtime authority。当前有十三个 workspace package：八个 public dispatch manifest（六个 dispatch package、`byok-sdk` umbrella、`@byok-sdk/testkit`）、独立 public `@byok-sdk/keys`、三个 private examples 与一个只供测试使用的 private `@byok-sdk/conformance`。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画实际 runtime、release 与 test-only edges。
 
 ```mermaid
 flowchart LR
