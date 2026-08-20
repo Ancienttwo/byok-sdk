@@ -1,12 +1,19 @@
+> **Archived**: 2026-08-20 22:38
+> **Related Plan**: plans/archive/plan-20260820-2055-post-042-db-upgrade-evidence.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260820-2238
+
 # Task Contract: post-042-db-upgrade-evidence
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260820-2055-post-042-db-upgrade-evidence.md
 > **Task Profile**: migration
+> **Workflow Profile**: strict
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-20 20:55
+> **Last Updated**: 2026-08-20 21:06
 > **Review File**: `tasks/reviews/20260820-2055-post-042-db-upgrade-evidence.review.md`
 > **Notes File**: `tasks/notes/20260820-2055-post-042-db-upgrade-evidence.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -70,6 +77,12 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 - Scope gate: edit only paths listed under `allowed_paths`; update this contract before widening scope.
 - Completion gate: run `verify-sprint --prepare-acceptance`, record one typed AcceptanceReceipt under the frozen policy below, then run `verify-sprint`; review Markdown is projection only.
 
+## Change Assessment
+
+```json
+{"protocol":1,"oracles":[{"id":"a2-contract-verification","kind":"deterministic_test","paths":["*"]},{"id":"v042-candidate-pack-and-postgres-readback","kind":"runtime_readback","paths":["*"]}]}
+```
+
 ## Acceptance Policy
 
 ```json
@@ -93,7 +106,11 @@ allowed_paths:
   - packages/ui-runtime/package.json
   - scripts/release/pg-migrate-smoke.mjs
   - scripts/release/fixtures/
+  - docs/architecture/index.md
+  - docs/architecture/requests/archive/2026/root.md
+  - docs/architecture/sdk-architecture.md
   - docs/researches/2026-08-20_post-042-progress-and-sprint-audit.md
+  - docs/spec.md
   - plans/
   - tasks/todos.md
   - tasks/current.md

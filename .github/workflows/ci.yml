@@ -338,7 +338,7 @@ jobs:
   # assertion "every shipped migration was applied" mean something, and the
   # second run pins idempotence plus the runner's checksum verification.
   release-pack-migrate:
-    name: migrate an empty Postgres from the packed tarball (fixed Node)
+    name: migrate empty and v0.4.2 Postgres fixtures from packed tarballs (fixed Node)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -361,6 +361,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # pg-migrate-smoke verifies frozen migration bytes directly from tag v0.4.2
 
       - name: Setup fixed Node
         uses: actions/setup-node@v7
@@ -376,7 +378,7 @@ jobs:
       - name: Pack the exact tarballs a consumer would install
         run: bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
 
-      - name: Migrate an empty database from the packed tarball, then prove the re-run is a no-op
+      - name: Prove empty install and v0.4.2-to-candidate upgrade from packed tarballs
         run: node scripts/release/pg-migrate-smoke.mjs --artifacts .ci-artifacts/release-pack
 
   # M3-4 Windows Service guarantee: proves the generated WinSW service

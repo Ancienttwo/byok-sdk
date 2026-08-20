@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-20T20:46:07+0800 -->
+<!-- updated_at: 2026-08-20T22:38:19+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Idle
-> **Updated At**: 2026-08-20T20:46:07+0800
-> **Source Branch**: main
-> **Source Commit**: f8bccbd
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-20T22:38:19+0800
+> **Source Branch**: codex/post-042-db-upgrade-evidence
+> **Source Commit**: 5818ad5
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: A1 authority reconciliation
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Idle
+- Status: ManualClearedWithActiveWork
 - Active Plan: (none)
 - Plan Status: (none)
-- Next Task: (none)
-- Clear Note: (none)
+- Next Task: inspect active worktree marker(s)
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,7 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- (none)
+- /Users/kito/Projects/byok-sdk: plans/plan-20260820-2055-post-042-db-upgrade-evidence.md
+- /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -40,7 +41,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: (none)
+- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
 
 ## Checks
 
@@ -48,17 +49,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 8 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
- M docs/architecture/index.md
- D docs/architecture/requests/root.md
- M docs/architecture/sdk-architecture.md
- M docs/spec.md
- M plans/sprints/20260812-0218-salesko-upstream-asks.sprint.md
- M tasks/current.md
-?? docs/architecture/requests/archive/
-?? docs/researches/2026-08-20_post-042-progress-and-sprint-audit.md
+ D plans/plan-20260820-2055-post-042-db-upgrade-evidence.md
+ D tasks/contracts/20260820-2055-post-042-db-upgrade-evidence.contract.md
+ D tasks/notes/20260820-2055-post-042-db-upgrade-evidence.notes.md
+ D tasks/reviews/20260820-2055-post-042-db-upgrade-evidence.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260820-2055-post-042-db-upgrade-evidence.md
+?? tasks/archive/contract-20260820-2238-post-042-db-upgrade-evidence.md
+?? tasks/archive/notes-20260820-2238-post-042-db-upgrade-evidence.md
+?? tasks/archive/review-20260820-2238-post-042-db-upgrade-evidence.md
+?? tasks/archive/todo-20260820-2238-post-042-db-upgrade-evidence.md
 ```
 
 ## Source Artifacts

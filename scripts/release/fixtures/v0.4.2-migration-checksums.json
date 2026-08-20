@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "releaseVersion": "0.4.2",
+  "migrations": {
+    "0001_cloud_local.sql": "0d7291468f3594fe1b34d5585bbff3fdc032869df030768e68fbd4a4fd8934e6",
+    "0002_core_domain.sql": "01a5c22efb05cb2623ae96218e3cc00eb5ed47b9e19de6319e16038a3cc16d6b",
+    "0003_cloud_cleanup.sql": "8e816de875fc4f7cefa82f290cb0130f3dfa655f2c710a0d71db7c0ef56dc229",
+    "0004_device_proof_truth.sql": "d4402d8d6ec053dbec2eaea8808d60cd99dcf598a7672fff2a533b49e8838636",
+    "0005_skill_packs.sql": "e92b75670fcac2a0a8a2746da973abfc1e0d388a394105462bc6b82a404ce1a5",
+    "0006_device_presence_toolsets.sql": "f0fd592f56226a2a234864991d0b777be0fa48933f50dfdfcf2f2a67ad7bb38c",
+    "0007_approval_timeline.sql": "5aede977a30c124ae2d2da1c53c8e041a4fae346e5c6e02e002f35b23861e275"
+  }
+}

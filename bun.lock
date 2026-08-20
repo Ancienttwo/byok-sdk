@@ -73,7 +73,7 @@
     },
     "packages/client": {
       "name": "@byok-sdk/client",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "bin": {
         "byok-agent": "./dist/bin/byok-agent.js",
         "byok-approval-mcp": "./dist/bin/byok-approval-mcp.js",
@@ -92,7 +92,7 @@
     },
     "packages/cloud": {
       "name": "@byok-sdk/cloud",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
@@ -102,7 +102,7 @@
     },
     "packages/cloud-dataplane": {
       "name": "@byok-sdk/cloud-dataplane",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
@@ -131,7 +131,7 @@
     },
     "packages/core": {
       "name": "@byok-sdk/core",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "zod": "^4.4.3",
       },
@@ -149,14 +149,14 @@
     },
     "packages/protocol": {
       "name": "@byok-sdk/protocol",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "zod": "^4.4.3",
       },
     },
     "packages/sdk": {
       "name": "byok-sdk",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@byok-sdk/client": "workspace:*",
         "@byok-sdk/cloud": "workspace:*",
@@ -169,7 +169,7 @@
     },
     "packages/server": {
       "name": "@byok-sdk/server",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
@@ -184,7 +184,7 @@
     },
     "packages/testkit": {
       "name": "@byok-sdk/testkit",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
@@ -192,7 +192,7 @@
     },
     "packages/ui-runtime": {
       "name": "@byok-sdk/ui-runtime",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",

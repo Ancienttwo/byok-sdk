@@ -1,6 +1,6 @@
 # Plan: A2 v0.4.2 Database to 0.5.0 Candidate Upgrade Evidence
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260820-2055
 > **Slug**: post-042-db-upgrade-evidence
 > **Planning Source**: repo-harness-plan
@@ -143,11 +143,13 @@ The first proof point is a local Postgres run from exact packed tarballs. The th
 
 ## Task Breakdown
 
-- [ ] Freeze and validate v0.4.2 migration 0001 through 0007 checksums from the published tag.
-- [ ] Extend packed-tarball Postgres smoke with isolated empty and seeded v0.4.2 upgrade schemas.
-- [ ] Set the aligned dispatch candidate manifests and lockfile to 0.5.0 without changing keys 0.2.0.
-- [ ] Freeze the exact candidate SHA, pack tarballs, and run package graph, isolated import, checksum, and real Postgres upgrade evidence.
-- [ ] Record A2 evidence and leave publish, deploy, production preflight, and Salesko repin unauthorized and untouched.
+- [x] Freeze and validate v0.4.2 migration 0001 through 0007 checksums from the published tag.
+- [x] Extend packed-tarball Postgres smoke with isolated empty and seeded v0.4.2 upgrade schemas.
+- [x] Set the aligned dispatch candidate manifests and lockfile to 0.5.0 without changing keys 0.2.0.
+- [x] Freeze the exact candidate SHA, pack tarballs, and run package graph, isolated import, checksum, and real Postgres upgrade evidence.
+- [x] Record A2 evidence and leave publish, deploy, production preflight, and Salesko repin unauthorized and untouched.
+- [x] Remediate independent-review evidence gaps with tag-bound migration bytes, stream preservation, installed-package concurrent replay, explicit fresh-database diagnostics, and a default-schema empty install.
+- [x] Obtain a fresh independent disposition for the remediated subject; do not reuse the rejected receipt.
 
 ## Verification
 
@@ -168,8 +170,10 @@ Before publish, revert the local candidate commit. Database rollback is intentio
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Freeze and validate v0.4.2 migration 0001 through 0007 checksums from the published tag.
-- [ ] Extend packed-tarball Postgres smoke with isolated empty and seeded v0.4.2 upgrade schemas.
-- [ ] Set the aligned dispatch candidate manifests and lockfile to 0.5.0 without changing keys 0.2.0.
-- [ ] Freeze the exact candidate SHA, pack tarballs, and run package graph, isolated import, checksum, and real Postgres upgrade evidence.
-- [ ] Record A2 evidence and leave publish, deploy, production preflight, and Salesko repin unauthorized and untouched.
+- [x] Freeze and validate v0.4.2 migration 0001 through 0007 checksums from the published tag.
+- [x] Extend packed-tarball Postgres smoke with isolated empty and seeded v0.4.2 upgrade schemas.
+- [x] Set the aligned dispatch candidate manifests and lockfile to 0.5.0 without changing keys 0.2.0.
+- [x] Freeze the exact candidate SHA, pack tarballs, and run package graph, isolated import, checksum, and real Postgres upgrade evidence.
+- [x] Record A2 evidence and leave publish, deploy, production preflight, and Salesko repin unauthorized and untouched.
+- [x] Remediate independent-review evidence gaps with tag-bound migration bytes, stream preservation, installed-package concurrent replay, explicit fresh-database diagnostics, and a default-schema empty install.
+- [x] Obtain a fresh independent disposition for the remediated subject; do not reuse the rejected receipt.

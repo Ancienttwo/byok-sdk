@@ -448,3 +448,36 @@ rg -n '"@byok-sdk/' \
 - 验证：`repo-harness run check-task-workflow --strict`、architecture queue `status/reindex/check` 与 `git diff --check` 全部通过。
 
 仍未闭合的是 A2/A3 的 production/deployment evidence，不属于 A1 authority reconciliation。
+
+## 14. A2 implementation checkpoint
+
+2026-08-20，A2 已在 linked contract worktree 完成 implementation、本地
+candidate evidence 与首轮独立 review remediation；fresh review/main integration
+尚未执行：
+
+- exact packed candidate commit `3e06eee76a1ab332219235a68cc23af83c96c0fa`
+  将 aligned dispatch manifests/lockfile 更新为 `0.5.0`；
+  `@byok-sdk/keys` 保持 `0.2.0`。
+- `v0.4.2` migration baseline 每次都直接读取 tag `v0.4.2` 的
+  `deploy/sql/0001`-`0007` bytes，并要求其 SHA-256 与 committed fixture 一致；
+  CI checkout 显式获取完整 tag history。
+- exact candidate pack 生成九个 `0.5.0` tarballs，installed dependency graph
+  闭合为单一 version set；cloud-dataplane tarball 携带与 `deploy/sql`
+  双向 SHA-256 一致的八个 migrations。
+- 临时 PostgreSQL 17 的 empty-install/idempotence path 使用 deployment-default
+  `public` schema；tag-bound `v0.4.2` schema 的 stream、mailbox、task、truth、
+  quota rows 在应用 `0008_device_assertion_replay.sql` 后保持不变。
+- replay table/index readback 通过；installed tarball 的
+  `PostgresDeviceAssertionReplayAuthority` 接收 64 个 concurrent consumes，
+  恰好一个成功；最终 migration rerun 为 no-op。
+- 对同一 database 再次执行 smoke 会 exit `1`，并明确报告必须使用 fresh
+  database（无 public tables 且无 `byok_upgrade_v042` schema），而不是暴露
+  无上下文的 `schema already exists`。
+- `bun run build`、`bun run typecheck`、`bun run test`、release graph、
+  strict workflow 和 `git diff --check` 均通过。
+
+A2 首轮 Claude review 的 typed disposition 为 `reject`；其 P2 evidence gaps
+已按上述路径修复，但旧 receipt 没有被重写为 pass，必须对 remediated subject
+取得 fresh disposition。A2 没有执行 publish、push、production migration 或 Salesko repin。production
+migration ledger/deployment version 仍是 release operator evidence；A3 仍负责
+Salesko candidate consumption 与 assertion/revocation smoke。
