@@ -81,6 +81,8 @@ allowed_paths:
   - .claude/templates/
   - src/
   - tests/
+  - packages/client/src/daemon/environment.ts
+  - packages/client/src/__tests__/environment.test.ts
 ```
 
 ## Evidence Requirements

@@ -12,18 +12,20 @@ describe('buildRuntimeEnv', () => {
       ambient: ambient({
         PATH: '/usr/bin',
         HOME: '/home/user',
+        USER: 'user',
         AWS_SECRET_ACCESS_KEY: 'leak-me',
         RANDOM_UNRELATED_VAR: 'nope',
       }),
     });
-    expect(result).toEqual({ PATH: '/usr/bin', HOME: '/home/user' });
+    expect(result).toEqual({ PATH: '/usr/bin', HOME: '/home/user', USER: 'user' });
   });
 
-  it('includes the full platform baseline (PATH/HOME/USERPROFILE/TMPDIR/TEMP/TMP/LANG/TZ/TERM/SHELL) when set', () => {
+  it('includes the full platform baseline (PATH/HOME/USER/USERPROFILE/TMPDIR/TEMP/TMP/LANG/TZ/TERM/SHELL) when set', () => {
     const result = buildRuntimeEnv({
       ambient: ambient({
         PATH: '/bin',
         HOME: '/home/user',
+        USER: 'user',
         USERPROFILE: 'C:\\Users\\user',
         TMPDIR: '/tmp',
         TEMP: '/temp',
@@ -37,6 +39,7 @@ describe('buildRuntimeEnv', () => {
     expect(result).toEqual({
       PATH: '/bin',
       HOME: '/home/user',
+      USER: 'user',
       USERPROFILE: 'C:\\Users\\user',
       TMPDIR: '/tmp',
       TEMP: '/temp',

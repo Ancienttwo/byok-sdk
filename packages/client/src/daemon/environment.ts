@@ -111,6 +111,11 @@ export interface BuildRuntimeEnvOptions {
 const BASE_PLATFORM_ALLOWLIST: readonly string[] = [
   'PATH',
   'HOME',
+  // macOS credential-store discovery used by subscription-authenticated
+  // agent CLIs depends on the login account name as well as HOME. Omitting
+  // USER makes `claude auth status` report logged out under the filtered
+  // child environment even when the host CLI is logged in.
+  'USER',
   'USERPROFILE',
   'TMPDIR',
   'TEMP',
