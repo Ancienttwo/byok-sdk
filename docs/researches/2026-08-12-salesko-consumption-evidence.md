@@ -56,6 +56,14 @@ salesko `scripts/byok-pairing-smoke.ts` 现在在下游手写的协议细节（s
 - 回证内容（按 1a plan 要求的格式）：tarball sha256 + salesko 消费 commit + 走通面（pair → heartbeat 周期发布 → host 读回 `level=online` → 停机后 TTL 过期 absent）。
 - 周转：栈是热的，tarball 到手当天可回证。
 
+## 4A. 0.5.0 registry consumption evidence status（2026-08-21）
+
+- Salesko source of truth: `main@18771502724ca9383d55c097723e112979102bac` (`chore(byok): consume published 0.5.0 train (#144)`). The ref is also `origin/main` at verification time.
+- Exact registry pins: `apps/byok-control` consumes `@byok-sdk/cloud`, `cloud-dataplane`, `core`, and `protocol` at `0.5.0`; `apps/local-agent` consumes `client`, `core`, `protocol` at `0.5.0` and independently versioned `keys@0.2.0`. There is no candidate tarball/file reference in those manifests.
+- Executed downstream coverage: `apps/byok-control/src/device-assertion-auth.test.ts` proves first-use acceptance, same-assertion replay rejection, and revoked-device rejection against the published SDK APIs; `apps/local-agent/src/daemon.ts` configures the explicit `salesko-api` assertion audience.
+- Subject-bound acceptance: at unchanged `main@18771502724ca9383d55c097723e112979102bac` (`origin/main` matched), a fresh `bun run check` completed with exit 0: 1,643/1,643 root tests and 6,089 assertions, all workspace typechecks/builds, byok-control 17/17, and local-agent 23/23. The earlier retained run `run-20260821T004816-86952-bun-run-check.log` was an exit-1 loader failure claiming that `InMemoryDeviceAssertionReplayAuthority` was absent; current public core 0.5.0 runtime/type exports and isolated/combined/full-suite runs all contain and exercise that export. The old failure was not reproducible on the same locked subject, so no unproved source-code root cause is asserted. Live production deployment and migration remain unverified.
+- Upstream public readback performed for this projection: GitHub `v0.5.0` is a published, non-draft release (2026-08-20T16:30:06Z); npm exposes public `@byok-sdk/core@0.5.0` and `@byok-sdk/client@0.5.0` tarballs with integrity metadata. The upstream publish driver landed in `be5b16f87808add4b71e7b25ac51e858c741d658`, which is contained by local `v0.5.0`.
+
 ## 5. 凭证桥（P2 条目 10）的消费方需求声明——供 byok 侧设计轮输入
 
 - 消费方：`@salesko/cli`（`salesko` bin，随 daemon 安装包 bundle，Node/Bun 独立可执行）。

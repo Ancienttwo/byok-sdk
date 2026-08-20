@@ -1,6 +1,6 @@
 # Plan: One-command release publish driver
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260820-2324
 > **Slug**: one-command-publish
 > **Planning Source**: codex-plan-or-waza-think
@@ -8,7 +8,7 @@
 > **Source Ref**: (none)
 > **Artifact Level**: work-package
 > **Promotion Reason**: human_decision_boundary
-> **Verification Boundary**: Commands named in the captured planning output plus `repo-harness run verify-contract --contract tasks/contracts/20260820-2324-one-command-publish.contract.md --strict`.
+> **Verification Boundary**: Historical release evidence is recorded in the Closeout Rebind below. This plan does not claim a new `--execute` run or an AcceptanceReceipt.
 > **Rollback Surface**: Before execution remove `plans/plan-20260820-2324-one-command-publish.md`; after execution revert branch `codex/one-command-publish` or the explicitly reviewed diff.
 > **Spec**: `docs/spec.md`
 > **Research**: See `docs/researches/`
@@ -101,8 +101,14 @@ See captured planning output.
 Collapse the 8-package fixed-version release into one command: scripts/release/publish.mjs chains version-consistency gate -> bun run build -> pack-and-smoke -> topo-ordered publish plan -> git tag -> npm publish per tarball -> registry-readback. Default is dry-run (steps 1-4 real, plan printed); tag/publish/readback only behind --execute. Fail-closed at every step, no fallback paths.
 
 ## Task Breakdown
-- [ ] Land scripts/release/publish.mjs (implementation reviewed by orchestrator; authored via fast-worker dispatch)
-- [ ] Verify: node scripts/release/publish.mjs dry-run end-to-end, node scripts/release/check-package-graph.mjs, bun run typecheck, bun run test
+- [x] Land `scripts/release/publish.mjs` in `be5b16f87808add4b71e7b25ac51e858c741d658`.
+- [ ] Original pre-release command matrix was not captured against this contract and is not recreated after publication.
+
+## Closeout Rebind (2026-08-21)
+
+The implementation is contained by local tag `v0.5.0`; `be5b16f` is an ancestor of that tag. Live closeout readback found a non-draft GitHub release published at 2026-08-20T16:30:06Z and public npm `@byok-sdk/core@0.5.0` / `@byok-sdk/client@0.5.0` tarballs. Salesko `main@1877150` pins the published train; a fresh subject-bound `bun run check` on that unchanged SHA exits 0 with 1,643/1,643 tests, all typechecks/builds, byok-control 17/17, and local-agent 23/23. Production deployment and migration remain unverified.
+
+The original code-change contract named a nonexistent test and an unavailable command, so it cannot truthfully be promoted to a completed strict AcceptanceReceipt after the fact. The active workflow is therefore rebound to a ledger-closeout contract and archived as **Superseded**: this is an artifact-lifecycle disposition, not a claim that the release was abandoned. No `scripts/release/publish.mjs --execute` command is rerun.
 
 ## Out of scope
 Running --execute (publish/tag remain owner-authorized); CI wiring; version bumps.

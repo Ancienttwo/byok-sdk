@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-20T22:39:32+0800 -->
+<!-- updated_at: 2026-08-21T01:19:42+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-20T22:39:32+0800
+> **Updated At**: 2026-08-21T01:19:42+0800
 > **Source Branch**: main
-> **Source Commit**: ddf6b58
+> **Source Commit**: f883f3d
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: A2 integrated locally; pending architecture queue preserved
+> **Reason**: Salesko 0.5.0 evidence correction
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -48,11 +48,24 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 2 changed/untracked path(s)
+- Summary: 15 changed/untracked path(s)
 
 ```
  M docs/architecture/index.md
-?? docs/architecture/requests/root.md
+ D docs/architecture/requests/root.md
+ M docs/researches/2026-08-12-salesko-consumption-evidence.md
+ D plans/plan-20260820-2324-one-command-publish.md
+ D tasks/contracts/20260820-2324-one-command-publish.contract.md
+ M tasks/current.md
+ D tasks/notes/20260820-2324-one-command-publish.notes.md
+ D tasks/reviews/20260820-2324-one-command-publish.review.md
+ M tasks/todos.md
+?? docs/architecture/requests/archive/2026/20260821-010608-root.md
+?? plans/archive/plan-20260820-2324-one-command-publish.md
+?? tasks/archive/contract-20260821-0106-one-command-publish.md
+?? tasks/archive/notes-20260821-0106-one-command-publish.md
+?? tasks/archive/review-20260821-0106-one-command-publish.md
+?? tasks/archive/todo-20260821-0106-one-command-publish.md
 ```
 
 ## Source Artifacts

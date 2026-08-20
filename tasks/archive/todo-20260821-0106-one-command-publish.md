@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-21 01:06
+> **Related Plan**: plans/archive/plan-20260820-2324-one-command-publish.md
+> **Outcome**: Superseded
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260821-0106
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
