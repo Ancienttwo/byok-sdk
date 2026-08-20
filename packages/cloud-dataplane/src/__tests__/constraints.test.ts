@@ -127,7 +127,7 @@ describe('the CI bun toolchain', () => {
   const rootManifest = JSON.parse(repoFile('package.json')) as { packageManager?: string };
 
   it('uses root packageManager as the single exact Bun version authority', () => {
-    expect(rootManifest.packageManager).toBe('bun@1.3.14');
+    expect(rootManifest.packageManager).toBe('bun@1.4.0');
     expect(workflow).not.toContain('bun-version:');
     expect(workflow).not.toContain('pnpm');
   });
