@@ -1,8 +1,8 @@
 # Architecture Queue Card: root
 
-> **Status**: Pending
-> **Detected**: 2026-08-15T15:36:38+0800
-> **Updated**: 2026-08-16T20:52:03+0800
+> **Status**: Resolved
+> **Detected**: 2026-08-20T20:47:08+0800
+> **Updated**: 2026-08-20T20:47:08+0800
 > **Severity**: medium
 > **Change Type**: boundary-or-config
 > **File**: `package.json`
@@ -33,13 +33,13 @@
 
 | Last Event | Severity | Change Type | File | Event Key |
 | --- | --- | --- | --- | --- |
-| 2026-08-16T20:52:03+0800 | medium | boundary-or-config | `package.json` | `sha256:34e78abdd687424fc2fad5c2930fcb83295968f0a7047b9dc47d60d9bddb9c8d` |
+| 2026-08-20T20:47:08+0800 | medium | boundary-or-config | `package.json` | `sha256:34e78abdd687424fc2fad5c2930fcb83295968f0a7047b9dc47d60d9bddb9c8d` |
 
 ## Event Fields
 
 ```json
 {
-  "ts": "2026-08-16T20:52:03+0800",
+  "ts": "2026-08-20T20:47:08+0800",
   "file_path": "package.json",
   "severity": "medium",
   "functional_block": "root",
@@ -64,7 +64,7 @@
 ```json
 [
   {
-    "ts": "2026-08-16T20:52:03+0800",
+    "ts": "2026-08-20T20:47:08+0800",
     "file_path": "package.json",
     "severity": "medium",
     "functional_block": "root",
@@ -84,3 +84,11 @@
   }
 ]
 ```
+
+## Archive Resolution
+
+- Status: Resolved
+- Archived: 2026-08-20T20:57:32+0800
+- Artifacts:
+- `docs/architecture/index.md`
+- Note: Root package-manager/runtime boundary is reflected by the canonical architecture index and sdk-architecture.md; A1 reverified main@f8bccbd and published v0.4.2@de07001.

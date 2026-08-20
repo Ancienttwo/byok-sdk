@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-17T12:42:19+0800 -->
+<!-- updated_at: 2026-08-20T20:46:07+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: Idle
-> **Updated At**: 2026-08-17T12:42:19+0800
-> **Source Branch**: codex/device-assertion-authenticator
-> **Source Commit**: 4485823
+> **Updated At**: 2026-08-20T20:46:07+0800
+> **Source Branch**: main
+> **Source Commit**: f8bccbd
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: A1 authority reconciliation
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -48,19 +48,17 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 8 changed/untracked path(s)
 
 ```
- D plans/plan-20260817-1205-device-assertion-authenticator.md
- D tasks/contracts/20260817-1205-device-assertion-authenticator.contract.md
- D tasks/notes/20260817-1205-device-assertion-authenticator.notes.md
- D tasks/reviews/20260817-1205-device-assertion-authenticator.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260817-1205-device-assertion-authenticator.md
-?? tasks/archive/contract-20260817-1242-device-assertion-authenticator.md
-?? tasks/archive/notes-20260817-1242-device-assertion-authenticator.md
-?? tasks/archive/review-20260817-1242-device-assertion-authenticator.md
-?? tasks/archive/todo-20260817-1242-device-assertion-authenticator.md
+ M docs/architecture/index.md
+ D docs/architecture/requests/root.md
+ M docs/architecture/sdk-architecture.md
+ M docs/spec.md
+ M plans/sprints/20260812-0218-salesko-upstream-asks.sprint.md
+ M tasks/current.md
+?? docs/architecture/requests/archive/
+?? docs/researches/2026-08-20_post-042-progress-and-sprint-audit.md
 ```
 
 ## Source Artifacts

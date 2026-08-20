@@ -1,7 +1,8 @@
 # BYOK SDK 架构文档
 
-> 状态：CURRENT；S0–S7 与 `byok-sdk@0.1.1` registry release 已完成。
-> Verified against: main@44a3669646d06a78519c4aa169a09f5b151f040d + npm/GitHub release `v0.1.1` readback（2026-08-10）
+> 状态：CURRENT；当前 main 为 `f8bccbd`，尚未作为 release 发布。
+> Version split: 已发布 `v0.4.2`（`de07001`）已包含 Live Activity、approval、ui-runtime 与 P5；当前 main 另含 device assertion authenticator 与 migration `0008`。
+> Verified against: main@f8bccbd + published `v0.4.2`@de07001
 > Verification scope: CURRENT sections + package graph + completed-slice status
 > Volatile workflow status: see tasks/current.md; not duplicated here
 > 面向对象：嵌入 BYOK 能力的 SaaS 开发者、SDK 维护者、安全审计与部署人员。

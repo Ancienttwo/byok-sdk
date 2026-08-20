@@ -46,6 +46,16 @@ continues to use an explicitly selected, read-only SQLite profile database; P5
 does not add a network listener, remote secret provisioning, or a dispatch-to-
 keys dependency.
 
+## Pre-1.0 package version policy
+
+The aligned dispatch train uses one version. Before 1.0, PATCH is limited to
+corrections with no new public behavior, API, persistence, or security
+authority; MINOR covers additive public API/features, new forward
+migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
+independently versioned. A version bump does not authorize publish. The
+next aligned dispatch candidate is `0.5.0`; publish still requires a separate
+release authorization and registry readback.
+
 ## Runtime operation authority
 
 `@byok-sdk/client` 0.4.0 has one breaking custom-adapter contract. A

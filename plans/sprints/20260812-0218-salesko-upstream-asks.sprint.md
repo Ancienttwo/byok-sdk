@@ -3,7 +3,7 @@
 > **Status**: Done
 > **Slug**: salesko-upstream-asks
 > **Created**: 2026-08-12 02:18
-> **Updated**: 2026-08-12 02:18
+> **Updated**: 2026-08-20
 > **Source PRD**: (none — source research) `docs/researches/2026-08-12-salesko-integration-handoff.md`
 > **Source Spec**: `docs/spec.md`
 > **Goal Mode**: incremental
@@ -62,7 +62,7 @@ Source of truth: `docs/researches/2026-08-12-salesko-integration-handoff.md`（s
 
 ### Dependency Order
 
-- Row 1（presence）与 Row 2（SQL）文件面不相交，且均已有 approved plan；Row 1 已在 contract worktree 执行中。
+- Row 1（presence）与 Row 2（SQL）文件面不相交，均已完成并归档 approved plan。
 - Row 3（TaskResult）为协议级 additive 改动，属 IP 锁定级：必须双轨评审（gatekeeper 实跑 + Codex 对抗二审），骑 CAPABILITY_FLAGS 现成机制（approval_resolved 先例）。
 - Row 4（testkit）先于后续 conformance 吸纳：它是协议级盲点回归断言的载体；simulator 复用 protocol codec 与 client device-keys 同源细节，禁止重实现。
 - Row 5（assertion broker）安全敏感：先 deep-reasoner 设计轮 + 双轨评审，再实现；建立在 M5 P2 authenticated control socket 之上，不触碰 runtime 凭证隔离。
@@ -83,14 +83,14 @@ execution for small tasks. Every row needs a concrete acceptance line.
 
 | # | Status | Task | Mode | Acceptance | Plan |
 |---|--------|------|------|------------|------|
-| 1 | [ ] | Presence producer + hosted capability discovery（已在 contract worktree 执行中，勿重复展开） | contract | `repo-harness run verify-contract --contract tasks/contracts/20260812-0201-presence-producer-capability-discovery.contract.md --strict` exits 0 | plans/plan-20260812-0201-presence-producer-capability-discovery.md |
-| 2 | [ ] | cloud-postgres SQL build projection + `migrationsDir()` + 两层 release smoke | contract | `node scripts/release/pack-and-smoke.mjs` exits 0 且输出包含 dist/sql 与 deploy/sql 的 SHA-256 一致断言；`ls packages/cloud-postgres/dist/sql/*.sql` 非空 | plans/plan-20260812-0201-cloud-postgres-sql-projection.md |
-| 3 | [ ] | `task.complete` bounded `document` 槽位 + `result-document` capability flag + `TaskResult.document` 投影（cap 决策输入见消费证据 §1：按 byte、reject-at-boundary、≥256 KiB 可用/512 KiB 舒适） | contract | `pnpm --filter @byok-sdk/protocol run test && pnpm --filter @byok-sdk/server run test` exits 0，且 freeze-guard 金样本零 diff（既有字段无类型变更） | (pending) |
-| 4 | [ ] | 公开 headless testkit 包（device simulator：pair/challenge/token/presence/revoke + 负向断言），conformance 保持 private 并消费它（API 面规格见消费证据 §3） | contract | `pnpm -r run build && pnpm --filter @byok-sdk/conformance run test` exits 0，且 testkit 包 `package.json` 无 `"private": true` 并只依赖 protocol/core | (pending) |
-| 5 | [ ] | daemon local device-assertion broker（audience 白名单、TTL ≤5 min、iat/exp/jti、revoke 联动失效、审计脱敏；先设计轮再实现；消费方需求见消费证据 §5） | contract | `pnpm --filter @byok-sdk/client run test` exits 0 且包含 broker 的 audience 拒绝/TTL 过期/revoked 拒发/审计不含 assertion 本文四类断言 | (pending) |
-| 6 | [ ] | pi provider base-URL probe：headless RPC 是否加载指定目录 models.json、`runtimeEnvironment.pi.allow` 通路、`PI_CODING_AGENT_DIR` 是否入 adapter baseNames | inline | `test -f docs/researches/pi-provider-baseurl-probe.md` 且文件含实测命令输出与 adapter 决策结论 | (inline) |
-| 7 | [ ] | Runtime 隔离能力矩阵：从 docs/security.md 提炼 per-runtime host 决策清单 | inline | `test -f docs/host-runtime-isolation-matrix.md` 且含 pi/claude/codex 三行矩阵 | (inline) |
-| 8 | [ ] | R2 `keyPrefix`：`R2BlobStoreOptions` 可选前缀（仅新 deployment 的 immutable config，禁 dual-read） | contract | `pnpm --filter @byok-sdk/cloud-postgres run test` exits 0 且含 keyPrefix 布局断言；`grep -q keyPrefix packages/cloud-postgres/src/` 递归命中 | (pending) |
+| 1 | [x] | Presence producer + hosted capability discovery | contract | `repo-harness run verify-contract --contract tasks/contracts/20260812-0201-presence-producer-capability-discovery.contract.md --strict` exits 0 | plans/archive/plan-20260812-0201-presence-producer-capability-discovery.md |
+| 2 | [x] | cloud-postgres SQL build projection + `migrationsDir()` + 两层 release smoke | contract | `node scripts/release/pack-and-smoke.mjs` exits 0 且输出包含 dist/sql 与 deploy/sql 的 SHA-256 一致断言；`ls packages/cloud-postgres/dist/sql/*.sql` 非空 | plans/archive/plan-20260812-0201-cloud-postgres-sql-projection.md |
+| 3 | [x] | `task.complete` bounded `document` 槽位 + `result-document` capability flag + `TaskResult.document` 投影（cap 决策输入见消费证据 §1：按 byte、reject-at-boundary、≥256 KiB 可用/512 KiB 舒适） | contract | `pnpm --filter @byok-sdk/protocol run test && pnpm --filter @byok-sdk/server run test` exits 0，且 freeze-guard 金样本零 diff（既有字段无类型变更） | plans/plan-20260812-0351-result-document-channel.md |
+| 4 | [x] | 公开 headless testkit 包（device simulator：pair/challenge/token/presence/revoke + 负向断言），conformance 保持 private 并消费它（API 面规格见消费证据 §3） | contract | `pnpm -r run build && pnpm --filter @byok-sdk/conformance run test` exits 0，且 testkit 包 `package.json` 无 `"private": true` 并只依赖 protocol/core | plans/plan-20260812-0357-testkit-device-simulator.md |
+| 5 | [x] | daemon local device-assertion broker（audience 白名单、TTL ≤5 min、iat/exp/jti、revoke 联动失效、审计脱敏；消费方需求见消费证据 §5） | contract | `pnpm --filter @byok-sdk/client run test` exits 0 且包含 broker 的 audience 拒绝/TTL 过期/revoked 拒发/审计不含 assertion 本文四类断言 | plans/plan-20260812-0445-device-assertion-broker.md |
+| 6 | [x] | pi provider base-URL probe：headless RPC 是否加载指定目录 models.json、`runtimeEnvironment.pi.allow` 通路、`PI_CODING_AGENT_DIR` 是否入 adapter baseNames | inline | `test -f docs/researches/pi-provider-baseurl-probe.md` 且文件含实测命令输出与 adapter 决策结论 | docs/researches/pi-provider-baseurl-probe.md |
+| 7 | [x] | Runtime 隔离能力矩阵：从 docs/security.md 提炼 per-runtime host 决策清单 | inline | `test -f docs/host-runtime-isolation-matrix.md` 且含 pi/claude/codex 三行矩阵 | docs/host-runtime-isolation-matrix.md |
+| 8 | [x] | R2 `keyPrefix`：`R2BlobStoreOptions` 可选前缀（仅新 deployment 的 immutable config，禁 dual-read） | contract | `pnpm --filter @byok-sdk/cloud-postgres run test` exits 0 且含 keyPrefix 布局断言；`grep -q keyPrefix packages/cloud-postgres/src/` 递归命中 | plans/plan-20260812-0400-r2-key-prefix.md |
 
 ## Execution Log
 
@@ -98,3 +98,12 @@ Keep this section last; `repo-harness run sprint-backlog complete-task` appends 
 
 | When | Task | Plan | Result |
 |------|------|------|--------|
+| 2026-08-12 | 1. Presence producer + hosted capability discovery | plans/archive/plan-20260812-0201-presence-producer-capability-discovery.md | Done; PR #52 merge `3d66543`. |
+| 2026-08-12 | 2. cloud-postgres SQL build projection + `migrationsDir()` + release smoke | plans/archive/plan-20260812-0201-cloud-postgres-sql-projection.md | Done; PR #50 merge `de92236`. |
+| 2026-08-12 | 3. `task.complete.document` + `result-document` capability | plans/plan-20260812-0351-result-document-channel.md | Done; PR #57 merge `cbad7be`. |
+| 2026-08-12 | 4. Public headless testkit device simulator | plans/plan-20260812-0357-testkit-device-simulator.md | Done; PR #56 merge `9b98333`. |
+| 2026-08-12 | 5. daemon local device-assertion broker | plans/plan-20260812-0445-device-assertion-broker.md | Done; PR #58 merge `4c0e875`. |
+| 2026-08-12 | 6. pi provider base-URL probe | docs/researches/pi-provider-baseurl-probe.md | Done; PR #53 merge `510a0d9`. |
+| 2026-08-12 | 7. Runtime isolation capability matrix | docs/host-runtime-isolation-matrix.md | Done; PR #54 merge `bf8d711`. |
+| 2026-08-12 | 8. R2 `keyPrefix` | plans/plan-20260812-0400-r2-key-prefix.md | Done; PR #55 merge `053419c`. |
+| 2026-08-12 | Sprint closeout reconciliation | — | PR #59 merge `b83fd8b` set Sprint `Done` but left the eight backlog boxes unchecked; this reconciliation records the completed rows. |
