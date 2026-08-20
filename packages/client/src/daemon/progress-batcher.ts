@@ -7,6 +7,40 @@ export interface ProgressBatcherOptions {
   maxBatchSize?: number;
   /** Otherwise flush at most this often (ms) while events are pending. Default 250 (~4/sec). */
   flushIntervalMs?: number;
+  /**
+   * Optional deployment-owned ceiling for the UTF-8 bytes in the serialized
+   * `events[]` array. Unset means no byte ceiling; hosts should inject the
+   * same value their activity ingress enforces.
+   */
+  maxBatchBytes?: number;
+}
+
+export class ProgressEventTooLargeError extends Error {
+  constructor(
+    public readonly actualBytes: number,
+    public readonly maxBatchBytes: number,
+  ) {
+    super(`Progress event requires ${actualBytes} UTF-8 bytes, exceeding maxBatchBytes ${maxBatchBytes}.`);
+    this.name = 'ProgressEventTooLargeError';
+  }
+}
+
+const encoder = new TextEncoder();
+
+function assertPositiveSafeInteger(value: number | undefined, name: keyof ProgressBatcherOptions): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
+    throw new TypeError(`${name} must be a positive safe integer when configured.`);
+  }
+}
+
+export function validateProgressBatcherOptions(options: ProgressBatcherOptions = {}): void {
+  assertPositiveSafeInteger(options.maxBatchSize, 'maxBatchSize');
+  assertPositiveSafeInteger(options.flushIntervalMs, 'flushIntervalMs');
+  assertPositiveSafeInteger(options.maxBatchBytes, 'maxBatchBytes');
+}
+
+function encodedEventsBytes(events: readonly AgentEvent[]): number {
+  return encoder.encode(JSON.stringify(events)).length;
 }
 
 /**
@@ -21,16 +55,31 @@ export class ProgressBatcher {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly maxBatchSize: number;
   private readonly flushIntervalMs: number;
+  private readonly maxBatchBytes: number | undefined;
 
   constructor(
     private readonly emit: ProgressEmitter,
     options: ProgressBatcherOptions = {},
   ) {
+    validateProgressBatcherOptions(options);
     this.maxBatchSize = options.maxBatchSize ?? 10;
     this.flushIntervalMs = options.flushIntervalMs ?? 250;
+    this.maxBatchBytes = options.maxBatchBytes;
   }
 
   push(event: AgentEvent): void {
+    if (this.maxBatchBytes !== undefined) {
+      const eventBytes = encodedEventsBytes([event]);
+      if (eventBytes > this.maxBatchBytes) {
+        throw new ProgressEventTooLargeError(eventBytes, this.maxBatchBytes);
+      }
+      if (
+        this.buffer.length > 0 &&
+        encodedEventsBytes([...this.buffer, event]) > this.maxBatchBytes
+      ) {
+        this.flush();
+      }
+    }
     this.buffer.push(event);
     if (this.buffer.length >= this.maxBatchSize) {
       this.flush();

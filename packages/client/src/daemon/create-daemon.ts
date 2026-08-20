@@ -73,7 +73,10 @@ import {
   type ResultDocumentExtractor,
   type TaskRunnerDeps,
 } from './task-runner';
-import type { ProgressBatcherOptions } from './progress-batcher';
+import {
+  validateProgressBatcherOptions,
+  type ProgressBatcherOptions,
+} from './progress-batcher';
 
 /**
  * M4 Phase 2 (originally control-socket-only). M5 batch-3 (workstream 2):
@@ -309,6 +312,14 @@ export interface DaemonConfig {
    */
   maxTaskOutputBytes?: number;
   /**
+   * Host-owned batching policy for normalized `task.progress` events.
+   * `maxBatchBytes`, when set, measures exactly the UTF-8 bytes of
+   * `JSON.stringify(events)` and must match the deployment's activity-ingress
+   * budget. It is deliberately unset by default because that ingress ceiling
+   * is deployment policy, not a frozen protocol constant.
+   */
+  progressBatch?: ProgressBatcherOptions;
+  /**
    * additive-minor (`task.complete.document`): the seam through which this
    * product turns a finished task's final output text into the STRUCTURED
    * terminal result the wire carries as `task.complete.document`, and the
@@ -503,7 +514,6 @@ export interface Daemon {
 /** Internal seam so tests can substitute stub adapters / faster backoff+batch+liveness+long-poll timing. `createDaemonWithAdapters` (which takes this) is also the real entry point for products supplying a hand-built adapter set `createDaemon` can't construct on its own — e.g. custom adapter options, or an adapter that REPLACES a bundled runtime's implementation under the same id. Honest limit: an adapter id outside `pi`/`claude`/`codex` cannot pass wire validation today — `RuntimeIdSchema` (`@byok-sdk/protocol`) is a closed `z.enum(['pi', 'claude', 'codex'])`, and `isRuntimeId` filtering below (see `detectRuntimes`) drops any detected adapter outside that set before it ever reaches a wire-visible field. A genuinely fourth/namespaced runtime id is a future protocol change, not something this seam enables today. */
 export interface DaemonOverrides {
   backoff?: BackoffOptions;
-  batch?: ProgressBatcherOptions;
   liveness?: LivenessOptions;
   /** M4 Phase 3: overrides `TaskRunner`'s default out-of-band approval wait (`DEFAULT_APPROVAL_TIMEOUT_MS`, 10 minutes) before an unanswered `requestApproval` force-resolves as a fail-closed rejection. */
   approvalTimeoutMs?: number;
@@ -982,6 +992,7 @@ export function buildDaemonWithAdapters(
       `DaemonConfig.maxTaskOutputBytes must be a positive number (or omitted to use the ${DEFAULT_MAX_TASK_OUTPUT_BYTES}-byte default) — got ${config.maxTaskOutputBytes}. Pass Number.POSITIVE_INFINITY to explicitly disable the cap; 0 or a negative number is rejected rather than silently treated as "disabled".`,
     );
   }
+  validateProgressBatcherOptions(config.progressBatch);
 
   // Same up-front discipline as `maxTaskOutputBytes` above: the presence
   // cadence is pure config, so a band violation is a construction error rather
@@ -1516,7 +1527,7 @@ export function buildDaemonWithAdapters(
       // untouched. See `observer.ts`'s module doc comment.
       send: sendEnvelope,
       blobClient,
-      batcherOptions: overrides.batch,
+      batcherOptions: config.progressBatch,
       sessionWorkspaces,
       gitWorkspaceManager,
       gitWorkspaceStore,

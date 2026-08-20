@@ -63,6 +63,24 @@ validated registry. Only those logical IDs are advertised in `conn.hello`
 and hosted presence; command, args, environment, headers, and credentials
 remain local.
 
+Hosted deployments that enforce an activity-ingress byte ceiling should inject
+the same ceiling into the daemon. The byte count is the UTF-8 length of
+`JSON.stringify(events)`; it does not include envelope or transport overhead.
+One event that cannot fit fails the task locally without truncation or network
+delivery.
+
+```ts
+createDaemon({
+  // ...normal device and transport configuration
+  progressBatch: {
+    maxBatchBytes: 64 * 1024,
+  },
+});
+```
+
+The value is intentionally host-owned and has no SDK default because it is a
+deployment/read-model policy, not a frozen protocol limit.
+
 For a concrete private host composition, see the
 [`examples/salesko-connector-broker`](../../examples/salesko-connector-broker)
 reference. It keeps `@byok-sdk/client` credential-blind while combining

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createDaemonWithAdapters } from '../daemon/create-daemon';
+import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -59,5 +59,46 @@ describe('createDaemonWithAdapters: DaemonConfig.maxTaskOutputBytes validation',
   it('accepts an unset value (the default applies later, inside TaskRunner)', async () => {
     const config = await buildConfig(undefined);
     expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).not.toThrow();
+  });
+});
+
+describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () => {
+  async function buildConfig(progressBatch?: DaemonConfig['progressBatch']): Promise<DaemonConfig> {
+    return {
+      productName: 'Test Product',
+      productId: 'test-product-progress-batch',
+      serverUrl: 'ws://localhost:1',
+      workspaceRoot: await tmpDir('byok-progress-batch-workspace-'),
+      storeDir: await tmpDir('byok-progress-batch-store-'),
+      progressBatch,
+    };
+  }
+
+  it.each([0, -1, Number.NaN, 1.5, Number.POSITIVE_INFINITY])(
+    'rejects invalid maxBatchBytes %s synchronously',
+    async (maxBatchBytes) => {
+      const config = await buildConfig({ maxBatchBytes });
+      expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).toThrow(/maxBatchBytes/);
+    },
+  );
+
+  it('rejects invalid count and timer bounds through the same config authority', async () => {
+    const badCount = await buildConfig({ maxBatchSize: 0 });
+    expect(() => createDaemonWithAdapters(badCount, [new StubRuntimeAdapter()])).toThrow(/maxBatchSize/);
+
+    const badInterval = await buildConfig({ flushIntervalMs: 0 });
+    expect(() => createDaemonWithAdapters(badInterval, [new StubRuntimeAdapter()])).toThrow(/flushIntervalMs/);
+  });
+
+  it('accepts an explicit byte budget and an unset policy', async () => {
+    const configured = await buildConfig({
+      maxBatchBytes: 64 * 1024,
+      maxBatchSize: 10,
+      flushIntervalMs: 250,
+    });
+    expect(() => createDaemonWithAdapters(configured, [new StubRuntimeAdapter()])).not.toThrow();
+
+    const unset = await buildConfig(undefined);
+    expect(() => createDaemonWithAdapters(unset, [new StubRuntimeAdapter()])).not.toThrow();
   });
 });

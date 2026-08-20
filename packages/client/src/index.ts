@@ -44,6 +44,7 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig } from './daemon/create-daemon';
+export type { ProgressBatcherOptions } from './daemon/progress-batcher';
 
 /**
  * Plan `device-assertion-broker`: the ONLY control-socket capability this

@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
   MAX_DURATION_EXCEEDED_REASON_PREFIX,
   MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX,
+  MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
@@ -51,7 +52,7 @@ const unusedBlobClient: BlobResolver = {
 async function makeRunner(
   adapter: StubRuntimeAdapter,
   sent: Envelope[],
-  overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs' | 'maxTaskOutputBytes'>> = {},
+  overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs' | 'maxTaskOutputBytes' | 'batcherOptions'>> = {},
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = {
     adapters: [adapter],
@@ -67,6 +68,7 @@ async function makeRunner(
     productId: 'unused-product-id',
     shutdownInterruptTimeoutMs: overrides.shutdownInterruptTimeoutMs,
     maxTaskOutputBytes: overrides.maxTaskOutputBytes,
+    batcherOptions: overrides.batcherOptions,
   };
   return new TaskRunner(deps);
 }
@@ -252,6 +254,55 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
       expect(sent.some((e) => e.type === 'task.complete' && e.task_id === 'task-default-cap')).toBe(true);
     });
     expect(sent.some((e) => e.type === 'task.fail')).toBe(false);
+  });
+});
+
+describe('TaskRunner: progressBatch.maxBatchBytes enforcement', () => {
+  it('flushes prior valid activity, rejects the oversized event locally, and tears down once', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const validEvent = { type: 'progress' as const, text: 'valid-prefix' };
+    const maxBatchBytes = new TextEncoder().encode(JSON.stringify([validEvent])).length;
+    const runner = await makeRunner(adapter, sent, {
+      batcherOptions: { maxBatchBytes, maxBatchSize: 10, flushIntervalMs: 60_000 },
+    });
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await runner.handleEnvelope(
+      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-batch-bytes', seq: 1 }),
+    );
+    const session = adapter.sessions[0];
+    expect(session).toBeDefined();
+
+    session!.emit(validEvent);
+    session!.emit({ type: 'progress', text: 'x'.repeat(maxBatchBytes * 2) });
+
+    await vi.waitFor(() => {
+      expect(sent.some((event) => event.type === 'task.fail' && event.task_id === 'task-batch-bytes')).toBe(true);
+    });
+
+    const progress = sent.filter(
+      (event) => event.type === 'task.progress' && event.task_id === 'task-batch-bytes',
+    );
+    expect(progress).toHaveLength(1);
+    expect(progress[0]?.payload).toMatchObject({ seq: 1, events: [validEvent] });
+    expect(JSON.stringify(progress)).not.toContain('x'.repeat(maxBatchBytes * 2));
+
+    const failures = sent.filter(
+      (event) => event.type === 'task.fail' && event.task_id === 'task-batch-bytes',
+    );
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.payload).toMatchObject({ retryable: false });
+    expect(
+      (failures[0]?.payload as { reason: string }).reason.startsWith(
+        MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX,
+      ),
+    ).toBe(true);
+    expect(session?.interruptCalled).toBe(true);
+    expect(session?.closeCalled).toBe(true);
+    expect(runner.activeTaskCount).toBe(0);
+    expect(diagnostic).not.toHaveBeenCalled();
+    diagnostic.mockRestore();
   });
 });
 

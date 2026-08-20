@@ -40,7 +40,11 @@ import type { TaskQueueWatermark } from './control-protocol';
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
-import { ProgressBatcher, type ProgressBatcherOptions } from './progress-batcher';
+import {
+  ProgressBatcher,
+  ProgressEventTooLargeError,
+  type ProgressBatcherOptions,
+} from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
 import type { GitWorkspaceManager, GitWorkspaceLease, GitWorkspaceObservation, GitWorkspaceError, GitErrorCategory } from './git-workspace';
 import { prependGitWorkspaceGuidance } from './git-workspace';
@@ -154,6 +158,10 @@ export const MAX_DURATION_EXCEEDED_REASON_PREFIX = 'resource limit exceeded: max
 
 /** M5 batch-3 (workstream 2): same contract as {@link MAX_DURATION_EXCEEDED_REASON_PREFIX}, for `DaemonConfig.maxTaskOutputBytes` — see `TaskRunner.pump`'s own per-event byte counting. */
 export const MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX = 'resource limit exceeded: maxTaskOutputBytes';
+
+/** Stable fail-closed reason for one normalized event that cannot fit the configured activity batch budget. */
+export const MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX =
+  'resource limit exceeded: progressBatch.maxBatchBytes';
 
 /**
  * additive-minor (`task.complete.document`): same stable-PREFIX contract as
@@ -1785,6 +1793,13 @@ export class TaskRunner {
     } catch (err) {
       if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
       active.batcher.flush();
+      if (err instanceof ProgressEventTooLargeError) {
+        await this.failActiveTaskForResourceLimit(
+          active.taskId,
+          `${MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX}: event requires ${err.actualBytes} UTF-8 bytes, exceeding the configured limit of ${err.maxBatchBytes} bytes`,
+        );
+        return;
+      }
       const failure = projectRuntimeBoundaryFailure(err, 'run');
       if (failure.contractViolation) {
         console.error('[byok/client] runtime adapter events iterable returned an untyped failure', err);
