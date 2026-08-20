@@ -132,6 +132,8 @@ interface ProgressBatcherOptions {
 new TextEncoder().encode(JSON.stringify(events)).length
 ```
 
+最直接的实现会在每次 `push` 对 `buffer + event` 重新序列化，单 batch 内为 O(n²)。当前默认 batch 上限 10、Cloud 默认上限 50，这个成本可作为首版的 deliberate bounded trade-off；实现评审必须显式确认该上界。若改为缓存前缀字节数，缓存只能是上述 exact serialization authority 的等价优化，并用数组括号、逗号、UTF-8 multibyte 与 mutation-safety 测试证明一致，禁止引入近似计数的第二 authority。
+
 Push algorithm：
 
 1. 先测 `[event]`；单 event 超限，抛 typed `ProgressEventTooLargeError`。
@@ -321,7 +323,7 @@ useHostedLiveActivity(taskId)
 - 获取 observation grant；
 - 用 `If-None-Match` polling BFF；
 - 304 保持 state identity；
-- grant expiry 只 refresh 一次，之后 fail closed；
+- 每次 request 遇到可归因于 grant expiry 的 401 时，最多 refresh grant 一次并 replay 该 request 一次；replay 仍失败则 fail closed。这个上限按单次失败事件计算，不是整个长任务生命周期只能续一次；
 - terminal 后停止；
 - transient failure bounded backoff；
 - authorization failure 不无限重试；
@@ -354,7 +356,7 @@ useHostedLiveActivity(taskId)
 
 - hook 不发送 tenantId；
 - 304 不替换 state object；
-- grant refresh 恰好一次；
+- 单次 expiry failure 最多触发一次 grant refresh 和一次 request replay；长任务后续新的 grant expiry 可以进入新的 bounded refresh cycle；
 - terminal 停止 polling；
 - task change/unmount 正确 cancel；
 - tool 所有 output state 可区分；
@@ -465,7 +467,7 @@ D2 可以在 D1 schema freeze 后用 fixture 并行开发，但不能在真实 D
 ## 执行前必须重新验证的事实
 
 1. byok-sdk candidate commit 的 `DaemonConfig` / `DaemonOverrides.batch` 实际形状；
-2. Cloud activity byte validator 的计量方式与 deployment override；
+2. Cloud activity byte validator 的计量方式与 deployment override；同时核对 WS、long-poll HTTP/body 与任何 proxy 的 message-size 上限，区分 `events[]` budget 和完整 envelope/transport overhead；
 3. Salesko 当前 package pins、API/auth primitive、byok-control ingress topology；
 4. Salesko user→tenant→task ownership authority；
 5. production DB migration ledger 与 deployment version；
