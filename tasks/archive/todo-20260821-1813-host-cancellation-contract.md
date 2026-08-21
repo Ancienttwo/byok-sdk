@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-21 18:13
+> **Related Plan**: plans/archive/plan-20260821-1645-host-cancellation-contract.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260821-1813
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-21 16:45
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-21 18:13
+> **Related Plan**: plans/archive/plan-20260821-1645-host-cancellation-contract.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260821-1813
+
 # Task Review: host-cancellation-contract
 
 > **Status**: Accepted

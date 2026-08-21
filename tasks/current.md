@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-21T02:32:57+0800 -->
+<!-- updated_at: 2026-08-21T18:13:19+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Idle
-> **Updated At**: 2026-08-21T02:32:57+0800
-> **Source Branch**: main
-> **Source Commit**: 82ca334
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-21T18:13:19+0800
+> **Source Branch**: codex/host-cancellation-contract
+> **Source Commit**: d24fb2c
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: manual
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Idle
+- Status: ManualClearedWithActiveWork
 - Active Plan: (none)
 - Plan Status: (none)
-- Next Task: (none)
-- Clear Note: (none)
+- Next Task: inspect active worktree marker(s)
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,7 +31,12 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- (none)
+- /Users/kito/Projects/byok-sdk: plans/plan-20260821-1645-host-cancellation-contract.md
+- /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
+- /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: plans/plan-20260821-0425-hosted-integration-authority-closure.md
+- /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure
+- /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity: plans/plan-20260821-1516-local-agent-release-identity.md
+- /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity
 ## Active Sprint
 
 - Sprint: (none)
@@ -40,7 +45,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: (none)
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Freeze the candidate revision, record independent review and the required typed external acceptance, then update canonical Obsidian implementation memory.
 
 ## Checks
 
@@ -48,17 +53,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 8 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
- M tasks/current.md
+ D plans/plan-20260821-1645-host-cancellation-contract.md
+ D tasks/contracts/20260821-1645-host-cancellation-contract.contract.md
+ D tasks/notes/20260821-1645-host-cancellation-contract.notes.md
+ D tasks/reviews/20260821-1645-host-cancellation-contract.review.md
  M tasks/todos.md
-?? docs/architecture/requests/archive/2026/20260821-022751-root.md
-?? plans/archive/plan-20260821-0228-todo-ledger-prune-3.md
-?? tasks/archive/contract-20260821-0232-todo-ledger-prune-3.md
-?? tasks/archive/notes-20260821-0232-todo-ledger-prune-3.md
-?? tasks/archive/review-20260821-0232-todo-ledger-prune-3.md
-?? tasks/archive/todo-20260821-0232-todo-ledger-prune-3.md
+?? plans/archive/plan-20260821-1645-host-cancellation-contract.md
+?? tasks/archive/contract-20260821-1813-host-cancellation-contract.md
+?? tasks/archive/notes-20260821-1813-host-cancellation-contract.md
+?? tasks/archive/review-20260821-1813-host-cancellation-contract.md
+?? tasks/archive/todo-20260821-1813-host-cancellation-contract.md
 ```
 
 ## Source Artifacts

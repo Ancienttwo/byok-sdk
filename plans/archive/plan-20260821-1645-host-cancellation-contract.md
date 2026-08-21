@@ -1,6 +1,6 @@
 # Plan: Host Cancellation Contract
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260821-1645
 > **Slug**: host-cancellation-contract
 > **Planning Source**: user-approved-plan
