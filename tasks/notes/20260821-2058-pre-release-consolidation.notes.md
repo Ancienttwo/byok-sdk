@@ -51,6 +51,14 @@
 - Run snapshots: `.ai/harness/runs/`
 - Prior hosted-authority external-pass evidence is preserved under
   `tasks/archive/`; the final merged subject still requires a new receipt.
+- Focused release graph and stale-keys negative control pass on Bun 1.4.0.
+- After workspace build, hosted constraints/migration/runtime tests pass. The first
+  pre-build invocation failed only because package `dist/` entries did not exist;
+  no source change was needed.
+- Real disposable Postgres+MinIO U1 cancellation, U3 readiness, U5 erasure and
+  migration suites pass; the opt-in workerd/role-backed schema suite passes 5/5.
+- Architecture queue is empty after archiving the workflow-only root policy event,
+  and strict task workflow passes after refreshing the resume projection directly.
 
 ## Promotion Filter
 
