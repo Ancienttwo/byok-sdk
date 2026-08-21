@@ -71,11 +71,14 @@
   and runtime paths, and asserts an empty HOME remains untouched. This is the
   actual entrypoint/order proof; the focused unit test covers the pure command
   projection without duplicating package installation.
-- Fixed candidate `f284ea656fc8fc049244c6bc8e11a02288201266` passed build,
+- Fixed code candidate `f284ea656fc8fc049244c6bc8e11a02288201266` passed build,
   typecheck, full test, strict workflow, clean pack smoke and a read-only
   gatekeeper review. `verify-contract` remained `Partial` only because its two
   Vitest-config-dependent `tests_pass.path` entries were run by bare Bun; the
   same four files pass 79/79 through the package-owned Vitest command.
+- Final docs/handoff candidate `9e5155b330919bd7aebfa9056bc8b76ae683c750`
+  received a delta gate PASS; the only later change is this plan/checkpoint
+  projection marking the already-executed verification item complete.
 
 ## Promotion Filter
 

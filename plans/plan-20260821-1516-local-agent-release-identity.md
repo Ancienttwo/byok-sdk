@@ -156,7 +156,7 @@ Keep application release distinct from runtime executable versions, protocol ver
 - [x] Implement the single release identity authority and migrate all in-repo `DaemonConfig` consumers without aliases or inference.
 - [x] Inject the official CLI identity from the package manifest at build time and add `--version` before all stateful paths.
 - [x] Add packed CLI/manifest parity evidence and update the Slice A product contract in `docs/spec.md`.
-- [ ] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
+- [x] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
 - [ ] Record strict review/acceptance evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
 
 ## Verification
@@ -194,5 +194,5 @@ Keep application release distinct from runtime executable versions, protocol ver
 - [x] Implement the single release identity authority and migrate all in-repo `DaemonConfig` consumers without aliases or inference.
 - [x] Inject the official CLI identity from the package manifest at build time and add `--version` before all stateful paths.
 - [x] Add packed CLI/manifest parity evidence and update the Slice A product contract in `docs/spec.md`.
-- [ ] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
+- [x] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
 - [ ] Record strict review/acceptance evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
