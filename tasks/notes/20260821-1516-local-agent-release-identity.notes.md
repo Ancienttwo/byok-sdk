@@ -29,6 +29,11 @@
 - Strict workflow verification found `.ai/harness/worktrees/` absent. An ignored
   `.gitkeep` was added as the single out-of-scope harness blocker repair; no
   runtime behavior depends on it.
+- Strict contract verification exposed a `repo-harness 0.16.1` upstream gap:
+  path-only test criteria run as bare `bun test` and bypass the owning package's
+  Vitest configuration. The SDK keeps its single build-time manifest authority;
+  the reproduction and upstream acceptance conditions are recorded in
+  `docs/researches/2026-08-21_repo-harness-package-test-runner-handoff.md`.
 
 ## Tradeoffs Considered
 
@@ -66,6 +71,11 @@
   and runtime paths, and asserts an empty HOME remains untouched. This is the
   actual entrypoint/order proof; the focused unit test covers the pure command
   projection without duplicating package installation.
+- Fixed candidate `f284ea656fc8fc049244c6bc8e11a02288201266` passed build,
+  typecheck, full test, strict workflow, clean pack smoke and a read-only
+  gatekeeper review. `verify-contract` remained `Partial` only because its two
+  Vitest-config-dependent `tests_pass.path` entries were run by bare Bun; the
+  same four files pass 79/79 through the package-owned Vitest command.
 
 ## Promotion Filter
 

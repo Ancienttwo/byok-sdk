@@ -92,6 +92,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ```yaml
 allowed_paths:
   - docs/spec.md
+  - docs/researches/2026-08-21_repo-harness-package-test-runner-handoff.md
   - bun.lock
   - plans/
   - tasks/contracts/20260821-1516-local-agent-release-identity.contract.md
