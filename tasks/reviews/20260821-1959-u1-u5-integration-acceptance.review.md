@@ -43,17 +43,17 @@
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:80d0844282947a1991794b3976d79f250623f704d22c906a79ba1a770bc88a08
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 1edbfdd9ad33df3da4d0f1ac43f9067981c001ec
+> **Verification Evidence SHA256**: sha256:af9438985f350b77764e737f1e228a6f56f78b2a918968a3292ac2821bbd13c2
+> **Issued At**: 2026-08-21T12:40:07.251Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Independent gatekeeper /root/u1_u5_integration_gate passed PR #81 HEAD f365804: product tree is byte-identical to the previously accepted subject; only declared integration workflow allow-list/notes drift occurred, fresh strict evidence passed, and all 42 GitHub checks are green on a clean mergeable base.
 - Findings: none
 
 ## Behavior Diff Notes
