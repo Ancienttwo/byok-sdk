@@ -56,17 +56,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:08c2d7bf2e571bb089c06c4b3995af7a23ebe1a5fb91f0d9271353620b5ad9c7
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 8f17f5aba596414f796270d71588090fe655d33e
+> **Verification Evidence SHA256**: sha256:d8393f4ac766cbe28ec144ff56b01962d201b7e2efc904614a1dbb0f27c73060
+> **Issued At**: 2026-08-21T13:09:46.339Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Codex final-subject review passed: hosted schema and migration authority, current U1-U5 contracts, keys/core release closure, root policy projection, real Postgres/MinIO/workerd evidence, and all 20 contract gates are coherent with no compatibility fallback.
 - Findings: none
 
 ## Behavior Diff Notes
