@@ -58,13 +58,13 @@ Task Profile 为 coordinated `code-change`，不启用单一 bugfix pre-fix gate
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"hosted-authority-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"worker-postgres-pack-runtime-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
 
 ```json
-{"protocol":1,"reviewer":"Claude","user_waiver":"allowed"}
+{"protocol":1,"reviewer":"Codex","user_waiver":"allowed"}
 ```
 
 ## Allowed Paths

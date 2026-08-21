@@ -17,6 +17,7 @@
 
 - Scope audit 发现 `scripts/release/pg-migrate-smoke.mjs` 仍使用 `PoolConfig.options`。该文件被纳入 Allowed Paths，并改为 disposable role/database authority；否则 schema kill list 只在 Worker fixture 成立。
 - keys writer 新增的 focused fixture/test 起初未列入 generated contract；preflight 前后已将两个 exact paths 补入 Allowed Paths，没有泛化为整个 `tests/` 或 `scripts/`。
+- 第一轮 Change Assessment 暴露 generated contract 的 strict schema/release oracle 为空；已在 receipt 前声明 deterministic test 与 runtime readback 两类 executable oracle。Acceptance reviewer 同步为实际执行独立 gate 的 Codex；未触发 AGENTS 明令需用户显式请求的 Claude review。
 
 ## Tradeoffs Considered
 
@@ -41,6 +42,7 @@
 - Real Postgres migration verification: `BYOK_TEST_POSTGRES_URL=... BYOK_TEST_S3_ENDPOINT=... bun test packages/cloud-dataplane/src/__tests__/migrate-runner.test.ts`，17 passed。
 - Workspace: `bun run build`、`bun run typecheck` passed；`bun run test` 首轮 wrangler dry-run 5s timeout，focused retry 6/6 passed，第二轮 full test passed。
 - Keys: stale-edge self-test、focused release tests、`bun run check:release-graph` 与 manual tarball clean-install single-core proof passed；clean-worktree `check:release-pack` 留待 subject commit 后执行。
+- Frozen subject `43277eb` 的 clean `check:release-pack` passed：10 packages，keys `0.2.1` packed edge 精确为 core `0.5.0`，standard npm tree 仅 `0.5.0`。packed Postgres smoke 在同一 disposable database 连续运行两次均通过，随后 database 已删除；这同时证明 role/schema cleanup 可重复。Contract metadata 修正后需由 final subject 再生成一次 SHA-bound evidence。
 
 ## Promotion Filter
 
