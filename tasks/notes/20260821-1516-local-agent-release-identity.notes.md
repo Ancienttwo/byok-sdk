@@ -132,7 +132,14 @@ Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset 
   from the isolated tarball set, and allows the independent keys version in
   the install graph. `scripts/release/registry-readback.mjs` now reads back
   the independent version and exact core edge when a publish is authorized.
+- Final clean candidate pack smoke passed at commit
+  `470514572454d32c2314bd02b2971a4f1fd5ee3d`, producing
+  `byok-sdk-keys-0.2.1.tgz`. It reported the packed keys edge pinned to core
+  0.6.0, an isolated install with 10 expected package versions (keys 0.2.1,
+  dispatch packages 0.6.0), eight migration files matching `deploy/sql`, and
+  the packed CLI/manifest zero-state version proof. Output directory:
+  `/tmp/byok-release-final-eQyFGc`.
 - Registry readback for `@byok-sdk/keys@0.2.1` is intentionally not run: that
   version is an unpublished local candidate, and running the post-publish
-  script now would correctly fail rather than fabricate evidence. Final clean
-  candidate pack smoke remains pending the candidate commit.
+  script now would correctly fail rather than fabricate evidence. The source
+  registry readback audit and local candidate pack evidence remain separate.

@@ -208,16 +208,19 @@ release plan or authorize publish/deploy/registry mutation.
 - [x] Audit live registry and packed keys/core metadata before choosing versions.
 - [x] Amend the U4 contract with exact manifest/release-script/changelog ownership.
 - [x] Add a failing packed-dependency regression and repair keys/core metadata.
-- [ ] Run the final clean-candidate pack smoke after the candidate commit.
+- [x] Run the final clean-candidate pack smoke after the candidate commit.
 - [x] Record local release evidence; stop before publish unless separately authorized.
 
 ### U4b evidence boundary
 
 The current source candidate is local-only: `@byok-sdk/keys@0.2.1` packs with
 an exact `@byok-sdk/core@0.6.0` dependency, while the live registry audit still
-shows the old published `@byok-sdk/keys@0.2.0` metadata. The registry readback
-script is prepared for the independently versioned package but is not run
-against an unpublished version and does not claim a registry result.
+shows the old published `@byok-sdk/keys@0.2.0` metadata. The clean pack smoke
+at candidate `470514572454d32c2314bd02b2971a4f1fd5ee3d` produced
+`byok-sdk-keys-0.2.1.tgz` and passed the isolated install/version-closure
+assertions. The registry readback script is prepared for the independently
+versioned package but is not run against an unpublished version and does not
+claim a registry result.
 
 ## Verification
 
