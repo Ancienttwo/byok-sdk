@@ -102,9 +102,7 @@ capability/load scheduler, or admission-policy implementation is authorized.
 - **Verification boundary**: focused U3 tests, real Postgres+MinIO readiness
   parity, workspace build/typecheck/test, deploy SQL ordering, strict workflow,
   and strict contract verification.
-- **Review/acceptance boundary**:
-  `tasks/reviews/20260821-1715-tenant-readiness-primitives.review.md` must
-  record the source/substrate result and any harness residual.
+- **Review/acceptance boundary**: `tasks/reviews/20260821-1715-tenant-readiness-primitives.review.md` records the source/substrate result and any harness residual.
 - **High-risk surface**: tenant isolation, revoked residual presence, exact TTL
   expiry, forward-only schema ordering, and release-identity authority.
 - **Why not checklist row**: the public, persistence, and daemon projection
