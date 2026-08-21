@@ -1,6 +1,6 @@
 # Plan: Consolidate remaining WIP and release 0.6.0
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260821-2058
 > **Slug**: pre-release-consolidation
 > **Artifact Level**: work-package

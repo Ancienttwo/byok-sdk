@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-21 21:09
+> **Related Plan**: plans/archive/plan-20260821-2058-pre-release-consolidation.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260821-2109
+
 # Task Contract: pre-release-consolidation
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260821-2058-pre-release-consolidation.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
