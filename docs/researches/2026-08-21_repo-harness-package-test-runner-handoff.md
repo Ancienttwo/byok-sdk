@@ -185,7 +185,9 @@ renderer.
 
 ### Current downstream impact
 
-The byok-sdk active state reports `required_recovery_state_missing`; attempting
-the prescribed repair command fails before writing recovery state. This does
-not invalidate the fixed-SHA product verification, but it prevents an honest
-workflow stop/closeout until repo-harness owns the helper path correctly.
+At reproduction time, attempting the prescribed explicit recovery command
+failed before writing recovery state. A later Stop-handler path materialized a
+recovery packet independently; that does not repair or invalidate the failing
+CLI path above. The defect therefore blocks the explicit recovery/repair
+surface, while the separate contract-test runner defect remains the blocker to
+fresh closeout checks.
