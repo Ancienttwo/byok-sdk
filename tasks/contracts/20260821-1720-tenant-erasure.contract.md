@@ -85,7 +85,7 @@ exit_criteria:
     - path: deploy/sql/0010_tenant_erasure.sql
       pattern: "tenant_erasure_operation"
     - path: packages/cloud-dataplane/src/stores/r2-blobs.ts
-      pattern: "tenantObjectKey(tenant, LIST_PREFIX_HASH"
+      pattern: 'tenantObjectKey\(tenant, LIST_PREFIX_HASH'
   tests_pass:
     - path: packages/cloud-dataplane/src/__tests__/tenant-erasure.test.ts
   commands_succeed:
