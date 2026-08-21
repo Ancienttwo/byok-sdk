@@ -157,7 +157,8 @@ Keep application release distinct from runtime executable versions, protocol ver
 - [x] Inject the official CLI identity from the package manifest at build time and add `--version` before all stateful paths.
 - [x] Add packed CLI/manifest parity evidence and update the Slice A product contract in `docs/spec.md`.
 - [x] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
-- [ ] Record strict review/acceptance evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
+- [x] Record strict review evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
+- [ ] After the documented upstream runner repair, produce fresh checks and record the typed external AcceptanceReceipt for the exact reviewed subject.
 
 ## Verification
 
@@ -195,4 +196,5 @@ Keep application release distinct from runtime executable versions, protocol ver
 - [x] Inject the official CLI identity from the package manifest at build time and add `--version` before all stateful paths.
 - [x] Add packed CLI/manifest parity evidence and update the Slice A product contract in `docs/spec.md`.
 - [x] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
-- [ ] Record strict review/acceptance evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
+- [x] Record strict review evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
+- [ ] After the documented upstream runner repair, produce fresh checks and record the typed external AcceptanceReceipt for the exact reviewed subject.
