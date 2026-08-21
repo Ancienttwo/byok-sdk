@@ -10,6 +10,7 @@
 --   deploy/sql/0006_device_presence_toolsets.sql (nullable logical-toolset inventory column)
 --   deploy/sql/0007_approval_timeline.sql (bounded approval lifecycle tail)
 --   deploy/sql/0008_device_assertion_replay.sql (single-use assertion exchange ledger)
+--   deploy/sql/0009_task_cancellation.sql (durable host cancellation tombstone and delivery identity)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -50,9 +51,9 @@
 -- Without this block the two below pass trivially against an empty schema, and
 -- a green result would mean "nothing was checked" rather than "nothing is
 -- wrong". 26 is 0001's seven plus 0002's eleven plus 0003's three plus
--- 0004's one plus 0005's two plus 0007's one plus 0008's one; migrations that
--- only alter an existing table do not add to the count. A later migration may only
--- raise it.
+-- 0004's one plus 0005's two plus 0007's one plus 0008's one; 0009 alters the
+-- existing task table and is checked explicitly in section 0.1. A later migration
+-- may only raise this count.
 DO $$
 DECLARE
   port_tables integer;
@@ -66,8 +67,49 @@ BEGIN
 
   IF port_tables < 26 THEN
     RAISE EXCEPTION
-      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 26 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql)',
+      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 26 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql; 0009_task_cancellation.sql is checked separately)',
       current_database(), current_schema(), port_tables;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.1 Host cancellation migration is present with its exact durable columns
+-- ---------------------------------------------------------------------------
+--
+-- 0009 is additive and does not create another table, so the table-count guard
+-- above cannot distinguish a pre-0009 schema. All three columns are the one
+-- cancellation authority: timestamp/reason is the accepted host tombstone and
+-- message identity pins the one durable task.cancel delivery. They intentionally
+-- remain nullable because existing and successfully completed tasks were never
+-- cancelled.
+DO $$
+DECLARE
+  missing_columns text;
+BEGIN
+  SELECT string_agg(required.name, ', ' ORDER BY required.name) INTO missing_columns
+    FROM (
+      VALUES
+        ('cancel_requested_at'::text, 'timestamp with time zone'::regtype),
+        ('cancel_reason'::text, 'text'::regtype),
+        ('cancel_message_id'::text, 'text'::regtype)
+    ) AS required(name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'task'
+         AND a.attname = required.name
+         AND a.atttypid = required.type_oid
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without 0009_task_cancellation.sql: task is missing cancellation column(s): %',
+      missing_columns;
   END IF;
 END $$;
 

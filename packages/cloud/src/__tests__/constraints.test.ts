@@ -203,7 +203,7 @@ describe('coordination vocabulary isolation', () => {
     const projection = shipped('board-projection.ts');
     expect(projection).not.toContain('task.complete');
     expect(projection).not.toContain('task.fail');
-    for (const state of ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'Complete', 'Failed', 'Cancelled']) {
+    for (const state of ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'CancelRequested', 'Complete', 'Failed', 'Cancelled']) {
       expect(projection, state).not.toContain(state);
     }
   });
@@ -228,6 +228,7 @@ describe('the public surface', () => {
       'nonces',
       'dedup',
       'tasks',
+      'cancellations',
       'receipts',
       'proofReceipts',
       'blobs',

@@ -56,6 +56,8 @@ import type {
   CloudStores,
   DeviceRecord,
   RequestReceipt,
+  TaskCancellationMutation,
+  TaskCancellationRequest,
   TaskAttempt,
   TaskAttemptStatus,
 } from './stores/ports';
@@ -102,8 +104,13 @@ export interface TenantBoundDevices {
 export interface TenantBoundTaskAttempts {
   open(input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt>;
   get(taskId: string): Promise<TaskAttempt | undefined>;
+  getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
   claim(input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt | undefined>;
   recordStatus(input: { readonly taskId: string; readonly status: TaskAttemptStatus }): Promise<TaskAttempt | undefined>;
+}
+
+export interface TenantBoundTaskCancellations {
+  request(input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
 }
 
 export interface TenantBoundDedup {
@@ -145,6 +152,7 @@ export interface TenantStores {
   readonly approvals: TenantBoundApprovalTimeline;
   readonly devices: TenantBoundDevices;
   readonly tasks: TenantBoundTaskAttempts;
+  readonly cancellations: TenantBoundTaskCancellations;
   readonly dedup: TenantBoundDedup;
   readonly receipts: TenantBoundReceipts;
   readonly blobs: TenantBoundBlobs;
@@ -200,8 +208,12 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     tasks: {
       open: (input) => cloud.tasks.open(tenant, input),
       get: (taskId) => cloud.tasks.get(tenant, taskId),
+      getMany: (taskIds) => cloud.tasks.getMany(tenant, taskIds),
       claim: (input) => cloud.tasks.claim(tenant, input),
       recordStatus: (input) => cloud.tasks.recordStatus(tenant, input),
+    },
+    cancellations: {
+      request: (input) => cloud.cancellations.request(tenant, input),
     },
     dedup: {
       checkAndRecord: (deviceId, envelopeId) => cloud.dedup.checkAndRecord(tenant, deviceId, envelopeId),

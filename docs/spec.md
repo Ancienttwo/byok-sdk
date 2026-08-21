@@ -123,6 +123,30 @@ lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
 publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
 
+## Hosted task cancellation authority
+
+The hosted cloud exposes one tenant-scoped `cancelTask(taskId, reason?)`
+control-plane operation. Acceptance is durable and idempotent: the first call
+atomically records a cancellation tombstone and appends the existing frozen-v1
+`task.cancel` envelope to the target device mailbox. An unknown or cross-tenant
+task id fails closed. Retrying cannot change the first reason, timestamp, or
+mailbox delivery identity.
+
+An unleased offer becomes `cancelled` immediately and the original
+`task.offer` is suppressed from later long-poll delivery. A leased attempt
+becomes `cancel_requested` until its device processes the durable command,
+interrupts the active Session, and returns `task.cancelled`; that acknowledgement
+moves the attempt to `cancelled`. The tombstone remains authoritative while a
+device is offline, so reconnect cannot start cancelled work.
+
+Cancellation acceptance is also the product terminal-truth boundary. A
+concurrent or late `task.complete` receipt may be retained as raw audit evidence,
+but it cannot replace the cancelled result or create a review/board side effect.
+This does not add a second wire state or a process-kill API: `cancel_requested`
+is a hosted attempt-delivery state, while the existing client owns
+`Session.interrupt()` and the existing `task.cancel` / `task.cancelled` messages
+remain the only device protocol.
+
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm

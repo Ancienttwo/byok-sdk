@@ -334,6 +334,14 @@ stateDiagram-v2
 | `AwaitApproval` | `Running`, `Failed`, `Cancelled` |
 | `Complete` / `Failed` / `Cancelled` | none (terminal) |
 
+The table above is the shared wire task state machine. The hosted cloud also
+has one control-plane attempt state, lower-case `cancel_requested`, which is
+not a new envelope value and does not extend `TaskState`. It means a host
+cancellation tombstone is durable for a leased attempt but the device has not
+yet acknowledged `task.cancel` with `task.cancelled`. An unleased hosted offer
+goes directly to `cancelled`; a leased one goes
+`running → cancel_requested → cancelled` at the attempt-store boundary.
+
 A server may additionally force a task straight to `Failed` when an inbound
 message doesn't fit the task's current state (e.g. `task.progress` arriving
 while `AwaitApproval`) — this is an implementation safety net (see the
@@ -407,10 +415,15 @@ outcome.
 
 ## 4. Cancel/approve/reject wire semantics (M1 gap #3)
 
-**Rule: the server's own state is authoritative on its own action.** Calling
-the server-side API (`TaskHandle.cancel()` / `.approve()` / `.reject()`)
-moves the server's task record immediately — it does not wait for the
-daemon to acknowledge anything. The corresponding wire message
+**Rule: the server's own action is authoritative.** Calling the embedded
+server API (`TaskHandle.cancel()` / `.approve()` / `.reject()`) moves that
+server's task record immediately. Calling the hosted cloud's tenant-scoped
+`cancelTask(taskId, reason?)` atomically records a cancellation tombstone and
+durable mailbox delivery; an unleased attempt becomes `cancelled`, while a
+leased attempt exposes `cancel_requested` until the daemon acknowledgement.
+Neither surface waits for the daemon before accepting the host decision, and
+the accepted hosted tombstone outranks a racing late success in the product
+result projection. The corresponding wire message
 (`task.cancel` / `task.approve` / `task.reject`) sent to the daemon is a
 **best-effort notification**, not a request awaiting a reply, and **there is
 no new ack message type**. The daemon's existing message stream is the
@@ -427,6 +440,14 @@ This is deliberate, not an oversight: a flaky or slow daemon connection must
 never be able to block the server's own state machine, and a dedicated ack
 message would only restate information the existing terminal/progress
 messages already carry.
+
+For hosted cancellation, “best-effort” describes when an online device acts,
+not whether the command survives disconnection: the tombstone and
+`task.cancel` mailbox row commit together, the original unleased offer is
+filtered from subsequent delivery, and reconnect redelivers the cancellation.
+`task.cancelled` remains the existing acknowledgement. A late
+`task.complete` may be retained as raw receipt evidence but cannot overwrite
+the accepted cancelled result or trigger downstream business projection.
 
 **`task.cancel`/`task.reject` stay individually redeliverable even though
 their task is already terminal server-side by the time they're queued.**

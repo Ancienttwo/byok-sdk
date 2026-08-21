@@ -18,6 +18,7 @@ const inMemoryFactory: CloudCompositionFactory = {
       clock,
       createWebCrypto(),
       core.objects,
+      core.mailbox,
     );
     return {
       // Exactly the certified ports, in `CLOUD_CONFORMANCE_PORTS` order: the
@@ -31,6 +32,7 @@ const inMemoryFactory: CloudCompositionFactory = {
         nonces: stores.nonces,
         dedup: stores.dedup,
         tasks: stores.tasks,
+        cancellations: stores.cancellations,
         receipts: stores.receipts,
         proofReceipts: stores.proofReceipts,
         blobs: stores.blobs,

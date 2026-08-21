@@ -22,6 +22,7 @@ import { runPairingConformance } from './pairing';
 import { runNonceConformance } from './nonces';
 import { runDedupConformance } from './dedup';
 import { runTaskAttemptConformance } from './task-attempts';
+import { runTaskCancellationConformance } from './task-cancellations';
 import { runReceiptConformance } from './receipts';
 import { runProofReceiptConformance } from './proof-receipts';
 import { runBlobConformance } from './blobs';
@@ -58,6 +59,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'nonces',
   'dedup',
   'tasks',
+  'cancellations',
   'receipts',
   'proofReceipts',
   'blobs',
@@ -147,6 +149,7 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runNonceConformance(factory);
     runDedupConformance(factory);
     runTaskAttemptConformance(factory);
+    runTaskCancellationConformance(factory);
     runReceiptConformance(factory);
     runProofReceiptConformance(factory);
     runBlobConformance(factory);

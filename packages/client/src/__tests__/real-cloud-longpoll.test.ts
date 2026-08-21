@@ -108,4 +108,47 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     expect(daemon.status().connected).toBe(false);
     expect(daemon.status().degraded).toBe(true);
   }, 15000);
+
+  it('host cancellation interrupts the running session and the device acknowledges cancellation over long-poll', async () => {
+    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, longPollIntervalMs: 20 });
+
+    const workspaceRoot = await tmpDir('byok-cloud-cancel-workspace-');
+    const storeDir = await tmpDir('byok-cloud-cancel-store-');
+    const adapter = new StubRuntimeAdapter();
+
+    daemon = createDaemonWithAdapters(
+      { productName: 'Test', productId: 'test-product', serverUrl: cloud.url, workspaceRoot, storeDir },
+      [adapter],
+      {
+        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
+        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+      },
+    );
+
+    const pairing = await cloud.createPairingCode();
+    const record = await daemon.pair(pairing.code);
+    await daemon.start();
+
+    const offer = await cloud.enqueueOffer(record.deviceId, 'cancel this task');
+    await vi.waitFor(async () => {
+      expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('running');
+    });
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+
+    const cancellation = await cloud.cancelTask(offer.taskId, 'operator stopped it');
+    expect(cancellation.status).toBe('cancel_requested');
+
+    const session = adapter.sessions[0]!;
+    await vi.waitFor(() => expect(session.interruptCalled).toBe(true));
+    await vi.waitFor(async () => {
+      expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('cancelled');
+    });
+    await vi.waitFor(() => expect(session.closeCalled).toBe(true));
+
+    const terminal = await cloud.readTerminalBody(offer.taskId);
+    expect(terminal).toBeDefined();
+    const envelope = decodeEnvelope(terminal ?? '');
+    expect(envelope.type).toBe('task.cancelled');
+    expect(envelope.task_id).toBe(offer.taskId);
+  }, 15000);
 });

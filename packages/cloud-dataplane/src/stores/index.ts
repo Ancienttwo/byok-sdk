@@ -32,6 +32,7 @@ import { PostgresPairingCodeStore } from './pairing-codes';
 import { PostgresRequestReceiptStore } from './receipts';
 import { PostgresProofRequestReceiptStore } from './proof-receipts';
 import { PostgresTaskAttemptStore } from './task-attempts';
+import { PostgresTaskCancellationStore } from './task-cancellations';
 import { PostgresActivityStore } from './activity';
 import { PostgresApprovalTimelineStore } from './approval-timeline';
 
@@ -42,6 +43,7 @@ export { PostgresPairingCodeStore } from './pairing-codes';
 export { PostgresRequestReceiptStore } from './receipts';
 export { PostgresProofRequestReceiptStore } from './proof-receipts';
 export { PostgresTaskAttemptStore } from './task-attempts';
+export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
 export { PostgresApprovalTimelineStore } from './approval-timeline';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
@@ -101,6 +103,7 @@ export function createPostgresCloudStores(
     nonces: new PostgresNonceStore(pool, clock, crypto),
     dedup: new PostgresInboundDedupStore(pool),
     tasks: new PostgresTaskAttemptStore(pool, clock),
+    cancellations: new PostgresTaskCancellationStore(pool, clock),
     receipts: new PostgresRequestReceiptStore(pool, clock),
     proofReceipts: new PostgresProofRequestReceiptStore(pool, clock),
     // A second `PostgresObjectStore` instance, not a shared one: it is a

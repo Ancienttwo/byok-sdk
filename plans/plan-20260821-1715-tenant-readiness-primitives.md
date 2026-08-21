@@ -1,0 +1,72 @@
+# Plan: Tenant Readiness Primitives
+
+> **Status**: Draft
+> **Created**: 20260821-1715
+> **Slug**: tenant-readiness-primitives
+> **Artifact Level**: work-package
+> **Verification Boundary**: tenant-scoped device plus unexpired-presence aggregate with in-memory/PostgreSQL parity
+> **Rollback Surface**: revert the additive readiness projection before release
+> **Dependency**: U4a Local Agent release identity must freeze first
+
+## Goal
+
+Expose one SDK-owned per-tenant readiness projection over durable device facts
+and TTL-bounded presence hints. Salesko consumes the aggregate for policy; it
+must not join `listDevices()` and `listPresence()` or invent expiry/revocation
+semantics.
+
+## P1 — Authority map
+
+- durable device/pairing/revocation facts remain cloud/dataplane authority.
+- presence remains lossy, unsigned, TTL-bounded observation; expiry means absent.
+- U4a owns the single Local Agent release identity projected into presence.
+- SDK owns aggregation semantics and tenant isolation; Salesko owns admission,
+  queueing, API/UI response, and fail-closed behavior when unavailable.
+
+## P2 — Concrete trace
+
+Device pairing/revocation plus latest unexpired presence publication →
+tenant-bound store query/aggregate → `ByokCloud` readiness read model → Salesko
+admission policy. Revoked devices never count as observed-online even if a stale
+presence row remains. Missing runtime/auth facts remain unknown.
+
+## P3 — Decision
+
+Add one public aggregate (final naming may differ from
+`readTenantReadiness`). Field names must say `observed`/`hint` rather than
+claim authoritative readiness. Do not add a scheduler, load score, capability
+heuristic, semver gate, or host-side fallback aggregation. At 10x, the first
+pressure point is per-device joins, so PostgreSQL must aggregate set-wise.
+
+## Scope / ownership
+
+- Owns the public readiness type/API and in-memory/PostgreSQL aggregate stores.
+- Owns presence projection of U4a release identity for both WS and first-hop
+  long-poll publication paths.
+- Runtime inventory/auth fields enter only with a real probe authority;
+  otherwise the schema represents unknown by omission.
+- Separate contract worktree; begins after U4a identity freeze.
+
+## Acceptance matrix
+
+- zero devices; active paired; revoked-only; paired without presence
+- each presence level and exact TTL expiry boundary
+- revoked device with residual presence
+- multi-tenant isolation
+- missing release/runtime/auth facts remain unknown
+- WS and first-hop long-poll report the same identity/readiness facts
+- in-memory/PostgreSQL parity and set-wise query evidence
+
+## Task Breakdown
+
+- [ ] Complete/freeze U4a process identity and packed-manifest parity.
+- [ ] Create a dedicated strict contract/worktree with mutually exclusive presence-schema ownership.
+- [ ] Define red projection tests and exact TTL/revocation semantics.
+- [ ] Implement tenant-bound aggregate ports and both store compositions.
+- [ ] Project the single U4a identity through both device publication paths.
+- [ ] Run targeted suites, real dataplane parity, full required checks, and review.
+
+## Authorization boundary
+
+No publish, deploy, production migration, secret mutation, Salesko glue,
+capability/load scheduler, or admission-policy implementation is authorized.
