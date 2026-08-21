@@ -307,6 +307,34 @@ export interface BlobContent {
 }
 
 /**
+ * How a byte-proxying read can fail while the blob itself is known to exist.
+ *
+ * The split is about WHERE the failure landed relative to the upstream
+ * response, because that is the only part a proxy can observe and the only
+ * part an operator can act on: `blob_upstream_unavailable` means nothing came
+ * back at all (the upstream was unreachable/refused before its response
+ * started), so a retry may succeed unchanged; `blob_upstream_stream_interrupted`
+ * means the response HAD started and died mid-transfer, so whatever the caller
+ * already has is a truncated prefix, not a short blob.
+ *
+ * Both are 502 on the wire (see `BLOB_READ_ERROR_HTTP_STATUS` in
+ * `handlers/blobs.ts`) — the CODE carries the distinction, not the status.
+ */
+export const BLOB_READ_ERROR_CODES = ['blob_upstream_unavailable', 'blob_upstream_stream_interrupted'] as const;
+
+export type BlobReadErrorCode = (typeof BLOB_READ_ERROR_CODES)[number];
+
+/**
+ * The result of {@link BlobContentProxy.readContent}, in the same union idiom
+ * as {@link BlobWriteResult}. Note what is NOT in here: not-found stays
+ * `undefined` at the method's return type, so "no such blob" keeps its
+ * existing 404 meaning and never has to be spelled as a failure code.
+ */
+export type BlobReadResult =
+  | { readonly ok: true; readonly content: BlobContent }
+  | { readonly ok: false; readonly code: BlobReadErrorCode };
+
+/**
  * The capability-minting half of blobs: what EVERY composition can honestly
  * provide, whoever holds the bytes.
  *
@@ -352,7 +380,8 @@ export interface CloudBlobStore {
 export interface BlobContentProxy {
   verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): Promise<boolean>;
   writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult>;
-  readContent(blobId: string): Promise<BlobContent | undefined>;
+  /** `undefined` = no such blob (404); a `{ok:false}` result = the blob exists but its bytes could not be proxied (502, distinguished by {@link BlobReadErrorCode}). */
+  readContent(blobId: string): Promise<BlobReadResult | undefined>;
 }
 
 // ---------------------------------------------------------------------------

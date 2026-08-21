@@ -9,14 +9,28 @@ import {
   type RuntimeInfo,
   type ToolsetId,
 } from '@byok-sdk/protocol';
-import { toWsUrl } from './url';
+import { describeEndpoint, toWsUrl, type TransportEndpoint } from './url';
 
 export type ConnectionState = 'connecting' | 'open' | 'closed' | 'degraded' | 'revoked';
 
-/** The WS upgrade itself was rejected with a non-101 HTTP status (e.g. 401 for an expired/invalid bearer token). Surfaced via `onConnectOutcome` so `ConnectionManager` can force a reactive token renewal before the next attempt (protocol §6.2, "reactively on 401"). */
+/**
+ * The WS upgrade itself was rejected with a non-101 HTTP status (e.g. 401 for
+ * an expired/invalid bearer token). Surfaced via `onConnectOutcome` so
+ * `ConnectionManager` can force a reactive token renewal before the next
+ * attempt (protocol §6.2, "reactively on 401").
+ *
+ * Carries the {@link TransportEndpoint} the rejected upgrade was aimed at, so
+ * a 401 in a log names WHICH server and path refused it instead of leaving
+ * the reader to guess between a stale `serverUrl` and a genuinely expired
+ * token. The endpoint's own construction is what keeps the bearer token out
+ * of this message — see {@link describeEndpoint}.
+ */
 export class WsUnexpectedStatusError extends Error {
-  constructor(public readonly status: number) {
-    super(`WS upgrade rejected with HTTP ${status}`);
+  constructor(
+    public readonly status: number,
+    public readonly endpoint: TransportEndpoint,
+  ) {
+    super(`WS upgrade rejected with HTTP ${status} (ws ${endpoint.host}${endpoint.path})`);
     this.name = 'WsUnexpectedStatusError';
   }
 }
@@ -69,8 +83,13 @@ export interface WsTransportOptions {
    * and the causing error when the attempt failed before a socket even
    * opened (e.g. `getToken()` rejecting). Used by `ConnectionManager` to
    * count consecutive failures for the long-poll fallback (protocol §8).
+   *
+   * `endpoint` names the route this attempt was aimed at (computed once per
+   * `openSocket()`, so every outcome site reports the same one) — a
+   * consecutive-failure count in a log is only actionable once it says WHICH
+   * server kept refusing.
    */
-  onConnectOutcome?: (acked: boolean, err?: unknown) => void;
+  onConnectOutcome?: (acked: boolean, err: unknown, endpoint: TransportEndpoint) => void;
   backoff?: BackoffOptions;
   liveness?: LivenessOptions;
   /** Deterministic automatic reconnect delay. Manual `connect({auto:false})` never reaches this scheduler. */
@@ -173,6 +192,8 @@ export class WsTransport {
 
   private async openSocket(): Promise<void> {
     const url = toWsUrl(this.opts.serverUrl);
+    // Once per attempt, shared by all three outcome sites below.
+    const endpoint = describeEndpoint('ws', url);
     this.acked = false;
     this.everAckedThisAttempt = false;
     this.opts.onStateChange?.('connecting');
@@ -182,7 +203,7 @@ export class WsTransport {
       token = await this.opts.getToken();
     } catch (err) {
       this.opts.onStateChange?.('closed');
-      this.opts.onConnectOutcome?.(false, err);
+      this.opts.onConnectOutcome?.(false, err, endpoint);
       if (!this.closedByUser && this.autoReconnect) this.scheduleReconnect();
       return;
     }
@@ -242,7 +263,11 @@ export class WsTransport {
       const acked = this.everAckedThisAttempt;
       const status = this.lastUnexpectedStatus;
       this.lastUnexpectedStatus = undefined;
-      this.opts.onConnectOutcome?.(acked, status !== undefined ? new WsUnexpectedStatusError(status) : undefined);
+      this.opts.onConnectOutcome?.(
+        acked,
+        status !== undefined ? new WsUnexpectedStatusError(status, endpoint) : undefined,
+        endpoint,
+      );
       if (!this.closedByUser && this.autoReconnect) this.scheduleReconnect();
     });
 

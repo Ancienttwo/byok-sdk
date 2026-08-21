@@ -1,7 +1,45 @@
 import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
-import { toHttpBase } from './url';
+import { describeEndpoint, toHttpBase, type TransportEndpoint } from './url';
+
+/**
+ * A long-poll request failed in a way that today told the caller only
+ * `false`/"retry in 2s" — this names WHICH of the transport's two routes it
+ * was and what the server said, so a stuck fallback loop is diagnosable
+ * without a packet capture.
+ *
+ * Scope (review finding — honest attribution): this type represents ONLY an
+ * actual route request/response cycle failing. Anything that happens BEFORE
+ * the request exists — in practice credential acquisition
+ * (`AuthManager.getValidAccessToken`) — is not a route failure and is never
+ * reported as one; neither is {@link DeviceRevokedError}, which is a device
+ * lifecycle fact rather than something the route did. See
+ * `LongPollClient.loop`/`postBatch` for where that boundary is drawn.
+ *
+ * `status` is the HTTP status of the response the route produced, INCLUDING
+ * the case where the response arrived intact and its body then failed to read
+ * or parse (a 200 whose payload is malformed is still a 200 — the parse error
+ * rides in `cause`). `undefined` means no response was ever produced: the
+ * `fetch` itself rejected (DNS/TLS/connection failure, abort). The underlying
+ * error is kept in `cause` rather than flattened into the message, so nothing
+ * about the original failure is lost.
+ */
+export class LongPollRouteError extends Error {
+  constructor(
+    public readonly endpoint: TransportEndpoint,
+    public readonly status: number | undefined,
+    cause: unknown,
+  ) {
+    super(
+      status === undefined
+        ? `long-poll ${endpoint.host}${endpoint.path} failed`
+        : `long-poll ${endpoint.host}${endpoint.path} failed with HTTP ${status}`,
+      { cause },
+    );
+    this.name = 'LongPollRouteError';
+  }
+}
 
 export interface LongPollClientOptions {
   serverUrl: string;
@@ -111,6 +149,9 @@ interface LooseEventsPollResponse {
 /** Finding R1: soft cap on `LongPollClient`'s own `warnedValidationFailureSeqs` bookkeeping — see that field's own doc comment for why this is a simple "clear outright" reset rather than an eviction policy: a rare/pathological path, not a hot one. */
 const MAX_TRACKED_VALIDATION_FAILURE_WARNINGS = 1000;
 
+/** Same soft-cap discipline as {@link MAX_TRACKED_VALIDATION_FAILURE_WARNINGS}, for `warnedRouteFailures` — see that field's own doc comment. */
+const MAX_TRACKED_ROUTE_FAILURE_WARNINGS = 1000;
+
 /**
  * M4 Phase 4 (version-negotiation drill fix): validates ONLY the OUTER shape
  * of a `/byok/events` response — `events` is an array of not-yet-validated
@@ -206,8 +247,60 @@ export class LongPollClient {
    * eviction bookkeeping for a case this unlikely.
    */
   private readonly warnedValidationFailureSeqs = new Set<number>();
+  /**
+   * `path:status` keys this loop has already warned about — same one-warn-per-key
+   * discipline (and same rare-path soft-cap reset) as
+   * {@link warnedValidationFailureSeqs}, and for the same reason: an
+   * unreachable or misconfigured route fails again every `retryDelayMs` (2s
+   * by default) for as long as the fallback is engaged, so an unguarded warn
+   * would bury every other line in the log within a minute. Keyed by route
+   * AND status so a route that starts failing differently (503 -> 401) still
+   * warns once for the new condition.
+   */
+  private readonly warnedRouteFailures = new Set<string>();
+  /**
+   * Both routes this transport can fail against, built once (see
+   * {@link describeEndpoint} for why constructing them in one place is what
+   * keeps credentials out of every diagnostic derived from them).
+   */
+  private readonly eventsEndpoint: TransportEndpoint;
+  private readonly messagesEndpoint: TransportEndpoint;
 
-  constructor(private readonly opts: LongPollClientOptions) {}
+  constructor(private readonly opts: LongPollClientOptions) {
+    const base = toHttpBase(opts.serverUrl);
+    this.eventsEndpoint = describeEndpoint('long-poll', new URL(BYOK_EVENTS_PATH, base));
+    this.messagesEndpoint = describeEndpoint('long-poll', new URL(BYOK_MESSAGES_PATH, base));
+  }
+
+  /**
+   * One warn per `path:status`, carrying the typed {@link LongPollRouteError}
+   * as the second argument so a caller inspecting the log (or a test) reads
+   * the route off the error rather than re-parsing the message.
+   */
+  private warnRouteFailure(endpoint: TransportEndpoint, status: number | undefined, cause: unknown): void {
+    const key = `${endpoint.path}:${status ?? 'no-response'}`;
+    if (this.warnedRouteFailures.has(key)) return;
+    if (this.warnedRouteFailures.size > MAX_TRACKED_ROUTE_FAILURE_WARNINGS) {
+      this.warnedRouteFailures.clear(); // see this Set's own doc comment — a rare-path reset, not a hot one
+    }
+    this.warnedRouteFailures.add(key);
+    const error = new LongPollRouteError(endpoint, status, cause);
+    console.warn(`[byok/client] ${error.message}`, error);
+  }
+
+  /**
+   * {@link DeviceRevokedError} is a device lifecycle fact, not a route
+   * failure: it stops this loop outright (retrying cannot help) and is
+   * deliberately reported through `onRevoked` ONLY — never additionally as a
+   * {@link LongPollRouteError}. Returns whether the error was that case, so
+   * each call site can skip its route-failure warn for it.
+   */
+  private noteRevoked(err: unknown): boolean {
+    if (!(err instanceof DeviceRevokedError)) return false;
+    this.running = false;
+    this.opts.onRevoked?.();
+    return true;
+  }
 
   start(): void {
     if (this.running) return;
@@ -229,9 +322,25 @@ export class LongPollClient {
    * `true` once the server has accepted the batch.
    */
   async postBatch(envelopes: Envelope[]): Promise<boolean> {
+    // Phase 1 — credentials. This happens BEFORE the route request exists, so
+    // its failure can never be attributed to `/byok/messages`. Pre-flighting
+    // the token here (rather than letting `authedFetch`'s own identical call
+    // be the first one) costs no extra round-trip: `getValidAccessToken` is
+    // idempotent and shares one in-flight renewal promise, so the call inside
+    // `authedFetch` below resolves from the same result.
+    try {
+      await this.opts.auth.getValidAccessToken();
+    } catch (err) {
+      this.noteRevoked(err);
+      return false;
+    }
+
+    // Phase 2 — the route request/response cycle. Only failures from here on
+    // are {@link LongPollRouteError}s.
+    let res: Response;
     try {
       const base = toHttpBase(this.opts.serverUrl);
-      const res = await authedFetch(
+      res = await authedFetch(
         new URL(BYOK_MESSAGES_PATH, base),
         {
           method: 'POST',
@@ -240,29 +349,62 @@ export class LongPollClient {
         },
         this.opts.auth,
       );
-      if (!res.ok) return false;
-      MessagesSendResponseSchema.parse(await res.json());
-      return true;
     } catch (err) {
-      if (err instanceof DeviceRevokedError) {
-        this.running = false;
-        this.opts.onRevoked?.();
-      }
+      // No response was ever produced (the `fetch` itself rejected) — the one
+      // case where `status: undefined` is structurally true.
+      if (!this.noteRevoked(err)) this.warnRouteFailure(this.messagesEndpoint, undefined, err);
       return false;
     }
+    if (!res.ok) {
+      this.warnRouteFailure(this.messagesEndpoint, res.status, undefined);
+      return false;
+    }
+    try {
+      MessagesSendResponseSchema.parse(await res.json());
+    } catch (err) {
+      // The response DID exist and the server DID accept the request line —
+      // it is its body that is unusable, so this carries that response's own
+      // status with the read/parse error in `cause`.
+      this.warnRouteFailure(this.messagesEndpoint, res.status, err);
+      return false;
+    }
+    return true;
   }
 
   private async loop(): Promise<void> {
     let retryAttempt = 0;
     while (this.running) {
       try {
+        // Phase 1 — credentials. A failure here happens BEFORE any request to
+        // `/byok/events` is made, so it is NOT a route failure and must not be
+        // reported as one (it falls through to the outer catch, which only
+        // backs off). Pre-flighting the token here rather than letting
+        // `authedFetch` be the first caller costs no extra round-trip:
+        // `getValidAccessToken` is idempotent and shares one in-flight renewal
+        // promise, so `authedFetch`'s own call below resolves from the same
+        // result. It exists purely to mark where the route request begins.
+        await this.opts.auth.getValidAccessToken();
+
         const base = toHttpBase(this.opts.serverUrl);
         const url = new URL(BYOK_EVENTS_PATH, base);
         const cursor = this.opts.getCursor();
         if (cursor !== undefined) url.searchParams.set('cursor', String(cursor));
 
-        const res = await authedFetch(url, { method: 'GET' }, this.opts.auth);
+        // Phase 2 — the route request/response cycle. Only failures from here
+        // on are {@link LongPollRouteError}s.
+        let res: Response;
+        try {
+          res = await authedFetch(url, { method: 'GET' }, this.opts.auth);
+        } catch (err) {
+          // No response was ever produced (the `fetch` itself rejected) — the
+          // one case where `status: undefined` is structurally true.
+          if (!(err instanceof DeviceRevokedError)) {
+            this.warnRouteFailure(this.eventsEndpoint, undefined, err);
+          }
+          throw err;
+        }
         if (!res.ok) {
+          this.warnRouteFailure(this.eventsEndpoint, res.status, undefined);
           // Long-poll has no persistent peer identity: a failed request no
           // longer proves that the responder behind the NEXT request supports
           // what the last successful one advertised. Match WS disconnect
@@ -316,7 +458,17 @@ export class LongPollClient {
         //     ordinary retain-and-redeliver semantics (protocol §9) keep
         //     this seq alive, and holds back anything delivered after it
         //     too, until a corrected version is actually processed.
-        const parsed = parseLooseEventsPollResponse(await res.json());
+        let parsed: LooseEventsPollResponse;
+        try {
+          parsed = parseLooseEventsPollResponse(await res.json());
+        } catch (err) {
+          // The response DID exist (and was a success status) — it is its body
+          // that is unusable. Carrying `res.status` here rather than
+          // `undefined` is what keeps this from reading as "the request never
+          // got a response"; the parse error itself rides in `cause`.
+          this.warnRouteFailure(this.eventsEndpoint, res.status, err);
+          throw err;
+        }
         this.opts.onServerCapabilities?.(parsed.capabilities);
         // Finding R1 (Codex's new P2): true the moment THIS batch contains
         // at least one validation-failed entry — used below to apply the
@@ -386,12 +538,14 @@ export class LongPollClient {
           this.opts.onOperationalOutcome?.('success');
         }
       } catch (err) {
+        // Whichever phase failed has already warned (or deliberately not
+        // warned) with its own accurate attribution — this block is only the
+        // shared "withdraw capabilities, then stop or back off" tail. It never
+        // warns itself: it cannot tell a route failure apart from a credential
+        // failure or a throwing `onEnvelope` handler, and guessing is exactly
+        // the mis-attribution this split removed.
         this.opts.onServerCapabilities?.([]);
-        if (err instanceof DeviceRevokedError) {
-          this.running = false;
-          this.opts.onRevoked?.();
-          return;
-        }
+        if (this.noteRevoked(err)) return;
         if (!this.running) return;
         this.opts.onOperationalOutcome?.('failure');
         const baseMs = this.opts.retryDelayMs ?? 2000;
