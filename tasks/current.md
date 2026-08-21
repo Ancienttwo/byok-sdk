@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-21T20:40:24+0800 -->
+<!-- updated_at: 2026-08-21T21:10:03+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-21T20:40:24+0800
-> **Source Branch**: codex/u1-u5-integration
-> **Source Commit**: 8f521da
+> **Updated At**: 2026-08-21T21:10:03+0800
+> **Source Branch**: codex/pre-release-consolidation
+> **Source Commit**: 0e8dade
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,7 +31,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/kito/Projects/byok-sdk: plans/plan-20260821-1645-host-cancellation-contract.md
+- /Users/kito/Projects/byok-sdk: stale active-plan marker -> plans/plan-20260821-1645-host-cancellation-contract.md
 - /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
 - /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: plans/plan-20260821-0425-hosted-integration-authority-closure.md
 - /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure
@@ -47,7 +47,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Commit and push this integration acceptance envelope.
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Run focused conflict tests, real Postgres+MinIO checks, build, typecheck, full test, strict workflow and release pack gates.
 
 ## Checks
 
@@ -58,15 +58,15 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 9 changed/untracked path(s)
 
 ```
- D plans/plan-20260821-1959-u1-u5-integration-acceptance.md
- D tasks/contracts/20260821-1959-u1-u5-integration-acceptance.contract.md
- D tasks/notes/20260821-1959-u1-u5-integration-acceptance.notes.md
- D tasks/reviews/20260821-1959-u1-u5-integration-acceptance.review.md
-?? plans/archive/plan-20260821-1959-u1-u5-integration-acceptance.md
-?? tasks/archive/contract-20260821-2040-u1-u5-integration-acceptance.md
-?? tasks/archive/notes-20260821-2040-u1-u5-integration-acceptance.md
-?? tasks/archive/review-20260821-2040-u1-u5-integration-acceptance.md
-?? tasks/archive/todo-20260821-2040-u1-u5-integration-acceptance.md
+ D plans/plan-20260821-2058-pre-release-consolidation.md
+ D tasks/contracts/20260821-2058-pre-release-consolidation.contract.md
+ D tasks/notes/20260821-2058-pre-release-consolidation.notes.md
+ D tasks/reviews/20260821-2058-pre-release-consolidation.review.md
+?? plans/archive/plan-20260821-2058-pre-release-consolidation.md
+?? tasks/archive/contract-20260821-2109-pre-release-consolidation.md
+?? tasks/archive/notes-20260821-2109-pre-release-consolidation.md
+?? tasks/archive/review-20260821-2109-pre-release-consolidation.md
+?? tasks/archive/todo-20260821-2109-pre-release-consolidation.md
 ```
 
 ## Source Artifacts

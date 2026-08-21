@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "source": "npm registry metadata for @byok-sdk/keys@0.2.0",
+  "package": "@byok-sdk/keys",
+  "version": "0.2.0",
+  "dependencies": {
+    "@byok-sdk/core": "0.4.2"
+  }
+}

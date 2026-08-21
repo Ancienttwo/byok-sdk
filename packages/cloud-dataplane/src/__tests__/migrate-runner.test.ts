@@ -1,10 +1,11 @@
 /**
  * The migrate runner's fault suite.
  *
- * A hand-written runner's bug IS a production schema incident, so the cases
- * here are the ways it can be wrong, each asserted against a real Postgres
- * rather than a mock: files applied out of order, a published file edited after
- * the fact, two runners racing, and a migration that fails halfway through.
+ * A hand-written runner's bug IS a production schema incident, so the runner
+ * cases here are asserted against a real Postgres: files applied out of order,
+ * a published file edited after the fact, two runners racing, and a migration
+ * that fails halfway through. The package-owned readback guard uses a narrow
+ * query-only ledger double so every mismatch class runs without a substrate.
  *
  * The racing case is why the substrate is a container. Two runners genuinely
  * contending for an advisory lock over two connections is the whole assertion;
@@ -13,12 +14,15 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Pool } from 'pg';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   MigrationChecksumMismatchError,
   MigrationFilenameError,
+  MigrationStateMismatchError,
   migrate,
   readMigrationFiles,
+  verifyMigrations,
 } from '../migrate';
 import {
   createDataplaneScope,
@@ -33,6 +37,33 @@ async function migrationDirectory(files: Readonly<Record<string, string>>): Prom
     await writeFile(join(directory, name), sql, 'utf8');
   }
   return directory;
+}
+
+interface LedgerRow {
+  readonly version: string;
+  readonly checksum: string;
+}
+
+interface VerificationPoolState {
+  readonly rows?: readonly LedgerRow[];
+  readonly error?: unknown;
+  readonly queries: string[];
+}
+
+/** A query-only pool for the package-owned ledger readback guard. */
+function verificationPool(state: VerificationPoolState): Pool {
+  const client = {
+    async query<T>(sql: string): Promise<{ rows: T[] }> {
+      state.queries.push(sql);
+      if (sql !== 'SELECT version, checksum FROM byok_schema_migration') {
+        throw new Error(`unexpected verification query: ${sql}`);
+      }
+      if (state.error !== undefined) throw state.error;
+      return { rows: [...(state.rows ?? [])] as T[] };
+    },
+    release(): void {},
+  };
+  return { connect: async () => client } as unknown as Pool;
 }
 
 describe('migration file discipline', () => {
@@ -102,6 +133,118 @@ describe('migration file discipline', () => {
     expect(Object.keys(runner).filter((name) => /down|rollback|revert|drop/i.test(name))).toEqual(
       [],
     );
+  });
+});
+
+describe('package-owned migration verification', () => {
+  const directories: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+    );
+  });
+
+  async function directoryOf(files: Readonly<Record<string, string>>): Promise<string> {
+    const path = await migrationDirectory(files);
+    directories.push(path);
+    return path;
+  }
+
+  it('returns exact package rows ordered by migration version', async () => {
+    const directory = await directoryOf({
+      '0002_second.sql': 'SELECT 2',
+      '0001_first.sql': 'SELECT 1',
+    });
+    const files = await readMigrationFiles(directory);
+    const pool = verificationPool({
+      rows: [
+        { version: files[1]!.version, checksum: files[1]!.checksum },
+        { version: files[0]!.version, checksum: files[0]!.checksum },
+      ],
+      queries: [],
+    });
+
+    await expect(verifyMigrations(pool, directory)).resolves.toEqual(
+      files.map(({ version, checksum }) => ({ version, checksum })),
+    );
+  });
+
+  it('defaults to the migration projection shipped beside the built root entry', async () => {
+    const built = (await import(new URL('../../dist/index.js', import.meta.url).href)) as {
+      migrationsDir(): string;
+      verifyMigrations(pool: Pool): Promise<readonly LedgerRow[]>;
+    };
+    const files = await readMigrationFiles(built.migrationsDir());
+    const pool = verificationPool({
+      rows: files.map(({ version, checksum }) => ({ version, checksum })),
+      queries: [],
+    });
+
+    await expect(built.verifyMigrations(pool)).resolves.toEqual(
+      files.map(({ version, checksum }) => ({ version, checksum })),
+    );
+  });
+
+  it('aggregates missing, unexpected, and checksum issues in stable order', async () => {
+    const directory = await directoryOf({
+      '0003_third.sql': 'SELECT 3',
+      '0001_first.sql': 'SELECT 1',
+    });
+    const files = await readMigrationFiles(directory);
+    const pool = verificationPool({
+      rows: [
+        { version: '0004_unexpected.sql', checksum: 'unexpected-checksum-4' },
+        { version: '0002_unexpected.sql', checksum: 'unexpected-checksum-2' },
+        { version: files[0]!.version, checksum: 'changed-checksum' },
+      ],
+      queries: [],
+    });
+
+    const error = await verifyMigrations(pool, directory).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(MigrationStateMismatchError);
+    expect((error as MigrationStateMismatchError).issues).toEqual([
+      {
+        kind: 'checksum_mismatch',
+        version: files[0]!.version,
+        expectedChecksum: files[0]!.checksum,
+        actualChecksum: 'changed-checksum',
+      },
+      {
+        kind: 'missing',
+        version: files[1]!.version,
+        expectedChecksum: files[1]!.checksum,
+      },
+      {
+        kind: 'unexpected',
+        version: '0002_unexpected.sql',
+        actualChecksum: 'unexpected-checksum-2',
+      },
+      {
+        kind: 'unexpected',
+        version: '0004_unexpected.sql',
+        actualChecksum: 'unexpected-checksum-4',
+      },
+    ]);
+  });
+
+  it('reports a missing ledger table without bootstrapping it', async () => {
+    const directory = await directoryOf({ '0001_first.sql': 'SELECT 1' });
+    const state: VerificationPoolState = {
+      error: Object.assign(new Error('relation "byok_schema_migration" does not exist'), {
+        code: '42P01',
+      }),
+      queries: [],
+    };
+
+    const error = await verifyMigrations(verificationPool(state), directory).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(MigrationStateMismatchError);
+    expect((error as MigrationStateMismatchError).issues).toEqual([
+      { kind: 'ledger_missing', table: 'byok_schema_migration' },
+    ]);
+    expect(state.queries).toEqual(['SELECT version, checksum FROM byok_schema_migration']);
   });
 });
 

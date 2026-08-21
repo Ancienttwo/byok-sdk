@@ -34,7 +34,9 @@ const packages = [
   'byok-sdk',
   '@byok-sdk/keys',
 ];
-const expectedPackageVersion = (packageName) => packageName === '@byok-sdk/keys' ? keysVersion : expectedVersion;
+const expectedPackageVersions = Object.fromEntries(
+  packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? keysVersion : expectedVersion]),
+);
 const nodeBin = process.execPath;
 const npmCliPath = path.join(path.dirname(nodeBin), 'node_modules', 'npm', 'bin', 'npm-cli.js');
 const npmInvocation = process.platform === 'win32'
@@ -62,6 +64,13 @@ const frozenPackages = new Map(
 if (frozenPackages.size !== packages.length || packages.some((packageName) => !frozenPackages.has(packageName))) {
   throw new Error('frozen release manifest package set mismatch');
 }
+for (const packageName of packages) {
+  if (frozenPackages.get(packageName).version !== expectedPackageVersions[packageName]) {
+    throw new Error(
+      `${packageName}: frozen artifact is ${frozenPackages.get(packageName).version}, expected ${expectedPackageVersions[packageName]}`,
+    );
+  }
+}
 
 function run(command, args, cwd = process.cwd()) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -73,7 +82,7 @@ function run(command, args, cwd = process.cwd()) {
 
 const metadata = [];
 for (const packageName of packages) {
-  const packageVersion = expectedPackageVersion(packageName);
+  const packageVersion = expectedPackageVersions[packageName];
   const value = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'view', `${packageName}@${packageVersion}`, 'name', 'version', 'maintainers', 'dist', 'dependencies', 'optionalDependencies', 'peerDependencies', '--json']));
   if (value.name !== packageName || value.version !== packageVersion) throw new Error(`${packageName}: registry identity/version mismatch`);
   const frozen = frozenPackages.get(packageName);
@@ -146,24 +155,54 @@ function assertSingleVersionSet(installDirectory, expectedVersions) {
   if (nestedCopies.length > 0) {
     throw new Error(`split @byok-sdk version set — nested copies installed:\n  ${nestedCopies.join('\n  ')}`);
   }
+  const seenNames = new Set();
   for (const manifestPath of found) {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    const expected = expectedVersions instanceof Map
-      ? expectedVersions.get(manifest.name)
-      : expectedVersions;
+    const expected = expectedVersions[manifest.name];
+    if (typeof expected !== 'string') {
+      throw new Error(`${manifestPath}: unexpected @byok-sdk package ${manifest.name} in the registry install`);
+    }
     if (manifest.version !== expected) {
-      throw new Error(`${manifestPath}: version ${manifest.version}, expected ${expected} — the @byok-sdk graph does not close to one version set`);
+      throw new Error(`${manifestPath}: version ${manifest.version}, expected ${expected} — the @byok-sdk graph does not close to its exact package versions`);
+    }
+    seenNames.add(manifest.name);
+  }
+  for (const packageName of Object.keys(expectedVersions)) {
+    if (!seenNames.has(packageName)) {
+      throw new Error(`${installDirectory}: missing expected registry package ${packageName}`);
     }
   }
-  const versionSummary = expectedVersions instanceof Map
-    ? [...expectedVersions.entries()].map(([name, version]) => `${name}@${version}`).join(', ')
-    : expectedVersions;
-  console.log(`[registry-readback] install tree closes to the expected @byok-sdk versions (${versionSummary}, ${found.length} package(s))`);
+  console.log(`[registry-readback] install tree closes to exact package versions (${found.length} package(s))`);
+}
+
+function assertNpmCoreClosure(installDirectory) {
+  const tree = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'ls', '@byok-sdk/core', '--all', '--json'], installDirectory));
+  const versions = new Set();
+  function collect(value) {
+    if (Array.isArray(value)) {
+      for (const entry of value) collect(entry);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    for (const [name, entry] of Object.entries(value)) {
+      if (name === '@byok-sdk/core' && entry && typeof entry === 'object' && typeof entry.version === 'string') {
+        versions.add(entry.version);
+      }
+      collect(entry);
+    }
+  }
+  collect(tree);
+  if (versions.size !== 1 || !versions.has(expectedVersion)) {
+    throw new Error(
+      `npm ls @byok-sdk/core --all --json resolved ${[...versions].sort().join(', ') || '(none)'}, expected only ${expectedVersion}`,
+    );
+  }
+  console.log(`[registry-readback] npm ls @byok-sdk/core --all --json resolves only ${expectedVersion}`);
 }
 
 const smokeDir = mkdtempSync(path.join(os.tmpdir(), 'byok-registry-install-'));
 try {
-  const dependencies = Object.fromEntries(packages.map((name) => [name, expectedPackageVersion(name)]));
+  const dependencies = Object.fromEntries(packages.map((name) => [name, expectedPackageVersions[name]]));
   writeFileSync(
     path.join(smokeDir, 'package.json'),
     `${JSON.stringify({ name: 'byok-registry-readback', private: true, type: 'module', dependencies }, null, 2)}\n`,
@@ -182,19 +221,8 @@ try {
       `console.log('[registry-readback] exact registry imports OK');\n`,
   );
   run(nodeBin, ['readback.mjs'], smokeDir);
-  const expectedVersions = new Map([
-    ['byok-sdk', expectedVersion],
-    ['@byok-sdk/core', expectedVersion],
-    ['@byok-sdk/protocol', expectedVersion],
-    ['@byok-sdk/server', expectedVersion],
-    ['@byok-sdk/cloud', expectedVersion],
-    ['@byok-sdk/client', expectedVersion],
-    ['@byok-sdk/cloud-dataplane', expectedVersion],
-    ['@byok-sdk/ui-runtime', expectedVersion],
-    ['@byok-sdk/testkit', expectedVersion],
-    ['@byok-sdk/keys', keysVersion],
-  ]);
-  assertSingleVersionSet(smokeDir, expectedVersions);
+  assertSingleVersionSet(smokeDir, expectedPackageVersions);
+  assertNpmCoreClosure(smokeDir);
   const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
   if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
     throw new Error(`registry client manifest must require pi ${piVersion}`);
@@ -214,4 +242,4 @@ try {
   rmSync(smokeDir, { recursive: true, force: true });
 }
 
-console.log(JSON.stringify({ releaseVersion: expectedVersion, sourceGitSha: manifest.sourceGitSha, packages: metadata }));
+console.log(JSON.stringify({ releaseVersion: expectedVersion, keysVersion, sourceGitSha: manifest.sourceGitSha, packages: metadata }));

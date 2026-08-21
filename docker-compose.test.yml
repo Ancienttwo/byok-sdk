@@ -53,6 +53,11 @@ services:
     # rather than a step someone has to remember.
     tmpfs:
       - /var/lib/postgresql/data
+    # The static Worker fixture uses this disposable application role. The
+    # database-scoped setting is the only schema authority shared by Node
+    # migration and Hyperdrive's fresh Worker connections.
+    volumes:
+      - ./packages/cloud-dataplane/src/__tests__/fixtures/schema-authority-bootstrap.sql:/docker-entrypoint-initdb.d/10-schema-authority-bootstrap.sql:ro
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
