@@ -42,6 +42,7 @@ import { migrate } from '../migrate';
 import { createByokPool } from '../pool';
 import {
   COMPOSE_COMMAND,
+  COMPOSE_POSTGRES_URL,
   OBJECT_STORE_ACCESS_KEY_ID,
   OBJECT_STORE_REGION,
   OBJECT_STORE_SECRET_ACCESS_KEY,
@@ -49,6 +50,9 @@ import {
   POSTGRES_URL_ENV,
   S3_ENDPOINT,
   S3_ENDPOINT_ENV,
+  WORKER_E2E_POSTGRES_URL,
+  WORKER_E2E_ROLE,
+  WORKER_E2E_SCHEMA,
   createObjectStorageScope,
   type ObjectStorageScope,
 } from './support/dataplane';
@@ -61,7 +65,7 @@ const SKIP_REASON =
   `${OPT_IN_ENV} is not set (or ${POSTGRES_URL_ENV} is unset), so the live Worker E2E is skipped. To run it:\n` +
   `  export ${OPT_IN_ENV}=1\n` +
   `  ${COMPOSE_COMMAND}\n` +
-  `  export ${POSTGRES_URL_ENV}=postgres://byok:byok@127.0.0.1:5433/byok_test\n` +
+  `  export ${POSTGRES_URL_ENV}=${COMPOSE_POSTGRES_URL}\n` +
   `  export ${S3_ENDPOINT_ENV}=http://127.0.0.1:9100`;
 
 const optIn = process.env[OPT_IN_ENV] === '1';
@@ -102,6 +106,23 @@ interface ProbeResult {
   readonly error?: string;
 }
 
+async function schemaTables(connectionString: string, schema: string): Promise<string[]> {
+  const pool = createByokPool({ connectionString, max: 1 });
+  try {
+    const tables = await pool.query<{ table_name: string }>(
+      `SELECT table_name
+         FROM information_schema.tables
+        WHERE table_schema = $1
+          AND table_type = 'BASE TABLE'
+        ORDER BY table_name`,
+      [schema],
+    );
+    return tables.rows.map((row) => row.table_name);
+  } finally {
+    await pool.end();
+  }
+}
+
 async function fetchProbe(
   base: string,
   route: string,
@@ -128,19 +149,39 @@ describe.skipIf(!RUN)('the runtime subpath on a real workerd', () => {
       // database the Worker never touched.
       const config = readFileSync(`${WORKER_SMOKE_DIR}/wrangler.jsonc`, 'utf8');
       expect(config, 'worker-smoke/wrangler.jsonc must point at the substrate Postgres').toContain(
-        POSTGRES_URL!,
+        WORKER_E2E_POSTGRES_URL,
+      );
+      expect(config, 'the application role, not a DSN option, selects the schema').not.toContain('options=');
+      expect(POSTGRES_URL, 'the Worker fixture only runs against the disposable compose database').toBe(
+        COMPOSE_POSTGRES_URL,
       );
 
-      // Node migrates; the Worker serves. Same runner, same SQL the rest of
-      // this package's suites apply — against the database's default schema,
-      // which per-tenant probes leave clean by construction.
-      const pool = createByokPool({ connectionString: POSTGRES_URL! });
+      // Node migrates; the Worker serves. Both authenticate as the same
+      // database-scoped application role, which owns the isolated schema.
+      const pool = createByokPool({ connectionString: WORKER_E2E_POSTGRES_URL });
       try {
+        await expect(
+          pool.query<{ currentSchema: string; currentUser: string }>(
+            'SELECT current_schema() AS "currentSchema", current_user AS "currentUser"',
+          ),
+        ).resolves.toMatchObject({
+          rows: [{ currentSchema: WORKER_E2E_SCHEMA, currentUser: WORKER_E2E_ROLE }],
+        });
         const result = await migrate(pool, DEPLOY_SQL);
         expect(result.applied.length + result.alreadyApplied.length).toBeGreaterThan(0);
       } finally {
         await pool.end();
       }
+
+      // Read metadata with the compose administrator, not a second migration
+      // path. Every SDK table (including the ledger) must be in the role-owned
+      // schema and none of those table names may exist in public.
+      const isolatedTables = await schemaTables(WORKER_E2E_POSTGRES_URL, WORKER_E2E_SCHEMA);
+      expect(isolatedTables).toEqual(
+        expect.arrayContaining(['attested_record', 'byok_schema_migration', 'outbox', 'pairing_code']),
+      );
+      const publicCounterparts = await schemaTables(POSTGRES_URL!, 'public');
+      expect(publicCounterparts.filter((table) => isolatedTables.includes(table))).toEqual([]);
 
       const port = await probeFreePort();
       base = `http://127.0.0.1:${port}`;
@@ -265,6 +306,18 @@ describe.skipIf(!RUN)('the runtime subpath on a real workerd', () => {
   it('pairs a device: mint then consume a single-use code over SQL', async () => {
     const result = await fetchProbe(base, '/probe/pairing');
     expect(result).toMatchObject({ ok: true, probe: { minted: true, redeemed: true } });
+  });
+
+  it('opens each fresh Hyperdrive session in the application role schema', async () => {
+    const reports = await Promise.all(
+      Array.from({ length: 3 }, () => fetchProbe(base, '/probe/schema')),
+    );
+    for (const report of reports) {
+      expect(report).toMatchObject({
+        ok: true,
+        probe: { currentSchema: WORKER_E2E_SCHEMA, currentUser: WORKER_E2E_ROLE },
+      });
+    }
   });
 
   it('delivers a mailbox message: enqueue, ack, then drained read', async () => {

@@ -13,9 +13,13 @@ const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 // packages/client. Every assertion below compares against these derived values.
 const exactVersion = /^\d+\.\d+\.\d+$/;
 const releaseVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
+const keysVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/keys/package.json'), 'utf8')).version;
 const piVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')).dependencies?.['@earendil-works/pi-coding-agent'];
 if (typeof releaseVersion !== 'string' || !exactVersion.test(releaseVersion)) {
   throw new Error('packages/core/package.json: version must be an exact x.y.z release train version');
+}
+if (typeof keysVersion !== 'string' || !exactVersion.test(keysVersion)) {
+  throw new Error('packages/keys/package.json: version must be an exact x.y.z version');
 }
 if (typeof piVersion !== 'string' || !exactVersion.test(piVersion)) {
   throw new Error('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
@@ -30,7 +34,11 @@ const packages = [
   { name: '@byok-sdk/ui-runtime', directory: 'packages/ui-runtime' },
   { name: '@byok-sdk/testkit', directory: 'packages/testkit' },
   { name: 'byok-sdk', directory: 'packages/sdk' },
+  { name: '@byok-sdk/keys', directory: 'packages/keys' },
 ];
+const expectedPackageVersions = Object.fromEntries(
+  packages.map(({ name }) => [name, name === '@byok-sdk/keys' ? keysVersion : releaseVersion]),
+);
 const nodeBin = process.execPath;
 const bunBin = process.platform === 'win32' ? 'bun.exe' : 'bun';
 const npmCliPath = path.join(path.dirname(nodeBin), 'node_modules', 'npm', 'bin', 'npm-cli.js');
@@ -54,20 +62,6 @@ function run(command, args, cwd = repoRoot) {
     throw new Error(`${command} ${args.join(' ')} failed (${result.status})\n${result.stdout}\n${result.stderr}`);
   }
   return result.stdout.trim();
-}
-
-// sourceGitSha must identify the exact artifact contents: refuse to pack a dirty worktree.
-const worktreeStatus = run('git', [
-  'status',
-  '--porcelain=v1',
-  '--untracked-files=all',
-]);
-
-if (worktreeStatus !== '') {
-  throw new Error(
-    'release pack requires a clean worktree so sourceGitSha identifies the exact artifact contents; commit or remove these changes before packing:\n' +
-      worktreeStatus,
-  );
 }
 
 function sha256(filePath) {
@@ -174,15 +168,15 @@ function assertTarballCarriesMigrations(tarballPath) {
 // edges point at the previous train — the split registry graph v0.4.1 shipped
 // with. The packed package.json is the only artifact that proves what npm will
 // actually resolve, so every internal edge is asserted at pack time.
-function assertTarballInternalEdges(tarballPath, packageName) {
+function assertTarballInternalEdges(tarballPath, packageName, expectedPackageVersion = expectedPackageVersions[packageName]) {
+  if (typeof expectedPackageVersion !== 'string') {
+    throw new Error(`${path.basename(tarballPath)}: no expected version is configured for ${packageName}`);
+  }
   const entry = readTarballEntry(tarballPath, 'package/package.json');
   if (entry === undefined) throw new Error(`${path.basename(tarballPath)}: carries no package/package.json`);
   const packed = JSON.parse(entry.toString('utf8'));
   if (packed.name !== packageName) {
     throw new Error(`${path.basename(tarballPath)}: packed name is ${packed.name}, expected ${packageName}`);
-  }
-  if (packed.version !== releaseVersion) {
-    throw new Error(`${path.basename(tarballPath)}: packed version is ${packed.version}, expected ${releaseVersion}`);
   }
   for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
     for (const [dependency, range] of Object.entries(packed[field] ?? {})) {
@@ -196,17 +190,20 @@ function assertTarballInternalEdges(tarballPath, packageName) {
       }
     }
   }
+  if (packed.version !== expectedPackageVersion) {
+    throw new Error(`${path.basename(tarballPath)}: packed version is ${packed.version}, expected ${expectedPackageVersion}`);
+  }
   console.log(`[release-pack] ${path.basename(tarballPath)} internal @byok-sdk edges all pin ${releaseVersion}`);
 }
 
 /**
- * Asserts an install tree's @byok-sdk graph closes to exactly one version set:
- * every installed @byok-sdk package (umbrella included) sits at the release
- * version, and no copy hides under a second node_modules — the nested-copy
- * fallback npm takes when published internal edges disagree. Follows
- * node_modules chains only, so the walk stays cheap on large trees.
+ * Asserts an install tree contains each expected release package at its exact
+ * manifest version and no copy hides under a second node_modules — the nested
+ * fallback npm takes when published internal edges disagree. Keys has an
+ * independent package version, so package identity, not a shared train number,
+ * is the authority here.
  */
-function assertSingleVersionSet(installDirectory, expected) {
+function assertSingleVersionSet(installDirectory, expectedVersions) {
   const root = path.join(installDirectory, 'node_modules');
   const found = [];
   const visit = (nodeModulesDirectory) => {
@@ -243,13 +240,108 @@ function assertSingleVersionSet(installDirectory, expected) {
   if (nestedCopies.length > 0) {
     throw new Error(`split @byok-sdk version set — nested copies installed:\n  ${nestedCopies.join('\n  ')}`);
   }
+  const seenNames = new Set();
   for (const manifestPath of found) {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const expected = expectedVersions[manifest.name];
+    if (typeof expected !== 'string') {
+      throw new Error(`${manifestPath}: unexpected @byok-sdk package ${manifest.name} in the release install`);
+    }
     if (manifest.version !== expected) {
-      throw new Error(`${manifestPath}: version ${manifest.version}, expected ${expected} — the @byok-sdk graph does not close to one version set`);
+      throw new Error(`${manifestPath}: version ${manifest.version}, expected ${expected} — the @byok-sdk graph does not close to its exact package versions`);
+    }
+    seenNames.add(manifest.name);
+  }
+  for (const packageName of Object.keys(expectedVersions)) {
+    if (!seenNames.has(packageName)) {
+      throw new Error(`${installDirectory}: missing expected release package ${packageName}`);
     }
   }
-  console.log(`[release-pack] install tree closes to a single @byok-sdk version set (${expected}, ${found.length} package(s))`);
+  console.log(`[release-pack] install tree closes to exact package versions (${found.length} package(s))`);
+}
+
+function assertNpmCoreClosure(installDirectory) {
+  const tree = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'ls', '@byok-sdk/core', '--all', '--json'], installDirectory));
+  const versions = new Set();
+  function collect(value) {
+    if (Array.isArray(value)) {
+      for (const entry of value) collect(entry);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    for (const [name, entry] of Object.entries(value)) {
+      if (name === '@byok-sdk/core' && entry && typeof entry === 'object' && typeof entry.version === 'string') {
+        versions.add(entry.version);
+      }
+      collect(entry);
+    }
+  }
+  collect(tree);
+  if (versions.size !== 1 || !versions.has(releaseVersion)) {
+    throw new Error(
+      `npm ls @byok-sdk/core --all --json resolved ${[...versions].sort().join(', ') || '(none)'}, expected only ${releaseVersion}`,
+    );
+  }
+  console.log(`[release-pack] npm ls @byok-sdk/core --all --json resolves only ${releaseVersion}`);
+}
+
+function runStaleKeysEdgeNegativeControl() {
+  const fixturePath = path.join(repoRoot, 'scripts', 'release', 'fixtures', 'keys-0.2.0-stale-core-edge.json');
+  const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const staleCoreVersion = fixture.dependencies?.['@byok-sdk/core'];
+  if (
+    fixture.schemaVersion !== 1 ||
+    fixture.package !== '@byok-sdk/keys' ||
+    fixture.version !== '0.2.0' ||
+    staleCoreVersion !== '0.4.2'
+  ) {
+    throw new Error(`${fixturePath}: stale registry edge fixture identity is invalid`);
+  }
+
+  const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'byok-stale-keys-edge-'));
+  try {
+    const tarballDirectory = path.join(fixtureRoot, 'tarballs');
+    mkdirSync(tarballDirectory);
+    writeFileSync(
+      path.join(fixtureRoot, 'package.json'),
+      `${JSON.stringify({ name: fixture.package, version: fixture.version, dependencies: fixture.dependencies }, null, 2)}\n`,
+    );
+    run(npmInvocation.command, [...npmInvocation.prefix, 'pack', '--pack-destination', tarballDirectory], fixtureRoot);
+    const tarballs = readdirSync(tarballDirectory).filter((entry) => entry.endsWith('.tgz'));
+    if (tarballs.length !== 1) throw new Error(`${fixturePath}: expected one synthetic stale keys tarball, found ${tarballs.length}`);
+    let rejection;
+    try {
+      assertTarballInternalEdges(path.join(tarballDirectory, tarballs[0]), fixture.package, fixture.version);
+    } catch (error) {
+      rejection = error instanceof Error ? error.message : String(error);
+    }
+    const expected = `dependencies.@byok-sdk/core is ${staleCoreVersion}, expected ${releaseVersion}`;
+    if (!rejection?.includes(expected)) {
+      throw new Error(`${fixturePath}: stale keys edge was not rejected as expected; got ${rejection ?? '(no rejection)'}`);
+    }
+    console.log(`[release-pack] negative control detected the registry ${fixture.package}@${fixture.version} -> @byok-sdk/core@${staleCoreVersion} stale edge`);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+if (process.argv.includes('--self-test-stale-keys-edge')) {
+  runStaleKeysEdgeNegativeControl();
+  process.exit(0);
+}
+
+// sourceGitSha must identify the exact artifact contents: refuse to pack a dirty worktree.
+const worktreeStatus = run('git', [
+  'status',
+  '--porcelain=v1',
+  '--untracked-files=all',
+]);
+
+if (worktreeStatus !== '') {
+  throw new Error(
+    'release pack requires a clean worktree so sourceGitSha identifies the exact artifact contents; commit or remove these changes before packing:\n' +
+      worktreeStatus,
+  );
 }
 
 try {
@@ -275,7 +367,7 @@ try {
     }
     tarballs.push({
       package: packageName,
-      version: releaseVersion,
+      version: expectedPackageVersions[packageName],
       file,
       sha256: sha256(tarballPath),
       sha512Integrity: sha512Integrity(tarballPath),
@@ -304,14 +396,16 @@ try {
         `import { createRequire } from 'node:module';\n` +
         `const require = createRequire(import.meta.url);\n` +
         `const expected = ['client','cloud','cloudDataplane','core','protocol','server','uiRuntime'];\n` +
+        `const expectedVersions = ${JSON.stringify(expectedPackageVersions)};\n` +
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime']) await import(name);\n` +
-        `for (const name of ['byok-sdk','@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/ui-runtime']) {\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/keys']) await import(name);\n` +
+        `for (const [name, version] of Object.entries(expectedVersions)) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
-        `  assert.equal(manifest.version, '${releaseVersion}', name);\n` +
+        `  assert.equal(manifest.version, version, name);\n` +
         `}\n` +
+        `assert.equal(require('@byok-sdk/keys/package.json').dependencies['@byok-sdk/core'], '${releaseVersion}');\n` +
         // The other half of the release-asset guarantee: the tarball check above
         // proves the bytes are IN the package, this proves the installed package
         // can point a runner at them without any source checkout in reach.
@@ -322,10 +416,8 @@ try {
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
-    if (existsSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys'))) {
-      throw new Error('isolated umbrella install unexpectedly contains @byok-sdk/keys');
-    }
-    assertSingleVersionSet(smokeDir, releaseVersion);
+    assertSingleVersionSet(smokeDir, expectedPackageVersions);
+    assertNpmCoreClosure(smokeDir);
     // The worker runtime subpath must stay deployable outside Node: the smoke
     // import above proves it loads, this proves it never grew node: builtins.
     const runtimePath = path.join(smokeDir, 'node_modules', '@byok-sdk', 'cloud-dataplane', 'dist', 'runtime.js');

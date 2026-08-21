@@ -58,6 +58,26 @@ function tenant(): TenantId {
   return `worker-smoke-${globalThis.crypto.randomUUID()}` as TenantId;
 }
 
+/**
+ * Reads the identity PostgreSQL assigned to one brand-new Worker pool. The
+ * caller closes that pool before responding, so repeated requests prove fresh
+ * Hyperdrive sessions rather than one checked-out connection.
+ */
+async function schemaProbe(connectionString: string) {
+  const pool = createByokPool({ connectionString });
+  try {
+    const result = await pool.query<{
+      currentSchema: string;
+      currentUser: string;
+    }>('SELECT current_schema() AS "currentSchema", current_user AS "currentUser"');
+    const row = result.rows[0];
+    if (row === undefined) throw new Error('schema probe returned no row');
+    return row;
+  } finally {
+    await pool.end();
+  }
+}
+
 async function pairingProbe(connectionString: string) {
   const pool = createByokPool({ connectionString });
   try {
@@ -307,10 +327,12 @@ export default {
                       (await request.json()) as { blobId: string; payload: string } &
                         Record<string, unknown>,
                     )
-                  : null;
+                  : route === '/probe/schema'
+                    ? await schemaProbe(env.BYOK_PG.connectionString)
+                    : null;
       if (probe === null) {
         return new Response(
-          'routes: GET /probe/pairing /probe/mailbox /probe/truth, POST /probe/blob /probe/blob/verify\n',
+          'routes: GET /probe/schema /probe/pairing /probe/mailbox /probe/truth, POST /probe/blob /probe/blob/verify\n',
           { status: 404 },
         );
       }

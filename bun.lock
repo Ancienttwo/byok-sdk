@@ -138,7 +138,7 @@
     },
     "packages/keys": {
       "name": "@byok-sdk/keys",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "bin": {
         "byok-pi-provider-launcher": "./dist/bin/pi-provider-launcher.js",
       },

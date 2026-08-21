@@ -152,10 +152,38 @@ describe('the compose substrate', () => {
     expect(compose.match(/healthcheck:/g)).toHaveLength(2);
   });
 
-  it('persists nothing, so every run starts from an empty database', () => {
-    // A named volume would make "fresh install + migrate-up" depend on whoever
-    // last ran `down -v`.
-    expect(compose).not.toContain('volumes:');
+  it('uses no named volume, so every run starts from an empty database', () => {
+    // The one bind mount is an immutable init fixture. A named volume would
+    // make "fresh install + migrate-up" depend on whoever last ran `down -v`.
+    expect(compose).not.toMatch(/^volumes:$/m);
+    expect(compose).toContain('schema-authority-bootstrap.sql');
+  });
+
+  it('bootstraps the Worker application role with one database-scoped schema authority', () => {
+    const bootstrap = repoFile('packages/cloud-dataplane/src/__tests__/fixtures/schema-authority-bootstrap.sql');
+    expect(bootstrap).toContain('CREATE ROLE byok_worker_e2e');
+    expect(bootstrap).toContain('CREATE SCHEMA byok_worker_e2e AUTHORIZATION byok_worker_e2e');
+    expect(bootstrap).toContain('ALTER ROLE byok_worker_e2e IN DATABASE byok_test');
+    expect(bootstrap).toContain('SET search_path TO byok_worker_e2e, public');
+  });
+
+  it('does not restore client-side schema authority in the dataplane substrate', () => {
+    const support = repoFile('packages/cloud-dataplane/src/__tests__/support/dataplane.ts');
+    const releaseSmoke = repoFile('scripts/release/pg-migrate-smoke.mjs');
+    expect(support).toContain('ALTER ROLE ${quoteIdentifier(role)} IN DATABASE ${quoteIdentifier(database)} SET search_path');
+    expect(support).not.toContain('options: `-c search_path=');
+    expect(support).not.toContain("query('SET search_path");
+    expect(support).not.toContain('query(`SET search_path');
+    expect(releaseSmoke).toContain('ALTER ROLE byok_empty IN DATABASE %I SET search_path');
+    expect(releaseSmoke).toContain('ALTER ROLE byok_upgrade_v042 IN DATABASE %I SET search_path');
+    expect(releaseSmoke).toContain("current_user: 'byok_empty', current_schema: 'byok_empty'");
+    expect(releaseSmoke).toContain("role-isolated migrations must leave public empty");
+    expect(releaseSmoke).toContain('DROP SCHEMA IF EXISTS byok_upgrade_v042 CASCADE');
+    expect(releaseSmoke).toContain('DROP ROLE byok_upgrade_v042');
+    expect(releaseSmoke).toContain('DROP SCHEMA IF EXISTS byok_empty CASCADE');
+    expect(releaseSmoke).toContain('DROP ROLE byok_empty');
+    expect(releaseSmoke).not.toContain("options: '-c search_path=");
+    expect(releaseSmoke).not.toContain("query('SET search_path");
   });
 });
 

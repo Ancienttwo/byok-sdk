@@ -79,6 +79,8 @@ const NODE_ONLY_EXPORTS = [
   'readMigrationFiles',
   'MigrationChecksumMismatchError',
   'MigrationFilenameError',
+  'verifyMigrations',
+  'MigrationStateMismatchError',
   'PostgresCloudCleanup',
   'createPostgresCloudMaintenance',
 ];
@@ -89,6 +91,13 @@ const runtimeKeys = Object.keys(runtime);
 const indexKeys = new Set(Object.keys(index));
 
 describe('the runtime subpath', () => {
+  it('exports migration verification only from the root entry', () => {
+    expect(indexNamespace.verifyMigrations).toBeTypeOf('function');
+    expect(indexNamespace.MigrationStateMismatchError).toBeDefined();
+    expect(runtimeNamespace.verifyMigrations).toBeUndefined();
+    expect(runtimeNamespace.MigrationStateMismatchError).toBeUndefined();
+  });
+
   it('exports the online surface', () => {
     expect(runtimeKeys.sort()).toEqual([...ONLINE_EXPORTS].sort());
     for (const name of ONLINE_EXPORTS) {

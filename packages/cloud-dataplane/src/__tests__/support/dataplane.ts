@@ -16,10 +16,11 @@
  * with `CI=true` inside the ordinary build-test job, where these services do
  * not exist, so keying off it would turn every unrelated CI run red.
  *
- * Isolation is per-test, by schema. Each composition gets a fresh
- * `byok_test_<n>` schema on the same server and a pool whose `search_path`
- * points at it, so unqualified DDL in `deploy/sql/` lands there and a test can
- * neither see nor clobber another's rows. That is what lets the concurrency
+ * Isolation is per-test, by database-scoped application role. Each composition
+ * gets a fresh `byok_test_<n>` schema and a role whose database setting makes
+ * that schema the default for every new connection. Unqualified DDL in
+ * `deploy/sql/` therefore lands there without a client-side connection option
+ * or a request-time session mutation. That is what lets the concurrency
  * assertions use REAL connections instead of a serialized stand-in — the whole
  * reason this substrate is a Postgres container and not an embedded engine.
  */
@@ -33,11 +34,15 @@ export const S3_ENDPOINT_ENV = 'BYOK_TEST_S3_ENDPOINT';
 export const REQUIRE_DATAPLANE_ENV = 'BYOK_REQUIRE_DATAPLANE';
 
 export const COMPOSE_COMMAND = 'docker compose -f docker-compose.test.yml up -d --wait';
+export const COMPOSE_POSTGRES_URL = 'postgres://byok:byok@127.0.0.1:5433/byok_test';
+export const WORKER_E2E_ROLE = 'byok_worker_e2e';
+export const WORKER_E2E_SCHEMA = 'byok_worker_e2e';
+export const WORKER_E2E_POSTGRES_URL = `postgres://${WORKER_E2E_ROLE}:${WORKER_E2E_ROLE}@127.0.0.1:5433/byok_test`;
 
 export const SKIP_REASON =
   `${POSTGRES_URL_ENV} and ${S3_ENDPOINT_ENV} are not both set, so the dataplane suites cannot run. Start the substrate with:\n` +
   `  ${COMPOSE_COMMAND}\n` +
-  `  export ${POSTGRES_URL_ENV}=postgres://byok:byok@127.0.0.1:5433/byok_test\n` +
+  `  export ${POSTGRES_URL_ENV}=${COMPOSE_POSTGRES_URL}\n` +
   `  export ${S3_ENDPOINT_ENV}=http://127.0.0.1:9100`;
 
 function configured(name: string): string | undefined {
@@ -95,6 +100,8 @@ export const SKIP_DATAPLANE = POSTGRES_URL === undefined || S3_ENDPOINT === unde
 export interface DataplaneScope {
   readonly pool: Pool;
   readonly schema: string;
+  /** Database-scoped role that owns `schema` and supplies its search path. */
+  readonly role: string;
   /**
    * `application_name` on every connection this pool opens, equal to the
    * schema. Server-wide catalogs (`pg_locks`, `pg_stat_activity`) are NOT
@@ -111,41 +118,68 @@ function requireUrl(): string {
   return POSTGRES_URL;
 }
 
+function applicationUrl(adminUrl: string, role: string): string {
+  const url = new URL(adminUrl);
+  if (url.searchParams.has('options')) {
+    throw new Error(`${POSTGRES_URL_ENV} must not carry a PostgreSQL options query parameter`);
+  }
+  url.username = role;
+  url.password = role;
+  return url.toString();
+}
+
+function databaseName(connectionString: string): string {
+  const name = decodeURIComponent(new URL(connectionString).pathname.slice(1));
+  if (name.length === 0) throw new Error(`${POSTGRES_URL_ENV} must name a database`);
+  return name;
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
 /**
- * Creates an empty schema and a pool that resolves unqualified names inside it.
- *
- * `search_path` is set through the connection's `options`, so it applies to
- * every client the pool opens — including the extra ones a concurrency
- * assertion forces open. Setting it with a `SET` statement after connecting
- * would apply to one session and silently miss the others.
+ * Creates an empty schema and a matching application role. PostgreSQL applies
+ * the role's database-scoped search path whenever this pool opens a session,
+ * including the extra clients a concurrency assertion forces open.
  */
 export async function createDataplaneScope(poolSize = 8): Promise<DataplaneScope> {
   const url = requireUrl();
-  const schema = `byok_test_${randomUUID().replaceAll('-', '')}`;
+  const nonce = randomUUID().replaceAll('-', '');
+  const schema = `byok_test_${nonce}`;
+  const role = `byok_test_role_${nonce}`;
+  const database = databaseName(url);
 
   const admin = createByokPool({ connectionString: url, max: 1 });
   try {
-    await admin.query(`CREATE SCHEMA "${schema}"`);
+    await admin.query(`CREATE ROLE ${quoteIdentifier(role)} LOGIN PASSWORD '${role}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`);
+    await admin.query(`CREATE SCHEMA ${quoteIdentifier(schema)} AUTHORIZATION ${quoteIdentifier(role)}`);
+    await admin.query(`ALTER ROLE ${quoteIdentifier(role)} IN DATABASE ${quoteIdentifier(database)} SET search_path TO ${quoteIdentifier(schema)}, public`);
+  } catch (error) {
+    await admin.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`);
+    await admin.query(`DROP ROLE IF EXISTS ${quoteIdentifier(role)}`);
+    throw error;
   } finally {
     await admin.end();
   }
 
   const pool = createByokPool({
-    connectionString: url,
+    connectionString: applicationUrl(url, role),
     max: poolSize,
-    options: `-c search_path=${schema}`,
     application_name: schema,
   });
 
   return {
     pool,
     schema,
+    role,
     applicationName: schema,
     async dispose() {
       await pool.end();
       const cleanup = createByokPool({ connectionString: url, max: 1 });
       try {
-        await cleanup.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+        await cleanup.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`);
+        await cleanup.query(`DROP ROLE IF EXISTS ${quoteIdentifier(role)}`);
       } finally {
         await cleanup.end();
       }

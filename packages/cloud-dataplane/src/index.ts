@@ -34,8 +34,20 @@ export * from './runtime';
 // SQL is authored in the repository's `deploy/sql/` and copied into this
 // package at build time, so an installed copy can migrate a database without a
 // source checkout in reach.
-export { MigrationChecksumMismatchError, MigrationFilenameError, migrate, readMigrationFiles } from './migrate';
-export type { MigrationFile, MigrationResult } from './migrate';
+export {
+  MigrationChecksumMismatchError,
+  MigrationFilenameError,
+  MigrationStateMismatchError,
+  migrate,
+  readMigrationFiles,
+  verifyMigrations,
+} from './migrate';
+export type {
+  MigrationFile,
+  MigrationResult,
+  MigrationStateIssue,
+  MigrationVerificationRow,
+} from './migrate';
 export { migrationsDir } from './migrations-dir';
 
 // Host-owned retention/dead-letter/R2 GC and reconciliation. This is separate

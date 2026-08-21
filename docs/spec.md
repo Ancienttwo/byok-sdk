@@ -24,7 +24,7 @@ Describe the product intent, users, workflows, acceptance scenarios, and constra
 
 ## Provider profile truth authority
 
-`@byok-sdk/keys` 0.2.0 exposes one asynchronous `ProviderProfileStore`
+`@byok-sdk/keys` 0.2.1 exposes one asynchronous `ProviderProfileStore`
 contract with three independently selected adapters: in-memory, SQLite, and a
 tenant-bound core `TruthStore`. Selecting the TruthStore adapter makes one
 versioned snapshot of the complete, bounded model-provider registry the
@@ -54,7 +54,10 @@ authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The
 next aligned dispatch candidate is `0.5.0`; publish still requires a separate
-release authorization and registry readback.
+release authorization and registry readback. The independent keys candidate is
+`0.2.1`; its packed and published `@byok-sdk/core` edge must be the exact
+current dispatch candidate, `0.5.0`, proven from an isolated standard npm
+install rather than the workspace graph.
 
 ## Runtime operation authority
 
@@ -130,8 +133,9 @@ artifact `@earendil-works/pi-coding-agent@0.84.1`; the SDK does not accept an
 unversioned global `pi` on `PATH` as an implicit substitute. All workspace
 dispatch packages and private conformance tests require Node.js `>=22.22.0`,
 matching pi's published engine floor. The independent
-`@byok-sdk/keys@0.2.0` package remains outside the dispatch graph, depends only
-on protocol-free `@byok-sdk/core`, and shares the Node.js `>=22.22.0` floor. A
+`@byok-sdk/keys@0.2.1` package remains outside the dispatch graph, depends only
+on protocol-free `@byok-sdk/core@0.5.0` in its packed and published manifest,
+and shares the Node.js `>=22.22.0` floor. A
 host that enables the BYOK lane installs its
 `byok-pi-provider-launcher` binary separately and gives the client only the
 launcher command plus non-secret profile/session paths; this executable

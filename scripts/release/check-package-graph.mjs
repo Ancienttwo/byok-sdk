@@ -198,7 +198,7 @@ for (const [directory, record] of Object.entries(workspaceRecords)) {
     );
   }
 }
-for (const directory of [...dispatchPackages.map(([dir]) => dir), 'packages/sdk', 'packages/testkit']) {
+for (const directory of [...dispatchPackages.map(([dir]) => dir), 'packages/sdk', 'packages/testkit', keys[0]]) {
   if (!workspaceRecords[directory]) {
     errors.push(`bun.lock: missing workspace record for ${directory} — bun pm pack cannot resolve its workspace edges without it`);
   }

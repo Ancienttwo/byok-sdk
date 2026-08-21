@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-21T02:32:57+0800 -->
+<!-- updated_at: 2026-08-21T11:41:33+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Idle
-> **Updated At**: 2026-08-21T02:32:57+0800
-> **Source Branch**: main
-> **Source Commit**: 82ca334
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-21T11:41:33+0800
+> **Source Branch**: codex/hosted-integration-authority-closure
+> **Source Commit**: 1a9c661
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: manual
+> **Reason**: ensure-task-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Idle
-- Active Plan: (none)
-- Plan Status: (none)
-- Next Task: (none)
-- Clear Note: (none)
+- Status: ManualClearedWithActiveWork
+- Active Plan: plans/plan-20260821-0425-hosted-integration-authority-closure.md
+- Plan Status: Executing
+- Next Task: Capture and activate this plan in an isolated contract worktree; fill a self-sufficient contract with root-cause evidence, disjoint writer ownership, allowed paths and machine-verifiable exit criteria.
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,7 +31,10 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- (none)
+- .: plans/plan-20260821-0425-hosted-integration-authority-closure.md
+- .: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure
+- /Users/kito/Projects/byok-sdk: stale active-plan marker -> plans/plan-20260821-0425-hosted-integration-authority-closure.md
+- /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
 ## Active Sprint
 
 - Sprint: (none)
@@ -44,21 +47,40 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), exit_code=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 8 changed/untracked path(s)
+- Summary: 27 changed/untracked path(s)
 
 ```
- M tasks/current.md
+ M bun.lock
+ M docker-compose.test.yml
+ M docs/researches/2026-08-12-salesko-integration-handoff.md
+ M docs/spec.md
+ M packages/cloud-dataplane/README.md
+ M packages/cloud-dataplane/src/__tests__/constraints.test.ts
+ M packages/cloud-dataplane/src/__tests__/migrate-runner.test.ts
+ M packages/cloud-dataplane/src/__tests__/runtime-entry.test.ts
+ M packages/cloud-dataplane/src/__tests__/support/dataplane.ts
+ M packages/cloud-dataplane/src/__tests__/worker-e2e.test.ts
+ M packages/cloud-dataplane/src/index.ts
+ M packages/cloud-dataplane/src/migrate.ts
+ M packages/cloud-dataplane/worker-smoke/src.ts
+ M packages/cloud-dataplane/worker-smoke/wrangler.jsonc
+ M packages/keys/package.json
+ M scripts/release/check-package-graph.mjs
+ M scripts/release/pack-and-smoke.mjs
+ M scripts/release/pg-migrate-smoke.mjs
+ M scripts/release/registry-readback.mjs
  M tasks/todos.md
-?? docs/architecture/requests/archive/2026/20260821-022751-root.md
-?? plans/archive/plan-20260821-0228-todo-ledger-prune-3.md
-?? tasks/archive/contract-20260821-0232-todo-ledger-prune-3.md
-?? tasks/archive/notes-20260821-0232-todo-ledger-prune-3.md
-?? tasks/archive/review-20260821-0232-todo-ledger-prune-3.md
-?? tasks/archive/todo-20260821-0232-todo-ledger-prune-3.md
+?? packages/cloud-dataplane/src/__tests__/fixtures/
+?? plans/plan-20260821-0425-hosted-integration-authority-closure.md
+?? scripts/release/fixtures/keys-0.2.0-stale-core-edge.json
+?? tasks/contracts/20260821-0425-hosted-integration-authority-closure.contract.md
+?? tasks/notes/20260821-0425-hosted-integration-authority-closure.notes.md
+?? tasks/reviews/20260821-0425-hosted-integration-authority-closure.review.md
+?? tests/unit/keys-release-graph.test.ts
 ```
 
 ## Source Artifacts
