@@ -1,4 +1,4 @@
-# U3 SDK-owned tenant readiness primitives contract
+# Task Contract: tenant-readiness-primitives
 
 > **Status**: Partial
 > **Plan**: plans/plan-20260821-1715-tenant-readiness-primitives.md
