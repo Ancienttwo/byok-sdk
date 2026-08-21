@@ -134,6 +134,27 @@ TaskRunner projects the typed retry disposition onto the existing
 event variants do not change. Interruption/close evidence is a separate
 teardown lifecycle and cannot rewrite an already established semantic result.
 
+### Terminal inference usage observation
+
+The three terminal messages may carry one bounded `TerminalInferenceUsage`
+observation. It is a device/runtime telemetry projection, never storage usage,
+billing, quota, entitlement, retry policy, or task-state authority. The client
+uses the adapter that actually started the task for `runtime`, copies only the
+last normalized terminal usage observation rather than summing events, and
+omits values the adapter did not expose. Requested `dispatchSelection`
+provider/model values are not telemetry and are never echoed as a substitute.
+
+`clientVersion` comes only from U4a's process-immutable
+`localAgentRelease.version`; no runtime/package/lockfile/path/network fallback
+exists. A direct legacy/internal runner without that composed identity omits
+the optional usage block. Token metrics are direct Codex/Claude terminal
+observations when present; Pi currently exposes no native usage observation and
+therefore omits the block rather than fabricating one from device facts.
+The protocol enforces safe non-negative bounded numbers and a canonical UTC
+device timestamp. Cloud records first-terminal-wins as usual and projects the
+same typed object from the winning receipt without parsing raw receipt bytes
+at callers or coupling it to `TenantStorageUsage`.
+
 ### Quiescent runtime disposal
 
 `Session.close()` is a bounded ownership receipt, not a best-effort signal. It

@@ -53,6 +53,12 @@ export {
   TaskApprovalResolvedPayloadSchema,
   RESULT_DOCUMENT_MAX_BYTES,
   checkResultDocument,
+  TerminalInferenceUsageSchema,
+  TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
+  TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
+  TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH,
+  TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH,
+  TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH,
 } from './messages';
 export type {
   ResultDocumentCheck,
@@ -80,6 +86,7 @@ export type {
   TaskFailPayload,
   TaskCancelledPayload,
   TaskApprovalResolvedPayload,
+  TerminalInferenceUsage,
 } from './messages';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
