@@ -18,6 +18,32 @@ export function toWsUrl(serverUrl: string): string {
 }
 
 /**
+ * Which route a transport diagnostic is about, in the only two fields that
+ * are safe to keep: the host (with port) and the path.
+ *
+ * Both are read off a parsed `URL` in {@link describeEndpoint}, so the
+ * redaction is STRUCTURAL rather than a scrub pass — userinfo, query and
+ * fragment are the only places a bearer token or a presigned signature ever
+ * travels in this SDK, and none of the three survive the projection onto
+ * these two fields. There is exactly one construction site, so a future
+ * diagnostic cannot accidentally reintroduce a credential-bearing component
+ * by formatting a raw URL of its own.
+ */
+export interface TransportEndpoint {
+  readonly transport: 'ws' | 'long-poll';
+  /** `URL.host` — hostname plus port when non-default. Never userinfo. */
+  readonly host: string;
+  /** `URL.pathname` — no query, no fragment. */
+  readonly path: string;
+}
+
+/** The single construction site for {@link TransportEndpoint} — see that interface's own doc comment for why it is the only one. */
+export function describeEndpoint(transport: TransportEndpoint['transport'], url: string | URL): TransportEndpoint {
+  const parsed = typeof url === 'string' ? new URL(url) : url;
+  return { transport, host: parsed.host, path: parsed.pathname };
+}
+
+/**
  * M5: thrown by {@link assertServerUrlAllowed} — see that function's own doc
  * comment for the full allow/deny rule this names. Deliberately ONE error
  * type for every way the gate can refuse a `serverUrl` (plaintext-to-remote,

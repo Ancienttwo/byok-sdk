@@ -30,7 +30,7 @@ import {
   isCoreError,
   type StorageErrorCode,
 } from '@byok-sdk/core';
-import type { BlobContentProxy } from '../stores/ports';
+import type { BlobContentProxy, BlobReadErrorCode } from '../stores/ports';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
 
 /** The three bearer-authed routes: everything they touch goes through the tenant facade. */
@@ -179,11 +179,26 @@ export function blobDownloadContentHandler(deps: BlobContentRouteDeps) {
       return c.json({ error: 'invalid or expired signature' }, 401);
     }
 
-    const content = await deps.contentProxy.readContent(blobId);
-    if (content === undefined) return c.json({ error: 'blob not found' }, 404);
-    return c.body(new Uint8Array(content.data), 200, { 'content-type': content.contentType });
+    const result = await deps.contentProxy.readContent(blobId);
+    if (result === undefined) return c.json({ error: 'blob not found' }, 404);
+    if (!result.ok) return c.json({ error: result.code }, BLOB_READ_ERROR_HTTP_STATUS[result.code]);
+    return c.body(new Uint8Array(result.content.data), 200, { 'content-type': result.content.contentType });
   };
 }
+
+/**
+ * Both read failures are 502: from the wire's point of view an upstream that
+ * never answered and one that died mid-response are the same class of fault —
+ * this gateway could not deliver bytes it does not own. The distinction lives
+ * in the response body's `error` code (a truncated transfer is not a retry-safe
+ * no-op), not in the status, so a client's status-based handling stays a
+ * two-way split — 404 missing / 502 upstream — while an operator reading the
+ * body still learns which half failed.
+ */
+const BLOB_READ_ERROR_HTTP_STATUS: Record<BlobReadErrorCode, 502> = {
+  blob_upstream_unavailable: 502,
+  blob_upstream_stream_interrupted: 502,
+};
 
 function idempotencyKey(c: Context): string | undefined {
   const value = c.req.header('Idempotency-Key');

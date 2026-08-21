@@ -30,9 +30,9 @@ import { ByokCoreError, type Clock, type ContentHash, type ObjectStore, type Sto
 import { byokBlobContentPath } from '@byok-sdk/protocol';
 import type { CloudCrypto } from '../../crypto/port';
 import type {
-  BlobContent,
   BlobContentProxy,
   BlobObservation,
+  BlobReadResult,
   BlobWriteResult,
   CloudBlobStore,
 } from '../ports';
@@ -209,10 +209,16 @@ export class InMemoryBlobContentProxy implements BlobContentProxy {
     return { ok: true };
   }
 
-  async readContent(blobId: string): Promise<BlobContent | undefined> {
+  /**
+   * Never returns `{ok:false}`: this composition holds the bytes in the same
+   * process, so there is no upstream to be unreachable and no stream to be
+   * interrupted. Both `BlobReadErrorCode`s are structurally unreachable here
+   * — a proxy that fetches from object storage is where they become live.
+   */
+  async readContent(blobId: string): Promise<BlobReadResult | undefined> {
     const record = this.#registry.blobs.get(blobId);
     if (record === undefined || !record.uploaded || record.data === undefined) return undefined;
-    return { data: record.data, contentType: record.contentType };
+    return { ok: true, content: { data: record.data, contentType: record.contentType } };
   }
 }
 
