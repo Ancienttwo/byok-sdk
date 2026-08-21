@@ -48,7 +48,7 @@ describe('shutdown-complete fires even when TaskRunner.shutdownActiveTasks throw
     const workspaceRoot = await tmpDir('byok-shutdown-hardening-ws-');
     const storeDir = await tmpDir('byok-shutdown-hardening-store-');
     const built = createDaemonWithAdapters(
-      { productName: 'Acme', productId: 'acme-shutdown-hardening', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-shutdown-hardening', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
     );
     daemon = built;

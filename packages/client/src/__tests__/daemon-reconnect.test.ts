@@ -27,7 +27,7 @@ describe('daemon reconnect after socket drop', () => {
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
       { backoff: { baseMs: 20, maxMs: 100, factor: 2 } },
     );
@@ -57,7 +57,7 @@ describe('daemon reconnect after socket drop', () => {
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
       { backoff: { baseMs: 20, maxMs: 100, factor: 2 }, liveness: { timeoutMs: 150, checkIntervalMs: 30 } },
     );
@@ -94,7 +94,7 @@ describe('redelivery cursor (protocol §9)', () => {
     const storeDir = await tmpDir('byok-client-store-'); // shared across both daemon instances below
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('code');
@@ -112,7 +112,7 @@ describe('redelivery cursor (protocol §9)', () => {
     // persists), and it should know the cursor without ever having been told
     // directly: it's read back from disk.
     const daemon2 = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     daemon = daemon2;
@@ -129,7 +129,7 @@ describe('redelivery cursor (protocol §9)', () => {
     const storeDir = await tmpDir('byok-client-store-');
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('code');

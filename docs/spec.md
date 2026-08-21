@@ -53,8 +53,34 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The
-next aligned dispatch candidate is `0.5.0`; publish still requires a separate
+next aligned dispatch candidate is `0.6.0`; publish still requires a separate
 release authorization and registry readback.
+
+## Local Agent application release authority
+
+The Local Agent application release is an observability identity, separate
+from the BYOK wire protocol version, advertised capabilities, and the detected
+Pi/Claude/Codex executable versions. An SDK embedder must pass one canonical
+strict-SemVer `LocalAgentReleaseIdentity` when it constructs a daemon. The
+daemon validates and copies it once, keeps it immutable for that process, and
+projects the same value through `Daemon.status()` and the authenticated local
+control status. It never derives the value from a runtime version, package
+path, lockfile, owner-record schema, or network lookup.
+
+The official `byok-agent` CLI receives its identity from the client package
+manifest at build time. CLI JSON config cannot author or override that field.
+`byok-agent --version` is a zero-state readback: it needs no config, user store,
+runtime probe, network, or daemon. `byok-agent status` reports both the invoking
+CLI release and, when reachable, the running daemon release, so a mismatch is
+observable without becoming a gate. An older local-control peer that predates
+the field is rendered as `unknown`; the CLI does not infer a replacement.
+
+Whether a release can run is decided by wire-protocol compatibility and the
+capabilities/runtime/toolsets required by the concrete action. Being behind a
+host's Latest release is only an operator-facing update signal; it must not
+block start, pair, connect, or work the daemon is otherwise capable of doing.
+This contract does not add Latest fetching, a minimum-supported-version policy,
+wire/presence projection, or self-update behavior.
 
 ## Runtime operation authority
 

@@ -20,6 +20,7 @@ import { runSupportBundleCommand } from './commands/support-bundle';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runUnpairCommand } from './commands/unpair';
 import { runWorkspacesCommand } from './commands/workspaces';
+import { runVersionCommand } from './version';
 
 /**
  * `byok-agent`: a PLAIN structured CLI (subcommands + line-oriented stdout +
@@ -108,6 +109,7 @@ function usage(): never {
   console.error(
     [
       'Usage:',
+      '  byok-agent --version',
       '  byok-agent pair <code> --server <url> [--config <path>]',
       '  byok-agent start [--config <path>]                        (or BYOK_CONFIG env var)',
       '  byok-agent status [--config <path>]',
@@ -147,6 +149,11 @@ function abortOnSignal(): AbortController {
 
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
+
+  if (command === '--version') {
+    runVersionCommand();
+    return;
+  }
 
   if (command === 'pair') {
     const [code] = positionalArgs(rest, ['--server', '--config']);

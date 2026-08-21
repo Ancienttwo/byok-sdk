@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
 import { GitWorkspaceManager } from '../daemon/git-workspace';
+import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release';
 
 /**
  * Shared CLI plumbing: config-file loading and a tiny hand-rolled arg
@@ -35,8 +36,10 @@ export class ConfigError extends Error {
  * `runtimeAllowlist` from the same one product install, so there is only
  * ever one config shape to reason about.
  */
-export function loadConfig(configPath: string | undefined, overrides: Partial<DaemonConfig> = {}): DaemonConfig {
-  let base: Partial<DaemonConfig> = {};
+type CliConfigInput = Omit<DaemonConfig, 'localAgentRelease'>;
+
+export function loadConfig(configPath: string | undefined, overrides: Partial<CliConfigInput> = {}): DaemonConfig {
+  let base: Partial<CliConfigInput> & { localAgentRelease?: unknown } = {};
   if (configPath) {
     let raw: string;
     try {
@@ -45,12 +48,18 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Da
       throw new ConfigError(`could not read config at "${configPath}": ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
-      base = JSON.parse(raw) as Partial<DaemonConfig>;
+      base = JSON.parse(raw) as Partial<CliConfigInput> & { localAgentRelease?: unknown };
     } catch (err) {
       throw new ConfigError(`config at "${configPath}" is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  const merged: Partial<DaemonConfig> = { ...base, ...overrides };
+  if (
+    Object.prototype.hasOwnProperty.call(base, 'localAgentRelease') ||
+    Object.prototype.hasOwnProperty.call(overrides, 'localAgentRelease')
+  ) {
+    throw new ConfigError('config field "localAgentRelease" is distribution-owned and must not be supplied');
+  }
+  const merged: Partial<CliConfigInput> = { ...base, ...overrides };
   if (merged.gitWorkspace !== undefined) {
     try {
       GitWorkspaceManager.validateConfig(merged.gitWorkspace);
@@ -63,7 +72,7 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Da
       throw new ConfigError(`config is missing required field "${field}"`);
     }
   }
-  return merged as DaemonConfig;
+  return { ...merged, localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE } as DaemonConfig;
 }
 
 /**

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 / @byok-sdk/keys 0.2.1 — Unreleased
+
+Local Agent release identity and packed release-hygiene candidate. This section
+describes local candidate behavior only; publish, registry readback, and deploy
+remain separately authorized gates.
+
+- Added the process-immutable Local Agent application release identity and the
+  packed CLI manifest parity gate. Runtime, protocol, capability, and Latest
+  authorities remain separate.
+- Advanced the aligned dispatch train to 0.6.0 and independently advanced
+  `@byok-sdk/keys` to 0.2.1. The packed keys manifest now declares
+  `@byok-sdk/core@0.6.0`, repairing the published 0.2.0 metadata skew that
+  declared core 0.4.2; the isolated pack smoke installs the artifact without a
+  workspace override.
+- Migration: consumers currently using `@byok-sdk/keys@0.2.0` should move to
+  `@byok-sdk/keys@0.2.1` together with the aligned core release. Do not add a
+  dependency override or resolution; the packed manifest is the dependency
+  authority. The exact registry version, tarball, and dist-tag readback is
+  pending an explicitly authorized publish.
+- All public package manifests retain the Node.js `>=22.22.0` engine floor.
+
 ## 0.4.2 — 2026-08-16
 
 Portable-dataplane release: the Worker-loadable `runtime` subpath, the dual

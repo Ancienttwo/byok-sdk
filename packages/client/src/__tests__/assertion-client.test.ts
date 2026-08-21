@@ -174,7 +174,7 @@ describe('requestDeviceAssertion', () => {
     const workspaceRoot = await tmpDir(`byok-assert-client-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-assert-client-${productId}-store-`);
     const config: DaemonConfig = {
-      productName: 'Acme',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId,
       serverUrl: server.url,
       workspaceRoot,

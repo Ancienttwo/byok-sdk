@@ -1,4 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
+
+const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
+if (typeof manifest.version !== 'string') throw new Error('packages/client/package.json must declare a string version');
 
 // @byok-sdk/client is the only package whose suite drives real operating-system
 // resources: it spawns the real `byok-agent` CLI as a child process, binds real
@@ -18,6 +22,9 @@ import { defineConfig } from 'vitest/config';
 // only changes how long a genuinely hung test waits before failing; no assertion
 // or test logic is affected, and inline per-test timeouts still take precedence.
 export default defineConfig({
+  define: {
+    __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
+  },
   test: {
     testTimeout: 10_000,
   },

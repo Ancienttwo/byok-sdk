@@ -55,7 +55,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     const storeDir = await tmpDir('byok-conn-hello-store-');
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
         workspaceRoot,
@@ -163,7 +163,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [pi],
     );
     await daemon.pair('pairing-code');
@@ -202,7 +202,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-custom-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-custom-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [opaquePi],
     );
     await daemon.pair('pairing-code');
@@ -217,7 +217,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-empty-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-empty-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [],
     );
     await daemon.pair('pairing-code');

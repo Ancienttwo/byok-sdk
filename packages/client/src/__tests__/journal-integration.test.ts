@@ -141,7 +141,7 @@ describe('hosted journal integration (L-002)', () => {
     const storeDir = await tmpDir('byok-journal-int-store-');
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
         serverUrl: server.url,
         workspaceRoot,
@@ -186,7 +186,7 @@ describe('hosted journal integration (L-002)', () => {
 
     it('rejects an unknown mode and an empty tenant at construction, before any daemon exists', async () => {
       const base: DaemonConfig = {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
         serverUrl: server.url,
         workspaceRoot: await tmpDir('byok-journal-cfg-workspace-'),
@@ -300,7 +300,7 @@ describe('hosted journal integration (L-002)', () => {
         const adapter = new StubRuntimeAdapter('pi');
         daemon = createDaemonWithAdapters(
           {
-            productName: 'Test Product',
+            localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
             productId: 'test-product-journal',
             serverUrl: server.url,
             workspaceRoot: await tmpDir('byok-journal-recover-workspace-'),

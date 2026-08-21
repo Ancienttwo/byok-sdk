@@ -18,6 +18,7 @@ function baseConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     workspaceRoot: '/ws',
     storeDir: '/tmp/acme-store',
     ...overrides,
+    localAgentRelease: overrides.localAgentRelease ?? { version: '0.0.0-test' },
   };
 }
 

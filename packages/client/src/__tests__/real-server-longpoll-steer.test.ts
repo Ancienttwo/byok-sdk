@@ -56,7 +56,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
     expect(adapter.descriptor.capabilities.steer).toBe(true);
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         backoff: { baseMs: 20, maxMs: 50, factor: 2 },
@@ -123,7 +123,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
     });
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         backoff: { baseMs: 20, maxMs: 50, factor: 2 },
