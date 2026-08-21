@@ -105,6 +105,13 @@ dependency and the workspace release floor.
 | `TruthStoreProviderProfileStore` | Node 22.22+ plus an injected tenant-bound `TruthStore` | stale CAS or malformed/hash-mismatched authority fails closed; never falls back to SQLite |
 | `byok-pi-provider-launcher` | Node 22.5+ (`node:sqlite`) and macOS/Windows for authenticated profiles | fails closed; `auth_mode: none` does not require a credential backend |
 
+On macOS, an isolated host may select one explicit credential authority with
+`MacOsKeychainSecretStore({ keychainPath: '/absolute/path/to/keychain-db' })`
+or the launcher's `--macos-keychain-path` flag. The path must be absolute and
+single-line. Once selected, availability and every credential operation use
+that keychain only; the store never also searches the user default keychain.
+The launcher rejects this macOS-only flag on other platforms.
+
 Only on-disk profile persistence needs the newer runtime. `node:sqlite` shipped
 in Node 22.5 and spent part of the 22.x line behind `--experimental-sqlite`, so
 a version-number comparison would be wrong in both directions; call

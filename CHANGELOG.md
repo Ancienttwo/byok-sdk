@@ -1,10 +1,22 @@
 # Changelog
 
-## 0.6.0 / @byok-sdk/keys 0.2.1 — Unreleased
+## 0.6.1 / @byok-sdk/keys 0.2.2 — Unreleased
 
-Local Agent release identity and packed release-hygiene candidate. This section
-describes local candidate behavior only; publish, registry readback, and deploy
-remain separately authorized gates.
+Explicit macOS credential-authority selection for isolated Local Agent hosts.
+
+- Added optional absolute `macosKeychainPath` configuration to the macOS
+  secret store and Pi BYOK launcher. When selected, availability and every
+  credential CRUD operation address that one keychain file; there is no
+  default-keychain fallback or dual read.
+- Projected the same path through `PiByokLauncherConfig` as the reserved
+  `--macos-keychain-path` launcher flag. Invalid, relative, multiline, and
+  non-macOS uses fail closed.
+- Kept credential bytes out of argv and kept the Pi child environment closed;
+  isolated hosts no longer need to widen the launcher or Pi child `HOME`.
+
+## 0.6.0 / @byok-sdk/keys 0.2.1 — 2026-08-21
+
+Local Agent release identity and packed release hygiene.
 
 - Added the process-immutable Local Agent application release identity and the
   packed CLI manifest parity gate. Runtime, protocol, capability, and Latest
@@ -17,8 +29,7 @@ remain separately authorized gates.
 - Migration: consumers currently using `@byok-sdk/keys@0.2.0` should move to
   `@byok-sdk/keys@0.2.1` together with the aligned core release. Do not add a
   dependency override or resolution; the packed manifest is the dependency
-  authority. The exact registry version, tarball, and dist-tag readback is
-  pending an explicitly authorized publish.
+  authority.
 - All public package manifests retain the Node.js `>=22.22.0` engine floor.
 
 ## 0.4.2 — 2026-08-16

@@ -1,0 +1,156 @@
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-macos-keychain-path
+
+ ❯ packages/keys/src/macos-keychain.test.ts (46 tests | 8 failed) 85ms
+     × probes the explicitly selected keychain when configured 15ms
+     × rejects an invalid explicit keychain path (empty) 0ms
+     × rejects an invalid explicit keychain path (relative) 0ms
+     × rejects an invalid explicit keychain path (multiline) 0ms
+     × appends the explicitly selected keychain to the read argv 4ms
+     × appends a safely quoted explicit keychain path in interactive mode 5ms
+     × appends the explicitly selected keychain to the delete argv 0ms
+     × carries every option into the scoped store 0ms
+ ❯ packages/keys/src/pi-provider-launcher-core.test.ts (5 tests | 1 failed) 12ms
+     × parses only the closed launcher contract and requires absolute custody paths 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/keys/src/macos-keychain.test.ts > MacOsKeychainSecretStore.available > probes the explicitly selected keychain when configured
+AssertionError: expected { …(3) } to deeply equal { …(3) }
+
+- Expected
++ Received
+
+  {
+    "args": [
+-     "show-keychain-info",
+-     "/private/tmp/byok-login.keychain-db",
++     "default-keychain",
++     "-d",
++     "user",
+    ],
+    "executable": "/usr/bin/security",
+    "stdin": undefined,
+  }
+
+ ❯ packages/keys/src/macos-keychain.test.ts:88:35
+     86|       store({ keychainPath: KEYCHAIN_PATH }).available(),
+     87|     ).resolves.toBe(true);
+     88|     expect(runner.invocations[0]).toEqual({
+       |                                   ^
+     89|       executable: '/usr/bin/security',
+     90|       args: ['show-keychain-info', KEYCHAIN_PATH],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  packages/keys/src/macos-keychain.test.ts > MacOsKeychainSecretStore.available > rejects an invalid explicit keychain path (empty)
+ FAIL  packages/keys/src/macos-keychain.test.ts > MacOsKeychainSecretStore.available > rejects an invalid explicit keychain path (relative)
+ FAIL  packages/keys/src/macos-keychain.test.ts > MacOsKeychainSecretStore.available > rejects an invalid explicit keychain path (multiline)
+AssertionError: expected function to throw an error, but it didn't
+ ❯ packages/keys/src/macos-keychain.test.ts:100:43
+     98|     ['multiline', `${KEYCHAIN_PATH}\nforged-log`],
+     99|   ])('rejects an invalid explicit keychain path (%s)', (_label, keycha…
+    100|     expect(() => store({ keychainPath })).toThrowError(
+       |                                           ^
+    101|       expect.objectContaining({ code: 'KEYCHAIN_ARGUMENT_INVALID' }),
+    102|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  packages/keys/src/macos-keychain.test.ts > MacOsKeychainSecretStore.get > appends the explicitly selected keychain to the read argv
+AssertionError: expected [ 'find-generic-password', '-a', …(4) ] to deeply equal [ 'find-generic-password', '-a', …(5) ]
+
+- Expected
++ Received
+
+@@ -3,7 +3,6 @@
+    "-a",
+    "local-device",
+    "-s",
+    "com.byok.keys.model-openai-api-key",
+    "-w",
+-   "/private/tmp/byok-login.keychain-db",
+  ]
+
+ ❯ packages/keys/src/macos-keychain.test.ts:146:41
+    144|       store({ keychainPath: KEYCHAIN_PATH }).get('model-openai-api-key…
+    145|     ).resolves.toBe(CANARY);
+    146|     expect(runner.invocations[0]?.args).toEqual([
+       |                                         ^
+    147|       'find-generic-password',
+    148|       '-a',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  packages/keys/src/macos-keychain.test.ts > MacOsKeychainSecretStore.set > appends a safely quoted explicit keychain path in interactive mode
+AssertionError: expected 'add-generic-password -U -a "local-dev…' to be 'add-generic-password -U -a "local-dev…' // Object.is equality
+
+- Expected
++ Received
+
+- add-generic-password -U -a "local-device" -s "com.byok.keys.model-openai-api-key" -w "byok-b64-v1:c2stY2FuYXJ5LW1hY29zLTAwMDE=" "/private/tmp/byok-\"login\"\\keychain-db"
++ add-generic-password -U -a "local-device" -s "com.byok.keys.model-openai-api-key" -w "byok-b64-v1:c2stY2FuYXJ5LW1hY29zLTAwMDE="
+
+
+ ❯ packages/keys/src/macos-keychain.test.ts:263:42
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  packages/keys/src/macos-keychain.test.ts > MacOsKeychainSecretStore.delete > appends the explicitly selected keychain to the delete argv
+AssertionError: expected [ 'delete-generic-password', …(4) ] to deeply equal [ 'delete-generic-password', …(5) ]
+
+- Expected
++ Received
+
+@@ -2,7 +2,6 @@
+    "delete-generic-password",
+    "-a",
+    "local-device",
+    "-s",
+    "com.byok.keys.model-openai-api-key",
+-   "/private/tmp/byok-login.keychain-db",
+  ]
+
+ ❯ packages/keys/src/macos-keychain.test.ts:335:41
+    333|       store({ keychainPath: KEYCHAIN_PATH }).delete('model-openai-api-…
+    334|     ).resolves.toBe(true);
+    335|     expect(runner.invocations[0]?.args).toEqual([
+       |                                         ^
+    336|       'delete-generic-password',
+    337|       '-a',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  packages/keys/src/macos-keychain.test.ts > MacOsKeychainSecretStore platform and scope > carries every option into the scoped store
+AssertionError: expected [ 'find-generic-password', '-a', …(4) ] to include '/private/tmp/byok-login.keychain-db'
+ ❯ packages/keys/src/macos-keychain.test.ts:417:41
+    415|     await expect(scoped.get('model-openai-api-key')).resolves.toBe(CAN…
+    416|     expect(runner.invocations[0]?.args).toContain('other-account');
+    417|     expect(runner.invocations[0]?.args).toContain(KEYCHAIN_PATH);
+       |                                         ^
+    418|   });
+    419|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  packages/keys/src/pi-provider-launcher-core.test.ts > Pi provider launcher core > parses only the closed launcher contract and requires absolute custody paths
+Error: unknown launcher argument --macos-keychain-path
+ ❯ parsePiProviderLauncherOptions packages/keys/src/pi-provider-launcher-core.ts:77:13
+     75|     const value = ownArgs[index + 1];
+     76|     if (!flag || !allowedFlags.has(flag)) {
+     77|       throw new Error(`unknown launcher argument ${flag ?? '<missing>'…
+       |             ^
+     78|     }
+     79|     if (values.has(flag)) throw new Error(`launcher argument ${flag} m…
+ ❯ packages/keys/src/pi-provider-launcher-core.test.ts:39:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  9 failed | 42 passed (51)
+   Start at  04:17:25
+   Duration  666ms (transform 314ms, setup 0ms, import 532ms, tests 97ms, environment 0ms)
+
+PRE_FIX_EXIT=1

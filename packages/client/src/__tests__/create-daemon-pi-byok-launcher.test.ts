@@ -48,4 +48,35 @@ describe('DaemonConfig.piByokLauncher', () => {
       ),
     ).toThrow(/reserved launcher argument --provider/);
   });
+
+  it('requires an explicit macOS keychain path to be absolute, non-empty, and single-line', () => {
+    const baseLauncher = {
+      command: 'byok-pi-provider-launcher',
+      profileDbPath: '/private/providers.sqlite',
+      sessionDir: '/private/pi-sessions',
+    };
+
+    expect(() => createDaemon(config({
+      ...baseLauncher,
+      macosKeychainPath: 'Library/Keychains/login.keychain-db',
+    }))).toThrow(/macosKeychainPath must be an absolute path/);
+    expect(() => createDaemon(config({
+      ...baseLauncher,
+      macosKeychainPath: '',
+    }))).toThrow(/macosKeychainPath must be a non-empty single-line string/);
+    expect(() => createDaemon(config({
+      ...baseLauncher,
+      macosKeychainPath: '/private/keychains/login\n.keychain-db',
+    }))).toThrow(/macosKeychainPath must be a non-empty single-line string/);
+  });
+
+  it('rejects fixed args that could spoof the explicit macOS keychain path', () => {
+    expect(() => createDaemon(config({
+      command: 'byok-pi-provider-launcher',
+      args: ['--macos-keychain-path', '/private/other.keychain-db'],
+      profileDbPath: '/private/providers.sqlite',
+      sessionDir: '/private/pi-sessions',
+      macosKeychainPath: '/private/login.keychain-db',
+    }))).toThrow(/reserved launcher argument --macos-keychain-path/);
+  });
 });

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
@@ -54,7 +55,70 @@ export interface PiByokLauncherConfig {
   args?: string[];
   profileDbPath: string;
   sessionDir: string;
+  macosKeychainPath?: string;
   secretServicePrefix?: string;
+}
+
+export function validatePiByokLauncherConfig(
+  launcher: PiByokLauncherConfig | undefined,
+): void {
+  if (launcher === undefined) return;
+
+  for (const [field, value] of [
+    ['command', launcher.command],
+    ['profileDbPath', launcher.profileDbPath],
+    ['sessionDir', launcher.sessionDir],
+  ] as const) {
+    if (value.trim().length === 0 || /[\u0000\r\n]/u.test(value)) {
+      throw new Error(`DaemonConfig.piByokLauncher.${field} must be a non-empty single-line string`);
+    }
+  }
+  if (!isAbsolute(launcher.profileDbPath) || !isAbsolute(launcher.sessionDir)) {
+    throw new Error(
+      'DaemonConfig.piByokLauncher profileDbPath and sessionDir must be absolute paths',
+    );
+  }
+  if (launcher.macosKeychainPath !== undefined && (
+    launcher.macosKeychainPath.trim().length === 0 ||
+    /[\u0000\r\n]/u.test(launcher.macosKeychainPath)
+  )) {
+    throw new Error(
+      'DaemonConfig.piByokLauncher.macosKeychainPath must be a non-empty single-line string',
+    );
+  }
+  if (launcher.macosKeychainPath !== undefined && !isAbsolute(launcher.macosKeychainPath)) {
+    throw new Error(
+      'DaemonConfig.piByokLauncher.macosKeychainPath must be an absolute path',
+    );
+  }
+  if (launcher.secretServicePrefix !== undefined && (
+    launcher.secretServicePrefix.trim().length === 0 ||
+    /[\u0000\r\n]/u.test(launcher.secretServicePrefix)
+  )) {
+    throw new Error(
+      'DaemonConfig.piByokLauncher.secretServicePrefix must be a non-empty single-line string',
+    );
+  }
+  const reserved = new Set([
+    '--',
+    '--pi-bin',
+    '--profile-db',
+    '--session-dir',
+    '--macos-keychain-path',
+    '--secret-service-prefix',
+    '--provider',
+    '--model',
+  ]);
+  const conflicting = launcher.args?.find((arg) => reserved.has(arg));
+  if (conflicting !== undefined) {
+    throw new Error(
+      `DaemonConfig.piByokLauncher.args must not override reserved launcher argument ${conflicting}`,
+    );
+  }
+  const invalidArg = launcher.args?.find((arg) => arg.length === 0 || /[\u0000\r\n]/u.test(arg));
+  if (invalidArg !== undefined) {
+    throw new Error('DaemonConfig.piByokLauncher.args must contain only non-empty single-line strings');
+  }
 }
 
 export class PiAdapter implements RuntimeAdapter {
@@ -70,7 +134,9 @@ export class PiAdapter implements RuntimeAdapter {
     environmentRequirements: { credentialNames: PROVIDER_CREDENTIAL_ENV_NAMES },
   });
 
-  constructor(private readonly options: PiAdapterOptions = {}) {}
+  constructor(private readonly options: PiAdapterOptions = {}) {
+    validatePiByokLauncherConfig(options.byokLauncher);
+  }
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
@@ -140,6 +206,9 @@ export class PiAdapter implements RuntimeAdapter {
         launcher.profileDbPath,
         '--session-dir',
         launcher.sessionDir,
+        ...(launcher.macosKeychainPath !== undefined
+          ? ['--macos-keychain-path', launcher.macosKeychainPath]
+          : []),
         ...(launcher.secretServicePrefix
           ? ['--secret-service-prefix', launcher.secretServicePrefix]
           : []),

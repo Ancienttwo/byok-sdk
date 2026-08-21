@@ -14,7 +14,11 @@ the separately installed `byok-pi-provider-launcher`, the local non-secret
 profile database path, and a stable Pi session directory. The client passes
 only those paths plus provider/model ids; the launcher alone reads the OS
 credential when required and spawns Pi. Both custody paths must be absolute;
-missing launcher configuration fails closed.
+missing launcher configuration fails closed. A macOS host running under an
+isolated `HOME` can additionally set `piByokLauncher.macosKeychainPath` to one
+absolute keychain file. The client projects it as the launcher's reserved
+`--macos-keychain-path` flag; it does not search a second credential authority
+or widen the Pi child environment.
 
 Claude Code and Codex remain user-installed runtimes and use their own login
 state. Hosts that only need runtime detection/composition can import the
