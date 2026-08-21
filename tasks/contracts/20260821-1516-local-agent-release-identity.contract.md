@@ -168,12 +168,8 @@ exit_criteria:
   artifacts_exist:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260821-1516-local-agent-release-identity.notes.md
-  tests_pass:
-    - path: packages/client/src/__tests__/release-identity.test.ts
-    - path: packages/client/src/__tests__/bin-config.test.ts
-    - path: packages/client/src/__tests__/bin-format.test.ts
-    - path: packages/client/src/__tests__/bin-version.test.ts
   commands_succeed:
+    - bun run --cwd packages/client test -- src/__tests__/release-identity.test.ts src/__tests__/bin-config.test.ts src/__tests__/bin-format.test.ts src/__tests__/bin-version.test.ts
     - bun run build
     - bun run typecheck
     - bun run test
