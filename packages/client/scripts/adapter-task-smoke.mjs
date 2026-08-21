@@ -208,6 +208,7 @@ try {
   const pairingCode = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId }).code;
   daemon = client.createDaemonWithAdapters(
     {
+      localAgentRelease: { version: '0.0.0-adapter-smoke' },
       productName: 'Adapter Task Smoke',
       productId,
       serverUrl,

@@ -101,6 +101,7 @@ allowed_paths:
   - .ai/harness/runs/
   - .ai/harness/worktrees/.gitkeep
   - packages/client/src/
+  - packages/client/scripts/adapter-task-smoke.mjs
   - packages/client/tsup.config.ts
   - packages/client/vitest.config.ts
   - packages/client/package.json

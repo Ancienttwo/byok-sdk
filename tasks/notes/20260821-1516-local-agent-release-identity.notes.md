@@ -51,10 +51,21 @@
   missing status projections before implementation.
 - Pre-freeze verification: all 124 client test files / 1293 tests passed; root
   build, typecheck, test, package-graph check, and strict workflow check passed.
+- Sibling sweep found the built-package adapter smoke was the one non-TypeScript
+  daemon consumer missed by the required-config migration. After a client build,
+  its pre-fix run failed synchronously with
+  `DaemonConfig.localAgentRelease.version must be canonical strict SemVer` at
+  `scripts/adapter-task-smoke.mjs:209`; the script now injects an explicit
+  smoke-owned prerelease identity, and the contract allowlist names that file.
 - Registry readback: `npm view @byok-sdk/client dist-tags --json` reported
   `latest: 0.5.0`, and the published version list contained `0.5.0`.
 - Final clean-candidate pack smoke is intentionally deferred until after the
   candidate commit so it is produced exactly once for the frozen subject.
+- The packed CLI smoke compares raw stdout to `<packed manifest version>\n`,
+  requires empty stderr, supplies a missing `BYOK_CONFIG`, unreachable proxy
+  and runtime paths, and asserts an empty HOME remains untouched. This is the
+  actual entrypoint/order proof; the focused unit test covers the pure command
+  projection without duplicating package installation.
 
 ## Promotion Filter
 

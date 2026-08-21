@@ -134,6 +134,7 @@ Keep application release distinct from runtime executable versions, protocol ver
 - `packages/client/src/index.ts`: public release identity exports.
 - `packages/client/tsup.config.ts`: manifest-derived build-time replacement for the official CLI identity.
 - `packages/client/src/__tests__/`: red-first validation, authority, status, CLI zero-state, and no-config override coverage; migrate in-repo client test consumers to explicit identity.
+- `packages/client/scripts/adapter-task-smoke.mjs`: migrate the built-package runtime smoke to explicit embedder identity.
 - `examples/packaging/launcher.ts`: explicit embedder identity migration.
 - `scripts/release/pack-and-smoke.mjs`: installed packed CLI/manifest parity assertion.
 - aligned package manifests plus `bun.lock`: advance the unpublished candidate from already-published `0.5.0` to `0.6.0`.
