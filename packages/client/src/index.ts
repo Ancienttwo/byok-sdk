@@ -14,6 +14,11 @@ export type {
   GitWorkspaceConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
+  McpToolsetLifecycleState,
+  McpToolsetObservation,
+  McpToolsetStatus,
+  McpToolsetRegistryStatus,
+  McpToolsetReloadReceipt,
 } from './types';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
@@ -46,6 +51,10 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig } from './daemon/create-daemon';
+export {
+  McpToolsetRevisionConflictError,
+  McpToolsetDefinitionRevisionConflictError,
+} from './daemon/toolset-registry';
 export type { ProgressBatcherOptions } from './daemon/progress-batcher';
 
 /**

@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
@@ -131,6 +131,20 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     expect(byId.get('pi')?.approvalInteractive).toBe(false);
     expect(byId.get('claude')?.approvalInteractive).toBe(true);
     expect(byId.get('codex')?.approvalInteractive).toBe(false);
+
+    daemon.reloadMcpToolsets(
+      { mail: { mcpServers: { gmail: { command: '/private/device/gmail-connector' } } } },
+      daemon.status().toolsets.revision,
+    );
+    server.dropConnection();
+    await vi.waitFor(
+      () => expect(server.received.filter((envelope) => envelope.type === 'conn.hello')).toHaveLength(2),
+      { timeout: 5_000 },
+    );
+    const reconnectedHello = server.received.filter((envelope) => envelope.type === 'conn.hello').at(-1);
+    if (reconnectedHello?.type !== 'conn.hello') throw new Error('unreachable');
+    expect(reconnectedHello.payload.configuredToolsets).toEqual(['mail']);
+    expect(JSON.stringify(reconnectedHello.payload)).not.toContain('/private/device/gmail-connector');
   });
 });
 

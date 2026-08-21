@@ -453,16 +453,40 @@ The device operator configures each id in `DaemonConfig.mcpToolsets` as one or
 more stdio MCP servers. This first slice accepts only `command` and `args`;
 environment variables, headers, remote URLs, tokens, and cookies are not part
 of the selectable shape. This does not sanitize arbitrary instruction text;
-the host must not put connector secrets there. The daemon validates and
-snapshots the registry at construction, resolves every requested id before
-claim, and rejects missing ids or colliding server names. Runtime selection
-also requires an adapter that advertises `mcpToolsets`; no semantic fallback to
-a tool-less runtime exists.
+the host must not put connector secrets there. The daemon validates the registry
+into one content-addressed snapshot, resolves every requested id from exactly one
+snapshot before claim, and rejects missing ids or colliding server names.
+Runtime selection also requires an adapter that advertises `mcpToolsets`; no
+semantic fallback to a tool-less runtime exists.
+
+The authenticated local control socket accepts an expected-revision
+compare-and-swap reload of the complete registry. The CLI host reads
+`--config`; the daemon does not accept or read an arbitrary pathname. Identical
+content has the same `sha256:` revision across restarts and reloads as a no-op.
+Invalid or stale reloads leave the current snapshot unchanged. Already-admitted
+tasks keep their sealed MCP projection, while later offers, presence heartbeats,
+and the next `conn.hello` read the current logical-id snapshot. Reload receipts
+and live status expose only ids, server counts, content revisions, and bounded
+lifecycle metadata—never command, argument, environment, header, or credential
+bytes.
+
+Lifecycle state is an explicit host observation, not a configuration-derived
+guess. A host embedding the daemon may report `installed | unauthorized |
+starting | ready | degraded | crashed | incompatible` with a canonical
+timestamp and optional bounded version/reason code. With no report, status says
+`unobserved`. A report includes the expected definition revision, so an event
+from an old connector instance cannot mark a newly reconfigured definition
+ready. Same-content reload retains a matching observation, while a changed
+definition clears it. The SDK does not probe commands or infer readiness from
+executable presence.
 
 Claude is the sole bundled runtime supported in this slice. Its selected local
 servers are projected into one task-scoped `--mcp-config` under
 `--strict-mcp-config`; confirm mode's internal approval server is merged into
-the same closed file. Pi and Codex decline toolset-aware offers. The
+the same closed file. Claude, not the daemon, owns the resulting task-scoped MCP
+subprocess lifetime. Therefore these registry status primitives are not a
+long-lived connector supervisor and do not independently observe a crash or
+recovery. Pi and Codex decline toolset-aware offers. The
 self-hosted coordinator requires a live `toolset-selection` capability before
 task creation; a stateless hosted caller must route only to a device it already
 knows is capable.

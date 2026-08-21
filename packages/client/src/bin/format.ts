@@ -2,6 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
+import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
 import type { ProbedRuntime } from './runtime-probe';
 import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
 
@@ -293,7 +294,9 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
       : 'live-local-agent-release: unknown',
     `live-paired: ${live.paired ? 'yes' : 'no'}${live.deviceId ? ` deviceId=${live.deviceId}` : ''}`,
     `live-runtimes: ${live.runtimeIds.length ? live.runtimeIds.join(',') : '(none)'}`,
+    `live-toolsets: revision=${live.toolsets.revision} count=${live.toolsets.toolsets.length}`,
   ];
+  for (const toolset of live.toolsets.toolsets) lines.push(formatToolsetStatusLine('live-toolset', toolset));
   const health = live.operationalHealth;
   if (health.availability === 'unavailable') {
     lines.push(`live-operational-health: unavailable reason=${quote(health.reason)}`);
@@ -357,6 +360,27 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
     }
   }
   return lines;
+}
+
+function formatToolsetStatusLine(prefix: string, toolset: Readonly<McpToolsetStatus>): string {
+  const observation = toolset.observation;
+  return [
+    `${prefix}: ${toolset.id}`,
+    `servers=${toolset.serverCount}`,
+    `definitionRevision=${toolset.definitionRevision}`,
+    `state=${observation?.state ?? 'unobserved'}`,
+    observation?.version === undefined ? undefined : `version=${quote(observation.version)}`,
+    observation?.observedAt === undefined ? undefined : `observedAt=${observation.observedAt}`,
+    observation?.reasonCode === undefined ? undefined : `reasonCode=${observation.reasonCode}`,
+  ].filter((part): part is string => part !== undefined).join(' ');
+}
+
+/** Plain, redacted operator receipt for one host-owned registry reload. */
+export function formatToolsetsReloadReceiptLines(receipt: Readonly<McpToolsetReloadReceipt>): string[] {
+  return [
+    `toolsets-reload: changed=${receipt.changed ? 'yes' : 'no'} previousRevision=${receipt.previousRevision} revision=${receipt.revision}`,
+    ...receipt.toolsets.map((toolset) => formatToolsetStatusLine('toolset', toolset)),
+  ];
 }
 
 /** Cap on a rendered approval summary's length before truncating with an ellipsis — these can be arbitrarily long tool-input dumps (see `docs/security.md`'s F8 note on why the FULL summary is only ever shown over the authenticated control socket, never service-log stdout); this is purely a display-width concern for a CLI table, not a redaction. */

@@ -270,8 +270,8 @@ export interface TaskRunnerDeps {
   runtimePreference?: RuntimeId[];
   /** M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment (`create-daemon.ts`) — the per-device, per-runtime env-allowlist override `handleOffer` merges into `buildRuntimeEnv`'s `locallyAllowedNames`. */
   runtimeEnvironment?: Record<string, { allow?: string[] }>;
-  /** Validated, device-local registry keyed by wire-level logical toolset id. */
-  mcpToolsets?: ReadonlyMap<string, McpToolsetConfig>;
+  /** Reads the daemon's current validated device-local registry once per offer. */
+  getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
   permissionDefaults?: PermissionPolicy;
   workspaceRoot: string;
   deviceId: string;
@@ -1593,8 +1593,8 @@ export class TaskRunner {
   ):
     | { ok: true; servers: Readonly<Record<string, McpStdioServerConfig>> }
     | { ok: false; reason: string } {
-    const registry = this.deps.mcpToolsets;
-    if (!registry) {
+    const registry = this.deps.getMcpToolsets?.();
+    if (!registry || registry.size === 0) {
       return { ok: false, reason: 'offer requires MCP toolsets, but this device has no local mcpToolsets registry' };
     }
     const servers = Object.create(null) as Record<string, McpStdioServerConfig>;
