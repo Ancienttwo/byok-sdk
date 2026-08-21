@@ -36,3 +36,7 @@ repo-harness are allowed only when they remain inside the contract allow-list.
   categories. The contract now declares only supported full-subject
   `deterministic_test` and `runtime_readback` oracles. Independent semantic
   judgment remains the separate Codex AcceptanceReceipt reviewer boundary.
+- After merging the current `origin/main` ancestry, the product tree remained
+  byte-identical to the previously accepted tree, but the new merge base made
+  three already-reviewed U1 workflow cleanup paths visible to the allow-list
+  gate. Those exact paths are now declared; this does not expand product scope.

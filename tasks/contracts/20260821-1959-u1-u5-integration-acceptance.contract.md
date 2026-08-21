@@ -60,12 +60,15 @@ allowed_paths:
   - tasks/contracts/20260821-1720-tenant-erasure.contract.md
   - tasks/contracts/20260821-1959-u1-u5-integration-acceptance.contract.md
   - tasks/current.md
+  - tasks/todos.md
+  - tasks/notes/20260821-1645-host-cancellation-contract.notes.md
   - tasks/notes/20260821-1516-local-agent-release-identity.notes.md
   - tasks/notes/20260821-1710-terminal-inference-usage.notes.md
   - tasks/notes/20260821-1715-tenant-readiness-primitives.notes.md
   - tasks/notes/20260821-1720-tenant-erasure.notes.md
   - tasks/notes/20260821-1959-u1-u5-integration-acceptance.notes.md
   - tasks/reviews/20260821-1516-local-agent-release-identity.review.md
+  - tasks/reviews/20260821-1645-host-cancellation-contract.review.md
   - tasks/reviews/20260821-1710-terminal-inference-usage.review.md
   - tasks/reviews/20260821-1715-tenant-readiness-primitives.review.md
   - tasks/reviews/20260821-1720-tenant-erasure.review.md
