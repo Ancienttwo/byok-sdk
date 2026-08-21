@@ -15,7 +15,7 @@
 
 ## P2: Concrete trace
 
-`eraseTenant(tenant, operationId)` verifies the live schema inventory, inserts/reads a tenant operation receipt, obtains its CAS lease, lists one canonical R2 page and deletes each listed canonical object, persists the opaque continuation cursor, then deletes one FK-safe SQL batch. A crash before a cursor/CAS update replays an idempotent delete or SQL batch; no cursor is advanced before the external deletion succeeds.
+`eraseTenant(tenant, operationId)` first loads that tenant-scoped operation: a completed receipt replays directly as frozen operator evidence, even if a later migration has made the product-table inventory unsafe. A running or absent operation verifies the live inventory before opening/advancing its CAS lease, lists one canonical R2 page and deletes each listed canonical object, persists the opaque continuation cursor, then deletes one FK-safe SQL batch. A crash before a cursor/CAS update replays an idempotent delete or SQL batch; no cursor is advanced before the external deletion succeeds.
 
 ## P3: Decision
 
@@ -24,4 +24,5 @@ The operation is separate from cleanup because an erasure receipt must survive a
 ## Evidence
 
 - Pre-implementation red test: `packages/cloud-dataplane/src/__tests__/tenant-erasure.test.ts` imports the required root API before it exists.
+- P1 regression: after completion, a future tenant table leaves same-`operationId` receipt replay stable while a different/new operation fails closed on the inventory drift.
 - Runtime evidence and final check output will be recorded after implementation.

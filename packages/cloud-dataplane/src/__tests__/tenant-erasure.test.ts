@@ -452,6 +452,9 @@ describe.skipIf(SKIP_DATAPLANE)('PostgresTenantErasure [postgres + minio]', () =
 
       await database.pool.query(`CREATE TABLE future_tenant_state (tenant_id text NOT NULL, value text NOT NULL)`);
       await expect(
+        new PostgresTenantErasure({ pool: database.pool, clock, objectStorage }).eraseTenant(TENANT_A, 'db-failure'),
+      ).resolves.toEqual(resumed);
+      await expect(
         new PostgresTenantErasure({ pool: database.pool, clock, objectStorage }).eraseTenant(TENANT_B, 'drift'),
       ).rejects.toMatchObject({ code: 'tenant_erasure_schema_drift' } satisfies Partial<TenantErasureError>);
       expect(await new PostgresTenantErasure({ pool: database.pool, clock, objectStorage }).readTenantErasure(TENANT_B, 'drift')).toBeUndefined();

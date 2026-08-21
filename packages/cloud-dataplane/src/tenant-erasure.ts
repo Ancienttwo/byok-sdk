@@ -198,6 +198,20 @@ export class PostgresTenantErasure {
    */
   async eraseTenant(tenant: TenantId, operationId: string): Promise<TenantErasureResult> {
     assertOperationId(operationId);
+
+    // A completed receipt is frozen operator evidence, not tenant product
+    // data. Replay must therefore remain stable even when a later migration
+    // makes the product-table inventory unsafe for every new/running erase.
+    // No running or absent operation passes this branch: those still assert
+    // the exact live inventory before acquiring or advancing a lease.
+    let existing: OperationRow | undefined;
+    try {
+      existing = await this.#readOperation(tenant, operationId);
+    } catch (cause) {
+      throw databaseFailure('reading tenant erasure operation', cause);
+    }
+    if (existing?.state === 'completed') return toReadback(existing);
+
     await this.#assertSchemaInventory();
 
     let row: OperationRow;
