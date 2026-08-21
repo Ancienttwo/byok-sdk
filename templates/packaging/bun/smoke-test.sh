@@ -58,16 +58,21 @@ cp "$BIN" "$RUN_BIN"
 chmod +x "$RUN_BIN" 2>/dev/null || true
 
 if [ "$OS" = "Windows" ]; then
-  STUB="$WORK_DIR/stub-pi.cmd"
-  cat > "$STUB" <<'EOF'
-@echo off
-if "%~1"=="--version" (
-  echo stub-pi 0.0.0-test 1>&2
-  exit /b 0
-)
-echo stub-pi: unsupported args 1>&2
-exit /b 1
+  # Node/Bun execFile cannot execute a .cmd file directly without enabling a
+  # shell. The product intentionally does not enable a shell for runtime
+  # adapters, so the smoke must inject the same kind of native executable a
+  # shipped Windows sidecar would provide.
+  STUB_SOURCE="$WORK_DIR/stub-pi.ts"
+  STUB="$WORK_DIR/stub-pi.exe"
+  cat > "$STUB_SOURCE" <<'EOF'
+if (process.argv.includes('--version')) {
+  console.error('stub-pi 0.0.0-test');
+  process.exit(0);
+}
+console.error(`stub-pi: unsupported args: ${process.argv.slice(1).join(' ')}`);
+process.exit(1);
 EOF
+  "${BUN_BIN:-bun}" build "$STUB_SOURCE" --compile --outfile "$STUB"
 else
   STUB="$WORK_DIR/stub-pi"
   cat > "$STUB" <<'EOF'
