@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-21T18:13:19+0800 -->
+<!-- updated_at: 2026-08-21T20:00:55+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-21T18:13:19+0800
-> **Source Branch**: codex/host-cancellation-contract
-> **Source Commit**: d24fb2c
+> **Status**: Active
+> **Updated At**: 2026-08-21T20:00:55+0800
+> **Source Branch**: codex/u1-u5-integration
+> **Source Commit**: 98cc505
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: archive-workflow
+> **Reason**: manual
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: ManualClearedWithActiveWork
-- Active Plan: (none)
-- Plan Status: (none)
-- Next Task: inspect active worktree marker(s)
-- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
+- Status: Active
+- Active Plan: plans/plan-20260821-1959-u1-u5-integration-acceptance.md
+- Plan Status: Executing
+- Next Task: Commit and push this integration acceptance envelope.
+- Clear Note: (none)
 
 ## Mainline Snapshot Reading
 
@@ -31,12 +31,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
+- .: plans/plan-20260821-1959-u1-u5-integration-acceptance.md
+- .: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-u1-u5-integration
 - /Users/kito/Projects/byok-sdk: plans/plan-20260821-1645-host-cancellation-contract.md
 - /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
 - /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: plans/plan-20260821-0425-hosted-integration-authority-closure.md
 - /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure
 - /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity: plans/plan-20260821-1516-local-agent-release-identity.md
 - /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity
+- /Users/kito/Projects/byok-sdk-wt-tenant-readiness-primitives: plans/plan-20260821-1715-tenant-readiness-primitives.md
+- /Users/kito/Projects/byok-sdk-wt-tenant-readiness-primitives: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-tenant-readiness-primitives
 ## Active Sprint
 
 - Sprint: (none)
@@ -45,27 +49,21 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Freeze the candidate revision, record independent review and the required typed external acceptance, then update canonical Obsidian implementation memory.
+- Exact Next Step: (none)
 
 ## Checks
 
-- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
+- status=(none), source=(none), file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 10 changed/untracked path(s)
+- Summary: 4 changed/untracked path(s)
 
 ```
- D plans/plan-20260821-1645-host-cancellation-contract.md
- D tasks/contracts/20260821-1645-host-cancellation-contract.contract.md
- D tasks/notes/20260821-1645-host-cancellation-contract.notes.md
- D tasks/reviews/20260821-1645-host-cancellation-contract.review.md
- M tasks/todos.md
-?? plans/archive/plan-20260821-1645-host-cancellation-contract.md
-?? tasks/archive/contract-20260821-1813-host-cancellation-contract.md
-?? tasks/archive/notes-20260821-1813-host-cancellation-contract.md
-?? tasks/archive/review-20260821-1813-host-cancellation-contract.md
-?? tasks/archive/todo-20260821-1813-host-cancellation-contract.md
+?? plans/plan-20260821-1959-u1-u5-integration-acceptance.md
+?? tasks/contracts/20260821-1959-u1-u5-integration-acceptance.contract.md
+?? tasks/notes/20260821-1959-u1-u5-integration-acceptance.notes.md
+?? tasks/reviews/20260821-1959-u1-u5-integration-acceptance.review.md
 ```
 
 ## Source Artifacts
