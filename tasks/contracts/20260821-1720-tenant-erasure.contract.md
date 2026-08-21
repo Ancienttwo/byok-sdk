@@ -1,6 +1,6 @@
 # Task Contract: tenant-erasure
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260821-1720-tenant-erasure.md
 > **Task Profile**: migration
 > **Owner**: ancienttwo
