@@ -1562,6 +1562,10 @@ export function buildDaemonWithAdapters(
       approvalRegistry,
       storeDir,
       productId: config.productId,
+      // U2 terminal inference usage consumes the one U4a-resolved,
+      // process-immutable identity captured above. This is composition-only:
+      // TaskRunner receives no config, manifest, or second identity resolver.
+      localAgentRelease,
       approvalTimeoutMs: overrides.approvalTimeoutMs,
       // Finding F5(a): see TaskRunnerDeps.shutdownInterruptTimeoutMs's own doc comment.
       shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,

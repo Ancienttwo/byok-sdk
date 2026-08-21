@@ -117,7 +117,14 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: cloud.url, workspaceRoot, storeDir },
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test',
+        productId: 'test-product',
+        serverUrl: cloud.url,
+        workspaceRoot,
+        storeDir,
+      },
       [adapter],
       {
         backoff: { baseMs: 20, maxMs: 50, factor: 2 },

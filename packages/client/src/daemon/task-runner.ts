@@ -7,6 +7,8 @@ import {
   createEnvelope,
   RESULT_DOCUMENT_MAX_BYTES,
   RuntimeIdSchema,
+  TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
+  TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   type AgentEvent,
   type BlobRef,
   type Envelope,
@@ -14,6 +16,7 @@ import {
   type PermissionPolicy,
   type ResultDocumentCheck,
   type RuntimeId,
+  type TerminalInferenceUsage,
   type TaskOfferPayload,
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
@@ -40,6 +43,7 @@ import type { TaskQueueWatermark } from './control-protocol';
 import { buildRuntimeEnv } from './environment';
 import { computeEffectivePolicy } from './policy';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
+import type { LocalAgentReleaseIdentity } from '../release-identity';
 import {
   ProgressBatcher,
   ProgressEventTooLargeError,
@@ -309,6 +313,14 @@ export interface TaskRunnerDeps {
   approvalRegistry: ApprovalRegistry;
   storeDir: string;
   productId: string;
+  /**
+   * The already-resolved, process-immutable U4a Local Agent release identity.
+   * `TaskRunner` only consumes this value; it never creates, normalizes, or
+   * revalidates a second version authority. It remains optional for direct
+   * internal harnesses and old embedders: absence omits terminal usage rather
+   * than fabricating a client version.
+   */
+  localAgentRelease?: Readonly<LocalAgentReleaseIdentity>;
   /** Default `requestApproval` timeout — see {@link DEFAULT_APPROVAL_TIMEOUT_MS}. */
   approvalTimeoutMs?: number;
   /**
@@ -451,6 +463,15 @@ interface ActiveTask {
    * wire-byte accountant).
    */
   outputBytesSoFar: number;
+  /** Device monotonic-ish wall-clock anchor taken only after a Session started. */
+  startedAtMs: number;
+  /**
+   * Last runtime usage observation received before this task's terminal
+   * signal. This is intentionally NOT accumulated: Codex and Claude expose a
+   * terminal turn-level usage object, and adding observations would invent a
+   * cross-runtime accounting meaning this client does not own.
+   */
+  lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
   /** Distinguishes runner-initiated teardown from an unexpected event-stream end. */
   beingTornDown?: boolean;
   /** Set before the first disposal await so no racing path can publish a second semantic terminal. */
@@ -493,6 +514,13 @@ type PickResult =
  */
 function isKnownRuntimeId(id: string): id is RuntimeId {
   return RuntimeIdSchema.safeParse(id).success;
+}
+
+/** Preserve a runtime/device number only when the terminal wire contract can represent it exactly. */
+function terminalUsageNumber(value: number | undefined, maximum: number): number | undefined {
+  return value !== undefined && Number.isSafeInteger(value) && value >= 0 && value <= maximum
+    ? value
+    : undefined;
 }
 
 /**
@@ -984,7 +1012,13 @@ export class TaskRunner {
     const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
     await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
     if (this.tasks.get(active.taskId) !== active) return true;
-    this.deps.send(createEnvelope('task.fail', { reason, retryable }, { taskId: active.taskId }));
+    this.deps.send(
+      createEnvelope(
+        'task.fail',
+        { reason, retryable, ...this.terminalInferenceUsagePayload(active) },
+        { taskId: active.taskId },
+      ),
+    );
     return this.finish(active.taskId);
   }
 
@@ -1469,6 +1503,7 @@ export class TaskRunner {
         ),
         approvalQueue: [],
         outputBytesSoFar: 0,
+        startedAtMs: Date.now(),
       };
 
       // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
@@ -1490,7 +1525,13 @@ export class TaskRunner {
           // best-effort — still report cancellation below
         }
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
-        this.deps.send(createEnvelope('task.cancelled', { reason }, { taskId }));
+        this.deps.send(
+          createEnvelope(
+            'task.cancelled',
+            { reason, ...this.terminalInferenceUsagePayload(active) },
+            { taskId },
+          ),
+        );
         await this.finish(taskId);
         return;
       }
@@ -1615,6 +1656,14 @@ export class TaskRunner {
             `${MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX}: task emitted approximately ${active.outputBytesSoFar} bytes of output (serialized-event-length approximation), exceeding the configured limit of ${this.maxTaskOutputBytes} bytes`,
           );
           return;
+        }
+
+        if (event.type === 'usage') {
+          // Terminal usage is last-observed, not an accumulator. The bundled
+          // Codex/Claude adapters emit their runtime terminal observation
+          // before turn_end/error; a custom adapter that emits several keeps
+          // only the latest actual observation rather than inventing a sum.
+          active.lastUsage = event;
         }
 
         if (event.type === 'needs_approval') {
@@ -1754,6 +1803,7 @@ export class TaskRunner {
                 // `toJSON(key)` or an unstable getter cannot make the wire
                 // bytes differ from what the cap gate approved.
                 ...(outcome.document !== undefined ? { document: outcome.document } : {}),
+                ...this.terminalInferenceUsagePayload(active),
               },
               { taskId: active.taskId, sessionRef: active.session.sessionRef },
             ),
@@ -1915,7 +1965,13 @@ export class TaskRunner {
     // the batcher; nothing else needs to happen with its buffer contents.
     // M1 gap #6: the canonical, explicit cancellation message — no longer
     // `task.fail({reason:'cancelled'})`.
-    this.deps.send(createEnvelope('task.cancelled', { reason }, { taskId }));
+    this.deps.send(
+      createEnvelope(
+        'task.cancelled',
+        { reason, ...this.terminalInferenceUsagePayload(active) },
+        { taskId },
+      ),
+    );
     await this.finish(taskId);
   }
 
@@ -2464,7 +2520,13 @@ export class TaskRunner {
     // task to `Failed` and closed its event queue before this notification
     // arrived, so flushing buffered progress here would be unobservable and
     // only trigger a spurious server-side warning.
-    this.deps.send(createEnvelope('task.fail', { reason: reason ?? 'rejected', retryable: false }, { taskId }));
+    this.deps.send(
+      createEnvelope(
+        'task.fail',
+        { reason: reason ?? 'rejected', retryable: false, ...this.terminalInferenceUsagePayload(active) },
+        { taskId },
+      ),
+    );
     await this.finish(taskId);
   }
 
@@ -2484,8 +2546,48 @@ export class TaskRunner {
       return;
     }
     if (active) await this.observeGit(active, 'salvage');
-    this.deps.send(createEnvelope('task.fail', { reason, retryable }, { taskId }));
+    this.deps.send(
+      createEnvelope(
+        'task.fail',
+        active === undefined
+          ? { reason, retryable }
+          : { reason, retryable, ...this.terminalInferenceUsagePayload(active) },
+        { taskId },
+      ),
+    );
     await this.finish(taskId);
+  }
+
+  /**
+   * Build the optional terminal observation from facts this running daemon
+   * actually has. No offered `dispatchSelection` is echoed here: it is a
+   * requested execution target, not an adapter-reported provider/model fact.
+   * The bundled adapter event contracts currently expose token observations
+   * (Codex and Claude) but no provider/model observation, so those keys stay
+   * absent. Pi exposes no native usage observation, so its terminal payload
+   * omits this optional block rather than fabricating a usage observation from
+   * independently known runtime, elapsed duration, or Local Agent version.
+   */
+  private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
+    const release = this.deps.localAgentRelease;
+    const runtimeId = active.adapter.descriptor.id;
+    if (release === undefined || active.lastUsage === undefined || !isKnownRuntimeId(runtimeId)) return {};
+
+    const nowMs = Date.now();
+    const durationMs = terminalUsageNumber(nowMs - active.startedAtMs, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);
+    const promptTokens = terminalUsageNumber(active.lastUsage?.inputTokens, TERMINAL_INFERENCE_USAGE_MAX_TOKENS);
+    const completionTokens = terminalUsageNumber(active.lastUsage?.outputTokens, TERMINAL_INFERENCE_USAGE_MAX_TOKENS);
+
+    return {
+      usage: {
+        runtime: runtimeId,
+        clientVersion: release.version,
+        reportedAt: new Date(nowMs).toISOString(),
+        ...(promptTokens === undefined ? {} : { promptTokens }),
+        ...(completionTokens === undefined ? {} : { completionTokens }),
+        ...(durationMs === undefined ? {} : { durationMs }),
+      },
+    };
   }
 
   /**

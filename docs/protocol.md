@@ -134,6 +134,16 @@ the historical envelope corpus (`v1.envelopes.ndjson`) was NOT touched,
 since a pre-`document` peer's committed bytes must keep parsing unchanged —
 which is exactly what proves the change additive.
 
+**Landed additive minor: terminal `usage`.** `task.complete`, `task.fail`,
+and `task.cancelled` each gain the same OPTIONAL `TerminalInferenceUsage`
+field. This is an observability-only fact attached to a terminal receipt, not
+a capability, task-state transition, billing record, storage usage, quota, or
+entitlement input. The field is optional so an old daemon's terminal payload
+remains valid; a receiver that does not know it follows the ordinary
+observability tolerance rule and strips it. The frozen fingerprint golden was
+regenerated for this additive schema change, while the historical envelope
+corpus remains a pre-usage compatibility witness.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -1028,6 +1038,57 @@ over-cap, non-serializable, or not plain JSON data. On the server, `document` is
 verbatim into `TaskResult.document` (`hub.ts`) and persists inside the same
 `result_json` record that already carries `summary`/`artifactRefs` — no new
 column, no migration, no second authority.
+
+### 7.3 Terminal inference usage — bounded observation, never accounting (additive minor)
+
+Every terminal payload MAY carry the same optional object:
+
+```ts
+interface TerminalInferenceUsage {
+  runtime: 'pi' | 'claude' | 'codex';
+  provider?: string;
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  durationMs?: number;
+  clientVersion: string;
+  reportedAt: string; // canonical UTC, e.g. 2026-08-21T10:00:02.500Z
+}
+```
+
+`runtime` is the adapter that actually started the task. `provider` and
+`model` are absent unless that adapter itself observed them; an offered
+`dispatchSelection` is a requested target, not an observation, and must never
+be echoed as telemetry. `clientVersion` is copied only from the process-
+immutable `localAgentRelease.version` that the Local Agent distribution owns;
+it is never inferred from a runtime version, package metadata, lockfile,
+filesystem path, or network lookup. An implementation that lacks that
+immutable value omits the entire optional block rather than creating a second
+identity authority.
+
+All counts are non-negative safe integers. `promptTokens` and
+`completionTokens` each cap at 1,000,000,000; `durationMs` caps at seven days;
+provider/model each cap at 160 characters; `clientVersion` caps at 128
+characters. `reportedAt` must be a valid ISO-8601 UTC instant with exactly
+millisecond precision and `Z` suffix. Negative, fractional, unsafe,
+over-cap, or malformed values reject the terminal envelope at the protocol
+boundary; they are never normalized, clamped, or zero-filled.
+
+The token fields have **last-observed**, not accumulated semantics: a daemon
+retains the last normalized runtime `usage` observation before the terminal
+signal for that task run. It must not add multiple events or derive totals.
+The Codex adapter maps its native `turn.completed.usage`; Claude maps its
+terminal `result.usage`; both place that event before their terminal signal.
+Pi's current RPC contract exposes no native usage fact, so it omits the
+optional block rather than fabricating a usage observation from runtime, device
+elapsed time, or `reportedAt`. Missing is unknown, not zero. When reported,
+device elapsed time and `reportedAt` are local observations, never provider
+invoice data.
+
+Hosted storage records the canonical first terminal exactly as it does every
+other terminal fact. Its typed result read model projects this object from the
+winning receipt unchanged; a later terminal cannot replace it. No raw-receipt
+consumer parses this object, and no `TenantStorageUsage` type is reused.
 
 ## 8. Long-poll fallback
 

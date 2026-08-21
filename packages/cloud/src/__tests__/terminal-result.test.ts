@@ -29,6 +29,15 @@ function blobRef(): BlobRef {
   };
 }
 
+const terminalUsage = {
+  runtime: 'codex' as const,
+  promptTokens: 120,
+  completionTokens: 45,
+  durationMs: 2_500,
+  clientVersion: '0.6.0',
+  reportedAt: '2026-08-21T10:00:02.500Z',
+};
+
 describe('readTaskResult', () => {
   let harness: CloudHarness;
   let stores: TenantStores;
@@ -62,7 +71,7 @@ describe('readTaskResult', () => {
       deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'did the thing', sessionRef: 'session-1', artifactRefs, document },
+        { summary: 'did the thing', sessionRef: 'session-1', artifactRefs, document, usage: terminalUsage },
         { taskId },
       ),
     );
@@ -75,6 +84,7 @@ describe('readTaskResult', () => {
     expect(result?.sessionRef).toBe('session-1');
     expect(result?.artifactRefs).toEqual(artifactRefs);
     expect(result?.document).toEqual(document);
+    expect(result?.usage).toEqual(terminalUsage);
     expect(result?.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -83,7 +93,7 @@ describe('readTaskResult', () => {
     const outcome = await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.fail', { reason: 'runtime crashed', retryable: true }, { taskId }),
+      createEnvelope('task.fail', { reason: 'runtime crashed', retryable: true, usage: terminalUsage }, { taskId }),
     );
     expect(outcome).toBe('accepted');
 
@@ -91,6 +101,7 @@ describe('readTaskResult', () => {
     expect(result?.state).toBe('failed');
     expect(result?.reason).toBe('runtime crashed');
     expect(result?.retryable).toBe(true);
+    expect(result?.usage).toEqual(terminalUsage);
     expect(result?.summary).toBeUndefined();
   });
 
@@ -99,11 +110,12 @@ describe('readTaskResult', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.cancelled', { reason: 'user asked' }, { taskId: explained }),
+      createEnvelope('task.cancelled', { reason: 'user asked', usage: terminalUsage }, { taskId: explained }),
     );
     const withReason = await harness.cloud.readTaskResult(TENANT_A, explained);
     expect(withReason?.state).toBe('cancelled');
     expect(withReason?.reason).toBe('user asked');
+    expect(withReason?.usage).toEqual(terminalUsage);
 
     const silent = await readyTask();
     await handleInboundEnvelope(
@@ -128,6 +140,26 @@ describe('readTaskResult', () => {
     expect(result?.summary).toBe('ok');
     expect(result?.document).toBeUndefined();
     expect(result && Object.hasOwn(result, 'document')).toBe(false);
+    expect(result && Object.hasOwn(result, 'usage')).toBe(false);
+  });
+
+  it('preserves the first terminal usage unchanged when a later terminal races it', async () => {
+    const taskId = await readyTask();
+    const winningUsage = { ...terminalUsage, runtime: 'claude' as const, promptTokens: 11 };
+    const losingUsage = { ...terminalUsage, promptTokens: 999 };
+    await handleInboundEnvelope(
+      stores,
+      deviceId,
+      createEnvelope('task.fail', { reason: 'first terminal', retryable: false, usage: winningUsage }, { taskId }),
+    );
+    await handleInboundEnvelope(
+      stores,
+      deviceId,
+      createEnvelope('task.complete', { summary: 'late terminal', sessionRef: 'session-late', usage: losingUsage }, { taskId }),
+    );
+
+    const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
+    expect(result).toMatchObject({ state: 'failed', reason: 'first terminal', usage: winningUsage });
   });
 
   it('reads undefined while no terminal fact exists', async () => {

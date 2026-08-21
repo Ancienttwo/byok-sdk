@@ -1,6 +1,6 @@
 # Plan: Optional Terminal Inference Usage
 
-> **Status**: Draft
+> **Status**: Complete
 > **Created**: 20260821-1710
 > **Slug**: terminal-inference-usage
 > **Artifact Level**: work-package
@@ -51,7 +51,7 @@ interface TerminalInferenceUsage {
   promptTokens?: number;
   completionTokens?: number;
   durationMs?: number;
-  clientVersion?: string;
+  clientVersion: string;
   reportedAt: string;
 }
 ```
@@ -81,12 +81,13 @@ device observation, not server time. Unknown values are omitted.
 
 ## Task Breakdown
 
-- [ ] Create a dedicated strict contract/worktree after U1 releases overlapping protocol/docs ownership.
-- [ ] Freeze the U4a identity field/type consumed by `clientVersion` (or its final name).
-- [ ] Add red codec/golden tests for the full acceptance matrix.
-- [ ] Implement one bounded protocol schema across all three terminal payloads.
-- [ ] Add client and cloud typed projections without storage-usage coupling.
-- [ ] Run targeted suites, full required checks, review, and packed-artifact API readback.
+- [x] Create a dedicated strict contract/worktree after U1 releases overlapping protocol/docs ownership.
+- [x] Freeze the U4a identity field/type consumed by `clientVersion` (or its final name).
+- [x] Add red codec/golden tests for the full acceptance matrix.
+- [x] Implement one bounded protocol schema across all three terminal payloads.
+- [x] Add client and cloud typed projections without storage-usage coupling.
+- [x] Run targeted suites, full required checks, strict workflow validation,
+  review, and packed-artifact API readback.
 
 ## Authorization boundary
 
