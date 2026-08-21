@@ -6,9 +6,24 @@
 - Red-test evidence: before implementation, protocol `tenant-readiness.test.ts`
   rejected `clientVersion`, cloud raised `readTenantReadiness is not a
   function`, and client presence omitted the requested frozen facts.
-- Candidate verification is in progress. Final targeted, real-Postgres,
-  workspace, and strict-workflow outcomes are recorded only after their
-  commands complete against the committed candidate.
+- Candidate `a448617` was committed before final verification. On that
+  candidate, `verify-contract --strict` re-ran all four focused U3 files and
+  passed them; the direct disposable Postgres+MinIO command passed the
+  readiness migration, durable aggregate, expiry/revocation, isolation, and
+  probe-fact assertions (1 file, 1 test).
+- Workspace gates on `a448617` passed: `bun run build`, `bun run typecheck`,
+  and `bun run test` (the latter includes client 125/1295, cloud 16/181,
+  protocol 14/270, core 9/251, and all remaining workspace packages). The
+  ordinary workspace dataplane job intentionally skipped service-dependent
+  suites; the disposable Postgres+MinIO readiness command above supplied that
+  separate evidence.
+- `repo-harness run check-task-workflow --strict` remains blocked before code
+  inspection because the inherited `.ai/harness/checks/latest.json` is a
+  legacy trace, then the refreshed trace resolves no active contract or
+  isolated worktree. `verify-contract --strict` passed its other 21 criteria
+  but recorded this command as its sole failed criterion and set the contract
+  status to `Partial`. This is a harness-activation residual, not a source or
+  test failure.
 
 ## Decisions
 
@@ -25,7 +40,9 @@
   revoked/expired observations are omitted.
 - The first HTTP presence publication is the transport-neutral long-poll
   first-hop. It carries the same per-start release/runtime snapshot as WS
-  `conn.hello`; long-poll itself still has no `conn.hello` frame.
+  `conn.hello`; the presence projection deliberately sends only
+  `id`/`version`/`authPresent`, never the WS capability blob. Long-poll itself
+  still has no `conn.hello` frame.
 
 ## Risks
 
@@ -36,3 +53,10 @@
 - `deploy/sql/0010_tenant_readiness.sql` required the matching catalog claim in
   `tests/sql/control_plane_invariants.sql`; both paths are contract-authorized
   because the release gate rejects an unclaimed migration.
+- The bounded parent action for the remaining strict failure is to activate
+  this U3 plan and contract worktree through the authoritative harness
+  workflow, then rerun `repo-harness run check-task-workflow --strict` and
+  `repo-harness run verify-contract --contract
+  tasks/contracts/20260821-1715-tenant-readiness-primitives.contract.md
+  --strict`. U3's allowed paths do not include the missing active-plan or
+  active-worktree pointers.

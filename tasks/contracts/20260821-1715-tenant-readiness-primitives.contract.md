@@ -171,3 +171,5 @@ The contract is complete only when the public API, both store compositions,
 protocol projections, and client first-hop paths satisfy the objective and all
 required feasible checks have current output. Any remaining failure must be
 reported with the exact command/output and a bounded parent action.
+
+> **Status**: Partial
