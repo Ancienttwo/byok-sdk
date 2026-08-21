@@ -109,9 +109,9 @@ Complete this inventory before implementation. If any line is unknown, keep the 
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Preserve and inventory every WIP candidate; classify merged-by-content versus truly missing work.
-- [ ] Merge hosted authority and root/policy WIP into the clean candidate with current main as semantic authority.
-- [ ] Resolve architecture queue and refresh workflow projections.
+- [x] Preserve and inventory every WIP candidate; classify merged-by-content versus truly missing work.
+- [x] Merge hosted authority and root/policy WIP into the clean candidate with current main as semantic authority.
+- [x] Resolve architecture queue and refresh workflow projections.
 - [ ] Run focused conflict tests, real Postgres+MinIO checks, build, typecheck, full test, strict workflow and release pack gates.
 - [ ] Freeze final review subject, record AcceptanceReceipt, push PR, wait CI, and merge.
 - [ ] Clean only branches/worktrees proven absorbed by `origin/main`; preserve unrelated detached/dirty state.

@@ -1,16 +1,16 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-21T20:58:55+0800 -->
+<!-- updated_at: 2026-08-21T21:05:00+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-21T20:58:55+0800
+> **Updated At**: 2026-08-21T21:05:00+0800
 > **Source Branch**: codex/pre-release-consolidation
-> **Source Commit**: 8f17f5a
+> **Source Commit**: d14d94e
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: ensure-task-workflow
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
@@ -18,9 +18,9 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 ## Current Focus
 
 - Status: ManualClearedWithActiveWork
-- Active Plan: (none)
-- Plan Status: (none)
-- Next Task: inspect active worktree marker(s)
+- Active Plan: plans/plan-20260821-2058-pre-release-consolidation.md
+- Plan Status: Executing
+- Next Task: Preserve and inventory every WIP candidate; classify merged-by-content versus truly missing work.
 - Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
@@ -31,6 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
+- .: plans/plan-20260821-2058-pre-release-consolidation.md
+- .: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-pre-release-consolidation
 - /Users/kito/Projects/byok-sdk: stale active-plan marker -> plans/plan-20260821-1645-host-cancellation-contract.md
 - /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
 - /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: plans/plan-20260821-0425-hosted-integration-authority-closure.md
@@ -47,7 +49,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: (none)
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Preserve and inventory every WIP candidate; classify merged-by-content versus truly missing work.
 
 ## Checks
 
@@ -55,10 +57,22 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 1 changed/untracked path(s)
+- Summary: 13 changed/untracked path(s)
 
 ```
- M tasks/current.md
+ M docs/architecture/index.md
+ D docs/architecture/requests/root.md
+ D plans/plan-20260821-0425-hosted-integration-authority-closure.md
+ D tasks/contracts/20260821-0425-hosted-integration-authority-closure.contract.md
+ D tasks/notes/20260821-0425-hosted-integration-authority-closure.notes.md
+ D tasks/reviews/20260821-0425-hosted-integration-authority-closure.review.md
+ M tasks/todos.md
+?? docs/architecture/requests/archive/2026/20260821-210458-root.md
+?? plans/archive/plan-20260821-0425-hosted-integration-authority-closure.md
+?? tasks/archive/contract-20260821-2104-hosted-integration-authority-closure.md
+?? tasks/archive/notes-20260821-2104-hosted-integration-authority-closure.md
+?? tasks/archive/review-20260821-2104-hosted-integration-authority-closure.md
+?? tasks/archive/todo-20260821-2104-hosted-integration-authority-closure.md
 ```
 
 ## Source Artifacts

@@ -1,6 +1,6 @@
 # Plan: Hosted Integration Authority Closure
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260821-0425
 > **Slug**: hosted-integration-authority-closure
 > **Planning Source**: repo-harness-plan

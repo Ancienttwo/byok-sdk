@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-21 21:04
+> **Related Plan**: plans/archive/plan-20260821-0425-hosted-integration-authority-closure.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260821-2104
+
 # Implementation Notes: hosted-integration-authority-closure
 
 > **Status**: Active

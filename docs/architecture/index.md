@@ -11,5 +11,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- [ ] 2026-08-21T18:18:51+0800 [high] `.ai/harness/policy.json` -> [root](requests/root.md)
+- (none)
 <!-- END ARCHITECTURE PENDING REQUESTS -->

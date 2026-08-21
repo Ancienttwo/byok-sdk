@@ -21,7 +21,16 @@
 
 ## Deviations From Plan Or Spec
 
-- None recorded.
+- The Live Activity branch was patch-equivalent and its document blob already
+  matched main. Because the user explicitly requested that every named branch be
+  merged and then cleaned, it received a history-only merge; the candidate tree
+  hash was identical before and after that merge.
+- `prepare-handoff` hit the already documented repo-harness consumer-relative
+  `scripts/recovery-view-cli.ts` lookup defect. `codex-handoff-resume` refreshed
+  the required recovery view directly; no helper was copied into this repo.
+- The root architecture request was archived as `no-change`: circuit-breaker
+  limits affect repo workflow policy, not product modules, entrypoints,
+  dependencies, runtime paths, or verification command ownership.
 
 ## Tradeoffs Considered
 
@@ -40,6 +49,8 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
+- Prior hosted-authority external-pass evidence is preserved under
+  `tasks/archive/`; the final merged subject still requires a new receipt.
 
 ## Promotion Filter
 
