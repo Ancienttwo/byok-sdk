@@ -1,6 +1,6 @@
 # Task Contract: local-agent-release-identity
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260821-1516-local-agent-release-identity.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
