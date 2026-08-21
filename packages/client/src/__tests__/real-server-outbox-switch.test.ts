@@ -57,7 +57,7 @@ describe('outbound envelopes queued while long-polling are not stranded when WS 
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         backoff: { baseMs: 20, maxMs: 50, factor: 2 },

@@ -34,7 +34,14 @@
  * because a composition backed by object storage physically cannot proxy
  * bytes (see the blobs section below).
  */
-import type { StorageReservation, TenantId } from '@byok-sdk/core';
+import type {
+  MailboxBody,
+  MailboxMessage,
+  PresenceStore,
+  StorageReservation,
+  TenantId,
+  TenantReadiness,
+} from '@byok-sdk/core';
 import type { ActivityStore } from '../activity';
 import type { ApprovalTimelineStore } from '../approval-timeline';
 
@@ -72,6 +79,8 @@ export interface DeviceDirectory {
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
   revoke(tenant: TenantId, deviceId: string): Promise<void>;
   list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
+  /** Set-wise tenant observation; revoked devices never contribute presence. */
+  readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness>;
   /** Pre-tenant. Two callers only: `POST /byok/challenge` and `POST /byok/token`. Never exposed through the tenant facade. */
   resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
 }
@@ -149,6 +158,7 @@ export const TASK_ATTEMPT_STATUSES = [
   'offered',
   'claimed',
   'running',
+  'cancel_requested',
   'complete',
   'failed',
   'cancelled',
@@ -163,6 +173,11 @@ export interface TaskAttempt {
   /** Set by `task.claim`, and only by the first one. Until then the task has no owner and the gate lets any of this tenant's devices through, matching the reference server. */
   readonly ownerDeviceId?: string;
   readonly status: TaskAttemptStatus;
+  /** Durable host cancellation authority. Its presence outranks later device terminal receipts. */
+  readonly cancellation?: {
+    readonly requestedAt: string;
+    readonly reason?: string;
+  };
   readonly updatedAt: string;
 }
 
@@ -170,6 +185,8 @@ export interface TaskAttemptStore {
   /** Called when an offer is enqueued: records the pending attempt with no owner yet. */
   open(tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt>;
   get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
+  /** Batch lookup used by mailbox projection; implementations must not turn one poll into N queries. */
+  getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
   /** First claim wins the ownership; a later claim by the same device is idempotent. No-op (returns `undefined`) for a task this tenant never offered. */
   claim(tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt | undefined>;
   /** Record a lifecycle transition. No-op (returns `undefined`) for an unknown task — same shape as the reference server's per-type handlers. */
@@ -177,6 +194,27 @@ export interface TaskAttemptStore {
     tenant: TenantId,
     input: { readonly taskId: string; readonly status: TaskAttemptStatus },
   ): Promise<TaskAttempt | undefined>;
+}
+
+export interface TaskCancellationRequest {
+  readonly taskId: string;
+  readonly proposedMessageId: string;
+  readonly reason?: string;
+  readonly materialize: (seq: number, messageId: string) => MailboxBody | Promise<MailboxBody>;
+}
+
+export interface TaskCancellationMutation {
+  readonly attempt: TaskAttempt;
+  /** Absent only when the task was already complete or failed before cancellation. */
+  readonly message?: MailboxMessage;
+}
+
+/**
+ * One atomic authority for the cancellation tombstone plus its durable device
+ * delivery. Implementations must commit both or neither.
+ */
+export interface TaskCancellationStore {
+  request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +388,7 @@ export interface CloudStores {
   readonly nonces: NonceStore;
   readonly dedup: InboundDedupStore;
   readonly tasks: TaskAttemptStore;
+  readonly cancellations: TaskCancellationStore;
   readonly receipts: RequestReceiptStore;
   readonly proofReceipts: ProofRequestReceiptStore;
   readonly blobs: CloudBlobStore;
@@ -365,6 +404,7 @@ export const CLOUD_STORE_NAMES = [
   'nonces',
   'dedup',
   'tasks',
+  'cancellations',
   'receipts',
   'proofReceipts',
   'blobs',

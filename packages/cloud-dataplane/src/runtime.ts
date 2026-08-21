@@ -38,6 +38,7 @@ export {
   PostgresProofRequestReceiptStore,
   PostgresRequestReceiptStore,
   PostgresTaskAttemptStore,
+  PostgresTaskCancellationStore,
   PostgresActivityStore,
   PostgresApprovalTimelineStore,
   PostgresDeviceAssertionReplayAuthority,

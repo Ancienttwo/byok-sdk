@@ -247,6 +247,9 @@ export type {
   TaskAttempt,
   TaskAttemptStatus,
   TaskAttemptStore,
+  TaskCancellationMutation,
+  TaskCancellationRequest,
+  TaskCancellationStore,
 } from './stores/ports';
 
 // In-memory reference implementations
@@ -264,6 +267,7 @@ export {
   InMemoryRequestReceiptStore,
   InMemoryProofRequestReceiptStore,
   InMemoryTaskAttemptStore,
+  InMemoryTaskCancellationStore,
   NONCE_TTL_MS,
   createInMemoryBlobs,
   createInMemoryCloudStores,

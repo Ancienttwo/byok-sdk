@@ -1,7 +1,6 @@
-import { isCoreError, PRESENCE_LEVELS } from '@byok-sdk/core';
-import { ConfiguredToolsetsSchema } from '@byok-sdk/protocol';
+import { isCoreError } from '@byok-sdk/core';
+import { PresencePublishRequestSchema } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
-import { z } from 'zod';
 import { appendActivityEvents, type ActivityBounds } from '../coordination';
 import { ActivityAppendRequestSchema } from '../activity';
 import { isCloudError } from '../errors';
@@ -17,11 +16,7 @@ export interface ActivityRouteDeps extends DeviceRouteDeps {
   readonly bounds: ActivityBounds;
 }
 
-const PresenceBodySchema = z.object({
-  level: z.enum(PRESENCE_LEVELS),
-  detail: z.string().optional(),
-  configuredToolsets: ConfiguredToolsetsSchema.optional(),
-});
+const PresenceBodySchema = PresencePublishRequestSchema;
 
 export function presencePublishHandler(deps: PresenceRouteDeps) {
   return async (c: Context): Promise<Response> => {
@@ -44,6 +39,19 @@ export function presencePublishHandler(deps: PresenceRouteDeps) {
           ...(parsed.data.configuredToolsets === undefined
             ? {}
             : { configuredToolsets: parsed.data.configuredToolsets }),
+          ...(parsed.data.clientVersion === undefined ? {} : { clientVersion: parsed.data.clientVersion }),
+          ...(parsed.data.protocolVersions === undefined
+            ? {}
+            : { protocolVersions: parsed.data.protocolVersions }),
+          ...(parsed.data.runtimes === undefined
+            ? {}
+            : {
+                runtimes: parsed.data.runtimes.map(({ id, version, authPresent }) => ({
+                  id,
+                  ...(version === undefined ? {} : { version }),
+                  ...(authPresent === undefined ? {} : { authPresent }),
+                })),
+              }),
           ttlMs: deps.ttlMs,
           minimumIntervalMs: deps.minimumIntervalMs,
         }),

@@ -223,11 +223,22 @@ async function recordTerminal(
   envelope: Envelope,
   status: 'complete' | 'failed' | 'cancelled',
 ): Promise<void> {
+  const attempt = await stores.tasks.get(taskId);
   const { created } = await stores.receipts.record({
     key: terminalReceiptKey(taskId),
     body: encodeEnvelope(envelope),
   });
+  if (attempt?.cancellation !== undefined) {
+    if (status === 'cancelled') {
+      await stores.tasks.recordStatus({ taskId, status: 'cancelled' });
+    }
+    return;
+  }
   if (!created) return;
-  await stores.tasks.recordStatus({ taskId, status });
+  const recordedAttempt = await stores.tasks.recordStatus({ taskId, status });
+  // The attempt mutation is the ordering CAS. Cancellation may have landed
+  // after the read above but before this write; in that race the store returns
+  // the cancellation-bearing attempt and no business projection is allowed.
+  if (recordedAttempt?.status !== status || recordedAttempt.cancellation !== undefined) return;
   await projectTerminalToReview(stores.board, taskId);
 }

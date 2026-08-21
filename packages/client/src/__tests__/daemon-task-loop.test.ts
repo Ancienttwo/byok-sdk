@@ -33,7 +33,7 @@ describe('daemon task loop (stub adapter + in-process WS server)', () => {
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
         workspaceRoot,

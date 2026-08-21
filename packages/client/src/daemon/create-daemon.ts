@@ -7,6 +7,7 @@ import {
   CONFIGURED_TOOLSETS_MAX_ITEMS,
   createEnvelope,
   encodeEnvelope,
+  PROTOCOL_VERSION,
   TASK_TRANSITIONS,
   ToolsetIdSchema,
 } from '@byok-sdk/protocol';
@@ -14,6 +15,10 @@ import { isAbsolute } from 'node:path';
 import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo, ToolsetId } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig } from '../types';
+import {
+  resolveLocalAgentReleaseIdentity,
+  type LocalAgentReleaseIdentity,
+} from '../release-identity';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { APPROVAL_MCP_SERVER_NAME, ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -173,6 +178,8 @@ export interface HostedJournalConfig {
 }
 
 export interface DaemonConfig {
+  /** Distribution-owned application release; observability only, never a protocol/capability gate. */
+  localAgentRelease: LocalAgentReleaseIdentity;
   productName: string;
   productId: string;
   serverUrl: string;
@@ -455,6 +462,8 @@ export interface PresenceConfig {
 }
 
 export interface DaemonStatus {
+  /** Process-immutable Local Agent application release captured at construction. */
+  localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
   paired: boolean;
   connected: boolean;
   /** True once the connection has fallen back to long-poll (protocol §8) — transport info only (finding F6): long-poll is a full transport, so work still proceeds normally while this holds; outbound envelopes POST to /byok/messages instead of going out over WS. */
@@ -974,6 +983,7 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
+  const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const mcpToolsets = resolveMcpToolsets(config.mcpToolsets);
   const configuredToolsets = Object.freeze(
     [...(mcpToolsets?.keys() ?? [])].sort(),
@@ -1182,6 +1192,8 @@ export function buildDaemonWithAdapters(
   // capability). The controller cancels an in-flight discovery during
   // shutdown so teardown never waits on a hung deployment.
   let presencePublisher: PresencePublisher | undefined;
+  /** Runtime facts are probed once per start and reused by WS + first-hop HTTP presence. */
+  let detectedRuntimeFacts: readonly RuntimeInfo[] = [];
   let presenceDiscovery: AbortController | undefined;
   /** Guards against a reconnect storm stacking overlapping declaration reads. */
   let presenceDiscoveryInFlight = false;
@@ -1447,6 +1459,7 @@ export function buildDaemonWithAdapters(
     // same as the `conn.hello.runtimes` it also feeds (see `detectRuntimes`'s
     // own doc comment on why this isn't re-probed on every reconnect).
     observer.noteRuntimesDetected(runtimes);
+    detectedRuntimeFacts = runtimes;
     const capabilities = computeCapabilities(adapters);
 
     // S3b: this daemon's journal identity — only knowable here, after
@@ -1553,6 +1566,10 @@ export function buildDaemonWithAdapters(
       approvalRegistry,
       storeDir,
       productId: config.productId,
+      // U2 terminal inference usage consumes the one U4a-resolved,
+      // process-immutable identity captured above. This is composition-only:
+      // TaskRunner receives no config, manifest, or second identity resolver.
+      localAgentRelease,
       approvalTimeoutMs: overrides.approvalTimeoutMs,
       // Finding F5(a): see TaskRunnerDeps.shutdownInterruptTimeoutMs's own doc comment.
       shutdownInterruptTimeoutMs: overrides.shutdown?.taskInterruptTimeoutMs,
@@ -1599,6 +1616,7 @@ export function buildDaemonWithAdapters(
       deviceId: record.deviceId,
       productId: config.productId,
       capabilities,
+      clientVersion: localAgentRelease.version,
       runtimes,
       configuredToolsets,
       auth,
@@ -1749,6 +1767,9 @@ export function buildDaemonWithAdapters(
             serverUrl: config.serverUrl,
             auth,
             configuredToolsets,
+            clientVersion: localAgentRelease.version,
+            protocolVersions: [PROTOCOL_VERSION],
+            runtimes: detectedRuntimeFacts,
             ...presenceCadence,
             onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
           });
@@ -2165,6 +2186,7 @@ export function buildDaemonWithAdapters(
     // list's count) — same source `approvals.list` itself calls.
     const pendingApprovals = approvalRegistry.list();
     return {
+      localAgentRelease,
       pid: process.pid,
       uptimeMs: startedAt !== undefined ? Date.now() - startedAt : 0,
       paired: auth.deviceId !== undefined,
@@ -2474,6 +2496,7 @@ export function buildDaemonWithAdapters(
 
   function status(): DaemonStatus {
     return {
+      localAgentRelease,
       paired: auth.deviceId !== undefined,
       connected: connectionState === 'open',
       degraded: connection?.isTransportDegraded() ?? false,

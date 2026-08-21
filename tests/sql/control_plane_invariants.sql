@@ -10,6 +10,9 @@
 --   deploy/sql/0006_device_presence_toolsets.sql (nullable logical-toolset inventory column)
 --   deploy/sql/0007_approval_timeline.sql (bounded approval lifecycle tail)
 --   deploy/sql/0008_device_assertion_replay.sql (single-use assertion exchange ledger)
+--   deploy/sql/0009_task_cancellation.sql (durable host cancellation tombstone and delivery identity)
+--   deploy/sql/0010_tenant_readiness.sql (optional frozen presence facts)
+--   deploy/sql/0011_tenant_erasure.sql (package/operator erasure receipt, not product data)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -49,10 +52,10 @@
 --
 -- Without this block the two below pass trivially against an empty schema, and
 -- a green result would mean "nothing was checked" rather than "nothing is
--- wrong". 26 is 0001's seven plus 0002's eleven plus 0003's three plus
--- 0004's one plus 0005's two plus 0007's one plus 0008's one; migrations that
--- only alter an existing table do not add to the count. A later migration may only
--- raise it.
+-- wrong". 27 is 0001's seven plus 0002's eleven plus 0003's three plus
+-- 0004's one plus 0005's two plus 0007's one plus 0008's one plus 0010's
+-- package/operator erasure receipt; 0009 alters the existing task table and is
+-- checked explicitly in section 0.1. A later migration may only raise this count.
 DO $$
 DECLARE
   port_tables integer;
@@ -64,10 +67,128 @@ BEGIN
      AND t.relkind = 'r'
      AND t.relname <> 'byok_schema_migration';
 
-  IF port_tables < 26 THEN
+  IF port_tables < 27 THEN
     RAISE EXCEPTION
-      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 26 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql)',
+      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 27 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql; 0009_task_cancellation.sql and 0010_tenant_readiness.sql are checked separately)',
       current_database(), current_schema(), port_tables;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.2 Tenant readiness presence projection has the additive fact columns
+-- ---------------------------------------------------------------------------
+--
+-- 0010 changes no key shape and creates no table, so the invariant is an
+-- explicit catalog check rather than another table-count increment. These
+-- fields are nullable by design: older daemons omit release/runtime/auth facts
+-- and the SDK must not synthesize them.
+DO $$
+DECLARE
+  missing_columns text;
+BEGIN
+  SELECT string_agg(required.name, ', ' ORDER BY required.name) INTO missing_columns
+    FROM (
+      VALUES
+        ('client_version'::text, 'text'::regtype),
+        ('protocol_versions'::text, 'jsonb'::regtype),
+        ('runtimes'::text, 'jsonb'::regtype)
+    ) AS required(name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'device_presence'
+         AND a.attname = required.name
+         AND a.atttypid = required.type_oid
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without 0010_tenant_readiness.sql: device_presence is missing column(s): %',
+      missing_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.3 Tenant-erasure receipt is installed, tenant-first, and distinct from
+--     product data deletion. Completed rows remain operator evidence.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  missing_columns text;
+BEGIN
+  SELECT string_agg(required.name, ', ' ORDER BY required.name) INTO missing_columns
+    FROM (
+      VALUES
+        ('operation_id'::text, 'text'::regtype),
+        ('state'::text, 'text'::regtype),
+        ('revision'::text, 'bigint'::regtype),
+        ('r2_complete'::text, 'boolean'::regtype),
+        ('sql_table_index'::text, 'integer'::regtype),
+        ('completed_at'::text, 'timestamp with time zone'::regtype)
+    ) AS required(name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'tenant_erasure_operation'
+         AND a.attname = required.name
+         AND a.atttypid = required.type_oid
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without 0011_tenant_erasure.sql: tenant_erasure_operation is missing column(s): %',
+      missing_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.1 Host cancellation migration is present with its exact durable columns
+-- ---------------------------------------------------------------------------
+--
+-- 0009 is additive and does not create another table, so the table-count guard
+-- above cannot distinguish a pre-0009 schema. All three columns are the one
+-- cancellation authority: timestamp/reason is the accepted host tombstone and
+-- message identity pins the one durable task.cancel delivery. They intentionally
+-- remain nullable because existing and successfully completed tasks were never
+-- cancelled.
+DO $$
+DECLARE
+  missing_columns text;
+BEGIN
+  SELECT string_agg(required.name, ', ' ORDER BY required.name) INTO missing_columns
+    FROM (
+      VALUES
+        ('cancel_requested_at'::text, 'timestamp with time zone'::regtype),
+        ('cancel_reason'::text, 'text'::regtype),
+        ('cancel_message_id'::text, 'text'::regtype)
+    ) AS required(name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'task'
+         AND a.attname = required.name
+         AND a.atttypid = required.type_oid
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without 0009_task_cancellation.sql: task is missing cancellation column(s): %',
+      missing_columns;
   END IF;
 END $$;
 

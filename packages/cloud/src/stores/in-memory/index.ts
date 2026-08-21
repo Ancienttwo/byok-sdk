@@ -17,7 +17,8 @@ import { InMemoryNonceStore } from './nonces';
 import { InMemoryPairingCodeStore } from './pairing-codes';
 import { InMemoryRequestReceiptStore } from './receipts';
 import { InMemoryProofRequestReceiptStore } from './proof-receipts';
-import { InMemoryTaskAttemptStore } from './task-attempts';
+import { InMemoryTaskAttemptState, InMemoryTaskAttemptStore } from './task-attempts';
+import { InMemoryTaskCancellationStore } from './task-cancellations';
 import { InMemoryActivityStore } from './activity';
 import { InMemoryApprovalTimelineStore } from './approval-timeline';
 
@@ -36,6 +37,7 @@ export { InMemoryPairingCodeStore } from './pairing-codes';
 export { InMemoryRequestReceiptStore } from './receipts';
 export { InMemoryProofRequestReceiptStore } from './proof-receipts';
 export { InMemoryTaskAttemptStore } from './task-attempts';
+export { InMemoryTaskCancellationStore } from './task-cancellations';
 export { InMemoryActivityStore } from './activity';
 export { InMemoryApprovalTimelineStore } from './approval-timeline';
 
@@ -57,8 +59,11 @@ export function createInMemoryCloudStores(
   clock: Clock,
   crypto: CloudCrypto,
   objects: ObjectStore,
+  mailbox: import('@byok-sdk/core').MailboxStore,
 ): InMemoryCloudComposition {
   const blobs = createInMemoryBlobs(clock, crypto, objects);
+  const taskState = new InMemoryTaskAttemptState(clock);
+  const tasks = new InMemoryTaskAttemptStore(clock, taskState);
   return {
     stores: {
       activity: new InMemoryActivityStore(clock),
@@ -67,7 +72,8 @@ export function createInMemoryCloudStores(
       pairingCodes: new InMemoryPairingCodeStore(clock),
       nonces: new InMemoryNonceStore(clock, crypto),
       dedup: new InMemoryInboundDedupStore(),
-      tasks: new InMemoryTaskAttemptStore(clock),
+      tasks,
+      cancellations: new InMemoryTaskCancellationStore(taskState, mailbox),
       receipts: new InMemoryRequestReceiptStore(clock),
       proofReceipts: new InMemoryProofRequestReceiptStore(clock),
       blobs: blobs.blobs,

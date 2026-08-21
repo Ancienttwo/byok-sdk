@@ -1,6 +1,6 @@
 # Plan: Host Cancellation Contract
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260821-1645
 > **Slug**: host-cancellation-contract
 > **Planning Source**: user-approved-plan
@@ -153,9 +153,27 @@ Before publish/deploy, revert this coherent work package including its migration
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Add red cloud, dataplane, and client tests for pre-lease, running, offline reconnect, cancellation/success race, duplicate cancellation, tenant isolation, and atomic rollback.
-- [ ] Add the hosted cancellation state/tombstone contract and one atomic cancellation mutation port without changing frozen wire message shapes.
-- [ ] Implement in-memory and PostgreSQL cancellation authorities plus the additive forward migration and migration parity tests.
-- [ ] Add `ByokCloud.cancelTask()`, long-poll suppression of cancelled offers, and cancellation-first terminal result projection.
-- [ ] Confirm the existing client `task.cancel` path interrupts/closes the runtime and emits one `task.cancelled`; change client production code only if red evidence requires it.
-- [ ] Update product/protocol truth, run targeted suites and all required checks, then record review/acceptance and canonical Obsidian memory.
+- [x] Enter the isolated contract worktree and prove `repo-harness state resolve --json` reports `allowedToEdit.decision=allow`; the handoff's root-worktree gate snapshot is superseded by this linked-worktree evidence.
+- [x] Add red cloud, dataplane, and client tests for pre-lease, running, offline reconnect, cancellation-before-success, duplicate cancellation, tenant isolation, atomic rollback, and the existing runtime interrupt acknowledgement path.
+- [x] Complete the remaining ordering matrix: success-before-cancel and truly concurrent duplicate cancellation, then run the real PostgreSQL path rather than accepting a skipped dataplane suite.
+- [x] Add the hosted cancellation state/tombstone contract and one atomic cancellation mutation port without changing frozen wire message shapes.
+- [x] Implement in-memory and PostgreSQL cancellation authorities plus the additive forward migration and migration parity tests.
+- [x] Add `ByokCloud.cancelTask()`, long-poll suppression of cancelled offers, and cancellation-first terminal result projection.
+- [x] Confirm the existing client `task.cancel` path interrupts/closes the runtime and emits one `task.cancelled`; red evidence required no client production change.
+- [x] Update product/protocol truth and run targeted suites plus all required build/typecheck/test/workflow checks.
+- [ ] Freeze the candidate revision, record independent review and the required typed external acceptance, then update canonical Obsidian implementation memory.
+
+## Upstream portfolio handoff (2026-08-21 live-state refresh)
+
+U1 remains this plan's only implementation scope. The adjacent Salesko
+dependencies are isolated as follows:
+
+| Package | Plan authority | Ordering / ownership |
+|---|---|---|
+| U2 terminal inference usage | `plans/plan-20260821-1710-terminal-inference-usage.md` | Separate worktree; owns terminal protocol schema after U1 releases `docs/protocol.md`; does not reuse storage usage. |
+| U3 tenant readiness | `plans/plan-20260821-1715-tenant-readiness-primitives.md` | Starts after U4a freezes the single Local Agent identity projection; SDK owns aggregation and TTL semantics. |
+| U4 release identity/hygiene | `plans/plan-20260821-1516-local-agent-release-identity.md` | Reuse existing plan; packed keys/core metadata and release hygiene remain its release boundary. |
+| U5 tenant erasure | `plans/plan-20260821-1720-tenant-erasure.md` | Independent maintenance worktree; bases its migration ordinal after U1 and never shares U1 cleanup/store files concurrently. |
+
+No package in this portfolio authorizes publish, deploy, production migration,
+credential/secret mutation, or downstream Salesko edits.

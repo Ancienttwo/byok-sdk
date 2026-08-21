@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { CONTENT_HASH_RE } from './blob';
 import { EnvelopeSchema } from './envelope';
+import {
+  ConfiguredToolsetsSchema,
+  ProtocolVersionNumberSchema,
+  RuntimeIdSchema,
+} from './messages';
 
 /**
  * HTTP-side request/response shapes for the reference server's auth and blob
@@ -70,6 +75,39 @@ export const TokenResponseSchema = z.object({
   expiresAt: z.iso.datetime({ offset: true }),
 });
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// PUT /byok/presence — first-hop daemon observation. The body carries only
+// facts captured by the daemon's frozen start snapshot; omitted release,
+// runtime, and auth fields remain unknown rather than guessed.
+// ---------------------------------------------------------------------------
+
+/** The hosted default is byte-bounded independently; this caps protocol input before it reaches a handler. */
+export const PRESENCE_DETAIL_MAX_LENGTH = 512;
+export const PRESENCE_RUNTIME_VERSION_MAX_LENGTH = 128;
+
+/**
+ * Presence is a readiness observation, not a second runtime-capability
+ * protocol. It retains only the facts the cloud persists and bounds every
+ * string/array/numeric input at this public request boundary.
+ */
+const PresenceRuntimeFactSchema = z.object({
+  id: RuntimeIdSchema,
+  version: z.string().min(1).max(PRESENCE_RUNTIME_VERSION_MAX_LENGTH).optional(),
+  authPresent: z.boolean().optional(),
+});
+
+export const PresencePublishRequestSchema = z.object({
+  level: z.enum(['online', 'thinking', 'working', 'error', 'offline']),
+  detail: z.string().max(PRESENCE_DETAIL_MAX_LENGTH).optional(),
+  configuredToolsets: ConfiguredToolsetsSchema.optional(),
+  /** U4a Local Agent release version; never inferred from a host package. */
+  clientVersion: z.string().min(1).max(128).optional(),
+  protocolVersions: z.array(ProtocolVersionNumberSchema).max(16).optional(),
+  /** Runtime version/auth facts from the same real probe as conn.hello. */
+  runtimes: z.array(PresenceRuntimeFactSchema).max(16).optional(),
+});
+export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema>;
 
 /**
  * Revocation is server-side only (dashboard/API call on the SaaS's own

@@ -89,6 +89,20 @@ describe('GET /byok/events cursor semantics', () => {
     expect(rest.events.map((event) => event.seq)).toEqual([two.seq]);
   });
 
+  it('scans past a filtered cancelled offer so a one-row page still delivers the following cancel', async () => {
+    const harness = createHarness({ eventsPageLimit: 1 });
+    const device = await harness.pairDevice(TENANT_A);
+    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'stop before lease');
+
+    const page = await poll(harness, device.authorization);
+
+    expect(page.events).toHaveLength(1);
+    expect(page.events[0]).toMatchObject({ type: 'task.cancel', task_id: offer.taskId, seq: 2 });
+    expect(page.cursor).toBe(2);
+    expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(0);
+  });
+
   it('does not treat a cursor at or below the ack position as an ack attempt', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

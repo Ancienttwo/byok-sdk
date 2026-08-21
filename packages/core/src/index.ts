@@ -96,7 +96,11 @@ export type {
   PresenceHint,
   PresenceHintInput,
   PresenceLevel,
+  PresenceRuntimeFact,
   PresenceStore,
+  TenantReadinessDevice,
+  TenantReadinessPresence,
+  TenantReadiness,
 } from './presence';
 
 // Content addressing + object manifest (§12.7.4, §12.7.8)

@@ -42,7 +42,7 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         // Fail over to long-poll after just 1 failed WS attempt so the test

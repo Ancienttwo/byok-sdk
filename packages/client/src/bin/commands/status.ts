@@ -45,6 +45,7 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   const tasks = deriveTasksFromEvents(events);
 
   const view: StatusView = {
+    localAgentRelease: config.localAgentRelease,
     productName: config.productName,
     productId: config.productId,
     branding: config.branding,

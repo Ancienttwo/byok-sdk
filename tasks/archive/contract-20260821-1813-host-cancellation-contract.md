@@ -1,8 +1,15 @@
+> **Archived**: 2026-08-21 18:13
+> **Related Plan**: plans/archive/plan-20260821-1645-host-cancellation-contract.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260821-1813
+
 # Task Contract: host-cancellation-contract
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260821-1645-host-cancellation-contract.md
 > **Task Profile**: code-change
+> **Workflow Profile**: strict
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
@@ -82,7 +89,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"u1-contract-tests","kind":"deterministic_test","paths":["*"]},{"id":"u1-postgres-minio-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
@@ -101,6 +108,7 @@ allowed_paths:
   - tasks/contracts/20260821-1645-host-cancellation-contract.contract.md
   - tasks/reviews/20260821-1645-host-cancellation-contract.review.md
   - tasks/notes/20260821-1645-host-cancellation-contract.notes.md
+  - tasks/todos.md
   - .ai/harness/checks/latest.json
   - .ai/harness/runs/
   - deploy/sql/
@@ -110,6 +118,7 @@ allowed_paths:
   - packages/client/src/
   - packages/testkit/src/
   - packages/conformance/src/
+  - tests/sql/control_plane_invariants.sql
 ```
 
 ## Evidence Requirements
@@ -162,11 +171,11 @@ exit_criteria:
   artifacts_exist:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260821-1645-host-cancellation-contract.notes.md
-  tests_pass:
-    - path: packages/cloud/src/__tests__/task-cancellation.test.ts
-    - path: packages/cloud-dataplane/src/__tests__/task-cancellation.test.ts
-    - path: packages/client/src/__tests__/task-runner-cancellation.test.ts
   commands_succeed:
+    - bun run --cwd packages/cloud test -- src/__tests__/task-cancellation.test.ts src/__tests__/mailbox-cursor.test.ts src/__tests__/inbound-gate.test.ts
+    - bun run --cwd packages/client test -- src/__tests__/task-runner-cancel-race.test.ts src/__tests__/real-cloud-longpoll.test.ts
+    - bun run --cwd packages/conformance test -- src/compositions/in-memory-cloud.test.ts
+    - BYOK_REQUIRE_DATAPLANE=1 bun run --cwd packages/cloud-dataplane test -- src/__tests__/task-cancellation.test.ts src/__tests__/invariants.test.ts
     - bun run build
     - bun run typecheck
     - bun run test

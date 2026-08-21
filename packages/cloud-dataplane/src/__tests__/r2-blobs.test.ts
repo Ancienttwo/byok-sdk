@@ -95,8 +95,8 @@ describe('R2 maintenance surface', () => {
            <ListBucketResult>
              <IsTruncated>true</IsTruncated>
              <NextContinuationToken>opaque+/=token</NextContinuationToken>
-             <Contents><Key>tenant-a/sha256/${hashA.slice('sha256:'.length)}</Key><Size>7</Size></Contents>
-             <Contents><Key>tenant-a/sha256/not-a-hash</Key><Size>9</Size></Contents>
+             <Contents><Key>tenants/tenant-a/objects/sha256/${hashA.slice('sha256:'.length)}</Key><Size>7</Size></Contents>
+             <Contents><Key>tenants/tenant-a/objects/sha256/not-a-hash</Key><Size>9</Size></Contents>
            </ListBucketResult>`,
           { status: 200 },
         );
@@ -106,13 +106,13 @@ describe('R2 maintenance surface', () => {
     const page = await store.listTenantObjects(tenant, 'before+/=token', 2);
     expect(page).toEqual({
       objects: [
-        { key: `tenant-a/sha256/${hashA.slice('sha256:'.length)}`, hash: hashA, byteSize: 7n },
-        { key: 'tenant-a/sha256/not-a-hash', byteSize: 9n },
+        { key: `tenants/tenant-a/objects/sha256/${hashA.slice('sha256:'.length)}`, hash: hashA, byteSize: 7n },
+        { key: 'tenants/tenant-a/objects/sha256/not-a-hash', byteSize: 9n },
       ],
       nextContinuationToken: 'opaque+/=token',
     });
     const url = new URL(requests[0]!.url);
-    expect(url.searchParams.get('prefix')).toBe('tenant-a/sha256/');
+    expect(url.searchParams.get('prefix')).toBe('tenants/tenant-a/objects/sha256/');
     expect(url.searchParams.get('max-keys')).toBe('2');
     expect(url.searchParams.get('continuation-token')).toBe('before+/=token');
   });

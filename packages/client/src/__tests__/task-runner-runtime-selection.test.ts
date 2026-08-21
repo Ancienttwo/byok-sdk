@@ -61,7 +61,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     const storeDir = await tmpDir('byok-selection-store-');
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-selection',
         serverUrl: server.url,
         workspaceRoot,
@@ -289,7 +289,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       const prepareSpy = vi.spyOn(pi, 'prepare');
       daemon = createDaemonWithAdapters(
         {
-          productName: 'Test Product',
+          localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pi-falsifier',
           serverUrl: server.url,
           workspaceRoot,

@@ -42,10 +42,10 @@ import { allocateMailboxSequence } from './mailbox-sequence';
 
 const DEFAULT_READ_LIMIT = 50;
 
-const OUTBOX_COLUMNS =
+export const OUTBOX_COLUMNS =
   'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at';
 
-interface OutboxRow {
+export interface OutboxRow {
   readonly tenant_id: string;
   readonly device_id: string;
   readonly seq: bigint;
@@ -68,7 +68,7 @@ interface RetentionRow {
   readonly released_bytes: bigint;
 }
 
-function toMessage(row: OutboxRow): MailboxMessage {
+export function toMailboxMessage(row: OutboxRow): MailboxMessage {
   return {
     tenantId: row.tenant_id as TenantId,
     deviceId: row.device_id,
@@ -108,7 +108,7 @@ export class PostgresMailboxStore implements MailboxStore {
       const replayed = existing.rows[0];
       if (replayed !== undefined) {
         await client.query('COMMIT');
-        return toMessage(replayed);
+        return toMailboxMessage(replayed);
       }
 
       // The device_stream row lock serializes the whole allocate -> materialize
@@ -124,7 +124,7 @@ export class PostgresMailboxStore implements MailboxStore {
       const winnerAfterLock = serializedExisting.rows[0];
       if (winnerAfterLock !== undefined) {
         await client.query('ROLLBACK');
-        return toMessage(winnerAfterLock);
+        return toMailboxMessage(winnerAfterLock);
       }
       const materialized = await input.materialize(seq);
       const now = this.#now();
@@ -147,7 +147,7 @@ export class PostgresMailboxStore implements MailboxStore {
       const row = inserted.rows[0];
       if (row !== undefined) {
         await client.query('COMMIT');
-        return toMessage(row);
+        return toMailboxMessage(row);
       }
 
       // A concurrent append with the same idempotency key won while this
@@ -166,7 +166,7 @@ export class PostgresMailboxStore implements MailboxStore {
           `Message ${input.messageId} vanished during an idempotent append.`,
         );
       }
-      return toMessage(won);
+      return toMailboxMessage(won);
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});
       throw cause;
@@ -187,7 +187,7 @@ export class PostgresMailboxStore implements MailboxStore {
       [tenant, query.deviceId, query.afterSeq, limit + 1],
     );
 
-    const page = result.rows.slice(0, limit).map(toMessage);
+    const page = result.rows.slice(0, limit).map(toMailboxMessage);
     return {
       messages: page,
       // Nothing above was mutated, so an identical call replays the same page.

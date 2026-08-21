@@ -41,6 +41,8 @@ export interface WsTransportOptions {
   deviceId: string;
   productId: string;
   capabilities: CapabilityFlag[];
+  /** U4a Local Agent release version; the sole client-version authority. */
+  clientVersion?: string;
   /** Detected runtimes, sent on every `conn.hello` (protocol §10 gap #4/#11). */
   runtimes?: RuntimeInfo[];
   /** Sorted logical IDs configured locally; no MCP executable definition crosses the wire. */
@@ -198,6 +200,7 @@ export class WsTransport {
         capabilities: this.opts.capabilities,
         deviceId: this.opts.deviceId,
         productId: this.opts.productId,
+        clientVersion: this.opts.clientVersion,
         runtimes: this.opts.runtimes,
         configuredToolsets:
           this.opts.configuredToolsets === undefined

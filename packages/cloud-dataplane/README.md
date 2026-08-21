@@ -5,14 +5,15 @@ implementations of **all ten cloud-local store ports and all seven `@byok-sdk/co
 ports**, the R2/S3 object adapter that backs the blob port, and the forward-only
 migration runner that creates the tables they read.
 
-Three store/maintenance compositions plus one transaction authority ship from here. `createPostgresCloudStores` supplies the full
+Four store/maintenance compositions plus one transaction authority ship from here. `createPostgresCloudStores` supplies the full
 `CloudStores` bundle (`activity`, `devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
 `receipts`, `proofReceipts`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
 supplies the full `CoreStores` bundle (`mailbox`, `board`, `truth`, `presence`,
 `objects`, `quota`, `skillPacks`). Both return every port rather than a subset,
 because the conformance suites certify a composition as a whole — there is no
 partial bundle for them to run. `createPostgresCloudMaintenance` is the third,
-host-only operational composition; it is deliberately outside both port
+host-only operational composition; `createPostgresTenantErasure` is the fourth,
+Node-only destructive operator composition. Both deliberately sit outside port
 inventories.
 
 `PostgresDeviceAssertionReplayAuthority` is a separate online security
@@ -54,14 +55,15 @@ the SDK never detects where it is running and never falls back between the two.
 
 - **Node/VPS resident service.** Import the package root
   (`@byok-sdk/cloud-dataplane`) and talk to Postgres and R2/S3 directly. The
-  migration runner and the cleanup/maintenance composition run in-process:
+  migration runner, cleanup/maintenance, and tenant erasure run in-process:
   this is the entry that carries the Node-only operations.
 - **Cloudflare Workers.** Import `@byok-sdk/cloud-dataplane/runtime` — the
   online request path alone (pool, both store compositions, R2 blob store,
   truth committer). Its graph never reaches a node builtin beyond what
   `nodejs_compat` provides, so `pg` stays external in this package's build and
   is satisfied by the platform: Hyperdrive terminates the database connection,
-  and R2 is reached over `fetch` with `aws4fetch`. Migrations and cleanup have
+  and R2 is reached over `fetch` with `aws4fetch`. Migrations, cleanup, and
+  tenant erasure have
   no place on a Worker — they read files off disk — so run them from a CI job
   or an operator's Node process against the direct DSN:
 
@@ -167,6 +169,58 @@ those ports. It sits here rather than inside `@byok-sdk/cloud` for two reasons: 
 `hono` user should not be made to install a database driver, and `@byok-sdk/core`
 and `@byok-sdk/cloud` stay loadable on Workers precisely because `pg` never enters
 their dependency graph.
+
+## Tenant erasure
+
+`createPostgresTenantErasure` is a separate Node-only operator primitive, not a
+zero-retention shortcut and not `PostgresCloudCleanup` with a different cursor.
+It owns the product-table inventory, FK-safe deletion order, one operation id,
+CAS lease, bounded R2/SQL pages, and completed receipt. The
+`tenant_erasure_operation` row is package/operator control evidence rather than
+tenant product data: it deliberately remains after completion. The migration
+ledger, deployment config, and every other tenant are never touched.
+
+The host must authorize the request and quiesce product writes before starting;
+the SDK cannot manufacture a host write fence. Use a direct Postgres DSN, never
+a request-path pooler, and configure the exact same immutable `keyPrefix` used
+by the serving blob composition.
+
+```ts
+import {
+  createByokPool,
+  createPostgresTenantErasure,
+  type TenantErasureResult,
+} from '@byok-sdk/cloud-dataplane';
+
+const pool = createByokPool({ connectionString: env.BYOK_DIRECT_DATABASE_URL });
+const erasure = createPostgresTenantErasure({
+  pool,
+  clock: { now: () => new Date() },
+  objectStorage: {
+    endpoint: env.R2_ENDPOINT,
+    bucket: env.R2_BUCKET,
+    accessKeyId: env.R2_ACCESS_KEY_ID,
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+    region: 'auto',
+    keyPrefix: 'production', // omit only when the deployment has always been unprefixed
+    signingClock: { now: () => new Date() },
+  },
+});
+
+const result: TenantErasureResult = await erasure.eraseTenant(tenantId, operationId);
+// `outstanding` / `partial`: retry the same operationId; `conflict`: another
+// unfinished operation owns this tenant; `completed`: retain the receipt.
+```
+
+Erasure lists only the canonical `tenants/<tenant>/objects/sha256/...` namespace
+(with the configured deployment prefix), deletes each listed canonical object
+before any product table page, and persists progress only after the delete
+returns. A missing/canonical object is a replay-safe delete; a malformed key
+under that namespace is schema/layout drift and returns typed `partial` without
+starting SQL deletion. A response loss/crash between R2 and SQL replays the
+object deletion before it can advance to rows. See
+`deploy/runbooks/tenant-erasure.md` for the operator sequence and recovery
+rules.
 
 Dependency direction is one-way: `cloud-dataplane → core + cloud + protocol +
 pg +` the explicit S3 signer/XML parser. The protocol edge is used only by the

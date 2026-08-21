@@ -5,7 +5,7 @@ import { createDaemon, type DaemonConfig } from '../daemon/create-daemon';
 
 function config(piByokLauncher: DaemonConfig['piByokLauncher']): DaemonConfig {
   return {
-    productName: 'Test',
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
     productId: 'pi-launcher-config-test',
     serverUrl: 'http://127.0.0.1:1',
     workspaceRoot: path.join(os.tmpdir(), 'byok-pi-launcher-workspaces'),

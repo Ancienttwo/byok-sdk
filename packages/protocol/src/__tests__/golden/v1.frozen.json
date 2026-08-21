@@ -184,11 +184,12 @@
       "type": "object",
       "properties": {
         "protocolVersions": {
+          "maxItems": 16,
           "type": "array",
           "items": {
             "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "minimum": 0,
+            "maximum": 2147483647
           }
         },
         "capabilities": {
@@ -202,6 +203,11 @@
         },
         "productId": {
           "type": "string"
+        },
+        "clientVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         },
         "runtimes": {
           "type": "array",
@@ -1133,7 +1139,61 @@
             "additionalProperties": false
           }
         },
-        "document": {}
+        "document": {},
+        "usage": {
+          "type": "object",
+          "properties": {
+            "runtime": {
+              "type": "string",
+              "enum": [
+                "pi",
+                "claude",
+                "codex"
+              ]
+            },
+            "provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "promptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "completionTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "durationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 604800000
+            },
+            "clientVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "reportedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "runtime",
+            "clientVersion",
+            "reportedAt"
+          ],
+          "additionalProperties": false
+        }
       },
       "required": [
         "summary",
@@ -1150,6 +1210,60 @@
         },
         "retryable": {
           "type": "boolean"
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "runtime": {
+              "type": "string",
+              "enum": [
+                "pi",
+                "claude",
+                "codex"
+              ]
+            },
+            "provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "promptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "completionTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "durationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 604800000
+            },
+            "clientVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "reportedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "runtime",
+            "clientVersion",
+            "reportedAt"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -1163,6 +1277,60 @@
       "properties": {
         "reason": {
           "type": "string"
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "runtime": {
+              "type": "string",
+              "enum": [
+                "pi",
+                "claude",
+                "codex"
+              ]
+            },
+            "provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "promptTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "completionTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "durationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 604800000
+            },
+            "clientVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "reportedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "runtime",
+            "clientVersion",
+            "reportedAt"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -1243,11 +1411,12 @@
             "type": "object",
             "properties": {
               "protocolVersions": {
+                "maxItems": 16,
                 "type": "array",
                 "items": {
                   "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                  "minimum": 0,
+                  "maximum": 2147483647
                 }
               },
               "capabilities": {
@@ -1261,6 +1430,11 @@
               },
               "productId": {
                 "type": "string"
+              },
+              "clientVersion": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
               },
               "runtimes": {
                 "type": "array",
@@ -2813,7 +2987,61 @@
                   "additionalProperties": false
                 }
               },
-              "document": {}
+              "document": {},
+              "usage": {
+                "type": "object",
+                "properties": {
+                  "runtime": {
+                    "type": "string",
+                    "enum": [
+                      "pi",
+                      "claude",
+                      "codex"
+                    ]
+                  },
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "promptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "completionTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 604800000
+                  },
+                  "clientVersion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "reportedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                },
+                "required": [
+                  "runtime",
+                  "clientVersion",
+                  "reportedAt"
+                ],
+                "additionalProperties": false
+              }
             },
             "required": [
               "summary",
@@ -2874,6 +3102,60 @@
               },
               "retryable": {
                 "type": "boolean"
+              },
+              "usage": {
+                "type": "object",
+                "properties": {
+                  "runtime": {
+                    "type": "string",
+                    "enum": [
+                      "pi",
+                      "claude",
+                      "codex"
+                    ]
+                  },
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "promptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "completionTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 604800000
+                  },
+                  "clientVersion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "reportedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                },
+                "required": [
+                  "runtime",
+                  "clientVersion",
+                  "reportedAt"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -2931,6 +3213,60 @@
             "properties": {
               "reason": {
                 "type": "string"
+              },
+              "usage": {
+                "type": "object",
+                "properties": {
+                  "runtime": {
+                    "type": "string",
+                    "enum": [
+                      "pi",
+                      "claude",
+                      "codex"
+                    ]
+                  },
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "promptTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "completionTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 604800000
+                  },
+                  "clientVersion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "reportedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                },
+                "required": [
+                  "runtime",
+                  "clientVersion",
+                  "reportedAt"
+                ],
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -3568,6 +3904,83 @@
       ],
       "additionalProperties": false
     },
+    "presencePublishRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "online",
+            "thinking",
+            "working",
+            "error",
+            "offline"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "configuredToolsets": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+          }
+        },
+        "clientVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "protocolVersions": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        },
+        "runtimes": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "pi",
+                  "claude",
+                  "codex"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "authPresent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "additionalProperties": false
+    },
     "createBlobRequest": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3680,11 +4093,12 @@
                     "type": "object",
                     "properties": {
                       "protocolVersions": {
+                        "maxItems": 16,
                         "type": "array",
                         "items": {
                           "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
+                          "minimum": 0,
+                          "maximum": 2147483647
                         }
                       },
                       "capabilities": {
@@ -3698,6 +4112,11 @@
                       },
                       "productId": {
                         "type": "string"
+                      },
+                      "clientVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
                       },
                       "runtimes": {
                         "type": "array",
@@ -5250,7 +5669,61 @@
                           "additionalProperties": false
                         }
                       },
-                      "document": {}
+                      "document": {},
+                      "usage": {
+                        "type": "object",
+                        "properties": {
+                          "runtime": {
+                            "type": "string",
+                            "enum": [
+                              "pi",
+                              "claude",
+                              "codex"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "promptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "completionTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 604800000
+                          },
+                          "clientVersion": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "reportedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "runtime",
+                          "clientVersion",
+                          "reportedAt"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
                     "required": [
                       "summary",
@@ -5311,6 +5784,60 @@
                       },
                       "retryable": {
                         "type": "boolean"
+                      },
+                      "usage": {
+                        "type": "object",
+                        "properties": {
+                          "runtime": {
+                            "type": "string",
+                            "enum": [
+                              "pi",
+                              "claude",
+                              "codex"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "promptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "completionTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 604800000
+                          },
+                          "clientVersion": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "reportedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "runtime",
+                          "clientVersion",
+                          "reportedAt"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -5368,6 +5895,60 @@
                     "properties": {
                       "reason": {
                         "type": "string"
+                      },
+                      "usage": {
+                        "type": "object",
+                        "properties": {
+                          "runtime": {
+                            "type": "string",
+                            "enum": [
+                              "pi",
+                              "claude",
+                              "codex"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "promptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "completionTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 604800000
+                          },
+                          "clientVersion": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "reportedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "runtime",
+                          "clientVersion",
+                          "reportedAt"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false
@@ -5529,11 +6110,12 @@
                     "type": "object",
                     "properties": {
                       "protocolVersions": {
+                        "maxItems": 16,
                         "type": "array",
                         "items": {
                           "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
+                          "minimum": 0,
+                          "maximum": 2147483647
                         }
                       },
                       "capabilities": {
@@ -5547,6 +6129,11 @@
                       },
                       "productId": {
                         "type": "string"
+                      },
+                      "clientVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
                       },
                       "runtimes": {
                         "type": "array",
@@ -7099,7 +7686,61 @@
                           "additionalProperties": false
                         }
                       },
-                      "document": {}
+                      "document": {},
+                      "usage": {
+                        "type": "object",
+                        "properties": {
+                          "runtime": {
+                            "type": "string",
+                            "enum": [
+                              "pi",
+                              "claude",
+                              "codex"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "promptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "completionTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 604800000
+                          },
+                          "clientVersion": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "reportedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "runtime",
+                          "clientVersion",
+                          "reportedAt"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
                     "required": [
                       "summary",
@@ -7160,6 +7801,60 @@
                       },
                       "retryable": {
                         "type": "boolean"
+                      },
+                      "usage": {
+                        "type": "object",
+                        "properties": {
+                          "runtime": {
+                            "type": "string",
+                            "enum": [
+                              "pi",
+                              "claude",
+                              "codex"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "promptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "completionTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 604800000
+                          },
+                          "clientVersion": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "reportedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "runtime",
+                          "clientVersion",
+                          "reportedAt"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -7217,6 +7912,60 @@
                     "properties": {
                       "reason": {
                         "type": "string"
+                      },
+                      "usage": {
+                        "type": "object",
+                        "properties": {
+                          "runtime": {
+                            "type": "string",
+                            "enum": [
+                              "pi",
+                              "claude",
+                              "codex"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "promptTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "completionTokens": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000000
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 604800000
+                          },
+                          "clientVersion": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "reportedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "runtime",
+                          "clientVersion",
+                          "reportedAt"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false

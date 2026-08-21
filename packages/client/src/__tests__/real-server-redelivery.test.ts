@@ -53,7 +53,7 @@ describe('redelivery across a real reconnect (finding F2, real @byok-sdk/server 
     // process restart (which would also lose the in-flight session this
     // test needs to still be there after reconnecting).
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         liveness: { timeoutMs: 150, checkIntervalMs: 20 },

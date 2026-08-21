@@ -53,8 +53,57 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The
-next aligned dispatch candidate is `0.5.0`; publish still requires a separate
+next aligned dispatch candidate is `0.6.0`; publish still requires a separate
 release authorization and registry readback.
+
+## Local Agent application release authority
+
+The Local Agent application release is an observability identity, separate
+from the BYOK wire protocol version, advertised capabilities, and the detected
+Pi/Claude/Codex executable versions. An SDK embedder must pass one canonical
+strict-SemVer `LocalAgentReleaseIdentity` when it constructs a daemon. The
+daemon validates and copies it once, keeps it immutable for that process, and
+projects the same value through `Daemon.status()` and the authenticated local
+control status. It never derives the value from a runtime version, package
+path, lockfile, owner-record schema, or network lookup.
+
+The official `byok-agent` CLI receives its identity from the client package
+manifest at build time. CLI JSON config cannot author or override that field.
+`byok-agent --version` is a zero-state readback: it needs no config, user store,
+runtime probe, network, or daemon. `byok-agent status` reports both the invoking
+CLI release and, when reachable, the running daemon release, so a mismatch is
+observable without becoming a gate. An older local-control peer that predates
+the field is rendered as `unknown`; the CLI does not infer a replacement.
+
+Whether a release can run is decided by wire-protocol compatibility and the
+capabilities/runtime/toolsets required by the concrete action. Being behind a
+host's Latest release is only an operator-facing update signal; it must not
+block start, pair, connect, or work the daemon is otherwise capable of doing.
+The release identity contract does not add Latest fetching, a
+minimum-supported-version policy, or self-update behavior; U3's observation
+projection below is not a release gate.
+
+## Tenant readiness observation
+
+The SDK exposes a tenant-scoped observed read model over two authorities:
+durable paired-device rows (active versus revoked) and the latest unexpired
+presence hint for each device. It reports active paired count, revoked count,
+live observed presence count, and deterministic counts for every presence
+level. `now >= expiresAt` means absence. A revoked device never contributes to
+observed presence, even when its lossy row remains in storage. A tenant with
+no devices or no live hints returns zeroes, and tenant queries cannot see rows
+owned by another tenant. The same aggregate includes each tenant-scoped
+device's durable product/name/revocation state and, for active devices only,
+the optional unexpired presence facts (release, protocol versions, runtime and
+auth observations). Hosts therefore consume one projection rather than
+joining device and presence lists.
+
+This is an SDK-owned observation projection, not a readiness claim or an
+execution, authorization, capability, scheduler, load, or admission gate.
+Hosts consume the aggregate; they must not re-join `listDevices()` and
+`listPresence()` or invent expiry/revocation semantics. Release identity comes
+only from U4a `localAgentRelease`; runtime version/auth fields are emitted only
+when a real local probe supplied them, and missing facts stay omitted.
 
 ## Runtime operation authority
 
@@ -108,6 +157,27 @@ TaskRunner projects the typed retry disposition onto the existing
 event variants do not change. Interruption/close evidence is a separate
 teardown lifecycle and cannot rewrite an already established semantic result.
 
+### Terminal inference usage observation
+
+The three terminal messages may carry one bounded `TerminalInferenceUsage`
+observation. It is a device/runtime telemetry projection, never storage usage,
+billing, quota, entitlement, retry policy, or task-state authority. The client
+uses the adapter that actually started the task for `runtime`, copies only the
+last normalized terminal usage observation rather than summing events, and
+omits values the adapter did not expose. Requested `dispatchSelection`
+provider/model values are not telemetry and are never echoed as a substitute.
+
+`clientVersion` comes only from U4a's process-immutable
+`localAgentRelease.version`; no runtime/package/lockfile/path/network fallback
+exists. A direct legacy/internal runner without that composed identity omits
+the optional usage block. Token metrics are direct Codex/Claude terminal
+observations when present; Pi currently exposes no native usage observation and
+therefore omits the block rather than fabricating one from device facts.
+The protocol enforces safe non-negative bounded numbers and a canonical UTC
+device timestamp. Cloud records first-terminal-wins as usual and projects the
+same typed object from the winning receipt without parsing raw receipt bytes
+at callers or coupling it to `TenantStorageUsage`.
+
 ### Quiescent runtime disposal
 
 `Session.close()` is a bounded ownership receipt, not a best-effort signal. It
@@ -122,6 +192,30 @@ the semantic terminal once, but retains its active entry and Git workspace
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
 publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
+
+## Hosted task cancellation authority
+
+The hosted cloud exposes one tenant-scoped `cancelTask(taskId, reason?)`
+control-plane operation. Acceptance is durable and idempotent: the first call
+atomically records a cancellation tombstone and appends the existing frozen-v1
+`task.cancel` envelope to the target device mailbox. An unknown or cross-tenant
+task id fails closed. Retrying cannot change the first reason, timestamp, or
+mailbox delivery identity.
+
+An unleased offer becomes `cancelled` immediately and the original
+`task.offer` is suppressed from later long-poll delivery. A leased attempt
+becomes `cancel_requested` until its device processes the durable command,
+interrupts the active Session, and returns `task.cancelled`; that acknowledgement
+moves the attempt to `cancelled`. The tombstone remains authoritative while a
+device is offline, so reconnect cannot start cancelled work.
+
+Cancellation acceptance is also the product terminal-truth boundary. A
+concurrent or late `task.complete` receipt may be retained as raw audit evidence,
+but it cannot replace the cancelled result or create a review/board side effect.
+This does not add a second wire state or a process-kill API: `cancel_requested`
+is a hosted attempt-delivery state, while the existing client owns
+`Session.interrupt()` and the existing `task.cancel` / `task.cancelled` messages
+remain the only device protocol.
 
 ## Core pi runtime contract
 

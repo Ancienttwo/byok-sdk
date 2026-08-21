@@ -125,7 +125,7 @@ describe('device assertion broker: assertion.issue', () => {
     const workspaceRoot = await tmpDir(`byok-assert-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-assert-${productId}-store-`);
     const full: DaemonConfig = {
-      productName: 'Acme',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId,
       serverUrl: server.url,
       workspaceRoot,
@@ -702,7 +702,7 @@ describe('device assertion broker: config validation is a construction error', (
   function build(deviceAssertion: unknown): () => Daemon {
     const unique = `${process.pid}-${configSeq++}`;
     const config: DaemonConfig = {
-      productName: 'Acme',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: `acme-assert-config-${unique}`,
       serverUrl: 'https://api.example.com',
       workspaceRoot: path.join(os.tmpdir(), `byok-assert-config-ws-${unique}`),

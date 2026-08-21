@@ -134,6 +134,16 @@ the historical envelope corpus (`v1.envelopes.ndjson`) was NOT touched,
 since a pre-`document` peer's committed bytes must keep parsing unchanged —
 which is exactly what proves the change additive.
 
+**Landed additive minor: terminal `usage`.** `task.complete`, `task.fail`,
+and `task.cancelled` each gain the same OPTIONAL `TerminalInferenceUsage`
+field. This is an observability-only fact attached to a terminal receipt, not
+a capability, task-state transition, billing record, storage usage, quota, or
+entitlement input. The field is optional so an old daemon's terminal payload
+remains valid; a receiver that does not know it follows the ordinary
+observability tolerance rule and strips it. The frozen fingerprint golden was
+regenerated for this additive schema change, while the historical envelope
+corpus remains a pre-usage compatibility witness.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -220,7 +230,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
-| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `runtimes?`, `configuredToolsets?`, `cursor?` | Opening (or reopening) the WSS connection |
+| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | Opening (or reopening) the WSS connection |
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
@@ -334,6 +344,14 @@ stateDiagram-v2
 | `AwaitApproval` | `Running`, `Failed`, `Cancelled` |
 | `Complete` / `Failed` / `Cancelled` | none (terminal) |
 
+The table above is the shared wire task state machine. The hosted cloud also
+has one control-plane attempt state, lower-case `cancel_requested`, which is
+not a new envelope value and does not extend `TaskState`. It means a host
+cancellation tombstone is durable for a leased attempt but the device has not
+yet acknowledged `task.cancel` with `task.cancelled`. An unleased hosted offer
+goes directly to `cancelled`; a leased one goes
+`running → cancel_requested → cancelled` at the attempt-store boundary.
+
 A server may additionally force a task straight to `Failed` when an inbound
 message doesn't fit the task's current state (e.g. `task.progress` arriving
 while `AwaitApproval`) — this is an implementation safety net (see the
@@ -407,10 +425,15 @@ outcome.
 
 ## 4. Cancel/approve/reject wire semantics (M1 gap #3)
 
-**Rule: the server's own state is authoritative on its own action.** Calling
-the server-side API (`TaskHandle.cancel()` / `.approve()` / `.reject()`)
-moves the server's task record immediately — it does not wait for the
-daemon to acknowledge anything. The corresponding wire message
+**Rule: the server's own action is authoritative.** Calling the embedded
+server API (`TaskHandle.cancel()` / `.approve()` / `.reject()`) moves that
+server's task record immediately. Calling the hosted cloud's tenant-scoped
+`cancelTask(taskId, reason?)` atomically records a cancellation tombstone and
+durable mailbox delivery; an unleased attempt becomes `cancelled`, while a
+leased attempt exposes `cancel_requested` until the daemon acknowledgement.
+Neither surface waits for the daemon before accepting the host decision, and
+the accepted hosted tombstone outranks a racing late success in the product
+result projection. The corresponding wire message
 (`task.cancel` / `task.approve` / `task.reject`) sent to the daemon is a
 **best-effort notification**, not a request awaiting a reply, and **there is
 no new ack message type**. The daemon's existing message stream is the
@@ -427,6 +450,14 @@ This is deliberate, not an oversight: a flaky or slow daemon connection must
 never be able to block the server's own state machine, and a dedicated ack
 message would only restate information the existing terminal/progress
 messages already carry.
+
+For hosted cancellation, “best-effort” describes when an online device acts,
+not whether the command survives disconnection: the tombstone and
+`task.cancel` mailbox row commit together, the original unleased offer is
+filtered from subsequent delivery, and reconnect redelivers the cancellation.
+`task.cancelled` remains the existing acknowledgement. A late
+`task.complete` may be retained as raw receipt evidence but cannot overwrite
+the accepted cancelled result or trigger downstream business projection.
 
 **`task.cancel`/`task.reject` stay individually redeliverable even though
 their task is already terminal server-side by the time they're queued.**
@@ -1008,6 +1039,57 @@ verbatim into `TaskResult.document` (`hub.ts`) and persists inside the same
 `result_json` record that already carries `summary`/`artifactRefs` — no new
 column, no migration, no second authority.
 
+### 7.3 Terminal inference usage — bounded observation, never accounting (additive minor)
+
+Every terminal payload MAY carry the same optional object:
+
+```ts
+interface TerminalInferenceUsage {
+  runtime: 'pi' | 'claude' | 'codex';
+  provider?: string;
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  durationMs?: number;
+  clientVersion: string;
+  reportedAt: string; // canonical UTC, e.g. 2026-08-21T10:00:02.500Z
+}
+```
+
+`runtime` is the adapter that actually started the task. `provider` and
+`model` are absent unless that adapter itself observed them; an offered
+`dispatchSelection` is a requested target, not an observation, and must never
+be echoed as telemetry. `clientVersion` is copied only from the process-
+immutable `localAgentRelease.version` that the Local Agent distribution owns;
+it is never inferred from a runtime version, package metadata, lockfile,
+filesystem path, or network lookup. An implementation that lacks that
+immutable value omits the entire optional block rather than creating a second
+identity authority.
+
+All counts are non-negative safe integers. `promptTokens` and
+`completionTokens` each cap at 1,000,000,000; `durationMs` caps at seven days;
+provider/model each cap at 160 characters; `clientVersion` caps at 128
+characters. `reportedAt` must be a valid ISO-8601 UTC instant with exactly
+millisecond precision and `Z` suffix. Negative, fractional, unsafe,
+over-cap, or malformed values reject the terminal envelope at the protocol
+boundary; they are never normalized, clamped, or zero-filled.
+
+The token fields have **last-observed**, not accumulated semantics: a daemon
+retains the last normalized runtime `usage` observation before the terminal
+signal for that task run. It must not add multiple events or derive totals.
+The Codex adapter maps its native `turn.completed.usage`; Claude maps its
+terminal `result.usage`; both place that event before their terminal signal.
+Pi's current RPC contract exposes no native usage fact, so it omits the
+optional block rather than fabricating a usage observation from runtime, device
+elapsed time, or `reportedAt`. Missing is unknown, not zero. When reported,
+device elapsed time and `reportedAt` are local observations, never provider
+invoice data.
+
+Hosted storage records the canonical first terminal exactly as it does every
+other terminal fact. Its typed result read model projects this object from the
+winning receipt unchanged; a later terminal cannot replace it. No raw-receipt
+consumer parses this object, and no `TenantStorageUsage` type is reused.
+
 ## 8. Long-poll fallback
 
 For environments where an outbound WSS connection isn't viable, long-poll is
@@ -1045,6 +1127,26 @@ travel on a `task.*` message, not be inferred from connection state — this is
 exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
 `conn.hello.runtimes[]`. The event *shapes* returned are identical `Envelope`
 values regardless of transport.
+
+### 8.1.1 First-hop presence — `PUT /byok/presence`
+
+Long-poll has no `conn.hello`, but a daemon using either transport publishes
+the same first-hop presence snapshot:
+
+```
+PUT /byok/presence
+  Request (PresencePublishRequestSchema):
+    { level, detail?, configuredToolsets?, clientVersion?,
+      protocolVersions?, runtimes? }
+```
+
+`clientVersion` is the U4a `localAgentRelease.version` value and is never
+derived from a package, runtime executable, or host. `runtimes[]` contains
+only the version/auth facts returned by the daemon's real local probe;
+unavailable fields are omitted. The WS `conn.hello` and this first HTTP
+presence publication use one frozen per-start snapshot, so switching to
+long-poll does not invent a second identity authority. Presence remains a
+lossy TTL hint and is not an execution or admission signal.
 
 ### 8.2 Send — `POST /byok/messages`
 

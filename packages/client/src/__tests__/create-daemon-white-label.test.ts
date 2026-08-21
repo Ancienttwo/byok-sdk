@@ -47,7 +47,7 @@ describe('DaemonConfig.branding', () => {
     const branding = { displayName: 'Acme Coder', supportUrl: 'https://acme.example/support', accent: '#336699' };
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Acme', productId: 'acme-product', serverUrl: server.url, workspaceRoot, storeDir, branding },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product', serverUrl: server.url, workspaceRoot, storeDir, branding },
       [new StubRuntimeAdapter('pi')],
     );
     await daemon.pair('pairing-code');
@@ -61,7 +61,7 @@ describe('DaemonConfig.branding', () => {
     const storeDir = await tmpDir('byok-branding-store-');
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Acme', productId: 'acme-product-nobrand', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product-nobrand', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     await daemon.pair('pairing-code');
@@ -108,7 +108,7 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
     const storeDir = await tmpDir('byok-allowlist-store-');
 
     daemon = createDaemon({
-      productName: 'Test Product',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-claude-codex',
       serverUrl: server.url,
       workspaceRoot,
@@ -129,7 +129,7 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
     const storeDir = await tmpDir('byok-allowlist-store-');
 
     daemon = createDaemon({
-      productName: 'Test Product',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-default',
       serverUrl: server.url,
       workspaceRoot,
@@ -171,7 +171,7 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
 
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-enforce',
         serverUrl: server.url,
         workspaceRoot,

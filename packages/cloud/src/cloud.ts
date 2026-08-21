@@ -28,6 +28,7 @@ import {
   type PresenceHint,
   type SkillPackStore,
   type TenantId,
+  type TenantReadiness,
 } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
@@ -228,17 +229,18 @@ export interface ByokCloud {
   enqueueOffer(tenant: TenantId, deviceId: string, input: EnqueueOfferInput): Promise<EnqueuedOffer>;
   /** Host control plane: enqueue the additive fail-closed offer variant that requires local MCP toolsets. */
   enqueueToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueToolsetOfferInput): Promise<EnqueuedOffer>;
+  /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
+  cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   /**
    * Host control plane: the same first terminal, decoded into the typed read
    * model ({@link TerminalResult}) so a host reads result fields, not envelope
-   * prose. `undefined` ONLY means no terminal fact is recorded yet:
-   * first-terminal-wins is inherited from the receipt store
-   * ({@link ByokCloud.readTerminalReceipt} reads the same row), and a declined
-   * task records no terminal at all — use {@link ByokCloud.readTaskAttempt}
-   * for that attempt status. An absent `document` covers both a legacy
+   * prose. An accepted host cancellation tombstone outranks a later device
+   * receipt; the raw receipt remains readable as device evidence through
+   * {@link ByokCloud.readTerminalReceipt}. `undefined` means neither fact
+   * exists. An absent `document` covers both a legacy
    * pre-`result-document` daemon build and a daemon with no `resultDocument`
    * extractor; a receipt whose body is not a terminal envelope throws rather
    * than returning a best-effort shape.
@@ -252,6 +254,8 @@ export interface ByokCloud {
   /** Human review authority. Device routes cannot produce `done`. */
   acceptBoardItem(tenant: TenantId, itemId: string): Promise<BoardItem>;
   listPresence(tenant: TenantId): Promise<readonly PresenceHint[]>;
+  /** SDK-owned observation only; never a scheduler or execution authority. */
+  readTenantReadiness(tenant: TenantId): Promise<TenantReadiness>;
   readActivity(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
   readApprovalTimeline(
     tenant: TenantId,
@@ -546,6 +550,43 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     },
 
+    async cancelTask(tenant, taskId, reason) {
+      const stores = tenantStoresFor(controlPlane(tenant), root);
+      const proposedMessageId = options.crypto.randomUuid();
+      const mutation = await stores.cancellations.request({
+        taskId,
+        proposedMessageId,
+        ...(reason === undefined ? {} : { reason }),
+        materialize: async (seq, messageId) => {
+          const envelope = createEnvelope('task.cancel', reason === undefined ? {} : { reason }, {
+            id: messageId,
+            taskId,
+            seq,
+          });
+          const body = encodeEnvelope(envelope);
+          const bytes = new TextEncoder().encode(body);
+          return {
+            body,
+            bodyHash: contentHash(await options.crypto.sha256(bytes)),
+            byteSize: BigInt(bytes.length),
+          };
+        },
+      });
+      if (mutation === undefined) {
+        throw new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
+      }
+      if (mutation.message !== undefined) {
+        const envelope = decodeEnvelope(mutation.message.body);
+        if (envelope.seq !== mutation.message.seq || envelope.type !== 'task.cancel') {
+          throw new ByokCloudError(
+            'mailbox_seq_mismatch',
+            `Mailbox stored cancellation seq ${String(envelope.seq)} at row ${mutation.message.seq}.`,
+          );
+        }
+      }
+      return mutation.attempt;
+    },
+
     readTaskAttempt(tenant, taskId) {
       return tenantStoresFor(controlPlane(tenant), root).tasks.get(taskId);
     },
@@ -555,7 +596,19 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async readTaskResult(tenant, taskId) {
-      const receipt = await tenantStoresFor(controlPlane(tenant), root).receipts.get(
+      const stores = tenantStoresFor(controlPlane(tenant), root);
+      const attempt = await stores.tasks.get(taskId);
+      if (attempt?.cancellation !== undefined) {
+        return {
+          taskId,
+          state: 'cancelled',
+          ...(attempt.cancellation.reason === undefined
+            ? {}
+            : { reason: attempt.cancellation.reason }),
+          recordedAt: attempt.cancellation.requestedAt,
+        };
+      }
+      const receipt = await stores.receipts.get(
         terminalReceiptKey(taskId),
       );
       return receipt === undefined ? undefined : projectTerminalResult(taskId, receipt);
@@ -591,6 +644,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     listPresence(tenant) {
       return tenantStoresFor(controlPlane(tenant), root).presence.list();
+    },
+
+    readTenantReadiness(tenant) {
+      return tenantStoresFor(controlPlane(tenant), root).devices.readiness();
     },
 
     readActivity(tenant, taskId) {

@@ -262,7 +262,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
     const adapter = new StubRuntimeAdapter();
     const started = createDaemonWithAdapters(
       {
-        productName: 'Test',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
         productId: 'test-product',
         serverUrl: handle.url,
         workspaceRoot,
@@ -297,6 +297,8 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
       expect(hints).toHaveLength(1);
       expect(hints[0]?.level).toBe('online');
       expect(hints[0]?.configuredToolsets).toEqual([]);
+      expect(hints[0]?.clientVersion).toBe('0.0.0-test');
+      expect(hints[0]?.runtimes).toEqual([]);
     });
 
     // Stopping IS the offline signal: no `offline` publish is issued, the hint
@@ -435,7 +437,7 @@ describe('presence re-discovery on reconnect', () => {
     const storeDir = await tmpDir('byok-presence-reconnect-store-');
     const started = createDaemonWithAdapters(
       {
-        productName: 'Test',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
         productId: 'test-product',
         serverUrl: url,
         workspaceRoot,

@@ -179,7 +179,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 
 describe('DaemonConfig.mcpToolsets local authority validation', () => {
   const baseConfig: DaemonConfig = {
-    productName: 'Test Product',
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
     productId: 'test-product',
     serverUrl: 'http://localhost:3000',
     workspaceRoot: '/tmp/byok-test-workspace',

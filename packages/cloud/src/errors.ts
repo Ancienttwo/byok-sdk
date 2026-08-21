@@ -42,6 +42,8 @@ export const CLOUD_ERROR_CODES = {
   terminal_receipt_unreadable: 'terminal_receipt_unreadable',
   /** A progress/activity batch exceeded the configured event or byte ceiling. */
   activity_batch_too_large: 'activity_batch_too_large',
+  /** Host control-plane task lookup is tenant-closed and found no task. */
+  task_not_found: 'task_not_found',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

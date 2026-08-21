@@ -23,13 +23,14 @@ import {
   type PresenceHint,
   type PresenceHintInput,
   type PresenceLevel,
+  type PresenceRuntimeFact,
   type PresenceStore,
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 const PRESENCE_COLUMNS =
-  'tenant_id, device_id, level, detail, configured_toolsets, observed_at, expires_at';
+  'tenant_id, device_id, level, detail, configured_toolsets, client_version, protocol_versions, runtimes, observed_at, expires_at';
 
 interface PresenceRow {
   readonly tenant_id: string;
@@ -37,6 +38,9 @@ interface PresenceRow {
   readonly level: string;
   readonly detail: string | null;
   readonly configured_toolsets: readonly string[] | null;
+  readonly client_version: string | null;
+  readonly protocol_versions: readonly number[] | null;
+  readonly runtimes: readonly PresenceRuntimeFact[] | null;
   readonly observed_at: string;
   readonly expires_at: string;
 }
@@ -50,6 +54,23 @@ function toHint(row: PresenceRow): PresenceHint {
     ...(row.configured_toolsets === null
       ? {}
       : { configuredToolsets: Object.freeze([...row.configured_toolsets]) }),
+    ...(row.client_version === null ? {} : { clientVersion: row.client_version }),
+    ...(row.protocol_versions === null
+      ? {}
+      : { protocolVersions: Object.freeze([...row.protocol_versions]) }),
+    ...(row.runtimes === null
+      ? {}
+      : {
+          runtimes: Object.freeze(
+            row.runtimes.map((runtime) =>
+              Object.freeze({
+                id: runtime.id,
+                ...(runtime.version === undefined ? {} : { version: runtime.version }),
+                ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
+              }),
+            ),
+          ),
+        }),
     observedAt: row.observed_at,
     expiresAt: row.expires_at,
   };
@@ -90,15 +111,18 @@ export class PostgresPresenceStore implements PresenceStore {
     const allowedBefore = new Date(now.getTime() - input.minimumIntervalMs).toISOString();
     const result = await this.#pool.query<PresenceRow>(
       `INSERT INTO device_presence (${PRESENCE_COLUMNS})
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9, $10)
        ON CONFLICT (tenant_id, device_id) DO UPDATE
           SET level       = EXCLUDED.level,
               detail      = EXCLUDED.detail,
               configured_toolsets = EXCLUDED.configured_toolsets,
+              client_version = EXCLUDED.client_version,
+              protocol_versions = EXCLUDED.protocol_versions,
+              runtimes    = EXCLUDED.runtimes,
               observed_at = EXCLUDED.observed_at,
               expires_at  = EXCLUDED.expires_at
         WHERE device_presence.expires_at <= EXCLUDED.observed_at
-           OR device_presence.observed_at <= $8
+           OR device_presence.observed_at <= $11
        RETURNING ${PRESENCE_COLUMNS}`,
       [
         tenant,
@@ -106,6 +130,9 @@ export class PostgresPresenceStore implements PresenceStore {
         input.level,
         input.detail ?? null,
         input.configuredToolsets === undefined ? null : JSON.stringify(input.configuredToolsets),
+        input.clientVersion ?? null,
+        input.protocolVersions === undefined ? null : JSON.stringify(input.protocolVersions),
+        input.runtimes === undefined ? null : JSON.stringify(input.runtimes),
         observedAt,
         new Date(now.getTime() + input.ttlMs).toISOString(),
         allowedBefore,

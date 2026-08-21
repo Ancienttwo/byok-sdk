@@ -45,6 +45,7 @@ const ONLINE_EXPORTS = [
   'PostgresProofRequestReceiptStore',
   'PostgresRequestReceiptStore',
   'PostgresTaskAttemptStore',
+  'PostgresTaskCancellationStore',
   'createPostgresCloudStores',
   // R2 blobs
   'DEFAULT_MAX_ATTEMPTS',

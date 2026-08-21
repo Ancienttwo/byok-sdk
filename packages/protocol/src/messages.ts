@@ -17,6 +17,13 @@ function isWithinInlineByteLimit(value: string): boolean {
 export const RuntimeIdSchema = z.enum(['pi', 'claude', 'codex']);
 export type RuntimeId = z.infer<typeof RuntimeIdSchema>;
 
+/** Wire-safe protocol version number: bounded before JSON reaches a store or comparison. */
+export const ProtocolVersionNumberSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(2_147_483_647);
+
 /**
  * Per-runtime feature flags reported in `conn.hello.runtimes[].capabilities`
  * (pre-freeze addition). Distinct from the connection-level `CAPABILITY_FLAGS`
@@ -107,10 +114,12 @@ export const ConfiguredToolsetsSchema = z
 
 /** daemon -> server: opening handshake. */
 export const ConnHelloPayloadSchema = z.object({
-  protocolVersions: z.array(z.number().int()),
+  protocolVersions: z.array(ProtocolVersionNumberSchema).max(16),
   capabilities: z.array(z.string()),
   deviceId: z.string(),
   productId: z.string(),
+  /** U4a Local Agent release identity; this is the sole client-version authority. */
+  clientVersion: z.string().min(1).max(128).optional(),
   /** Runtimes detected on this device (M1 gap #4; replaces `agents`). */
   runtimes: z.array(RuntimeInfoSchema).optional(),
   /** Validated logical IDs configured on this device; definitions and secrets stay local. */
@@ -623,6 +632,61 @@ export function checkResultDocument(document: unknown): ResultDocumentCheck {
   return { ok: true, bytes, canonical };
 }
 
+/** Maximum provider-reported prompt or completion token count retained in one terminal observation. */
+export const TERMINAL_INFERENCE_USAGE_MAX_TOKENS = 1_000_000_000;
+/** Maximum device-observed elapsed duration retained in one terminal observation (seven days). */
+export const TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS = 604_800_000;
+export const TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH = 160;
+export const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;
+export const TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH = 128;
+
+const TerminalInferenceUsageNumberSchema = z
+  .number()
+  .int()
+  .safe()
+  .nonnegative()
+  .max(TERMINAL_INFERENCE_USAGE_MAX_TOKENS);
+
+const TerminalInferenceUsageDurationSchema = z
+  .number()
+  .int()
+  .safe()
+  .nonnegative()
+  .max(TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);
+
+/** Canonical device observation time: an ISO-8601 UTC instant with milliseconds. */
+const TerminalInferenceReportedAtSchema = z
+  .iso
+  .datetime({ offset: true, precision: 3 })
+  .refine((value) => value.endsWith('Z'), 'reportedAt must be canonical UTC (Z)');
+
+/**
+ * A bounded, non-billing observation associated with one terminal runtime
+ * outcome. It is optional on every terminal payload so a pre-U2 daemon remains
+ * a legal v1 peer. `promptTokens` and `completionTokens` are values a runtime
+ * reported for its final observed turn; they are not a storage-accounting or
+ * invoice authority.
+ */
+export const TerminalInferenceUsageSchema = z.object({
+  /** The adapter that actually started this task, never a requested fallback. */
+  runtime: RuntimeIdSchema,
+  /** Omitted unless the adapter itself exposed this provider observation. */
+  provider: z.string().min(1).max(TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH).optional(),
+  /** Omitted unless the adapter itself exposed this model observation. */
+  model: z.string().min(1).max(TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH).optional(),
+  /** Direct projection of the runtime's final observed input token count. */
+  promptTokens: TerminalInferenceUsageNumberSchema.optional(),
+  /** Direct projection of the runtime's final observed output token count. */
+  completionTokens: TerminalInferenceUsageNumberSchema.optional(),
+  /** Device-observed elapsed duration for the started task. */
+  durationMs: TerminalInferenceUsageDurationSchema.optional(),
+  /** Process-immutable Local Agent release version, owned outside the protocol. */
+  clientVersion: z.string().min(1).max(TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH),
+  /** Device observation time, never server receipt time. */
+  reportedAt: TerminalInferenceReportedAtSchema,
+});
+export type TerminalInferenceUsage = z.infer<typeof TerminalInferenceUsageSchema>;
+
 /**
  * daemon -> server: task finished successfully.
  *
@@ -659,6 +723,7 @@ export const TaskCompletePayloadSchema = z.object({
     .refine((value) => value === undefined || checkResultDocument(value).ok, {
       message: `task.complete.document must be plain JSON data (equal to its own JSON round trip) and at most ${RESULT_DOCUMENT_MAX_BYTES} bytes as canonical JSON (UTF-8)`,
     }),
+  usage: TerminalInferenceUsageSchema.optional(),
 });
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
@@ -666,6 +731,7 @@ export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 export const TaskFailPayloadSchema = z.object({
   reason: z.string(),
   retryable: z.boolean().optional(),
+  usage: TerminalInferenceUsageSchema.optional(),
 });
 export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
 
@@ -690,6 +756,7 @@ export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
  */
 export const TaskCancelledPayloadSchema = z.object({
   reason: z.string().optional(),
+  usage: TerminalInferenceUsageSchema.optional(),
 });
 export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
 

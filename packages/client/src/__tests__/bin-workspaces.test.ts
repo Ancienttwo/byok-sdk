@@ -20,6 +20,7 @@ afterEach(async () => {
 
 function config(storeDir: string): DaemonConfig {
   return {
+    localAgentRelease: { version: '0.0.0-test' },
     productName: 'Acme',
     productId: 'acme-product',
     serverUrl: 'http://example.invalid',

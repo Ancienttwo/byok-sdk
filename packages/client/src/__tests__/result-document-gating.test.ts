@@ -416,7 +416,7 @@ describe('DaemonConfig.resultDocument end to end (real daemon + in-process serve
   ): Promise<Daemon> {
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
         workspaceRoot: await tmpDir('byok-result-document-e2e-workspace-'),

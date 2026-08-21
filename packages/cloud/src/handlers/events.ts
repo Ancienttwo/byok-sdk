@@ -61,13 +61,38 @@ export function eventsHandler(deps: EventsRouteDeps) {
 
     const attempts = Math.max(1, Math.ceil(deps.longPollHoldMs / deps.longPollIntervalMs));
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const page = await stores.mailbox.readAfter({
-        deviceId: device.deviceId,
-        afterSeq: cursor,
-        limit: deps.pageLimit,
-      });
-      if (page.messages.length > 0) {
-        const events: Envelope[] = page.messages.map((message) => decodeEnvelope(message.body));
+      let scanCursor = cursor;
+      while (true) {
+        const page = await stores.mailbox.readAfter({
+          deviceId: device.deviceId,
+          afterSeq: scanCursor,
+          limit: deps.pageLimit,
+        });
+        if (page.messages.length === 0) break;
+        const decoded: Envelope[] = page.messages.map((message) => decodeEnvelope(message.body));
+        const offeredTaskIds = decoded.flatMap((event) =>
+          (event.type === 'task.offer' || event.type === 'task.offer_with_toolsets') &&
+          event.task_id !== undefined
+            ? [event.task_id]
+            : [],
+        );
+        const attemptsByTaskId = Object.fromEntries(
+          (await stores.tasks.getMany(offeredTaskIds)).map((attempt) => [attempt.taskId, attempt]),
+        );
+        const events = decoded.filter((event) => {
+          if (event.type !== 'task.offer' && event.type !== 'task.offer_with_toolsets') return true;
+          return event.task_id === undefined || attemptsByTaskId[event.task_id]?.cancellation === undefined;
+        });
+        if (events.length === 0 && page.hasMore) {
+          // A cancelled offer can occupy an entire small mailbox page. The
+          // daemon advances from delivered envelope seqs, not response.cursor,
+          // so returning that empty filtered page would replay it forever and
+          // strand the following durable task.cancel. Scan to the next page in
+          // this same request without acknowledging anything server-side.
+          scanCursor = page.nextSeq;
+          continue;
+        }
+        if (events.length === 0) break;
         const response: EventsPollResponse = {
           events,
           cursor: page.nextSeq,

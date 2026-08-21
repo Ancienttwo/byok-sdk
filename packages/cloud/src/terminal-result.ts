@@ -1,4 +1,4 @@
-import { decodeEnvelope, type BlobRef, type Envelope } from '@byok-sdk/protocol';
+import { decodeEnvelope, type BlobRef, type Envelope, type TerminalInferenceUsage } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
 import type { RequestReceipt } from './stores/ports';
 
@@ -22,6 +22,12 @@ export interface TerminalResult {
    * `resultDocument` extractor.
    */
   readonly document?: unknown;
+  /**
+   * Device/runtime terminal observation copied from the canonical winning
+   * receipt. It is telemetry only — never cloud storage usage, billing, quota
+   * or entitlement authority.
+   */
+  readonly usage?: TerminalInferenceUsage;
   readonly reason?: string;
   readonly retryable?: boolean;
   /** When the receipt store wrote the terminal fact — the first one, by its own first-write-wins rule. */
@@ -60,6 +66,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ? { artifactRefs: envelope.payload.artifactRefs }
           : {}),
         ...(envelope.payload.document !== undefined ? { document: envelope.payload.document } : {}),
+        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };
     case 'task.fail':
@@ -70,6 +77,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.retryable !== undefined
           ? { retryable: envelope.payload.retryable }
           : {}),
+        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };
     case 'task.cancelled':
@@ -77,6 +85,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         taskId,
         state: 'cancelled',
         ...(envelope.payload.reason !== undefined ? { reason: envelope.payload.reason } : {}),
+        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };
     default:

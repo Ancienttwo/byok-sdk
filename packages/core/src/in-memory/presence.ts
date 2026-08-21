@@ -65,6 +65,23 @@ export class InMemoryPresenceStore implements PresenceStore {
       ...(input.configuredToolsets === undefined
         ? {}
         : { configuredToolsets: Object.freeze([...input.configuredToolsets]) }),
+      ...(input.clientVersion === undefined ? {} : { clientVersion: input.clientVersion }),
+      ...(input.protocolVersions === undefined
+        ? {}
+        : { protocolVersions: Object.freeze([...input.protocolVersions]) }),
+      ...(input.runtimes === undefined
+        ? {}
+        : {
+            runtimes: Object.freeze(
+              input.runtimes.map((runtime) =>
+                Object.freeze({
+                  id: runtime.id,
+                  ...(runtime.version === undefined ? {} : { version: runtime.version }),
+                  ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
+                }),
+              ),
+            ),
+          }),
       observedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + input.ttlMs).toISOString(),
     };

@@ -1,5 +1,5 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo } from '../index';
+import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ProbedRuntime } from './runtime-probe';
@@ -239,6 +239,7 @@ export function formatRuntimeLines(runtimes: readonly ProbedRuntime[]): string[]
 }
 
 export interface StatusView {
+  localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
   productName: string;
   productId: string;
   branding?: DaemonBranding;
@@ -255,6 +256,9 @@ export function formatStatusLines(view: StatusView): string[] {
   const lines: string[] = [];
   const label = view.branding?.displayName ?? view.productName;
   lines.push(`product: ${label} (${view.productId})`);
+  lines.push(
+    `local-agent-release: ${view.localAgentRelease.version}${view.localAgentRelease.buildId ? ` buildId=${view.localAgentRelease.buildId}` : ''}`,
+  );
   if (view.branding?.supportUrl) lines.push(`support: ${view.branding.supportUrl}`);
   lines.push(`paired: ${view.paired ? 'yes' : 'no'}${view.deviceId ? ` deviceId=${view.deviceId}` : ''}`);
   lines.push(
@@ -281,8 +285,12 @@ export function formatStatusLines(view: StatusView): string[] {
  * the historical/persisted view above them.
  */
 export function formatLiveStatusLines(live: ControlStatusResult): string[] {
+  const liveRelease = live.localAgentRelease;
   const lines: string[] = [
     `live: pid=${live.pid} uptimeMs=${live.uptimeMs} transport=${live.transport}`,
+    liveRelease
+      ? `live-local-agent-release: ${liveRelease.version}${liveRelease.buildId ? ` buildId=${liveRelease.buildId}` : ''}`
+      : 'live-local-agent-release: unknown',
     `live-paired: ${live.paired ? 'yes' : 'no'}${live.deviceId ? ` deviceId=${live.deviceId}` : ''}`,
     `live-runtimes: ${live.runtimeIds.length ? live.runtimeIds.join(',') : '(none)'}`,
   ];

@@ -58,6 +58,8 @@ export interface RealCloudHandle {
   enqueueOffer(deviceId: string, instruction: string): Promise<EnqueuedOffer>;
   /** Additive hosted offer whose logical toolset ids must resolve on the target device before claim. */
   enqueueToolsetOffer(deviceId: string, payload: TaskOfferWithToolsetsPayload): Promise<EnqueuedOffer>;
+  /** Accept a host cancellation and durably enqueue the frozen-v1 `task.cancel` message. */
+  cancelTask(taskId: string, reason?: string): ReturnType<ByokCloud['cancelTask']>;
   readTaskAttempt(taskId: string): Promise<TaskAttempt | undefined>;
   /** The recorded terminal envelope for a task, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `cloud/src/inbound.ts`). */
   readTerminalBody(taskId: string): Promise<string | undefined>;
@@ -138,6 +140,7 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
           cloud.enqueueOffer(tenant, deviceId, { payload: { instruction, policy: { mode: 'auto' } } }),
         enqueueToolsetOffer: (deviceId, payload) =>
           cloud.enqueueToolsetOffer(tenant, deviceId, { payload }),
+        cancelTask: (taskId, reason) => cloud.cancelTask(tenant, taskId, reason),
         readTaskAttempt: (taskId) => cloud.readTaskAttempt(tenant, taskId),
         readTerminalBody: async (taskId) => (await cloud.readTerminalReceipt(tenant, taskId))?.body,
         readActivity: (taskId) => cloud.readActivity(tenant, taskId),

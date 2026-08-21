@@ -222,7 +222,7 @@ interface HeadResult {
 /** One tenant-prefixed R2 key returned by ListObjectsV2. */
 export interface R2ListedObject {
   readonly key: string;
-  /** Present only when the key is exactly `<tenant>/sha256/<64 lowercase hex>`. */
+  /** Present only when the key is exactly `tenants/<tenant>/objects/sha256/<64 lowercase hex>`. */
   readonly hash?: ContentHash;
   readonly byteSize: bigint;
 }
@@ -641,7 +641,11 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
       );
     }
 
-    const prefix = `${tenant}/sha256/`;
+    // Use core's single key-construction point even for enumeration. The
+    // previous abbreviated `${tenant}/sha256/` listing never matched objects
+    // written by `tenantObjectKey`, silently hiding canonical R2 data from
+    // maintenance. The synthetic valid hash is removed byte-for-byte.
+    const prefix = tenantObjectKey(tenant, LIST_PREFIX_HASH, this.#keyPrefix).slice(0, -LIST_HASH_HEX_LENGTH);
     const url = new URL(`${this.#origin}/${this.#bucket}`);
     url.searchParams.set('list-type', '2');
     url.searchParams.set('prefix', prefix);
@@ -881,6 +885,8 @@ function parseListObjectsV2(xml: string, prefix: string, attempts: number): R2Ob
 }
 
 const HASH_KEY_SUFFIX = /^[0-9a-f]{64}$/;
+const LIST_HASH_HEX_LENGTH = 64;
+const LIST_PREFIX_HASH = contentHash(`sha256:${'0'.repeat(LIST_HASH_HEX_LENGTH)}`);
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
