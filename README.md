@@ -5,6 +5,19 @@ authenticated on an end user's machine. It includes a local daemon, a
 self-hosted reference coordinator, and a hosted multi-tenant composition over
 Postgres and R2.
 
+## Current release
+
+The current release is `byok-sdk@0.6.0`, with the independently versioned
+`@byok-sdk/keys@0.2.1`. It adds hosted cancellation, optional bounded terminal
+inference usage, SDK-owned tenant readiness, immutable Local Agent release
+identity, and recoverable Postgres + R2 tenant erasure. The hosted data plane
+ships migrations `0001` through `0011` and verifies their exact ledger before
+serving traffic.
+
+All ten npm artifacts were frozen from one source commit and passed registry
+integrity, dependency-edge, fresh-import, and single-version closure readback.
+The release does not perform a production migration or deployment for a host.
+
 ## 0.4.0 custom RuntimeAdapter migration
 
 0.4.0 intentionally removes the old `id`, `capabilities()`, optional
@@ -18,7 +31,7 @@ adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
 ```sh
-npm install byok-sdk
+npm install byok-sdk@0.6.0
 ```
 
 ```ts
@@ -55,7 +68,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys
+npm install @byok-sdk/keys@0.2.1
 ```
 
 ## Host connector composition
@@ -71,6 +84,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK requires Node.js 22.22.0 or newer. The independently
-installable `@byok-sdk/keys@0.1.0` package retains Node.js 20 support. MIT
-licensed.
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.2.1`
+require Node.js 22.22.0 or newer. MIT licensed.
