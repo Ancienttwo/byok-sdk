@@ -9,7 +9,14 @@
  * guessed. One row, two access paths, never two copies to keep in sync — a
  * stale pre-tenant index would be a revoked device that can still get a token.
  */
-import type { TenantId } from '@byok-sdk/core';
+import {
+  type Clock,
+  type PresenceStore,
+  type PresenceLevel,
+  type TenantId,
+  type TenantReadinessDevice,
+  type TenantReadiness,
+} from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
 
@@ -48,9 +55,11 @@ const SELECT_COLUMNS =
 
 export class PostgresDeviceDirectory implements DeviceDirectory {
   readonly #pool: Pool;
+  readonly #clock: Clock | undefined;
 
-  constructor(pool: Pool) {
+  constructor(pool: Pool, clock?: Clock) {
     this.#pool = pool;
+    this.#clock = clock;
   }
 
   async register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
@@ -108,6 +117,108 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
       [tenant],
     );
     return result.rows.map(toRecord);
+  }
+
+  async readiness(tenant: TenantId, _presence: PresenceStore): Promise<TenantReadiness> {
+    // One tenant-scoped aggregate over durable devices and the latest live
+    // presence row. The presence parameter keeps the port shape identical to
+    // the reference implementation; SQL is the set-wise authority here.
+    const result = await this.#pool.query<{
+      device_id: string;
+      product_id: string;
+      device_name: string;
+      revoked: boolean;
+      presence_level: string | null;
+      presence_detail: string | null;
+      presence_configured_toolsets: readonly string[] | null;
+      presence_client_version: string | null;
+      presence_protocol_versions: readonly number[] | null;
+      presence_runtimes: ReadonlyArray<{ id: string; version?: string; authPresent?: boolean }> | null;
+      presence_observed_at: string | null;
+      presence_expires_at: string | null;
+      active_paired_device_count: number | string;
+      revoked_device_count: number | string;
+      observed_presence_count: number | string;
+      observed_online_count: number | string;
+      observed_thinking_count: number | string;
+      observed_working_count: number | string;
+      observed_error_count: number | string;
+      observed_offline_count: number | string;
+    }>(
+      `SELECT
+         d.device_id,
+         d.product_id,
+         d.device_name,
+         d.revoked,
+         CASE WHEN NOT d.revoked THEN p.level END AS presence_level,
+         CASE WHEN NOT d.revoked THEN p.detail END AS presence_detail,
+         CASE WHEN NOT d.revoked THEN p.configured_toolsets END AS presence_configured_toolsets,
+         CASE WHEN NOT d.revoked THEN p.client_version END AS presence_client_version,
+         CASE WHEN NOT d.revoked THEN p.protocol_versions END AS presence_protocol_versions,
+         CASE WHEN NOT d.revoked THEN p.runtimes END AS presence_runtimes,
+         CASE WHEN NOT d.revoked THEN p.observed_at END AS presence_observed_at,
+         CASE WHEN NOT d.revoked THEN p.expires_at END AS presence_expires_at,
+         (COUNT(*) FILTER (WHERE NOT d.revoked) OVER ())::int AS active_paired_device_count,
+         (COUNT(*) FILTER (WHERE d.revoked) OVER ())::int AS revoked_device_count,
+         (COUNT(*) FILTER (WHERE NOT d.revoked AND p.device_id IS NOT NULL) OVER ())::int AS observed_presence_count,
+         (COUNT(*) FILTER (WHERE NOT d.revoked AND p.level = 'online') OVER ())::int AS observed_online_count,
+         (COUNT(*) FILTER (WHERE NOT d.revoked AND p.level = 'thinking') OVER ())::int AS observed_thinking_count,
+         (COUNT(*) FILTER (WHERE NOT d.revoked AND p.level = 'working') OVER ())::int AS observed_working_count,
+         (COUNT(*) FILTER (WHERE NOT d.revoked AND p.level = 'error') OVER ())::int AS observed_error_count,
+         (COUNT(*) FILTER (WHERE NOT d.revoked AND p.level = 'offline') OVER ())::int AS observed_offline_count
+       FROM device d
+       LEFT JOIN device_presence p
+         ON p.tenant_id = d.tenant_id
+        AND p.device_id = d.device_id
+        AND p.expires_at > $2
+       WHERE d.tenant_id = $1
+       ORDER BY d.device_id`,
+      [tenant, this.#clock?.now().toISOString() ?? new Date().toISOString()],
+    );
+    const row = result.rows[0];
+    const count = (value: number | string): number => Number(value);
+    const devices: TenantReadinessDevice[] = result.rows.map((device) => ({
+      deviceId: device.device_id,
+      productId: device.product_id,
+      deviceName: device.device_name,
+      revoked: device.revoked,
+      ...(device.presence_level === null
+        ? {}
+        : {
+            presence: {
+              level: device.presence_level as PresenceLevel,
+              ...(device.presence_detail === null ? {} : { detail: device.presence_detail }),
+              ...(device.presence_configured_toolsets === null
+                ? {}
+                : { configuredToolsets: Object.freeze([...device.presence_configured_toolsets]) }),
+              ...(device.presence_client_version === null
+                ? {}
+                : { clientVersion: device.presence_client_version }),
+              ...(device.presence_protocol_versions === null
+                ? {}
+                : { protocolVersions: Object.freeze([...device.presence_protocol_versions]) }),
+              ...(device.presence_runtimes === null
+                ? {}
+                : { runtimes: Object.freeze(device.presence_runtimes.map((runtime) => Object.freeze({ ...runtime }))) }),
+              observedAt: device.presence_observed_at!,
+              expiresAt: device.presence_expires_at!,
+            },
+          }),
+    }));
+    return {
+      tenantId: tenant,
+      activePairedDeviceCount: count(row?.active_paired_device_count ?? 0),
+      revokedDeviceCount: count(row?.revoked_device_count ?? 0),
+      observedPresenceCount: count(row?.observed_presence_count ?? 0),
+      observedPresenceByLevel: {
+        online: count(row?.observed_online_count ?? 0),
+        thinking: count(row?.observed_thinking_count ?? 0),
+        working: count(row?.observed_working_count ?? 0),
+        error: count(row?.observed_error_count ?? 0),
+        offline: count(row?.observed_offline_count ?? 0),
+      },
+      devices,
+    };
   }
 
   async resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined> {

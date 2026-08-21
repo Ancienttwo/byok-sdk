@@ -28,6 +28,7 @@ import {
   type PresenceHint,
   type SkillPackStore,
   type TenantId,
+  type TenantReadiness,
 } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
@@ -253,6 +254,8 @@ export interface ByokCloud {
   /** Human review authority. Device routes cannot produce `done`. */
   acceptBoardItem(tenant: TenantId, itemId: string): Promise<BoardItem>;
   listPresence(tenant: TenantId): Promise<readonly PresenceHint[]>;
+  /** SDK-owned observation only; never a scheduler or execution authority. */
+  readTenantReadiness(tenant: TenantId): Promise<TenantReadiness>;
   readActivity(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
   readApprovalTimeline(
     tenant: TenantId,
@@ -641,6 +644,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     listPresence(tenant) {
       return tenantStoresFor(controlPlane(tenant), root).presence.list();
+    },
+
+    readTenantReadiness(tenant) {
+      return tenantStoresFor(controlPlane(tenant), root).devices.readiness();
     },
 
     readActivity(tenant, taskId) {

@@ -37,8 +37,10 @@
 import type {
   MailboxBody,
   MailboxMessage,
+  PresenceStore,
   StorageReservation,
   TenantId,
+  TenantReadiness,
 } from '@byok-sdk/core';
 import type { ActivityStore } from '../activity';
 import type { ApprovalTimelineStore } from '../approval-timeline';
@@ -77,6 +79,8 @@ export interface DeviceDirectory {
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
   revoke(tenant: TenantId, deviceId: string): Promise<void>;
   list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
+  /** Set-wise tenant observation; revoked devices never contribute presence. */
+  readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness>;
   /** Pre-tenant. Two callers only: `POST /byok/challenge` and `POST /byok/token`. Never exposed through the tenant facade. */
   resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
 }

@@ -220,7 +220,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
-| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `runtimes?`, `configuredToolsets?`, `cursor?` | Opening (or reopening) the WSS connection |
+| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | Opening (or reopening) the WSS connection |
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
@@ -1066,6 +1066,26 @@ travel on a `task.*` message, not be inferred from connection state — this is
 exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
 `conn.hello.runtimes[]`. The event *shapes* returned are identical `Envelope`
 values regardless of transport.
+
+### 8.1.1 First-hop presence — `PUT /byok/presence`
+
+Long-poll has no `conn.hello`, but a daemon using either transport publishes
+the same first-hop presence snapshot:
+
+```
+PUT /byok/presence
+  Request (PresencePublishRequestSchema):
+    { level, detail?, configuredToolsets?, clientVersion?,
+      protocolVersions?, runtimes? }
+```
+
+`clientVersion` is the U4a `localAgentRelease.version` value and is never
+derived from a package, runtime executable, or host. `runtimes[]` contains
+only the version/auth facts returned by the daemon's real local probe;
+unavailable fields are omitted. The WS `conn.hello` and this first HTTP
+presence publication use one frozen per-start snapshot, so switching to
+long-poll does not invent a second identity authority. Presence remains a
+lossy TTL hint and is not an execution or admission signal.
 
 ### 8.2 Send — `POST /byok/messages`
 

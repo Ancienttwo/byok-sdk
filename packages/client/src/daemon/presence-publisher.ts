@@ -24,7 +24,11 @@
  * publisher permanently — there is no recourse but a fresh `pair()`, so
  * retrying would be a pure spin.
  */
-import { BYOK_PRESENCE_PATH, type ToolsetId } from '@byok-sdk/protocol';
+import {
+  BYOK_PRESENCE_PATH,
+  type RuntimeInfo,
+  type ToolsetId,
+} from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
 import { DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
@@ -72,6 +76,12 @@ export interface PresencePublisherOptions {
   auth: AuthManager;
   /** Sorted logical IDs only. Executable MCP definitions and credentials remain device-local. */
   configuredToolsets?: readonly ToolsetId[];
+  /** U4a Local Agent release version; never inferred from the host package. */
+  clientVersion?: string;
+  /** The same runtime/auth snapshot sent in `conn.hello`. */
+  runtimes?: readonly RuntimeInfo[];
+  /** The same protocol-version snapshot sent in `conn.hello`. */
+  protocolVersions?: readonly number[];
   /** Heartbeat cadence. Must sit strictly between {@link PresencePublisherOptions.minimumIntervalMs} and {@link PresencePublisherOptions.ttlMs}. */
   intervalMs?: number;
   /** The deployment's presence hint TTL, as this daemon understands it. Only used to validate the cadence. */
@@ -151,6 +161,23 @@ export class PresencePublisher {
             ...(this.opts.configuredToolsets === undefined
               ? {}
               : { configuredToolsets: this.opts.configuredToolsets }),
+            ...(this.opts.clientVersion === undefined ? {} : { clientVersion: this.opts.clientVersion }),
+            ...(this.opts.protocolVersions === undefined
+              ? {}
+              : { protocolVersions: [...this.opts.protocolVersions] }),
+            // Presence is a lightweight readiness fact, not a second
+            // capability-negotiation channel. Keep its projection identical
+            // to the persisted presence contract: the conn.hello snapshot's
+            // runtime identity/version/auth facts, with no capabilities blob.
+            ...(this.opts.runtimes === undefined
+              ? {}
+              : {
+                  runtimes: this.opts.runtimes.map(({ id, version, authPresent }) => ({
+                    id,
+                    ...(version === undefined ? {} : { version }),
+                    ...(authPresent === undefined ? {} : { authPresent }),
+                  })),
+                }),
           }),
         },
         this.opts.auth,

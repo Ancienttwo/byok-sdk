@@ -40,6 +40,7 @@ import {
   type Principal,
   type PresenceHint,
   type PresenceHintInput,
+  type TenantReadiness,
   type StorageFinalizeInput,
   type StorageFinalizeResult,
   type StorageReservation,
@@ -99,6 +100,7 @@ export interface TenantBoundDevices {
   get(deviceId: string): Promise<DeviceRecord | undefined>;
   list(): Promise<readonly DeviceRecord[]>;
   revoke(deviceId: string): Promise<void>;
+  readiness(): Promise<TenantReadiness>;
 }
 
 export interface TenantBoundTaskAttempts {
@@ -204,6 +206,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       get: (deviceId) => cloud.devices.get(tenant, deviceId),
       list: () => cloud.devices.list(tenant),
       revoke: (deviceId) => cloud.devices.revoke(tenant, deviceId),
+      readiness: () => cloud.devices.readiness(tenant, core.presence),
     },
     tasks: {
       open: (input) => cloud.tasks.open(tenant, input),

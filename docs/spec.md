@@ -79,8 +79,31 @@ Whether a release can run is decided by wire-protocol compatibility and the
 capabilities/runtime/toolsets required by the concrete action. Being behind a
 host's Latest release is only an operator-facing update signal; it must not
 block start, pair, connect, or work the daemon is otherwise capable of doing.
-This contract does not add Latest fetching, a minimum-supported-version policy,
-wire/presence projection, or self-update behavior.
+The release identity contract does not add Latest fetching, a
+minimum-supported-version policy, or self-update behavior; U3's observation
+projection below is not a release gate.
+
+## Tenant readiness observation
+
+The SDK exposes a tenant-scoped observed read model over two authorities:
+durable paired-device rows (active versus revoked) and the latest unexpired
+presence hint for each device. It reports active paired count, revoked count,
+live observed presence count, and deterministic counts for every presence
+level. `now >= expiresAt` means absence. A revoked device never contributes to
+observed presence, even when its lossy row remains in storage. A tenant with
+no devices or no live hints returns zeroes, and tenant queries cannot see rows
+owned by another tenant. The same aggregate includes each tenant-scoped
+device's durable product/name/revocation state and, for active devices only,
+the optional unexpired presence facts (release, protocol versions, runtime and
+auth observations). Hosts therefore consume one projection rather than
+joining device and presence lists.
+
+This is an SDK-owned observation projection, not a readiness claim or an
+execution, authorization, capability, scheduler, load, or admission gate.
+Hosts consume the aggregate; they must not re-join `listDevices()` and
+`listPresence()` or invent expiry/revocation semantics. Release identity comes
+only from U4a `localAgentRelease`; runtime version/auth fields are emitted only
+when a real local probe supplied them, and missing facts stay omitted.
 
 ## Runtime operation authority
 

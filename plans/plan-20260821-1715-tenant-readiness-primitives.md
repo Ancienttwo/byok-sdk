@@ -1,6 +1,6 @@
 # Plan: Tenant Readiness Primitives
 
-> **Status**: Draft
+> **Status**: Executing
 > **Created**: 20260821-1715
 > **Slug**: tenant-readiness-primitives
 > **Artifact Level**: work-package
@@ -60,11 +60,11 @@ pressure point is per-device joins, so PostgreSQL must aggregate set-wise.
 ## Task Breakdown
 
 - [ ] Complete/freeze U4a process identity and packed-manifest parity.
-- [ ] Create a dedicated strict contract/worktree with mutually exclusive presence-schema ownership.
-- [ ] Define red projection tests and exact TTL/revocation semantics.
-- [ ] Implement tenant-bound aggregate ports and both store compositions.
-- [ ] Project the single U4a identity through both device publication paths.
-- [ ] Run targeted suites, real dataplane parity, full required checks, and review.
+- [x] Create a dedicated strict contract/worktree with mutually exclusive presence-schema ownership.
+- [x] Define red projection tests and exact TTL/revocation semantics.
+- [x] Implement tenant-bound aggregate ports and both store compositions.
+- [x] Project the single U4a identity through both device publication paths.
+- [x] Run targeted suites, real dataplane parity, full required checks, and review.
 
 ## Authorization boundary
 
