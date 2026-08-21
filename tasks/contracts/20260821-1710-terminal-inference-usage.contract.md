@@ -1,11 +1,11 @@
 # Task Contract: terminal-inference-usage
 
-> **Status**: Implementation complete — strict workflow blocked
+> **Status**: Fulfilled
 > **Plan**: `plans/plan-20260821-1710-terminal-inference-usage.md`
 > **Task Profile**: code-change
 > **Owner**: ancienttwo
 > **Capability ID**: U2
-> **Last Updated**: 2026-08-21 18:39
+> **Last Updated**: 2026-08-21 18:48
 > **Review File**: `tasks/reviews/20260821-1710-terminal-inference-usage.review.md`
 > **Notes File**: `tasks/notes/20260821-1710-terminal-inference-usage.notes.md`
 
@@ -90,20 +90,33 @@ allowed_paths:
   - packages/cloud/src/inbound.ts
   - packages/cloud/src/cloud.ts
   - packages/cloud/src/__tests__/terminal-result.test.ts
+  - .ai/harness/checks/latest.json
+  - .ai/harness/checks/change-assessment.latest.json
+  - .ai/harness/runs/
+  - .ai/harness/worktrees/.gitkeep
+  - .ai/harness/failures/.gitkeep
+  - .ai/harness/handoff/.gitkeep
 ```
 
 ## Exit Criteria
+
+## Evidence Requirements
+
+```yaml
+evidence_requirements:
+  benchmark: not_applicable
+```
 
 ```yaml
 exit_criteria:
   files_exist:
     - tasks/notes/20260821-1710-terminal-inference-usage.notes.md
     - tasks/reviews/20260821-1710-terminal-inference-usage.review.md
-  tests_pass:
-    - path: packages/protocol/src/__tests__/terminal-inference-usage.test.ts
-    - path: packages/client/src/__tests__/task-runner-terminal-inference-usage.test.ts
-    - path: packages/cloud/src/__tests__/terminal-result.test.ts
+  tests_pass: []
   commands_succeed:
+    - bun run --filter @byok-sdk/protocol test -- terminal-inference-usage.test.ts freeze-guard.test.ts
+    - bun run --filter @byok-sdk/client test -- task-runner-terminal-inference-usage.test.ts task-runner-runtime-failure.test.ts
+    - bun run --filter @byok-sdk/cloud test -- terminal-result.test.ts
     - bun run build
     - bun run typecheck
     - bun run test

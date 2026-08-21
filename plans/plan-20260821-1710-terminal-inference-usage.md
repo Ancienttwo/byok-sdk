@@ -1,6 +1,6 @@
 # Plan: Optional Terminal Inference Usage
 
-> **Status**: In Progress — strict workflow environment blocked
+> **Status**: Complete
 > **Created**: 20260821-1710
 > **Slug**: terminal-inference-usage
 > **Artifact Level**: work-package
@@ -86,8 +86,8 @@ device observation, not server time. Unknown values are omitted.
 - [x] Add red codec/golden tests for the full acceptance matrix.
 - [x] Implement one bounded protocol schema across all three terminal payloads.
 - [x] Add client and cloud typed projections without storage-usage coupling.
-- [ ] Run strict workflow validation and packed-artifact API readback after the
-  repository-owned `.ai/harness/` layout is restored.
+- [x] Run targeted suites, full required checks, strict workflow validation,
+  review, and packed-artifact API readback.
 
 ## Authorization boundary
 

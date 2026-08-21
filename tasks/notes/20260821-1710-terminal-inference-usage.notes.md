@@ -32,7 +32,7 @@ projection preserves the exact winning terminal value.
   `localAgentRelease.version`.
 - Cloud tests prove every terminal projection and preserve the first terminal's
   usage through a later conflicting terminal.
-- `bun run build`, `bun run typecheck`, and `bun run test` pass. The required
-  strict workflow is blocked before task validation because the worktree lacks
-  repository-owned `.ai/harness/{runs,checks,failures,handoff}` directories;
-  U2 does not create that layout.
+- `bun run build`, `bun run typecheck`, and `bun run test` pass. After the
+  repository-owned harness layout was materialized, strict workflow passed and
+  `repo-harness run verify-contract --strict` reported `total=11 failed=0
+  status=Fulfilled`.

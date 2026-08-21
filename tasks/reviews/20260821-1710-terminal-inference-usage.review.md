@@ -1,6 +1,6 @@
 # Review: terminal-inference-usage
 
-> **Status**: Source review passed — strict workflow environment blocked
+> **Status**: Passed — local verification complete
 > **Plan**: `plans/plan-20260821-1710-terminal-inference-usage.md`
 
 ## Review Boundary
@@ -18,7 +18,8 @@
   assertions that confirmed the correct omission rule: a runtime with no
   native `usage` event (Pi) must omit the entire optional block. The final
   implementation and targeted regression test preserve that rule.
-- Build, typecheck, and full test passed locally. `check-task-workflow --strict`
-  cannot start task validation until the repository-owned `.ai/harness/`
-  directories exist; they are outside this U2 write contract. Package artifact
-  readback remains pending a clean committed worktree.
+- Build, typecheck, full test, and `check-task-workflow --strict` passed
+  locally. The strict contract verifier ran the real targeted Vitest commands
+  plus full checks and reported `total=11 failed=0 status=Fulfilled`. The
+  generated harness layout is declarative evidence only; it does not change
+  product behavior or replace the package artifact readback.
