@@ -84,6 +84,14 @@
 - Final docs/handoff candidate `9e5155b330919bd7aebfa9056bc8b76ae683c750`
   received a delta gate PASS; the only later change is this plan/checkpoint
   projection marking the already-executed verification item complete.
+- Change assessment now declares the already-executed deterministic checks and
+  packed CLI runtime readback as the two required oracles. It is `ready` for
+  normalized subject
+  `sha256:37d1ea4c2ecd402f5f051a326bba37b008c2a7a6a5a578863c4e391e23161191`
+  against target `40343ed02761f78643dd1c697ceb70dbe3cc11ed`.
+- Independent read-only gate review recommends PASS for the fixed code and the
+  later docs/handoff delta. This is review evidence only; no typed external
+  AcceptanceReceipt has been recorded.
 
 ## Promotion Filter
 

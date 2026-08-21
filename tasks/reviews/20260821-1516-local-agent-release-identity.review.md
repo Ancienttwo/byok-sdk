@@ -1,27 +1,27 @@
 # Task Review: local-agent-release-identity
 
-> **Status**: Pending
+> **Status**: Reviewed
 > **Plan**: plans/plan-20260821-1516-local-agent-release-identity.md
 > **Contract**: tasks/contracts/20260821-1516-local-agent-release-identity.contract.md
 > **Notes File**: tasks/notes/20260821-1516-local-agent-release-identity.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-21 15:18
-> **Recommendation**: fail
+> **Last Updated**: 2026-08-21 15:51
+> **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:37d1ea4c2ecd402f5f051a326bba37b008c2a7a6a5a578863c4e391e23161191
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
+> **Reviewed Target Revision**: 40343ed02761f78643dd1c697ceb70dbe3cc11ed
 
 ## Human Review Card
 
-- Verdict: pending
+- Verdict: pass
 - Change type: code-change
 - Intended files changed: client identity/daemon/CLI/test/build surfaces, aligned package manifests and lockfile, pack smoke, spec, and workflow artifacts named by the contract
 - Actual files changed: matches the contract allowlist; no WS, hosted presence, updater, Latest lookup, publish, or deployment surface changed
-- Commands passed: targeted and full client Vitest, root build/typecheck/test, package-graph check, strict task-workflow check (pre-freeze); final clean-candidate pack smoke pending
-- Residual risks: public pre-1.0 `DaemonConfig` consumers outside this repo must add the required identity; external acceptance is not yet authorized/recorded
-- Reviewer action required: inspect diff and card
-- Rollback:
+- Commands passed: targeted client Vitest (4 files / 79 tests), full client Vitest (124 files / 1293 tests), root build/typecheck/test, package-graph check, strict task-workflow check, final clean-candidate pack smoke, and change assessment
+- Residual risks: public pre-1.0 `DaemonConfig` consumers outside this repo must add the required identity; external acceptance is not recorded; repo-harness still has two upstream closeout defects documented in the handoff
+- Reviewer action required: record the configured external AcceptanceReceipt after upstream closeout behavior is accepted
+- Rollback: revert this work-package's client API, CLI, tests, spec, package manifests, lockfile, and pack-smoke commits; no data or deployment rollback exists
 
 ## Mode Evidence
 
@@ -31,12 +31,12 @@
 
 ## Verification Evidence
 
-- Waza `/check` run:
-- Commands run: targeted/full Vitest, `bun run build`, `bun run typecheck`, `bun run test`, package graph check, strict workflow check; final candidate rerun and pack smoke pending
+- Waza `/check` run: not used; equivalent contract commands were run directly in the isolated worktree
+- Commands run: targeted/full Vitest, `bun run build`, `bun run typecheck`, `bun run test`, package graph check, strict workflow check, clean pack smoke, and `change-assessment prepare`
 - Manual checks: bundled output contains no unresolved `__BYOK_CLIENT_PACKAGE_VERSION__`; empty-environment built CLI prints `0.6.0`; public resolver output is frozen
-- Supporting artifacts:
-- Implementation notes reviewed:
-- Run snapshot:
+- Supporting artifacts: `.ai/harness/runs/20260821-local-agent-release-identity-change-assessment.json`; retained upstream runner failure logs named in the handoff
+- Implementation notes reviewed: `tasks/notes/20260821-1516-local-agent-release-identity.notes.md`
+- Run snapshot: change assessment status `ready` for the reviewed subject and target revision above
 
 ## Manual Check Evidence
 
@@ -44,8 +44,7 @@ Copy each non-built-in contract `manual_checks` requirement exactly. Check it on
 the observation is complete and replace the placeholder with concrete command output,
 screenshot/artifact path, or reviewer observation.
 
-- [ ] Exact manual_checks requirement
-  - Evidence: concrete observation, command output, screenshot path, or reviewer note
+- No contract `manual_checks` requirements are declared.
 
 ## Acceptance Receipt Projection
 
@@ -79,22 +78,23 @@ screenshot/artifact path, or reviewer observation.
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| Functionality | 0/10 | |
-| Product depth | 0/10 | |
-| Design quality | 0/10 | |
-| Code quality | 0/10 | |
+| Functionality | 10/10 | Required local readbacks and zero-state version behavior are covered. |
+| Product depth | 9/10 | Slice is deliberately bounded before wire/update semantics. |
+| Design quality | 10/10 | One immutable release authority; no fallback or behavior gate. |
+| Code quality | 10/10 | Focused tests, full suite, build/typecheck, and packed artifact proof pass. |
 
 ## Failing Items
 
-- External acceptance not recorded; review recommendation remains `fail` until
-  that separate gate is satisfied.
+- External acceptance remains a separate unavailable gate; it does not change
+  the code-review recommendation.
 
 ## Retest Steps
 
-- Re-run: contract exit commands against the frozen candidate.
-- Re-check: installed packed CLI stdout equals packed client manifest version.
+- After upstream repo-harness repair, rerun `verify-contract` so package-owned
+  Vitest config is honored and `prepare-handoff` resolves its packaged helper.
+- Record the configured AcceptanceReceipt only for the exact reviewed subject.
 
 ## Summary
 
-- Implementation is locally ready for frozen-candidate verification; it is not
-  accepted, published, tagged, pushed, merged, or deployed.
+- The implementation and frozen-subject review pass locally. Acceptance remains
+  unavailable, and nothing was published, tagged, pushed, merged, or deployed.
