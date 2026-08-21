@@ -98,7 +98,7 @@ export function createPostgresCloudStores(
   return {
     activity: new PostgresActivityStore(pool, clock),
     approvals: new PostgresApprovalTimelineStore(pool, clock),
-    devices: new PostgresDeviceDirectory(pool),
+    devices: new PostgresDeviceDirectory(pool, clock),
     pairingCodes: new PostgresPairingCodeStore(pool, clock),
     nonces: new PostgresNonceStore(pool, clock, crypto),
     dedup: new PostgresInboundDedupStore(pool),

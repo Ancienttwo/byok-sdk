@@ -17,6 +17,13 @@ function isWithinInlineByteLimit(value: string): boolean {
 export const RuntimeIdSchema = z.enum(['pi', 'claude', 'codex']);
 export type RuntimeId = z.infer<typeof RuntimeIdSchema>;
 
+/** Wire-safe protocol version number: bounded before JSON reaches a store or comparison. */
+export const ProtocolVersionNumberSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(2_147_483_647);
+
 /**
  * Per-runtime feature flags reported in `conn.hello.runtimes[].capabilities`
  * (pre-freeze addition). Distinct from the connection-level `CAPABILITY_FLAGS`
@@ -107,10 +114,12 @@ export const ConfiguredToolsetsSchema = z
 
 /** daemon -> server: opening handshake. */
 export const ConnHelloPayloadSchema = z.object({
-  protocolVersions: z.array(z.number().int()),
+  protocolVersions: z.array(ProtocolVersionNumberSchema).max(16),
   capabilities: z.array(z.string()),
   deviceId: z.string(),
   productId: z.string(),
+  /** U4a Local Agent release identity; this is the sole client-version authority. */
+  clientVersion: z.string().min(1).max(128).optional(),
   /** Runtimes detected on this device (M1 gap #4; replaces `agents`). */
   runtimes: z.array(RuntimeInfoSchema).optional(),
   /** Validated logical IDs configured on this device; definitions and secrets stay local. */

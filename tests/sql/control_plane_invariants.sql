@@ -11,6 +11,7 @@
 --   deploy/sql/0007_approval_timeline.sql (bounded approval lifecycle tail)
 --   deploy/sql/0008_device_assertion_replay.sql (single-use assertion exchange ledger)
 --   deploy/sql/0009_task_cancellation.sql (durable host cancellation tombstone and delivery identity)
+--   deploy/sql/0010_tenant_readiness.sql (optional frozen presence facts)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -69,6 +70,45 @@ BEGIN
     RAISE EXCEPTION
       'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 26 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql; 0009_task_cancellation.sql is checked separately)',
       current_database(), current_schema(), port_tables;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.2 Tenant readiness presence projection has the additive fact columns
+-- ---------------------------------------------------------------------------
+--
+-- 0010 changes no key shape and creates no table, so the invariant is an
+-- explicit catalog check rather than another table-count increment. These
+-- fields are nullable by design: older daemons omit release/runtime/auth facts
+-- and the SDK must not synthesize them.
+DO $$
+DECLARE
+  missing_columns text;
+BEGIN
+  SELECT string_agg(required.name, ', ' ORDER BY required.name) INTO missing_columns
+    FROM (
+      VALUES
+        ('client_version'::text, 'text'::regtype),
+        ('protocol_versions'::text, 'jsonb'::regtype),
+        ('runtimes'::text, 'jsonb'::regtype)
+    ) AS required(name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'device_presence'
+         AND a.attname = required.name
+         AND a.atttypid = required.type_oid
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without 0010_tenant_readiness.sql: device_presence is missing column(s): %',
+      missing_columns;
   END IF;
 END $$;
 

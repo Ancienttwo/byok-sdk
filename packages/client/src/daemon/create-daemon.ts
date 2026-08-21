@@ -7,6 +7,7 @@ import {
   CONFIGURED_TOOLSETS_MAX_ITEMS,
   createEnvelope,
   encodeEnvelope,
+  PROTOCOL_VERSION,
   TASK_TRANSITIONS,
   ToolsetIdSchema,
 } from '@byok-sdk/protocol';
@@ -1191,6 +1192,8 @@ export function buildDaemonWithAdapters(
   // capability). The controller cancels an in-flight discovery during
   // shutdown so teardown never waits on a hung deployment.
   let presencePublisher: PresencePublisher | undefined;
+  /** Runtime facts are probed once per start and reused by WS + first-hop HTTP presence. */
+  let detectedRuntimeFacts: readonly RuntimeInfo[] = [];
   let presenceDiscovery: AbortController | undefined;
   /** Guards against a reconnect storm stacking overlapping declaration reads. */
   let presenceDiscoveryInFlight = false;
@@ -1456,6 +1459,7 @@ export function buildDaemonWithAdapters(
     // same as the `conn.hello.runtimes` it also feeds (see `detectRuntimes`'s
     // own doc comment on why this isn't re-probed on every reconnect).
     observer.noteRuntimesDetected(runtimes);
+    detectedRuntimeFacts = runtimes;
     const capabilities = computeCapabilities(adapters);
 
     // S3b: this daemon's journal identity — only knowable here, after
@@ -1612,6 +1616,7 @@ export function buildDaemonWithAdapters(
       deviceId: record.deviceId,
       productId: config.productId,
       capabilities,
+      clientVersion: localAgentRelease.version,
       runtimes,
       configuredToolsets,
       auth,
@@ -1762,6 +1767,9 @@ export function buildDaemonWithAdapters(
             serverUrl: config.serverUrl,
             auth,
             configuredToolsets,
+            clientVersion: localAgentRelease.version,
+            protocolVersions: [PROTOCOL_VERSION],
+            runtimes: detectedRuntimeFacts,
             ...presenceCadence,
             onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
           });

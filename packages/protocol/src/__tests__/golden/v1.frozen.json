@@ -184,11 +184,12 @@
       "type": "object",
       "properties": {
         "protocolVersions": {
+          "maxItems": 16,
           "type": "array",
           "items": {
             "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991
+            "minimum": 0,
+            "maximum": 2147483647
           }
         },
         "capabilities": {
@@ -202,6 +203,11 @@
         },
         "productId": {
           "type": "string"
+        },
+        "clientVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         },
         "runtimes": {
           "type": "array",
@@ -1405,11 +1411,12 @@
             "type": "object",
             "properties": {
               "protocolVersions": {
+                "maxItems": 16,
                 "type": "array",
                 "items": {
                   "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
+                  "minimum": 0,
+                  "maximum": 2147483647
                 }
               },
               "capabilities": {
@@ -1423,6 +1430,11 @@
               },
               "productId": {
                 "type": "string"
+              },
+              "clientVersion": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
               },
               "runtimes": {
                 "type": "array",
@@ -3892,6 +3904,83 @@
       ],
       "additionalProperties": false
     },
+    "presencePublishRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "online",
+            "thinking",
+            "working",
+            "error",
+            "offline"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "configuredToolsets": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+          }
+        },
+        "clientVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "protocolVersions": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        },
+        "runtimes": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "pi",
+                  "claude",
+                  "codex"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "authPresent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "additionalProperties": false
+    },
     "createBlobRequest": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -4004,11 +4093,12 @@
                     "type": "object",
                     "properties": {
                       "protocolVersions": {
+                        "maxItems": 16,
                         "type": "array",
                         "items": {
                           "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
+                          "minimum": 0,
+                          "maximum": 2147483647
                         }
                       },
                       "capabilities": {
@@ -4022,6 +4112,11 @@
                       },
                       "productId": {
                         "type": "string"
+                      },
+                      "clientVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
                       },
                       "runtimes": {
                         "type": "array",
@@ -6015,11 +6110,12 @@
                     "type": "object",
                     "properties": {
                       "protocolVersions": {
+                        "maxItems": 16,
                         "type": "array",
                         "items": {
                           "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
+                          "minimum": 0,
+                          "maximum": 2147483647
                         }
                       },
                       "capabilities": {
@@ -6033,6 +6129,11 @@
                       },
                       "productId": {
                         "type": "string"
+                      },
+                      "clientVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
                       },
                       "runtimes": {
                         "type": "array",

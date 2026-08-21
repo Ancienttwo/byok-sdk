@@ -7,7 +7,14 @@
  * so a revocation applied through the composite key is immediately visible to
  * `/byok/challenge` and `/byok/token` with no second copy to keep in sync.
  */
-import { tenantKey, type TenantId } from '@byok-sdk/core';
+import {
+  PRESENCE_LEVELS,
+  tenantKey,
+  type PresenceStore,
+  type TenantId,
+  type TenantReadinessDevice,
+  type TenantReadiness,
+} from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '../ports';
 
 export class InMemoryDeviceDirectory implements DeviceDirectory {
@@ -47,6 +54,61 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     return [...this.#byTenant.entries()]
       .filter(([key]) => key.startsWith(prefix))
       .map(([, record]) => record);
+  }
+
+  async readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness> {
+    const devices = await this.list(tenant);
+    const livePresence = await presence.list(tenant);
+    const presenceByDevice = new Map(livePresence.map((hint) => [hint.deviceId, hint]));
+    const activeDeviceIds = new Set(
+      devices.filter((device) => !device.revoked).map((device) => device.deviceId),
+    );
+    const observedPresenceByLevel = Object.fromEntries(
+      PRESENCE_LEVELS.map((level) => [level, 0]),
+    ) as Record<(typeof PRESENCE_LEVELS)[number], number>;
+    for (const hint of livePresence) {
+      if (!activeDeviceIds.has(hint.deviceId)) continue;
+      observedPresenceByLevel[hint.level] += 1;
+    }
+    return {
+      tenantId: tenant,
+      activePairedDeviceCount: devices.filter((device) => !device.revoked).length,
+      revokedDeviceCount: devices.filter((device) => device.revoked).length,
+      observedPresenceCount: Object.values(observedPresenceByLevel).reduce(
+        (total, count) => total + count,
+        0,
+      ),
+      observedPresenceByLevel,
+      devices: [...devices]
+        .sort((left, right) => left.deviceId.localeCompare(right.deviceId))
+        .map((device): TenantReadinessDevice => {
+          const hint = device.revoked ? undefined : presenceByDevice.get(device.deviceId);
+          return {
+            deviceId: device.deviceId,
+            productId: device.productId,
+            deviceName: device.deviceName,
+            revoked: device.revoked,
+            ...(hint === undefined
+              ? {}
+              : {
+                  presence: {
+                    level: hint.level,
+                    ...(hint.detail === undefined ? {} : { detail: hint.detail }),
+                    ...(hint.configuredToolsets === undefined
+                      ? {}
+                      : { configuredToolsets: hint.configuredToolsets }),
+                    ...(hint.clientVersion === undefined ? {} : { clientVersion: hint.clientVersion }),
+                    ...(hint.protocolVersions === undefined
+                      ? {}
+                      : { protocolVersions: hint.protocolVersions }),
+                    ...(hint.runtimes === undefined ? {} : { runtimes: hint.runtimes }),
+                    observedAt: hint.observedAt,
+                    expiresAt: hint.expiresAt,
+                  },
+                }),
+          };
+        }),
+    };
   }
 
   async resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined> {

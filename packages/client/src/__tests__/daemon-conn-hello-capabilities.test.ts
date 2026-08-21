@@ -81,6 +81,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
+    expect(hello.payload.clientVersion).toBe('0.0.0-test');
     const runtimes = hello.payload.runtimes ?? [];
     expect(hello.payload.capabilities).toContain('toolset-selection');
     expect(hello.payload.configuredToolsets).toEqual(['crm.readonly', 'salesko.connectors']);

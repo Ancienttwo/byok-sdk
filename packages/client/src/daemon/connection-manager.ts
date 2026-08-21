@@ -29,6 +29,8 @@ export interface ConnectionManagerOptions {
   deviceId: string;
   productId: string;
   capabilities: CapabilityFlag[];
+  /** U4a Local Agent release version; passed unchanged to both transports. */
+  clientVersion?: string;
   runtimes: RuntimeInfo[];
   /** Sorted logical IDs from the validated local registry; executable definitions stay local. */
   configuredToolsets?: readonly ToolsetId[];
@@ -217,6 +219,7 @@ export class ConnectionManager {
       deviceId: opts.deviceId,
       productId: opts.productId,
       capabilities: opts.capabilities,
+      clientVersion: opts.clientVersion,
       runtimes: opts.runtimes,
       configuredToolsets: opts.configuredToolsets,
       getCursor: () => this.cursor,
