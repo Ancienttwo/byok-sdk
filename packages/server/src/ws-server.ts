@@ -136,6 +136,7 @@ function handleConnection(ws: WebSocket, principal: AuthenticatedDevice, deps: A
       payload.runtimes,
       payload.capabilities,
       payload.configuredToolsets,
+      payload.clientVersion,
     );
     deps.hub.sendConnAck(deviceId, SUPPORTED_CAPABILITIES);
     // Reconnection procedure step 3 (§9): redeliver anything still relevant

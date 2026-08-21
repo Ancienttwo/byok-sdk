@@ -78,6 +78,11 @@ CLI release and, when reachable, the running daemon release, so a mismatch is
 observable without becoming a gate. An older local-control peer that predates
 the field is rendered as `unknown`; the CLI does not infer a replacement.
 
+The same version is projected as optional `clientVersion` in WS hello and
+hosted presence. The self-hosted server retains the WS value in its live
+connection state and exposes it through `machines.list()`; omission remains
+legacy/unknown and is never replaced by a server-inferred version.
+
 Whether a release can run is decided by wire-protocol compatibility and the
 capabilities/runtime/toolsets required by the concrete action. Being behind a
 host's Latest release is only an operator-facing update signal; it must not

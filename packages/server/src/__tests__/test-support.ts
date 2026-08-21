@@ -254,6 +254,7 @@ export async function connectFakeDaemonWs(
     deviceId: string;
     accessToken: string;
     productId: string;
+    clientVersion?: string;
     capabilities?: string[];
     runtimes?: RuntimeInfo[];
     configuredToolsets?: ToolsetId[];
@@ -275,6 +276,7 @@ export async function connectFakeDaemonWs(
       capabilities: opts.capabilities ?? [],
       deviceId: opts.deviceId,
       productId: opts.productId,
+      clientVersion: opts.clientVersion,
       runtimes: opts.runtimes,
       configuredToolsets: opts.configuredToolsets,
       cursor: opts.cursor,
@@ -300,6 +302,7 @@ export async function connectFakeDaemon(
   opts: {
     deviceName?: string;
     productId: string;
+    clientVersion?: string;
     capabilities?: string[];
     runtimes?: RuntimeInfo[];
     configuredToolsets?: ToolsetId[];
@@ -318,6 +321,7 @@ export async function connectFakeDaemon(
     deviceId,
     accessToken,
     productId: opts.productId,
+    clientVersion: opts.clientVersion,
     capabilities: opts.capabilities,
     runtimes: opts.runtimes,
     configuredToolsets: opts.configuredToolsets,

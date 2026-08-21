@@ -50,7 +50,7 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
     ws = undefined;
   });
 
-  it('pair -> hello/ack -> dispatch -> offer -> claim -> progress -> complete', async () => {
+  it('an older Local Agent release remains observable and completes work when protocol and capabilities match', async () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);
     server = started.server;
@@ -58,6 +58,7 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
     const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
       productId: PRODUCT_ID,
+      clientVersion: '0.5.0',
       configuredToolsets: ['salesko.connectors'],
     });
     ws = daemon.ws;
@@ -67,6 +68,7 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
         deviceId: daemon.deviceId,
         deviceName: 'test-laptop',
         connected: true,
+        clientVersion: '0.5.0',
         configuredToolsets: ['salesko.connectors'],
       }),
     ]);
@@ -136,6 +138,20 @@ describe('server integration (in-process http+ws, fake daemon client)', () => {
       'progress',
       'turn_end',
     ]);
+  });
+
+  it('keeps a legacy daemon with no release identity connected and does not invent one', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, { productId: PRODUCT_ID });
+    ws = daemon.ws;
+
+    const [machine] = byok.machines.list();
+    expect(machine).toMatchObject({ deviceId: daemon.deviceId, connected: true });
+    expect(machine).not.toHaveProperty('clientVersion');
   });
 
   it('task.claim is an idempotent CAS: a retried claim from the same device is a no-op', async () => {

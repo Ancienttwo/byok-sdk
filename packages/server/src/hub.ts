@@ -155,6 +155,8 @@ interface ConnectionState {
   ws?: WebSocket;
   connected: boolean;
   lastSeen: string;
+  /** Process-immutable Local Agent release from conn.hello; omission means legacy/unknown. */
+  clientVersion?: string;
   runtimes?: RuntimeInfo[];
   /** Logical IDs from the last conn.hello; executable MCP definitions never enter the hub. */
   configuredToolsets?: readonly ToolsetId[];
@@ -560,12 +562,14 @@ export class ConnectionHub {
     runtimes: RuntimeInfo[] | undefined,
     capabilities?: readonly string[],
     configuredToolsets?: readonly ToolsetId[],
+    clientVersion?: string,
   ): void {
     const at = new Date().toISOString();
     this.connections.set(deviceId, {
       ws,
       connected: true,
       lastSeen: at,
+      clientVersion,
       runtimes,
       capabilities,
       configuredToolsets,
@@ -2187,6 +2191,7 @@ export class ConnectionHub {
         deviceName,
         connected: conn?.connected ?? false,
         lastSeen: conn?.lastSeen,
+        ...(conn?.clientVersion === undefined ? {} : { clientVersion: conn.clientVersion }),
         runtimes: conn?.runtimes,
         configuredToolsets: conn?.configuredToolsets ? [...conn.configuredToolsets] : undefined,
       };
