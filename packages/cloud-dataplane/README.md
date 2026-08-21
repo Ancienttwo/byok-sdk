@@ -241,11 +241,18 @@ vendoring the SQL into your own repository would make that copy a second source
 of truth, free to drift from the runner installed beside it.
 
 ```ts
-import { createByokPool, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';
+import {
+  createByokPool,
+  migrate,
+  migrationsDir,
+  verifyMigrations,
+} from '@byok-sdk/cloud-dataplane';
 
 const pool = createByokPool({ connectionString: process.env.DATABASE_URL! });
 const result = await migrate(pool, migrationsDir());
 console.log(result.applied); // e.g. ['0001_cloud_local.sql', ..., '0004_device_proof_truth.sql']
+const applied = await verifyMigrations(pool);
+console.log(applied); // exact ordered [{ version, checksum }, ...] rows
 ```
 
 `migrate` still takes its directory explicitly, because the same runner also
@@ -271,6 +278,14 @@ The runner:
 
 A consequence of per-file transactions: a statement that cannot run inside one
 (`CREATE INDEX CONCURRENTLY`) cannot appear in a migration file.
+
+`verifyMigrations(pool, directory = migrationsDir())` is a Node-only root export
+for readiness/readback checks. It reads the package migration files and the
+existing `byok_schema_migration` ledger, returning exact rows in migration order
+only when every version and checksum matches. Missing rows, unexpected rows,
+checksum drift, and an absent ledger table throw one aggregate
+`MigrationStateMismatchError` with stable `issues` ordering. Verification never
+creates the ledger or applies migrations; `./runtime` does not export it.
 
 ## Pool
 

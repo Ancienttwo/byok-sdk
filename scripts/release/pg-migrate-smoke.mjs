@@ -134,6 +134,8 @@ try {
       `const controlPool = createByokPool({ connectionString });\n` +
       `let emptyPool;\n` +
       `let upgradePool;\n` +
+      `let emptyRoleCreated = false;\n` +
+      `let upgradeRoleCreated = false;\n` +
       `const baselineDirectory = ${JSON.stringify(baselineTagDir)};\n` +
       `async function readSeedRows(pool) {\n` +
       `  const [stream, mailbox, task, truth, entitlement, usage] = await Promise.all([\n` +
@@ -148,14 +150,32 @@ try {
       `}\n` +
       `try {\n` +
       `  const directory = migrationsDir();\n` +
-      `  const existing = await controlPool.query("SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = 'public' OR table_schema = 'byok_upgrade_v042' ORDER BY table_schema, table_name");\n` +
-      `  const upgradeSchema = await controlPool.query("SELECT 1 FROM pg_namespace WHERE nspname = 'byok_upgrade_v042'");\n` +
-      `  if (existing.rowCount !== 0 || upgradeSchema.rowCount !== 0) {\n` +
-      `    throw new Error('DATABASE_URL must have no public tables and no byok_upgrade_v042 schema');\n` +
+      `  const existing = await controlPool.query("SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema IN ('public', 'byok_empty', 'byok_upgrade_v042') ORDER BY table_schema, table_name");\n` +
+      `  const smokeSchemas = await controlPool.query("SELECT nspname FROM pg_namespace WHERE nspname IN ('byok_empty', 'byok_upgrade_v042')");\n` +
+      `  const smokeRoles = await controlPool.query("SELECT rolname FROM pg_roles WHERE rolname IN ('byok_empty', 'byok_upgrade_v042')");\n` +
+      `  if (existing.rowCount !== 0 || smokeSchemas.rowCount !== 0 || smokeRoles.rowCount !== 0) {\n` +
+      `    throw new Error('DATABASE_URL must have no public SDK tables and no byok_empty/byok_upgrade_v042 role or schema');\n` +
       `  }\n` +
-      `  await controlPool.query('CREATE SCHEMA byok_upgrade_v042');\n` +
-      `  emptyPool = createByokPool({ connectionString });\n` +
-      `  upgradePool = createByokPool({ connectionString, max: 64, options: '-c search_path=byok_upgrade_v042' });\n` +
+      `  await controlPool.query("CREATE ROLE byok_empty LOGIN PASSWORD 'byok_empty'");\n` +
+      `  emptyRoleCreated = true;\n` +
+      `  await controlPool.query('CREATE SCHEMA byok_empty AUTHORIZATION byok_empty');\n` +
+      `  await controlPool.query("DO $do$ BEGIN EXECUTE format('ALTER ROLE byok_empty IN DATABASE %I SET search_path TO byok_empty, public', current_database()); END $do$");\n` +
+      `  await controlPool.query("CREATE ROLE byok_upgrade_v042 LOGIN PASSWORD 'byok_upgrade_v042'");\n` +
+      `  upgradeRoleCreated = true;\n` +
+      `  await controlPool.query('CREATE SCHEMA byok_upgrade_v042 AUTHORIZATION byok_upgrade_v042');\n` +
+      `  await controlPool.query("DO $do$ BEGIN EXECUTE format('ALTER ROLE byok_upgrade_v042 IN DATABASE %I SET search_path TO byok_upgrade_v042, public', current_database()); END $do$");\n` +
+      `  const upgradeConnection = new URL(connectionString);\n` +
+      `  upgradeConnection.username = 'byok_upgrade_v042';\n` +
+      `  upgradeConnection.password = 'byok_upgrade_v042';\n` +
+      `  const emptyConnection = new URL(connectionString);\n` +
+      `  emptyConnection.username = 'byok_empty';\n` +
+      `  emptyConnection.password = 'byok_empty';\n` +
+      `  emptyPool = createByokPool({ connectionString: emptyConnection.toString() });\n` +
+      `  upgradePool = createByokPool({ connectionString: upgradeConnection.toString(), max: 64 });\n` +
+      `  const emptySession = await emptyPool.query('SELECT current_user, current_schema() AS current_schema');\n` +
+      `  assert.deepEqual(emptySession.rows, [{ current_user: 'byok_empty', current_schema: 'byok_empty' }], 'database-scoped application role setting must own the empty-install schema');\n` +
+      `  const upgradeSession = await upgradePool.query('SELECT current_user, current_schema() AS current_schema');\n` +
+      `  assert.deepEqual(upgradeSession.rows, [{ current_user: 'byok_upgrade_v042', current_schema: 'byok_upgrade_v042' }], 'database-scoped application role setting must own the upgrade schema');\n` +
       `\n` +
       `  const first = await migrate(emptyPool, directory);\n` +
       `  assert.deepEqual([...first.applied], expected, 'first run must apply every shipped migration');\n` +
@@ -197,9 +217,23 @@ try {
       `  const final = await migrate(upgradePool, directory);\n` +
       `  assert.deepEqual([...final.applied], []);\n` +
       `  assert.deepEqual([...final.alreadyApplied], expected);\n` +
-      `  console.log('[pg-migrate-smoke] default-schema empty install applied ' + expected.length + ' migration(s); tag-bound v0.4.2 fixture preserved stream/mailbox/task/truth/quota rows, applied ' + upgraded.applied.join(', ') + ', and admitted exactly one of 64 concurrent replay consumes');\n` +
+      `  const publicTables = await controlPool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name");\n` +
+      `  assert.deepEqual(publicTables.rows, [], 'role-isolated migrations must leave public empty');\n` +
+      `  console.log('[pg-migrate-smoke] role-isolated empty install applied ' + expected.length + ' migration(s); tag-bound v0.4.2 fixture preserved stream/mailbox/task/truth/quota rows, applied ' + upgraded.applied.join(', ') + ', and admitted exactly one of 64 concurrent replay consumes');\n` +
       `} finally {\n` +
-      `  await Promise.allSettled([emptyPool?.end(), upgradePool?.end(), controlPool.end()]);\n` +
+      `  await Promise.allSettled([emptyPool?.end(), upgradePool?.end()]);\n` +
+      `  try {\n` +
+      `    if (upgradeRoleCreated) {\n` +
+      `      await controlPool.query('DROP SCHEMA IF EXISTS byok_upgrade_v042 CASCADE');\n` +
+      `      await controlPool.query('DROP ROLE byok_upgrade_v042');\n` +
+      `    }\n` +
+      `    if (emptyRoleCreated) {\n` +
+      `      await controlPool.query('DROP SCHEMA IF EXISTS byok_empty CASCADE');\n` +
+      `      await controlPool.query('DROP ROLE byok_empty');\n` +
+      `    }\n` +
+      `  } finally {\n` +
+      `    await controlPool.end();\n` +
+      `  }\n` +
       `}\n`,
   );
   console.log(run(nodeBin, ['migrate-smoke.mjs'], smokeDir, { ...process.env, DATABASE_URL: databaseUrl }));

@@ -38,6 +38,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool, PoolClient } from 'pg';
+import { migrationsDir } from './migrations-dir';
 
 /**
  * An arbitrary but permanently fixed advisory-lock key. Its only requirement is
@@ -60,6 +61,9 @@ CREATE TABLE IF NOT EXISTS byok_schema_migration (
   applied_at  timestamptz NOT NULL
 )`;
 
+const MIGRATION_LEDGER_TABLE = 'byok_schema_migration';
+const LEDGER_READ_SQL = 'SELECT version, checksum FROM byok_schema_migration';
+
 /** One file on disk, already ordered and checksummed. */
 export interface MigrationFile {
   /** The filename, e.g. `0001_cloud_local.sql`. This is the ledger's `version`. */
@@ -74,6 +78,65 @@ export interface MigrationFile {
 export interface MigrationResult {
   readonly applied: readonly string[];
   readonly alreadyApplied: readonly string[];
+}
+
+/** The exact package-owned row returned after a successful ledger readback. */
+export interface MigrationVerificationRow {
+  readonly version: string;
+  readonly checksum: string;
+}
+
+export type MigrationStateIssue =
+  | {
+      readonly kind: 'missing';
+      readonly version: string;
+      readonly expectedChecksum: string;
+    }
+  | {
+      readonly kind: 'unexpected';
+      readonly version: string;
+      readonly actualChecksum: string;
+    }
+  | {
+      readonly kind: 'checksum_mismatch';
+      readonly version: string;
+      readonly expectedChecksum: string;
+      readonly actualChecksum: string;
+    }
+  | {
+      readonly kind: 'ledger_missing';
+      readonly table: 'byok_schema_migration';
+    };
+
+/**
+ * The database's migration state does not exactly match this package's files.
+ *
+ * This is deliberately aggregate and fail-closed: a host can report every
+ * drift fact in one readiness result, but it cannot continue as though a
+ * partially matching schema were usable.
+ */
+export class MigrationStateMismatchError extends Error {
+  readonly issues: readonly MigrationStateIssue[];
+
+  constructor(issues: readonly MigrationStateIssue[], options?: ErrorOptions) {
+    const detail = issues
+      .map((issue) => {
+        switch (issue.kind) {
+          case 'missing':
+            return `missing ${issue.version}`;
+          case 'unexpected':
+            return `unexpected ${issue.version}`;
+          case 'checksum_mismatch':
+            return `checksum mismatch ${issue.version}`;
+          case 'ledger_missing':
+            return `ledger table missing ${issue.table}`;
+        }
+      })
+      .join('; ');
+    super(`Migration state does not match package files: ${detail}`, options);
+    this.name = 'MigrationStateMismatchError';
+    this.issues = Object.freeze([...issues]);
+  }
 }
 
 /**
@@ -162,11 +225,99 @@ export async function readMigrationFiles(directory: string): Promise<readonly Mi
   return files;
 }
 
+interface MigrationLedgerRow {
+  readonly version: string;
+  readonly checksum: string;
+}
+
+async function readLedgerRows(client: PoolClient): Promise<readonly MigrationLedgerRow[]> {
+  const result = await client.query<MigrationLedgerRow>(LEDGER_READ_SQL);
+  return result.rows;
+}
+
 async function readLedger(client: PoolClient): Promise<Map<string, string>> {
-  const result = await client.query<{ version: string; checksum: string }>(
-    'SELECT version, checksum FROM byok_schema_migration',
+  const rows = await readLedgerRows(client);
+  return new Map(rows.map((row) => [row.version, row.checksum]));
+}
+
+function isMissingLedgerTable(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === '42P01'
   );
-  return new Map(result.rows.map((row) => [row.version, row.checksum]));
+}
+
+function compareVersions(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+/**
+ * Reads the package migration files and the existing ledger, then requires an
+ * exact version/checksum match.
+ *
+ * The default directory is the migration projection shipped by this package.
+ * This function only reads state: it never creates the ledger, applies a
+ * migration, or synthesizes a compatible result for a missing/changed row.
+ */
+export async function verifyMigrations(
+  pool: Pool,
+  directory: string = migrationsDir(),
+): Promise<readonly MigrationVerificationRow[]> {
+  const files = await readMigrationFiles(directory);
+  const client = await pool.connect();
+
+  try {
+    let ledgerRows: readonly MigrationLedgerRow[];
+    try {
+      ledgerRows = await readLedgerRows(client);
+    } catch (error) {
+      if (!isMissingLedgerTable(error)) throw error;
+      throw new MigrationStateMismatchError(
+        [{ kind: 'ledger_missing', table: MIGRATION_LEDGER_TABLE }],
+        { cause: error },
+      );
+    }
+
+    const ledger = new Map(ledgerRows.map((row) => [row.version, row.checksum]));
+    const expectedVersions = new Set(files.map((file) => file.version));
+    const issues: MigrationStateIssue[] = [];
+
+    for (const file of files) {
+      const actualChecksum = ledger.get(file.version);
+      if (actualChecksum === undefined) {
+        issues.push({
+          kind: 'missing',
+          version: file.version,
+          expectedChecksum: file.checksum,
+        });
+      } else if (actualChecksum !== file.checksum) {
+        issues.push({
+          kind: 'checksum_mismatch',
+          version: file.version,
+          expectedChecksum: file.checksum,
+          actualChecksum,
+        });
+      }
+    }
+
+    const unexpectedRows = ledgerRows
+      .filter((row) => !expectedVersions.has(row.version))
+      .slice()
+      .sort((left, right) => compareVersions(left.version, right.version));
+    for (const row of unexpectedRows) {
+      issues.push({ kind: 'unexpected', version: row.version, actualChecksum: row.checksum });
+    }
+
+    if (issues.length > 0) throw new MigrationStateMismatchError(issues);
+
+    return files.map(({ version, checksum }) => ({ version, checksum }));
+  } finally {
+    client.release();
+  }
 }
 
 /**

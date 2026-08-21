@@ -8,6 +8,33 @@
 
 ---
 
+## 2026-08-21 delta — hosted integration authority closure
+
+这次只记录此前未 upstream 的三个通用 SDK 缺口；presence、`result-document`、`migrationsDir()`、R2 `keyPrefix`、device simulator 与 device assertion broker 不重复登记。
+
+### A. schema-isolated Worker + Hyperdrive E2E（candidate 已实现，生产 operator action 未执行）
+
+- **复现证据**：Salesko direct migration/ledger readback 在 `byok_control` 为 8/8；同一 Hyperdrive binding 的 fresh Worker probe 对 DSN query `options` 与 `PoolConfig.options` 均读回 `current_schema=public`、`search_path="$user", public`，随后 `/readyz` 因 relation missing 返回 503。
+- **边界裁决**：SDK stores/migrations 继续使用 unqualified SQL；唯一 schema authority 是 Hyperdrive origin PostgreSQL application role 的 database-scoped `ALTER ROLE ... IN DATABASE ... SET search_path`。禁止 DSN options、`PoolConfig.options`、request-time `SET`、schema-qualified SQL 和 `public` fallback。
+- **最小修复**：candidate 的 disposable substrate、Node migrator、Worker/Hyperdrive fixture 使用同一 role/database；真实 workerd E2E 连续 fresh invocation 验证隔离 schema，且 `public` 中无 SDK tables/ledger。release migration smoke 同样改为 role-backed authority。
+- **验收条件**：Salesko operator 在真实 origin role/database 设置同一 authority 后，fresh Hyperdrive session 必须读回目标 schema，`/readyz` 为 200，目标 schema ledger exact，`public` negative。生产 role/binding 本 work-package 未修改。
+
+### B. package-owned exact migration ledger/readback（candidate 已实现）
+
+- **复现证据**：Salesko 必须复制 package 私有的 migration readdir、filename ordering、SHA-256、ledger raw SQL 与 missing/extra/checksum comparison，形成第二 migration-state authority。
+- **边界裁决**：执行时机仍由 host 决定；migration bytes、checksum、ledger shape 与 exact comparison 由 `@byok-sdk/cloud-dataplane/node` 单独拥有，Worker runtime 不读取文件系统。
+- **最小修复**：root-only `verifyMigrations(pool, directory = migrationsDir())`；成功返回 version 排序的 exact rows，missing、unexpected、checksum mismatch、ledger table absent 统一抛 typed aggregate `MigrationStateMismatchError`，稳定 issue ordering，绝不 auto-migrate/bootstrap。
+- **验收条件**：exact success 与四类 mismatch matrix、真实 Postgres ledger readback、installed default directory 和 `./runtime` export-negative 全部通过；Salesko 后续删除本地 comparator，只保留调用与产品 readiness composition。
+
+### C. `@byok-sdk/keys` registry dependency graph（`0.2.1` candidate 已实现，未发布）
+
+- **复现证据**：registry `@byok-sdk/keys@0.2.0` 精确依赖 `@byok-sdk/core@0.4.2`；与 downstream root `core@0.5.0` 标准 npm 安装会得到 nested `0.4.2`。旧 `check:release-graph` 只看 workspace，不能证明 packed/registry graph。
+- **边界裁决**：不覆盖不可变的 `0.2.0`，不放宽 dependency range；以新 keys patch candidate、exact tarball 与标准 npm clean install 修正发布事实。
+- **最小修复**：keys candidate 为 `0.2.1`，packed edge 精确指向 `core@0.5.0`；keys 纳入 pack artifact、release manifest、isolated import、single-version npm tree 与 registry readback，并冻结 `0.2.0 -> 0.4.2` stale-edge negative control。
+- **验收条件**：clean exact-SHA pack 后 `npm ls @byok-sdk/core --all --json` 只含 `0.5.0`；publish 之后 registry readback 必须确认 `keys@0.2.1 -> core@0.5.0`。本 work-package 不 publish、tag、push 或 deploy。
+
+---
+
 ## P0 — 阻塞 salesko Phase C
 
 ### 1. client daemon 从不上报 presence

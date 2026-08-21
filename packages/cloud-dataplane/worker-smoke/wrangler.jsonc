@@ -27,7 +27,7 @@
       // without touching the API, and `wrangler dev --local` routes through
       // localConnectionString, so this identifier is never resolved anywhere.
       "id": "byok-worker-smoke-local",
-      "localConnectionString": "postgres://byok:byok@127.0.0.1:5433/byok_test"
+      "localConnectionString": "postgres://byok_worker_e2e:byok_worker_e2e@127.0.0.1:5433/byok_test"
     }
   ]
 }
