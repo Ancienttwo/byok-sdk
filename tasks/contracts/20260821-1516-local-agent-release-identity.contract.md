@@ -78,7 +78,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"release-identity-required-checks","kind":"deterministic_test","paths":["*"]},{"id":"packed-cli-version-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
