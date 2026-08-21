@@ -1,6 +1,6 @@
 # Plan: Package-Owned Tenant Erasure
 
-> **Status**: Draft
+> **Status**: Active
 > **Created**: 20260821-1720
 > **Slug**: tenant-erasure
 > **Artifact Level**: work-package
@@ -70,9 +70,9 @@ configuration.
 
 ## Task Breakdown
 
-- [ ] Create a dedicated strict contract/worktree after U1 migration numbering is fixed.
-- [ ] Inventory every tenant-owned table/FK/object authority and lock it with a red drift test.
-- [ ] Define operation state, typed progress, concurrency, and orphan policy.
+- [x] Create a dedicated strict contract/worktree after U1 migration numbering is fixed.
+- [x] Inventory every tenant-owned table/FK/object authority and lock it with a red drift test.
+- [x] Define operation state, typed progress, concurrency, and orphan policy.
 - [ ] Implement bounded R2-first evidence-preserving deletion and FK-safe DB batches.
 - [ ] Add crash/failure injection, replay, isolation, and real-substrate tests.
 - [ ] Run full required checks and review; hand back only local evidence until release is separately authorized.

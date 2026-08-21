@@ -62,3 +62,23 @@ export type {
   TenantRetentionPolicy,
   TenantRetentionPolicyInput,
 } from './cleanup';
+
+// Package-owned destructive maintenance. This is intentionally Node-only: an
+// operator passes a direct-DSN pool, while the Worker `./runtime` surface never
+// gains a destructive tenant-data capability.
+export {
+  TENANT_ERASURE_ERROR_CODES,
+  TENANT_ERASURE_TABLES,
+  PostgresTenantErasure,
+  TenantErasureError,
+  createPostgresTenantErasure,
+} from './tenant-erasure';
+export type {
+  PostgresTenantErasureCompositionOptions,
+  PostgresTenantErasureOptions,
+  TenantErasureConflict,
+  TenantErasureErrorCode,
+  TenantErasureReadback,
+  TenantErasureResult,
+  TenantErasureStatus,
+} from './tenant-erasure';
