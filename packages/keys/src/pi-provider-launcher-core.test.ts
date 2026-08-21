@@ -16,6 +16,7 @@ const timestamps = {
   created_at: '2026-08-12T00:00:00.000Z',
   updated_at: '2026-08-12T00:00:00.000Z',
 };
+const CANARY = 'sk-canary-macos-0001';
 
 function profile(authMode: 'bearer' | 'none') {
   return parseModelProviderProfile({
@@ -35,6 +36,7 @@ describe('Pi provider launcher core', () => {
   it('parses only the closed launcher contract and requires absolute custody paths', () => {
     const profileDbPath = path.join(os.tmpdir(), 'providers.sqlite');
     const sessionDir = path.join(os.tmpdir(), 'pi-sessions');
+    const macosKeychainPath = '/private/tmp/byok-login.keychain-db';
     expect(parsePiProviderLauncherOptions([
       '--pi-bin',
       '/opt/pi',
@@ -46,10 +48,17 @@ describe('Pi provider launcher core', () => {
       'custom',
       '--model',
       'local-model',
+      '--macos-keychain-path',
+      macosKeychainPath,
       '--',
       '--mode',
       'rpc',
-    ])).toMatchObject({ profileDbPath, sessionDir, providerId: 'custom' });
+    ])).toMatchObject({
+      profileDbPath,
+      sessionDir,
+      providerId: 'custom',
+      macosKeychainPath,
+    });
 
     expect(() => parsePiProviderLauncherOptions([
       '--pi-bin', '/opt/pi',
@@ -58,7 +67,7 @@ describe('Pi provider launcher core', () => {
       '--provider', 'custom',
       '--model', 'local-model',
       '--', '--mode', 'rpc',
-    ])).toThrow(/absolute paths/);
+    ])).toThrow(/absolute/);
 
     expect(() => parsePiProviderLauncherOptions([
       '--pi-bin', '/opt/pi',
@@ -66,6 +75,26 @@ describe('Pi provider launcher core', () => {
       '--session-dir', sessionDir,
       '--provider', 'custom',
       '--model', 'local-model\nforged-log',
+      '--', '--mode', 'rpc',
+    ])).toThrow(/single-line/);
+
+    expect(() => parsePiProviderLauncherOptions([
+      '--pi-bin', '/opt/pi',
+      '--profile-db', profileDbPath,
+      '--session-dir', sessionDir,
+      '--provider', 'custom',
+      '--model', 'local-model',
+      '--macos-keychain-path', 'login.keychain-db',
+      '--', '--mode', 'rpc',
+    ])).toThrow(/absolute/);
+
+    expect(() => parsePiProviderLauncherOptions([
+      '--pi-bin', '/opt/pi',
+      '--profile-db', profileDbPath,
+      '--session-dir', sessionDir,
+      '--provider', 'custom',
+      '--model', 'local-model',
+      '--macos-keychain-path', '/private/tmp/byok-keychain\nforged-log',
       '--', '--mode', 'rpc',
     ])).toThrow(/single-line/);
   });
@@ -78,8 +107,8 @@ describe('Pi provider launcher core', () => {
 
   it('reads the exact provider secret and fails closed when it is absent', async () => {
     const store = new InMemorySecretStore();
-    await store.set(modelProviderSecretName('custom'), 'secret-value');
-    await expect(resolvePiProviderSecret(profile('bearer'), () => store)).resolves.toBe('secret-value');
+    await store.set(modelProviderSecretName('custom'), CANARY);
+    await expect(resolvePiProviderSecret(profile('bearer'), () => store)).resolves.toBe(CANARY);
 
     await expect(
       resolvePiProviderSecret(profile('bearer'), () => new InMemorySecretStore()),

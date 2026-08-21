@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { type CommandRunner, runCommand } from './command-runner';
 import { ByokKeysError } from './errors';
 import { assertSecretName, assertSecretNamespace } from './secret-name';
@@ -34,6 +36,8 @@ export interface MacOsKeychainSecretStoreOptions {
    */
   allowUnprefixedRead?: boolean;
   commandRunner?: CommandRunner;
+  /** Explicit macOS keychain file; omitted means the user default keychain. */
+  keychainPath?: string;
   platform?: NodeJS.Platform;
   servicePrefix?: string;
   storagePrefix?: string;
@@ -53,6 +57,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
   readonly #account: string;
   readonly #allowUnprefixedRead: boolean;
   readonly #commandRunner: CommandRunner;
+  readonly #keychainPath: string | undefined;
   readonly #platform: NodeJS.Platform;
   readonly #servicePrefix: string;
   readonly #storagePrefix: string;
@@ -61,6 +66,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
     this.#account = options.account ?? 'local-device';
     this.#allowUnprefixedRead = options.allowUnprefixedRead ?? false;
     this.#commandRunner = options.commandRunner ?? runCommand;
+    this.#keychainPath = assertKeychainPath(options.keychainPath);
     this.#platform = options.platform ?? process.platform;
     this.#servicePrefix = options.servicePrefix ?? DEFAULT_SECRET_SERVICE_PREFIX;
     this.#storagePrefix =
@@ -70,9 +76,9 @@ export class MacOsKeychainSecretStore<TName extends string = string>
   async available(): Promise<boolean> {
     if (this.#platform !== 'darwin') return false;
     const result = await this.#commandRunner('/usr/bin/security', [
-      'default-keychain',
-      '-d',
-      'user',
+      ...(this.#keychainPath === undefined
+        ? ['default-keychain', '-d', 'user']
+        : ['show-keychain-info', this.#keychainPath]),
     ]);
     return result.exitCode === 0;
   }
@@ -86,6 +92,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
       this.#account,
       '-s',
       service,
+      ...(this.#keychainPath === undefined ? [] : [this.#keychainPath]),
     ]);
     if (result.exitCode === SECURITY_ITEM_NOT_FOUND) return false;
     if (result.exitCode !== 0) {
@@ -107,6 +114,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
       '-s',
       service,
       '-w',
+      ...(this.#keychainPath === undefined ? [] : [this.#keychainPath]),
     ]);
     if (result.exitCode === SECURITY_ITEM_NOT_FOUND) return undefined;
     if (result.exitCode !== 0) {
@@ -127,6 +135,7 @@ export class MacOsKeychainSecretStore<TName extends string = string>
       account: this.#account,
       allowUnprefixedRead: this.#allowUnprefixedRead,
       commandRunner: this.#commandRunner,
+      keychainPath: this.#keychainPath,
       platform: this.#platform,
       servicePrefix: `${this.#servicePrefix}.scope.${assertSecretNamespace(namespace)}`,
       storagePrefix: this.#storagePrefix,
@@ -160,6 +169,9 @@ export class MacOsKeychainSecretStore<TName extends string = string>
       quoteSecurityInteractiveArgument(service),
       '-w',
       quoteSecurityInteractiveArgument(storedSecret),
+      ...(this.#keychainPath === undefined
+        ? []
+        : [quoteSecurityInteractiveArgument(this.#keychainPath)]),
     ].join(' ');
     const result = await this.#commandRunner(
       '/usr/bin/security',
@@ -226,4 +238,19 @@ function quoteSecurityInteractiveArgument(value: string): string {
     );
   }
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+}
+
+function assertKeychainPath(keychainPath: string | undefined): string | undefined {
+  if (keychainPath === undefined) return undefined;
+  if (
+    keychainPath.length === 0 ||
+    !path.posix.isAbsolute(keychainPath) ||
+    /[\u0000\r\n]/u.test(keychainPath)
+  ) {
+    throw new ByokKeysError(
+      'KEYCHAIN_ARGUMENT_INVALID',
+      'macOS keychain path must be a non-empty absolute single-line path',
+    );
+  }
+  return keychainPath;
 }

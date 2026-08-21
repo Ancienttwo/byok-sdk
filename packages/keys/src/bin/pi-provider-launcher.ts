@@ -23,10 +23,20 @@ import { WindowsCredentialManagerSecretStore } from '../windows-credential-manag
 
 function createSecretStore(
   servicePrefix: string | undefined,
+  macosKeychainPath: string | undefined,
 ): SecretStore {
+  if (macosKeychainPath !== undefined && process.platform !== 'darwin') {
+    throw new ByokKeysError(
+      'KEYCHAIN_UNAVAILABLE',
+      'macOS keychain path is only supported on darwin',
+    );
+  }
   switch (process.platform) {
     case 'darwin':
-      return new MacOsKeychainSecretStore({ servicePrefix });
+      return new MacOsKeychainSecretStore({
+        keychainPath: macosKeychainPath,
+        servicePrefix,
+      });
     case 'win32':
       return new WindowsCredentialManagerSecretStore({ servicePrefix });
     default:
@@ -38,6 +48,12 @@ function createSecretStore(
 }
 
 async function run(options: PiProviderLauncherOptions): Promise<number> {
+  if (options.macosKeychainPath !== undefined && process.platform !== 'darwin') {
+    throw new ByokKeysError(
+      'KEYCHAIN_UNAVAILABLE',
+      'macOS keychain path is only supported on darwin',
+    );
+  }
   const profiles = new SqliteProviderProfileStore({
     path: options.profileDbPath,
     readOnly: true,
@@ -56,7 +72,10 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
 
     const secret = await resolvePiProviderSecret(
       profile,
-      () => createSecretStore(options.secretServicePrefix),
+      () => createSecretStore(
+        options.secretServicePrefix,
+        options.macosKeychainPath,
+      ),
     );
 
     projectionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-provider-'));

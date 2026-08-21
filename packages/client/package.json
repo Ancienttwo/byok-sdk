@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/client",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
   "type": "module",
   "license": "MIT",

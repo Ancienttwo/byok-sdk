@@ -173,6 +173,89 @@ describe('PiAdapter against the fake-pi fixture', () => {
     })).rejects.toThrow(/cannot change its authoritative BYOK provider\/model/);
   });
 
+  it('projects an explicit macOS keychain path to the launcher argv unchanged', async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ command, args: [...args] });
+      const separator = args.indexOf('--');
+      return realSpawn(FIXTURE_PATH, args.slice(separator + 1), options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      spawnFn,
+      byokLauncher: {
+        command: '/opt/byok-pi-provider-launcher',
+        profileDbPath: '/private/providers.sqlite',
+        sessionDir: '/private/pi-sessions',
+        macosKeychainPath: '/Users/test/Library/Keychains/login.keychain-db',
+      },
+    });
+    const task: TaskOfferPayload = {
+      ...baseTask,
+      dispatchSelection: {
+        lane: 'byok',
+        runtimeId: 'pi',
+        providerId: 'openai',
+        modelId: 'gpt-5.2',
+      },
+    };
+
+    const session = await startAdapter(adapter, task, await makeCtx());
+    openSessions.push(session);
+
+    expect(calls).toEqual([{
+      command: '/opt/byok-pi-provider-launcher',
+      args: [
+        '--pi-bin',
+        FIXTURE_PATH,
+        '--profile-db',
+        '/private/providers.sqlite',
+        '--session-dir',
+        '/private/pi-sessions',
+        '--macos-keychain-path',
+        '/Users/test/Library/Keychains/login.keychain-db',
+        '--provider',
+        'openai',
+        '--model',
+        'gpt-5.2',
+        '--',
+        '--mode',
+        'rpc',
+      ],
+    }]);
+  });
+
+  it('validates the BYOK launcher at construction before prepare or spawn', () => {
+    const spawnFn = (() => {
+      throw new Error('spawn must not be reached');
+    }) as never;
+    const baseLauncher = {
+      command: '/opt/byok-pi-provider-launcher',
+      profileDbPath: '/private/providers.sqlite',
+      sessionDir: '/private/pi-sessions',
+    };
+
+    expect(() => new PiAdapter({
+      spawnFn,
+      byokLauncher: { ...baseLauncher, macosKeychainPath: 'login.keychain-db' },
+    })).toThrow(/macosKeychainPath must be an absolute path/);
+    expect(() => new PiAdapter({
+      spawnFn,
+      byokLauncher: { ...baseLauncher, macosKeychainPath: '' },
+    })).toThrow(/macosKeychainPath must be a non-empty single-line string/);
+    expect(() => new PiAdapter({
+      spawnFn,
+      byokLauncher: { ...baseLauncher, macosKeychainPath: '/private/login\n.keychain-db' },
+    })).toThrow(/macosKeychainPath must be a non-empty single-line string/);
+    expect(() => new PiAdapter({
+      spawnFn,
+      byokLauncher: {
+        ...baseLauncher,
+        args: ['--macos-keychain-path', '/private/other.keychain-db'],
+      },
+    })).toThrow(/reserved launcher argument --macos-keychain-path/);
+  });
+
   it('fails closed before spawn when a BYOK selection has no credential launcher', async () => {
     const task: TaskOfferPayload = {
       ...baseTask,

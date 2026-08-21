@@ -11,7 +11,6 @@ import {
   TASK_TRANSITIONS,
   ToolsetIdSchema,
 } from '@byok-sdk/protocol';
-import { isAbsolute } from 'node:path';
 import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo, ToolsetId } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig } from '../types';
@@ -19,7 +18,7 @@ import {
   resolveLocalAgentReleaseIdentity,
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
-import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { APPROVAL_MCP_SERVER_NAME, ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
@@ -764,52 +763,6 @@ function buildDefaultAdapters(config: DaemonConfig): RuntimeAdapter[] {
   return ids.map((id) => buildAdapter(id, config));
 }
 
-function validatePiByokLauncherConfig(
-  launcher: NonNullable<DaemonConfig['piByokLauncher']>,
-): void {
-  for (const [field, value] of [
-    ['command', launcher.command],
-    ['profileDbPath', launcher.profileDbPath],
-    ['sessionDir', launcher.sessionDir],
-  ] as const) {
-    if (value.trim().length === 0 || /[\u0000\r\n]/u.test(value)) {
-      throw new Error(`DaemonConfig.piByokLauncher.${field} must be a non-empty single-line string`);
-    }
-  }
-  if (!isAbsolute(launcher.profileDbPath) || !isAbsolute(launcher.sessionDir)) {
-    throw new Error(
-      'DaemonConfig.piByokLauncher profileDbPath and sessionDir must be absolute paths',
-    );
-  }
-  if (launcher.secretServicePrefix !== undefined && (
-    launcher.secretServicePrefix.trim().length === 0 ||
-    /[\u0000\r\n]/u.test(launcher.secretServicePrefix)
-  )) {
-    throw new Error(
-      'DaemonConfig.piByokLauncher.secretServicePrefix must be a non-empty single-line string',
-    );
-  }
-  const reserved = new Set([
-    '--',
-    '--pi-bin',
-    '--profile-db',
-    '--session-dir',
-    '--secret-service-prefix',
-    '--provider',
-    '--model',
-  ]);
-  const conflicting = launcher.args?.find((arg) => reserved.has(arg));
-  if (conflicting !== undefined) {
-    throw new Error(
-      `DaemonConfig.piByokLauncher.args must not override reserved launcher argument ${conflicting}`,
-    );
-  }
-  const invalidArg = launcher.args?.find((arg) => arg.length === 0 || /[\u0000\r\n]/u.test(arg));
-  if (invalidArg !== undefined) {
-    throw new Error('DaemonConfig.piByokLauncher.args must contain only non-empty single-line strings');
-  }
-}
-
 const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
 const MAX_LOCAL_MCP_ARGS = 64;
 const MAX_LOCAL_MCP_TOKEN_CHARS = 4096;
@@ -988,9 +941,7 @@ export function buildDaemonWithAdapters(
   const configuredToolsets = Object.freeze(
     [...(mcpToolsets?.keys() ?? [])].sort(),
   ) as readonly ToolsetId[];
-  if (config.piByokLauncher !== undefined) {
-    validatePiByokLauncherConfig(config.piByokLauncher);
-  }
+  validatePiByokLauncherConfig(config.piByokLauncher);
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
   // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
   // zero/negative-is-an-error / `Number.POSITIVE_INFINITY`-is-the-real-

@@ -49,6 +49,7 @@ export interface PiProviderLauncherOptions {
   modelId: string;
   sessionDir: string;
   secretServicePrefix?: string;
+  macosKeychainPath?: string;
   piArgs: string[];
 }
 
@@ -68,6 +69,7 @@ export function parsePiProviderLauncherOptions(
     '--model',
     '--session-dir',
     '--secret-service-prefix',
+    '--macos-keychain-path',
   ]);
   const values = new Map<string, string>();
   for (let index = 0; index < ownArgs.length; index += 2) {
@@ -105,6 +107,10 @@ export function parsePiProviderLauncherOptions(
   }
 
   const secretServicePrefix = values.get('--secret-service-prefix');
+  const macosKeychainPath = values.get('--macos-keychain-path');
+  if (macosKeychainPath !== undefined && !path.posix.isAbsolute(macosKeychainPath)) {
+    throw new Error('--macos-keychain-path must be an absolute path');
+  }
   return {
     piBin: required('--pi-bin'),
     profileDbPath,
@@ -112,6 +118,7 @@ export function parsePiProviderLauncherOptions(
     modelId,
     sessionDir,
     ...(secretServicePrefix ? { secretServicePrefix } : {}),
+    ...(macosKeychainPath !== undefined ? { macosKeychainPath } : {}),
     piArgs,
   };
 }

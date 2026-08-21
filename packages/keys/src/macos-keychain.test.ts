@@ -9,6 +9,7 @@ import { DEFAULT_SECRET_SERVICE_PREFIX } from './secret-store';
 
 const CANARY = 'sk-canary-macos-0001';
 const NUL = String.fromCodePoint(0);
+const KEYCHAIN_PATH = '/private/tmp/byok-login.keychain-db';
 
 interface Invocation {
   args: string[];
@@ -78,6 +79,28 @@ describe('MacOsKeychainSecretStore.available', () => {
     runner.queue({ exitCode: 1 });
     await expect(store().available()).resolves.toBe(false);
   });
+
+  it('probes the explicitly selected keychain when configured', async () => {
+    runner.queue({ exitCode: 0 });
+    await expect(
+      store({ keychainPath: KEYCHAIN_PATH }).available(),
+    ).resolves.toBe(true);
+    expect(runner.invocations[0]).toEqual({
+      executable: '/usr/bin/security',
+      args: ['show-keychain-info', KEYCHAIN_PATH],
+      stdin: undefined,
+    });
+  });
+
+  it.each([
+    ['empty', ''],
+    ['relative', 'login.keychain-db'],
+    ['multiline', `${KEYCHAIN_PATH}\nforged-log`],
+  ])('rejects an invalid explicit keychain path (%s)', (_label, keychainPath) => {
+    expect(() => store({ keychainPath })).toThrowError(
+      expect.objectContaining({ code: 'KEYCHAIN_ARGUMENT_INVALID' }),
+    );
+  });
 });
 
 describe('MacOsKeychainSecretStore.get', () => {
@@ -113,6 +136,22 @@ describe('MacOsKeychainSecretStore.get', () => {
   it('strips a CRLF terminator before decoding', async () => {
     runner.queue({ exitCode: 0, stdout: `${encoded(CANARY)}\r\n` });
     await expect(store().get('model-openai-api-key')).resolves.toBe(CANARY);
+  });
+
+  it('appends the explicitly selected keychain to the read argv', async () => {
+    runner.queue({ exitCode: 0, stdout: `${encoded(CANARY)}\n` });
+    await expect(
+      store({ keychainPath: KEYCHAIN_PATH }).get('model-openai-api-key'),
+    ).resolves.toBe(CANARY);
+    expect(runner.invocations[0]?.args).toEqual([
+      'find-generic-password',
+      '-a',
+      'local-device',
+      '-s',
+      `${DEFAULT_SECRET_SERVICE_PREFIX}.model-openai-api-key`,
+      '-w',
+      KEYCHAIN_PATH,
+    ]);
   });
 
   it('round-trips multi-byte utf-8 through the storage prefix', async () => {
@@ -217,6 +256,15 @@ describe('MacOsKeychainSecretStore.set', () => {
     expect(runner.invocations[0]?.stdin).not.toContain(CANARY);
   });
 
+  it('appends a safely quoted explicit keychain path in interactive mode', async () => {
+    const keychainPath = '/private/tmp/byok-"login"\\keychain-db';
+    runner.queue({ exitCode: 0 });
+    await store({ keychainPath }).set('model-openai-api-key', CANARY);
+    expect(runner.invocations[0]?.stdin).toBe(
+      `add-generic-password -U -a "local-device" -s "${DEFAULT_SECRET_SERVICE_PREFIX}.model-openai-api-key" -w "${encoded(CANARY)}" "${keychainPath.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"\n`,
+    );
+  });
+
   it('maps a non-zero exit to KEYCHAIN_WRITE_FAILED', async () => {
     runner.queue({ exitCode: 1 });
     await expect(
@@ -276,6 +324,21 @@ describe('MacOsKeychainSecretStore.delete', () => {
       'local-device',
       '-s',
       `${DEFAULT_SECRET_SERVICE_PREFIX}.model-openai-api-key`,
+    ]);
+  });
+
+  it('appends the explicitly selected keychain to the delete argv', async () => {
+    runner.queue({ exitCode: 0 });
+    await expect(
+      store({ keychainPath: KEYCHAIN_PATH }).delete('model-openai-api-key'),
+    ).resolves.toBe(true);
+    expect(runner.invocations[0]?.args).toEqual([
+      'delete-generic-password',
+      '-a',
+      'local-device',
+      '-s',
+      `${DEFAULT_SECRET_SERVICE_PREFIX}.model-openai-api-key`,
+      KEYCHAIN_PATH,
     ]);
   });
 
@@ -347,9 +410,11 @@ describe('MacOsKeychainSecretStore platform and scope', () => {
     const scoped = store({
       account: 'other-account',
       allowUnprefixedRead: true,
+      keychainPath: KEYCHAIN_PATH,
     }).scope('acct_00000000');
     await expect(scoped.get('model-openai-api-key')).resolves.toBe(CANARY);
     expect(runner.invocations[0]?.args).toContain('other-account');
+    expect(runner.invocations[0]?.args).toContain(KEYCHAIN_PATH);
   });
 
   it('labels itself as the macOS Keychain', () => {
