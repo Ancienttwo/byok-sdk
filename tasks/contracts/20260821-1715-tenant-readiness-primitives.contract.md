@@ -1,6 +1,6 @@
 # Task Contract: tenant-readiness-primitives
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260821-1715-tenant-readiness-primitives.md
 > **Task Profile**: migration
 > **Workflow Profile**: strict
