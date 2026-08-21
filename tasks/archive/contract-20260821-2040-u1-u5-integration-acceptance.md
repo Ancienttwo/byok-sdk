@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-21 20:40
+> **Related Plan**: plans/archive/plan-20260821-1959-u1-u5-integration-acceptance.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260821-2040
+
 # Task Contract: u1-u5-integration-acceptance
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260821-1959-u1-u5-integration-acceptance.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict

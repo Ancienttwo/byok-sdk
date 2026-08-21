@@ -1,6 +1,6 @@
 # Plan: U1-U5 Integration Acceptance
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260821-1959
 > **Slug**: u1-u5-integration-acceptance
 > **Artifact Level**: work-package

@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-21 20:40
+> **Related Plan**: plans/archive/plan-20260821-1959-u1-u5-integration-acceptance.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260821-2040
+
 # U1-U5 integration acceptance notes
 
 ## Authority

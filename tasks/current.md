@@ -1,27 +1,27 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-21T20:00:55+0800 -->
+<!-- updated_at: 2026-08-21T20:40:24+0800 -->
 <!-- stale_after: 24h -->
 
-> **Status**: Active
-> **Updated At**: 2026-08-21T20:00:55+0800
+> **Status**: ManualClearedWithActiveWork
+> **Updated At**: 2026-08-21T20:40:24+0800
 > **Source Branch**: codex/u1-u5-integration
-> **Source Commit**: 98cc505
+> **Source Commit**: 8f521da
 > **Target Branch**: main
 > **Stale After**: 24h
-> **Reason**: manual
+> **Reason**: archive-workflow
 > **Derived From**: active-plan, active-sprint, workstreams, handoff, checks, git status
 
 This file is a tracked mainline snapshot derived from repo artifacts. It is not a live lock, not a kanban board, and not an implementation gate. If it is stale, read the source artifacts below.
 
 ## Current Focus
 
-- Status: Active
-- Active Plan: plans/plan-20260821-1959-u1-u5-integration-acceptance.md
-- Plan Status: Executing
-- Next Task: Commit and push this integration acceptance envelope.
-- Clear Note: (none)
+- Status: ManualClearedWithActiveWork
+- Active Plan: (none)
+- Plan Status: (none)
+- Next Task: inspect active worktree marker(s)
+- Clear Note: Manual clear requested, but active work markers still exist. Idle was not written.
 
 ## Mainline Snapshot Reading
 
@@ -31,8 +31,6 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- .: plans/plan-20260821-1959-u1-u5-integration-acceptance.md
-- .: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-u1-u5-integration
 - /Users/kito/Projects/byok-sdk: plans/plan-20260821-1645-host-cancellation-contract.md
 - /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
 - /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: plans/plan-20260821-0425-hosted-integration-authority-closure.md
@@ -49,21 +47,26 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: (none)
+- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Commit and push this integration acceptance envelope.
 
 ## Checks
 
-- status=(none), source=(none), file=.ai/harness/checks/latest.json
+- status=pass, source=verify-sprint, exit_code=0, file=.ai/harness/checks/latest.json
 
 ## Git Status
 
-- Summary: 4 changed/untracked path(s)
+- Summary: 9 changed/untracked path(s)
 
 ```
-?? plans/plan-20260821-1959-u1-u5-integration-acceptance.md
-?? tasks/contracts/20260821-1959-u1-u5-integration-acceptance.contract.md
-?? tasks/notes/20260821-1959-u1-u5-integration-acceptance.notes.md
-?? tasks/reviews/20260821-1959-u1-u5-integration-acceptance.review.md
+ D plans/plan-20260821-1959-u1-u5-integration-acceptance.md
+ D tasks/contracts/20260821-1959-u1-u5-integration-acceptance.contract.md
+ D tasks/notes/20260821-1959-u1-u5-integration-acceptance.notes.md
+ D tasks/reviews/20260821-1959-u1-u5-integration-acceptance.review.md
+?? plans/archive/plan-20260821-1959-u1-u5-integration-acceptance.md
+?? tasks/archive/contract-20260821-2040-u1-u5-integration-acceptance.md
+?? tasks/archive/notes-20260821-2040-u1-u5-integration-acceptance.md
+?? tasks/archive/review-20260821-2040-u1-u5-integration-acceptance.md
+?? tasks/archive/todo-20260821-2040-u1-u5-integration-acceptance.md
 ```
 
 ## Source Artifacts
