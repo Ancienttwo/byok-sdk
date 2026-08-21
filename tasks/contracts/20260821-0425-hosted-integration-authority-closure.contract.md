@@ -1,6 +1,6 @@
 # Task Contract: hosted-integration-authority-closure
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260821-0425-hosted-integration-authority-closure.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
