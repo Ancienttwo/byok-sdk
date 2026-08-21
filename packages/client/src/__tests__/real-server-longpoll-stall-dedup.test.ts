@@ -59,7 +59,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 100;
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         backoff: { baseMs: 20, maxMs: 50, factor: 2 },
@@ -112,7 +112,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 30;
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         backoff: { baseMs: 20, maxMs: 50, factor: 2 },
@@ -186,7 +186,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 30;
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         backoff: { baseMs: 20, maxMs: 50, factor: 2 },

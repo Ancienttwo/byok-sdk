@@ -59,7 +59,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
     const workspaceRoot = await tmpDir(`byok-ctl-e2e-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-ctl-e2e-${productId}-store-`);
-    const config: DaemonConfig = { productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
     const built = createDaemonWithAdapters(config, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
@@ -75,6 +75,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     if (!conn.ok) throw new Error('expected reachable');
     const status = await conn.client.request<ControlStatusResult>('status');
 
+    expect(status.localAgentRelease).toEqual({ version: '0.0.0-test' });
     expect(status.pid).toBe(process.pid);
     expect(status.uptimeMs).toBeGreaterThanOrEqual(0);
     expect(status.paired).toBe(true);
@@ -280,7 +281,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const adapter = new StubRuntimeAdapter('pi');
     const workspaceRoot = await tmpDir('byok-ctl-e2e-startcmd-ws-');
     const storeDir = await tmpDir('byok-ctl-e2e-startcmd-store-');
-    const config: DaemonConfig = { productName: 'Acme', productId: 'acme-ctl-startcmd', serverUrl: server.url, workspaceRoot, storeDir };
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-ctl-startcmd', serverUrl: server.url, workspaceRoot, storeDir };
     daemon = createDaemonWithAdapters(config, [adapter]);
     await daemon.pair('pairing-code');
 
@@ -315,7 +316,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const workspaceRoot = await tmpDir('byok-ctl-e2e-startcmd-active-ws-');
     const storeDir = await tmpDir('byok-ctl-e2e-startcmd-active-store-');
     const config: DaemonConfig = {
-      productName: 'Acme',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: 'acme-ctl-startcmd-active',
       serverUrl: server.url,
       workspaceRoot,

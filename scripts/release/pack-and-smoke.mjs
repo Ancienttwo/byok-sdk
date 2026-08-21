@@ -337,6 +337,44 @@ try {
       throw new Error('@byok-sdk/cloud-dataplane/dist/runtime.js must not reference node: builtins (worker runtime)');
     }
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
+    const installedAgentBin = path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'dist', 'bin', 'byok-agent.js');
+    const emptyAgentHome = path.join(smokeDir, 'empty-agent-home');
+    mkdirSync(emptyAgentHome);
+    const missingAgentConfig = path.join(emptyAgentHome, 'must-not-be-read.json');
+    const installedAgentVersion = spawnSync(nodeBin, [installedAgentBin, '--version'], {
+      cwd: smokeDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        HOME: emptyAgentHome,
+        USERPROFILE: emptyAgentHome,
+        APPDATA: emptyAgentHome,
+        BYOK_CONFIG: missingAgentConfig,
+        BYOK_PI_BIN: path.join(emptyAgentHome, 'missing-pi'),
+        BYOK_CLAUDE_BIN: path.join(emptyAgentHome, 'missing-claude'),
+        BYOK_CODEX_BIN: path.join(emptyAgentHome, 'missing-codex'),
+        HTTP_PROXY: 'http://127.0.0.1:1',
+        HTTPS_PROXY: 'http://127.0.0.1:1',
+      },
+    });
+    if (installedAgentVersion.status !== 0) {
+      throw new Error(
+        `installed byok-agent --version failed (${installedAgentVersion.status})\n` +
+          `${installedAgentVersion.stdout}${installedAgentVersion.stderr}`,
+      );
+    }
+    const expectedAgentVersionOutput = `${clientManifest.version}\n`;
+    if (installedAgentVersion.stdout !== expectedAgentVersionOutput || installedAgentVersion.stderr !== '') {
+      throw new Error(
+        `installed byok-agent --version reported stdout=${JSON.stringify(installedAgentVersion.stdout)} ` +
+          `stderr=${JSON.stringify(installedAgentVersion.stderr)}, expected exact stdout ` +
+          `${JSON.stringify(expectedAgentVersionOutput)} and empty stderr`,
+      );
+    }
+    if (readdirSync(emptyAgentHome).length !== 0) {
+      throw new Error('installed byok-agent --version touched the empty HOME despite being a zero-state command');
+    }
     if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
       throw new Error(`isolated client manifest must require pi ${piVersion}`);
     }

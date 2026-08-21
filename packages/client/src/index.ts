@@ -17,6 +17,8 @@ export type {
 } from './types';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
+export { resolveLocalAgentReleaseIdentity } from './release-identity';
+export type { LocalAgentReleaseIdentity } from './release-identity';
 export {
   RuntimeExecutionFailure,
   RuntimeDisposalFailure,

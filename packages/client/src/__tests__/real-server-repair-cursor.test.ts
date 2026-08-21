@@ -37,7 +37,7 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
     const adapterA = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapterA],
     );
 
@@ -65,7 +65,7 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
 
     const adapterB = new StubRuntimeAdapter();
     const daemon2 = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapterB],
     );
     daemon = daemon2;

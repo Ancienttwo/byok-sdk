@@ -42,7 +42,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const storeDir = await tmpDir('byok-start-store-');
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Acme',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-start-product',
         serverUrl: server.url,
         workspaceRoot,
@@ -58,7 +58,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     let ready = false;
 
     const startPromise = runStartCommand(
-      { productName: 'Acme', productId: 'acme-start-product', serverUrl: server.url, workspaceRoot, storeDir, branding: { displayName: 'Acme Coder' } },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-product', serverUrl: server.url, workspaceRoot, storeDir, branding: { displayName: 'Acme Coder' } },
       {
         daemon,
         log: (l) => lines.push(l),
@@ -114,7 +114,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     await fs.writeFile(storeDir, 'x');
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir: parent },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir: parent },
       [adapter],
     );
     // Daemon itself uses `parent` (a real dir) for its OWN device store, but
@@ -127,7 +127,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     let ready = false;
 
     const startPromise = runStartCommand(
-      { productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir },
       {
         daemon,
         log: (l) => lines.push(l),
@@ -168,7 +168,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const lines: string[] = [];
     const controller = new AbortController();
     const startPromise = runStartCommand(
-      { productName: 'Acme', productId: 'acme-start-redact', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-redact', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
       { daemon: fakeDaemon, log: (l) => lines.push(l), signal: controller.signal },
     );
 
@@ -215,7 +215,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
     await expect(
       runStartCommand(
-        { productName: 'Acme', productId: 'acme-start-throw', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+        { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-throw', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
         { daemon: fakeDaemon, signal: new AbortController().signal },
       ),
     ).rejects.toThrow(/boom-start/);

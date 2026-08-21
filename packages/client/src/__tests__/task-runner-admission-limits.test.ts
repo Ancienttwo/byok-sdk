@@ -53,7 +53,7 @@ describe('task.offer admission gates (M5 batch-3)', () => {
     const storeDir = await tmpDir('byok-admission-store-');
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-admission',
         serverUrl: server.url,
         workspaceRoot,

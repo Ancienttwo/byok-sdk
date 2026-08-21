@@ -322,7 +322,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       const adapter = new StubRuntimeAdapter('pi');
       daemon = createDaemonWithAdapters(
         {
-          productName: 'Test Product',
+          localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pressure',
           serverUrl: server.url,
           workspaceRoot,
@@ -425,7 +425,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       const adapter = new StubRuntimeAdapter('pi');
       daemon = createDaemonWithAdapters(
         {
-          productName: 'Test Product',
+          localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pressure',
           serverUrl: server.url,
           workspaceRoot,

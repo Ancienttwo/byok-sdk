@@ -50,7 +50,7 @@ describe('a task.cancel sent while disconnected is redelivered on reconnect and 
     // lets the daemon's own liveness check self-detect the silent drop and
     // reconnect automatically within the same process/daemon instance.
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         liveness: { timeoutMs: 150, checkIntervalMs: 20 },

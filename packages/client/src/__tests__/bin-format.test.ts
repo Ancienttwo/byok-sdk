@@ -246,6 +246,7 @@ describe('bin/format: formatStatusLines', () => {
     return {
       productName: 'Acme',
       productId: 'acme-product',
+      localAgentRelease: { version: '1.2.3', buildId: 'build-a' },
       paired: false,
       runtimes: [],
       taskCounts: { total: 0, Offered: 0, Claimed: 0, Running: 0, AwaitApproval: 0, Complete: 0, Failed: 0, Cancelled: 0 },
@@ -267,6 +268,10 @@ describe('bin/format: formatStatusLines', () => {
     const lines = formatStatusLines(baseView());
     expect(lines[0]).toBe('product: Acme (acme-product)');
     expect(lines.some((l) => l.startsWith('support:'))).toBe(false);
+  });
+
+  it('renders the invoking CLI release in the persisted status section', () => {
+    expect(formatStatusLines(baseView())).toContain('local-agent-release: 1.2.3 buildId=build-a');
   });
 
   it('shows paired + deviceId', () => {
@@ -331,6 +336,7 @@ describe('bin/format: formatLiveStatusLines', () => {
     return {
       pid: 123,
       uptimeMs: 4567,
+      localAgentRelease: { version: '1.1.0', buildId: 'live-build' },
       paired: true,
       transport: 'open',
       activeTasks: [],
@@ -355,6 +361,13 @@ describe('bin/format: formatLiveStatusLines', () => {
     expect(lines).toContain('live: pid=123 uptimeMs=4567 transport=open');
     expect(lines).toContain('live-paired: yes deviceId=dev-1');
     expect(lines).toContain('live-runtimes: pi,claude');
+    expect(lines).toContain('live-local-agent-release: 1.1.0 buildId=live-build');
+  });
+
+  it('renders an older live control peer with no release identity as unknown', () => {
+    expect(formatLiveStatusLines(baseLive({ localAgentRelease: undefined }))).toContain(
+      'live-local-agent-release: unknown',
+    );
   });
 
   it('renders operational health without event details or payloads', () => {

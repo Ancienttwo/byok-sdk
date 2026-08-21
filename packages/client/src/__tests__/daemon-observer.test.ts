@@ -64,7 +64,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = storeDirOverride ?? (await tmpDir('byok-observer-store-'));
     daemon = createDaemonWithAdapters(
-      { productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
     );
     await daemon.pair('pairing-code');
@@ -78,7 +78,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = await tmpDir('byok-observer-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
     );
     // Subscribe BEFORE pair()/start() so `paired`/`runtimes-detected`/`connection` are all caught too.
@@ -134,7 +134,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     const storeDir = await tmpDir('byok-observer-store-');
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-observer-decline',
         serverUrl: server.url,
         workspaceRoot,
@@ -224,7 +224,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = await tmpDir('byok-observer-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test Product', productId: 'test-product-observer-fresh', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-fresh', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     await expect(daemon.unpair()).resolves.toBeUndefined();
@@ -522,7 +522,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       const workspaceRoot = await tmpDir('byok-observer-workspace-');
       const storeDir = await tmpDir('byok-observer-store-');
       daemon = createDaemonWithAdapters(
-        { productName: 'Test Product', productId: 'test-product-observer-not-started', serverUrl: server.url, workspaceRoot, storeDir },
+        { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-not-started', serverUrl: server.url, workspaceRoot, storeDir },
         [new StubRuntimeAdapter()],
       );
       await expect(daemon.approve('task-x')).rejects.toThrow(/not started/i);

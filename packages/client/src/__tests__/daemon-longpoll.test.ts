@@ -29,7 +29,7 @@ describe('long-poll fallback (protocol §8)', () => {
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
       {
         backoff: { baseMs: 10, maxMs: 30, factor: 2 },

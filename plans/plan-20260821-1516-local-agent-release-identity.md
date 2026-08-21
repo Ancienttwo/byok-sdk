@@ -108,7 +108,8 @@ Implement Slice A from `docs/researches/2026-08-21_local-agent-version-tolerance
 - Official CLI distribution authority: `packages/client/package.json`, injected at build time through `packages/client/tsup.config.ts`; config JSON must not become a second version author.
 - Local readbacks: `Daemon.status()`, authenticated control `status`, persisted CLI status rendering, and `byok-agent --version`.
 - Release artifact proof: `scripts/release/pack-and-smoke.mjs` compares packed CLI output to the packed client manifest.
-- Out of scope: protocol schemas, WS hello, server `MachineInfo`, hosted presence, Latest/minimum-version policy, update download/swap/rollback, publish, deploy, and package version bump.
+- Release candidate: npm readback proves aligned `0.5.0` is already published, so this additive public behavior advances the aligned source/package graph to unpublished `0.6.0`; no publish or tag is authorized.
+- Out of scope: protocol schemas, WS hello, server `MachineInfo`, hosted presence, Latest/minimum-version policy, update download/swap/rollback, publish, and deploy.
 
 ## P2 Concrete Trace
 
@@ -133,8 +134,10 @@ Keep application release distinct from runtime executable versions, protocol ver
 - `packages/client/src/index.ts`: public release identity exports.
 - `packages/client/tsup.config.ts`: manifest-derived build-time replacement for the official CLI identity.
 - `packages/client/src/__tests__/`: red-first validation, authority, status, CLI zero-state, and no-config override coverage; migrate in-repo client test consumers to explicit identity.
+- `packages/client/scripts/adapter-task-smoke.mjs`: migrate the built-package runtime smoke to explicit embedder identity.
 - `examples/packaging/launcher.ts`: explicit embedder identity migration.
 - `scripts/release/pack-and-smoke.mjs`: installed packed CLI/manifest parity assertion.
+- aligned package manifests plus `bun.lock`: advance the unpublished candidate from already-published `0.5.0` to `0.6.0`.
 - `docs/spec.md`: record the application-release authority and Latest non-gate contract for Slice A only.
 - Workflow artifacts and `.ai/harness/checks/latest.json`: execution evidence required by strict profile.
 
@@ -149,12 +152,13 @@ Keep application release distinct from runtime executable versions, protocol ver
 
 ## Task Breakdown
 
-- [ ] Add red tests for strict identity validation, immutable daemon status, CLI config authority rejection, CLI/live status rendering, and zero-state `--version`.
-- [ ] Implement the single release identity authority and migrate all in-repo `DaemonConfig` consumers without aliases or inference.
-- [ ] Inject the official CLI identity from the package manifest at build time and add `--version` before all stateful paths.
-- [ ] Add packed CLI/manifest parity evidence and update the Slice A product contract in `docs/spec.md`.
-- [ ] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
-- [ ] Record strict review/acceptance evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
+- [x] Add red tests for strict identity validation, immutable daemon status, CLI config authority rejection, CLI/live status rendering, and zero-state `--version`.
+- [x] Implement the single release identity authority and migrate all in-repo `DaemonConfig` consumers without aliases or inference.
+- [x] Inject the official CLI identity from the package manifest at build time and add `--version` before all stateful paths.
+- [x] Add packed CLI/manifest parity evidence and update the Slice A product contract in `docs/spec.md`.
+- [x] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
+- [x] Record strict review evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
+- [ ] After the documented upstream runner repair, produce fresh checks and record the typed external AcceptanceReceipt for the exact reviewed subject.
 
 ## Verification
 
@@ -187,12 +191,13 @@ Keep application release distinct from runtime executable versions, protocol ver
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Add red tests for strict identity validation, immutable daemon status, CLI config authority rejection, CLI/live status rendering, and zero-state `--version`.
-- [ ] Implement the single release identity authority and migrate all in-repo `DaemonConfig` consumers without aliases or inference.
-- [ ] Inject the official CLI identity from the package manifest at build time and add `--version` before all stateful paths.
-- [ ] Add packed CLI/manifest parity evidence and update the Slice A product contract in `docs/spec.md`.
-- [ ] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
-- [ ] Record strict review/acceptance evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
+- [x] Add red tests for strict identity validation, immutable daemon status, CLI config authority rejection, CLI/live status rendering, and zero-state `--version`.
+- [x] Implement the single release identity authority and migrate all in-repo `DaemonConfig` consumers without aliases or inference.
+- [x] Inject the official CLI identity from the package manifest at build time and add `--version` before all stateful paths.
+- [x] Add packed CLI/manifest parity evidence and update the Slice A product contract in `docs/spec.md`.
+- [x] Run targeted client tests, `bun run build`, `bun run typecheck`, `bun run test`, `repo-harness run check-task-workflow --strict`, and the clean-worktree pack smoke at the final candidate boundary.
+- [x] Record strict review evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
+- [ ] After the documented upstream runner repair, produce fresh checks and record the typed external AcceptanceReceipt for the exact reviewed subject.
 
 ## U4 live-state extension: packed metadata and release hygiene
 

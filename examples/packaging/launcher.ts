@@ -56,6 +56,7 @@ const PROBE_MARKER = 'BYOK_PACKAGING_PROBE';
 
 async function main(): Promise<void> {
   const daemon = createDaemon({
+    localAgentRelease: { version: '0.0.0-packaging-probe' },
     productId: 'byok-packaging-smoke',
     productName: 'BYOK Packaging Smoke',
     // Deliberately unroutable (port 0) -- start()/pair() are never called,

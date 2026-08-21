@@ -48,6 +48,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
 function baseConfig(storeDir: string, overrides: Partial<DaemonConfig> = {}): DaemonConfig {
   return {
+    localAgentRelease: { version: '0.0.0-test' },
     productName: 'Acme',
     productId: 'acme-product',
     serverUrl: 'http://example.invalid',
