@@ -21,7 +21,7 @@ the acceptance envelope is committed is a hard stop.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"github-ci","kind":"deterministic_test","paths":["*"]},{"id":"packed-artifact-closure","kind":"deterministic_test","paths":["packages/*","scripts/release/*","deploy/sql/*"]},{"id":"independent-integration-gatekeeper","kind":"semantic_review","paths":["*"]}]}
+{"protocol":1,"oracles":[{"id":"github-ci","kind":"deterministic_test","paths":["*"]},{"id":"packed-runtime-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy

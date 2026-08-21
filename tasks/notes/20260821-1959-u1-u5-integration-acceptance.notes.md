@@ -25,3 +25,14 @@
 Any product-path edit after the envelope commit invalidates this path and must
 return to the relevant U1-U5 contract. Workflow projection updates produced by
 repo-harness are allowed only when they remain inside the contract allow-list.
+
+## Acceptance preparation corrections
+
+- The first prepare pass materialized the contract-declared latest trace; its
+  only failure was the circular pre-existence check for that trace. The second
+  pass satisfied all 17 contract checks.
+- Change Assessment then rejected an invalid `semantic_review` oracle kind and
+  correctly required `runtime_readback` for the strict deploy/release risk
+  categories. The contract now declares only supported full-subject
+  `deterministic_test` and `runtime_readback` oracles. Independent semantic
+  judgment remains the separate Codex AcceptanceReceipt reviewer boundary.
