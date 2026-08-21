@@ -1,4 +1,4 @@
-# Upstream handoff: contract `tests_pass.path` bypasses the owning package test runner
+# Upstream handoff: verifier and recovery commands bypass packaged authorities
 
 - Date: 2026-08-21
 - Reporter repo: `/Users/kito/Projects/byok-sdk`
@@ -6,7 +6,13 @@
 - Observed version: `repo-harness 0.16.1`
 - Upstream source snapshot inspected: `f6fee1cec2f034a4658a7253b8e7949004ecbd2c`
 - Failing candidate: `byok-sdk` `f284ea656fc8fc049244c6bc8e11a02288201266`
-- Status: confirmed upstream runner gap; no SDK fallback or waiver applied
+- Status: two confirmed upstream runner gaps; no SDK fallback or waiver applied
+
+This handoff contains two independent `repo-harness` defects found at the same
+byok-sdk closeout boundary. They share an authority error shape, but neither is
+a byok-sdk product defect.
+
+## Issue 1: contract tests bypass the owning package test runner
 
 ## One-line root cause
 
@@ -100,3 +106,86 @@ gatekeeper review all pass. Contract verification remains `Partial` only
 because the two path criteria are executed by the wrong runner. Until upstream
 fixes the runner or the contract schema gains an explicit command authority,
 byok-sdk should not record a false acceptance waiver for these failures.
+
+## Issue 2: `prepare-handoff` resolves its materializer from the target repo
+
+### One-line root cause
+
+The globally installed `prepare-handoff.sh` sources the target repository's
+`.ai/hooks/lib/workflow-state.sh`, whose `workflow_write_handoff()` invokes the
+literal target-relative path `scripts/recovery-view-cli.ts`; initialized
+consumer repositories do not necessarily contain that package-owned script.
+
+### Reproduction
+
+From the same clean byok-sdk contract worktree:
+
+```bash
+repo-harness run prepare-handoff --reason upstream-contract-test-runner
+```
+
+Observed result with `repo-harness 0.16.1`:
+
+```text
+error: Module not found "scripts/recovery-view-cli.ts"
+```
+
+Lower-layer readback:
+
+- The installed package does contain
+  `/Users/kito/.bun/install/global/node_modules/repo-harness/scripts/recovery-view-cli.ts`.
+- The repo-harness source checkout contains the same packaged script.
+- The byok-sdk target repo correctly has no root
+  `scripts/recovery-view-cli.ts`.
+- Target `.ai/hooks/lib/workflow-state.sh:1858-1874` runs
+  `"$bun_bin" "scripts/recovery-view-cli.ts" ...` after changing execution to
+  the target repo.
+- The globally installed `scripts/prepare-handoff.sh:42-58` sources that target
+  hook and calls `workflow_write_handoff`, so its own package `SCRIPT_DIR` no
+  longer owns materializer resolution.
+
+This is not a missing-file packaging failure: the file exists in the installed
+package. It is a runtime path-authority error.
+
+### Responsibility boundary
+
+Recovery materialization is a repo-harness runtime responsibility. A consumer
+repo may carry projected hooks and file-backed state, but it must not need a
+private copy of a package executable under its own root. Copying the script into
+byok-sdk, changing the target's root layout, or skipping the required recovery
+state would create a downstream workaround and a second implementation
+authority.
+
+### Minimal upstream fix
+
+Make `prepare-handoff` invoke the recovery materializer through one packaged,
+absolute authority. For example, pass the package-resolved helper path into
+`workflow_write_handoff`, or route the command through the existing packaged
+`recovery-view-cli` helper. Do not silently prefer a target-relative copy when
+present.
+
+The Stop-handler's in-process materializer and the CLI path must continue to
+render the same four recovery views; this fix is path ownership, not a new
+renderer.
+
+### Acceptance conditions
+
+1. Install `repo-harness` into a disposable HOME and initialize a consumer repo
+   that has projected `.ai/hooks/` state but no root
+   `scripts/recovery-view-cli.ts`.
+2. `repo-harness run prepare-handoff --reason fixture` exits zero and writes the
+   canonical handoff/resume recovery views in that consumer repo.
+3. The command resolves the materializer from the installed repo-harness
+   package (or its registered helper), never from an accidental target-relative
+   same-name file.
+4. Stop-handler and explicit CLI materialization remain byte/semantic parity
+   checked against the existing recovery-view authority.
+5. A genuinely missing packaged helper fails closed with an error that names
+   the resolved package path and installed version.
+
+### Current downstream impact
+
+The byok-sdk active state reports `required_recovery_state_missing`; attempting
+the prescribed repair command fails before writing recovery state. This does
+not invalidate the fixed-SHA product verification, but it prevents an honest
+workflow stop/closeout until repo-harness owns the helper path correctly.

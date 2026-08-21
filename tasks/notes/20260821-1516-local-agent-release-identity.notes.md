@@ -34,6 +34,11 @@
   Vitest configuration. The SDK keeps its single build-time manifest authority;
   the reproduction and upstream acceptance conditions are recorded in
   `docs/researches/2026-08-21_repo-harness-package-test-runner-handoff.md`.
+- The prescribed `prepare-handoff` recovery command independently fails with
+  `Module not found "scripts/recovery-view-cli.ts"`: the installed package has
+  the helper, but projected target workflow code resolves it relative to the
+  consumer repo. The same upstream handoff records this second path-authority
+  defect; no helper was copied into byok-sdk.
 
 ## Tradeoffs Considered
 
