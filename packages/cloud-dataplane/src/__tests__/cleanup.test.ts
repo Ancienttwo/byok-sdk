@@ -121,7 +121,7 @@ class FakeObjectMaintenance implements R2ObjectMaintenance {
       if (owner !== tenant || hash === undefined) continue;
       const typed = hash as ContentHash;
       objects.push({
-        key: `${tenant}/sha256/${typed.slice('sha256:'.length)}`,
+        key: `tenants/${tenant}/objects/sha256/${typed.slice('sha256:'.length)}`,
         hash: typed,
         byteSize: observation.observedByteSize,
       });
@@ -717,7 +717,7 @@ describe.skipIf(SKIP_DATAPLANE)('R2 maintenance against MinIO', () => {
   it('lists tenant-prefixed objects and makes DELETE replay-safe on the independent substrate', async () => {
     const scope = await createObjectStorageScope();
     const hash = HASH_A.slice('sha256:'.length);
-    const key = `${TENANT}/sha256/${hash}`;
+    const key = `tenants/${TENANT}/objects/sha256/${hash}`;
     const planted = await scope.client.fetch(
       `${scope.config.endpoint}/${scope.bucket}/${key}`,
       { method: 'PUT', body: 'bytes', headers: { 'content-type': 'text/plain' } },
