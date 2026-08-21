@@ -61,6 +61,8 @@ allowed_paths:
   - .ai/harness/checks/latest.json
   - .ai/harness/runs/
   - .ai/harness/worktrees/.gitkeep
+  - .ai/harness/failures/.gitkeep
+  - .ai/harness/handoff/.gitkeep
 ```
 
 ## Evidence Requirements
