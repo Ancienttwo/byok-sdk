@@ -7,13 +7,17 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Version authority: the manifests, never a constant here. The expected
-// registry version is whatever packages/core ships; the pi pin comes from
-// packages/client.
+// registry train is whatever packages/core ships, keys versions independently,
+// and the pi pin comes from packages/client.
 const exactVersion = /^\d+\.\d+\.\d+$/;
 const expectedVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
+const keysVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/keys/package.json'), 'utf8')).version;
 const piVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')).dependencies?.['@earendil-works/pi-coding-agent'];
 if (typeof expectedVersion !== 'string' || !exactVersion.test(expectedVersion)) {
   throw new Error('packages/core/package.json: version must be an exact x.y.z release train version');
+}
+if (typeof keysVersion !== 'string' || !exactVersion.test(keysVersion)) {
+  throw new Error('packages/keys/package.json: version must be an exact x.y.z independent version');
 }
 if (typeof piVersion !== 'string' || !exactVersion.test(piVersion)) {
   throw new Error('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
@@ -28,7 +32,9 @@ const packages = [
   '@byok-sdk/ui-runtime',
   '@byok-sdk/testkit',
   'byok-sdk',
+  '@byok-sdk/keys',
 ];
+const expectedPackageVersion = (packageName) => packageName === '@byok-sdk/keys' ? keysVersion : expectedVersion;
 const nodeBin = process.execPath;
 const npmCliPath = path.join(path.dirname(nodeBin), 'node_modules', 'npm', 'bin', 'npm-cli.js');
 const npmInvocation = process.platform === 'win32'
@@ -67,10 +73,11 @@ function run(command, args, cwd = process.cwd()) {
 
 const metadata = [];
 for (const packageName of packages) {
-  const value = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'view', `${packageName}@${expectedVersion}`, 'name', 'version', 'maintainers', 'dist', 'dependencies', 'optionalDependencies', 'peerDependencies', '--json']));
-  if (value.name !== packageName || value.version !== expectedVersion) throw new Error(`${packageName}: registry identity/version mismatch`);
+  const packageVersion = expectedPackageVersion(packageName);
+  const value = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'view', `${packageName}@${packageVersion}`, 'name', 'version', 'maintainers', 'dist', 'dependencies', 'optionalDependencies', 'peerDependencies', '--json']));
+  if (value.name !== packageName || value.version !== packageVersion) throw new Error(`${packageName}: registry identity/version mismatch`);
   const frozen = frozenPackages.get(packageName);
-  if (typeof frozen.sha512Integrity !== 'string' || value.dist?.integrity !== frozen.sha512Integrity) {
+  if (frozen.version !== packageVersion || typeof frozen.sha512Integrity !== 'string' || value.dist?.integrity !== frozen.sha512Integrity) {
     throw new Error(`${packageName}: registry tarball integrity differs from frozen artifact`);
   }
   const maintainers = Array.isArray(value.maintainers) ? value.maintainers : [value.maintainers];
@@ -86,7 +93,7 @@ for (const packageName of packages) {
       if (dependency === 'byok-sdk' || dependency.startsWith('@byok-sdk/')) {
         if (range !== expectedVersion) {
           throw new Error(
-            `${packageName}@${expectedVersion}: registry ${field}.${dependency} is ${range}, expected ${expectedVersion} — the published graph is split`,
+            `${packageName}@${packageVersion}: registry ${field}.${dependency} is ${range}, expected ${expectedVersion} — the published graph is split`,
           );
         }
       }
@@ -102,7 +109,7 @@ for (const packageName of packages) {
  * nested-copy fallback npm takes when published internal edges disagree.
  * Follows node_modules chains only, so the walk stays cheap on large trees.
  */
-function assertSingleVersionSet(installDirectory, expected) {
+function assertSingleVersionSet(installDirectory, expectedVersions) {
   const root = path.join(installDirectory, 'node_modules');
   const found = [];
   const visit = (nodeModulesDirectory) => {
@@ -141,16 +148,22 @@ function assertSingleVersionSet(installDirectory, expected) {
   }
   for (const manifestPath of found) {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const expected = expectedVersions instanceof Map
+      ? expectedVersions.get(manifest.name)
+      : expectedVersions;
     if (manifest.version !== expected) {
       throw new Error(`${manifestPath}: version ${manifest.version}, expected ${expected} — the @byok-sdk graph does not close to one version set`);
     }
   }
-  console.log(`[registry-readback] install tree closes to a single @byok-sdk version set (${expected}, ${found.length} package(s))`);
+  const versionSummary = expectedVersions instanceof Map
+    ? [...expectedVersions.entries()].map(([name, version]) => `${name}@${version}`).join(', ')
+    : expectedVersions;
+  console.log(`[registry-readback] install tree closes to the expected @byok-sdk versions (${versionSummary}, ${found.length} package(s))`);
 }
 
 const smokeDir = mkdtempSync(path.join(os.tmpdir(), 'byok-registry-install-'));
 try {
-  const dependencies = Object.fromEntries(packages.map((name) => [name, expectedVersion]));
+  const dependencies = Object.fromEntries(packages.map((name) => [name, expectedPackageVersion(name)]));
   writeFileSync(
     path.join(smokeDir, 'package.json'),
     `${JSON.stringify({ name: 'byok-registry-readback', private: true, type: 'module', dependencies }, null, 2)}\n`,
@@ -164,14 +177,24 @@ try {
       `assert.equal('keys' in sdk, false);\n` +
       `await import('@byok-sdk/client/adapters');\n` +
       `await import('@byok-sdk/cloud-dataplane/runtime');\n` +
-      `for (const name of ${JSON.stringify(packages.slice(0, -1))}) await import(name);\n` +
+      `await import('@byok-sdk/keys');\n` +
+      `for (const name of ${JSON.stringify(packages)}) await import(name);\n` +
       `console.log('[registry-readback] exact registry imports OK');\n`,
   );
   run(nodeBin, ['readback.mjs'], smokeDir);
-  if (existsSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys'))) {
-    throw new Error('registry umbrella install unexpectedly contains @byok-sdk/keys');
-  }
-  assertSingleVersionSet(smokeDir, expectedVersion);
+  const expectedVersions = new Map([
+    ['byok-sdk', expectedVersion],
+    ['@byok-sdk/core', expectedVersion],
+    ['@byok-sdk/protocol', expectedVersion],
+    ['@byok-sdk/server', expectedVersion],
+    ['@byok-sdk/cloud', expectedVersion],
+    ['@byok-sdk/client', expectedVersion],
+    ['@byok-sdk/cloud-dataplane', expectedVersion],
+    ['@byok-sdk/ui-runtime', expectedVersion],
+    ['@byok-sdk/testkit', expectedVersion],
+    ['@byok-sdk/keys', keysVersion],
+  ]);
+  assertSingleVersionSet(smokeDir, expectedVersions);
   const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
   if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
     throw new Error(`registry client manifest must require pi ${piVersion}`);
@@ -182,6 +205,10 @@ try {
   const piManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8'));
   if (piManifest.version !== piVersion) {
     throw new Error(`registry install resolved pi ${piManifest.version}, expected ${piVersion}`);
+  }
+  const keysManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys', 'package.json'), 'utf8'));
+  if (keysManifest.dependencies?.['@byok-sdk/core'] !== expectedVersion || keysManifest.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
+    throw new Error(`registry keys manifest must declare core ${expectedVersion} directly`);
   }
 } finally {
   rmSync(smokeDir, { recursive: true, force: true });

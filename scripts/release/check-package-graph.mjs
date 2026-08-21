@@ -102,6 +102,9 @@ if (typeof releaseVersion !== 'string' || !exactVersion.test(releaseVersion)) {
 if (typeof keysVersion !== 'string' || !exactVersion.test(keysVersion)) {
   errors.push('packages/keys/package.json: version must be an exact x.y.z version');
 }
+if (keysVersion === releaseVersion) {
+  errors.push(`packages/keys/package.json: keys must remain independently versioned from the ${releaseVersion} dispatch train`);
+}
 if (typeof piVersion !== 'string' || !exactVersion.test(piVersion)) {
   errors.push('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
 }
@@ -250,6 +253,9 @@ for (const field of [...runtimeFields, 'devDependencies']) {
 }
 if (keysManifest?.dependencies?.['@byok-sdk/core'] !== 'workspace:*') {
   errors.push('packages/keys/package.json: @byok-sdk/core must be the one workspace contract dependency');
+}
+if (Object.keys(keysManifest?.dependencies ?? {}).includes('@byok-sdk/core') === false) {
+  errors.push('packages/keys/package.json: @byok-sdk/core dependency is required for the packed metadata edge');
 }
 if (runtimeEdges(keysManifest ?? {}).includes('@byok-sdk/protocol')) {
   errors.push('packages/keys/package.json: keys must not depend on @byok-sdk/protocol');

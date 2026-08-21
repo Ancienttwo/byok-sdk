@@ -160,6 +160,65 @@ Keep application release distinct from runtime executable versions, protocol ver
 - [x] Record strict review evidence and update the canonical BYOK SDK Obsidian decision/project note with verified Slice A state.
 - [ ] After the documented upstream runner repair, produce fresh checks and record the typed external AcceptanceReceipt for the exact reviewed subject.
 
+## U4 live-state extension: packed metadata and release hygiene
+
+This existing plan remains the single U4 authority. Slice A freezes the Local
+Agent identity first. U3 then consumes that identity in presence/readiness;
+U3 must not add another `clientVersion` authoring path. U4b is the release
+hygiene slice under the amended contract; it does not create a competing
+release plan or authorize publish/deploy/registry mutation.
+
+### U4b scope
+
+- Prove the packed `@byok-sdk/keys` artifact depends on the intended aligned
+  `@byok-sdk/core` line without downstream overrides; repair the published
+  `keys@0.2.0 -> core@0.4.2` metadata skew in the next independent keys patch
+  artifact, `@byok-sdk/keys@0.2.1`.
+- Keep every public package engine at Node.js `>=22.22.0`.
+- Require aligned-version policy, changelog, package graph, clean-candidate
+  pack smoke, and registry/dist-tag readback as one release gate.
+- Keep `RESULT_DOCUMENT_MAX_BYTES` authored only by protocol.
+- Distinguish local pack evidence from registry evidence: neither authorizes
+  publish, and a release is not complete until an explicitly authorized
+  publish is followed by exact registry/tarball readback.
+
+### U4b acceptance
+
+- Packed keys metadata installs against its declared packed core dependency
+  with no workspace configuration or override.
+- Package graph and engine floors are exact, and the changelog covers the
+  public release surface and forward migration from keys 0.2.0.
+- Clean-SHA pack/smoke proves CLI/manifest identity and packed dependency
+  graph, including the independently versioned keys artifact.
+- When publish is separately authorized, registry version, dist-tag, tarball,
+  dependency metadata, and downstream exact-pin smoke are read back. Without
+  that authorization the plan stops at local evidence.
+
+### Ownership and sequencing
+
+- U4a owns client identity files until code freeze.
+- U3 receives identity/presence schema ownership only after that freeze.
+- U4b owns `packages/keys/package.json`, release scripts, changelog, package
+  graph evidence, and pack evidence; it does not edit U1/U2/U3/U5
+  implementation surfaces concurrently.
+- The contract allowlist was amended before U4b source edits.
+
+### U4b tasks
+
+- [x] Audit live registry and packed keys/core metadata before choosing versions.
+- [x] Amend the U4 contract with exact manifest/release-script/changelog ownership.
+- [x] Add a failing packed-dependency regression and repair keys/core metadata.
+- [ ] Run the final clean-candidate pack smoke after the candidate commit.
+- [x] Record local release evidence; stop before publish unless separately authorized.
+
+### U4b evidence boundary
+
+The current source candidate is local-only: `@byok-sdk/keys@0.2.1` packs with
+an exact `@byok-sdk/core@0.6.0` dependency, while the live registry audit still
+shows the old published `@byok-sdk/keys@0.2.0` metadata. The registry readback
+script is prepared for the independently versioned package but is not run
+against an unpublished version and does not claim a registry result.
+
 ## Verification
 
 - Targeted Vitest files prove all negative cases and readback projections.

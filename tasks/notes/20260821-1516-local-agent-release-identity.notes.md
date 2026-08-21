@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260821-1516-local-agent-release-identity.md
 > **Contract**: tasks/contracts/20260821-1516-local-agent-release-identity.contract.md
 > **Review**: tasks/reviews/20260821-1516-local-agent-release-identity.review.md
-> **Last Updated**: 2026-08-21 15:18
+> **Last Updated**: 2026-08-21 18:36
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -106,3 +106,33 @@ Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset 
 - Promote to `tasks/lessons.md` only after a repeated correction or failure pattern.
 - Promote to `docs/researches/` only when it is durable repo knowledge with evidence.
 - Promote to harness asset files only after verification across more than one task or fixture.
+
+## U4b Packed Metadata and Release Hygiene
+
+- Read-only registry audit before the version choice on 2026-08-21:
+  `npm view @byok-sdk/keys@0.2.0 ... --json` reported dependency
+  `@byok-sdk/core: 0.4.2`, Node engine `>=22.22.0`, and `latest: 0.2.0`;
+  `npm view @byok-sdk/core@0.4.2 ... --json` reported the same engine floor
+  and core's `latest: 0.5.0`. The published tarball URLs were
+  `keys-0.2.0.tgz` and `core-0.4.2.tgz`. No registry mutation was performed.
+- The U4b extension was merged into this existing plan and the contract
+  allowlist was amended before source edits. The independent candidate is
+  `@byok-sdk/keys@0.2.1`; the aligned local dispatch train is `0.6.0`.
+- Red-first regression: before the implementation, `node --test
+  scripts/release/pack-and-smoke.test.mjs` failed because the release pack did
+  not include the keys package. After implementation it passes 1/1 and checks
+  both keys inclusion and the exact packed core dependency assertion.
+- Local gates before the final clean candidate commit:
+  `node scripts/release/check-package-graph.mjs` passed with
+  `8 dispatch manifests at 0.6.0, keys at 0.2.1`; `bun run --cwd packages/keys
+  test` passed 19 files / 366 tests; `bun run build`, `bun run typecheck`,
+  `bun run test`, and `repo-harness run check-task-workflow --strict` passed.
+- `scripts/release/pack-and-smoke.mjs` now packs keys, asserts the packed
+  `@byok-sdk/core` edge is exact and not `workspace:*`, installs keys and core
+  from the isolated tarball set, and allows the independent keys version in
+  the install graph. `scripts/release/registry-readback.mjs` now reads back
+  the independent version and exact core edge when a publish is authorized.
+- Registry readback for `@byok-sdk/keys@0.2.1` is intentionally not run: that
+  version is an unpublished local candidate, and running the post-publish
+  script now would correctly fail rather than fabricate evidence. Final clean
+  candidate pack smoke remains pending the candidate commit.
