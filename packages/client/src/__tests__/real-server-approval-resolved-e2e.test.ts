@@ -58,7 +58,7 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
     );
 

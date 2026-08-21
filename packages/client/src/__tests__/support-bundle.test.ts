@@ -34,6 +34,7 @@ function unreachable(): Promise<ConnectControlResult> {
 
 function config(storeDir: string): DaemonConfig {
   return {
+    localAgentRelease: { version: '0.0.0-test' },
     productName: 'SENTINEL_PRODUCT_NAME_SECRET',
     productId: 'SENTINEL_PRODUCT_ID',
     serverUrl: 'https://user:SENTINEL_URL_SECRET@example.invalid/private/path?token=SENTINEL_QUERY_SECRET',

@@ -36,7 +36,7 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
     });
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Salesko Personal Agent',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Salesko Personal Agent',
         productId: 'salesko',
         serverUrl: cloud.url,
         workspaceRoot: await tmpDir('byok-hosted-salesko-mcp-workspace-'),

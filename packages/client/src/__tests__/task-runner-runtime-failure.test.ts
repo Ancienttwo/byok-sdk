@@ -28,7 +28,7 @@ describe('TaskRunner typed runtime failure projection', () => {
   async function start(adapter: StubRuntimeAdapter): Promise<void> {
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Runtime failure test',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Runtime failure test',
         productId: 'runtime-failure-test',
         serverUrl: server.url,
         workspaceRoot: await temporaryDirectory('byok-runtime-failure-workspace-'),

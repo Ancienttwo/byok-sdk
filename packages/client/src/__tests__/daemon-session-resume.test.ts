@@ -40,7 +40,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
 
     const adapter1 = new StubRuntimeAdapter();
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter1],
     );
     await daemon.pair('code');
@@ -70,7 +70,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
     // disk, not lost with the old in-memory TaskRunner.
     const adapter2 = new StubRuntimeAdapter();
     const daemon2 = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter2],
     );
     daemon = daemon2;
@@ -98,7 +98,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
 
     const adapter = new StubRuntimeAdapter();
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
     );
     await daemon.pair('code');
@@ -134,7 +134,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
 
     const adapter = new StubRuntimeAdapter();
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
     );
     await daemon.pair('code');

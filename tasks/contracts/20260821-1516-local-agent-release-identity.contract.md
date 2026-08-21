@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-21 15:16
+> **Last Updated**: 2026-08-21 15:18
 > **Review File**: `tasks/reviews/20260821-1516-local-agent-release-identity.review.md`
 > **Notes File**: `tasks/notes/20260821-1516-local-agent-release-identity.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -36,8 +36,9 @@ output equals the packed client manifest version.
   - `Daemon.status()`, authenticated local control status, CLI status, and `byok-agent --version` projections.
   - Official CLI build-time manifest injection; CLI JSON config must reject release authorship.
   - Client tests, package build configuration, packaging example, spec text, and release pack smoke parity.
+  - Advance the aligned unpublished release candidate to `0.6.0` because npm readback proves `0.5.0` is already published.
 - Out of scope:
-  - protocol schemas, WS hello, server `MachineInfo`, hosted presence, Latest/minimum-version policy, update download/swap/rollback, publish, deploy, and package version bump.
+  - protocol schemas, WS hello, server `MachineInfo`, hosted presence, Latest/minimum-version policy, update download/swap/rollback, publish, and deploy.
 - Taste constraints: one identity authority; no runtime package.json read, config alias, inferred default, semver-based capability gate, or compatibility shim.
 
 ## Stop Conditions
@@ -91,14 +92,26 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ```yaml
 allowed_paths:
   - docs/spec.md
+  - bun.lock
   - plans/
   - tasks/contracts/20260821-1516-local-agent-release-identity.contract.md
   - tasks/reviews/20260821-1516-local-agent-release-identity.review.md
   - tasks/notes/20260821-1516-local-agent-release-identity.notes.md
   - .ai/harness/checks/latest.json
   - .ai/harness/runs/
+  - .ai/harness/worktrees/.gitkeep
   - packages/client/src/
   - packages/client/tsup.config.ts
+  - packages/client/vitest.config.ts
+  - packages/client/package.json
+  - packages/cloud/package.json
+  - packages/cloud-dataplane/package.json
+  - packages/core/package.json
+  - packages/protocol/package.json
+  - packages/sdk/package.json
+  - packages/server/package.json
+  - packages/testkit/package.json
+  - packages/ui-runtime/package.json
   - examples/packaging/launcher.ts
   - scripts/release/pack-and-smoke.mjs
 ```
@@ -163,7 +176,7 @@ exit_criteria:
     - bun run typecheck
     - bun run test
     - repo-harness run check-task-workflow --strict
-    - node scripts/release/pack-and-smoke.mjs --out-dir <empty-directory-on-clean-candidate>
+    - node scripts/release/pack-and-smoke.mjs
 ```
 
 ## Acceptance Notes (Human Review)

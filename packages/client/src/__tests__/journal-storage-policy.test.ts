@@ -167,7 +167,7 @@ describe('the default cleanup executor', () => {
 describe('createDaemon storage policy validation', () => {
   it('rejects a bad policy at construction, before any daemon exists', async () => {
     const base: DaemonConfig = {
-      productName: 'Test Product',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-storage',
       serverUrl: 'http://127.0.0.1:1',
       workspaceRoot: await tmpDir('byok-policy-workspace-'),
@@ -188,7 +188,7 @@ describe('createDaemon storage policy validation', () => {
   it('constructs no engine — and needs no policy — on the default path', async () => {
     const daemon = createDaemonWithAdapters(
       {
-        productName: 'Test Product',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-storage',
         serverUrl: 'http://127.0.0.1:1',
         workspaceRoot: await tmpDir('byok-policy-workspace-'),

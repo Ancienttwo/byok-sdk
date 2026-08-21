@@ -24,7 +24,7 @@ async function tempDir(prefix: string): Promise<string> {
 
 function baseConfig(serverUrl: string, workspaceRoot: string, storeDir: string) {
   return {
-    productName: 'Git startup integration test',
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Git startup integration test',
     productId: `git-startup-${Math.random().toString(36).slice(2)}`,
     serverUrl,
     workspaceRoot,

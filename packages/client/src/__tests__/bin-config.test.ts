@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { argValue, ConfigError, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from '../bin/config';
+import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../bin/official-release';
 import { DeviceStore } from '../daemon/store';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -25,7 +26,33 @@ describe('bin/config: loadConfig', () => {
       productId: 'acme',
       serverUrl: 'http://new.example',
       workspaceRoot: '/ws',
+      localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE,
     });
+  });
+
+  it('rejects config-authored Local Agent release identity instead of accepting a second authority', async () => {
+    const dir = await tmpDir('byok-bin-config-release-');
+    const configPath = path.join(dir, 'config.json');
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        productName: 'Acme',
+        productId: 'acme',
+        serverUrl: 'http://example',
+        workspaceRoot: '/ws',
+        localAgentRelease: { version: '9.9.9' },
+      }),
+    );
+
+    expect(() => loadConfig(configPath)).toThrow(ConfigError);
+    expect(() => loadConfig(configPath)).toThrow(/localAgentRelease.*distribution/i);
+    expect(() => loadConfig(undefined, {
+      productName: 'Acme',
+      productId: 'acme',
+      serverUrl: 'http://example',
+      workspaceRoot: '/ws',
+      localAgentRelease: { version: '9.9.9' },
+    } as never)).toThrow(/localAgentRelease.*distribution/i);
   });
 
   it('throws ConfigError (never calls process.exit) when a required field is missing', () => {

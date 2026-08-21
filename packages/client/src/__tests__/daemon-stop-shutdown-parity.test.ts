@@ -120,7 +120,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
     const workspaceRoot = await tmpDir(`byok-stop-parity-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-stop-parity-${productId}-store-`);
-    const config: DaemonConfig = { productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
     const built = createDaemonWithAdapters(config, [adapter]);
     await built.pair('pairing-code');
     await built.start();
@@ -262,7 +262,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const workspaceRoot = await tmpDir('byok-stop-barrier-ws-');
     const storeDir = await tmpDir('byok-stop-barrier-store-');
     const config: DaemonConfig = {
-      productName: 'Acme',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: 'acme-stop-barrier',
       serverUrl: server.url,
       workspaceRoot,
@@ -300,7 +300,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const storeDir = await tmpDir('byok-stop-concurrent-store-');
     daemon = createDaemonWithAdapters(
       {
-        productName: 'Acme',
+        localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-stop-concurrent',
         serverUrl: server.url,
         workspaceRoot,

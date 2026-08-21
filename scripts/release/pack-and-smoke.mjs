@@ -337,6 +337,14 @@ try {
       throw new Error('@byok-sdk/cloud-dataplane/dist/runtime.js must not reference node: builtins (worker runtime)');
     }
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
+    const installedAgentBin = path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'dist', 'bin', 'byok-agent.js');
+    const installedAgentVersion = run(nodeBin, [installedAgentBin, '--version'], smokeDir);
+    if (installedAgentVersion !== clientManifest.version) {
+      throw new Error(
+        `installed byok-agent --version reported ${JSON.stringify(installedAgentVersion)}, ` +
+          `expected packed @byok-sdk/client manifest version ${JSON.stringify(clientManifest.version)}`,
+      );
+    }
     if (clientManifest.dependencies?.['@earendil-works/pi-coding-agent'] !== piVersion) {
       throw new Error(`isolated client manifest must require pi ${piVersion}`);
     }

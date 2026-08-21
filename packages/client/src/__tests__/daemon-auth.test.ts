@@ -290,7 +290,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
       { backoff: { baseMs: 20, maxMs: 100, factor: 2 } },
     );
@@ -313,7 +313,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const workspaceRoot = await tmpDir('byok-client-owner-auth-workspace-');
     const storeDir = await tmpDir('byok-client-owner-auth-store-');
-    const config = { productName: 'Test', productId: 'test-owner-auth', serverUrl: server.url, workspaceRoot, storeDir };
+    const config = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-owner-auth', serverUrl: server.url, workspaceRoot, storeDir };
     daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await daemon.pair('pairing-code');
     await daemon.start();
@@ -333,7 +333,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-hosted-owner-workspace-');
     const storeDir = await tmpDir('byok-client-hosted-owner-store-');
     const config = {
-      productName: 'Test',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
       productId: 'test-hosted-owner',
       serverUrl: server.url,
       workspaceRoot,
@@ -421,7 +421,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-open-cleanup-workspace-');
     const storeDir = await tmpDir('byok-client-open-cleanup-store-');
     const config = {
-      productName: 'Test',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
       productId: 'test-open-cleanup-owner',
       serverUrl: server.url,
       workspaceRoot,
@@ -500,7 +500,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-unpair-lease-workspace-');
     const storeDir = await tmpDir('byok-client-unpair-lease-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-unpair-lease', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-unpair-lease', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('pairing-code');
@@ -522,7 +522,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-pair-queue-workspace-');
     const storeDir = await tmpDir('byok-client-pair-queue-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-pair-queue', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-pair-queue', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     const realSave = DeviceStore.prototype.save;
@@ -561,7 +561,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-pair-start-workspace-');
     const storeDir = await tmpDir('byok-client-pair-start-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-pair-start', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-pair-start', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     const realSave = DeviceStore.prototype.save;
@@ -602,7 +602,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-pair-stop-workspace-');
     const storeDir = await tmpDir('byok-client-pair-stop-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-pair-stop', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-pair-stop', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('initial-pairing-code');
@@ -646,7 +646,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-pair-unpair-workspace-');
     const storeDir = await tmpDir('byok-client-pair-unpair-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-pair-unpair', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-pair-unpair', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('initial-pairing-code');
@@ -685,7 +685,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-unpair-fifo-workspace-');
     const storeDir = await tmpDir('byok-client-unpair-fifo-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-unpair-fifo', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-unpair-fifo', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('pairing-code');
@@ -750,7 +750,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
       { backoff: { baseMs: 20, maxMs: 100, factor: 2 } },
     );
@@ -782,7 +782,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
-      { productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
 

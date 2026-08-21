@@ -22,7 +22,7 @@ async function tmpDir(prefix: string): Promise<string> {
 describe('createDaemonWithAdapters: DaemonConfig.maxTaskOutputBytes validation', () => {
   async function buildConfig(maxTaskOutputBytes?: number) {
     return {
-      productName: 'Test Product',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-resource-limits',
       serverUrl: 'ws://localhost:1',
       workspaceRoot: await tmpDir('byok-resource-limits-workspace-'),
@@ -65,7 +65,7 @@ describe('createDaemonWithAdapters: DaemonConfig.maxTaskOutputBytes validation',
 describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () => {
   async function buildConfig(progressBatch?: DaemonConfig['progressBatch']): Promise<DaemonConfig> {
     return {
-      productName: 'Test Product',
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-progress-batch',
       serverUrl: 'ws://localhost:1',
       workspaceRoot: await tmpDir('byok-progress-batch-workspace-'),
