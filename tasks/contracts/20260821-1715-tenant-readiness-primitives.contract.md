@@ -1,8 +1,14 @@
 # U3 SDK-owned tenant readiness primitives contract
 
-Status: Active
-Owner: `/root/u4_release_hygiene`
-Plan: `plans/plan-20260821-1715-tenant-readiness-primitives.md`
+> **Status**: Partial
+> **Plan**: plans/plan-20260821-1715-tenant-readiness-primitives.md
+> **Task Profile**: migration
+> **Workflow Profile**: strict
+> **Owner**: `/root/u4_release_hygiene`
+> **Capability ID**: root
+> **Review File**: `tasks/reviews/20260821-1715-tenant-readiness-primitives.review.md`
+> **Notes File**: `tasks/notes/20260821-1715-tenant-readiness-primitives.notes.md`
+
 Evidence boundary: local source/tests and a separately identified real-Postgres run only. This contract authorizes no registry, publish, deploy, production migration, or secret mutation.
 
 ## Objective
@@ -88,6 +94,7 @@ allowed_paths:
   - packages/protocol/src/__tests__/golden/v1.frozen.json
   - packages/conformance/src/__tests__/tenant-readiness.test.ts
   - .ai/harness/checks/latest.json
+  - .ai/harness/checks/change-assessment.latest.json
   - .ai/harness/runs/
   - .ai/harness/worktrees/.gitkeep
   - .ai/harness/failures/.gitkeep
@@ -171,5 +178,3 @@ The contract is complete only when the public API, both store compositions,
 protocol projections, and client first-hop paths satisfy the objective and all
 required feasible checks have current output. Any remaining failure must be
 reported with the exact command/output and a bounded parent action.
-
-> **Status**: Partial
