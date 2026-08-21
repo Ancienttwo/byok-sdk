@@ -8,7 +8,7 @@
 > **Last Updated**: 2026-08-21 15:51
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:37d1ea4c2ecd402f5f051a326bba37b008c2a7a6a5a578863c4e391e23161191
+> **Reviewed Subject SHA256**: sha256:acfacca4413545e54749b2d1e034ef6da869bec6d0efbd9957c94f907e22ae3c
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 40343ed02761f78643dd1c697ceb70dbe3cc11ed
 
@@ -36,7 +36,7 @@
 - Manual checks: bundled output contains no unresolved `__BYOK_CLIENT_PACKAGE_VERSION__`; empty-environment built CLI prints `0.6.0`; public resolver output is frozen
 - Supporting artifacts: `.ai/harness/runs/20260821-local-agent-release-identity-change-assessment.json`; retained upstream runner failure logs named in the handoff
 - Implementation notes reviewed: `tasks/notes/20260821-1516-local-agent-release-identity.notes.md`
-- Run snapshot: change assessment status `ready` for the reviewed subject and target revision above
+- Run snapshot: change assessment status `ready` for the reviewed subject and target revision above; independent docs-only delta review also passed
 
 ## Manual Check Evidence
 

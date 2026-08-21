@@ -92,6 +92,10 @@
 - Independent read-only gate review recommends PASS for the fixed code and the
   later docs/handoff delta. This is review evidence only; no typed external
   AcceptanceReceipt has been recorded.
+- The recovery handoff now distinguishes the failing explicit CLI from a later
+  independently materialized Stop-handler packet. A docs-only delta gate passed,
+  and the final ready change-assessment subject is
+  `sha256:acfacca4413545e54749b2d1e034ef6da869bec6d0efbd9957c94f907e22ae3c`.
 
 ## Promotion Filter
 
