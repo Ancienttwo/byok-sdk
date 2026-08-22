@@ -12,6 +12,7 @@ import { runPairCommand } from '../bin/commands/pair';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runTasksFollowCommand, runTasksListCommand } from '../bin/commands/tasks';
+import { runToolsetsReloadCommand } from '../bin/commands/toolsets';
 import {
   runUnpairCommand,
   UnpairBlockedByRunningServiceError,
@@ -126,6 +127,52 @@ describe('bin/commands/status: runStatusCommand', () => {
     expect(lines.some((l) => l === 'tasks: total=1 offered=0 claimed=1 running=0 awaitApproval=0 complete=0 failed=0 cancelled=0')).toBe(
       true,
     );
+  });
+});
+
+describe('bin/commands/toolsets: runToolsetsReloadCommand', () => {
+  it('uses status revision for CAS and prints a redacted reload receipt', async () => {
+    const calls: Array<{ method: string; params?: unknown }> = [];
+    const revision = `sha256:${'1'.repeat(64)}`;
+    const nextRevision = `sha256:${'2'.repeat(64)}`;
+    const connected = fakeConnected(async (method, params) => {
+      calls.push({ method, params });
+      if (method === 'status') return { toolsets: { revision, toolsets: [] } };
+      return {
+        previousRevision: revision,
+        revision: nextRevision,
+        changed: true,
+        toolsets: [{ id: 'mail', serverCount: 1, definitionRevision: nextRevision }],
+      };
+    });
+    const { log, lines } = collectLog();
+    const config = baseConfig('/store', {
+      mcpToolsets: {
+        mail: { mcpServers: { gmail: { command: '/private/device/gmail-mcp', args: ['--stdio'] } } },
+      },
+    });
+
+    await runToolsetsReloadCommand(config, { log, connectControl: connected.connectControl });
+
+    expect(calls).toEqual([
+      { method: 'status', params: undefined },
+      {
+        method: 'toolsets.reload',
+        params: { expectedRevision: revision, mcpToolsets: config.mcpToolsets },
+      },
+    ]);
+    expect(lines).toEqual([
+      `toolsets-reload: changed=yes previousRevision=${revision} revision=${nextRevision}`,
+      `toolset: mail servers=1 definitionRevision=${nextRevision} state=unobserved`,
+    ]);
+    expect(lines.join('\n')).not.toMatch(/gmail-mcp|--stdio|private\/device/);
+    expect(connected.close).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when no running daemon owns the reload target', async () => {
+    await expect(
+      runToolsetsReloadCommand(baseConfig('/store'), { connectControl: fakeUnreachable('offline') }),
+    ).rejects.toThrow(/requires a running daemon: offline/);
   });
 });
 

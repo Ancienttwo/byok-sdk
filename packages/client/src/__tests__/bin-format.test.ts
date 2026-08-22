@@ -9,6 +9,7 @@ import {
   formatStatusLines,
   formatTaskLine,
   formatTaskListLines,
+  formatToolsetsReloadReceiptLines,
   type StatusView,
 } from '../bin/format';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
@@ -344,6 +345,7 @@ describe('bin/format: formatLiveStatusLines', () => {
       queueWatermarks: [],
       approvals: [],
       approvalsPending: 0,
+      toolsets: { revision: `sha256:${'0'.repeat(64)}`, toolsets: [] },
       operationalHealth: {
         availability: 'available',
         state: 'healthy',
@@ -362,6 +364,36 @@ describe('bin/format: formatLiveStatusLines', () => {
     expect(lines).toContain('live-paired: yes deviceId=dev-1');
     expect(lines).toContain('live-runtimes: pi,claude');
     expect(lines).toContain('live-local-agent-release: 1.1.0 buildId=live-build');
+  });
+
+  it('renders explicit toolset observations and marks absent evidence unobserved without executable bytes', () => {
+    const revision = `sha256:${'1'.repeat(64)}`;
+    const lines = formatLiveStatusLines(
+      baseLive({
+        toolsets: {
+          revision,
+          toolsets: [
+            { id: 'crm', serverCount: 1, definitionRevision: revision },
+            {
+              id: 'mail',
+              serverCount: 2,
+              definitionRevision: revision,
+              observation: {
+                state: 'degraded',
+                observedAt: '2026-08-21T15:00:00.000Z',
+                version: '1.2.3',
+                reasonCode: 'provider.timeout',
+              },
+            },
+          ],
+        },
+      }),
+    );
+    expect(lines).toContain(`live-toolsets: revision=${revision} count=2`);
+    expect(lines).toContain(`live-toolset: crm servers=1 definitionRevision=${revision} state=unobserved`);
+    expect(lines).toContain(
+      `live-toolset: mail servers=2 definitionRevision=${revision} state=degraded version="1.2.3" observedAt=2026-08-21T15:00:00.000Z reasonCode=provider.timeout`,
+    );
   });
 
   it('renders an older live control peer with no release identity as unknown', () => {
@@ -465,6 +497,23 @@ describe('bin/format: formatLiveStatusLines', () => {
       }),
     );
     for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);
+  });
+});
+
+describe('bin/format: formatToolsetsReloadReceiptLines', () => {
+  it('renders only redacted registry metadata', () => {
+    const previousRevision = `sha256:${'1'.repeat(64)}`;
+    const revision = `sha256:${'2'.repeat(64)}`;
+    const lines = formatToolsetsReloadReceiptLines({
+      previousRevision,
+      revision,
+      changed: true,
+      toolsets: [{ id: 'mail', serverCount: 1, definitionRevision: revision }],
+    });
+    expect(lines).toEqual([
+      `toolsets-reload: changed=yes previousRevision=${previousRevision} revision=${revision}`,
+      `toolset: mail servers=1 definitionRevision=${revision} state=unobserved`,
+    ]);
   });
 });
 

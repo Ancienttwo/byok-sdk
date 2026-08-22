@@ -43,7 +43,7 @@ describe('Salesko fake connector MCP end to end', () => {
       approvalRegistry: new ApprovalRegistry(),
       storeDir: 'unused-store-dir',
       productId: 'salesko',
-      mcpToolsets: new Map([
+      getMcpToolsets: () => new Map([
         [
           'salesko',
           {

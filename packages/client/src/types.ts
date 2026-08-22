@@ -58,6 +58,50 @@ export interface McpToolsetConfig {
   mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
 }
 
+/** Lifecycle facts a device host may explicitly report for one configured toolset. */
+export type McpToolsetLifecycleState =
+  | 'installed'
+  | 'unauthorized'
+  | 'starting'
+  | 'ready'
+  | 'degraded'
+  | 'crashed'
+  | 'incompatible';
+
+/**
+ * One host-owned lifecycle observation. The SDK validates and projects this
+ * evidence but never derives it from executable configuration or command
+ * presence. `reasonCode` is a bounded machine code, not arbitrary log text.
+ */
+export interface McpToolsetObservation {
+  state: McpToolsetLifecycleState;
+  observedAt: string;
+  version?: string;
+  reasonCode?: string;
+}
+
+/** Redacted status for one configured toolset; executable definitions are absent by construction. */
+export interface McpToolsetStatus {
+  id: string;
+  serverCount: number;
+  definitionRevision: string;
+  observation?: Readonly<McpToolsetObservation>;
+}
+
+/** Content-addressed status of the daemon's complete device-local toolset registry. */
+export interface McpToolsetRegistryStatus {
+  revision: string;
+  toolsets: readonly Readonly<McpToolsetStatus>[];
+}
+
+/** Receipt returned after an atomic, expected-revision registry reload. */
+export interface McpToolsetReloadReceipt {
+  previousRevision: string;
+  revision: string;
+  changed: boolean;
+  toolsets: readonly Readonly<McpToolsetStatus>[];
+}
+
 /**
  * M4 Phase 3: the out-of-band approval channel `TaskRunner` (`daemon/
  * task-runner.ts`) hands to a prepared operation's `start()` via

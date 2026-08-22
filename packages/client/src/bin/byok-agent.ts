@@ -18,6 +18,7 @@ import { runStartCommand } from './commands/start';
 import { runStatusCommand } from './commands/status';
 import { runSupportBundleCommand } from './commands/support-bundle';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
+import { runToolsetsReloadCommand } from './commands/toolsets';
 import { runUnpairCommand } from './commands/unpair';
 import { runWorkspacesCommand } from './commands/workspaces';
 import { runVersionCommand } from './version';
@@ -34,7 +35,8 @@ import { runVersionCommand } from './version';
  *
  * `start` is a long-lived foreground process (or an installed background
  * service running the same command). `status`/`runtimes`/`tasks`/
- * `tasks --follow`/`unpair`/`approve`/`reject` are all separate, short-lived
+ * `toolsets reload`/`tasks --follow`/`unpair`/`approve`/`reject` are all
+ * separate, short-lived
  * invocations. As of M4 Phase 2 there IS a local IPC channel between them —
  * a Unix domain socket / Windows named pipe (`daemon/control-server.ts`,
  * `bin/control-client.ts`), mutually authenticated by an HMAC handshake over
@@ -100,9 +102,14 @@ import { runVersionCommand } from './version';
  *   (approvalId/taskId/age/summary excerpt) — same no-fallback rule as
  *   `approve`/`reject` above. See `commands/approvals.ts`'s own doc
  *   comment.
+ * - `toolsets reload` reads the host-owned config file in the CLI process,
+ *   then sends the complete candidate plus the live registry's expected
+ *   revision over the authenticated socket. It has no offline fallback: no
+ *   running daemon means there is no runtime registry to mutate.
  *
- * `pair`/`start` are the only two commands that mutate/run a live daemon in
- * THIS process, unchanged in spirit from the pre-M3-2b bin.
+ * `pair`/`start` are the only commands that construct or run a daemon in THIS
+ * process. `toolsets reload` mutates only an already-running daemon over the
+ * authenticated control socket.
  */
 
 function usage(): never {
@@ -117,6 +124,7 @@ function usage(): never {
       '  byok-agent support-bundle --output <path> [--config <path>]',
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
+      '  byok-agent toolsets reload --config <path>',
       '  byok-agent workspaces [--show-paths] [--config <path>]',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
       '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
@@ -207,6 +215,17 @@ async function main(): Promise<void> {
       return runTasksFollowCommand(config, { signal: controller.signal });
     }
     return runTasksListCommand(config);
+  }
+
+  if (command === 'toolsets') {
+    const [action, ...extra] = positionalArgs(rest, ['--config']);
+    if (action !== 'reload' || extra.length > 0) usage();
+    const configPath = configPathFrom(rest);
+    if (!configPath) {
+      console.error('toolsets reload requires --config <path> or a BYOK_CONFIG env var');
+      process.exit(1);
+    }
+    return runToolsetsReloadCommand(loadConfig(configPath));
   }
 
   if (command === 'workspaces') {

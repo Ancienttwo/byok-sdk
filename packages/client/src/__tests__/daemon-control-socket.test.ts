@@ -14,6 +14,7 @@ import { runTasksFollowCommand } from '../bin/commands/tasks';
 import { runUnpairCommand } from '../bin/commands/unpair';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import type { McpToolsetReloadReceipt } from '../types';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -86,6 +87,44 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     // M4 Phase 4 (part B.3): queue watermarks, empty with no active tasks.
     expect(status.queueWatermarks).toEqual([]);
     expect(status.approvalsPending).toBe(0);
+    conn.client.close();
+  });
+
+  it('reloads the registry with CAS and reports only explicit, redacted lifecycle evidence', async () => {
+    const built = await pairedAndStarted('acme-ctl-toolsets', new StubRuntimeAdapter('pi'));
+    daemon = built.daemon;
+    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+
+    const before = await conn.client.request<ControlStatusResult>('status');
+    expect(before.toolsets.toolsets).toEqual([]);
+    const receipt = await conn.client.request<McpToolsetReloadReceipt>('toolsets.reload', {
+      expectedRevision: before.toolsets.revision,
+      mcpToolsets: {
+        mail: { mcpServers: { gmail: { command: '/private/device/gmail-mcp', args: ['--stdio'] } } },
+      },
+    });
+    expect(receipt.changed).toBe(true);
+    expect(receipt.toolsets).toHaveLength(1);
+    expect(receipt.toolsets[0]?.observation).toBeUndefined();
+    expect(JSON.stringify(receipt)).not.toMatch(/gmail-mcp|--stdio|private\/device/);
+
+    await expect(
+      conn.client.request('toolsets.reload', { expectedRevision: before.toolsets.revision, mcpToolsets: {} }),
+    ).rejects.toMatchObject({ code: 'revision_conflict' });
+
+    daemon.reportMcpToolsetObservation('mail', receipt.toolsets[0]!.definitionRevision, {
+      state: 'ready',
+      observedAt: '2026-08-21T15:00:00.000Z',
+      version: '2.4.0',
+    });
+    const after = await conn.client.request<ControlStatusResult>('status');
+    expect(after.toolsets.toolsets[0]?.observation).toEqual({
+      state: 'ready',
+      observedAt: '2026-08-21T15:00:00.000Z',
+      version: '2.4.0',
+    });
+    expect(JSON.stringify(after.toolsets)).not.toMatch(/gmail-mcp|--stdio|private\/device/);
     conn.client.close();
   });
 

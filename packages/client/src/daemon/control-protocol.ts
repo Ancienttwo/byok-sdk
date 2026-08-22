@@ -6,6 +6,7 @@ import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
+import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
@@ -443,6 +444,27 @@ export interface ControlStatusResult {
   storage?: ControlStorageStatus;
   /** Local lifecycle/retry budget. This is not the transport state above. */
   operationalHealth: OperationalHealthSnapshot;
+  /** Redacted content-addressed status from the daemon's single local registry. */
+  toolsets: McpToolsetRegistryStatus;
+}
+
+export interface ToolsetsReloadParams {
+  expectedRevision: string;
+  mcpToolsets: Record<string, McpToolsetConfig>;
+}
+
+/** Shape-only parser; executable definition validation remains registry-owned. */
+export function parseToolsetsReloadParams(value: unknown): ToolsetsReloadParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'expectedRevision' && key !== 'mcpToolsets')) {
+    return undefined;
+  }
+  if (typeof value.expectedRevision !== 'string' || !isRecord(value.mcpToolsets) || Array.isArray(value.mcpToolsets)) {
+    return undefined;
+  }
+  return {
+    expectedRevision: value.expectedRevision,
+    mcpToolsets: value.mcpToolsets as Record<string, McpToolsetConfig>,
+  };
 }
 
 export interface ApprovalsListResult {

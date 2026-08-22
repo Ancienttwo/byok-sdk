@@ -32,8 +32,8 @@ export interface ConnectionManagerOptions {
   /** U4a Local Agent release version; passed unchanged to both transports. */
   clientVersion?: string;
   runtimes: RuntimeInfo[];
-  /** Sorted logical IDs from the validated local registry; executable definitions stay local. */
-  configuredToolsets?: readonly ToolsetId[];
+  /** Reads current sorted logical IDs from the validated local registry for every WS hello. */
+  getConfiguredToolsets?: () => readonly ToolsetId[];
   auth: AuthManager;
   cursorStore: CursorStore;
   /**
@@ -221,7 +221,7 @@ export class ConnectionManager {
       capabilities: opts.capabilities,
       clientVersion: opts.clientVersion,
       runtimes: opts.runtimes,
-      configuredToolsets: opts.configuredToolsets,
+      getConfiguredToolsets: opts.getConfiguredToolsets,
       getCursor: () => this.cursor,
       onEnvelope: (envelope) => this.deliver(envelope),
       onStateChange: (state) => {

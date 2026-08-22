@@ -96,7 +96,7 @@ describe('PresencePublisher', () => {
       serverUrl: 'https://example.test',
       auth: stubAuth(),
       intervalMs: 30_000,
-      configuredToolsets: ['crm.readonly', 'salesko.connectors'],
+      getConfiguredToolsets: () => ['crm.readonly', 'salesko.connectors'],
     });
     publisher.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -108,6 +108,29 @@ describe('PresencePublisher', () => {
       },
     ]);
     expect(JSON.stringify(bodies)).not.toMatch(/command|args|env|header|secret/i);
+    publisher.stop();
+  });
+
+  it('reads the current logical-id snapshot on every heartbeat', async () => {
+    const bodies: Array<{ configuredToolsets?: string[] }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as { configuredToolsets?: string[] });
+      return jsonOk();
+    }) as typeof globalThis.fetch;
+    let configuredToolsets = ['mail'];
+    const publisher = new PresencePublisher({
+      serverUrl: 'https://example.test',
+      auth: stubAuth(),
+      intervalMs: 30_000,
+      getConfiguredToolsets: () => configuredToolsets,
+    });
+
+    publisher.start();
+    await vi.advanceTimersByTimeAsync(0);
+    configuredToolsets = ['crm', 'mail'];
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(bodies.map((body) => body.configuredToolsets)).toEqual([['mail'], ['crm', 'mail']]);
     publisher.stop();
   });
 

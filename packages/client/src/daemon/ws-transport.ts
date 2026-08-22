@@ -59,8 +59,8 @@ export interface WsTransportOptions {
   clientVersion?: string;
   /** Detected runtimes, sent on every `conn.hello` (protocol §10 gap #4/#11). */
   runtimes?: RuntimeInfo[];
-  /** Sorted logical IDs configured locally; no MCP executable definition crosses the wire. */
-  configuredToolsets?: readonly ToolsetId[];
+  /** Reads current sorted logical IDs for every hello; no executable definition crosses the wire. */
+  getConfiguredToolsets?: () => readonly ToolsetId[];
   /** The redelivery cursor to send as `conn.hello.cursor` (protocol §9) — read fresh on every connect so a value learned mid-connection is used on the next reconnect. */
   getCursor?: () => number | undefined;
   onEnvelope: (envelope: Envelope) => void;
@@ -216,6 +216,7 @@ export class WsTransport {
     this.startLivenessCheck(socket);
 
     socket.on('open', () => {
+      const configuredToolsets = this.opts.getConfiguredToolsets?.();
       const hello = createEnvelope('conn.hello', {
         protocolVersions: [PROTOCOL_VERSION],
         capabilities: this.opts.capabilities,
@@ -223,10 +224,7 @@ export class WsTransport {
         productId: this.opts.productId,
         clientVersion: this.opts.clientVersion,
         runtimes: this.opts.runtimes,
-        configuredToolsets:
-          this.opts.configuredToolsets === undefined
-            ? undefined
-            : [...this.opts.configuredToolsets],
+        configuredToolsets: configuredToolsets === undefined ? undefined : [...configuredToolsets],
         cursor: this.opts.getCursor?.(),
       });
       socket.send(encodeEnvelope(hello));

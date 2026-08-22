@@ -4,22 +4,27 @@ import {
   DEVICE_ASSERTION_MAX_TTL_MS,
 } from '@byok-sdk/core';
 import {
-  CONFIGURED_TOOLSETS_MAX_ITEMS,
   createEnvelope,
   encodeEnvelope,
   PROTOCOL_VERSION,
   TASK_TRANSITIONS,
-  ToolsetIdSchema,
 } from '@byok-sdk/protocol';
-import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo, ToolsetId } from '@byok-sdk/protocol';
+import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig } from '../types';
+import type {
+  RuntimeAdapter,
+  GitWorkspaceConfig,
+  McpToolsetConfig,
+  McpToolsetObservation,
+  McpToolsetRegistryStatus,
+  McpToolsetReloadReceipt,
+} from '../types';
 import {
   resolveLocalAgentReleaseIdentity,
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
 import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
-import { APPROVAL_MCP_SERVER_NAME, ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
@@ -43,12 +48,14 @@ import {
   parseApprovalsResolveParams,
   parseAssertionIssueParams,
   parseShutdownParams,
+  parseToolsetsReloadParams,
   type AssertionIssueResult,
   type ControlActiveTask,
   type ControlStatusResult,
   type ControlStorageStatus,
   type ShutdownReason,
 } from './control-protocol';
+import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
@@ -475,6 +482,8 @@ export interface DaemonStatus {
   branding?: DaemonBranding;
   /** Local lifecycle/retry budget, separate from transport fallback state. */
   operationalHealth: OperationalHealthSnapshot;
+  /** Redacted, content-addressed device-local MCP registry status. */
+  toolsets: McpToolsetRegistryStatus;
 }
 
 export interface Daemon {
@@ -482,6 +491,17 @@ export interface Daemon {
   start(): Promise<void>;
   stop(): Promise<void>;
   status(): DaemonStatus;
+  /** Atomically replace the local registry when its current revision matches. */
+  reloadMcpToolsets(
+    mcpToolsets: Record<string, McpToolsetConfig> | undefined,
+    expectedRevision: string,
+  ): McpToolsetReloadReceipt;
+  /** Record one explicit host-owned lifecycle observation for a configured toolset. */
+  reportMcpToolsetObservation(
+    toolsetId: string,
+    expectedDefinitionRevision: string,
+    observation: McpToolsetObservation,
+  ): void;
   /**
    * M3-2a: local observability — subscribe to live `DaemonEvent`s (task
    * feed, connection/pairing state changes, runtime-detection results) as
@@ -763,104 +783,6 @@ function buildDefaultAdapters(config: DaemonConfig): RuntimeAdapter[] {
   return ids.map((id) => buildAdapter(id, config));
 }
 
-const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
-const MAX_LOCAL_MCP_ARGS = 64;
-const MAX_LOCAL_MCP_TOKEN_CHARS = 4096;
-
-function isNonEmptySingleLine(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.trim().length > 0 &&
-    value.length <= MAX_LOCAL_MCP_TOKEN_CHARS &&
-    !/[\u0000\r\n]/u.test(value)
-  );
-}
-
-/** Validate and snapshot the device-local MCP registry once at construction. */
-function resolveMcpToolsets(
-  configured: DaemonConfig['mcpToolsets'],
-): ReadonlyMap<string, McpToolsetConfig> | undefined {
-  if (configured === undefined) return undefined;
-  if (configured === null || typeof configured !== 'object' || Array.isArray(configured)) {
-    throw new Error('DaemonConfig.mcpToolsets must be an object keyed by logical toolset id');
-  }
-  const toolsetEntries = Object.entries(configured);
-  if (toolsetEntries.length > CONFIGURED_TOOLSETS_MAX_ITEMS) {
-    throw new Error(
-      `DaemonConfig.mcpToolsets may contain at most ${CONFIGURED_TOOLSETS_MAX_ITEMS} toolsets`,
-    );
-  }
-
-  const resolved = new Map<string, McpToolsetConfig>();
-  for (const [toolsetId, rawToolset] of toolsetEntries) {
-    const parsedId = ToolsetIdSchema.safeParse(toolsetId);
-    if (!parsedId.success) {
-      throw new Error(`DaemonConfig.mcpToolsets contains invalid toolset id ${JSON.stringify(toolsetId)}`);
-    }
-    if (rawToolset === null || typeof rawToolset !== 'object' || Array.isArray(rawToolset)) {
-      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} must be an object`);
-    }
-    const toolsetKeys = Object.keys(rawToolset);
-    if (toolsetKeys.some((key) => key !== 'mcpServers')) {
-      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} accepts only the mcpServers field`);
-    }
-    const rawServers = (rawToolset as { mcpServers?: unknown }).mcpServers;
-    if (rawServers === null || typeof rawServers !== 'object' || Array.isArray(rawServers)) {
-      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers must be an object`);
-    }
-    const serverEntries = Object.entries(rawServers);
-    if (serverEntries.length === 0 || serverEntries.length > MAX_LOCAL_MCP_SERVERS_PER_TOOLSET) {
-      throw new Error(
-        `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers must contain 1-${MAX_LOCAL_MCP_SERVERS_PER_TOOLSET} servers`,
-      );
-    }
-
-    const servers: Record<string, { command: string; args?: readonly string[] }> = {};
-    for (const [serverName, rawServer] of serverEntries) {
-      if (!ToolsetIdSchema.safeParse(serverName).success) {
-        throw new Error(
-          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers contains invalid server name ${JSON.stringify(serverName)}`,
-        );
-      }
-      if (serverName === APPROVAL_MCP_SERVER_NAME) {
-        throw new Error(
-          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} uses a server name reserved by the daemon`,
-        );
-      }
-      if (rawServer === null || typeof rawServer !== 'object' || Array.isArray(rawServer)) {
-        throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} must be an object`);
-      }
-      const serverKeys = Object.keys(rawServer);
-      if (serverKeys.some((key) => key !== 'command' && key !== 'args')) {
-        throw new Error(
-          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} accepts only command and args; env, headers, and remote task data are not supported`,
-        );
-      }
-      const server = rawServer as { command?: unknown; args?: unknown };
-      if (!isNonEmptySingleLine(server.command)) {
-        throw new Error(
-          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.command must be a non-empty single-line string no longer than ${MAX_LOCAL_MCP_TOKEN_CHARS} characters`,
-        );
-      }
-      if (server.args !== undefined && !Array.isArray(server.args)) {
-        throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.args must be an array`);
-      }
-      const args = server.args ?? [];
-      if (args.length > MAX_LOCAL_MCP_ARGS || args.some((arg) => !isNonEmptySingleLine(arg))) {
-        throw new Error(
-          `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName}.args must contain at most ${MAX_LOCAL_MCP_ARGS} non-empty single-line strings`,
-        );
-      }
-      servers[serverName] = Object.freeze({
-        command: server.command,
-        ...(args.length > 0 ? { args: Object.freeze([...args]) as readonly string[] } : {}),
-      });
-    }
-    resolved.set(toolsetId, Object.freeze({ mcpServers: Object.freeze(servers) }));
-  }
-  return resolved;
-}
-
 /**
  * Plan `device-assertion-broker`: validates `DaemonConfig.deviceAssertion
  * .audiences` and resolves it to the exact-match `Set` the `assertion.issue`
@@ -937,10 +859,7 @@ export function buildDaemonWithAdapters(
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
-  const mcpToolsets = resolveMcpToolsets(config.mcpToolsets);
-  const configuredToolsets = Object.freeze(
-    [...(mcpToolsets?.keys() ?? [])].sort(),
-  ) as readonly ToolsetId[];
+  const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
   // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
@@ -1480,7 +1399,7 @@ export function buildDaemonWithAdapters(
       deviceId: record.deviceId,
       // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
       runtimeEnvironment: config.runtimeEnvironment,
-      ...(mcpToolsets ? { mcpToolsets } : {}),
+      getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
       // M3-2a: `send` is already this file's OWN closure (not something
       // `TaskRunner` builds) — every `task.claim`/`task.started`/
       // `task.progress`/`task.artifact`/`task.await_approval`/
@@ -1569,7 +1488,7 @@ export function buildDaemonWithAdapters(
       capabilities,
       clientVersion: localAgentRelease.version,
       runtimes,
-      configuredToolsets,
+      getConfiguredToolsets: () => toolsetRegistry.snapshot().configuredToolsets,
       auth,
       cursorStore,
       // Finding F3: return (not void-and-forget) so ConnectionManager can
@@ -1717,7 +1636,7 @@ export function buildDaemonWithAdapters(
           presencePublisher ??= new PresencePublisher({
             serverUrl: config.serverUrl,
             auth,
-            configuredToolsets,
+            getConfiguredToolsets: () => toolsetRegistry.snapshot().configuredToolsets,
             clientVersion: localAgentRelease.version,
             protocolVersions: [PROTOCOL_VERSION],
             runtimes: detectedRuntimeFacts,
@@ -2162,6 +2081,7 @@ export function buildDaemonWithAdapters(
       // fine.
       ...(storageStatus === undefined ? {} : { storage: storageStatus }),
       operationalHealth: operationalHealth.snapshot(),
+      toolsets: toolsetRegistry.status(),
     };
   }
 
@@ -2235,6 +2155,23 @@ export function buildDaemonWithAdapters(
   const controlMethods: ControlMethods = {
     unary: {
       status: () => buildControlStatus(),
+      'toolsets.reload': (params) => {
+        const parsed = parseToolsetsReloadParams(params);
+        if (!parsed) {
+          throw new ControlError(
+            'bad_request',
+            'toolsets.reload requires exactly {expectedRevision, mcpToolsets}',
+          );
+        }
+        try {
+          return toolsetRegistry.reload(parsed.mcpToolsets, parsed.expectedRevision);
+        } catch (err) {
+          if (err instanceof McpToolsetRevisionConflictError) {
+            throw new ControlError('revision_conflict', err.message);
+          }
+          throw new ControlError('bad_request', err instanceof Error ? err.message : String(err));
+        }
+      },
       'approvals.list': () => ({ approvals: approvalRegistry.list() }),
       'approvals.resolve': (params) => {
         const parsed = parseApprovalsResolveParams(params);
@@ -2456,10 +2393,38 @@ export function buildDaemonWithAdapters(
       activeTaskCount: runner?.activeTaskCount ?? 0,
       branding: config.branding,
       operationalHealth: operationalHealth.snapshot(),
+      toolsets: toolsetRegistry.status(),
     };
   }
 
-  return { pair, start, stop, status, subscribe, tasks, unpair, approve, reject };
+  function reloadMcpToolsets(
+    mcpToolsets: Record<string, McpToolsetConfig> | undefined,
+    expectedRevision: string,
+  ): McpToolsetReloadReceipt {
+    return toolsetRegistry.reload(mcpToolsets, expectedRevision);
+  }
+
+  function reportMcpToolsetObservation(
+    toolsetId: string,
+    expectedDefinitionRevision: string,
+    observation: McpToolsetObservation,
+  ): void {
+    toolsetRegistry.report(toolsetId, expectedDefinitionRevision, observation);
+  }
+
+  return {
+    pair,
+    start,
+    stop,
+    status,
+    reloadMcpToolsets,
+    reportMcpToolsetObservation,
+    subscribe,
+    tasks,
+    unpair,
+    approve,
+    reject,
+  };
 }
 
 /**

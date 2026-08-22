@@ -74,8 +74,8 @@ export function assertPresenceHeartbeatCadence(cadence: {
 export interface PresencePublisherOptions {
   serverUrl: string;
   auth: AuthManager;
-  /** Sorted logical IDs only. Executable MCP definitions and credentials remain device-local. */
-  configuredToolsets?: readonly ToolsetId[];
+  /** Reads current sorted logical IDs only; executable definitions and credentials remain device-local. */
+  getConfiguredToolsets?: () => readonly ToolsetId[];
   /** U4a Local Agent release version; never inferred from the host package. */
   clientVersion?: string;
   /** The same runtime/auth snapshot sent in `conn.hello`. */
@@ -151,6 +151,7 @@ export class PresencePublisher {
   private async beat(): Promise<void> {
     if (!this.running) return;
     try {
+      const configuredToolsets = this.opts.getConfiguredToolsets?.();
       const response = await authedFetch(
         this.url,
         {
@@ -158,9 +159,9 @@ export class PresencePublisher {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             level: 'online',
-            ...(this.opts.configuredToolsets === undefined
+            ...(configuredToolsets === undefined
               ? {}
-              : { configuredToolsets: this.opts.configuredToolsets }),
+              : { configuredToolsets }),
             ...(this.opts.clientVersion === undefined ? {} : { clientVersion: this.opts.clientVersion }),
             ...(this.opts.protocolVersions === undefined
               ? {}
