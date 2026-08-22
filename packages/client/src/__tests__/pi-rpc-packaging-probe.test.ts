@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const PROBE_PATH = fileURLToPath(new URL('./fixtures/pi-rpc-0.84.1-live-probe.mjs', import.meta.url));
+const PROBE_PATH = fileURLToPath(new URL('./fixtures/pi-rpc-0.84.2-live-probe.mjs', import.meta.url));
 const PI_PACKAGE_PATH = fileURLToPath(
   new URL('../../node_modules/@earendil-works/pi-coding-agent/package.json', import.meta.url),
 );
@@ -59,10 +59,10 @@ async function runPinnedPiRpcProbe(): Promise<ProbeResult> {
   });
 }
 
-describe('pinned Pi 0.84.1 RPC packaging probe', () => {
+describe('pinned Pi 0.84.2 RPC packaging probe', () => {
   it('serializes native toolCallId and isError as JSONL without a provider call', async () => {
     const packageJson = JSON.parse(await readFile(PI_PACKAGE_PATH, 'utf8')) as { version?: unknown };
-    expect(packageJson.version).toBe('0.84.1');
+    expect(packageJson.version).toBe('0.84.2');
 
     const result = await runPinnedPiRpcProbe();
     expect(result.code).toBe(0);

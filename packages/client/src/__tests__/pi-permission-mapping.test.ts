@@ -32,7 +32,7 @@ describe('mapPermissionPolicyToPiArgs', () => {
     expect(result.args).toEqual(['--no-tools']);
   });
 
-  it('denyTools maps to pi 0.84.1\'s native --exclude-tools flag', () => {
+  it('denyTools maps to pi 0.84.2\'s native --exclude-tools flag', () => {
     const result = mapPermissionPolicyToPiArgs({ mode: 'auto', denyTools: ['bash'] });
     expect(result.ok).toBe(true);
     expect(result.args).toEqual(['--exclude-tools', 'bash']);

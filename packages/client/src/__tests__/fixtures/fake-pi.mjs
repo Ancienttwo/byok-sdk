@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Fake `pi --mode rpc`: replays a representative, empirically grounded frame
 // sequence (pi's bundled docs/rpc.md, cross-checked against live probes of
-// @earendil-works/pi-coding-agent 0.84.1 against its documented RPC contract
+// @earendil-works/pi-coding-agent 0.84.2 against its documented RPC contract
 // traffic) without spawning a real LLM call. Substituted for the real pi
 // binary via PiAdapterOptions.resolveBin/spawnFn in tests.
 //
@@ -113,6 +113,7 @@ if (process.env.FAKE_PI_CRASH_WITH_STDERR) {
 const FLAG_TAKES_VALUE = {
   '--mode': true,
   '--session': true,
+  '--extension': true,
   '--tools': true,
   '--exclude-tools': true,
   '--no-tools': false,

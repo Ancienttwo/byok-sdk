@@ -23,7 +23,7 @@ function requireToolResultOutcome(msg: PiRpcMessage): boolean {
 }
 
 /**
- * Map pi 0.84.1 RPC frames into BYOK's runtime-neutral event contract.
+ * Map pi 0.84.2 RPC frames into BYOK's runtime-neutral event contract.
  *
  * `agent_settled` is the only whole-task completion authority. `agent_end`
  * ends one low-level agent run, but pi may still perform retry/compaction or

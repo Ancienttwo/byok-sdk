@@ -91,10 +91,12 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     expect(runtimes).toHaveLength(3);
     const byId = new Map(runtimes.map((r) => [r.id, r.capabilities]));
 
-    // pi: the only bundled runtime that can express mid-turn steering.
+    // pi: the only bundled runtime that can express mid-turn steering; its
+    // task-scoped pi-mcp-adapter bridge also consumes selected MCP toolsets.
     expect(byId.get('pi')).toEqual({
       steer: true,
       resume: true,
+      mcpToolsets: true,
       approvalInteractive: false,
       permissionModes: ['auto', 'readonly'],
     });
