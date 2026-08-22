@@ -223,7 +223,7 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. `@byok-sdk/client` depends on the exact npm
-artifact `@earendil-works/pi-coding-agent@0.84.1`; the SDK does not accept an
+artifact `@earendil-works/pi-coding-agent@0.84.2`; the SDK does not accept an
 unversioned global `pi` on `PATH` as an implicit substitute. All workspace
 dispatch packages and private conformance tests require Node.js `>=22.22.0`,
 matching pi's published engine floor. The independent

@@ -5,7 +5,13 @@ const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.u
 if (typeof manifest.version !== 'string') throw new Error('packages/client/package.json must declare a string version');
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/adapters/index.ts', 'src/bin/byok-agent.ts', 'src/bin/byok-approval-mcp.ts'],
+  entry: [
+    'src/index.ts',
+    'src/adapters/index.ts',
+    'src/adapters/pi/mcp-extension.ts',
+    'src/bin/byok-agent.ts',
+    'src/bin/byok-approval-mcp.ts',
+  ],
   format: ['esm'],
   target: 'es2022',
   platform: 'node',

@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
-import { isAbsolute } from 'node:path';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path, { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
@@ -12,8 +14,10 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
-import { RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
+import { resolvePiExtensions, type ResolvedPiExtensions } from './resolve-extensions';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
@@ -29,6 +33,19 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Task-owned cleanup is part of the close receipt and must fail visibly. */
+async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
+  if (!dir) return;
+  try {
+    await fs.rm(dir, { recursive: true, force: true });
+  } catch (cause) {
+    throw new RuntimeDisposalFailure({
+      stage: 'cleanup',
+      reason: 'pi task-scoped MCP configuration could not be removed',
+    }, { cause });
+  }
+}
+
 /**
  * Known provider credential env var *names* (never values) — see the
  * credential-isolation rule on `RuntimeAdapter`. `detect()` only checks
@@ -41,6 +58,8 @@ export interface PiAdapterOptions {
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
   spawnFn?: SpawnFn;
+  /** Override bundled extension resolution — tests use stable fixture paths. */
+  resolveExtensions?: () => ResolvedPiExtensions;
   /**
    * Separate-process BYOK credential boundary. The launcher receives only
    * non-secret selection/config paths, resolves the OS credential itself,
@@ -128,6 +147,7 @@ export class PiAdapter implements RuntimeAdapter {
     capabilities: {
       steer: true,
       resume: true,
+      mcpToolsets: true,
       approvalInteractive: false,
       permissionModes: ['auto', 'readonly'],
     },
@@ -141,7 +161,7 @@ export class PiAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const bin = this.resolveBin();
-      // Empirically, pi 0.84.1 prints `--version` to stdout. Check stderr too
+      // Empirically, pi 0.84.2 prints `--version` to stdout. Check stderr too
       // so detection remains accurate if a future pinned release moves it.
       const { stdout, stderr } = await execFileAsync(bin.command, ['--version'], { timeout: DETECT_TIMEOUT_MS });
       const version = stdout.trim() || stderr.trim();
@@ -157,8 +177,16 @@ export class PiAdapter implements RuntimeAdapter {
     if (!mapping.ok) {
       return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by pi adapter', retryable: false };
     }
+    if (input.requiredToolsetIds.length > 0 && input.policy.mode !== 'auto') {
+      return {
+        kind: 'reject',
+        reason: 'pi MCP toolsets require permission mode "auto" because pi-mcp-adapter exposes one proxy across read and mutation tools',
+        retryable: false,
+      };
+    }
 
     const bin = this.resolveBin();
+    const extensions = (this.options.resolveExtensions ?? resolvePiExtensions)();
     // Session/workspace continuity:
     // `task.sessionRef` is only ever non-empty here when `task-runner.ts`
     // has (a) found a recorded workspace for this exact sessionRef in its
@@ -181,7 +209,7 @@ export class PiAdapter implements RuntimeAdapter {
     // docs/protocol.md §2's note on this field for the explicit
     // reserved/ignored status); a real implementation is a genuine
     // follow-on design task, not a mechanical fix, and is intentionally
-    // left alone here. pi 0.84.1 also offers `--session-id`, but that flag
+    // left alone here. pi 0.84.2 also offers `--session-id`, but that flag
     // creates a missing session. BYOK deliberately uses `--session` so a
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
@@ -237,7 +265,26 @@ export class PiAdapter implements RuntimeAdapter {
             });
           }
           const resumeSessionId = startInput.manifest.sessionRef;
-          const piArgs = ['--mode', 'rpc', ...(resumeSessionId ? ['--session', resumeSessionId] : []), ...mapping.args];
+          let mcpConfigDir: string | undefined;
+          let runtimeEnv = manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env);
+          const taskMcpServers = startInput.mcpServers ?? {};
+          const hasMcpServers = Object.keys(taskMcpServers).length > 0;
+          if (hasMcpServers) {
+            mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-mcp-'));
+            await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
+            const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
+            await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers: taskMcpServers }), { mode: 0o600 });
+            runtimeEnv = { ...runtimeEnv, [BYOK_PI_MCP_CONFIG_PATH]: mcpConfigPath };
+          }
+          const piArgs = [
+            '--mode',
+            'rpc',
+            '--extension',
+            extensions.webAccess,
+            ...(hasMcpServers ? ['--extension', extensions.mcpAdapter] : []),
+            ...(resumeSessionId ? ['--session', resumeSessionId] : []),
+            ...mapping.args,
+          ];
           const args = launcherArgs === undefined ? piArgs : [...launcherArgs, '--', ...piArgs];
           let rpc: PiRpcClient;
           try {
@@ -245,10 +292,11 @@ export class PiAdapter implements RuntimeAdapter {
               command,
               args,
               cwd: startInput.manifest.workspace.workspaceDir,
-              env: manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env),
+              env: runtimeEnv,
               spawnFn: this.options.spawnFn,
             });
           } catch (cause) {
+            await cleanupMcpConfigDir(mcpConfigDir);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
               reason: 'pi runtime process could not be spawned',
@@ -260,6 +308,7 @@ export class PiAdapter implements RuntimeAdapter {
             response = await rpc.send({ type: 'prompt', message: startInput.instruction });
           } catch (cause) {
             rpc.kill();
+            await cleanupMcpConfigDir(mcpConfigDir);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
               reason: `pi initial prompt transport failed: ${errorMessage(cause)}`,
@@ -267,6 +316,7 @@ export class PiAdapter implements RuntimeAdapter {
           }
           if (response.success === false) {
             rpc.kill();
+            await cleanupMcpConfigDir(mcpConfigDir);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'semantic', retry: 'non-retryable',
               reason: typeof response.error === 'string' ? response.error : 'pi rejected the initial prompt',
@@ -278,16 +328,18 @@ export class PiAdapter implements RuntimeAdapter {
             sessionRef = await resolveAuthoritativeSessionId(rpc);
           } catch (err) {
             rpc.kill();
+            await cleanupMcpConfigDir(mcpConfigDir);
             throw err;
           }
           if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
             rpc.kill();
+            await cleanupMcpConfigDir(mcpConfigDir);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'authority', retry: 'non-retryable',
               reason: 'pi resumed a different authoritative session than requested',
             });
           }
-          return new PiSession(sessionRef, rpc, manifestSelection);
+          return new PiSession(sessionRef, rpc, manifestSelection, mcpConfigDir);
         },
       },
     };
@@ -369,10 +421,14 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> 
 }
 
 class PiSession implements Session {
+  private closeAttempt: Promise<void> | undefined;
+
   constructor(
     public readonly sessionRef: string,
     private readonly rpc: PiRpcClient,
     private readonly selection: TaskOfferPayload['dispatchSelection'],
+    /** Task-scoped isolated pi-mcp-adapter configuration, removed in close(). */
+    private readonly mcpConfigDir?: string,
   ) {}
 
   get events(): AsyncIterable<AgentEvent> {
@@ -458,7 +514,17 @@ class PiSession implements Session {
   }
 
   async close(): Promise<void> {
-    await this.rpc.dispose();
+    if (!this.closeAttempt) {
+      const attempt = (async () => {
+        await this.rpc.dispose();
+        await cleanupMcpConfigDir(this.mcpConfigDir);
+      })();
+      this.closeAttempt = attempt.catch((error: unknown) => {
+        this.closeAttempt = undefined;
+        throw error;
+      });
+    }
+    await this.closeAttempt;
   }
 
   async resolveApproval(): Promise<void> {

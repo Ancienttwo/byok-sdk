@@ -11,9 +11,17 @@ import { startPreparedOperation, type PreparedOperationResources } from './fixtu
 import { RuntimeExecutionFailure } from '../runtime-failure';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
+const FIXTURE_EXTENSIONS = Object.freeze({
+  webAccess: '/extensions/pi-web-access/index.ts',
+  mcpAdapter: '/extensions/byok-pi-mcp.js',
+});
+const resolveFixtureExtensions = () => FIXTURE_EXTENSIONS;
 
 function fakePiAdapter(): PiAdapter {
-  return new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }) });
+  return new PiAdapter({
+    resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+    resolveExtensions: resolveFixtureExtensions,
+  });
 }
 
 async function takeEvents(session: Session, count: number): Promise<AgentEvent[]> {
@@ -120,6 +128,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
       byokLauncher: {
         command: '/opt/byok-pi-provider-launcher',
@@ -158,6 +167,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--',
       '--mode',
       'rpc',
+      '--extension',
+      FIXTURE_EXTENSIONS.webAccess,
     ]);
     expect(JSON.stringify(calls[0])).not.toContain('sk-sentinel');
     expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
@@ -182,6 +193,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     }) as never;
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
       spawnFn,
       byokLauncher: {
         command: '/opt/byok-pi-provider-launcher',
@@ -221,6 +233,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
         '--',
         '--mode',
         'rpc',
+        '--extension',
+        FIXTURE_EXTENSIONS.webAccess,
       ],
     }]);
   });
@@ -401,6 +415,63 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/No API key found/);
   });
 
+  it('loads bundled web access and an isolated task-scoped MCP config, then removes the config on close', async () => {
+    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ args: [...args], env: options?.env ?? {} });
+      return realSpawn(FIXTURE_PATH, args, options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
+      spawnFn,
+    });
+    const ctx = await makeCtx();
+    ctx.mcpServers = {
+      docs: { command: '/opt/docs-mcp', args: ['--readonly'] },
+    };
+
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toEqual([
+      '--mode',
+      'rpc',
+      '--extension',
+      FIXTURE_EXTENSIONS.webAccess,
+      '--extension',
+      FIXTURE_EXTENSIONS.mcpAdapter,
+    ]);
+    const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH;
+    expect(typeof configPath).toBe('string');
+    expect(JSON.parse(await fs.readFile(configPath as string, 'utf8'))).toEqual({
+      mcpServers: {
+        docs: { command: '/opt/docs-mcp', args: ['--readonly'] },
+      },
+    });
+
+    await session.close();
+    openSessions.splice(openSessions.indexOf(session), 1);
+    await expect(fs.access(configPath as string)).rejects.toThrow();
+  });
+
+  it('rejects MCP toolsets under readonly because the MCP proxy cannot distinguish read tools from mutations', async () => {
+    const adapter = fakePiAdapter();
+    const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
+    await expect(adapter.prepare({
+      offer,
+      policy: offer.policy,
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: ['docs'],
+      mcpServers: { docs: { command: '/opt/docs-mcp' } },
+    })).resolves.toMatchObject({
+      kind: 'reject',
+      reason: expect.stringMatching(/require permission mode "auto"/),
+      retryable: false,
+    });
+  });
+
   it('fails closed on a policy pi cannot express, without ever spawning a process', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx();
@@ -427,6 +498,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(adapter.descriptor.capabilities).toEqual({
       steer: true,
       resume: true,
+      mcpToolsets: true,
       // S0/H-002: pi has no needs_approval notion at all
       // (`PiSession.resolveApproval` throws unconditionally).
       approvalInteractive: false,
@@ -458,6 +530,6 @@ describe('PiAdapter against the user-installed runtime (no network/API key requi
   it('detect() returns a well-formed result whether or not pi is actually installed here', async () => {
     const adapter = new PiAdapter();
     const result = await adapter.detect();
-    expect(result).toMatchObject({ present: true, version: '0.84.1' });
+    expect(result).toMatchObject({ present: true, version: '0.84.2' });
   });
 });

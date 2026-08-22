@@ -55,9 +55,11 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.1",
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "pi-mcp-adapter": "2.27.0",
+    "pi-web-access": "0.24.1",
     "ws": "^8.21.1"
   },
   "devDependencies": {

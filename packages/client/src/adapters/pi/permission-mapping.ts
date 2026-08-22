@@ -13,7 +13,7 @@ const READONLY_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls'];
 
 /**
  * Map an effective {@link PermissionPolicy} to `pi --mode rpc` CLI args,
- * fail-closed against the exact pi 0.84.1 CLI contract:
+ * fail-closed against the exact pi 0.84.2 CLI contract:
  *
  * - `auto` / `readonly` are expressible via `--tools` / `--no-tools`.
  * - `confirm` and `plan` are NOT expressible: pi ships no built-in per-call
