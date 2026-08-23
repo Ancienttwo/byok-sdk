@@ -42,8 +42,8 @@ import type {
   TenantId,
   TenantReadiness,
 } from '@byok-sdk/core';
-import type { AgentRef } from '@byok-sdk/protocol';
-export type { AgentRef } from '@byok-sdk/protocol';
+import type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
+export type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
 import type { ActivityStore } from '../activity';
 import type { ApprovalTimelineStore } from '../approval-timeline';
 
@@ -289,6 +289,28 @@ export interface RequestReceiptStore {
 }
 
 // ---------------------------------------------------------------------------
+// Reliable Agent egress — durable event and acknowledgement receipt fact
+// ---------------------------------------------------------------------------
+
+export interface AgentEgressRecord {
+  readonly tenantId: TenantId;
+  readonly deviceId: string;
+  readonly payload: AgentEgressReliablePayload;
+  /** Stable cloud-generated receipt identity echoed on every exact replay. */
+  readonly receiptId: string;
+  readonly recordedAt: string;
+}
+
+export interface AgentEgressStore {
+  /** First event-id write wins; callers reject mismatches rather than updating. */
+  record(
+    tenant: TenantId,
+    input: Omit<AgentEgressRecord, 'tenantId' | 'recordedAt'>,
+  ): Promise<{ readonly record: AgentEgressRecord; readonly created: boolean }>;
+  get(tenant: TenantId, deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+}
+
+// ---------------------------------------------------------------------------
 // Device-proof request receipts — request-bound replay authority (S6)
 // ---------------------------------------------------------------------------
 
@@ -464,6 +486,7 @@ export interface CloudStores {
   readonly tasks: TaskAttemptStore;
   readonly cancellations: TaskCancellationStore;
   readonly receipts: RequestReceiptStore;
+  readonly egress: AgentEgressStore;
   readonly proofReceipts: ProofRequestReceiptStore;
   readonly blobs: CloudBlobStore;
   readonly rateLimiter: InboundRateLimiter;
@@ -480,6 +503,7 @@ export const CLOUD_STORE_NAMES = [
   'tasks',
   'cancellations',
   'receipts',
+  'egress',
   'proofReceipts',
   'blobs',
   'rateLimiter',

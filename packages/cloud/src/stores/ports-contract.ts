@@ -26,6 +26,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   tasks: ['open', 'reserveAgentOffer', 'get', 'getMany', 'claim', 'recordStatus'],
   cancellations: ['request'],
   receipts: ['record', 'get'],
+  egress: ['record', 'get'],
   proofReceipts: ['record', 'get'],
   // Three methods, not six: the byte-proxy trio moved to `BlobContentProxy`,
   // which is a composition input rather than a port and therefore has no row
@@ -45,6 +46,7 @@ export const CLOUD_PORT_INTERFACES: Readonly<Record<CloudStoreName, string>> = {
   tasks: 'TaskAttemptStore',
   cancellations: 'TaskCancellationStore',
   receipts: 'RequestReceiptStore',
+  egress: 'AgentEgressStore',
   proofReceipts: 'ProofRequestReceiptStore',
   blobs: 'CloudBlobStore',
   rateLimiter: 'InboundRateLimiter',

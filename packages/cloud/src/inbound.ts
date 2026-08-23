@@ -28,10 +28,19 @@
  * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
  */
 import {
+  AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
+  AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
+  AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
+  AGENT_EGRESS_POLICY_CAPABILITY,
+  AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+  AgentContentReadPayloadSchema,
   DAEMON_TO_SERVER_TYPES,
   encodeEnvelope,
   PROTOCOL_VERSION,
   type AgentRef,
+  type AgentContentReceiptPayload,
+  type AgentContentReadPayload,
+  type AgentEgressReliablePayload,
   type Envelope,
   type MessageType,
 } from '@byok-sdk/protocol';
@@ -58,6 +67,76 @@ export function terminalReceiptKey(taskId: string): string {
 
 function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean {
   return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
+}
+
+function sameReliableEgress(
+  expected: AgentEgressReliablePayload,
+  actual: AgentEgressReliablePayload,
+): boolean {
+  return (
+    sameAgentRef(expected.agentRef, actual.agentRef) &&
+    expected.sessionRef === actual.sessionRef &&
+    expected.policyRevision === actual.policyRevision &&
+    expected.eventId === actual.eventId &&
+    expected.cursor === actual.cursor &&
+    expected.contentHash === actual.contentHash &&
+    expected.byteCount === actual.byteCount &&
+    JSON.stringify(expected.payload) === JSON.stringify(actual.payload)
+  );
+}
+
+function contentReadCapability(surface: AgentContentReceiptPayload['surface']): string {
+  switch (surface) {
+    case 'workspace':
+      return AGENT_CONTENT_WORKSPACE_READ_CAPABILITY;
+    case 'transcript':
+      return AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY;
+    case 'artifact':
+      return AGENT_CONTENT_ARTIFACT_READ_CAPABILITY;
+  }
+}
+
+function hasCapabilities(capabilities: readonly string[] | undefined, required: readonly string[]): boolean {
+  return capabilities !== undefined && required.every((capability) => capabilities.includes(capability));
+}
+
+function contentRequestReceiptKey(deviceId: string, requestId: string): string {
+  return `agent-content-request:${deviceId}:${requestId}`;
+}
+
+function contentReceiptKey(deviceId: string, requestId: string): string {
+  return `agent-content:${deviceId}:${requestId}`;
+}
+
+function matchesContentReadReceipt(request: AgentContentReadPayload, receipt: AgentContentReceiptPayload): boolean {
+  return (
+    request.requestId === receipt.requestId &&
+    request.surface === receipt.surface &&
+    request.actor.kind === receipt.actor.kind &&
+    request.actor.id === receipt.actor.id &&
+    sameAgentRef(request.agentRef, receipt.agentRef) &&
+    request.sessionRef === receipt.sessionRef &&
+    request.runtime === receipt.runtime &&
+    request.cwd === receipt.cwd &&
+    request.policyRevision === receipt.policyRevision &&
+    request.target === receipt.target &&
+    request.mimeType === receipt.mimeType &&
+    request.decodeAs === receipt.decodeAs
+  );
+}
+
+async function readContentRequest(
+  stores: TenantStores,
+  deviceId: string,
+  requestId: string,
+): Promise<AgentContentReadPayload | undefined> {
+  const stored = await stores.receipts.get(contentRequestReceiptKey(deviceId, requestId));
+  if (stored === undefined) return undefined;
+  try {
+    return AgentContentReadPayloadSchema.parse(JSON.parse(stored.body));
+  } catch {
+    return undefined;
+  }
 }
 
 function inboundAgentRef(envelope: Envelope): AgentRef | undefined {
@@ -109,6 +188,40 @@ export async function handleInboundEnvelope(
   }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return 'rejected';
+
+  if (envelope.type === 'agent.egress.reliable') {
+    const device = await stores.devices.get(deviceId);
+    if (
+      device === undefined ||
+      device.revoked ||
+      !hasCapabilities(device.capabilities, [AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])
+    ) {
+      return 'rejected';
+    }
+    const outcome = await stores.egress.record({
+      deviceId,
+      payload: envelope.payload,
+      receiptId: crypto.randomUUID(),
+    });
+    return outcome.created || sameReliableEgress(outcome.record.payload, envelope.payload)
+      ? outcome.created
+        ? 'accepted'
+        : 'duplicate'
+      : 'rejected';
+  }
+
+  if (envelope.type === 'agent.content.receipt') {
+    const device = await stores.devices.get(deviceId);
+    if (device === undefined || device.revoked || !hasCapabilities(device.capabilities, [contentReadCapability(envelope.payload.surface)])) {
+      return 'rejected';
+    }
+    const request = await readContentRequest(stores, deviceId, envelope.payload.requestId);
+    if (request === undefined || !matchesContentReadReceipt(request, envelope.payload)) return 'rejected';
+    const key = contentReceiptKey(deviceId, envelope.payload.requestId);
+    const encoded = encodeEnvelope(envelope);
+    const receipt = await stores.receipts.record({ key, body: encoded });
+    return receipt.created ? 'accepted' : receipt.receipt.body === encoded ? 'duplicate' : 'rejected';
+  }
 
   const taskId = envelope.task_id;
   // Every `DAEMON_TO_SERVER_TYPES` member requires `task_id` at the schema

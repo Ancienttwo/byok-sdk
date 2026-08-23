@@ -79,9 +79,35 @@ describe('the inbound gate', () => {
 
   it('step 1: accepts every daemon -> server type', async () => {
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    await stores.devices.recordCapabilities({
+      capabilities: [
+        'agent-egress-policy',
+        'agent-egress-reliable-ack',
+        'agent-content-workspace-read',
+      ],
+    });
     const accepted: string[] = [];
     for (const type of DAEMON_TO_SERVER_TYPES) {
       const envelope = envelopeOfType(type, taskId, deviceId);
+      if (envelope.type === 'agent.content.receipt') {
+        await stores.receipts.record({
+          key: `agent-content-request:${deviceId}:${envelope.payload.requestId}`,
+          body: JSON.stringify({
+            requestId: envelope.payload.requestId,
+            surface: envelope.payload.surface,
+            actor: envelope.payload.actor,
+            agentRef: envelope.payload.agentRef,
+            sessionRef: envelope.payload.sessionRef,
+            runtime: envelope.payload.runtime,
+            cwd: envelope.payload.cwd,
+            policyRevision: envelope.payload.policyRevision,
+            target: envelope.payload.target,
+            mimeType: envelope.payload.mimeType,
+            decodeAs: envelope.payload.decodeAs,
+            policy: { maxBytes: envelope.payload.byteCount, allowedMimeTypes: [envelope.payload.mimeType] },
+          }),
+        });
+      }
       const outcome = await handleInboundEnvelope(stores, deviceId, envelope);
       if (outcome === 'accepted') accepted.push(type);
     }
@@ -300,5 +326,39 @@ function envelopeOfType(type: (typeof DAEMON_TO_SERVER_TYPES)[number], taskId: s
         { approvalId: 'ap-1', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() },
         { taskId },
       );
+    case 'agent.egress.reliable':
+      return createEnvelope('agent.egress.reliable', {
+        agentRef: { agentId: 'agent-inbound', profileRevision: 'profile-inbound' },
+        sessionRef: 'session-inbound',
+        policyRevision: 'policy-inbound',
+        eventId: '10000000-0000-4000-8000-000000000001',
+        cursor: 1,
+        payload: { status: 'ok' },
+        contentHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        byteCount: 15,
+      });
+    case 'agent.content.receipt':
+      return createEnvelope('agent.content.receipt', {
+        requestId: '10000000-0000-4000-8000-000000000002',
+        surface: 'workspace',
+        actor: { kind: 'user', id: 'actor-inbound-1' },
+        agentRef: { agentId: 'agent-inbound', profileRevision: 'profile-inbound' },
+        sessionRef: 'session-inbound',
+        runtime: 'codex',
+        cwd: '/workspace',
+        policyRevision: 'policy-inbound',
+        target: 'README.md',
+        mimeType: 'text/plain',
+        decodeAs: 'utf8',
+        decision: 'allowed',
+        byteCount: 15,
+        contentHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        blobRef: {
+          blobId: 'blob-inbound-1',
+          contentHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          size: 15,
+          contentType: 'text/plain',
+        },
+      });
   }
 }

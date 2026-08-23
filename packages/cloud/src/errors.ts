@@ -50,6 +50,10 @@ export const CLOUD_ERROR_CODES = {
   agent_ref_mismatch: 'agent_ref_mismatch',
   /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
   agent_task_already_exists: 'agent_task_already_exists',
+  /** A first-write-wins Agent control record was replayed with a different body. */
+  agent_content_request_mismatch: 'agent_content_request_mismatch',
+  /** A durable mailbox receipt id resolved to an envelope other than its exact acknowledgement. */
+  mailbox_receipt_mismatch: 'mailbox_receipt_mismatch',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

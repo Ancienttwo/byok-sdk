@@ -35,6 +35,7 @@ import { PostgresTaskAttemptStore } from './task-attempts';
 import { PostgresTaskCancellationStore } from './task-cancellations';
 import { PostgresActivityStore } from './activity';
 import { PostgresApprovalTimelineStore } from './approval-timeline';
+import { PostgresAgentEgressStore } from './agent-egress';
 
 export { PostgresDeviceDirectory } from './devices';
 export { PostgresInboundDedupStore } from './dedup';
@@ -46,6 +47,7 @@ export { PostgresTaskAttemptStore } from './task-attempts';
 export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
 export { PostgresApprovalTimelineStore } from './approval-timeline';
+export { PostgresAgentEgressStore } from './agent-egress';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
 export {
   DEFAULT_MAX_ATTEMPTS,
@@ -68,7 +70,7 @@ export type {
   R2ObjectPage,
 } from './r2-blobs';
 
-/** Every cloud-local port. All eleven, or it is not a composition. */
+/** Every cloud-local port. All twelve, or it is not a composition. */
 export type PostgresCloudStores = CloudStores;
 
 /** Everything the blob store needs that is not already a composition-wide input. */
@@ -105,6 +107,7 @@ export function createPostgresCloudStores(
     tasks: new PostgresTaskAttemptStore(pool, clock),
     cancellations: new PostgresTaskCancellationStore(pool, clock),
     receipts: new PostgresRequestReceiptStore(pool, clock),
+    egress: new PostgresAgentEgressStore(pool, clock),
     proofReceipts: new PostgresProofRequestReceiptStore(pool, clock),
     // A second `PostgresObjectStore` instance, not a shared one: it is a
     // stateless wrapper over the pool, so the two read and write the same rows

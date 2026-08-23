@@ -21,6 +21,7 @@ import { InMemoryTaskAttemptState, InMemoryTaskAttemptStore } from './task-attem
 import { InMemoryTaskCancellationStore } from './task-cancellations';
 import { InMemoryActivityStore } from './activity';
 import { InMemoryApprovalTimelineStore } from './approval-timeline';
+import { InMemoryAgentEgressStore } from './agent-egress';
 
 export { AllowAllRateLimiter } from './rate-limiter';
 export {
@@ -40,6 +41,7 @@ export { InMemoryTaskAttemptStore } from './task-attempts';
 export { InMemoryTaskCancellationStore } from './task-cancellations';
 export { InMemoryActivityStore } from './activity';
 export { InMemoryApprovalTimelineStore } from './approval-timeline';
+export { InMemoryAgentEgressStore } from './agent-egress';
 
 /**
  * The port bundle plus the byte proxy, in the shape `createInMemoryCoreStores`
@@ -75,6 +77,7 @@ export function createInMemoryCloudStores(
       tasks,
       cancellations: new InMemoryTaskCancellationStore(taskState, mailbox),
       receipts: new InMemoryRequestReceiptStore(clock),
+      egress: new InMemoryAgentEgressStore(clock),
       proofReceipts: new InMemoryProofRequestReceiptStore(clock),
       blobs: blobs.blobs,
       rateLimiter: new AllowAllRateLimiter(),

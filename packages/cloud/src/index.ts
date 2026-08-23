@@ -26,8 +26,11 @@ export type {
   ByokCloud,
   ByokCloudOptions,
   AgentDispatchInput,
+  AgentEgressDispatchInput,
+  AgentContentReadInput,
   EnqueueOfferInput,
   EnqueueToolsetOfferInput,
+  EnqueuedAgentControl,
   EnqueuedOffer,
 } from './cloud';
 export {
@@ -252,6 +255,8 @@ export type {
   TaskAttemptStatus,
   TaskAttemptStore,
   AgentRef,
+  AgentEgressRecord,
+  AgentEgressStore,
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,
@@ -270,6 +275,7 @@ export {
   InMemoryNonceStore,
   InMemoryPairingCodeStore,
   InMemoryRequestReceiptStore,
+  InMemoryAgentEgressStore,
   InMemoryProofRequestReceiptStore,
   InMemoryTaskAttemptStore,
   InMemoryTaskCancellationStore,

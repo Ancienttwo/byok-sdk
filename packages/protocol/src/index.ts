@@ -17,6 +17,43 @@ export {
 } from './agent-event';
 export type { AgentEvent, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
 
+export {
+  AgentEgressPolicySchema,
+  AgentEgressActivityPolicySchema,
+  AgentReliableQuotaPolicySchema,
+  ContentReadPolicySchema,
+  AgentEgressLaneSchema,
+  AgentEgressDropReasonSchema,
+  AgentContentReadSurfaceSchema,
+  AgentContentActorKindSchema,
+  AgentContentActorSchema,
+  AgentContentDecodeAsSchema,
+  AgentContentMimeTypeSchema,
+  AgentContentReadDecisionSchema,
+  AgentContentReadDenialReasonSchema,
+  AgentEgressContentHashSchema,
+  AgentEgressPolicyRevisionSchema,
+  AGENT_EGRESS_POLICY_CAPABILITY,
+  AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+  AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
+  AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
+  AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
+} from './agent-egress';
+export type {
+  AgentEgressPolicy,
+  AgentEgressActivityPolicy,
+  AgentReliableQuotaPolicy,
+  ContentReadPolicy,
+  AgentEgressLane,
+  AgentEgressDropReason,
+  AgentContentReadSurface,
+  AgentContentActorKind,
+  AgentContentActor,
+  AgentContentDecodeAs,
+  AgentContentReadDecision,
+  AgentContentReadDenialReason,
+} from './agent-egress';
+
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
 
@@ -41,6 +78,11 @@ export {
   TaskOfferPayloadSchema,
   TaskOfferWithToolsetsPayloadSchema,
   TaskOfferForAgentPayloadSchema,
+  TaskOfferForAgentWithEgressPayloadSchema,
+  AgentEgressReliablePayloadSchema,
+  AgentEgressAckPayloadSchema,
+  AgentContentReadPayloadSchema,
+  AgentContentReceiptPayloadSchema,
   TaskApprovePayloadSchema,
   TaskRejectPayloadSchema,
   TaskCancelPayloadSchema,
@@ -78,6 +120,11 @@ export type {
   TaskOfferPayload,
   TaskOfferWithToolsetsPayload,
   TaskOfferForAgentPayload,
+  TaskOfferForAgentWithEgressPayload,
+  AgentEgressReliablePayload,
+  AgentEgressAckPayload,
+  AgentContentReadPayload,
+  AgentContentReceiptPayload,
   TaskApprovePayload,
   TaskRejectPayload,
   TaskCancelPayload,

@@ -23,10 +23,18 @@ import type { Context } from 'hono';
 import { MessagesSendRequestSchema, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../inbound';
 import type { ActivityBounds } from '../coordination';
+import type { AgentEgressRecord } from '../stores/ports';
+import type { TenantStores } from '../tenant-stores';
 import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
 
 export interface MessagesRouteDeps extends DeviceRouteDeps {
   readonly activityBounds: ActivityBounds;
+  /**
+   * The egress fact is committed by the inbound gate first. This callback then
+   * puts the exact receipt acknowledgement in the durable core mailbox, so a
+   * transport retry cannot turn a committed reliable event into an unacked one.
+   */
+  readonly appendReliableEgressAck: (stores: TenantStores, record: AgentEgressRecord) => Promise<void>;
 }
 
 export function messagesHandler(deps: MessagesRouteDeps) {
@@ -48,6 +56,13 @@ export function messagesHandler(deps: MessagesRouteDeps) {
         deps.activityBounds,
       );
       if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);
+      if (envelope.type === 'agent.egress.reliable' && (outcome === 'accepted' || outcome === 'duplicate')) {
+        const record = await stores.egress.get(device.deviceId, envelope.payload.eventId);
+        if (record === undefined) {
+          throw new Error(`Accepted reliable egress ${envelope.payload.eventId} has no durable receipt record.`);
+        }
+        await deps.appendReliableEgressAck(stores, record);
+      }
       // A duplicate is still a wire-level success (§8.2/§9's idempotency
       // window) — it just did not re-run a handler. Only a gate rejection
       // (wrong-direction type, or an ownership mismatch) is excluded.

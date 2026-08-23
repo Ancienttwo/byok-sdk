@@ -1,5 +1,8 @@
 import type {
+  AgentContentReadPayload,
   AgentEventOrUnknown,
+  AgentEgressPolicy,
+  AgentEgressReliablePayload,
   AgentRef,
   BlobRef,
   DispatchSelection,
@@ -112,6 +115,25 @@ export interface DispatchInput {
   requiredToolsets?: ToolsetId[];
   /** Explicit durable Agent identity; dispatches through task.offer_for_agent. */
   agentRef?: AgentRef;
+  /**
+   * An explicit, consumed Agent egress policy. This may only travel with an
+   * Agent-bound offer on the distinct egress-aware wire message.
+   */
+  egressPolicy?: AgentEgressPolicy;
+}
+
+/** Host control-plane input for one exact content-read request. */
+export interface AgentContentReadRequest {
+  readonly deviceId: string;
+  readonly payload: AgentContentReadPayload;
+}
+
+/** First-write-wins reference-server readback for a reliable Agent egress item. */
+export interface AgentEgressReceipt {
+  readonly deviceId: string;
+  readonly payload: AgentEgressReliablePayload;
+  readonly receiptId: string;
+  readonly recordedAt: string;
 }
 
 /** Outcome of a task that reached a terminal state. */

@@ -54,14 +54,26 @@ import {
   BYOK_SKILL_PACK_FILE_ROUTE,
   BYOK_SKILL_PACKS_PATH,
   BYOK_TOKEN_PATH,
+  AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
+  AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
+  AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
+  AGENT_EGRESS_POLICY_CAPABILITY,
+  AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
   type Envelope,
+  AgentContentReadPayloadSchema,
+  AgentEgressAckPayloadSchema,
+  TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentPayloadSchema,
   type AgentRef,
+  type AgentContentReadPayload,
+  type AgentEgressAckPayload,
+  type AgentEgressReliablePayload,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
+  type TaskOfferForAgentWithEgressPayload,
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
@@ -122,12 +134,13 @@ import type {
   BlobContentProxy,
   CloudStores,
   DeviceRecord,
+  AgentEgressRecord,
   PairingCodeInfo,
   RequestReceipt,
   TaskAttempt,
 } from './stores/ports';
 import { projectTerminalResult, type TerminalResult } from './terminal-result';
-import { tenantStoresFor, type CloudRootStores } from './tenant-stores';
+import { tenantStoresFor, type CloudRootStores, type TenantStores } from './tenant-stores';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 
 /** Matches the reference server's ceiling (§7). */
@@ -223,6 +236,23 @@ export interface AgentDispatchInput {
   readonly payload: TaskOfferForAgentPayload;
 }
 
+/** Strict Agent dispatch that supplies the policy consumed by the typed egress lanes. */
+export interface AgentEgressDispatchInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  readonly payload: TaskOfferForAgentWithEgressPayload;
+}
+
+/** A task-free, independently capability-gated Agent content read. */
+export interface AgentContentReadInput {
+  readonly payload: AgentContentReadPayload;
+}
+
+export interface EnqueuedAgentControl {
+  readonly seq: number;
+  readonly envelope: Envelope;
+}
+
 export interface EnqueuedOffer {
   readonly taskId: string;
   /** The per-(tenant, device) delivery seq — the daemon's redelivery cursor position for this envelope. */
@@ -256,11 +286,32 @@ export interface ByokCloud {
    * before either the mailbox append or task-attempt open.
    */
   enqueueAgentOffer(tenant: TenantId, deviceId: string, input: AgentDispatchInput): Promise<EnqueuedOffer>;
+  /**
+   * Host control plane: enqueue the typed egress-policy Agent offer. Missing
+   * egress/reliable-ack capabilities reject before a mailbox row is allocated.
+   */
+  enqueueAgentEgressOffer(
+    tenant: TenantId,
+    deviceId: string,
+    input: AgentEgressDispatchInput,
+  ): Promise<EnqueuedOffer>;
+  /** Host control plane: request one policy-bound content read without a task fallback. */
+  enqueueAgentContentRead(
+    tenant: TenantId,
+    deviceId: string,
+    input: AgentContentReadInput,
+  ): Promise<EnqueuedAgentControl>;
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
+  /** Exact durable egress fact and receipt selected by (tenant, device, event id). */
+  readAgentEgress(
+    tenant: TenantId,
+    deviceId: string,
+    eventId: string,
+  ): Promise<AgentEgressRecord | undefined>;
   /**
    * Host control plane: the same first terminal, decoded into the typed read
    * model ({@link TerminalResult}) so a host reads result fields, not envelope
@@ -350,7 +401,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   if (declares(declaration, CLOUD_CAPABILITIES.messagesBatch)) {
     registry.register(
       { method: 'POST', path: BYOK_MESSAGES_PATH, class: 'device' },
-      messagesHandler({ ...deviceRouteDeps, activityBounds }),
+      messagesHandler({ ...deviceRouteDeps, activityBounds, appendReliableEgressAck: enqueueReliableEgressAck }),
     );
   }
 
@@ -607,18 +658,100 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return { taskId, seq: message.seq, envelope, attempt };
   }
 
-  async function assertAgentDispatchCapability(tenant: TenantId, deviceId: string): Promise<void> {
+  async function assertAgentCapabilities(
+    tenant: TenantId,
+    deviceId: string,
+    required: readonly string[],
+  ): Promise<void> {
     // This is deliberately a durable device-row read. Core presence is
     // lossy/TTL-bounded and is never consulted for an execution admission.
     const device = await options.cloud.devices.get(tenant, deviceId);
     if (
       device === undefined ||
       device.revoked ||
-      !device.capabilities?.includes(AGENT_HOME_CONTRACT_CAPABILITY)
+      !device.capabilities ||
+      !required.every((capability) => device.capabilities!.includes(capability))
     ) {
+      const missing = required.filter((capability) => !device?.capabilities?.includes(capability));
       throw new ByokCloudError(
         'agent_capability_missing',
-        `Device ${deviceId} has no durable ${AGENT_HOME_CONTRACT_CAPABILITY} capability; refusing Agent dispatch before mailbox append.`,
+        `Device ${deviceId} lacks durable Agent capabilities (${missing.join(', ')}); refusing before mailbox append.`,
+      );
+    }
+  }
+
+  function contentReadCapability(surface: AgentContentReadPayload['surface']): string {
+    switch (surface) {
+      case 'workspace':
+        return AGENT_CONTENT_WORKSPACE_READ_CAPABILITY;
+      case 'transcript':
+        return AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY;
+      case 'artifact':
+        return AGENT_CONTENT_ARTIFACT_READ_CAPABILITY;
+    }
+  }
+
+  async function enqueueAgentControlEnvelope(
+    tenant: TenantId,
+    deviceId: string,
+    messageId: string,
+    buildEnvelope: (seq: number) => Envelope,
+  ): Promise<EnqueuedAgentControl> {
+    const stores = tenantStoresFor(controlPlane(tenant), root);
+    const message = await stores.mailbox.append({
+      deviceId,
+      messageId,
+      materialize: async (seq) => {
+        const body = encodeEnvelope(buildEnvelope(seq));
+        const bytes = new TextEncoder().encode(body);
+        return {
+          body,
+          bodyHash: contentHash(await options.crypto.sha256(bytes)),
+          byteSize: BigInt(bytes.length),
+        };
+      },
+    });
+    const envelope = decodeEnvelope(message.body);
+    if (envelope.seq !== message.seq) {
+      throw new ByokCloudError(
+        'mailbox_seq_mismatch',
+        `Mailbox stored Agent control seq ${String(envelope.seq)} at row ${message.seq}.`,
+      );
+    }
+    return { seq: message.seq, envelope };
+  }
+
+  async function enqueueReliableEgressAck(stores: TenantStores, record: AgentEgressRecord): Promise<void> {
+    const payload: AgentEgressAckPayload = AgentEgressAckPayloadSchema.parse({
+      agentRef: record.payload.agentRef,
+      sessionRef: record.payload.sessionRef,
+      policyRevision: record.payload.policyRevision,
+      eventId: record.payload.eventId,
+      cursor: record.payload.cursor,
+      receiptId: record.receiptId,
+    });
+    const message = await stores.mailbox.append({
+      deviceId: record.deviceId,
+      messageId: record.receiptId,
+      materialize: async (seq) => {
+        const body = encodeEnvelope(createEnvelope('agent.egress.ack', payload, { id: record.receiptId, seq }));
+        const bytes = new TextEncoder().encode(body);
+        return {
+          body,
+          bodyHash: contentHash(await options.crypto.sha256(bytes)),
+          byteSize: BigInt(bytes.length),
+        };
+      },
+    });
+    const decoded = decodeEnvelope(message.body);
+    if (
+      decoded.type !== 'agent.egress.ack' ||
+      decoded.seq !== message.seq ||
+      JSON.stringify(decoded.payload) !== JSON.stringify(payload)
+    ) {
+      throw new ByokCloudError(
+        'mailbox_receipt_mismatch',
+        `Mailbox receipt ${record.receiptId} does not exactly acknowledge Agent egress ${record.payload.eventId}.`,
       );
     }
   }
@@ -646,7 +779,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueAgentOffer(tenant, deviceId, input) {
-      await assertAgentDispatchCapability(tenant, deviceId);
+      await assertAgentCapabilities(tenant, deviceId, [AGENT_HOME_CONTRACT_CAPABILITY]);
       // Parse the strict control payload before reserving a mailbox sequence.
       // A malformed/oversized AgentRef therefore cannot leave a durable
       // delivery row behind.
@@ -654,6 +787,51 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
         createEnvelope('task.offer_for_agent', payload, { id: messageId, taskId, seq }),
       );
+    },
+
+    async enqueueAgentEgressOffer(tenant, deviceId, input) {
+      await assertAgentCapabilities(tenant, deviceId, [
+        AGENT_HOME_CONTRACT_CAPABILITY,
+        AGENT_EGRESS_POLICY_CAPABILITY,
+        AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+      ]);
+      const payload = TaskOfferForAgentWithEgressPayloadSchema.parse(input.payload);
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_for_agent_with_egress', payload, { id: messageId, taskId, seq }),
+      );
+    },
+
+    async enqueueAgentContentRead(tenant, deviceId, input) {
+      const payload = AgentContentReadPayloadSchema.parse(input.payload);
+      await assertAgentCapabilities(tenant, deviceId, [
+        AGENT_HOME_CONTRACT_CAPABILITY,
+        AGENT_EGRESS_POLICY_CAPABILITY,
+        contentReadCapability(payload.surface),
+      ]);
+      const stores = tenantStoresFor(controlPlane(tenant), root);
+      const persisted = await stores.receipts.record({
+        key: `agent-content-request:${deviceId}:${payload.requestId}`,
+        body: JSON.stringify(payload),
+      });
+      if (!persisted.created && persisted.receipt.body !== JSON.stringify(payload)) {
+        throw new ByokCloudError(
+          'agent_content_request_mismatch',
+          `Request ${payload.requestId} already exists with a different immutable content-read body.`,
+        );
+      }
+      const control = await enqueueAgentControlEnvelope(tenant, deviceId, payload.requestId, (seq) =>
+        createEnvelope('agent.content.read', payload, { id: payload.requestId, seq }),
+      );
+      if (
+        control.envelope.type !== 'agent.content.read' ||
+        JSON.stringify(control.envelope.payload) !== JSON.stringify(payload)
+      ) {
+        throw new ByokCloudError(
+          'agent_content_request_mismatch',
+          `Request ${payload.requestId} already exists with a different immutable content-read body.`,
+        );
+      }
+      return control;
     },
 
     async cancelTask(tenant, taskId, reason) {
@@ -699,6 +877,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     readTerminalReceipt(tenant, taskId) {
       return tenantStoresFor(controlPlane(tenant), root).receipts.get(terminalReceiptKey(taskId));
+    },
+
+    readAgentEgress(tenant, deviceId, eventId) {
+      return tenantStoresFor(controlPlane(tenant), root).egress.get(deviceId, eventId);
     },
 
     async readTaskResult(tenant, taskId) {

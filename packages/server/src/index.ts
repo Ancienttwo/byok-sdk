@@ -10,6 +10,8 @@ import { InMemoryTaskStore } from './task-store';
 import { attachWebSocket as attachWsUpgrade } from './ws-server';
 import type {
   ByokServerEvent,
+  AgentContentReadRequest,
+  AgentEgressReceipt,
   CreateByokServerOptions,
   DispatchInput,
   HubStats,
@@ -20,6 +22,8 @@ import type {
 
 export type {
   ByokServerEvent,
+  AgentContentReadRequest,
+  AgentEgressReceipt,
   CreateByokServerOptions,
   DispatchInput,
   HubStats,
@@ -111,9 +115,15 @@ export interface ByokServer {
     createPairingCode(claims: PairingCodeClaims): PairingCodeInfo;
   };
   dispatch(input: DispatchInput): Promise<TaskHandle>;
+  /** Enqueue one capability-gated, exact-identity content-read request. */
+  requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
   tasks: {
     get(taskId: string): TaskSnapshot | undefined;
     list(): TaskSnapshot[];
+  };
+  /** Reference-server reliable egress receipt readback. */
+  egress: {
+    get(deviceId: string, eventId: string): AgentEgressReceipt | undefined;
   };
   machines: {
     list(): MachineInfo[];
@@ -211,9 +221,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       createPairingCode: (claims: PairingCodeClaims) => pairing.createPairingCode(claims),
     },
     dispatch: (input: DispatchInput) => hub.dispatch(input),
+    requestAgentContentRead: (input: AgentContentReadRequest) => hub.requestAgentContentRead(input),
     tasks: {
       get: (taskId: string) => hub.getTask(taskId),
       list: () => hub.listTasks(),
+    },
+    egress: {
+      get: (deviceId: string, eventId: string) => hub.getAgentEgressReceipt(deviceId, eventId),
     },
     machines: {
       list: () => hub.listMachines(),

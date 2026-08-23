@@ -2,6 +2,17 @@ import { z } from 'zod';
 import { BlobRefSchema } from './blob';
 import { PermissionPolicySchema } from './permission';
 import { AgentEventOrUnknownSchema } from './agent-event';
+import {
+  AgentContentActorSchema,
+  AgentContentDecodeAsSchema,
+  AgentContentMimeTypeSchema,
+  AgentContentReadDenialReasonSchema,
+  AgentContentReadSurfaceSchema,
+  AgentEgressContentHashSchema,
+  AgentEgressPolicyRevisionSchema,
+  AgentEgressPolicySchema,
+  ContentReadPolicySchema,
+} from './agent-egress';
 
 /** Max size of an inlined artifact payload, per the delivery-model spec (<=64KB). */
 const MAX_INLINE_BYTES = 64 * 1024;
@@ -299,6 +310,144 @@ export const TaskOfferForAgentPayloadSchema = z
   })
   .strict();
 export type TaskOfferForAgentPayload = z.infer<typeof TaskOfferForAgentPayloadSchema>;
+
+/**
+ * Strict Agent offer which consumes the typed egress policy. It is a distinct
+ * message so an older Agent-home daemon cannot strip control data and proceed
+ * with an unconsumed egress declaration.
+ */
+export const TaskOfferForAgentWithEgressPayloadSchema = TaskOfferForAgentPayloadSchema.extend({
+  sessionRef: z.string().min(1).max(512),
+  egressPolicy: AgentEgressPolicySchema,
+}).strict();
+export type TaskOfferForAgentWithEgressPayload = z.infer<typeof TaskOfferForAgentWithEgressPayloadSchema>;
+
+const EGRESS_SAFE_VALUE = z
+  .json()
+  .refine(
+    (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 256 * 1024,
+    'sanitized egress payload exceeds 256KiB',
+  );
+const EGRESS_SESSION_REF = z.string().min(1).max(512);
+
+/** Daemon -> cloud: one durable reliable-lane item after local sanitization. */
+export const AgentEgressReliablePayloadSchema = z
+  .object({
+    agentRef: AgentRefSchema,
+    sessionRef: EGRESS_SESSION_REF,
+    policyRevision: AgentEgressPolicyRevisionSchema,
+    eventId: z.uuid(),
+    cursor: z.number().int().positive(),
+    payload: EGRESS_SAFE_VALUE,
+    contentHash: AgentEgressContentHashSchema,
+    byteCount: z.number().int().nonnegative().max(256 * 1024),
+  })
+  .strict();
+export type AgentEgressReliablePayload = z.infer<typeof AgentEgressReliablePayloadSchema>;
+
+/** Cloud -> daemon: exact acknowledgement for one reliable egress record. */
+export const AgentEgressAckPayloadSchema = z
+  .object({
+    agentRef: AgentRefSchema,
+    sessionRef: EGRESS_SESSION_REF,
+    policyRevision: AgentEgressPolicyRevisionSchema,
+    eventId: z.uuid(),
+    cursor: z.number().int().positive(),
+    receiptId: z.uuid(),
+  })
+  .strict();
+export type AgentEgressAckPayload = z.infer<typeof AgentEgressAckPayloadSchema>;
+
+const AGENT_CONTENT_TARGET = z
+  .string()
+  .min(1)
+  .max(1024)
+  .regex(/^[^\u0000-\u001f\u007f]+$/u, 'content target must not contain control characters')
+  .refine(
+    (value) =>
+      !value.startsWith('/') &&
+      !value.includes('\\') &&
+      value.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..'),
+    'content target must be a portable relative path without dot segments',
+  );
+const AGENT_CONTENT_CWD = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(/^[^\u0000-\u001f\u007f]+$/u, 'cwd must not contain control characters')
+  .regex(/^(?:\/|[A-Za-z]:[\\/])/u, 'cwd must be absolute');
+
+/** Server -> daemon: one exact, independently-capability-gated content read. */
+export const AgentContentReadPayloadSchema = z
+  .object({
+    requestId: z.uuid(),
+    surface: AgentContentReadSurfaceSchema,
+    actor: AgentContentActorSchema,
+    agentRef: AgentRefSchema,
+    sessionRef: EGRESS_SESSION_REF,
+    runtime: RuntimeIdSchema,
+    cwd: AGENT_CONTENT_CWD,
+    policyRevision: AgentEgressPolicyRevisionSchema,
+    target: AGENT_CONTENT_TARGET,
+    mimeType: AgentContentMimeTypeSchema,
+    decodeAs: AgentContentDecodeAsSchema,
+    policy: ContentReadPolicySchema,
+  })
+  .strict();
+export type AgentContentReadPayload = z.infer<typeof AgentContentReadPayloadSchema>;
+
+/** Daemon -> cloud: durable, content-free content-read audit fact. */
+export const AgentContentReceiptPayloadSchema = z.discriminatedUnion('decision', [
+  z
+    .object({
+      requestId: z.uuid(),
+      surface: AgentContentReadSurfaceSchema,
+      actor: AgentContentActorSchema,
+      agentRef: AgentRefSchema,
+      sessionRef: EGRESS_SESSION_REF,
+      runtime: RuntimeIdSchema,
+      cwd: AGENT_CONTENT_CWD,
+      policyRevision: AgentEgressPolicyRevisionSchema,
+      target: AGENT_CONTENT_TARGET,
+      mimeType: AgentContentMimeTypeSchema,
+      decodeAs: AgentContentDecodeAsSchema,
+      decision: z.literal('allowed'),
+      byteCount: z.number().int().nonnegative(),
+      contentHash: AgentEgressContentHashSchema,
+      blobRef: BlobRefSchema,
+    })
+    .strict(),
+  z
+    .object({
+      requestId: z.uuid(),
+      surface: AgentContentReadSurfaceSchema,
+      actor: AgentContentActorSchema,
+      agentRef: AgentRefSchema,
+      sessionRef: EGRESS_SESSION_REF,
+      runtime: RuntimeIdSchema,
+      cwd: AGENT_CONTENT_CWD,
+      policyRevision: AgentEgressPolicyRevisionSchema,
+      target: AGENT_CONTENT_TARGET,
+      mimeType: AgentContentMimeTypeSchema,
+      decodeAs: AgentContentDecodeAsSchema,
+      decision: z.literal('denied'),
+      byteCount: z.literal(0),
+      reason: AgentContentReadDenialReasonSchema,
+    })
+    .strict(),
+]).superRefine((value, ctx) => {
+  if (value.decision !== 'allowed') return;
+  if (value.blobRef.size !== value.byteCount) {
+    ctx.addIssue({ code: 'custom', path: ['blobRef', 'size'], message: 'blobRef size must equal byteCount' });
+  }
+  if (value.blobRef.contentHash !== value.contentHash) {
+    ctx.addIssue({ code: 'custom', path: ['blobRef', 'contentHash'], message: 'blobRef contentHash must equal contentHash' });
+  }
+  if (value.blobRef.contentType !== value.mimeType) {
+    ctx.addIssue({ code: 'custom', path: ['blobRef', 'contentType'], message: 'blobRef contentType must equal mimeType' });
+  }
+});
+export type AgentContentReceiptPayload = z.infer<typeof AgentContentReceiptPayloadSchema>;
 
 /**
  * server -> daemon: approve a pending `task.await_approval` request.
@@ -873,6 +1022,11 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'task.offer': TaskOfferPayloadSchema,
   'task.offer_with_toolsets': TaskOfferWithToolsetsPayloadSchema,
   'task.offer_for_agent': TaskOfferForAgentPayloadSchema,
+  'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema,
+  'agent.egress.reliable': AgentEgressReliablePayloadSchema,
+  'agent.egress.ack': AgentEgressAckPayloadSchema,
+  'agent.content.read': AgentContentReadPayloadSchema,
+  'agent.content.receipt': AgentContentReceiptPayloadSchema,
   'task.approve': TaskApprovePayloadSchema,
   'task.reject': TaskRejectPayloadSchema,
   'task.cancel': TaskCancelPayloadSchema,
@@ -903,6 +1057,9 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.offer',
   'task.offer_with_toolsets',
   'task.offer_for_agent',
+  'task.offer_for_agent_with_egress',
+  'agent.egress.ack',
+  'agent.content.read',
   'task.approve',
   'task.reject',
   'task.cancel',
@@ -932,4 +1089,6 @@ export const DAEMON_TO_SERVER_TYPES = [
   'task.fail',
   'task.cancelled',
   'task.approval_resolved',
+  'agent.egress.reliable',
+  'agent.content.receipt',
 ] as const satisfies readonly MessageType[];

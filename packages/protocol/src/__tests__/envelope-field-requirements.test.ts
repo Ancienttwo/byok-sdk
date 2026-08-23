@@ -38,6 +38,75 @@ function minimalPayload(type: MessageType): unknown {
       return { instruction: 'find leads', policy: { mode: 'auto' }, requiredToolsets: ['salesko'] };
     case 'task.offer_for_agent':
       return { instruction: 'run for agent', policy: { mode: 'auto' }, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
+    case 'task.offer_for_agent_with_egress':
+      return {
+        instruction: 'run with an explicit egress policy',
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        egressPolicy: {
+          policyRevision: 'policy-r1',
+          activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          reliable: {
+            maxPendingEventsPerAgent: 1,
+            maxPendingBytesPerAgent: 1,
+            maxPendingBytesPerTenant: 1,
+          },
+          transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+        },
+      };
+    case 'agent.egress.reliable':
+      return {
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        policyRevision: 'policy-r1',
+        eventId: '00000000-0000-4000-8000-000000000021',
+        cursor: 1,
+        payload: { state: 'running' },
+        contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        byteCount: 19,
+      };
+    case 'agent.egress.ack':
+      return {
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        policyRevision: 'policy-r1',
+        eventId: '00000000-0000-4000-8000-000000000021',
+        cursor: 1,
+        receiptId: '00000000-0000-4000-8000-000000000022',
+      };
+    case 'agent.content.read':
+      return {
+        requestId: '00000000-0000-4000-8000-000000000023',
+        surface: 'workspace',
+        actor: { kind: 'user', id: 'actor-1' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        runtime: 'pi',
+        cwd: '/agents/agent-1',
+        policyRevision: 'policy-r1',
+        target: 'notes/today.md',
+        mimeType: 'text/plain',
+        decodeAs: 'utf8',
+        policy: { maxBytes: 64, allowedMimeTypes: ['text/plain'] },
+      };
+    case 'agent.content.receipt':
+      return {
+        requestId: '00000000-0000-4000-8000-000000000023',
+        surface: 'workspace',
+        actor: { kind: 'user', id: 'actor-1' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        runtime: 'pi',
+        cwd: '/agents/agent-1',
+        policyRevision: 'policy-r1',
+        target: 'notes/today.md',
+        mimeType: 'text/plain',
+        decodeAs: 'utf8',
+        decision: 'denied',
+        byteCount: 0,
+        reason: 'policy-disabled',
+      };
     case 'task.approve':
       return {};
     case 'task.reject':

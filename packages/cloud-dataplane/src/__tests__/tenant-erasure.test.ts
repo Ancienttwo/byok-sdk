@@ -255,6 +255,18 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
      ) VALUES ($1, 'issuer', 'product', $2, 'audience', 'jti', $3)`,
     [tenant, device, now],
   );
+  await pool.query(
+    `INSERT INTO agent_egress_event (
+       tenant_id, device_id, event_id, agent_id, agent_profile_revision,
+       session_ref, policy_revision, cursor, payload_json, content_hash,
+       byte_count, receipt_id, recorded_at
+     ) VALUES (
+       $1, $2, '10000000-0000-4000-8000-000000000001', 'agent', 'profile',
+       'session', 'policy', 1, '{}'::jsonb, $3, 0,
+       '10000000-0000-4000-8000-000000000002', $4
+     )`,
+    [tenant, device, hash, now],
+  );
 }
 
 async function eraseToCompletion(

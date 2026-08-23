@@ -62,6 +62,9 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('task.offer', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_with_toolsets', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_for_agent', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('task.offer_for_agent_with_egress', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('agent.egress.ack', OPTIONAL_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('agent.content.read', OPTIONAL_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.approve', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.reject', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.cancel', REQUIRED_TASK_ID, REQUIRED_SEQ),
@@ -80,6 +83,8 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('task.fail', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('task.cancelled', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('task.approval_resolved', REQUIRED_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('agent.egress.reliable', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('agent.content.receipt', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
 ]);
 
 export type Envelope = z.infer<typeof EnvelopeSchema>;

@@ -114,6 +114,11 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.offer': { taskId: 'required', seq: 'required' },
     'task.offer_with_toolsets': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent': { taskId: 'required', seq: 'required' },
+    'task.offer_for_agent_with_egress': { taskId: 'required', seq: 'required' },
+    'agent.egress.reliable': { taskId: 'optional', seq: 'optional' },
+    'agent.egress.ack': { taskId: 'optional', seq: 'required' },
+    'agent.content.read': { taskId: 'optional', seq: 'required' },
+    'agent.content.receipt': { taskId: 'optional', seq: 'optional' },
     'task.approve': { taskId: 'required', seq: 'required' },
     'task.reject': { taskId: 'required', seq: 'required' },
     'task.cancel': { taskId: 'required', seq: 'required' },
@@ -163,6 +168,26 @@ type CodecRequirednessMatrix = {
     seq: FieldRequiredness<'task.offer_with_toolsets', 'seq'>;
   };
   'task.offer_for_agent': { taskId: FieldRequiredness<'task.offer_for_agent', 'taskId'>; seq: FieldRequiredness<'task.offer_for_agent', 'seq'> };
+  'task.offer_for_agent_with_egress': {
+    taskId: FieldRequiredness<'task.offer_for_agent_with_egress', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_for_agent_with_egress', 'seq'>;
+  };
+  'agent.egress.reliable': {
+    taskId: FieldRequiredness<'agent.egress.reliable', 'taskId'>;
+    seq: FieldRequiredness<'agent.egress.reliable', 'seq'>;
+  };
+  'agent.egress.ack': {
+    taskId: FieldRequiredness<'agent.egress.ack', 'taskId'>;
+    seq: FieldRequiredness<'agent.egress.ack', 'seq'>;
+  };
+  'agent.content.read': {
+    taskId: FieldRequiredness<'agent.content.read', 'taskId'>;
+    seq: FieldRequiredness<'agent.content.read', 'seq'>;
+  };
+  'agent.content.receipt': {
+    taskId: FieldRequiredness<'agent.content.receipt', 'taskId'>;
+    seq: FieldRequiredness<'agent.content.receipt', 'seq'>;
+  };
   'task.approve': { taskId: FieldRequiredness<'task.approve', 'taskId'>; seq: FieldRequiredness<'task.approve', 'seq'> };
   'task.reject': { taskId: FieldRequiredness<'task.reject', 'taskId'>; seq: FieldRequiredness<'task.reject', 'seq'> };
   'task.cancel': { taskId: FieldRequiredness<'task.cancel', 'taskId'>; seq: FieldRequiredness<'task.cancel', 'seq'> };
@@ -449,6 +474,75 @@ function minimalPayloadForProbe(type: MessageType): unknown {
       return { instruction: 'find leads', policy: { mode: 'auto' }, requiredToolsets: ['salesko'] };
     case 'task.offer_for_agent':
       return { instruction: 'run for agent', policy: { mode: 'auto' }, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
+    case 'task.offer_for_agent_with_egress':
+      return {
+        instruction: 'run with egress',
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        egressPolicy: {
+          policyRevision: 'policy-r1',
+          activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          reliable: {
+            maxPendingEventsPerAgent: 1,
+            maxPendingBytesPerAgent: 1,
+            maxPendingBytesPerTenant: 1,
+          },
+          transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+        },
+      };
+    case 'agent.egress.reliable':
+      return {
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        policyRevision: 'policy-r1',
+        eventId: '00000000-0000-4000-8000-000000000021',
+        cursor: 1,
+        payload: { state: 'running' },
+        contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        byteCount: 19,
+      };
+    case 'agent.egress.ack':
+      return {
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        policyRevision: 'policy-r1',
+        eventId: '00000000-0000-4000-8000-000000000021',
+        cursor: 1,
+        receiptId: '00000000-0000-4000-8000-000000000022',
+      };
+    case 'agent.content.read':
+      return {
+        requestId: '00000000-0000-4000-8000-000000000023',
+        surface: 'workspace',
+        actor: { kind: 'user', id: 'actor-1' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        runtime: 'pi',
+        cwd: '/agents/agent-1',
+        policyRevision: 'policy-r1',
+        target: 'notes/today.md',
+        mimeType: 'text/plain',
+        decodeAs: 'utf8',
+        policy: { maxBytes: 64, allowedMimeTypes: ['text/plain'] },
+      };
+    case 'agent.content.receipt':
+      return {
+        requestId: '00000000-0000-4000-8000-000000000023',
+        surface: 'workspace',
+        actor: { kind: 'user', id: 'actor-1' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        runtime: 'pi',
+        cwd: '/agents/agent-1',
+        policyRevision: 'policy-r1',
+        target: 'notes/today.md',
+        mimeType: 'text/plain',
+        decodeAs: 'utf8',
+        decision: 'denied',
+        byteCount: 0,
+        reason: 'policy-disabled',
+      };
     case 'task.approve':
       return {};
     case 'task.reject':

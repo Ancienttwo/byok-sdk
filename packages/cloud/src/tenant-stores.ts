@@ -56,6 +56,7 @@ import type {
   BlobObservation,
   CloudStores,
   DeviceRecord,
+  AgentEgressRecord,
   RequestReceipt,
   TaskCancellationMutation,
   TaskCancellationRequest,
@@ -143,6 +144,14 @@ export interface TenantBoundReceipts {
   get(key: string): Promise<RequestReceipt | undefined>;
 }
 
+export interface TenantBoundAgentEgress {
+  record(input: Omit<AgentEgressRecord, 'tenantId' | 'recordedAt'>): Promise<{
+    readonly record: AgentEgressRecord;
+    readonly created: boolean;
+  }>;
+  get(deviceId: string, eventId: string): Promise<AgentEgressRecord | undefined>;
+}
+
 export interface TenantBoundBlobs {
   createUpload(reservation: StorageReservation): Promise<{ readonly blobId: string; readonly uploadUrl: string }>;
   observeUpload(blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
@@ -173,6 +182,7 @@ export interface TenantStores {
   readonly cancellations: TenantBoundTaskCancellations;
   readonly dedup: TenantBoundDedup;
   readonly receipts: TenantBoundReceipts;
+  readonly egress: TenantBoundAgentEgress;
   readonly blobs: TenantBoundBlobs;
   readonly quota: TenantBoundQuota;
   readonly rateLimiter: TenantBoundRateLimiter;
@@ -248,6 +258,10 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     receipts: {
       record: (input) => cloud.receipts.record(tenant, input),
       get: (key) => cloud.receipts.get(tenant, key),
+    },
+    egress: {
+      record: (input) => cloud.egress.record(tenant, input),
+      get: (deviceId, eventId) => cloud.egress.get(tenant, deviceId, eventId),
     },
     blobs: {
       createUpload: (reservation) => cloud.blobs.createUpload(tenant, reservation),

@@ -3,7 +3,14 @@ import {
   canTransition,
   createEnvelope,
   DAEMON_TO_SERVER_TYPES,
+  AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
+  AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
+  AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
+  AGENT_EGRESS_POLICY_CAPABILITY,
+  AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AgentRefSchema,
+  AgentContentReadPayloadSchema,
+  AgentEgressPolicySchema,
   DispatchSelectionSchema,
   RequiredToolsetsSchema,
   encodeEnvelope,
@@ -13,6 +20,9 @@ import {
   type ConnHelloPayload,
   type Envelope,
   type AgentRef,
+  type AgentContentReceiptPayload,
+  type AgentContentReadPayload,
+  type AgentEgressReliablePayload,
   type MessageType,
   type PermissionPolicy,
   type RuntimeId,
@@ -37,6 +47,8 @@ import { RateLimiter } from './rate-limiter';
 import type { TaskStore } from './task-store';
 import type {
   ByokServerEvent,
+  AgentContentReadRequest,
+  AgentEgressReceipt,
   DispatchInput,
   HubStats,
   MachineInfo,
@@ -83,6 +95,53 @@ function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean
   return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
 }
 
+function sameAgentEgressPayload(
+  expected: AgentEgressReliablePayload,
+  actual: AgentEgressReliablePayload,
+): boolean {
+  return (
+    sameAgentRef(expected.agentRef, actual.agentRef) &&
+    expected.sessionRef === actual.sessionRef &&
+    expected.policyRevision === actual.policyRevision &&
+    expected.eventId === actual.eventId &&
+    expected.cursor === actual.cursor &&
+    expected.contentHash === actual.contentHash &&
+    expected.byteCount === actual.byteCount &&
+    JSON.stringify(expected.payload) === JSON.stringify(actual.payload)
+  );
+}
+
+function matchesContentReadReceipt(
+  request: AgentContentReadPayload,
+  receipt: AgentContentReceiptPayload,
+): boolean {
+  return (
+    request.requestId === receipt.requestId &&
+    request.surface === receipt.surface &&
+    request.actor.kind === receipt.actor.kind &&
+    request.actor.id === receipt.actor.id &&
+    sameAgentRef(request.agentRef, receipt.agentRef) &&
+    request.sessionRef === receipt.sessionRef &&
+    request.runtime === receipt.runtime &&
+    request.cwd === receipt.cwd &&
+    request.policyRevision === receipt.policyRevision &&
+    request.target === receipt.target &&
+    request.mimeType === receipt.mimeType &&
+    request.decodeAs === receipt.decodeAs
+  );
+}
+
+function contentReadCapability(surface: AgentContentReadPayload['surface']): string {
+  switch (surface) {
+    case 'workspace':
+      return AGENT_CONTENT_WORKSPACE_READ_CAPABILITY;
+    case 'transcript':
+      return AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY;
+    case 'artifact':
+      return AGENT_CONTENT_ARTIFACT_READ_CAPABILITY;
+  }
+}
+
 /** A device's live transport (WS or long-poll — never both, §8) plus last-known metadata. */
 interface ConnectionState {
   ws?: WebSocket;
@@ -119,7 +178,7 @@ interface ConnectionState {
 /** One envelope this server has sent (or would have sent) to a device, retained for redelivery. */
 interface OutboxEntry {
   seq: number;
-  /** Absent for `conn.ack` (not task-scoped) — such entries are never redelivered/polled. */
+  /** Absent for connection frames and Agent control/ack facts. */
   taskId?: string;
   envelope: Envelope;
   /**
@@ -134,6 +193,8 @@ interface OutboxEntry {
    * non-terminal state), so the exemption would be moot for them.
    */
   redeliverThroughTerminal?: boolean;
+  /** Exact Agent egress/content control facts must survive a transport restart. */
+  redeliverWithoutTask?: boolean;
 }
 
 /** Per-device outbound sequence counter + bounded history (§1.2, §9). */
@@ -393,6 +454,12 @@ export class ConnectionHub {
   private readonly longPollWaiters = new Map<string, LongPollWaiter>();
   private readonly runtimes = new Map<string, TaskRuntime>();
   private readonly serverEvents = new AsyncEventQueue<ByokServerEvent>();
+  /** First-write-wins reliable facts; the reference composition's bounded in-memory readback. */
+  private readonly agentEgressReceipts = new Map<string, AgentEgressReceipt>();
+  /** Accepted requests are the authority that later receipts/transfers must echo exactly. */
+  private readonly agentContentReadRequests = new Map<string, AgentContentReadPayload>();
+  /** Content-free explicit-read audit facts keyed by exact authenticated device/request identity. */
+  private readonly agentContentReceipts = new Map<string, AgentContentReceiptPayload>();
   /**
    * Per-task last-inbound-activity timestamp (epoch ms) — the task-lease
    * reaper's condition (c), see the "task-lease reaper" section below. Reset
@@ -724,6 +791,14 @@ export class ConnectionHub {
       return 'rejected';
     }
 
+    if (envelope.type === 'agent.egress.reliable') {
+      return this.handleAgentEgressReliable(deviceId, envelope.payload);
+    }
+
+    if (envelope.type === 'agent.content.receipt') {
+      return this.handleAgentContentReceipt(deviceId, envelope.payload);
+    }
+
     const taskId = envelope.task_id;
     if (taskId === undefined) return 'rejected'; // schema guarantees every DAEMON_TO_SERVER_TYPES member carries task_id; defensive only.
 
@@ -740,6 +815,71 @@ export class ConnectionHub {
 
     this.dispatchToHandler(deviceId, taskId, envelope);
     return 'accepted';
+  }
+
+  /**
+   * Store before acking. Replays must agree on every identity/cursor/hash
+   * field and receive the original receipt id; a same event id with changed
+   * facts is rejected rather than treated as an update.
+   */
+  private handleAgentEgressReliable(deviceId: string, payload: AgentEgressReliablePayload): 'accepted' | 'duplicate' | 'rejected' {
+    if (!this.hasDeviceCapabilities(deviceId, [AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])) {
+      return 'rejected';
+    }
+    const key = this.agentEgressReceiptKey(deviceId, payload.eventId);
+    const existing = this.agentEgressReceipts.get(key);
+    if (existing !== undefined) {
+      if (!sameAgentEgressPayload(existing.payload, payload)) return 'rejected';
+      this.sendAgentEgressAck(deviceId, existing);
+      this.dedupDropCount++;
+      return 'duplicate';
+    }
+
+    const receipt: AgentEgressReceipt = {
+      deviceId,
+      payload,
+      receiptId: crypto.randomUUID(),
+      recordedAt: new Date().toISOString(),
+    };
+    this.agentEgressReceipts.set(key, receipt);
+    this.sendAgentEgressAck(deviceId, receipt);
+    return 'accepted';
+  }
+
+  private handleAgentContentReceipt(deviceId: string, payload: AgentContentReceiptPayload): 'accepted' | 'duplicate' | 'rejected' {
+    const capability = contentReadCapability(payload.surface);
+    if (!this.hasDeviceCapabilities(deviceId, [capability])) return 'rejected';
+    const key = `${deviceId}\u0000${payload.requestId}`;
+    const request = this.agentContentReadRequests.get(key);
+    if (request === undefined || !matchesContentReadReceipt(request, payload)) return 'rejected';
+    const existing = this.agentContentReceipts.get(key);
+    if (existing !== undefined) {
+      if (JSON.stringify(existing) !== JSON.stringify(payload)) return 'rejected';
+      this.dedupDropCount++;
+      return 'duplicate';
+    }
+    this.agentContentReceipts.set(key, payload);
+    return 'accepted';
+  }
+
+  private sendAgentEgressAck(deviceId: string, receipt: AgentEgressReceipt): void {
+    this.sendToDevice(
+      deviceId,
+      'agent.egress.ack',
+      {
+        agentRef: receipt.payload.agentRef,
+        sessionRef: receipt.payload.sessionRef,
+        policyRevision: receipt.payload.policyRevision,
+        eventId: receipt.payload.eventId,
+        cursor: receipt.payload.cursor,
+        receiptId: receipt.receiptId,
+      },
+      {},
+    );
+  }
+
+  private agentEgressReceiptKey(deviceId: string, eventId: string): string {
+    return `${deviceId}\u0000${eventId}`;
   }
 
   /** Record the authenticated long-poll equivalent of the WS opening frame. */
@@ -1556,6 +1696,7 @@ export class ConnectionHub {
 
   async dispatch(input: DispatchInput): Promise<TaskHandle> {
     const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
+    const egressPolicy = input.egressPolicy === undefined ? undefined : AgentEgressPolicySchema.parse(input.egressPolicy);
     const dispatchSelection =
       input.dispatchSelection === undefined
         ? undefined
@@ -1567,6 +1708,12 @@ export class ConnectionHub {
     const deviceId = input.deviceId ?? this.pickFirstConnectedDevice(requiredToolsets);
     if (agentRef !== undefined && input.deviceId === undefined) {
       throw new Error('Agent-bound dispatch requires an explicit deviceId for capability admission');
+    }
+    if (egressPolicy !== undefined && agentRef === undefined) {
+      throw new Error('Agent egress policy requires an explicit AgentRef; legacy task dispatch cannot consume it');
+    }
+    if (egressPolicy !== undefined && input.sessionRef === undefined) {
+      throw new Error('Agent egress policy requires an exact sessionRef');
     }
     // M0 routing has no queue-until-connect: reject clearly instead of
     // silently queuing a task nothing will ever claim.
@@ -1581,6 +1728,15 @@ export class ConnectionHub {
     if (agentRef !== undefined && !(this.getDeviceCapabilities(deviceId)?.includes('agent-home-contract') ?? false)) {
       throw new Error(
         `device ${deviceId} did not advertise agent-home-contract capability; refusing Agent-bound dispatch`,
+      );
+    }
+
+    if (
+      egressPolicy !== undefined &&
+      !this.hasDeviceCapabilities(deviceId, [AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])
+    ) {
+      throw new Error(
+        `device ${deviceId} did not advertise Agent egress policy and reliable acknowledgement capabilities; refusing before enqueue`,
       );
     }
 
@@ -1658,7 +1814,20 @@ export class ConnectionHub {
       dispatchSelection,
       sessionRef: input.sessionRef,
     };
-    if (agentRef !== undefined) {
+    if (agentRef !== undefined && egressPolicy !== undefined) {
+      this.sendToDevice(
+        deviceId,
+        'task.offer_for_agent_with_egress',
+        {
+          ...commonOffer,
+          sessionRef: input.sessionRef!,
+          agentRef,
+          egressPolicy,
+          ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+        },
+        { taskId, sessionRef: input.sessionRef },
+      );
+    } else if (agentRef !== undefined) {
       this.sendToDevice(
         deviceId,
         'task.offer_for_agent',
@@ -1677,6 +1846,28 @@ export class ConnectionHub {
     }
 
     return this.buildTaskHandle(taskId);
+  }
+
+  /** Capability-gated control-plane read request; no request enters the outbox on omission. */
+  async requestAgentContentRead(input: AgentContentReadRequest): Promise<void> {
+    const payload = AgentContentReadPayloadSchema.parse(input.payload);
+    const deviceId = input.deviceId;
+    if (!this.connections.get(deviceId)?.connected) {
+      throw new Error(`device ${deviceId} is not connected`);
+    }
+    const capability = contentReadCapability(payload.surface);
+    if (!this.hasDeviceCapabilities(deviceId, [capability])) {
+      throw new Error(
+        `device ${deviceId} did not advertise ${capability}; refusing Agent content read before enqueue`,
+      );
+    }
+    const key = `${deviceId}\u0000${payload.requestId}`;
+    const existing = this.agentContentReadRequests.get(key);
+    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(payload)) {
+      throw new Error(`Agent content request ${payload.requestId} already exists with a different immutable body`);
+    }
+    this.agentContentReadRequests.set(key, payload);
+    this.sendToDevice(deviceId, 'agent.content.read', payload, {});
   }
 
   private buildTaskHandle(taskId: string): TaskHandle {
@@ -1862,7 +2053,7 @@ export class ConnectionHub {
    * (everything except `conn.ack`), same as calling `createEnvelope`
    * directly would require.
    */
-  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.offer_for_agent' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer'>(
+  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.offer_for_agent' | 'task.offer_for_agent_with_egress' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer' | 'agent.egress.ack' | 'agent.content.read'>(
     deviceId: string,
     type: T,
     payload: Parameters<typeof createEnvelope<T>>[1],
@@ -1888,7 +2079,8 @@ export class ConnectionHub {
     // non-terminal state), so the exemption is moot — and correctly
     // omitted — for them.
     const redeliverThroughTerminal = type === 'task.cancel' || type === 'task.reject';
-    outbox.ring.push({ seq, taskId, envelope, redeliverThroughTerminal });
+    const redeliverWithoutTask = type === 'agent.egress.ack' || type === 'agent.content.read';
+    outbox.ring.push({ seq, taskId, envelope, redeliverThroughTerminal, redeliverWithoutTask });
     if (outbox.ring.length > OUTBOX_RING_CAPACITY) outbox.ring.shift();
     this.deliverToDevice(deviceId, envelope);
     return envelope;
@@ -1921,8 +2113,9 @@ export class ConnectionHub {
       .filter(
         (entry) =>
           entry.seq > cursor &&
-          entry.taskId !== undefined &&
-          (!this.isTaskTerminal(entry.taskId) || entry.redeliverThroughTerminal),
+          (entry.taskId === undefined
+            ? entry.redeliverWithoutTask === true
+            : !this.isTaskTerminal(entry.taskId) || entry.redeliverThroughTerminal),
       )
       .map((entry) => entry.envelope);
   }
@@ -1980,6 +2173,15 @@ export class ConnectionHub {
    */
   getDeviceCapabilities(deviceId: string): readonly string[] | undefined {
     return this.connections.get(deviceId)?.capabilities;
+  }
+
+  private hasDeviceCapabilities(deviceId: string, required: readonly string[]): boolean {
+    const advertised = this.getDeviceCapabilities(deviceId);
+    return advertised !== undefined && required.every((capability) => advertised.includes(capability));
+  }
+
+  getAgentEgressReceipt(deviceId: string, eventId: string): AgentEgressReceipt | undefined {
+    return this.agentEgressReceipts.get(this.agentEgressReceiptKey(deviceId, eventId));
   }
 
   getTask(taskId: string): TaskSnapshot | undefined {

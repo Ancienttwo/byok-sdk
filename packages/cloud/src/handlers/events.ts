@@ -25,7 +25,15 @@ import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sd
 import { authenticateDevice, type DeviceRouteDeps } from './shared';
 
 /** Protocol features this cloud build accepts from a long-poll daemon. */
-const CLOUD_PROTOCOL_CAPABILITIES = ['result-document', 'agent-home-contract'];
+const CLOUD_PROTOCOL_CAPABILITIES = [
+  'result-document',
+  'agent-home-contract',
+  'agent-egress-policy',
+  'agent-egress-reliable-ack',
+  'agent-content-workspace-read',
+  'agent-content-transcript-read',
+  'agent-content-artifact-read',
+];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {
   /** How long an empty poll is held open, ms. */

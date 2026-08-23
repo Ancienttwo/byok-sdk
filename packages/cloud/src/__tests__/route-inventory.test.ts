@@ -149,7 +149,15 @@ describe('tenant isolation across every device-class resource', () => {
     expect(events.body).toEqual({
       events: [],
       cursor: 0,
-      capabilities: ['result-document', 'agent-home-contract'],
+      capabilities: [
+        'result-document',
+        'agent-home-contract',
+        'agent-egress-policy',
+        'agent-egress-reliable-ack',
+        'agent-content-workspace-read',
+        'agent-content-transcript-read',
+        'agent-content-artifact-read',
+      ],
     });
     expect(JSON.stringify(events.body)).not.toContain('secret work');
 

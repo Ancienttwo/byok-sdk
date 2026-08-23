@@ -157,6 +157,133 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('task.offer_for_agent_with_egress', () => {
+    const type = 'task.offer_for_agent_with_egress' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          instruction: 'continue typed egress Agent work',
+          policy: { mode: 'auto' },
+          runtime: 'pi',
+          agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
+          sessionRef: 'session-egress-1',
+          egressPolicy: {
+            policyRevision: 'egress-policy-r1',
+            activity: { mode: 'metadata-status', delivery: 'latest-value' },
+            reliable: {
+              maxPendingEventsPerAgent: 10,
+              maxPendingBytesPerAgent: 4096,
+              maxPendingBytesPerTenant: 8192,
+            },
+            transfers: {
+              workspace: { maxBytes: 1024, allowedMimeTypes: ['text/plain'] },
+              transcript: 'disabled',
+              artifact: 'disabled',
+            },
+          },
+        },
+        { taskId: 'task-agent-egress-1', seq: 5 },
+      ),
+    );
+  });
+
+  it('agent.egress.reliable', () => {
+    const type = 'agent.egress.reliable' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(type, {
+        agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
+        sessionRef: 'session-egress-1',
+        policyRevision: 'egress-policy-r1',
+        eventId: '10000000-0000-4000-8000-000000000060',
+        cursor: 1,
+        payload: { state: 'ready' },
+        contentHash: `sha256:${'a'.repeat(64)}`,
+        byteCount: 17,
+      }),
+    );
+  });
+
+  it('agent.egress.ack', () => {
+    const type = 'agent.egress.ack' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
+          sessionRef: 'session-egress-1',
+          policyRevision: 'egress-policy-r1',
+          eventId: '10000000-0000-4000-8000-000000000060',
+          cursor: 1,
+          receiptId: '10000000-0000-4000-8000-000000000061',
+        },
+        { seq: 6 },
+      ),
+    );
+  });
+
+  it('agent.content.read', () => {
+    const type = 'agent.content.read' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          requestId: '10000000-0000-4000-8000-000000000062',
+          surface: 'workspace',
+          actor: { kind: 'user', id: 'actor-1' },
+          agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
+          sessionRef: 'session-egress-1',
+          runtime: 'codex',
+          cwd: '/workspace',
+          policyRevision: 'egress-policy-r1',
+          target: 'README.md',
+          mimeType: 'text/plain',
+          decodeAs: 'utf8',
+          policy: { maxBytes: 1024, allowedMimeTypes: ['text/plain'] },
+        },
+        { seq: 7 },
+      ),
+    );
+  });
+
+  it('agent.content.receipt', () => {
+    const type = 'agent.content.receipt' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(type, {
+        requestId: '10000000-0000-4000-8000-000000000062',
+        surface: 'workspace',
+        actor: { kind: 'user', id: 'actor-1' },
+        agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
+        sessionRef: 'session-egress-1',
+        runtime: 'codex',
+        cwd: '/workspace',
+        policyRevision: 'egress-policy-r1',
+        target: 'README.md',
+        mimeType: 'text/plain',
+        decodeAs: 'utf8',
+        decision: 'allowed',
+        byteCount: 17,
+        contentHash: `sha256:${'a'.repeat(64)}`,
+        blobRef: {
+          blobId: 'blob-egress-1',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          size: 17,
+          contentType: 'text/plain',
+        },
+      }),
+    );
+  });
+
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);

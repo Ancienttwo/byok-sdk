@@ -14,6 +14,7 @@
 --   deploy/sql/0010_tenant_readiness.sql (optional frozen presence facts)
 --   deploy/sql/0011_tenant_erasure.sql (package/operator erasure receipt, not product data)
 --   deploy/sql/0012_agent_home_contract.sql (durable capability + exact AgentRef task identity)
+--   deploy/sql/0013_agent_egress_contract.sql (immutable reliable Agent egress receipt facts)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -51,11 +52,12 @@
 -- 0. The schema is actually migrated
 -- ---------------------------------------------------------------------------
 --
--- Without this block the two below pass trivially against an empty schema, and
+-- Without this block the checks below pass trivially against an empty schema, and
 -- a green result would mean "nothing was checked" rather than "nothing is
--- wrong". 27 is 0001's seven plus 0002's eleven plus 0003's three plus
+-- wrong". 28 is 0001's seven plus 0002's eleven plus 0003's three plus
 -- 0004's one plus 0005's two plus 0007's one plus 0008's one plus 0010's
--- package/operator erasure receipt; 0009 alters the existing task table and is
+-- package/operator erasure receipt; 0013 adds one immutable reliable Agent
+-- egress table; 0009 alters the existing task table and is
 -- checked explicitly in section 0.1. A later migration may only raise this count.
 DO $$
 DECLARE
@@ -68,10 +70,78 @@ BEGIN
      AND t.relkind = 'r'
      AND t.relname <> 'byok_schema_migration';
 
-  IF port_tables < 27 THEN
+  IF port_tables < 28 THEN
     RAISE EXCEPTION
-      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 27 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql; 0009_task_cancellation.sql and 0010_tenant_readiness.sql are checked separately)',
+      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 28 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql + 0013_agent_egress_contract.sql; 0009_task_cancellation.sql, 0010_tenant_readiness.sql, and 0012_agent_home_contract.sql are checked separately)',
       current_database(), current_schema(), port_tables;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.5 Reliable Agent egress facts preserve every acknowledgement discriminator
+-- ---------------------------------------------------------------------------
+--
+-- A receipt row is never an opaque envelope blob: tenant/device/event identity,
+-- AgentRef, session, policy revision, cursor, content hash, and receipt id are
+-- all durable columns so the host can make an exact typed readback. The primary
+-- key is also the first-write-wins idempotency authority.
+DO $$
+DECLARE
+  missing_columns text;
+  primary_key_columns text[];
+BEGIN
+  SELECT string_agg(required.column_name, ', ' ORDER BY required.column_name)
+    INTO missing_columns
+    FROM (
+      VALUES
+        ('tenant_id'::text, 'text'::regtype),
+        ('device_id'::text, 'text'::regtype),
+        ('event_id'::text, 'uuid'::regtype),
+        ('agent_id'::text, 'text'::regtype),
+        ('agent_profile_revision'::text, 'text'::regtype),
+        ('session_ref'::text, 'text'::regtype),
+        ('policy_revision'::text, 'text'::regtype),
+        ('cursor'::text, 'bigint'::regtype),
+        ('payload_json'::text, 'jsonb'::regtype),
+        ('content_hash'::text, 'text'::regtype),
+        ('byte_count'::text, 'integer'::regtype),
+        ('receipt_id'::text, 'uuid'::regtype),
+        ('recorded_at'::text, 'timestamp with time zone'::regtype)
+    ) AS required(column_name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'agent_egress_event'
+         AND a.attname = required.column_name
+         AND a.atttypid = required.type_oid
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without complete 0013_agent_egress_contract.sql: agent_egress_event is missing column(s): %',
+      missing_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO primary_key_columns
+    FROM pg_constraint constraint_row
+    JOIN pg_class t ON t.oid = constraint_row.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_egress_event'
+     AND constraint_row.contype = 'p';
+
+  IF primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'device_id', 'event_id']::text[] THEN
+    RAISE EXCEPTION
+      'agent_egress_event primary key must be (tenant_id, device_id, event_id), found %',
+      primary_key_columns;
   END IF;
 END $$;
 

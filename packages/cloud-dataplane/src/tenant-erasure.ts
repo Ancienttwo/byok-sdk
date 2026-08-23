@@ -22,7 +22,7 @@ const MAX_BATCH_SIZE = 1_000;
 const MAX_PAGES_PER_RUN = 100;
 const MAX_LEASE_MS = 5 * 60_000;
 
-/** Every tenant-owned table as of 0010, in child-before-parent deletion order. */
+/** Every tenant-owned table as of 0013, in child-before-parent deletion order. */
 export const TENANT_ERASURE_TABLES = [
   'object_reference',
   'object_manifest',
@@ -40,6 +40,7 @@ export const TENANT_ERASURE_TABLES = [
   'board_item',
   'tenant_stream',
   'outbox',
+  'agent_egress_event',
   'device_request_receipts',
   'proof_request_receipt',
   'task',
