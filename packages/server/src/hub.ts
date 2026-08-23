@@ -8,6 +8,7 @@ import {
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+  AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AgentRefSchema,
   AgentContentReadPayloadSchema,
   AgentEgressPolicySchema,
@@ -50,6 +51,7 @@ import type {
   AgentContentReadRequest,
   AgentEgressReceipt,
   DispatchInput,
+  FreshAgentEgressDispatchInput,
   HubStats,
   MachineInfo,
   ServerTaskEvent,
@@ -1734,6 +1736,24 @@ export class ConnectionHub {
   // ---------------------------------------------------------------------
 
   async dispatch(input: DispatchInput): Promise<TaskHandle> {
+    if (input.egressPolicy !== undefined && input.sessionRef === undefined) {
+      throw new Error('Agent egress resume dispatch requires an exact sessionRef; use dispatchFreshAgentEgress for fresh execution');
+    }
+    return this.dispatchInternal(input, false);
+  }
+
+  async dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle> {
+    if (Object.prototype.hasOwnProperty.call(input, 'sessionRef')) {
+      throw new Error('fresh Agent egress dispatch must not carry sessionRef');
+    }
+    return this.dispatchInternal(input, true);
+  }
+
+  private async dispatchInternal(
+    input: DispatchInput | FreshAgentEgressDispatchInput,
+    freshAgentEgress: boolean,
+  ): Promise<TaskHandle> {
+    const sessionRef = 'sessionRef' in input ? input.sessionRef : undefined;
     const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
     const egressPolicy = input.egressPolicy === undefined ? undefined : AgentEgressPolicySchema.parse(input.egressPolicy);
     const dispatchSelection =
@@ -1751,9 +1771,6 @@ export class ConnectionHub {
     if (egressPolicy !== undefined && agentRef === undefined) {
       throw new Error('Agent egress policy requires an explicit AgentRef; legacy task dispatch cannot consume it');
     }
-    if (egressPolicy !== undefined && input.sessionRef === undefined) {
-      throw new Error('Agent egress policy requires an exact sessionRef');
-    }
     // M0 routing has no queue-until-connect: reject clearly instead of
     // silently queuing a task nothing will ever claim.
     if (!deviceId || !this.connections.get(deviceId)?.connected) {
@@ -1770,12 +1787,18 @@ export class ConnectionHub {
       );
     }
 
-    if (
-      egressPolicy !== undefined &&
-      !this.hasDeviceCapabilities(deviceId, [AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])
-    ) {
+    const requiredEgressCapabilities = freshAgentEgress
+      ? [
+          AGENT_EGRESS_POLICY_CAPABILITY,
+          AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+          AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+        ]
+      : [AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY];
+    if (egressPolicy !== undefined && !this.hasDeviceCapabilities(deviceId, requiredEgressCapabilities)) {
       throw new Error(
-        `device ${deviceId} did not advertise Agent egress policy and reliable acknowledgement capabilities; refusing before enqueue`,
+        freshAgentEgress
+          ? `device ${deviceId} did not advertise Agent egress policy, reliable acknowledgement, and fresh-session capabilities; refusing before enqueue`
+          : `device ${deviceId} did not advertise Agent egress policy and reliable acknowledgement capabilities; refusing before enqueue`,
       );
     }
 
@@ -1833,7 +1856,7 @@ export class ConnectionHub {
       policy,
       requiredToolsets,
       deviceId,
-      sessionRef: input.sessionRef,
+      sessionRef,
       agentRef,
     });
 
@@ -1851,36 +1874,52 @@ export class ConnectionHub {
       policy,
       runtime,
       dispatchSelection,
-      sessionRef: input.sessionRef,
+      sessionRef,
     };
-    if (agentRef !== undefined && egressPolicy !== undefined) {
+    if (agentRef !== undefined && egressPolicy !== undefined && freshAgentEgress) {
+      const freshOffer = {
+        instruction: input.instruction,
+        policy,
+        runtime,
+        dispatchSelection,
+        agentRef,
+        egressPolicy,
+        ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+      };
+      this.sendToDevice(
+        deviceId,
+        'task.offer_for_agent_with_egress_fresh',
+        freshOffer,
+        { taskId },
+      );
+    } else if (agentRef !== undefined && egressPolicy !== undefined) {
       this.sendToDevice(
         deviceId,
         'task.offer_for_agent_with_egress',
         {
           ...commonOffer,
-          sessionRef: input.sessionRef!,
+          sessionRef: sessionRef!,
           agentRef,
           egressPolicy,
           ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
         },
-        { taskId, sessionRef: input.sessionRef },
+        { taskId, sessionRef },
       );
     } else if (agentRef !== undefined) {
       this.sendToDevice(
         deviceId,
         'task.offer_for_agent',
         { ...commonOffer, agentRef, ...(requiredToolsets === undefined ? {} : { requiredToolsets }) },
-        { taskId, sessionRef: input.sessionRef },
+        { taskId, sessionRef },
       );
     } else if (requiredToolsets === undefined) {
-      this.sendToDevice(deviceId, 'task.offer', commonOffer, { taskId, sessionRef: input.sessionRef });
+      this.sendToDevice(deviceId, 'task.offer', commonOffer, { taskId, sessionRef });
     } else {
       this.sendToDevice(
         deviceId,
         'task.offer_with_toolsets',
         { ...commonOffer, requiredToolsets },
-        { taskId, sessionRef: input.sessionRef },
+        { taskId, sessionRef },
       );
     }
 
@@ -2092,7 +2131,7 @@ export class ConnectionHub {
    * (everything except `conn.ack`), same as calling `createEnvelope`
    * directly would require.
    */
-  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.offer_for_agent' | 'task.offer_for_agent_with_egress' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer' | 'agent.egress.ack' | 'agent.content.read'>(
+  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.offer_for_agent' | 'task.offer_for_agent_with_egress' | 'task.offer_for_agent_with_egress_fresh' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer' | 'agent.egress.ack' | 'agent.content.read'>(
     deviceId: string,
     type: T,
     payload: Parameters<typeof createEnvelope<T>>[1],

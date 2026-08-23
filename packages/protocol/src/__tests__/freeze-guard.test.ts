@@ -115,6 +115,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.offer_with_toolsets': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress': { taskId: 'required', seq: 'required' },
+    'task.offer_for_agent_with_egress_fresh': { taskId: 'required', seq: 'required' },
     'agent.egress.reliable': { taskId: 'optional', seq: 'optional' },
     'agent.egress.ack': { taskId: 'optional', seq: 'required' },
     'agent.content.read': { taskId: 'optional', seq: 'required' },
@@ -171,6 +172,10 @@ type CodecRequirednessMatrix = {
   'task.offer_for_agent_with_egress': {
     taskId: FieldRequiredness<'task.offer_for_agent_with_egress', 'taskId'>;
     seq: FieldRequiredness<'task.offer_for_agent_with_egress', 'seq'>;
+  };
+  'task.offer_for_agent_with_egress_fresh': {
+    taskId: FieldRequiredness<'task.offer_for_agent_with_egress_fresh', 'taskId'>;
+    seq: FieldRequiredness<'task.offer_for_agent_with_egress_fresh', 'seq'>;
   };
   'agent.egress.reliable': {
     taskId: FieldRequiredness<'agent.egress.reliable', 'taskId'>;
@@ -480,6 +485,22 @@ function minimalPayloadForProbe(type: MessageType): unknown {
         policy: { mode: 'auto' },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         sessionRef: 'session-1',
+        egressPolicy: {
+          policyRevision: 'policy-r1',
+          activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          reliable: {
+            maxPendingEventsPerAgent: 1,
+            maxPendingBytesPerAgent: 1,
+            maxPendingBytesPerTenant: 1,
+          },
+          transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+        },
+      };
+    case 'task.offer_for_agent_with_egress_fresh':
+      return {
+        instruction: 'start with egress',
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         egressPolicy: {
           policyRevision: 'policy-r1',
           activity: { mode: 'metadata-status', delivery: 'latest-value' },

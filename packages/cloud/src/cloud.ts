@@ -57,6 +57,7 @@ import {
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
   AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
+  AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   createEnvelope,
@@ -67,6 +68,7 @@ import {
   AgentContentReceiptPayloadSchema,
   AgentEgressAckPayloadSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
+  TaskOfferForAgentWithEgressFreshPayloadSchema,
   TaskOfferForAgentPayloadSchema,
   type AgentRef,
   type AgentContentReceiptPayload,
@@ -76,6 +78,7 @@ import {
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
+  type TaskOfferForAgentWithEgressFreshPayload,
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
@@ -245,6 +248,14 @@ export interface AgentEgressDispatchInput {
   readonly payload: TaskOfferForAgentWithEgressPayload;
 }
 
+/** Strict Agent dispatch whose selected runtime mints its session after start. */
+export interface AgentEgressFreshSessionDispatchInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  /** Deliberately session-free strict payload for the fresh-runtime path. */
+  readonly payload: TaskOfferForAgentWithEgressFreshPayload;
+}
+
 /** A task-free, independently capability-gated Agent content read. */
 export interface AgentContentReadInput {
   readonly payload: AgentContentReadPayload;
@@ -296,6 +307,16 @@ export interface ByokCloud {
     tenant: TenantId,
     deviceId: string,
     input: AgentEgressDispatchInput,
+  ): Promise<EnqueuedOffer>;
+  /**
+   * Host control plane: enqueue the distinct fresh-session egress offer.
+   * The device must durably advertise fresh-session support before task or
+   * mailbox reservation, so older resume-only daemons never receive it.
+   */
+  enqueueFreshAgentEgressOffer(
+    tenant: TenantId,
+    deviceId: string,
+    input: AgentEgressFreshSessionDispatchInput,
   ): Promise<EnqueuedOffer>;
   /** Host control plane: request one policy-bound content read without a task fallback. */
   enqueueAgentContentRead(
@@ -852,6 +873,19 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       const payload = TaskOfferForAgentWithEgressPayloadSchema.parse(input.payload);
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
         createEnvelope('task.offer_for_agent_with_egress', payload, { id: messageId, taskId, seq }),
+      );
+    },
+
+    async enqueueFreshAgentEgressOffer(tenant, deviceId, input) {
+      await assertAgentCapabilities(tenant, deviceId, [
+        AGENT_HOME_CONTRACT_CAPABILITY,
+        AGENT_EGRESS_POLICY_CAPABILITY,
+        AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+        AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+      ]);
+      const payload = TaskOfferForAgentWithEgressFreshPayloadSchema.parse(input.payload);
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_for_agent_with_egress_fresh', payload, { id: messageId, taskId, seq }),
       );
     },
 

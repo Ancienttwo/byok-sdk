@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import type { JournalReceipt, LocalTaskJournal, ReceivedEnvelopeRecord } from '../daemon/journal/journal';
 import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -194,11 +195,12 @@ describe('authenticated enrollment tenant projection', () => {
     expect(daemon.status().connected).toBe(false);
     expect((await new DeviceStore(storeDir).load())?.tenantId).toBe(replacement.tenantId);
     expect(server.httpRequests.filter((request) => request.pathname === '/byok/pair')).toHaveLength(2);
-    expect(await daemon.publishReliableAgentEgress?.({
+    await expect(daemon.publishReliableAgentEgress?.({
       agentRef: { agentId: 'active-repair-agent', profileRevision: 'r1' },
       sessionRef: 'active-repair-session',
+      runtimeId: 'pi',
       payload: { status: 'must-not-use-stale-tenant' },
-    })).toEqual({ ok: false, reason: 'policy_denied' });
+    })).rejects.toThrow(/handoff/i);
   });
 
   it('binds final egress and journal composition to the loaded enrollment record, not host config', async () => {
@@ -208,6 +210,17 @@ describe('authenticated enrollment tenant projection', () => {
     const workspaceRoot = await tmpDir('byok-enrollment-workspace-');
     const storeDir = await tmpDir('byok-enrollment-store-');
     const hostStorageRoot = await tmpDir('byok-enrollment-agent-home-');
+    const agentRef = { agentId: 'enrollment-agent', profileRevision: 'r1' };
+    const agentHome = path.join(await fs.realpath(hostStorageRoot), 'agents', agentRef.agentId);
+    await fs.mkdir(agentHome, { recursive: true });
+    await new AgentSessionHandoffStore().record({
+      agentRef,
+      taskId: 'enrollment-egress-task',
+      sessionRef: 'enrollment-session',
+      runtimeId: 'pi',
+      cwd: agentHome,
+      leaseId: 'enrollment-egress-lease',
+    });
     const journal = new CapturingJournal();
     daemon = createDaemonWithAdapters(
       {
@@ -228,8 +241,10 @@ describe('authenticated enrollment tenant projection', () => {
     const record = await daemon.pair('daemon-code');
     await daemon.start();
     const appended = await daemon.publishReliableAgentEgress?.({
-      agentRef: { agentId: 'enrollment-agent', profileRevision: 'r1' },
+      agentRef,
       sessionRef: 'enrollment-session',
+      runtimeId: 'pi',
+      taskId: 'enrollment-egress-task',
       payload: { status: 'authenticated' },
     });
     expect(appended).toMatchObject({ ok: true, record: { tenantId: record.tenantId } });

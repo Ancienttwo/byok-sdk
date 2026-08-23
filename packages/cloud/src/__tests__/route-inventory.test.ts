@@ -154,6 +154,7 @@ describe('tenant isolation across every device-class resource', () => {
         'agent-home-contract',
         'agent-egress-policy',
         'agent-egress-reliable-ack',
+        'agent-egress-fresh-session',
         'agent-content-workspace-read',
         'agent-content-transcript-read',
         'agent-content-artifact-read',

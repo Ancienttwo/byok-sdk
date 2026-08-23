@@ -21,6 +21,7 @@ import {
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
+  type TaskOfferForAgentWithEgressFreshPayload,
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
 import {
@@ -637,10 +638,17 @@ function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor): boole
   return descriptor.capabilities.mcpToolsets === true;
 }
 
-type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload;
+type AcceptedOfferPayload =
+  | TaskOfferPayload
+  | TaskOfferWithToolsetsPayload
+  | TaskOfferForAgentPayload
+  | TaskOfferForAgentWithEgressPayload
+  | TaskOfferForAgentWithEgressFreshPayload;
 
 function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
-  const { requiredToolsets, egressPolicy, ...offer } = payload as TaskOfferWithToolsetsPayload & Partial<TaskOfferForAgentWithEgressPayload>;
+  const { requiredToolsets, egressPolicy, ...offer } = payload as TaskOfferWithToolsetsPayload
+    & Partial<TaskOfferForAgentWithEgressPayload>
+    & Partial<TaskOfferForAgentWithEgressFreshPayload>;
   void requiredToolsets;
   void egressPolicy;
   return offer as TaskOfferPayload;
@@ -653,6 +661,17 @@ function sameEgressPolicy(left: Readonly<AgentEgressPolicy>, right: Readonly<Age
 function offeredAgentRef(payload: AcceptedOfferPayload): AgentRef | undefined {
   if (!Object.prototype.hasOwnProperty.call(payload, 'agentRef')) return undefined;
   return validateAgentRef((payload as unknown as { agentRef?: unknown }).agentRef);
+}
+
+/**
+ * The fresh egress offer deliberately has no sessionRef. Preserve that absence
+ * through admission and manifest sealing so only the legacy egress message
+ * can take the exact-resume path.
+ */
+function offeredSessionRef(payload: AcceptedOfferPayload): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(payload, 'sessionRef')) return undefined;
+  const value = (payload as unknown as { sessionRef?: unknown }).sessionRef;
+  return typeof value === 'string' ? value : undefined;
 }
 
 function errorMessage(err: unknown): string {
@@ -1174,6 +1193,9 @@ export class TaskRunner {
       case 'task.offer_for_agent_with_egress':
         await this.handleOffer(envelope.task_id, envelope.payload, true);
         return;
+      case 'task.offer_for_agent_with_egress_fresh':
+        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
@@ -1230,6 +1252,7 @@ export class TaskRunner {
     const decline = (reason: string, retryable: boolean): void => {
       this.decline(taskId, reason, retryable, agentRef);
     };
+    const sessionRef = offeredSessionRef(payload);
     if ('egressPolicy' in payload) {
       if (this.deps.agentEgressPolicy === undefined || !sameEgressPolicy(this.deps.agentEgressPolicy, payload.egressPolicy)) {
         decline('Agent egress offer policy is not exactly enabled by this daemon', false);
@@ -1403,11 +1426,11 @@ export class TaskRunner {
       let plainWorkspaceNeedsResolve = false;
       if (agentBinding !== undefined) {
         workspaceDir = agentBinding.lease.cwd;
-        if (payload.sessionRef !== undefined) {
+        if (sessionRef !== undefined) {
           try {
             await this.deps.agentSessionHandoffs!.requireMatch({
               agentRef: agentBinding.resolution.agentRef,
-              sessionRef: payload.sessionRef,
+              sessionRef,
               runtimeId: pick.descriptor.id,
               cwd: workspaceDir,
             });
@@ -1427,16 +1450,16 @@ export class TaskRunner {
           return;
         }
       } else if (this.deps.gitWorkspaceManager && this.deps.gitWorkspaceStore) {
-        known = payload.sessionRef ? await this.deps.sessionWorkspaces.get(payload.sessionRef) : undefined;
+        known = sessionRef ? await this.deps.sessionWorkspaces.get(sessionRef) : undefined;
         const gitManager = this.deps.gitWorkspaceManager;
         const gitStore = this.deps.gitWorkspaceStore;
-        if (payload.sessionRef) {
-          const ledger = await gitStore.findBySessionAnyPhase(payload.sessionRef).catch(() => undefined);
+        if (sessionRef) {
+          const ledger = await gitStore.findBySessionAnyPhase(sessionRef).catch(() => undefined);
           const sameProtocolTask = ledger?.taskId === taskId;
           const interruptedOldTask = ledger?.phase === 'interrupted' && sameProtocolTask;
           const activeDifferentTask = ledger !== undefined && ledger.taskId !== taskId && (ledger.phase === 'preparing' || ledger.phase === 'active');
           if (!known || known.workspaceKind !== 'git' || !known.gitWorkspaceId || !ledger ||
-              ledger.workspaceId !== known.gitWorkspaceId || ledger.sessionRef !== payload.sessionRef ||
+              ledger.workspaceId !== known.gitWorkspaceId || ledger.sessionRef !== sessionRef ||
               path.resolve(ledger.workspaceDir) !== path.resolve(known.workspaceDir) ||
               interruptedOldTask || activeDifferentTask) {
             decline('session is incompatible with Git workspace mode', true);
@@ -1457,13 +1480,13 @@ export class TaskRunner {
           gitWorkspaceId = randomUUID();
         }
         try {
-          gitLease = await gitManager.acquireLease(workspaceDir, payload.sessionRef);
+          gitLease = await gitManager.acquireLease(workspaceDir, sessionRef);
         } catch {
           decline('workspace is busy or unavailable', true);
           return;
         }
       } else if (!this.deps.gitWorkspaceManager && !this.deps.gitWorkspaceStore) {
-        known = payload.sessionRef ? await this.deps.sessionWorkspaces.get(payload.sessionRef) : undefined;
+        known = sessionRef ? await this.deps.sessionWorkspaces.get(sessionRef) : undefined;
         workspaceDir = known?.workspaceDir ?? path.join(this.deps.workspaceRoot, taskId);
         plainWorkspaceNeedsResolve = true;
       } else {
@@ -1483,9 +1506,9 @@ export class TaskRunner {
         policy: decision.policy,
         requiredToolsetIds: requiredToolsets ?? [],
         ...(offered.dispatchSelection === undefined ? {} : { dispatchSelection: offered.dispatchSelection }),
-        ...(payload.sessionRef === undefined || (known === undefined && agentBinding === undefined)
+        ...(sessionRef === undefined || (known === undefined && agentBinding === undefined)
           ? {}
-          : { sessionRef: payload.sessionRef }),
+          : { sessionRef }),
         ...(agentBinding === undefined ? {} : {
           agentRef: agentBinding.resolution.agentRef,
           cwd: agentBinding.lease.cwd,
@@ -1595,7 +1618,7 @@ export class TaskRunner {
             workspaceId,
             taskId,
             workspaceDir,
-            sessionRef: payload.sessionRef,
+            sessionRef,
             phase,
             baseline: gitBaseline ?? observation.head,
             current: observation.head,

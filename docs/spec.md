@@ -53,10 +53,10 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The
-next aligned dispatch candidate is `0.6.0`; publish still requires a separate
+next aligned dispatch candidate is `0.8.0`; publish still requires a separate
 release authorization and registry readback. The independent keys candidate is
-`0.2.1`; its packed and published `@byok-sdk/core` edge must be the exact
-current dispatch candidate, `0.6.0`, proven from an isolated standard npm
+`0.3.1`; its packed and published `@byok-sdk/core` edge must be the exact
+current dispatch candidate, `0.8.0`, proven from an isolated standard npm
 install rather than the workspace graph.
 
 ## Local Agent application release authority
@@ -639,6 +639,12 @@ separate:
 - `task.offer_for_agent_with_egress` remains byte-compatible and requires an
   exact resume `sessionRef` plus its canonical handoff. There is no fresh
   fallback for a missing or mismatched resume.
+
+The host APIs preserve the same distinction: hosted composition uses
+`enqueueFreshAgentEgressOffer`, the reference server uses
+`dispatchFreshAgentEgress`, and the existing resume surfaces continue to
+require the exact session. A caller cannot obtain fresh semantics by omitting
+`sessionRef` from a resume call.
 
 The fresh trace is `claim` → start the runtime without resume arguments → runtime
 issues its real session → SDK fsyncs the exact AgentRef/runtime/cwd/session

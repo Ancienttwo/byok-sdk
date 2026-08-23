@@ -11,6 +11,7 @@ import {
   TASK_TRANSITIONS,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+  AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AgentContentReceiptPayloadSchema,
 } from '@byok-sdk/protocol';
 import type {
@@ -501,6 +502,8 @@ export interface AgentContentReadConfig {
 export interface AgentReliableEgressInput {
   agentRef: AgentRef;
   sessionRef: string;
+  /** Exact runtime identity from the durable Agent-home handoff. */
+  runtimeId: string;
   payload: unknown;
   taskId?: string;
   eventId?: string;
@@ -827,7 +830,13 @@ function computeCapabilities(
     flags.push('toolset-selection');
   }
   if (agentHomeConfigured) flags.push('agent-home-contract');
-  if (agentEgressConfigured) flags.push(AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY);
+  if (agentEgressConfigured) {
+    flags.push(
+      AGENT_EGRESS_POLICY_CAPABILITY,
+      AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+      AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+    );
+  }
   if (contentReadPolicies !== undefined) {
     for (const surface of Object.keys(AGENT_CONTENT_READ_CAPABILITIES) as AgentContentReadSurface[]) {
       const policy = contentReadPolicies[surface];
@@ -2846,7 +2855,7 @@ export function buildDaemonWithAdapters(
   }
 
   async function publishReliableAgentEgress(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult> {
-    if (config.agentEgress === undefined || agentHomeManager === undefined) {
+    if (config.agentEgress === undefined || agentHomeManager === undefined || agentSessionHandoffs === undefined) {
       throw new Error('Agent reliable egress is not configured');
     }
     if (tenantRebinding) {
@@ -2855,6 +2864,15 @@ export function buildDaemonWithAdapters(
     const binding = await agentHomeManager.acquire(input.agentRef);
     try {
       await agentHomeManager.initialize(binding);
+      const handoff = await agentSessionHandoffs.requireMatch({
+        agentRef: binding.resolution.agentRef,
+        sessionRef: input.sessionRef,
+        runtimeId: input.runtimeId,
+        cwd: binding.resolution.canonicalHome,
+      });
+      if (input.taskId !== undefined && handoff.taskId !== input.taskId) {
+        throw new Error('Agent reliable egress taskId does not match the durable session handoff');
+      }
       const appended = await agentEgress.appendReliable({
         homeDir: binding.resolution.canonicalHome,
         agentRef: binding.resolution.agentRef,

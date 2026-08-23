@@ -190,6 +190,38 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('task.offer_for_agent_with_egress_fresh', () => {
+    const type = 'task.offer_for_agent_with_egress_fresh' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          instruction: 'start typed egress Agent work',
+          policy: { mode: 'auto' },
+          runtime: 'pi',
+          agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
+          egressPolicy: {
+            policyRevision: 'egress-policy-r1',
+            activity: { mode: 'metadata-status', delivery: 'latest-value' },
+            reliable: {
+              maxPendingEventsPerAgent: 10,
+              maxPendingBytesPerAgent: 4096,
+              maxPendingBytesPerTenant: 8192,
+            },
+            transfers: {
+              workspace: { maxBytes: 1024, allowedMimeTypes: ['text/plain'] },
+              transcript: 'disabled',
+              artifact: 'disabled',
+            },
+          },
+        },
+        { taskId: 'task-agent-egress-fresh-1', seq: 6 },
+      ),
+    );
+  });
+
   it('agent.egress.reliable', () => {
     const type = 'agent.egress.reliable' as const;
     testedTypes.push(type);

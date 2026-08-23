@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-23 23:00
+> **Last Updated**: 2026-08-23 23:22
 > **Review File**: `tasks/reviews/20260823-2300-agent-egress-fresh-session-authority.review.md`
 > **Notes File**: `tasks/notes/20260823-2300-agent-egress-fresh-session-authority.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -119,7 +119,8 @@ allowed_paths:
   - packages/cloud-dataplane/src/__tests__/
   - packages/testkit/package.json
   - packages/ui-runtime/package.json
-  - packages/byok-sdk/package.json
+  - packages/sdk/package.json
+  - packages/keys/package.json
 ```
 
 ## Evidence Requirements

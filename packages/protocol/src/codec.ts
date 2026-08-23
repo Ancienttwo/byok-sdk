@@ -87,6 +87,7 @@ interface EnvelopeShapeOptions {
   'task.offer_with_toolsets': { taskId: string; seq: number };
   'task.offer_for_agent': { taskId: string; seq: number };
   'task.offer_for_agent_with_egress': { taskId: string; seq: number };
+  'task.offer_for_agent_with_egress_fresh': { taskId: string; seq: number };
   'agent.egress.reliable': { taskId?: string; seq?: number };
   'agent.egress.ack': { taskId?: string; seq: number };
   'agent.content.read': { taskId?: string; seq: number };

@@ -160,9 +160,9 @@ At 10x scale the first pressure point remains per-Agent/tenant reliable backlog,
 ## Task Breakdown
 
 - [x] Update architecture/spec/protocol docs with the observed 0.7.0 deadlock, datum authority and additive fresh/resume decision.
-- [ ] Add failing fresh-execution and exact-reliable-handoff regression guards.
-- [ ] Implement protocol capability/message plus client/cloud/server composition with no compatibility fallback.
-- [ ] Run focused protocol/client/cloud/server tests and affected typechecks/builds.
+- [x] Add failing fresh-execution and exact-reliable-handoff regression guards.
+- [x] Implement protocol capability/message plus client/cloud/server composition with no compatibility fallback.
+- [x] Run focused protocol/client/cloud/server tests and affected typechecks/builds.
 - [ ] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
 - [ ] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent frozen-subject gate.
 
@@ -183,8 +183,8 @@ Before publication, rollback is deletion/revert of this isolated source branch. 
 
 ## Task Breakdown
 - [x] Update architecture/spec/protocol docs with the observed 0.7.0 deadlock, datum authority and additive fresh/resume decision.
-- [ ] Add failing fresh-execution and exact-reliable-handoff regression guards.
-- [ ] Implement protocol capability/message plus client/cloud/server composition with no compatibility fallback.
-- [ ] Run focused protocol/client/cloud/server tests and affected typechecks/builds.
+- [x] Add failing fresh-execution and exact-reliable-handoff regression guards.
+- [x] Implement protocol capability/message plus client/cloud/server composition with no compatibility fallback.
+- [x] Run focused protocol/client/cloud/server tests and affected typechecks/builds.
 - [ ] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
 - [ ] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent frozen-subject gate.

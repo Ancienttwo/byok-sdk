@@ -27,6 +27,7 @@ export type {
   ByokCloudOptions,
   AgentDispatchInput,
   AgentEgressDispatchInput,
+  AgentEgressFreshSessionDispatchInput,
   AgentContentReadInput,
   EnqueueOfferInput,
   EnqueueToolsetOfferInput,

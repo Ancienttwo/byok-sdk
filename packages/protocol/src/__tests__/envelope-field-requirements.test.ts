@@ -55,6 +55,22 @@ function minimalPayload(type: MessageType): unknown {
           transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
         },
       };
+    case 'task.offer_for_agent_with_egress_fresh':
+      return {
+        instruction: 'start with an explicit egress policy',
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        egressPolicy: {
+          policyRevision: 'policy-r1',
+          activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          reliable: {
+            maxPendingEventsPerAgent: 1,
+            maxPendingBytesPerAgent: 1,
+            maxPendingBytesPerTenant: 1,
+          },
+          transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+        },
+      };
     case 'agent.egress.reliable':
       return {
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },

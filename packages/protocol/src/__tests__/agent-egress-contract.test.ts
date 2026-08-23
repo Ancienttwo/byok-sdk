@@ -5,6 +5,7 @@ import {
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+  AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AgentEgressPolicySchema,
   AgentContentReadDenialReasonSchema,
   CAPABILITY_FLAGS,
@@ -37,6 +38,7 @@ describe('Agent egress typed wire contract', () => {
       expect.arrayContaining([
         AGENT_EGRESS_POLICY_CAPABILITY,
         AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+        AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
         AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
         AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
         AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
@@ -98,6 +100,46 @@ describe('Agent egress typed wire contract', () => {
         byteCount: 5,
         extra: 'not permitted',
       } as never),
+    ).toThrow(/invalid envelope/u);
+  });
+
+  it('keeps exact resume sessionRef required while the distinct fresh offer forbids it', () => {
+    const freshOffer = createEnvelope(
+      'task.offer_for_agent_with_egress_fresh',
+      {
+        instruction: 'start typed egress Agent work',
+        policy: { mode: 'auto' },
+        agentRef: AGENT_REF,
+        egressPolicy: POLICY,
+      },
+      { taskId: 'task-egress-fresh-protocol', seq: 33 },
+    );
+    expect(freshOffer.payload).not.toHaveProperty('sessionRef');
+
+    expect(() =>
+      createEnvelope(
+        'task.offer_for_agent_with_egress',
+        {
+          instruction: 'resume typed egress Agent work',
+          policy: { mode: 'auto' },
+          agentRef: AGENT_REF,
+          egressPolicy: POLICY,
+        } as never,
+        { taskId: 'task-egress-resume-missing-session', seq: 34 },
+      ),
+    ).toThrow(/invalid envelope/u);
+    expect(() =>
+      createEnvelope(
+        'task.offer_for_agent_with_egress_fresh',
+        {
+          instruction: 'fresh typed egress Agent work',
+          policy: { mode: 'auto' },
+          agentRef: AGENT_REF,
+          sessionRef: 'forbidden-prestart-session',
+          egressPolicy: POLICY,
+        } as never,
+        { taskId: 'task-egress-fresh-forbidden-session', seq: 35 },
+      ),
     ).toThrow(/invalid envelope/u);
   });
 

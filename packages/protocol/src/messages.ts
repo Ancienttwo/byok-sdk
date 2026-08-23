@@ -322,6 +322,19 @@ export const TaskOfferForAgentWithEgressPayloadSchema = TaskOfferForAgentPayload
 }).strict();
 export type TaskOfferForAgentWithEgressPayload = z.infer<typeof TaskOfferForAgentWithEgressPayloadSchema>;
 
+/**
+ * Strict fresh-session Agent egress offer. It deliberately omits `sessionRef`:
+ * the selected runtime is the sole authority that can mint that identity after
+ * start. This distinct message prevents a missing resume reference from being
+ * interpreted as a fresh execution by an older daemon.
+ */
+export const TaskOfferForAgentWithEgressFreshPayloadSchema = TaskOfferForAgentPayloadSchema.omit({
+  sessionRef: true,
+})
+  .extend({ egressPolicy: AgentEgressPolicySchema })
+  .strict();
+export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshPayloadSchema>;
+
 const EGRESS_SAFE_VALUE = z
   .json()
   .refine(
@@ -1029,6 +1042,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'task.offer_with_toolsets': TaskOfferWithToolsetsPayloadSchema,
   'task.offer_for_agent': TaskOfferForAgentPayloadSchema,
   'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema,
+  'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema,
   'agent.egress.reliable': AgentEgressReliablePayloadSchema,
   'agent.egress.ack': AgentEgressAckPayloadSchema,
   'agent.content.read': AgentContentReadPayloadSchema,
@@ -1064,6 +1078,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.offer_with_toolsets',
   'task.offer_for_agent',
   'task.offer_for_agent_with_egress',
+  'task.offer_for_agent_with_egress_fresh',
   'agent.egress.ack',
   'agent.content.read',
   'task.approve',

@@ -30,6 +30,15 @@ function egressOfferPayload() {
   };
 }
 
+function freshEgressOfferPayload() {
+  return {
+    instruction: 'start a fresh runtime with egress policy',
+    policy: { mode: 'auto' as const },
+    agentRef: AGENT_REF,
+    egressPolicy: POLICY,
+  };
+}
+
 function reliableEnvelope() {
   return createEnvelope('agent.egress.reliable', {
     agentRef: AGENT_REF,
@@ -77,6 +86,57 @@ describe('hosted Agent egress contract', () => {
     expect(
       (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages,
     ).toHaveLength(0);
+  });
+
+  it('admits the distinct fresh offer only with all four durable capabilities and leaves no task or mailbox row otherwise', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await admitFullEgress(harness, device.deviceId);
+
+    await expect(
+      harness.cloud.enqueueFreshAgentEgressOffer(TENANT_A, device.deviceId, {
+        taskId: 'fresh-missing-capability',
+        payload: freshEgressOfferPayload(),
+      }),
+    ).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'fresh-missing-capability')).toBeUndefined();
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages,
+    ).toHaveLength(0);
+
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [
+        'agent-home-contract',
+        'agent-egress-policy',
+        'agent-egress-reliable-ack',
+        'agent-egress-fresh-session',
+      ],
+    });
+    const offered = await harness.cloud.enqueueFreshAgentEgressOffer(TENANT_A, device.deviceId, {
+      taskId: 'fresh-agent-egress-task',
+      payload: freshEgressOfferPayload(),
+    });
+    expect(offered.envelope).toMatchObject({
+      type: 'task.offer_for_agent_with_egress_fresh',
+      payload: { agentRef: AGENT_REF, egressPolicy: POLICY },
+    });
+    expect(offered.envelope.payload).not.toHaveProperty('sessionRef');
+  });
+
+  it('keeps the resume enqueue on its exact-session message without a fresh fallback', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await admitFullEgress(harness, device.deviceId);
+
+    const offered = await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, {
+      payload: egressOfferPayload(),
+    });
+
+    expect(offered.envelope).toMatchObject({
+      type: 'task.offer_for_agent_with_egress',
+      payload: { sessionRef: 'session-egress' },
+    });
   });
 
   it('persists exact AgentRef/session/cursor and replays one immutable acknowledgement receipt', async () => {

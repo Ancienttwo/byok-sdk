@@ -30,6 +30,7 @@ const CLOUD_PROTOCOL_CAPABILITIES = [
   'agent-home-contract',
   'agent-egress-policy',
   'agent-egress-reliable-ack',
+  'agent-egress-fresh-session',
   'agent-content-workspace-read',
   'agent-content-transcript-read',
   'agent-content-artifact-read',
@@ -82,7 +83,8 @@ export function eventsHandler(deps: EventsRouteDeps) {
           (event.type === 'task.offer' ||
             event.type === 'task.offer_with_toolsets' ||
             event.type === 'task.offer_for_agent' ||
-            event.type === 'task.offer_for_agent_with_egress') &&
+            event.type === 'task.offer_for_agent_with_egress' ||
+            event.type === 'task.offer_for_agent_with_egress_fresh') &&
           event.task_id !== undefined
             ? [event.task_id]
             : [],
@@ -95,7 +97,8 @@ export function eventsHandler(deps: EventsRouteDeps) {
             event.type !== 'task.offer' &&
             event.type !== 'task.offer_with_toolsets' &&
             event.type !== 'task.offer_for_agent' &&
-            event.type !== 'task.offer_for_agent_with_egress'
+            event.type !== 'task.offer_for_agent_with_egress' &&
+            event.type !== 'task.offer_for_agent_with_egress_fresh'
           ) {
             return true;
           }

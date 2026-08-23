@@ -122,6 +122,17 @@ export interface DispatchInput {
   egressPolicy?: AgentEgressPolicy;
 }
 
+/** Input to the distinct fresh-session Agent egress dispatch surface. */
+export interface FreshAgentEgressDispatchInput
+  extends Omit<DispatchInput, 'deviceId' | 'sessionRef' | 'agentRef' | 'egressPolicy'> {
+  /** Exact target; fresh Agent dispatch never selects an ambient device. */
+  deviceId: string;
+  /** Exact durable Agent identity for the canonical-home execution. */
+  agentRef: AgentRef;
+  /** Exact policy revision consumed by the fresh execution. */
+  egressPolicy: AgentEgressPolicy;
+}
+
 /** Host control-plane input for one exact content-read request. */
 export interface AgentContentReadRequest {
   readonly deviceId: string;

@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260823-2300-agent-egress-fresh-session-authority.md
 > **Contract**: tasks/contracts/20260823-2300-agent-egress-fresh-session-authority.contract.md
 > **Review**: tasks/reviews/20260823-2300-agent-egress-fresh-session-authority.review.md
-> **Last Updated**: 2026-08-23 23:00
+> **Last Updated**: 2026-08-23 23:22
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -44,15 +44,24 @@
 
 ## Open Questions
 
-- Package versions will be chosen only after source/tests close.  Because the
-  public client reliable-publish input tightens under 0.x, the current
-  candidate is a new aligned minor train; npm publication remains separately
+- The RC is now the aligned dispatch/testkit/umbrella train `0.8.0` plus
+  independently versioned keys `0.3.1`, whose packed edge must close to core
+  `0.8.0`.  This follows the pre-1.0 MINOR rule for additive public API and a
+  tightened public client input. npm publication remains separately
   unauthorized.
 
 ## Evidence Links
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
+- Focused fresh-session suites: protocol 130, client 10, cloud 25, server 5;
+  all passed on the combined tree.
+- Root build and typecheck passed. Root tests passed on the bounded second run:
+  the first run hit the existing `daemon-auth.test.ts` SQLite WAL snapshot
+  race, its isolated 24-test rerun passed, and the unchanged full retry passed.
+- Release graph passed for eight aligned dispatch manifests at `0.8.0` and
+  keys `0.3.1`. Pack/readback remains pending until this source tree is
+  committed and clean, as required by the pack gate.
 
 ## Promotion Filter
 

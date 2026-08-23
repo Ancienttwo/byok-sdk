@@ -1,6 +1,10 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, type AgentEgressPolicy } from '@byok-sdk/protocol';
+import {
+  AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+  createEnvelope,
+  type AgentEgressPolicy,
+} from '@byok-sdk/protocol';
 import type { WebSocket } from 'ws';
 import { createByokServer } from '../index';
 import {
@@ -62,6 +66,67 @@ describe('reference-server Agent egress contract', () => {
       }),
     ).rejects.toThrow(/egress policy and reliable acknowledgement capabilities/);
     expect(byok.tasks.list()).toHaveLength(0);
+  });
+
+  it('requires the fresh-session capability before creating a fresh egress task', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack'],
+    });
+    ws = daemon.ws;
+
+    await expect(
+      byok.dispatchFreshAgentEgress({
+        deviceId: daemon.deviceId,
+        instruction: 'fresh Agent work',
+        agentRef: AGENT_REF,
+        egressPolicy: POLICY,
+      }),
+    ).rejects.toThrow(/fresh-session capabilities/);
+    expect(byok.tasks.list()).toHaveLength(0);
+  });
+
+  it('dispatches the additive fresh egress offer without inventing a sessionRef', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      capabilities: [
+        'agent-home-contract',
+        'agent-egress-policy',
+        'agent-egress-reliable-ack',
+        AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+      ],
+    });
+    ws = daemon.ws;
+
+    await expect(byok.dispatch({
+      deviceId: daemon.deviceId,
+      instruction: 'must not reinterpret resume as fresh',
+      agentRef: AGENT_REF,
+      egressPolicy: POLICY,
+    })).rejects.toThrow(/dispatchFreshAgentEgress/);
+    expect(byok.tasks.list()).toHaveLength(0);
+
+    const handle = await byok.dispatchFreshAgentEgress({
+      deviceId: daemon.deviceId,
+      instruction: 'fresh Agent work',
+      agentRef: AGENT_REF,
+      egressPolicy: POLICY,
+    });
+    const offer = await nextEnvelope(ws);
+    expect(offer).toMatchObject({
+      type: 'task.offer_for_agent_with_egress_fresh',
+      task_id: handle.taskId,
+      payload: { agentRef: AGENT_REF, egressPolicy: POLICY },
+    });
+    expect('sessionRef' in offer.payload).toBe(false);
   });
 
   it('uses the strict offer and returns one exact durable receipt on reliable replay', async () => {

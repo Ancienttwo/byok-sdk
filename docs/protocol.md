@@ -302,6 +302,11 @@ claim/start, and the client must fsync the exact Agent-home handoff before
 exact-resume-only and never falls back to this path when its handoff is absent
 or mismatched.
 
+Host-facing APIs mirror those two wire facts. Hosted cloud exposes
+`enqueueFreshAgentEgressOffer`, and the reference server exposes
+`dispatchFreshAgentEgress`; the existing resume dispatch rejects a missing
+`sessionRef` instead of selecting the fresh message.
+
 The policy has one exact `policyRevision`. Activity is either
 `metadata-status`/`latest-value`, or explicit
 `contentful-trajectory`/`latest-value` with positive coalesce and event-byte

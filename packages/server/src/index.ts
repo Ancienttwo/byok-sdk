@@ -14,6 +14,7 @@ import type {
   AgentEgressReceipt,
   CreateByokServerOptions,
   DispatchInput,
+  FreshAgentEgressDispatchInput,
   HubStats,
   MachineInfo,
   TaskHandle,
@@ -26,6 +27,7 @@ export type {
   AgentEgressReceipt,
   CreateByokServerOptions,
   DispatchInput,
+  FreshAgentEgressDispatchInput,
   HubStats,
   MachineInfo,
   ServerTaskEvent,
@@ -115,6 +117,8 @@ export interface ByokServer {
     createPairingCode(claims: PairingCodeClaims): PairingCodeInfo;
   };
   dispatch(input: DispatchInput): Promise<TaskHandle>;
+  /** Dispatch a fresh Agent execution whose runtime will mint its session after start. */
+  dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle>;
   /** Enqueue one capability-gated, exact-identity content-read request. */
   requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
   tasks: {
@@ -221,6 +225,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       createPairingCode: (claims: PairingCodeClaims) => pairing.createPairingCode(claims),
     },
     dispatch: (input: DispatchInput) => hub.dispatch(input),
+    dispatchFreshAgentEgress: (input: FreshAgentEgressDispatchInput) => hub.dispatchFreshAgentEgress(input),
     requestAgentContentRead: (input: AgentContentReadRequest) => hub.requestAgentContentRead(input),
     tasks: {
       get: (taskId: string) => hub.getTask(taskId),
