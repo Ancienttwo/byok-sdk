@@ -88,6 +88,7 @@ describe('LongPollRouteError names the failing route', () => {
     const store = new DeviceStore(storeDir);
     await store.save({
       deviceId: 'dev-1',
+      tenantId: 'tenant-transport',
       accessToken: 'tok-1',
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(), // far future — never renews, never touches the network
       devicePrivateKeyPem: 'unused-in-this-test',
@@ -120,6 +121,7 @@ describe('LongPollRouteError names the failing route', () => {
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
     await store.save({
       deviceId: 'dev-expired',
+      tenantId: 'tenant-transport',
       accessToken: 'tok-expired',
       expiresAt: new Date(Date.now() - 3_600_000).toISOString(),
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),

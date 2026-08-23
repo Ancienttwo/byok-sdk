@@ -34,12 +34,35 @@ export const PairRequestSchema = z.object({
 });
 export type PairRequest = z.infer<typeof PairRequestSchema>;
 
+/**
+ * The authenticated tenant projection is opaque to the wire protocol. It is
+ * bounded so a malformed control-plane value cannot become an unbounded local
+ * key prefix, while deliberately imposing no product-specific format.
+ *
+ * Keep these runtime checks aligned with `@byok-sdk/core`'s TenantId mint
+ * point: trimming or normalizing here would make the response disagree with
+ * the authenticated device row that authored it.
+ */
+export const PAIR_RESPONSE_TENANT_ID_MAX_LENGTH = 200;
+export const PairResponseTenantIdSchema = z
+  .string()
+  .min(1)
+  .max(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH)
+  .refine((value) => value.trim() === value, {
+    message: 'tenantId must not have leading or trailing whitespace',
+  })
+  .refine((value) => !value.includes('\u0000'), {
+    message: 'tenantId must not contain a NUL character',
+  });
+
 export const PairResponseSchema = z.object({
   deviceId: z.string(),
   /** JWT, ~1h lifetime. */
   accessToken: z.string(),
   /** Opaque hint for when/how to renew (e.g. an ISO timestamp); not itself a credential. */
   refreshHint: z.string().optional(),
+  /** Exact opaque, non-secret tenant binding from the authenticated device row. */
+  tenantId: PairResponseTenantIdSchema,
 });
 export type PairResponse = z.infer<typeof PairResponseSchema>;
 

@@ -469,6 +469,7 @@ describe('truth memory client', () => {
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');
     await store.save({
       deviceId: 'device-e2e',
+      tenantId: tenant,
       accessToken: 'not-used',
       expiresAt: '2026-08-10T00:00:00.000Z',
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),

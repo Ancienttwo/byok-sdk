@@ -289,7 +289,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
           serverUrl: cloud.url,
           workspaceRoot,
           storeDir,
-          hostedJournal: { mode: 'sqlite', tenantId: 'tenant-cloud-test' },
+          hostedJournal: { mode: 'sqlite' },
         },
         [adapter],
         {

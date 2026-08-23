@@ -15,6 +15,7 @@ import type { Context } from 'hono';
 import {
   ChallengeRequestSchema,
   PairRequestSchema,
+  PairResponseSchema,
   TokenRequestSchema,
   type ChallengeResponse,
   type PairResponse,
@@ -38,7 +39,15 @@ export function pairHandler(deps: AuthRouteDeps) {
     if (device === undefined) return c.json({ error: 'invalid pairing code' }, 401);
 
     const { accessToken, expiresAt } = await deps.auth.mintAccessToken(device);
-    const response: PairResponse = { deviceId: device.deviceId, accessToken, refreshHint: expiresAt };
+    // The authenticated device row is the only tenant authority after
+    // redemption. Validate the projection at the wire boundary so a malformed
+    // custom store cannot emit an unbounded or otherwise invalid tenant shape.
+    const response: PairResponse = PairResponseSchema.parse({
+      deviceId: device.deviceId,
+      accessToken,
+      refreshHint: expiresAt,
+      tenantId: device.tenantId,
+    });
     return c.json(response, 200);
   };
 }

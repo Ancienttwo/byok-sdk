@@ -178,7 +178,7 @@ describe('createDaemon storage policy validation', () => {
       createDaemonWithAdapters(
         {
           ...base,
-          hostedJournal: { mode: 'sqlite', tenantId: 'tenant-a', storagePolicy: { maxStoreBytes: -1, minFreeBytes: 1000 } },
+          hostedJournal: { mode: 'sqlite', storagePolicy: { maxStoreBytes: -1, minFreeBytes: 1000 } },
         },
         [],
       ),

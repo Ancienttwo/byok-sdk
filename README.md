@@ -86,10 +86,13 @@ Metadata/status activity is the safe default; contentful trajectory is an
 explicit capability-gated opt-in. Reliable evidence is fsynced under the
 canonical Agent home and retried with stable cursors until an exact ack, while
 latest-value activity remains replaceable and reports typed drop reasons.
-Workspace, transcript, and artifact reads are separately disabled/enabled,
+The daemon's tenant binding comes only from the authenticated pair response
+atomically persisted in its local `DeviceRecord`; Agent egress has no
+host-authored `tenantId` setting and never parses the access token. Workspace,
+transcript, and artifact reads are separately disabled/enabled,
 path/MIME/size checked locally, audited per Agent, and represented to cloud by
 content-free receipts plus authenticated `BlobRef`s. Salesko supplies tenant
-authorization, stable Agent/Profile identity, policy and retention; it does
+authorization and pairing authority, stable Agent/Profile identity, policy and retention; it does
 not compose Agent paths, implement SDK journals, or mirror the full local
 transcript as shared history.
 

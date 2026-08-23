@@ -785,11 +785,20 @@ generated device keypair register the device and mint its first token.
 
 ```
 Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey }
-Response (PairResponseSchema): { deviceId, accessToken, refreshHint? }
+Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint? }
 ```
 
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
 - `accessToken`: JWT, ~1h lifetime.
+- `tenantId`: required opaque, non-secret tenant binding copied exactly from
+  the authenticated redeemed pairing-code/device row. It is bounded to 1–200
+  characters, rejects leading/trailing whitespace and NUL, and has no
+  product-specific format. It is never accepted in `PairRequest` and must not
+  be derived from or parsed out of the access token.
+- This required field is part of the 0.7.0 HTTP auth contract. Pairing is an
+  out-of-band HTTP DTO, so `PROTOCOL_VERSION` remains `1` and the frozen v1
+  envelope corpus is unchanged; the frozen HTTP schema fingerprint records
+  this required field explicitly.
 - `refreshHint`: opaque hint for when/how to renew; not itself a credential.
   **Pinned semantics (resolves a carried-forward pin): the reference server
   always sets `refreshHint` to the freshly-minted token's own ISO-8601

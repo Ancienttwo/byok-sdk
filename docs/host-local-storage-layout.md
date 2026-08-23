@@ -63,6 +63,17 @@ SDK-reserved namespace in the Agent home.
 | Concurrency | Enforce one mutable writer per canonical Agent home | Do not schedule around or bypass a busy decline |
 | Credentials | Never persist credential bytes in Agent home | Store secrets in Keychain or Windows Credential Manager; project references/configured state only |
 
+The daemon tenant binding is part of authenticated enrollment, not host product
+configuration. A successful pair response projects the opaque non-secret
+tenant identifier already bound to the redeemed pairing code and cloud device
+row; the client stores it atomically in its device enrollment record. Agent
+egress, content receipts, acknowledgements and hosted journal rows consume that
+exact local projection after restart. Renewal changes only token/expiry, while
+re-pair atomically replaces the complete binding. A legacy or malformed record
+without the binding fails closed and requires re-pairing—Salesko must not fill
+it from Profile, editable config, deviceId, JWT/access-token parsing or a shadow
+store.
+
 ## Admission and migration
 
 Agent execution uses the distinct `task.offer_for_agent` message and the

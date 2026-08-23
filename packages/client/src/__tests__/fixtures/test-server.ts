@@ -19,6 +19,7 @@ interface Waiter {
 
 interface DeviceAuthState {
   deviceId: string;
+  tenantId: string;
   publicKeyBase64Url: string;
   accessToken: string;
   revoked: boolean;
@@ -54,6 +55,7 @@ export class TestServer {
   private waiters: Waiter[] = [];
 
   private readonly devicesById = new Map<string, DeviceAuthState>();
+  private readonly pairingTenantIds = new Map<string, string>();
   private readonly pendingNonces = new Map<string, string>(); // nonce -> deviceId
   private readonly blobs = new Map<string, StoredBlob>();
   private readonly blobReservations = new Map<string, string>();
@@ -121,6 +123,11 @@ export class TestServer {
   /** How long a freshly (re)minted access token is valid for — controls both `/byok/pair`'s `refreshHint` and `/byok/token`'s `expiresAt`. */
   setTokenTtlMs(ms: number): void {
     this.tokenTtlMs = ms;
+  }
+
+  /** Test-only authenticated pairing-code projection for re-pair replacement coverage. */
+  setPairingTenantId(pairingCode: string, tenantId: string): void {
+    this.pairingTenantIds.set(pairingCode, tenantId);
   }
 
   /** Reject every WS upgrade attempt (503) while `true` — used to force the client into its long-poll fallback (protocol §8). */
@@ -367,6 +374,7 @@ export class TestServer {
 
   private async handlePair(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = (await readJsonBody(req)) as { pairingCode: string; deviceName: string; devicePublicKey: string };
+    const tenantId = this.pairingTenantIds.get(body.pairingCode) ?? 'tenant-test';
     // Test hook (see `blockNextPair`): hold this handler open until released so
     // a test can keep `daemon.pair()` in flight, occupying the lifecycle queue.
     if (this.pairGate) {
@@ -378,11 +386,13 @@ export class TestServer {
     let device = [...this.devicesById.values()].find((d) => d.publicKeyBase64Url === body.devicePublicKey);
     if (device) {
       device.revoked = false;
+      device.tenantId = tenantId;
       device.accessToken = this.mintToken();
     } else {
       this.deviceSeq += 1;
       device = {
         deviceId: `device-${this.deviceSeq}`,
+        tenantId,
         publicKeyBase64Url: body.devicePublicKey,
         accessToken: this.mintToken(),
         revoked: false,
@@ -392,6 +402,7 @@ export class TestServer {
 
     respondJson(res, 200, {
       deviceId: device.deviceId,
+      tenantId: device.tenantId,
       accessToken: device.accessToken,
       refreshHint: new Date(Date.now() + this.tokenTtlMs).toISOString(),
     });

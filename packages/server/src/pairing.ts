@@ -1,4 +1,5 @@
 import type { TenantId } from './auth';
+import { PairResponseTenantIdSchema } from '@byok-sdk/protocol';
 import { generatePairingCode } from './ids';
 
 const PAIRING_CODE_TTL_MS = 10 * 60 * 1000; // ~10min, per spec
@@ -105,11 +106,12 @@ function validatePairingCodeClaims(claims: PairingCodeClaims): PairingCodeClaims
     throw new TypeError('createPairingCode requires { tenantId, productId } claims');
   }
   const { tenantId, productId } = claims;
-  if (typeof tenantId !== 'string' || tenantId.length === 0) {
-    throw new TypeError('createPairingCode requires a non-empty tenantId');
+  const tenantResult = PairResponseTenantIdSchema.safeParse(tenantId);
+  if (!tenantResult.success) {
+    throw new TypeError('createPairingCode requires a valid bounded tenantId');
   }
   if (typeof productId !== 'string' || productId.length === 0) {
     throw new TypeError('createPairingCode requires a non-empty productId');
   }
-  return { tenantId, productId };
+  return { tenantId: tenantResult.data, productId };
 }

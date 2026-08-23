@@ -565,6 +565,17 @@ projection; contentful trajectory requires explicit host selection plus the
 fail-closed sanitizer boundary before WS or long-poll encoding. A rejected or
 throwing sanitizer emits no original bytes.
 
+The tenant used by Agent egress and hosted local journaling is not editable
+host configuration. Pairing projects the required opaque non-secret tenant
+binding already authenticated by the single-use pairing code and registered
+cloud device row into the atomic local device enrollment record. Daemon restart
+loads that exact projection before constructing tenant-bound egress, content,
+acknowledgement or journal state. Renewal preserves it byte-for-byte and changes
+only token/expiry; re-pair atomically replaces the complete record. A legacy or
+tampered record without a valid binding fails closed and requires re-pairing.
+Profile/config fallback, deviceId inference, JWT/access-token parsing and a
+second shadow tenant store are forbidden.
+
 Reliable Agent evidence is a different lane and store from latest-value
 activity. It is appended and fsynced under the canonical Agent home's `.byok`
 namespace before its first send, retains a stable event id and cursor across

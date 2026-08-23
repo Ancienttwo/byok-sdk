@@ -157,6 +157,8 @@ export type { CreateEnvelopeOptions } from './codec';
 
 export {
   PairRequestSchema,
+  PairResponseTenantIdSchema,
+  PAIR_RESPONSE_TENANT_ID_MAX_LENGTH,
   PairResponseSchema,
   ChallengeRequestSchema,
   ChallengeResponseSchema,

@@ -338,7 +338,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       serverUrl: server.url,
       workspaceRoot,
       storeDir,
-      hostedJournal: { mode: 'sqlite' as const, tenantId: 'tenant-owner-test' },
+      hostedJournal: { mode: 'sqlite' as const },
     };
     const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await pairer.pair('pairing-code');
@@ -426,7 +426,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       serverUrl: server.url,
       workspaceRoot,
       storeDir,
-      hostedJournal: { mode: 'sqlite' as const, tenantId: 'tenant-open-cleanup-test' },
+      hostedJournal: { mode: 'sqlite' as const },
     };
     const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await pairer.pair('pairing-code');

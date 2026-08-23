@@ -178,13 +178,13 @@ describe('hosted journal integration (L-002)', () => {
   describe('configuration', () => {
     it('constructs exactly one journal, rooted at storeDir, when hostedJournal is set', async () => {
       if (!isSqliteAvailable()) return; // the real class is under test here; see journal-unavailable.test.ts for the Node 20 half
-      const { storeDir } = await startDaemon({ hostedJournal: { mode: 'sqlite', tenantId: 'tenant-a' } });
+      const { storeDir } = await startDaemon({ hostedJournal: { mode: 'sqlite' } });
 
       expect(journalConstructions.storeDirs).toEqual([storeDir]);
       expect(await exists(path.join(storeDir, JOURNAL_DB_FILENAME))).toBe(true);
     });
 
-    it('rejects an unknown mode and an empty tenant at construction, before any daemon exists', async () => {
+    it('rejects an unknown mode at construction, before any daemon exists', async () => {
       const base: DaemonConfig = {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
@@ -194,12 +194,9 @@ describe('hosted journal integration (L-002)', () => {
       };
 
       expect(() =>
-        createDaemonWithAdapters({ ...base, hostedJournal: { mode: 'jsonl' as 'sqlite', tenantId: 'tenant-a' } }, []),
+        createDaemonWithAdapters({ ...base, hostedJournal: { mode: 'jsonl' as 'sqlite' } }, []),
       ).toThrow(/must be "sqlite"/);
-      expect(() =>
-        createDaemonWithAdapters({ ...base, hostedJournal: { mode: 'sqlite', tenantId: '   ' } }, []),
-      ).toThrow(/tenantId/);
-      // Nothing was constructed on either rejected path.
+      // Nothing was constructed on the rejected path.
       expect(journalConstructions.storeDirs).toEqual([]);
     });
   });
@@ -208,7 +205,7 @@ describe('hosted journal integration (L-002)', () => {
     it('holds the whole envelope chain — and the cursor — behind the journal commit', async () => {
       const journal = new RecordingJournal();
       const { adapter, storeDir, deviceId } = await startDaemon(
-        { hostedJournal: { mode: 'sqlite', tenantId: 'tenant-a' } },
+        { hostedJournal: { mode: 'sqlite' } },
         journal,
       );
       const cursorStore = new CursorStore(storeDir);
@@ -230,7 +227,7 @@ describe('hosted journal integration (L-002)', () => {
         taskId: 'task-order-1',
         seq,
         opensTask: true,
-        identity: { tenantId: 'tenant-a', productId: 'test-product-journal', deviceId },
+        identity: { tenantId: 'tenant-test', productId: 'test-product-journal', deviceId },
       });
 
       // While it is held: the runner has not been handed the offer, nothing
@@ -251,7 +248,7 @@ describe('hosted journal integration (L-002)', () => {
 
     it('records the terminal in the journal before it reaches the wire', async () => {
       const journal = new RecordingJournal();
-      const { adapter } = await startDaemon({ hostedJournal: { mode: 'sqlite', tenantId: 'tenant-a' } }, journal);
+      const { adapter } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
 
       server.send(
         createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-terminal-1', seq: server.nextSeq() }),
@@ -305,7 +302,7 @@ describe('hosted journal integration (L-002)', () => {
             serverUrl: server.url,
             workspaceRoot: await tmpDir('byok-journal-recover-workspace-'),
             storeDir,
-            hostedJournal: { mode: 'sqlite', tenantId: 'tenant-a' },
+            hostedJournal: { mode: 'sqlite' },
           },
           [adapter],
         );

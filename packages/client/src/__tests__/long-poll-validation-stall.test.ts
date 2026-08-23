@@ -64,6 +64,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     const store = new DeviceStore(storeDir);
     await store.save({
       deviceId: 'dev-1',
+      tenantId: 'tenant-long-poll',
       accessToken: 'tok-1',
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(), // far future — getValidAccessToken never renews, never touches the network
       devicePrivateKeyPem: 'unused-in-this-test',

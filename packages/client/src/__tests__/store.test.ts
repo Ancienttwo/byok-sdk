@@ -12,6 +12,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
 const record: DeviceRecord = {
   deviceId: 'device-1',
+  tenantId: 'tenant-store',
   accessToken: 'token-1',
   expiresAt: '2026-01-01T00:00:00.000Z',
   devicePrivateKeyPem: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n',

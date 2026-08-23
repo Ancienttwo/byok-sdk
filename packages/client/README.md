@@ -122,17 +122,19 @@ contents.
 
 ## Agent egress and explicit content reads
 
-`agentEgress` is consumed configuration, not a profile projection. The host
-must select one exact policy revision and an authenticated tenant id. Omitting
-contentful mode keeps runtime activity metadata/status-only; enabling it is an
-explicit product decision and requires the server capability. Reliable events
-are fsynced under the canonical Agent home and retire only after an exact ack.
+`agentEgress` is consumed policy configuration, not a profile or tenant
+projection. The host selects one exact policy revision. The daemon obtains its
+tenant binding only from the authenticated pair response persisted in the
+atomic local `DeviceRecord`; there is no `agentEgress.tenantId` setting and no
+Profile/config, deviceId, or access-token fallback. Omitting contentful mode
+keeps runtime activity metadata/status-only; enabling it is an explicit product
+decision and requires the server capability. Reliable events are fsynced under
+the canonical Agent home and retire only after an exact ack.
 
 ```ts
 createDaemon({
   // ...normal device, transport and agentHome configuration
   agentEgress: {
-    tenantId: 'tenant-authority-from-salesko',
     policy: {
       policyRevision: 'salesko-agent-egress-r1',
       activity: { mode: 'metadata-status', delivery: 'latest-value' },
@@ -163,8 +165,9 @@ its local supplement. The local supplement can only narrow root, text, MIME,
 size and sensitive-name behavior; it cannot enable a wire-disabled surface.
 The SDK derives `agents/<agentId>`, `.byok/egress`, runtime-session evidence and
 the per-Agent content-read audit path. Salesko must not compose those paths.
-Tenant/device identity comes from authenticated host state; a request cannot
-override it. Transcript reads additionally require the exact persisted
+Tenant/device identity comes from the persisted authenticated enrollment; a
+request or editable host configuration cannot override it. Transcript reads
+additionally require the exact persisted
 AgentRef/session/runtime/cwd handoff. Allowed content is uploaded through the
 authenticated blob channel. The content-free receipt is fsynced into the
 Agent-local reliable spool with stable event/cursor identity before send and

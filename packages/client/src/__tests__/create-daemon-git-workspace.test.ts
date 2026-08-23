@@ -110,7 +110,6 @@ describe('daemon Git workspace startup/local-event boundary', () => {
         gitWorkspace: { mode: 'local-checkpoints' },
         hostedJournal: {
           mode: 'sqlite',
-          tenantId: 'tenant-startup-failure',
           storagePolicy: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 },
         },
       },

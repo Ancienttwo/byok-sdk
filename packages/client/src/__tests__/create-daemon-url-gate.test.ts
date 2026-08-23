@@ -63,7 +63,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     it('with dangerouslyAllowInsecureRemote: true, proceeds past the gate (reaches the network) and logs a warning', async () => {
       fetchMock.mockResolvedValue({
         ok: true,
-        json: async () => ({ deviceId: 'dev-1', accessToken: 'tok-1' }),
+        json: async () => ({ deviceId: 'dev-1', tenantId: 'tenant-url-gate', accessToken: 'tok-1' }),
       });
 
       const daemon = createDaemon({
@@ -88,7 +88,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     it('with dangerouslyAllowInsecureRemote: true against an ALREADY-loopback URL, proceeds normally and logs NO warning (the hatch was inert, never exercised)', async () => {
       fetchMock.mockResolvedValue({
         ok: true,
-        json: async () => ({ deviceId: 'dev-2', accessToken: 'tok-2' }),
+        json: async () => ({ deviceId: 'dev-2', tenantId: 'tenant-url-gate', accessToken: 'tok-2' }),
       });
 
       const daemon = createDaemon({

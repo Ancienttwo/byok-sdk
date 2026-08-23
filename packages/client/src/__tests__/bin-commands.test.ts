@@ -101,6 +101,7 @@ describe('bin/commands/status: runStatusCommand', () => {
     const storeDir = await tmpDir('byok-cmd-status-paired-');
     const record: DeviceRecord = {
       deviceId: 'dev-123',
+      tenantId: 'tenant-status',
       accessToken: 'tok',
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       devicePrivateKeyPem: 'pem',
@@ -249,7 +250,7 @@ describe('bin/commands/tasks: runTasksFollowCommand', () => {
 
 describe('bin/commands/pair: runPairCommand', () => {
   it('calls daemon.pair(code) and logs the resulting deviceId', async () => {
-    const pair = vi.fn().mockResolvedValue({ deviceId: 'dev-9' } as DeviceRecord);
+    const pair = vi.fn().mockResolvedValue({ deviceId: 'dev-9', tenantId: 'tenant-pair' } as DeviceRecord);
     const { log, lines } = collectLog();
     await runPairCommand(baseConfig('/unused'), 'the-code', { log, daemon: { pair } });
     expect(pair).toHaveBeenCalledWith('the-code');

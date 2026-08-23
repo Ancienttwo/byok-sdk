@@ -126,7 +126,6 @@ async function startDaemon(
     storeDir,
     agentHome: { hostStorageRoot },
     agentEgress: {
-      tenantId: 'tenant-content',
       policy: currentPolicy,
       contentRead: {
         workspace: {

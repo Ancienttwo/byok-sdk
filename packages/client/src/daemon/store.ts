@@ -9,11 +9,14 @@ import {
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { isTenantId } from '@byok-sdk/core';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
 
 export interface DeviceRecord {
   deviceId: string;
+  /** Opaque tenant binding returned by the authenticated pairing response. */
+  tenantId: string;
   /** Current access token (JWT), renewed via challenge/token without re-pairing (protocol §6.2). */
   accessToken: string;
   /** ISO-8601 expiry for `accessToken` (our best knowledge of it — see auth-manager.ts for how this is derived after `/byok/pair`, which reports no explicit expiry itself). */
@@ -25,6 +28,20 @@ export interface DeviceRecord {
 }
 
 const MAX_DEVICE_RECORD_BYTES = 256 * 1024;
+
+const REPAIR_REQUIRED_MESSAGE =
+  'device enrollment record is missing or has an invalid authenticated tenant binding; re-pair required';
+
+/**
+ * A durable enrollment record cannot be used by any steady-state path. Only
+ * the explicit pair operation may replace it with a fresh authenticated row.
+ */
+export class DeviceRecordRePairRequiredError extends Error {
+  constructor() {
+    super(REPAIR_REQUIRED_MESSAGE);
+    this.name = 'DeviceRecordRePairRequiredError';
+  }
+}
 
 function sameInode(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
@@ -43,24 +60,40 @@ function sameContentState(left: import('node:fs').BigIntStats, right: import('no
   return sameInode(left, right) && left.size === right.size && left.mtimeNs === right.mtimeNs;
 }
 
-function parseDeviceRecord(raw: string): DeviceRecord | undefined {
-  const parsed = JSON.parse(raw) as Partial<DeviceRecord>;
+function assertDeviceRecord(value: unknown): asserts value is DeviceRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new DeviceRecordRePairRequiredError();
+  }
+  const parsed = value as Partial<DeviceRecord>;
   if (
     typeof parsed.deviceId === 'string' &&
+    isTenantId(parsed.tenantId) &&
     typeof parsed.accessToken === 'string' &&
     typeof parsed.expiresAt === 'string' &&
     typeof parsed.devicePrivateKeyPem === 'string' &&
     typeof parsed.devicePublicKey === 'string'
   ) {
-    return {
-      deviceId: parsed.deviceId,
-      accessToken: parsed.accessToken,
-      expiresAt: parsed.expiresAt,
-      devicePrivateKeyPem: parsed.devicePrivateKeyPem,
-      devicePublicKey: parsed.devicePublicKey,
-    };
+    return;
   }
-  return undefined;
+  throw new DeviceRecordRePairRequiredError();
+}
+
+function parseDeviceRecord(raw: string): DeviceRecord {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new DeviceRecordRePairRequiredError();
+  }
+  assertDeviceRecord(parsed);
+  return {
+    deviceId: parsed.deviceId,
+    tenantId: parsed.tenantId,
+    accessToken: parsed.accessToken,
+    expiresAt: parsed.expiresAt,
+    devicePrivateKeyPem: parsed.devicePrivateKeyPem,
+    devicePublicKey: parsed.devicePublicKey,
+  };
 }
 
 /**
@@ -147,6 +180,9 @@ export class DeviceStore {
   }
 
   async save(record: DeviceRecord): Promise<void> {
+    // Every writer, including test/product callers that bypass AuthManager,
+    // must persist the complete authenticated enrollment as one record.
+    assertDeviceRecord(record);
     const storeDir = path.dirname(this.filePath);
     // `mkdir`'s own `mode` only applies at CREATION time — a pre-existing
     // storeDir (predating this fix, or created by something else with a

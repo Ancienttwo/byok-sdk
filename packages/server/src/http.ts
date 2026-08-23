@@ -15,6 +15,7 @@ import {
   CreateBlobRequestSchema,
   MessagesSendRequestSchema,
   PairRequestSchema,
+  PairResponseSchema,
   TokenRequestSchema,
   type BlobDownloadUrlResponse,
   type ChallengeResponse,
@@ -114,13 +115,24 @@ export function buildHonoApp(deps: HttpDeps): Hono {
       deviceName,
       devicePublicKey,
     });
+    const device = deps.devices.get(claims.tenantId, deviceId);
+    if (device === undefined) {
+      throw new Error('paired device row was not persisted');
+    }
     const { accessToken, expiresAt } = await mintAccessToken(deps.tokenSigner, {
-      deviceId,
-      tenantId: claims.tenantId,
-      productId: claims.productId,
+      deviceId: device.deviceId,
+      tenantId: device.tenantId,
+      productId: device.productId,
     });
 
-    const response: PairResponse = { deviceId, accessToken, refreshHint: expiresAt };
+    // Project only the exact authenticated row that was just registered; the
+    // request has no tenant field and cannot influence this value.
+    const response: PairResponse = PairResponseSchema.parse({
+      deviceId: device.deviceId,
+      accessToken,
+      refreshHint: expiresAt,
+      tenantId: device.tenantId,
+    });
     return c.json(response, 200);
   });
 

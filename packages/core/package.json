@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/core",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "BYOK SDK platform contracts: branded tenant identity, tenant-first store ports, device proof canonicalization, and the composition conformance reference",
   "type": "module",
   "license": "MIT",

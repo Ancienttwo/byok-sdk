@@ -61,6 +61,7 @@ normal authority replacement operation.
 | `packages/client/src/daemon/create-daemon.ts`, client tests | Update | Remove host-authored egress/journal tenant and bind runtime egress/content/ack/journal composition to the loaded DeviceRecord. |
 | `packages/cloud-dataplane` tests/probes | Update | Prove real disposable persistence retains the exact pairing tenant and rejects cross-tenant tamper. |
 | public package manifests, `bun.lock`, release tests/docs | Update | Prepare aligned 0.7.0 plus keys 0.3.0 exact graph; do not publish. |
+| `README.md`, `packages/client/README.md` | Update | Remove the stale host-authored tenant example while keeping the published-current release pins at 0.6.1/keys 0.2.2 until registry publication. |
 | plan/contract/review/notes/todos | Add/update | Record scope, evidence, independent review and source-vs-RC-vs-registry boundary. |
 
 ### Code Snippets
@@ -114,12 +115,12 @@ Re-pair is `new authenticated PairResponse -> atomic full-record replacement`.
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Project and activate a strict contract with exact allowed paths and tests.
-- [ ] Add required typed PairResponse tenant projection to hosted and reference pair handlers.
-- [ ] Make DeviceRecord require/validate/persist tenantId across pair, restart and renewal; re-pair atomically replaces it.
-- [ ] Remove host-authored egress/journal tenant authority and bind daemon composition to enrollment.
-- [ ] Add old-record, tamper, re-pair, restart, renewal and no-token-parsing negatives.
-- [ ] Prepare aligned 0.7.0 and keys 0.3.0 exact release graph without publication.
-- [ ] Run focused/full gates and real disposable dataplane evidence.
+- [x] Project and activate a strict contract with exact allowed paths and tests.
+- [x] Add required typed PairResponse tenant projection to hosted and reference pair handlers.
+- [x] Make DeviceRecord require/validate/persist tenantId across pair, restart and renewal; re-pair atomically replaces it.
+- [x] Remove host-authored egress/journal tenant authority and bind daemon composition to enrollment.
+- [x] Add old-record, tamper, re-pair, restart, renewal and no-token-parsing negatives.
+- [x] Prepare aligned 0.7.0 and keys 0.3.0 exact release graph without publication.
+- [x] Run focused/full gates and real disposable dataplane evidence.
 - [ ] Freeze the source subject and obtain an independent gate/typed acceptance receipt.
 - [ ] Update durable BYOK memory and report source/RC/npm/registry states separately.

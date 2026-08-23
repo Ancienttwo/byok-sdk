@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0 release candidate / @byok-sdk/keys 0.3.0 — Unreleased
+
+Authenticated enrollment tenant projection.
+
+- Projects the required, bounded, opaque, non-secret tenant binding from the
+  authenticated pairing code and registered cloud device row into
+  `PairResponse` and the atomic local `DeviceRecord`.
+- Makes the persisted enrollment record the only daemon tenant authority for
+  Agent egress, content receipts, acknowledgements and hosted journal rows.
+  Host configuration no longer authors those tenant identifiers.
+- Fails closed on legacy or tampered local records and requires re-pairing;
+  renewal preserves the exact binding and re-pair atomically replaces it.
+  There is no JWT/access-token parsing, Profile/config fallback, deviceId
+  inference or steady-state dual-read path.
+- Prepares the aligned public train at 0.7.0 and keys at 0.3.0 with its exact
+  core 0.7.0 edge. This entry records an unreleased source candidate; npm
+  publication, registry readback, merge/push, deploy and downstream cutover
+  require separate authority.
+
 ## 0.6.1 / @byok-sdk/keys 0.2.2 — 2026-08-23
 
 Agent-first persistence, controlled local/cloud projection, device-local

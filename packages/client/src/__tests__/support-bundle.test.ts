@@ -49,6 +49,7 @@ describe('support bundle privacy and bounds', () => {
     const dir = await tempDir();
     const record: DeviceRecord = {
       deviceId: 'SENTINEL_DEVICE_ID',
+      tenantId: 'SENTINEL_TENANT_ID',
       accessToken: 'SENTINEL_ACCESS_TOKEN',
       expiresAt: '2030-01-01T00:00:00.000Z',
       devicePrivateKeyPem: 'SENTINEL_PRIVATE_KEY',

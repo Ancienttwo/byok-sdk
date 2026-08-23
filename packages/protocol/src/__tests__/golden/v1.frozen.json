@@ -7226,11 +7226,17 @@
         },
         "refreshHint": {
           "type": "string"
+        },
+        "tenantId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": [
         "deviceId",
-        "accessToken"
+        "accessToken",
+        "tenantId"
       ],
       "additionalProperties": false
     },

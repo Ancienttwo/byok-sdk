@@ -1,7 +1,7 @@
 import os from 'node:os';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH } from '@byok-sdk/protocol';
-import type { ChallengeResponse, PairResponse, TokenResponse } from '@byok-sdk/protocol';
-import { DeviceStore, type DeviceRecord } from './store';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, PairResponseSchema } from '@byok-sdk/protocol';
+import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
+import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceRecord } from './store';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
 import { toHttpBase } from './url';
 
@@ -81,7 +81,18 @@ export class AuthManager {
     this.proactiveTimer = undefined;
     try {
       return await this.runCredentialMutation(async () => {
-        const existing = this.record ?? (await this.opts.store.load());
+        let existing = this.record;
+        if (!existing) {
+          try {
+            existing = await this.opts.store.load();
+          } catch (error) {
+            // Explicit pairing is the one authorized replacement path for a
+            // legacy/tampered enrollment file. It never reads through it: a
+            // fresh keypair and complete authenticated PairResponse replace
+            // the record atomically below.
+            if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+          }
+        }
         const keyPair = existing
           ? { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey }
           : generateDeviceKeyPair();
@@ -99,10 +110,15 @@ export class AuthManager {
         if (!res.ok) {
           throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
         }
-        const body = (await res.json()) as PairResponse;
+        // Pairing is the only time an authenticated tenant binding may enter
+        // local state. Parse the required wire contract before building the
+        // one atomic DeviceRecord; no token claim or host configuration is an
+        // alternate tenant authority.
+        const body = PairResponseSchema.parse(await res.json());
 
         const record: DeviceRecord = {
           deviceId: body.deviceId,
+          tenantId: body.tenantId,
           accessToken: body.accessToken,
           expiresAt: resolvePairExpiry(body.refreshHint),
           devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),

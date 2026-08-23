@@ -86,7 +86,7 @@ import { SessionWorkspaceStore } from './session-workspace-store';
 import { AgentSessionHandoffStore } from './agent-session-handoff-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
-import { DeviceStore, type DeviceRecord } from './store';
+import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceRecord } from './store';
 import { JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
@@ -190,13 +190,6 @@ export interface HostedJournalConfig {
    * to a closed set instead of a re-interpretation of an existing config.
    */
   mode: 'sqlite';
-  /**
-   * The tenant every journal row on this device is scoped to (§12.7.2's
-   * minimum fact set opens with tenant/product/device). Required: a hosted
-   * daemon that cannot say which tenant its durable evidence belongs to has
-   * evidence nobody can act on.
-   */
-  tenantId: string;
   /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
   busyTimeoutMs?: number;
   /** Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated. */
@@ -473,8 +466,6 @@ export interface DaemonConfig {
 }
 
 export interface AgentEgressConfig {
-  /** Authenticated deployment tenant bound into every local reliable record. */
-  tenantId: string;
   /** Exact policy the daemon is willing to consume from an Agent offer. */
   policy: AgentEgressPolicy;
   /** Named redaction hook for explicit contentful trajectory only. */
@@ -1050,9 +1041,6 @@ export function buildDaemonWithAdapters(
   if (config.agentEgress !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentEgress requires DaemonConfig.agentHome for the per-Agent local spool');
   }
-  if (config.agentEgress !== undefined && (config.agentEgress.tenantId.length === 0 || config.agentEgress.tenantId.trim() !== config.agentEgress.tenantId)) {
-    throw new Error('DaemonConfig.agentEgress.tenantId must be a non-empty canonical authenticated tenant id');
-  }
   const egressPolicy = resolveAgentEgressPolicy(config.agentEgress?.policy);
   const egressBatcherOptions: ProgressBatcherOptions | undefined = egressPolicy.activity.mode === 'contentful-trajectory'
     ? {
@@ -1115,9 +1103,11 @@ export function buildDaemonWithAdapters(
       });
   const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();
   const agentContentReadPolicies = resolveContentReadPolicies(egressPolicy, config.agentEgress?.contentRead);
-  const agentEgress = new AgentEgressController({
+  // Before authenticated enrollment is loaded, egress is deliberately unable
+  // to persist or acknowledge tenant-scoped records. startUnderLease replaces
+  // this with the exact loaded DeviceRecord binding before it accepts work.
+  let agentEgress = new AgentEgressController({
     policy: egressPolicy,
-    ...(config.agentEgress?.tenantId === undefined ? {} : { tenantId: config.agentEgress.tenantId }),
     ...(config.agentEgress?.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
   });
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
@@ -1138,11 +1128,6 @@ export function buildDaemonWithAdapters(
     // construction, not at the first envelope that needed it.
     if (config.hostedJournal.mode !== 'sqlite') {
       throw new Error(`DaemonConfig.hostedJournal.mode must be "sqlite" — got ${JSON.stringify(config.hostedJournal.mode)}`);
-    }
-    if (typeof config.hostedJournal.tenantId !== 'string' || config.hostedJournal.tenantId.trim() === '') {
-      throw new Error(
-        'DaemonConfig.hostedJournal.tenantId must be a non-empty tenant id — a hosted journal row with no tenant is durable evidence nobody can act on',
-      );
     }
     // Resolved HERE, in the same pure-config block, and deliberately BEFORE
     // any journal is constructed: rejecting a malformed storage policy must
@@ -1250,6 +1235,15 @@ export function buildDaemonWithAdapters(
 
   let connection: ConnectionManager | undefined;
   let connectionState: ConnectionState = 'closed';
+  // A successful start owns tenant-bound egress and journal composition. A
+  // re-pair during that lifetime is refused rather than leaving any active
+  // closure on the previous record; stop() must complete first.
+  let daemonStarted = false;
+  // Once an active daemon begins an explicit re-pair, no inbound envelope or
+  // host reliable append may observe the old binding after the new record is
+  // committed. A failed replacement before commit clears this; a failed
+  // shutdown after commit remains fail-closed.
+  let tenantRebinding = false;
   let runner: TaskRunner | undefined;
   // M4 Phase 2: local control socket (see `control-server.ts`) — started in
   // `start()`, closed in `stop()`. `undefined` whenever the daemon isn't
@@ -1367,6 +1361,8 @@ export function buildDaemonWithAdapters(
   }
 
   async function pairUnderLease(pairingCode: string): Promise<DeviceRecord> {
+    const wasRunning = daemonStarted;
+    if (wasRunning) tenantRebinding = true;
     // Pairing persists device.json. It intentionally does not arm proactive
     // renewal (AuthManager.loadExisting does that under start()'s lease), so a
     // short-lived pair command can release ownership once the write lands.
@@ -1379,9 +1375,39 @@ export function buildDaemonWithAdapters(
     // recover the outgoing deviceId afterward to know whose cursor to clear.
     // Reading straight from `store` (not `auth.deviceId`) works whether or
     // not `start()`/`loadExisting()` ran in this process before `pair()`.
+    let replacementPersisted = false;
     try {
-      const previous = await store.load();
+      let previous: DeviceRecord | undefined;
+      try {
+        previous = await store.load();
+      } catch (error) {
+        // Pairing may replace a legacy/tampered record, but must not derive a
+        // cursor/device identity from an untrusted file.
+        if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+      }
       const record = await auth.pair(pairingCode);
+      replacementPersisted = true;
+      // No stopped daemon operation may continue using a superseded binding
+      // between re-pair and the next start. startUnderLease will construct the
+      // bound controller only from the newly loaded DeviceRecord.
+      if (config.agentEgress !== undefined) {
+        // TaskRunner owns the previous controller by reference for this run;
+        // deactivate it before the new record can be followed by shutdown
+        // terminal/progress activity.
+        agentEgress.deactivate();
+        agentEgress = new AgentEgressController({
+          policy: egressPolicy,
+          ...(config.agentEgress.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
+        });
+      }
+      if (wasRunning) {
+        // The pair response has replaced device.json, so the running daemon's
+        // closures are no longer allowed to handle work under the old record.
+        // Completing this shutdown before pair() resolves makes restart an
+        // explicit, fresh load of the new authenticated binding.
+        await runShutdownSequence('re-pairing enrollment binding');
+        tenantRebinding = false;
+      }
       if (previous && previous.deviceId !== record.deviceId) {
         await cursorStore.clear(config.serverUrl, previous.deviceId);
       }
@@ -1392,6 +1418,7 @@ export function buildDaemonWithAdapters(
       }
       return record;
     } catch (err) {
+      if (wasRunning && !replacementPersisted) tenantRebinding = false;
       if (acquiredHere) {
         await daemonOwnerLease?.release();
         daemonOwnerLease = undefined;
@@ -1422,6 +1449,13 @@ export function buildDaemonWithAdapters(
     const record = await auth.loadExisting();
     if (!record) {
       throw new Error('device is not paired yet; call pair(pairingCode) first');
+    }
+    if (config.agentEgress !== undefined) {
+      agentEgress = new AgentEgressController({
+        policy: egressPolicy,
+        tenantId: record.tenantId,
+        ...(config.agentEgress.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
+      });
     }
     // Capability publication happens only after this SDK-owned preflight has
     // proved the canonical root/agents namespace can be materialized and
@@ -1550,7 +1584,7 @@ export function buildDaemonWithAdapters(
     // S3b: this daemon's journal identity — only knowable here, after
     // `auth.loadExisting()` has resolved the deviceId.
     const journalIdentity: JournalIdentity | undefined = config.hostedJournal
-      ? { tenantId: config.hostedJournal.tenantId, productId: config.productId, deviceId: record.deviceId }
+      ? { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId }
       : undefined;
 
     /**
@@ -1719,9 +1753,8 @@ export function buildDaemonWithAdapters(
     runner = new TaskRunner(deps);
     const handleAgentEgressEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'agent.egress.ack') return false;
-      const tenantId = config.agentEgress?.tenantId;
-      if (tenantId === undefined) return true;
-      await agentEgress.acknowledge({ ...envelope.payload, tenantId });
+      if (config.agentEgress === undefined) return true;
+      await agentEgress.acknowledge({ ...envelope.payload, tenantId: record.tenantId });
       return true;
     };
     const handleAgentContentReadEnvelope = async (envelope: Envelope): Promise<boolean> => {
@@ -1783,7 +1816,7 @@ export function buildDaemonWithAdapters(
       const result = await policyEngine.read({
         requestId: payload.requestId,
         actor: payload.actor,
-        tenantId: config.agentEgress.tenantId,
+        tenantId: record.tenantId,
         deviceId: record.deviceId,
         agentRef: payload.agentRef,
         surface: payload.surface,
@@ -1892,6 +1925,9 @@ export function buildDaemonWithAdapters(
       onEnvelope:
         activeJournal && journalIdentity
           ? async (envelope) => {
+              if (tenantRebinding) {
+                throw new Error('tenant enrollment is being re-paired; inbound work is blocked until restart');
+              }
               observer.handleInboundEnvelope(envelope);
               if (await handleAgentEgressEnvelope(envelope)) return;
               if (await handleAgentContentReadEnvelope(envelope)) return;
@@ -1907,6 +1943,9 @@ export function buildDaemonWithAdapters(
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();
             }
           : (envelope) => {
+              if (tenantRebinding) {
+                return Promise.reject(new Error('tenant enrollment is being re-paired; inbound work is blocked until restart'));
+              }
               observer.handleInboundEnvelope(envelope);
               if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);
@@ -1947,6 +1986,7 @@ export function buildDaemonWithAdapters(
       dispatchReliableRecord(record);
     }
     startPresenceProducer();
+    daemonStarted = true;
     } catch (err) {
       try {
         // startUnderLease already owns the process-local lifecycle slot. Run
@@ -2277,6 +2317,7 @@ export function buildDaemonWithAdapters(
       // doctor or a second daemon to overlap a residual writer.
       throw new Error('daemon shutdown mutation barrier is incomplete; ownership lease retained');
     }
+    daemonStarted = false;
   }
 
   /**
@@ -2807,6 +2848,9 @@ export function buildDaemonWithAdapters(
   async function publishReliableAgentEgress(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult> {
     if (config.agentEgress === undefined || agentHomeManager === undefined) {
       throw new Error('Agent reliable egress is not configured');
+    }
+    if (tenantRebinding) {
+      throw new Error('tenant enrollment is being re-paired; reliable egress is blocked until restart');
     }
     const binding = await agentHomeManager.acquire(input.agentRef);
     try {

@@ -77,10 +77,16 @@ export class AgentEgressController {
   private readonly latestStatus = emptyLane();
   private readonly reliableStatus = emptyLane();
   private readonly drops: AgentEgressDropReceipt[] = [];
+  private active = true;
 
   constructor(private readonly options: AgentEgressControllerOptions) {}
 
   get policy(): Readonly<AgentEgressPolicy> { return this.options.policy; }
+
+  /** Permanently fail closed after its authenticated enrollment is replaced. */
+  deactivate(): void {
+    this.active = false;
+  }
 
   status(): AgentEgressStatus {
     const reliable = this.reliableRecords();
@@ -102,6 +108,10 @@ export class AgentEgressController {
     // No Agent identity means this is the established legacy task lane. The
     // additive Agent egress contract has no authority to rewrite it.
     if (input.agentRef === undefined) return Object.freeze([...input.events]);
+    if (!this.active) {
+      this.noteDrop('latest-value', 'policy_denied', input.agentRef);
+      return [];
+    }
     if (this.options.policy.activity.mode === 'contentful-trajectory' && !input.serverCapabilities.includes('agent-egress-policy')) {
       this.noteDrop('latest-value', 'capability_missing', input.agentRef);
       return [];
@@ -126,7 +136,7 @@ export class AgentEgressController {
   }
 
   async appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult> {
-    if (this.options.tenantId === undefined) {
+    if (!this.active || this.options.tenantId === undefined) {
       this.noteDrop('reliable', 'policy_denied', input.agentRef);
       return { ok: false, reason: 'policy_denied' };
     }
@@ -165,7 +175,7 @@ export class AgentEgressController {
    * with `wireType: agent.content.receipt` before any transport attempt.
    */
   async appendContentReceipt(input: AgentEgressContentReceiptInput): Promise<AgentEgressReliableAppendResult> {
-    if (this.options.tenantId === undefined) {
+    if (!this.active || this.options.tenantId === undefined) {
       this.noteDrop('reliable', 'policy_denied', input.agentRef);
       return { ok: false, reason: 'policy_denied' };
     }
@@ -190,7 +200,7 @@ export class AgentEgressController {
   /** Retires only the record whose full Agent/tenant/revision/id/cursor tuple matches. */
   async acknowledge(ack: AgentReliableAck): Promise<boolean> {
     const spool = this.spools.get(agentKey(ack.agentRef));
-    if (!spool || this.options.tenantId === undefined || ack.tenantId !== this.options.tenantId) {
+    if (!this.active || !spool || this.options.tenantId === undefined || ack.tenantId !== this.options.tenantId) {
       this.noteDrop('reliable', 'ack_mismatch', ack.agentRef);
       return false;
     }
@@ -202,6 +212,7 @@ export class AgentEgressController {
   /** Re-open every existing Agent-local spool before retrying stable records after restart. */
   async recover(agentsRoot: string): Promise<void> {
     if (!path.isAbsolute(agentsRoot)) throw new Error('Agent egress recovery root must be absolute');
+    if (!this.active) throw new Error('Agent egress recovery requires an active authenticated enrollment');
     if (this.options.tenantId === undefined) {
       throw new Error('Agent egress recovery requires one authenticated tenant authority');
     }

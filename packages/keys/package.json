@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/keys",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "BYOK SDK key management: provider profiles, credential-backed auth headers, and direct provider transports",
   "type": "module",
   "license": "MIT",

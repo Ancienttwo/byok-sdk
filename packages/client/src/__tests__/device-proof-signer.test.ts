@@ -23,6 +23,7 @@ describe('stored device proof signer', () => {
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');
     await store.save({
       deviceId: 'device-a',
+      tenantId: 'tenant-a',
       accessToken: 'not-used-by-proof',
       expiresAt: '2026-08-10T00:00:00.000Z',
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
@@ -81,6 +82,7 @@ describe('stored device proof signer', () => {
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');
     await store.save({
       deviceId: 'device-a',
+      tenantId: 'tenant-a',
       accessToken: 'unused',
       expiresAt: '2026-08-10T00:00:00.000Z',
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),

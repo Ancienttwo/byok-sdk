@@ -269,7 +269,6 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       storeDir,
       hostedJournal: {
         mode: 'sqlite',
-        tenantId: 'tenant-stop-barrier',
         storagePolicy: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 },
       },
     };

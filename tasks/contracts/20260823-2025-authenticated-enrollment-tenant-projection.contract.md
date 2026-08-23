@@ -1,8 +1,9 @@
 # Task Contract: authenticated-enrollment-tenant-projection
 
-> **Status**: Active
+> **Status**: Partial
 > **Plan**: plans/plan-20260823-2025-authenticated-enrollment-tenant-projection.md
 > **Task Profile**: code-change
+> **Workflow Profile**: strict
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
@@ -88,7 +89,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"authenticated-enrollment-projection-tests","kind":"deterministic_test","paths":["*"]},{"id":"enrollment-restart-dataplane-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
@@ -104,6 +105,8 @@ allowed_paths:
   - docs/spec.md
   - docs/protocol.md
   - docs/host-local-storage-layout.md
+  - README.md
+  - packages/client/README.md
   - CHANGELOG.md
   - package.json
   - bun.lock
@@ -131,6 +134,7 @@ allowed_paths:
   - .ai/context/capabilities.json
   - .ai/harness/checks/latest.json
   - .ai/harness/runs/
+  - .ai/harness/handoff/
 ```
 
 ## Evidence Requirements
