@@ -3,13 +3,16 @@ import {
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
   DEVICE_ASSERTION_MAX_TTL_MS,
 } from '@byok-sdk/core';
+import path from 'node:path';
 import {
   createEnvelope,
   encodeEnvelope,
   PROTOCOL_VERSION,
   TASK_TRANSITIONS,
+  AGENT_EGRESS_POLICY_CAPABILITY,
+  AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
 } from '@byok-sdk/protocol';
-import type { CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
+import type { AgentEgressPolicy, AgentEgressReliablePayload, CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
@@ -25,6 +28,7 @@ import {
   stableAgentHomeOwnerId,
   type AgentHomeProjection,
 } from '../agent-home';
+import type { AgentRef } from '../agent-home';
 import {
   resolveLocalAgentReleaseIdentity,
   type LocalAgentReleaseIdentity,
@@ -95,6 +99,10 @@ import {
   validateProgressBatcherOptions,
   type ProgressBatcherOptions,
 } from './progress-batcher';
+import { AgentEgressController, type AgentEgressReliableAppendResult } from './agent-egress-controller';
+import { resolveAgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy';
+import { sanitizeEgressEnvelope, type AgentEgressSanitizer } from './agent-egress-sanitizer';
+import type { AgentReliableEgressRecord } from './agent-egress-spool';
 
 /**
  * M4 Phase 2 (originally control-socket-only). M5 batch-3 (workstream 2):
@@ -208,6 +216,12 @@ export interface DaemonConfig {
     hostStorageRoot: string;
     projection?: AgentHomeProjection;
   };
+  /**
+   * Explicit Agent-local/cloud egress selection. Omission still enforces the
+   * SDK metadata/status projection, but does not advertise or admit the new
+   * policy/reliable protocol surface.
+   */
+  agentEgress?: AgentEgressConfig;
   /**
    * Disabled by default. Enables local-only Git checkpoint repositories for
    * legacy task workspaces. Mutually exclusive with `agentHome`: strict Agent
@@ -438,6 +452,23 @@ export interface DaemonConfig {
   deviceAssertion?: DeviceAssertionConfig;
 }
 
+export interface AgentEgressConfig {
+  /** Authenticated deployment tenant bound into every local reliable record. */
+  tenantId: string;
+  /** Exact policy the daemon is willing to consume from an Agent offer. */
+  policy: AgentEgressPolicy;
+  /** Named redaction hook for explicit contentful trajectory only. */
+  sanitizer?: AgentEgressSanitizer;
+}
+
+export interface AgentReliableEgressInput {
+  agentRef: AgentRef;
+  sessionRef: string;
+  payload: unknown;
+  taskId?: string;
+  eventId?: string;
+}
+
 /**
  * Plan `device-assertion-broker`. Two fields, both about what this daemon will
  * refuse.
@@ -505,6 +536,8 @@ export interface DaemonStatus {
   operationalHealth: OperationalHealthSnapshot;
   /** Redacted, content-addressed device-local MCP registry status. */
   toolsets: McpToolsetRegistryStatus;
+  /** Content-free egress lane watermarks and typed last-drop facts. */
+  egress: AgentEgressStatus;
 }
 
 export interface Daemon {
@@ -512,6 +545,8 @@ export interface Daemon {
   start(): Promise<void>;
   stop(): Promise<void>;
   status(): DaemonStatus;
+  /** Append one sanitized reliable record before its first transport attempt. */
+  publishReliableAgentEgress?(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult>;
   /** Atomically replace the local registry when its current revision matches. */
   reloadMcpToolsets(
     mcpToolsets: Record<string, McpToolsetConfig> | undefined,
@@ -732,7 +767,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
  * gate, and therefore safe to advertise unconditionally the moment a daemon
  * genuinely does what it claims (as this one already does).
  */
-function computeCapabilities(adapters: RuntimeAdapter[], agentHomeConfigured = false): CapabilityFlag[] {
+function computeCapabilities(adapters: RuntimeAdapter[], agentHomeConfigured = false, agentEgressConfigured = false): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
@@ -750,6 +785,7 @@ function computeCapabilities(adapters: RuntimeAdapter[], agentHomeConfigured = f
     flags.push('toolset-selection');
   }
   if (agentHomeConfigured) flags.push('agent-home-contract');
+  if (agentEgressConfigured) flags.push(AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY);
   return flags;
 }
 
@@ -900,6 +936,19 @@ export function buildDaemonWithAdapters(
     );
   }
   validateProgressBatcherOptions(config.progressBatch);
+  if (config.agentEgress !== undefined && config.agentHome === undefined) {
+    throw new Error('DaemonConfig.agentEgress requires DaemonConfig.agentHome for the per-Agent local spool');
+  }
+  if (config.agentEgress !== undefined && (config.agentEgress.tenantId.length === 0 || config.agentEgress.tenantId.trim() !== config.agentEgress.tenantId)) {
+    throw new Error('DaemonConfig.agentEgress.tenantId must be a non-empty canonical authenticated tenant id');
+  }
+  const egressPolicy = resolveAgentEgressPolicy(config.agentEgress?.policy);
+  const egressBatcherOptions: ProgressBatcherOptions | undefined = egressPolicy.activity.mode === 'contentful-trajectory'
+    ? {
+        ...config.progressBatch,
+        flushIntervalMs: Math.min(config.progressBatch?.flushIntervalMs ?? 250, egressPolicy.activity.maxCoalesceMs),
+      }
+    : config.progressBatch;
 
   // Same up-front discipline as `maxTaskOutputBytes` above: the presence
   // cadence is pure config, so a band violation is a construction error rather
@@ -954,6 +1003,11 @@ export function buildDaemonWithAdapters(
         }),
       });
   const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();
+  const agentEgress = new AgentEgressController({
+    policy: egressPolicy,
+    ...(config.agentEgress?.tenantId === undefined ? {} : { tenantId: config.agentEgress.tenantId }),
+    ...(config.agentEgress?.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
+  });
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
   // S3b (L-002), same three-part shape as `gitWorkspace` above: optional
@@ -1261,6 +1315,9 @@ export function buildDaemonWithAdapters(
     // proved the canonical root/agents namespace can be materialized and
     // mutated. A configured-but-unusable root must never admit cloud work.
     await agentHomeManager?.preflight();
+    if (config.agentEgress !== undefined && config.agentHome !== undefined) {
+      await agentEgress.recover(path.join(config.agentHome.hostStorageRoot, 'agents'));
+    }
     fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
     // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own
@@ -1371,7 +1428,7 @@ export function buildDaemonWithAdapters(
     // own doc comment on why this isn't re-probed on every reconnect).
     observer.noteRuntimesDetected(runtimes);
     detectedRuntimeFacts = runtimes;
-    const capabilities = computeCapabilities(adapters, config.agentHome !== undefined);
+    const capabilities = computeCapabilities(adapters, config.agentHome !== undefined, config.agentEgress !== undefined);
 
     // S3b: this daemon's journal identity — only knowable here, after
     // `auth.loadExisting()` has resolved the deviceId.
@@ -1394,7 +1451,7 @@ export function buildDaemonWithAdapters(
      * the cloud side because the local bookkeeping hiccupped would be a worse
      * outcome than a missing local row.
      */
-    const sendEnvelope: TaskRunnerDeps['send'] =
+    const sendSanitizedEnvelope: TaskRunnerDeps['send'] =
       activeJournal && journalIdentity
         ? (envelope) => {
             observer.handleOutboundEnvelope(envelope);
@@ -1429,6 +1486,17 @@ export function buildDaemonWithAdapters(
             observer.handleOutboundEnvelope(envelope);
             connection?.send(envelope);
           };
+    const sendEnvelope: TaskRunnerDeps['send'] = (candidate) => {
+      const sanitized = sanitizeEgressEnvelope(candidate, egressPolicy, config.agentEgress?.sanitizer);
+      if (!sanitized.ok) {
+        // Fail closed at the single outbound boundary. In particular, a
+        // throwing sanitizer does not leave original candidate bytes on the
+        // WS/long-poll queue as a fallback.
+        agentEgress.noteTransportDrop(sanitized.reason);
+        return;
+      }
+      sendSanitizedEnvelope(sanitized.envelope);
+    };
 
     const deps: TaskRunnerDeps = {
       adapters,
@@ -1453,7 +1521,9 @@ export function buildDaemonWithAdapters(
       // untouched. See `observer.ts`'s module doc comment.
       send: sendEnvelope,
       blobClient,
-      batcherOptions: config.progressBatch,
+      batcherOptions: egressBatcherOptions,
+      agentEgress,
+      ...(config.agentEgress === undefined ? {} : { agentEgressPolicy: egressPolicy }),
       sessionWorkspaces,
       gitWorkspaceManager,
       gitWorkspaceStore,
@@ -1523,6 +1593,13 @@ export function buildDaemonWithAdapters(
       ...(activePressureEngine ? { admissionGuard: () => activePressureEngine.admissionGuard() } : {}),
     };
     runner = new TaskRunner(deps);
+    const handleAgentEgressEnvelope = async (envelope: Envelope): Promise<boolean> => {
+      if (envelope.type !== 'agent.egress.ack') return false;
+      const tenantId = config.agentEgress?.tenantId;
+      if (tenantId === undefined) return true;
+      await agentEgress.acknowledge({ ...envelope.payload, tenantId });
+      return true;
+    };
 
     connection = new ConnectionManager({
       serverUrl: config.serverUrl,
@@ -1565,6 +1642,7 @@ export function buildDaemonWithAdapters(
         activeJournal && journalIdentity
           ? async (envelope) => {
               observer.handleInboundEnvelope(envelope);
+              if (await handleAgentEgressEnvelope(envelope)) return;
               // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
               // 新 mailbox row；保留现有 recovery evidence". Throwing HERE, ahead
               // of the append, reuses the ordering the journal branch already
@@ -1578,6 +1656,7 @@ export function buildDaemonWithAdapters(
             }
           : (envelope) => {
               observer.handleInboundEnvelope(envelope);
+              if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();
             },
       onStateChange: (state) => {
@@ -1611,6 +1690,9 @@ export function buildDaemonWithAdapters(
     });
     await connection.start();
     await connection.waitForAck();
+    for (const record of agentEgress.retryableReliableRecords(connection.getServerCapabilities())) {
+      dispatchReliableRecord(record);
+    }
     startPresenceProducer();
     } catch (err) {
       try {
@@ -2425,6 +2507,63 @@ export function buildDaemonWithAdapters(
     return observer.tasks();
   }
 
+  function dispatchReliableRecord(record: AgentReliableEgressRecord): void {
+    if (record.sessionRef === undefined) {
+      agentEgress.noteTransportDrop('invalid_envelope', record.agentRef);
+      return;
+    }
+    if (!connection?.getServerCapabilities().includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY)) {
+      // The append stays durable and is retried after the next acknowledged
+      // connection. It is never republished through latest-value activity.
+      agentEgress.noteTransportDrop('capability_missing', record.agentRef);
+      return;
+    }
+    const envelope = createEnvelope('agent.egress.reliable', {
+      agentRef: record.agentRef,
+      sessionRef: record.sessionRef,
+      policyRevision: record.policyRevision,
+      eventId: record.eventId,
+      cursor: record.cursor,
+      payload: record.payload as AgentEgressReliablePayload['payload'],
+      contentHash: record.payloadHash,
+      byteCount: record.byteCount,
+    }, {
+      ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
+      sessionRef: record.sessionRef,
+    });
+    // The payload's optional host redaction already ran before append/hash;
+    // this second SDK boundary pass validates the frozen envelope without
+    // invoking a non-idempotent host sanitizer a second time.
+    const sanitized = sanitizeEgressEnvelope(envelope, egressPolicy, undefined, { lane: 'reliable' });
+    if (!sanitized.ok) {
+      agentEgress.noteTransportDrop(sanitized.reason, record.agentRef);
+      return;
+    }
+    connection.send(sanitized.envelope);
+  }
+
+  async function publishReliableAgentEgress(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult> {
+    if (config.agentEgress === undefined || agentHomeManager === undefined) {
+      throw new Error('Agent reliable egress is not configured');
+    }
+    const binding = await agentHomeManager.acquire(input.agentRef);
+    try {
+      await agentHomeManager.initialize(binding);
+      const appended = await agentEgress.appendReliable({
+        homeDir: binding.resolution.canonicalHome,
+        agentRef: binding.resolution.agentRef,
+        sessionRef: input.sessionRef,
+        payload: input.payload,
+        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+        ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
+      });
+      if (appended.ok) dispatchReliableRecord(appended.record);
+      return appended;
+    } finally {
+      await binding.lease.release();
+    }
+  }
+
   function status(): DaemonStatus {
     return {
       localAgentRelease,
@@ -2437,6 +2576,7 @@ export function buildDaemonWithAdapters(
       branding: config.branding,
       operationalHealth: operationalHealth.snapshot(),
       toolsets: toolsetRegistry.status(),
+      egress: agentEgress.status(),
     };
   }
 
@@ -2460,6 +2600,7 @@ export function buildDaemonWithAdapters(
     start,
     stop,
     status,
+    publishReliableAgentEgress,
     reloadMcpToolsets,
     reportMcpToolsetObservation,
     subscribe,

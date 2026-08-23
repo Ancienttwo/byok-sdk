@@ -10,6 +10,7 @@ import {
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   type AgentEvent,
+  type AgentEgressPolicy,
   type BlobRef,
   type Envelope,
   type PermissionMode,
@@ -19,6 +20,7 @@ import {
   type TerminalInferenceUsage,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
+  type TaskOfferForAgentWithEgressPayload,
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
 import {
@@ -66,6 +68,7 @@ import type { SessionWorkspaceStore } from './session-workspace-store';
 import type { GitWorkspaceManager, GitWorkspaceLease, GitWorkspaceObservation, GitWorkspaceError, GitErrorCategory } from './git-workspace';
 import { prependGitWorkspaceGuidance } from './git-workspace';
 import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './git-workspace-store';
+import type { AgentEgressController } from './agent-egress-controller';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -293,6 +296,10 @@ export interface TaskRunnerDeps {
   workspaceRoot: string;
   /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
   agentHome?: AgentHomeManager;
+  /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
+  agentEgressPolicy?: Readonly<AgentEgressPolicy>;
+  /** Always-present projection/sanitizer consumer; it defaults to metadata-only. */
+  agentEgress?: AgentEgressController;
   /** Durable exact-match Agent session handoff authority. */
   agentSessionHandoffs?: AgentSessionHandoffStore;
   deviceId: string;
@@ -628,13 +635,17 @@ function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor): boole
   return descriptor.capabilities.mcpToolsets === true;
 }
 
-type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload;
+type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload;
 
 function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
-  if (!('requiredToolsets' in payload)) return payload;
-  const { requiredToolsets, ...offer } = payload;
+  const { requiredToolsets, egressPolicy, ...offer } = payload as TaskOfferWithToolsetsPayload & Partial<TaskOfferForAgentWithEgressPayload>;
   void requiredToolsets;
+  void egressPolicy;
   return offer as TaskOfferPayload;
+}
+
+function sameEgressPolicy(left: Readonly<AgentEgressPolicy>, right: Readonly<AgentEgressPolicy>): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function offeredAgentRef(payload: AcceptedOfferPayload): AgentRef | undefined {
@@ -1149,6 +1160,9 @@ export class TaskRunner {
       case 'task.offer_for_agent':
         await this.handleOffer(envelope.task_id, envelope.payload, true);
         return;
+      case 'task.offer_for_agent_with_egress':
+        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
         return;
@@ -1205,6 +1219,12 @@ export class TaskRunner {
     const decline = (reason: string, retryable: boolean): void => {
       this.decline(taskId, reason, retryable, agentRef);
     };
+    if ('egressPolicy' in payload) {
+      if (this.deps.agentEgressPolicy === undefined || !sameEgressPolicy(this.deps.agentEgressPolicy, payload.egressPolicy)) {
+        decline('Agent egress offer policy is not exactly enabled by this daemon', false);
+        return;
+      }
+    }
 
     // S3b (L-002): the pre-claim admission veto — see
     // `TaskRunnerDeps.admissionGuard`'s own doc comment. Consulted here,
@@ -1639,7 +1659,8 @@ export class TaskRunner {
         return;
       }
 
-      const active: ActiveTask = {
+      let active!: ActiveTask;
+      active = {
         taskId,
         adapter: pick.adapter,
         session,
@@ -1658,7 +1679,15 @@ export class TaskRunner {
         gitBaseline,
         summaryParts: [],
         batcher: new ProgressBatcher(
-          (seq, events) => this.deps.send(createEnvelope('task.progress', { seq, events }, { taskId, seq })),
+          (seq, events) => {
+            const projected = this.deps.agentEgress?.projectLatestValue({
+              agentRef: active.agentRef,
+              taskId,
+              events,
+              serverCapabilities: this.deps.getServerCapabilities?.() ?? [],
+            }) ?? events;
+            if (projected.length > 0) this.deps.send(createEnvelope('task.progress', { seq, events: [...projected] }, { taskId, seq }));
+          },
           this.deps.batcherOptions,
         ),
         approvalQueue: [],
@@ -2015,7 +2044,15 @@ export class TaskRunner {
           active.summaryParts.push(event.text);
         }
         if (event.type === 'artifact') {
-          await this.sendArtifact(active, event.name, event.contentType);
+          if (active.agentRef !== undefined && this.deps.agentEgress !== undefined) {
+            // A runtime artifact is content, not activity metadata. Strict
+            // Agent egress never uploads it through the legacy blob path;
+            // only the separately capability-gated artifact-read contract
+            // may authorize a content transfer.
+            this.deps.agentEgress.noteTransportDrop('policy_denied', active.agentRef);
+          } else {
+            await this.sendArtifact(active, event.name, event.contentType);
+          }
         }
         active.batcher.push(event);
       }

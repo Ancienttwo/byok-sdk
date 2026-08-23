@@ -19,6 +19,7 @@ export type {
   McpToolsetStatus,
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
+  AgentEgressPolicy,
 } from './types';
 export type { AgentRef } from './agent-home';
 export {
@@ -86,7 +87,36 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig } from './daemon/create-daemon';
+export type {
+  Daemon,
+  DaemonConfig,
+  DaemonStatus,
+  DaemonOverrides,
+  DaemonBranding,
+  HostedJournalConfig,
+  DeviceAssertionConfig,
+  AgentEgressConfig,
+  AgentReliableEgressInput,
+} from './daemon/create-daemon';
+export type {
+  AgentEgressDropReceipt,
+  AgentEgressLaneStatus,
+  AgentEgressStatus,
+} from './daemon/agent-egress-policy';
+export type { AgentEgressSanitizer, AgentEgressSanitizerContext } from './daemon/agent-egress-sanitizer';
+export {
+  AgentReliableSpool,
+  AgentReliableSpoolError,
+  AgentReliableQuotaError,
+  AGENT_EGRESS_DIRECTORY,
+  AGENT_RELIABLE_SPOOL_FILENAME,
+} from './daemon/agent-egress-spool';
+export type {
+  AgentReliableAck,
+  AgentReliableAppendInput,
+  AgentReliableEgressRecord,
+  LatestValueRecord,
+} from './daemon/agent-egress-spool';
 export {
   McpToolsetRevisionConflictError,
   McpToolsetDefinitionRevisionConflictError,
