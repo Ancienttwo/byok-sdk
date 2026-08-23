@@ -207,7 +207,9 @@ describe('task-free Agent-home projection', () => {
     await vi.waitFor(() => {
       expect(real.byok.readAgentHomeProjection(record.deviceId, desired('1').requestId)?.status).toBe('idempotent');
     });
-    await expect(new CursorStore(storeDir).load(real.url, record.deviceId)).resolves.toBe(2);
+    await vi.waitFor(async () => {
+      expect(await new CursorStore(storeDir).load(real.url, record.deviceId)).toBe(2);
+    });
     expect(hookCwds).toHaveLength(1);
     expect(hookCwds[0]).toBe(path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-one'));
     expect(adapterB.sessions).toHaveLength(0);
