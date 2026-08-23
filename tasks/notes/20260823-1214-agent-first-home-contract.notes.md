@@ -73,6 +73,11 @@
 - Full required dataplane mode with `BYOK_REQUIRE_DATAPLANE=1`: 24 files and
   289 tests passed; 5 explicitly non-applicable tests skipped. This is runtime
   Postgres/MinIO evidence, separate from migration/static SQL checks.
+- The first acceptance preparation found the harness treats `deploy` as a
+  subject-wide irreversible-risk category. The declared runtime oracle was
+  widened from two implementation directories to the normalized final subject;
+  its executable command remains the mandatory disposable-Postgres readback,
+  not a documentation or static-SQL assertion.
 - Full `bun run test`: client 1339, cloud 192, cloud-dataplane 74 (83 live
   tests skipped), conformance 141, core 251, protocol 293, server 247, and all
   remaining package suites passed.

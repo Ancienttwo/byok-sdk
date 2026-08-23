@@ -110,7 +110,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"agent-home-contract-tests","kind":"deterministic_test","paths":["*"]},{"id":"agent-home-durable-readback","kind":"runtime_readback","paths":["packages/cloud-dataplane/src/","deploy/sql/"]}]}
+{"protocol":1,"oracles":[{"id":"agent-home-contract-tests","kind":"deterministic_test","paths":["*"]},{"id":"agent-home-durable-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
