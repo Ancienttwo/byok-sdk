@@ -1,6 +1,6 @@
 # Implementation Notes: agent-local-cloud-egress-contract
 
-> **Status**: Active
+> **Status**: Review
 > **Plan**: plans/plan-20260823-1639-agent-local-cloud-egress-contract.md
 > **Contract**: tasks/contracts/20260823-1639-agent-local-cloud-egress-contract.contract.md
 > **Review**: tasks/reviews/20260823-1639-agent-local-cloud-egress-contract.review.md
@@ -37,6 +37,16 @@
 - Latest-value state retains at most one value per Agent. Its tenant byte quota
   does not reinterpret the reliable per-Agent event quota as a tenant-wide
   Agent-count limit; different Agents remain isolated.
+- The first full typecheck found that the in-memory conformance composition did
+  not project the newly required `egress` port. The port already existed in
+  the cloud store authority; the fixture wiring was added and its 58-test
+  composition suite passed.
+- The first full test exposed an over-broad boundary: the new sanitizer was
+  rewriting legacy `task.decline`/`task.fail` reasons. Sanitization is now
+  restricted to active `task.offer_for_agent_with_egress` tasks; legacy tasks
+  and plain Agent-home offers preserve their established wire semantics. A
+  focused regression plus the previously failing legacy suites and the second
+  full test pass prove the boundary.
 
 ## Tradeoffs Considered
 
@@ -72,6 +82,15 @@
 - Focused receipt reliability evidence: protocol 121, client 8, server 3,
   cloud 18 tests passed; affected package typechecks and `git diff --check`
   passed before the final repository gate.
+- Final machine evidence: `bun run build`, `bun run typecheck`, and
+  `bun run test` passed at final code HEAD; client 1373, cloud 200,
+  protocol 313, server 252, conformance 142 and every remaining package suite
+  passed. Disposable Postgres/MinIO
+  `agent-egress-contract.test.ts` passed 1/1 with
+  `BYOK_REQUIRE_DATAPLANE=1`.
+- `repo-harness run verify-contract ... --strict` passed 26/26 and projected
+  the contract to `Fulfilled`. The disposable Docker substrate was removed
+  with `down -v`; no migration was executed outside that test database.
 
 ## Promotion Filter
 
