@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:110fae6a5d977a72a378041fe3027db3e2233cf8b39c3d7f82c076edb82d58b8
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 3ff409337e6f8263934c45756ec28eebb1d66f73
+> **Verification Evidence SHA256**: sha256:7b35117d70ebaa57d48513af2042290c4bb6dc5eeaa67ec2a476802bccff95b1
+> **Issued At**: 2026-08-23T15:38:19.204Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Independent frozen-subject gate passed the additive fresh-session and exact handoff authority contract
 - Findings: none
 
 ## Behavior Diff Notes
