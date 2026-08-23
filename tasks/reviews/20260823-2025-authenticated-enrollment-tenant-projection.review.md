@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:cc881b8d2a935dbe4f338d85581e5a4a4ca0ee6af93aad08105c7626c2281fea
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 70002fb1bd57afec0ded19c05f7c649e4137ee0d
+> **Verification Evidence SHA256**: sha256:2f4419006c4a621233bbf3ffb72ac40b0f700c6e1761b47734af9287512cd9b5
+> **Issued At**: 2026-08-23T13:08:34.780Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: User approved Stage A source and RC preparation only; independent frozen-subject gate passed on 1dfc34d. No merge, push, publish, deploy, production or secret authority.
 - Findings: none
 
 ## Behavior Diff Notes
