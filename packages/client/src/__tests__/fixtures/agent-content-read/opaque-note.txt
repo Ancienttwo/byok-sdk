@@ -1,0 +1,1 @@
+fixture content stays opaque until an explicit content-read request.
