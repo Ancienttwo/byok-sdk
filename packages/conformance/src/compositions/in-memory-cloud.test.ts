@@ -34,6 +34,7 @@ const inMemoryFactory: CloudCompositionFactory = {
         tasks: stores.tasks,
         cancellations: stores.cancellations,
         receipts: stores.receipts,
+        egress: stores.egress,
         proofReceipts: stores.proofReceipts,
         blobs: stores.blobs,
         rateLimiter: stores.rateLimiter,
