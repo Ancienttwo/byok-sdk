@@ -1,6 +1,6 @@
 # Implementation Notes: agent-local-cloud-egress-contract
 
-> **Status**: Review
+> **Status**: Active
 > **Plan**: plans/plan-20260823-1639-agent-local-cloud-egress-contract.md
 > **Contract**: tasks/contracts/20260823-1639-agent-local-cloud-egress-contract.contract.md
 > **Review**: tasks/reviews/20260823-1639-agent-local-cloud-egress-contract.review.md
@@ -47,6 +47,15 @@
   and plain Agent-home offers preserve their established wire semantics. A
   focused regression plus the previously failing legacy suites and the second
   full test pass prove the boundary.
+- The first independent semantic gate rejected subject `fac1c0c` on two
+  concrete gaps. Hosted long-poll cancellation filtering omitted
+  `task.offer_for_agent_with_egress`, allowing an already-cancelled egress
+  offer to be delivered beside `task.cancel`; `cdf1c5e` adds the new offer
+  to the exact filter and proves cancel-only readback. Separately,
+  per-envelope content audit stores had instance-local queues, so concurrent
+  same-Agent writers could duplicate one request id; `1145c68` keys one
+  writer queue by canonical Agent-home ledger path and proves exact replay,
+  conflict refusal, restart readback, and cross-Agent isolation.
 
 ## Tradeoffs Considered
 
@@ -91,6 +100,10 @@
 - `repo-harness run verify-contract ... --strict` passed 26/26 and projected
   the contract to `Fulfilled`. The disposable Docker substrate was removed
   with `down -v`; no migration was executed outside that test database.
+- That 26/26 receipt and the first acceptance preparation belong to the
+  rejected `fac1c0c` subject and are historical only. The replacement subject
+  must regenerate machine evidence and semantic acceptance after the two gate
+  fixes; no stale receipt may be reused.
 
 ## Promotion Filter
 

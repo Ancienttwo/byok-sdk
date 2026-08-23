@@ -1,6 +1,6 @@
 # Task Contract: agent-local-cloud-egress-contract
 
-> **Status**: Fulfilled
+> **Status**: Active
 > **Plan**: plans/plan-20260823-1639-agent-local-cloud-egress-contract.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
