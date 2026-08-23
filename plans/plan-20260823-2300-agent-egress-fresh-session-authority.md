@@ -163,7 +163,7 @@ At 10x scale the first pressure point remains per-Agent/tenant reliable backlog,
 - [x] Add failing fresh-execution and exact-reliable-handoff regression guards.
 - [x] Implement protocol capability/message plus client/cloud/server composition with no compatibility fallback.
 - [x] Run focused protocol/client/cloud/server tests and affected typechecks/builds.
-- [ ] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
+- [x] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
 - [ ] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent frozen-subject gate.
 
 ## Failure Handling and Rollback
@@ -186,5 +186,5 @@ Before publication, rollback is deletion/revert of this isolated source branch. 
 - [x] Add failing fresh-execution and exact-reliable-handoff regression guards.
 - [x] Implement protocol capability/message plus client/cloud/server composition with no compatibility fallback.
 - [x] Run focused protocol/client/cloud/server tests and affected typechecks/builds.
-- [ ] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
+- [x] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
 - [ ] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent frozen-subject gate.

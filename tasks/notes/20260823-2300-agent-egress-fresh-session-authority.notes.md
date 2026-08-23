@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260823-2300-agent-egress-fresh-session-authority.md
 > **Contract**: tasks/contracts/20260823-2300-agent-egress-fresh-session-authority.contract.md
 > **Review**: tasks/reviews/20260823-2300-agent-egress-fresh-session-authority.review.md
-> **Last Updated**: 2026-08-23 23:22
+> **Last Updated**: 2026-08-23 23:24
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -60,8 +60,14 @@
   the first run hit the existing `daemon-auth.test.ts` SQLite WAL snapshot
   race, its isolated 24-test rerun passed, and the unchanged full retry passed.
 - Release graph passed for eight aligned dispatch manifests at `0.8.0` and
-  keys `0.3.1`. Pack/readback remains pending until this source tree is
-  committed and clean, as required by the pack gate.
+  keys `0.3.1`.
+- Clean-commit pack/readback closed all ten tarballs and an isolated standard
+  npm install to exact `0.8.0` internal edges; keys `0.3.1` resolved only core
+  `0.8.0`, and cloud-dataplane carried the exact 13 committed migrations.
+- The repository-owned disposable Postgres + MinIO substrate was started
+  healthy, the required dataplane suite passed 292 tests with 5 intentional
+  skips, and `docker compose ... down -v` removed only those throwaway
+  containers, network and volumes.
 
 ## Promotion Filter
 
