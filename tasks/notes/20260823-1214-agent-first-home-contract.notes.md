@@ -168,6 +168,13 @@
   the direct store API still rejects omitted identity. The real-cloud
   long-poll Agent lifecycle, cloud cancellation/Agent suites, and monorepo
   typecheck passed after the fix.
+- The next full run reached the protocol freeze guard and correctly reported
+  that the tightened portable Agent segment regex had not yet been projected
+  into `v1.frozen.json`. Because AgentRef itself is introduced and remains
+  unreleased inside this same work-package, the reviewed Windows-safe rule is
+  the single v1 authority rather than a change to a previously shipped field.
+  The repository's explicit golden regeneration path updated that fingerprint;
+  the isolated freeze suite passed 38/38.
 
 ## Promotion Filter
 
