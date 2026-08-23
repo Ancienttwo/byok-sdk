@@ -109,6 +109,9 @@
   full typecheck, full test, strict workflow, and the required real
   Postgres/MinIO dataplane oracle passed. The disposable substrate was removed
   again with `down -v`.
+- Second independent semantic gate passed exact source subject `4353cd3`.
+  The user-approved waiver was then bound to the normalized final subject and
+  frozen verification evidence; `acceptance-receipt verify` returned pass.
 
 ## Promotion Filter
 
