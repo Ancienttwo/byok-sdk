@@ -146,12 +146,14 @@ describe('fresh Agent egress session authority', () => {
       agentRef,
       sessionRef: 'invented-native-session',
       runtimeId: 'pi',
+      taskId: freshTaskId,
       payload: { rejectedBytes },
     })).rejects.toThrow(/handoff/i);
     await expect(publish({
       agentRef,
       sessionRef,
       runtimeId: 'codex',
+      taskId: freshTaskId,
       payload: { rejectedBytes },
     })).rejects.toThrow(/handoff/i);
     await expect(publish({
@@ -165,8 +167,15 @@ describe('fresh Agent egress session authority', () => {
       agentRef: { agentId: agentRef.agentId, profileRevision: 'wrong-profile' },
       sessionRef,
       runtimeId: 'pi',
+      taskId: freshTaskId,
       payload: { rejectedBytes },
     })).rejects.toThrow(/handoff/i);
+    await expect(publish({
+      agentRef,
+      sessionRef,
+      runtimeId: 'pi',
+      payload: { rejectedBytes },
+    } as never)).rejects.toThrow(/taskId/i);
     expect(reliableEnvelopes()).toHaveLength(beforeRejected);
     const spool = await fs.readFile(path.join(home, '.byok', 'egress', 'reliable-v1.jsonl'), 'utf8');
     expect(spool).not.toContain(rejectedBytes);

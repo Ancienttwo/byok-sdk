@@ -627,7 +627,7 @@ The authority for each datum is explicit:
 | Session handoff | SDK-owned canonical Agent-home `.byok/runtime-sessions/` | SDK records exact AgentRef/profile/runtime/cwd/session and fsyncs it before exposing the session |
 | Resume `sessionRef` | Existing exact handoff | The old egress offer remains exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
 | Egress policy and fresh capability | Host-selected typed policy plus durable device declaration | Cloud/server admit only the exact declared capability; presence is not authority |
-| Reliable egress identity | The handoff read by the public publisher | Publisher proves exact handoff before durable append/send; cloud receipt and ack do not mint a session |
+| Reliable egress identity | The handoff read by the public publisher | Publisher proves exact AgentRef/task/runtime/cwd/session handoff before durable append/send; cloud receipt and ack do not mint a session |
 
 Protocol v1 remains frozen. The repair is additive and keeps the old wire facts
 separate:
@@ -651,8 +651,9 @@ issues its real session → SDK fsyncs the exact AgentRef/runtime/cwd/session
 handoff → `task.started` → reliable egress. `wire execution` state,
 `runtime/session` state, durable handoff state, and the latest-value/reliable
 egress lanes remain separate state vocabularies; one cannot be inferred from
-another. The public reliable publisher rejects an invented session even when a
-caller supplies otherwise plausible identity fields.
+another. The public reliable publisher requires the exact task and rejects an
+invented session even when a caller supplies otherwise plausible identity
+fields.
 
 This is an upstream-reopened source candidate after the `0.7.0` deadlock. The
 existing `0.7.0` release/registry facts are unchanged; the fresh-session

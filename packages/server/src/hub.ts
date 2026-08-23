@@ -1746,6 +1746,12 @@ export class ConnectionHub {
     if (Object.prototype.hasOwnProperty.call(input, 'sessionRef')) {
       throw new Error('fresh Agent egress dispatch must not carry sessionRef');
     }
+    if (typeof input.deviceId !== 'string' || input.deviceId.length === 0) {
+      throw new Error('fresh Agent egress dispatch requires an explicit deviceId');
+    }
+    if (input.agentRef === undefined || input.egressPolicy === undefined) {
+      throw new Error('fresh Agent egress dispatch requires exact AgentRef and egress policy');
+    }
     return this.dispatchInternal(input, true);
   }
 

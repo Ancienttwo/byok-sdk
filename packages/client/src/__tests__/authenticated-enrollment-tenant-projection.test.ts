@@ -199,6 +199,7 @@ describe('authenticated enrollment tenant projection', () => {
       agentRef: { agentId: 'active-repair-agent', profileRevision: 'r1' },
       sessionRef: 'active-repair-session',
       runtimeId: 'pi',
+      taskId: 'active-repair-task',
       payload: { status: 'must-not-use-stale-tenant' },
     })).rejects.toThrow(/handoff/i);
   });

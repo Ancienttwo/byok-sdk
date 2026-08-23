@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260823-2300-agent-egress-fresh-session-authority.md
 > **Contract**: tasks/contracts/20260823-2300-agent-egress-fresh-session-authority.contract.md
 > **Review**: tasks/reviews/20260823-2300-agent-egress-fresh-session-authority.review.md
-> **Last Updated**: 2026-08-23 23:24
+> **Last Updated**: 2026-08-23 23:34
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -68,6 +68,13 @@
   healthy, the required dataplane suite passed 292 tests with 5 intentional
   skips, and `docker compose ... down -v` removed only those throwaway
   containers, network and volumes.
+- The first independent gate correctly returned FAIL on frozen subject
+  `1384a29`: an untyped caller could omit the fresh API policy and fall through
+  to the ordinary Agent offer, and reliable publishing could omit `taskId`.
+  The bounded correction makes device/AgentRef/policy runtime-required before
+  fresh dispatch and makes taskId mandatory/exact before append/send. Focused
+  server/client tests and both typechecks pass on the corrected tree; no
+  AcceptanceReceipt was issued for the failed subject.
 
 ## Promotion Filter
 

@@ -504,8 +504,9 @@ export interface AgentReliableEgressInput {
   sessionRef: string;
   /** Exact runtime identity from the durable Agent-home handoff. */
   runtimeId: string;
+  /** Exact task identity from the same durable Agent-home handoff. */
+  taskId: string;
   payload: unknown;
-  taskId?: string;
   eventId?: string;
 }
 
@@ -2870,7 +2871,7 @@ export function buildDaemonWithAdapters(
         runtimeId: input.runtimeId,
         cwd: binding.resolution.canonicalHome,
       });
-      if (input.taskId !== undefined && handoff.taskId !== input.taskId) {
+      if (handoff.taskId !== input.taskId) {
         throw new Error('Agent reliable egress taskId does not match the durable session handoff');
       }
       const appended = await agentEgress.appendReliable({
@@ -2878,7 +2879,7 @@ export function buildDaemonWithAdapters(
         agentRef: binding.resolution.agentRef,
         sessionRef: input.sessionRef,
         payload: input.payload,
-        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+        taskId: input.taskId,
         ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
       });
       if (appended.ok) dispatchReliableRecord(appended.record);

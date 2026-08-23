@@ -79,6 +79,18 @@ describe('reference-server Agent egress contract', () => {
     });
     ws = daemon.ws;
 
+    await expect(byok.dispatchFreshAgentEgress({
+      deviceId: daemon.deviceId,
+      instruction: 'must not downgrade without policy',
+      agentRef: AGENT_REF,
+      egressPolicy: undefined,
+    } as never)).rejects.toThrow(/requires exact AgentRef and egress policy/);
+    await expect(byok.dispatchFreshAgentEgress({
+      instruction: 'must not pick an ambient device',
+      agentRef: AGENT_REF,
+      egressPolicy: POLICY,
+    } as never)).rejects.toThrow(/requires an explicit deviceId/);
+
     await expect(
       byok.dispatchFreshAgentEgress({
         deviceId: daemon.deviceId,

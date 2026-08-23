@@ -1394,7 +1394,7 @@ Datum authority 必须保持单一且可追溯：
 | Durable handoff | SDK-owned canonical Agent home `.byok/runtime-sessions/` | 记录 exact `AgentRef/profileRevision/runtime/cwd/sessionRef`，fsync 成功才算可消费 |
 | Resume session | 既有 durable handoff | 旧 `task.offer_for_agent_with_egress` 继续要求 exact `sessionRef`，缺失、过期或 mismatch fail closed |
 | Egress policy/capability | host 选择的 typed policy + device 的 durable declaration | server/cloud 只按 capability admission；不由 presence 或 runtime guess |
-| Reliable event identity | public publisher 读取的 exact handoff + stable event/cursor | publisher 证明 Agent/session/runtime/cwd 后才 append/send；cloud receipt/ack 不 mint session |
+| Reliable event identity | public publisher 读取的 exact handoff + stable event/cursor | publisher 证明 Agent/task/session/runtime/cwd 后才 append/send；cloud receipt/ack 不 mint session |
 
 修复保持 Protocol v1 frozen，采用两个 additive facts：
 
@@ -1410,7 +1410,7 @@ Agent home，随后才发送 `task.started` 并开放 reliable egress。因而 w
 execution（`Offered/Claimed/Running/...`）、runtime process/session、handoff
 durability、以及 latest-value 与 reliable 两条 egress lane 是四套分离事实；
 任何一套都不能由另一套反推。Public reliable publisher 每次重新读取并 exact
-match handoff，不能接受调用者自带的 invented session。
+match handoff，要求 exact task，不能接受调用者自带的 invented session。
 
 P1/P2/P3 已在本次 upstream reopen 对齐：P1 是 protocol additive message /
 capability、client runtime+handoff、cloud/server durable admission 与
