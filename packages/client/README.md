@@ -166,8 +166,10 @@ the per-Agent content-read audit path. Salesko must not compose those paths.
 Tenant/device identity comes from authenticated host state; a request cannot
 override it. Transcript reads additionally require the exact persisted
 AgentRef/session/runtime/cwd handoff. Allowed content is uploaded through the
-authenticated blob channel and cloud receives a content-free receipt with an
-exact `BlobRef`; no API recursively mirrors an Agent home.
+authenticated blob channel. The content-free receipt is fsynced into the
+Agent-local reliable spool with stable event/cursor identity before send and
+retires only after an exact ack; an allowed receipt carries the exact
+`BlobRef`. No API recursively mirrors an Agent home.
 
 For a concrete private host composition, see the
 [`examples/salesko-connector-broker`](../../examples/salesko-connector-broker)

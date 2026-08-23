@@ -283,9 +283,13 @@ backslash); cwd is absolute. The daemon derives the capability from the
 surface, binds tenant/device from authenticated local state rather than the
 payload, and applies its own narrower root/text/sensitive-name policy. Allowed
 bytes travel only through the authenticated blob channel. The
-`agent.content.receipt` contains a `BlobRef` whose hash, size and content type
-must exactly match the receipt; denial carries `byteCount: 0`. The receipt is
-content-free metadata and does not make cloud a transcript authority.
+`agent.content.receipt` contains required stable `eventId`/positive
+`cursor`. It is fsynced to the same Agent-local reliable spool before first
+send and retires only after an exact `agent.egress.ack`; restart replay and
+duplicate re-ack preserve that identity. An allowed receipt contains a
+`BlobRef` whose hash, size and content type exactly match the receipt; denial
+carries `byteCount: 0`. The receipt is content-free metadata and does not make
+cloud a transcript authority.
 
 **`TaskOfferPayload.dispatchSelection` is the authoritative LLM target when
 present.** It is a strict discriminated union:

@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260823-1639-agent-local-cloud-egress-contract.md
 > **Contract**: tasks/contracts/20260823-1639-agent-local-cloud-egress-contract.contract.md
 > **Review**: tasks/reviews/20260823-1639-agent-local-cloud-egress-contract.review.md
-> **Last Updated**: 2026-08-23 16:42
+> **Last Updated**: 2026-08-23 18:24
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -24,7 +24,19 @@
 
 ## Deviations From Plan Or Spec
 
-- None recorded.
+- Content-read audit and idempotent Blob upload were not sufficient delivery
+  evidence by themselves: after persisting the inbound cursor, a daemon could
+  crash before an in-memory receipt reached cloud. The final design therefore
+  stores the complete protocol-validated, content-free receipt in the existing
+  Agent reliable spool with required stable `eventId`/positive `cursor`.
+  Server/cloud persist the receipt before sending an exact
+  `agent.egress.ack`; duplicate replay re-acks the same identity.
+- Content bytes still use the existing authenticated Blob channel. No second
+  content-transfer message, recursive Agent-home sync, reliable-to-latest
+  fallback, or cloud transcript authority was introduced.
+- Latest-value state retains at most one value per Agent. Its tenant byte quota
+  does not reinterpret the reliable per-Agent event quota as a tenant-wide
+  Agent-count limit; different Agents remain isolated.
 
 ## Tradeoffs Considered
 
@@ -55,6 +67,11 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
+- Implementation commits: `9f559f2`, `1f36513`, `83f43f5`, `a82de7a`,
+  `0b09328`, `d14ed20` (stacked on accepted Agent-home `3c47b03`).
+- Focused receipt reliability evidence: protocol 121, client 8, server 3,
+  cloud 18 tests passed; affected package typechecks and `git diff --check`
+  passed before the final repository gate.
 
 ## Promotion Filter
 

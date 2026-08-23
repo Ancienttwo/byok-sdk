@@ -18,7 +18,7 @@
 - Routing reason: Cross-module security/reliability contract with three separable write scopes and one host integration gate.
 - Due diligence:
   - P1 map: `docs/researches/agent-local-cloud-projection-contract.md` freezes local Agent authority, egress lane ownership, cloud consumer ownership, and downstream Salesko semantics.
-  - P2 trace: `Session.events -> TaskRunner.pump -> ProgressBatcher -> task.progress -> ConnectionManager memory outbox -> WS/long-poll -> cloud activity`; no generic envelope sanitizer, restart-safe outbound spool, quota receipt, or explicit content-read contract exists today.
+  - P2 trace: the baseline was `Session.events -> TaskRunner.pump -> ProgressBatcher -> task.progress -> ConnectionManager memory outbox -> WS/long-poll -> cloud activity`. The implemented Agent path now consumes policy, sanitizes before envelope creation, selects a distinct latest/reliable lane, and binds explicit reads to exact Agent/session/cwd evidence plus durable content-free receipts.
   - P3 decision rationale: Introduce one consumed typed policy, distinct reliable/latest-value lanes, fail-closed sanitizer, and separate capability-gated content reads; never relabel the inbound task journal or add a no-op host declaration.
 
 ## Workflow Inventory
@@ -146,10 +146,10 @@ runtime event / reliable evidence / explicit content request
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Freeze typed policy, additive egress/read capabilities, envelopes, ack/drop reasons and protocol golden tests.
-- [ ] Implement metadata-default/content-opt-in projection and one fail-closed envelope-boundary sanitizer for WS and long-poll.
-- [ ] Implement distinct Agent-local reliable spool and latest-value state with restart-safe cursor/ack/retry, quotas, coalescing, backpressure and observable drop reasons.
-- [ ] Implement capability-gated workspace/transcript/artifact reads with containment, size/type/sensitive-name policy and durable audit receipts.
-- [ ] Persist and validate exact capability/AgentRef/session/cursor/ack/receipt facts in reference server and hosted cloud/dataplane.
-- [ ] Update Salesko/downstream configuration, responsibility and one-shot migration guidance without adding product schema to SDK.
+- [x] Freeze typed policy, additive egress/read capabilities, envelopes, ack/drop reasons and protocol golden tests.
+- [x] Implement metadata-default/content-opt-in projection and one fail-closed envelope-boundary sanitizer for WS and long-poll.
+- [x] Implement distinct Agent-local reliable spool and latest-value state with restart-safe cursor/ack/retry, quotas, coalescing, backpressure and observable drop reasons.
+- [x] Implement capability-gated workspace/transcript/artifact reads with containment, size/type/sensitive-name policy and durable audit receipts.
+- [x] Persist and validate exact capability/AgentRef/session/cursor/ack/receipt facts in reference server and hosted cloud/dataplane.
+- [x] Update Salesko/downstream configuration, responsibility and one-shot migration guidance without adding product schema to SDK.
 - [ ] Run focused negative/restart suites, disposable Postgres oracle, full required gates, semantic review and typed acceptance.

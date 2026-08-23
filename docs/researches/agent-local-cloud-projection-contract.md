@@ -1,9 +1,11 @@
 # Agent local/cloud projection contract
 
-> **Status:** design input; the current Agent-home work-package implements the
-> local home/session authority only. It does not yet implement the egress,
-> spool, quota, redaction, or explicit content-transfer surfaces specified
-> below.
+> **Status:** implemented local candidate on
+> `codex/agent-local-cloud-egress-contract`; final repository gates and
+> subject-bound acceptance remain pending. The accepted Agent-home contract is
+> the parent authority; this work-package adds consumed egress, durable
+> delivery, quota, sanitization, and explicit content-read surfaces without a
+> compatibility path.
 
 ## Evidence correction
 
@@ -49,9 +51,9 @@ runtime implementation must not become a second BYOK provider authority.
 Opaque Agent files remain local by default. A file living under an Agent home
 does not authorize upload, indexing, scanning, or shared-history projection.
 
-## P2: current BYOK trace and gap
+## P2: baseline trace and implemented path
 
-The current runtime path is:
+The pre-change runtime path was:
 
 ```text
 local runtime Session.events
@@ -73,16 +75,36 @@ process memory. The existing SQLite local task journal protects inbound task
 admission/transitions/terminal truth; it is not a generic outbound activity
 journal and must not be relabelled as one.
 
-No public workspace/transcript/artifact read protocol currently satisfies the
-explicit content-transfer contract below. `AgentHome` containment by itself is
-not upload authorization.
+The implemented Agent path is now distinct:
+
+```text
+runtime AgentEvent
+  -> consumed AgentEgressPolicy
+  -> metadata-only projection or explicit contentful opt-in
+  -> fail-closed SDK sanitizer
+  -> latest-value state OR Agent-local reliable spool
+  -> frozen WS/long-poll envelope
+  -> exact server/cloud capability and identity gate
+  -> durable record, exact ack, local retirement
+
+explicit agent.content.read
+  -> exact AgentRef/profile/session/runtime/cwd handoff
+  -> canonical root/symlink/name/MIME/size policy
+  -> durable local audit
+  -> authenticated Blob upload when allowed
+  -> fsynced content-free receipt with stable eventId/cursor
+  -> server/cloud persist-before-ack and duplicate re-ack
+```
+
+Legacy `task.progress` remains legacy task projection and is not reclassified
+as Agent reliable history. `AgentHome` containment alone still does not grant
+upload authority.
 
 ## P3: frozen design direction
 
 ### Typed egress policy
 
-The future public config must have one consumed, typed policy. The minimum
-semantic shape is:
+The public config has one consumed, typed policy. Its semantic shape is:
 
 ```ts
 type AgentEgressPolicy = {
@@ -168,12 +190,12 @@ handoff identity. The local read contract must enforce:
 
 ## Capability and migration boundary
 
-The implementation work-package must introduce additive capabilities for the
-typed egress contract and for each explicit content-read surface. Server/cloud
-must reject before request enqueue when the selected daemon lacks the exact
-capability. An old daemon may continue legacy task execution, but it must not
-receive an egress-policy or content-transfer request and no layer may strip the
-new contract then proceed.
+The implementation introduces additive capabilities for the typed egress
+contract and for each explicit content-read surface. Server/cloud reject before
+request enqueue when the selected daemon lacks the exact capability. An old
+daemon may continue legacy task execution, but it cannot receive an
+egress-policy or content-transfer request and no layer strips the new contract
+then proceeds.
 
 Migration is one-shot and operator approved: select the policy, publish the
 capability snapshot, then enable new request types. Existing `task.progress`
@@ -199,6 +221,8 @@ At minimum, behavior tests must prove:
 - server/cloud capability admission and persistence readback are exact;
 - legacy Agent-home cwd/session semantics remain unchanged.
 
-Until those tests pass, BYOK documentation must describe this file as a design
-contract and must not claim generic egress policy, reliable projection, DLP, or
-explicit Agent-content read support.
+The focused behavior suites cover this matrix. Full repository gates,
+disposable Postgres readback, semantic review, and the subject-bound
+AcceptanceReceipt remain the promotion boundary; this document does not claim
+merge, publication, deployment, migration execution, DLP, or downstream
+enablement.
