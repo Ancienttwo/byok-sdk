@@ -27,6 +27,7 @@ export {
   AgentHomeResolutionError,
   AgentHomeCollisionError,
   AgentHomeBusyError,
+  AgentHomeLeaseCorruptError,
   AgentHomeLayout,
   AgentHomeLeaseManager,
   AgentHomeManager,

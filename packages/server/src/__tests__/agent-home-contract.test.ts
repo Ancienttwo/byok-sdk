@@ -24,12 +24,15 @@ const agentRef = { agentId: 'agent-1', profileRevision: 'profile-r7' } as const;
 describe('agent-home-contract reference server', () => {
   let server: HttpServer | undefined;
   let ws: WebSocket | undefined;
+  let secondaryWs: WebSocket | undefined;
 
   afterEach(async () => {
     ws?.terminate();
+    secondaryWs?.terminate();
     if (server) await stopServer(server);
     server = undefined;
     ws = undefined;
+    secondaryWs = undefined;
   });
 
   it('rejects before task creation when an old daemon omits the capability', async () => {
@@ -125,6 +128,73 @@ describe('agent-home-contract reference server', () => {
     );
     await waitForTaskEvent(terminalMismatch, (event) => event.kind === 'state' && event.state === 'Failed');
     expect(byok.tasks.get(terminalMismatch.taskId)?.result).toMatchObject({ state: 'Failed', retryable: false });
+  });
+
+  it('does not let another authenticated device claim or fail a targeted Agent offer', async () => {
+    const byok = createByokServer({ productId: PRODUCT_ID });
+    const started = await startServer(byok);
+    server = started.server;
+
+    const targetPairing = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const target = await connectFakeDaemon(started.baseUrl, started.port, targetPairing.code, {
+      productId: PRODUCT_ID,
+      capabilities: ['agent-home-contract'],
+    });
+    ws = target.ws;
+    const attackerPairing = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const attacker = await connectFakeDaemon(started.baseUrl, started.port, attackerPairing.code, {
+      productId: PRODUCT_ID,
+      capabilities: ['agent-home-contract'],
+    });
+    secondaryWs = attacker.ws;
+
+    const claimTarget = await byok.dispatch({
+      deviceId: target.deviceId,
+      instruction: 'target-device claim isolation',
+      agentRef,
+    });
+    await nextEnvelope(ws);
+    const claimResponse = await fetch(`${started.baseUrl}/byok/messages`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${attacker.accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: [createEnvelope('task.claim', { deviceId: attacker.deviceId, agentRef }, { taskId: claimTarget.taskId })],
+      }),
+    });
+    expect(claimResponse.status).toBe(200);
+    expect(await claimResponse.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(byok.tasks.get(claimTarget.taskId)?.state).toBe('Offered');
+
+    const declineTarget = await byok.dispatch({
+      deviceId: target.deviceId,
+      instruction: 'target-device decline isolation',
+      agentRef,
+    });
+    await nextEnvelope(ws);
+    const declineResponse = await fetch(`${started.baseUrl}/byok/messages`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${attacker.accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: [createEnvelope(
+          'task.decline',
+          {
+            reason: 'cross-device attempt',
+            retryable: false,
+            agentRef: { ...agentRef, profileRevision: 'wrong' },
+          },
+          { taskId: declineTarget.taskId },
+        )],
+      }),
+    });
+    expect(declineResponse.status).toBe(200);
+    expect(await declineResponse.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(byok.tasks.get(declineTarget.taskId)?.state).toBe('Offered');
   });
 
   it('reads an AgentRef back after SQLite restart', () => {

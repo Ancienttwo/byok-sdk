@@ -31,6 +31,7 @@ ALTER TABLE task
       AND position('/' IN agent_id) = 0
       AND position(E'\\' IN agent_id) = 0
       AND position(':' IN agent_id) = 0
+      AND agent_id !~ '[<>"|?*]'
       AND agent_id NOT IN ('.', '..')
       AND agent_id !~ '[. ]$'
       AND lower(split_part(agent_id, '.', 1)) !~ '^(con|prn|aux|nul|com[1-9]|lpt[1-9])$'

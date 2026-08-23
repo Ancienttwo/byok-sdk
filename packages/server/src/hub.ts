@@ -859,7 +859,7 @@ export class ConnectionHub {
         this.onStarted(envelope.task_id, envelope.payload);
         return;
       case 'task.decline':
-        this.onDecline(envelope.task_id, envelope.payload);
+        this.onDecline(deviceId, envelope.task_id, envelope.payload);
         return;
       case 'task.progress':
         this.onProgress(envelope.task_id, envelope.payload);
@@ -934,6 +934,14 @@ export class ConnectionHub {
   private onClaim(deviceId: string, taskId: string, payload: TaskClaimPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
+    // Defense in depth for every call path into this handler. The public wire
+    // path already enforces this in handleInbound, before dedup/activity, but
+    // a claim must never be able to transfer a pre-targeted offer merely by
+    // presenting its exact AgentRef from another authenticated device.
+    if (record.deviceId !== undefined && record.deviceId !== deviceId) {
+      console.warn(`[byok/server] dropping task.claim for ${taskId}: offered to a different device`);
+      return;
+    }
     if (record.agentRef && !sameAgentRef(record.agentRef, payload.agentRef)) {
       this.forceFailOrDrop(taskId, 'task.claim AgentRef does not exactly match the offered AgentRef');
       return;
@@ -971,10 +979,14 @@ export class ConnectionHub {
    * ever legal from `Offered`; anything else is stale. Ownership is already
    * enforced by {@link handleInbound} (N2) before this runs.
    */
-  private onDecline(taskId: string, payload: TaskDeclinePayload): void {
+  private onDecline(deviceId: string, taskId: string, payload: TaskDeclinePayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
     if (record.state !== 'Offered') return;
+    if (record.deviceId !== undefined && record.deviceId !== deviceId) {
+      console.warn(`[byok/server] dropping task.decline for ${taskId}: offered to a different device`);
+      return;
+    }
     if (record.agentRef && !sameAgentRef(record.agentRef, payload.agentRef)) {
       this.forceFailOrDrop(taskId, 'task.decline AgentRef does not exactly match the offered AgentRef');
       return;

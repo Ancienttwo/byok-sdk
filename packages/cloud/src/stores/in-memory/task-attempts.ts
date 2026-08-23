@@ -116,7 +116,10 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     return this.#state.mutate(key, () => {
       const existing = this.#state.attempts.get(key);
       if (existing === undefined) return undefined;
-      if (input.agentRef !== undefined && !sameAgentRef(existing.agentRef, input.agentRef)) return existing;
+      if (
+        (existing.agentRef === undefined) !== (input.agentRef === undefined) ||
+        (existing.agentRef !== undefined && !sameAgentRef(existing.agentRef, input.agentRef))
+      ) return existing;
       if (existing.cancellation !== undefined) {
         if (input.status !== 'cancelled' || existing.status === 'cancelled') return existing;
       } else if (

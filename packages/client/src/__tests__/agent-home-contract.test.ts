@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import {
   AgentHomeBusyError,
+  AgentHomeLeaseCorruptError,
   AgentHomeLayout,
   AgentHomeLeaseManager,
   AgentHomeManager,
@@ -179,6 +180,17 @@ describe('SDK-owned Agent home contract', () => {
       canonicalHome: home,
     }), 'utf8');
     await expect(manager.prepare(ref('one'))).rejects.toBeInstanceOf(AgentHomeBusyError);
+  });
+
+  it('treats a corrupt persisted lease marker as non-retryable integrity failure', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const initial = await manager.prepare(ref('one'));
+    const marker = path.join(initial.resolution.canonicalHome, '.byok', 'agent-home.lease');
+    await initial.lease.release();
+    await fs.writeFile(marker, '{broken', 'utf8');
+
+    await expect(manager.prepare(ref('one'))).rejects.toBeInstanceOf(AgentHomeLeaseCorruptError);
   });
 
   it('persists exact AgentRef/profileRevision/session/runtime/cwd and terminal cause in Agent home', async () => {

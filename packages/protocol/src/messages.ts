@@ -107,7 +107,7 @@ const WINDOWS_RESERVED_AGENT_SEGMENT = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?
  */
 export const AgentRefSchema = z
   .object({
-    agentId: AGENT_REF_VALUE.regex(/^[^\\/:]+$/u, 'agentId must be one pathname segment').refine(
+    agentId: AGENT_REF_VALUE.regex(/^[^\\/:<>"|?*]+$/u, 'agentId must be one portable pathname segment').refine(
       (value) => value !== '.' && value !== '..',
       'agentId must not be a dot segment',
     ).refine(

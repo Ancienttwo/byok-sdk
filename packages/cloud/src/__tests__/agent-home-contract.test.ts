@@ -274,6 +274,25 @@ describe('hosted Agent-home contract', () => {
     expect((await harness.stores.tasks.get(TENANT_A, 'legacy-agent-attachment'))?.agentRef).toBeUndefined();
   });
 
+  it('does not let a lifecycle caller omit the exact AgentRef from an Agent attempt', async () => {
+    const harness = createHarness();
+    await harness.stores.tasks.reserveAgentOffer(TENANT_A, {
+      taskId: 'agent-ref-omission',
+      deviceId: 'agent-device',
+      agentRef: AGENT_REF,
+    });
+
+    await harness.stores.tasks.recordStatus(TENANT_A, {
+      taskId: 'agent-ref-omission',
+      status: 'failed',
+      terminalCause: 'must not bypass identity matching',
+    });
+    await expect(harness.stores.tasks.get(TENANT_A, 'agent-ref-omission')).resolves.toMatchObject({
+      status: 'offered',
+      agentRef: AGENT_REF,
+    });
+  });
+
   it('rejects claim/terminal AgentRef mismatches and protects the first terminal fact', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

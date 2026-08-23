@@ -185,7 +185,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
               updated_at = $4
         WHERE tenant_id = $1 AND task_id = $2
           AND (
-            ($5::text IS NULL AND $6::text IS NULL)
+            (agent_id IS NULL AND agent_profile_revision IS NULL AND $5::text IS NULL AND $6::text IS NULL)
             OR (agent_id = $5 AND agent_profile_revision = $6)
           )
           AND (

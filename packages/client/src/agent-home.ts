@@ -43,6 +43,14 @@ export class AgentHomeBusyError extends AgentHomeError {
   }
 }
 
+/** A malformed persisted lease is integrity failure, never retryable contention. */
+export class AgentHomeLeaseCorruptError extends AgentHomeResolutionError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentHomeLeaseCorruptError';
+  }
+}
+
 export interface AgentHomeResolution {
   readonly agentRef: AgentRef;
   /** Absolute branded storage root supplied by the host, after realpath. */
@@ -301,7 +309,7 @@ function parseLeaseMarker(value: string, lockPath: string): StoredLeaseMarker {
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} is corrupt`);
+    throw new AgentHomeLeaseCorruptError(`Agent home lease marker ${lockPath} is corrupt`);
   }
   if (
     typeof parsed !== 'object' || parsed === null ||
@@ -311,13 +319,13 @@ function parseLeaseMarker(value: string, lockPath: string): StoredLeaseMarker {
     typeof (parsed as { canonicalHome?: unknown }).canonicalHome !== 'string' ||
     !path.isAbsolute((parsed as { canonicalHome: string }).canonicalHome)
   ) {
-    throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} has an invalid shape`);
+    throw new AgentHomeLeaseCorruptError(`Agent home lease marker ${lockPath} has an invalid shape`);
   }
   let agentRef: AgentRef;
   try {
     agentRef = validateAgentRef((parsed as { agentRef?: unknown }).agentRef);
   } catch {
-    throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} has an invalid AgentRef`);
+    throw new AgentHomeLeaseCorruptError(`Agent home lease marker ${lockPath} has an invalid AgentRef`);
   }
   const marker = parsed as Omit<StoredLeaseMarker, 'agentRef'>;
   return { ...marker, agentRef, canonicalHome: path.resolve(marker.canonicalHome) };
@@ -371,7 +379,7 @@ export class AgentHomeLeaseManager {
       if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) {
         AgentHomeLeaseManager.held.delete(canonicalHome);
       }
-      if (error instanceof AgentHomeBusyError) throw error;
+      if (error instanceof AgentHomeError) throw error;
       throw new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
     }
     const acquiredLockPath = lockPath;

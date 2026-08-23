@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260823-1214-agent-first-home-contract.md
 > **Contract**: tasks/contracts/20260823-1214-agent-first-home-contract.contract.md
 > **Review**: tasks/reviews/20260823-1214-agent-first-home-contract.review.md
-> **Last Updated**: 2026-08-23 15:52
+> **Last Updated**: 2026-08-23 16:03
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -82,6 +82,18 @@
   before mailbox append. In-memory and Postgres concurrency tests prove one
   winner. Store-level lifecycle updates also preserve exact Agent identity;
   the protocol/SQL boundary rejects Windows-reserved segments.
+- The final external pass raised a target-device/AgentRef takeover concern in
+  the reference server. Concrete tracing showed `handleInbound` already drops
+  every task envelope whose authenticated connection device differs from the
+  persisted target before dispatch, dedup, or state mutation. The handler now
+  repeats that ownership check for claim/decline as defense in depth, and a
+  two-connected-device HTTP-wire regression proves that an exact stolen
+  AgentRef cannot claim the target offer and a mismatched decline cannot fail
+  it. The same remediation closes three adjacent identity/integrity findings:
+  all Windows-forbidden segment characters are rejected in protocol and SQL,
+  Agent lifecycle writes require exact AgentRef presence as well as value, and
+  corrupt lease markers are a non-retryable resolution failure rather than
+  retryable writer contention.
 
 ## Tradeoffs Considered
 
@@ -144,6 +156,10 @@
   workspace package declarations unavailable to typecheck. After build
   completed, the required sequential monorepo typecheck passed. This was a
   verification-orchestration race, not a source failure.
+- Final target-device/integrity remediation gates: protocol, server, client,
+  hosted-cloud Agent suites passed (4 files / 39 tests), sequential monorepo
+  typecheck passed, and the disposable-Postgres Agent oracle passed with the
+  new illegal-character plus omitted-AgentRef assertions.
 
 ## Promotion Filter
 
