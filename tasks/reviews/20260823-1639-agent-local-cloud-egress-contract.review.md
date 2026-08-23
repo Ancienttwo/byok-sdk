@@ -53,7 +53,7 @@
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 3c47b0316eecb426594eeba30b1924f9a9db1531
 > **Verification Evidence SHA256**: sha256:73995dc010efda4cdf34bf6866d1de933ee833fb14e9b61e827f5559c2b0c492
-> **Issued At**: 2026-08-23T10:43:53.988Z
+> **Issued At**: 2026-08-23T10:45:28.428Z
 
 - Summary: User explicitly approved the bounded Agent-first egress work-package and delegated implementation; second independent gate passed the frozen replacement subject.
 - Findings: none
