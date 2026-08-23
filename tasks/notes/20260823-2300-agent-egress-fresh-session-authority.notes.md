@@ -44,13 +44,9 @@
 
 ## Open Questions
 
-- The user explicitly replaced stable-first release sequencing with beta-first
-  downstream acceptance. The next immutable artifact subject is the aligned
-  dispatch/testkit/umbrella train `0.8.0-beta.0` plus independently versioned
-  keys `0.3.1-beta.0`, published only under npm dist-tag `beta`; `latest` must
-  remain on 0.7.0/keys 0.3.0. Salesko exact-pins these beta artifacts in an
-  isolated worktree and must pass fresh-first-job plus later exact-resume
-  acceptance before any stable version is considered.
+- Stable promotion remains a separate release decision. The beta-first
+  downstream acceptance is complete; no further stable package is required to
+  validate the fresh/resume contract.
 
 ## Evidence Links
 
@@ -101,9 +97,21 @@
   timeout by 176 ms, and one live SQLite WAL snapshot changed while the hosted
   daemon owned it. Each exact failing file passed immediately in isolated
   rerun (6/6 and 24/24 respectively); no product or test source was changed.
-- Registry availability is now closed, but this is not stable promotion or
-  downstream acceptance. The remaining gate is Salesko exact-beta
-  fresh/resume acceptance and its independent frozen-subject review.
+- Registry availability is closed. This publication did not promote stable or
+  mutate `latest`; downstream acceptance is recorded separately below.
+
+## 2026-08-24 Salesko beta acceptance closure
+
+- Salesko exact-pinned the complete beta train from the public registry; no
+  `file:`, `link:` or git dependency was used and npm `latest` remained
+  unchanged.
+- The downstream source contract now dispatches a distinct fresh offer without
+  a cloud-authored session, persists the runtime-issued exact handoff before
+  started/egress facts, and keeps exact resume as a separate fail-closed path.
+- Salesko root verification, typed AcceptanceReceipt and an independent final
+  gate passed on the frozen combined subject. This closes downstream source
+  acceptance only; merge, stable promotion, deploy and production cutover are
+  still separate authorities.
 
 ## Promotion Filter
 
