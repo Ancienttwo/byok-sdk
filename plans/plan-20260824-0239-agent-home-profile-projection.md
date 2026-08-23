@@ -1,6 +1,6 @@
 # Plan: Task-free Agent-home projection
 
-> **Status**: Completed
+> **Status**: Executing
 > **Created**: 20260824-0239
 > **Slug**: agent-home-profile-projection
 > **Planning Source**: user-approved-consumer-contract
