@@ -1,6 +1,6 @@
 # Plan: Task-free Agent-home projection
 
-> **Status**: Executing
+> **Status**: Completed
 > **Created**: 20260824-0239
 > **Slug**: agent-home-profile-projection
 > **Planning Source**: user-approved-consumer-contract
@@ -94,9 +94,9 @@ profile revision, projection hash, and request identity.
   credential-specific protocol field,
   traversal/symlink/cross-Agent, stale/conflict/idempotency, busy overlap,
   offline/restart redelivery, exact receipt, and zero task/runtime side effects.
-- [ ] Run build/typecheck/full tests, strict workflow and independent frozen gate.
-- [ ] Pack an aligned unpublished RC with manifest/hash/declaration readback.
-- [ ] Run Salesko falsifier and consumer acceptance against the exact RC bytes;
+- [x] Run build/typecheck/full tests, strict workflow and independent frozen gate.
+- [x] Pack an aligned unpublished RC with manifest/hash/declaration readback.
+- [x] Run Salesko falsifier and consumer acceptance against the exact RC bytes;
   freeze any one-time naming adjustment and report registry as unpublished.
 
 ## Stop Conditions

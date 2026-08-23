@@ -1,10 +1,10 @@
 # Implementation Notes: agent-home-profile-projection
 
-> **Status**: Active
+> **Status**: Complete
 > **Plan**: plans/plan-20260824-0239-agent-home-profile-projection.md
 > **Contract**: tasks/contracts/20260824-0239-agent-home-profile-projection.contract.md
 > **Review**: tasks/reviews/20260824-0239-agent-home-profile-projection.review.md
-> **Last Updated**: 2026-08-24 04:35
+> **Last Updated**: 2026-08-24 04:36
 > **Lifecycle**: notes
 
 ## Frozen Consumer Evidence
@@ -84,3 +84,17 @@
 
 Promote only durable, verified architecture or reusable failure evidence; do
 not promote transient command logs or provisional RC names.
+
+## Final Acceptance
+
+- Frozen implementation source: `1cc029a57c086a2473bb639fa58b26a93400aa02`.
+- Unpublished RC manifest:
+  `/Users/kito/Projects/byok-sdk-rc/20260824-agent-home-projection-1cc029a/release-manifest.json`,
+  SHA-256 `c2b54fa8927e226b4ba020da39ddb1737e40afb29cf4f84e5dbd7f24f7061f6e`.
+- Public train is `0.8.0`; independently versioned keys is `0.3.1`.
+- Exact-tarball Salesko acceptance passed: falsifier 1/1, frozen contract 3/3,
+  and byok-control 99/99 plus TypeScript.
+- Independent exact-SHA gate returned PASS and the typed AcceptanceReceipt is
+  `external_pass` with no findings.
+- Registry publication, merge, push, deploy, production migration, secrets,
+  and formal downstream pin remain outside this work-package.

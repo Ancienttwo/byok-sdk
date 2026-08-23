@@ -1,11 +1,11 @@
 # Task Contract: agent-home-profile-projection
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260824-0239-agent-home-profile-projection.md
 > **Task Profile**: code-change
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-24 04:35
+> **Last Updated**: 2026-08-24 04:36
 > **Review File**: `tasks/reviews/20260824-0239-agent-home-profile-projection.review.md`
 > **Notes File**: `tasks/notes/20260824-0239-agent-home-profile-projection.notes.md`
 
