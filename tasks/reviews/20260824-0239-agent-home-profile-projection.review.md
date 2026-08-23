@@ -56,7 +56,7 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 4316bb2f926169112c6feb51b51b447cc69f8999
 > **Verification Evidence SHA256**: sha256:657fa20e6233ca59d11ed065c0c7047ed27e53edc0be65283baabac0dcf71e03
-> **Issued At**: 2026-08-23T20:34:24.214Z
+> **Issued At**: 2026-08-23T20:39:20.671Z
 
 - Summary: Independent exact-SHA gate passed for the task-free exact-device Agent-home projection contract and frozen Salesko RC consumer.
 - Findings: none
