@@ -340,6 +340,8 @@ function envelopeOfType(type: (typeof DAEMON_TO_SERVER_TYPES)[number], taskId: s
     case 'agent.content.receipt':
       return createEnvelope('agent.content.receipt', {
         requestId: '10000000-0000-4000-8000-000000000002',
+        eventId: '10000000-0000-4000-8000-000000000002',
+        cursor: 2,
         surface: 'workspace',
         actor: { kind: 'user', id: 'actor-inbound-1' },
         agentRef: { agentId: 'agent-inbound', profileRevision: 'profile-inbound' },

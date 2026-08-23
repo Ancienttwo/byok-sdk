@@ -93,6 +93,8 @@ function minimalPayload(type: MessageType): unknown {
     case 'agent.content.receipt':
       return {
         requestId: '00000000-0000-4000-8000-000000000023',
+        eventId: '00000000-0000-4000-8000-000000000023',
+        cursor: 2,
         surface: 'workspace',
         actor: { kind: 'user', id: 'actor-1' },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },

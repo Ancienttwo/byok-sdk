@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+  AgentContentReceiptPayloadSchema,
+  type AgentContentReceiptPayload,
+} from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir } from '../util/secure-dir';
@@ -9,8 +13,15 @@ import { type AgentEgressPolicy, type AgentEgressDropReason, eventBytes } from '
 export const AGENT_EGRESS_DIRECTORY = path.join('.byok', 'egress');
 export const AGENT_RELIABLE_SPOOL_FILENAME = 'reliable-v1.jsonl';
 
+/** A spool row's intended envelope type, never inferred from its payload. */
+export const AGENT_RELIABLE_WIRE_TYPES = ['agent.egress.reliable', 'agent.content.receipt'] as const;
+export type AgentReliableWireType = (typeof AGENT_RELIABLE_WIRE_TYPES)[number];
+type OmitReliableIdentity<T> = T extends unknown ? Omit<T, 'eventId' | 'cursor'> : never;
+export type AgentContentReceiptWithoutReliableIdentity = OmitReliableIdentity<AgentContentReceiptPayload>;
+
 export interface AgentReliableEgressRecord {
   readonly schema: 1;
+  readonly wireType: AgentReliableWireType;
   readonly agentRef: AgentRef;
   readonly tenantId: string;
   readonly policyRevision: string;
@@ -33,6 +44,20 @@ export interface AgentReliableAppendInput {
   readonly taskId?: string;
   readonly eventId?: string;
   readonly createdAt?: string;
+}
+
+/**
+ * Content receipts use the existing durable spool but retain their own wire
+ * type and validated receipt payload. The request id is the stable event id:
+ * a retried local read cannot mint a competing receipt identity.
+ */
+export interface AgentContentReceiptAppendInput {
+  readonly agentRef: AgentRef;
+  readonly tenantId: string;
+  readonly policyRevision: string;
+  readonly sessionRef: string;
+  readonly payload: AgentContentReceiptWithoutReliableIdentity;
+  readonly taskId?: string;
 }
 
 export interface AgentReliableAck {
@@ -94,6 +119,30 @@ function assertPositiveInteger(value: unknown, label: string): asserts value is 
   }
 }
 
+function assertWireType(value: unknown): asserts value is AgentReliableWireType {
+  if (value !== 'agent.egress.reliable' && value !== 'agent.content.receipt') {
+    throw new AgentReliableSpoolError('reliable record wireType is invalid');
+  }
+}
+
+function sameRecord(
+  record: AgentReliableEgressRecord,
+  candidate: Pick<AgentReliableEgressRecord, 'wireType' | 'agentRef' | 'tenantId' | 'policyRevision' | 'eventId' | 'cursor' | 'payloadHash' | 'byteCount' | 'sessionRef' | 'taskId'>,
+): boolean {
+  return (
+    record.wireType === candidate.wireType &&
+    sameAgentRef(record.agentRef, candidate.agentRef) &&
+    record.tenantId === candidate.tenantId &&
+    record.policyRevision === candidate.policyRevision &&
+    record.eventId === candidate.eventId &&
+    record.cursor === candidate.cursor &&
+    record.payloadHash === candidate.payloadHash &&
+    record.byteCount === candidate.byteCount &&
+    record.sessionRef === candidate.sessionRef &&
+    record.taskId === candidate.taskId
+  );
+}
+
 function parseEntry(value: unknown): SpoolEntry {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new AgentReliableSpoolError('reliable spool entry is not an object');
   const entry = value as Record<string, unknown>;
@@ -102,6 +151,7 @@ function parseEntry(value: unknown): SpoolEntry {
     const record = entry.record as Partial<AgentReliableEgressRecord> | undefined;
     if (!record || typeof record !== 'object') throw new AgentReliableSpoolError('reliable append record is missing');
     assertNonEmptyString(record.eventId, 'record.eventId');
+    assertWireType(record.wireType);
     assertNonEmptyString(record.tenantId, 'record.tenantId');
     assertNonEmptyString(record.policyRevision, 'record.policyRevision');
     assertPositiveInteger(record.cursor, 'record.cursor');
@@ -111,6 +161,19 @@ function parseEntry(value: unknown): SpoolEntry {
     }
     assertNonEmptyString(record.payloadHash, 'record.payloadHash');
     assertNonEmptyString(record.createdAt, 'record.createdAt');
+    if (record.wireType === 'agent.content.receipt') {
+      let payload: AgentContentReceiptPayload;
+      try {
+        payload = AgentContentReceiptPayloadSchema.parse(record.payload);
+      } catch (error) {
+        throw new AgentReliableSpoolError(
+          `content receipt spool payload is not protocol-valid: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (payload.eventId !== record.eventId || payload.cursor !== record.cursor || payload.sessionRef !== record.sessionRef) {
+        throw new AgentReliableSpoolError('content receipt spool identity does not match its record');
+      }
+    }
     return { schema: 1, kind: 'append', record: record as AgentReliableEgressRecord };
   }
   if (entry.kind === 'ack') {
@@ -186,6 +249,7 @@ export class AgentReliableSpool {
       if (this.pending.has(eventId)) throw new AgentReliableSpoolError(`reliable eventId ${eventId} already exists`);
       const record: AgentReliableEgressRecord = Object.freeze({
         schema: 1,
+        wireType: 'agent.egress.reliable',
         agentRef: Object.freeze({ ...input.agentRef }),
         tenantId: input.tenantId,
         policyRevision: input.policyRevision,
@@ -198,6 +262,77 @@ export class AgentReliableSpool {
         ...(input.sessionRef === undefined ? {} : { sessionRef: input.sessionRef }),
         ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
       });
+      await this.appendEntry({ schema: 1, kind: 'append', record });
+      this.pending.set(record.eventId, record);
+      return record;
+    });
+  }
+
+  /**
+   * Append one complete, protocol-validated content receipt before its first
+   * send. `eventId` is fixed to `requestId`; the durable spool alone allocates
+   * the positive cursor, then validates the final payload before fsync.
+   */
+  async appendContentReceipt(
+    input: AgentContentReceiptAppendInput,
+    policy: Readonly<AgentEgressPolicy>,
+    tenantPendingBytes: number,
+  ): Promise<AgentReliableEgressRecord> {
+    return this.exclusive(async () => {
+      assertNonEmptyString(input.tenantId, 'tenantId');
+      assertNonEmptyString(input.policyRevision, 'policyRevision');
+      assertNonEmptyString(input.sessionRef, 'sessionRef');
+      if (input.policyRevision !== policy.policyRevision) {
+        throw new AgentReliableSpoolError('content receipt policy revision does not match consumed policy');
+      }
+      const eventId = input.payload.requestId;
+      assertNonEmptyString(eventId, 'content receipt requestId');
+      const existing = this.pending.get(eventId);
+      const cursor = existing?.cursor ?? this.nextCursor;
+      let payload: AgentContentReceiptPayload;
+      try {
+        payload = AgentContentReceiptPayloadSchema.parse({ ...input.payload, eventId, cursor });
+      } catch (error) {
+        throw new AgentReliableSpoolError(
+          `content receipt payload is not protocol-valid: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const payloadJson = stableRecordJson(payload);
+      const byteCount = Buffer.byteLength(payloadJson, 'utf8');
+      const candidate = {
+        wireType: 'agent.content.receipt' as const,
+        agentRef: input.agentRef,
+        tenantId: input.tenantId,
+        policyRevision: input.policyRevision,
+        eventId,
+        cursor,
+        payloadHash: contentHash(payloadJson),
+        byteCount,
+        sessionRef: input.sessionRef,
+        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+      };
+      if (existing !== undefined) {
+        if (!sameRecord(existing, candidate) || stableRecordJson(existing.payload) !== payloadJson) {
+          throw new AgentReliableSpoolError(`content receipt ${eventId} differs from its existing reliable record`);
+        }
+        return existing;
+      }
+      if (this.pending.size >= policy.reliable.maxPendingEventsPerAgent) {
+        throw new AgentReliableQuotaError('quota_exceeded', 'reliable per-Agent event quota is exhausted');
+      }
+      if (this.pendingBytes + byteCount > policy.reliable.maxPendingBytesPerAgent) {
+        throw new AgentReliableQuotaError('quota_exceeded', 'reliable per-Agent byte quota is exhausted');
+      }
+      if (tenantPendingBytes + byteCount > policy.reliable.maxPendingBytesPerTenant) {
+        throw new AgentReliableQuotaError('quota_exceeded', 'reliable tenant byte quota is exhausted');
+      }
+      const record: AgentReliableEgressRecord = Object.freeze({
+        schema: 1,
+        ...candidate,
+        payload: JSON.parse(payloadJson),
+        createdAt: new Date().toISOString(),
+      });
+      this.nextCursor += 1;
       await this.appendEntry({ schema: 1, kind: 'append', record });
       this.pending.set(record.eventId, record);
       return record;
@@ -315,7 +450,6 @@ export class AgentLatestValueState {
     const prior = this.recordsByAgent.get(key);
     const tenantRecords = [...this.recordsByAgent.values()].filter((entry) => entry.tenantId === record.tenantId);
     const tenantBytes = tenantRecords.reduce((total, entry) => total + entry.byteCount, 0) - (prior?.byteCount ?? 0);
-    if (!prior && tenantRecords.length >= policy.reliable.maxPendingEventsPerAgent) return { accepted: false, reason: 'quota_exceeded' };
     if (tenantBytes + byteCount > policy.reliable.maxPendingBytesPerTenant || byteCount > policy.reliable.maxPendingBytesPerAgent) {
       return { accepted: false, reason: 'quota_exceeded' };
     }

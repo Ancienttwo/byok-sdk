@@ -64,10 +64,12 @@ import {
   encodeEnvelope,
   type Envelope,
   AgentContentReadPayloadSchema,
+  AgentContentReceiptPayloadSchema,
   AgentEgressAckPayloadSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentPayloadSchema,
   type AgentRef,
+  type AgentContentReceiptPayload,
   type AgentContentReadPayload,
   type AgentEgressAckPayload,
   type AgentEgressReliablePayload,
@@ -401,7 +403,12 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   if (declares(declaration, CLOUD_CAPABILITIES.messagesBatch)) {
     registry.register(
       { method: 'POST', path: BYOK_MESSAGES_PATH, class: 'device' },
-      messagesHandler({ ...deviceRouteDeps, activityBounds, appendReliableEgressAck: enqueueReliableEgressAck }),
+      messagesHandler({
+        ...deviceRouteDeps,
+        activityBounds,
+        appendReliableEgressAck: enqueueReliableEgressAck,
+        appendContentReceiptAck: enqueueContentReceiptAck,
+      }),
     );
   }
 
@@ -756,6 +763,53 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     }
   }
 
+  /** Durable content receipt first; this exact mailbox acknowledgement is then replayable by request id. */
+  async function enqueueContentReceiptAck(
+    stores: TenantStores,
+    deviceId: string,
+    receipt: AgentContentReceiptPayload,
+  ): Promise<void> {
+    const exactReceipt = AgentContentReceiptPayloadSchema.parse(receipt);
+    if (exactReceipt.eventId !== exactReceipt.requestId) {
+      throw new ByokCloudError('mailbox_receipt_mismatch', 'Content receipt eventId must equal requestId.');
+    }
+    const payload: AgentEgressAckPayload = AgentEgressAckPayloadSchema.parse({
+      agentRef: exactReceipt.agentRef,
+      sessionRef: exactReceipt.sessionRef,
+      policyRevision: exactReceipt.policyRevision,
+      eventId: exactReceipt.eventId,
+      cursor: exactReceipt.cursor,
+      receiptId: exactReceipt.requestId,
+    });
+    const message = await stores.mailbox.append({
+      deviceId,
+      // The request itself already occupies its bare request id in this
+      // mailbox. A namespaced producer key keeps the ack idempotent without
+      // returning that control envelope on duplicate receipt delivery.
+      messageId: `agent-content-ack:${exactReceipt.requestId}`,
+      materialize: async (seq) => {
+        const body = encodeEnvelope(createEnvelope('agent.egress.ack', payload, { id: exactReceipt.requestId, seq }));
+        const bytes = new TextEncoder().encode(body);
+        return {
+          body,
+          bodyHash: contentHash(await options.crypto.sha256(bytes)),
+          byteSize: BigInt(bytes.length),
+        };
+      },
+    });
+    const decoded = decodeEnvelope(message.body);
+    if (
+      decoded.type !== 'agent.egress.ack' ||
+      decoded.seq !== message.seq ||
+      JSON.stringify(decoded.payload) !== JSON.stringify(payload)
+    ) {
+      throw new ByokCloudError(
+        'mailbox_receipt_mismatch',
+        `Mailbox content receipt ${exactReceipt.requestId} does not exactly acknowledge its durable content fact.`,
+      );
+    }
+  }
+
   return {
     fetch: registry.fetch,
     routes: registry.routes,
@@ -806,6 +860,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       await assertAgentCapabilities(tenant, deviceId, [
         AGENT_HOME_CONTRACT_CAPABILITY,
         AGENT_EGRESS_POLICY_CAPABILITY,
+        AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
         contentReadCapability(payload.surface),
       ]);
       const stores = tenantStoresFor(controlPlane(tenant), root);

@@ -401,6 +401,10 @@ export const AgentContentReceiptPayloadSchema = z.discriminatedUnion('decision',
   z
     .object({
       requestId: z.uuid(),
+      /** Stable reliable-delivery identity. Content receipts use their requestId. */
+      eventId: z.uuid(),
+      /** Stable positive cursor allocated by the durable Agent spool. */
+      cursor: z.number().int().positive(),
       surface: AgentContentReadSurfaceSchema,
       actor: AgentContentActorSchema,
       agentRef: AgentRefSchema,
@@ -420,6 +424,8 @@ export const AgentContentReceiptPayloadSchema = z.discriminatedUnion('decision',
   z
     .object({
       requestId: z.uuid(),
+      eventId: z.uuid(),
+      cursor: z.number().int().positive(),
       surface: AgentContentReadSurfaceSchema,
       actor: AgentContentActorSchema,
       agentRef: AgentRefSchema,

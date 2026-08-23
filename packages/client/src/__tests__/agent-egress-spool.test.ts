@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEgressPolicy } from '@byok-sdk/protocol';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
-import { AgentReliableSpool } from '../daemon/agent-egress-spool';
+import { AgentLatestValueState, AgentReliableSpool } from '../daemon/agent-egress-spool';
 
 const roots: string[] = [];
 const agentRef = { agentId: 'agent-spool', profileRevision: 'r1' };
@@ -50,6 +50,59 @@ describe('Agent reliable egress spool', () => {
       agentRef,
       tenantId: 'tenant-spool',
       sessionRef: 'session-spool',
+      policyRevision: record.policyRevision,
+      eventId: record.eventId,
+      cursor: record.cursor,
+    })).toBe(true);
+    expect((await AgentReliableSpool.open(agentHome)).records()).toEqual([]);
+  });
+
+  it('keeps denied content receipts durable and content-free across crash/restart until an exact ack', async () => {
+    const agentHome = await home('content-receipt-restart');
+    const spool = await AgentReliableSpool.open(agentHome);
+    const record = await spool.appendContentReceipt({
+      agentRef,
+      tenantId: 'tenant-content',
+      policyRevision: DEFAULT_AGENT_EGRESS_POLICY.policyRevision,
+      sessionRef: 'session-content',
+      payload: {
+        requestId: 'f0000000-0000-4000-8000-000000000001',
+        surface: 'workspace',
+        actor: { kind: 'user', id: 'content-user' },
+        agentRef,
+        sessionRef: 'session-content',
+        runtime: 'pi',
+        cwd: '/agents/agent-spool',
+        policyRevision: DEFAULT_AGENT_EGRESS_POLICY.policyRevision,
+        target: 'host-only-secret.txt',
+        mimeType: 'text/plain',
+        decodeAs: 'utf8',
+        decision: 'denied',
+        byteCount: 0,
+        reason: 'sensitive-name',
+      },
+    }, DEFAULT_AGENT_EGRESS_POLICY, 0);
+    expect(record.wireType).toBe('agent.content.receipt');
+    expect(record.payload).toMatchObject({ eventId: 'f0000000-0000-4000-8000-000000000001', cursor: 1, decision: 'denied' });
+    const raw = await readFile(path.join(agentHome, '.byok', 'egress', 'reliable-v1.jsonl'), 'utf8');
+    expect(raw).not.toContain('host-only-secret bytes');
+    expect(raw).not.toContain('inline');
+
+    const restarted = await AgentReliableSpool.open(agentHome);
+    expect(restarted.records()).toEqual([record]);
+    expect(await restarted.acknowledge({
+      agentRef,
+      tenantId: 'tenant-content',
+      sessionRef: 'session-content',
+      policyRevision: record.policyRevision,
+      eventId: record.eventId,
+      cursor: record.cursor + 1,
+    })).toBe(false);
+    expect(restarted.records()).toEqual([record]);
+    expect(await restarted.acknowledge({
+      agentRef,
+      tenantId: 'tenant-content',
+      sessionRef: 'session-content',
       policyRevision: record.policyRevision,
       eventId: record.eventId,
       cursor: record.cursor,
@@ -107,6 +160,26 @@ describe('Agent reliable egress spool', () => {
     });
     expect(second).toEqual({ ok: false, reason: 'quota_exceeded' });
     expect(controller.reliableRecords()).toHaveLength(1);
+  });
+
+  it('keeps one latest value per Agent without applying the reliable per-Agent event quota to tenant peers', () => {
+    const latest = new AgentLatestValueState();
+    const policy: AgentEgressPolicy = {
+      ...DEFAULT_AGENT_EGRESS_POLICY,
+      policyRevision: 'latest-agent-isolation-r1',
+      reliable: { maxPendingEventsPerAgent: 1, maxPendingBytesPerAgent: 1024, maxPendingBytesPerTenant: 1024 },
+    };
+    expect(latest.offer({
+      agentRef: { agentId: 'agent-latest-one', profileRevision: 'r1' },
+      tenantId: 'tenant-latest',
+      event: { type: 'progress', text: 'one' },
+    }, policy)).toMatchObject({ accepted: true, replaced: false });
+    expect(latest.offer({
+      agentRef: { agentId: 'agent-latest-two', profileRevision: 'r1' },
+      tenantId: 'tenant-latest',
+      event: { type: 'progress', text: 'two' },
+    }, policy)).toMatchObject({ accepted: true, replaced: false });
+    expect(latest.pendingEvents).toBe(2);
   });
 
   it('fails closed when restart recovery finds a spool under another Agent or tenant home', async () => {

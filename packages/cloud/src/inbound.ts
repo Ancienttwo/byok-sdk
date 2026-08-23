@@ -212,15 +212,25 @@ export async function handleInboundEnvelope(
 
   if (envelope.type === 'agent.content.receipt') {
     const device = await stores.devices.get(deviceId);
-    if (device === undefined || device.revoked || !hasCapabilities(device.capabilities, [contentReadCapability(envelope.payload.surface)])) {
+    if (
+      device === undefined ||
+      device.revoked ||
+      envelope.payload.eventId !== envelope.payload.requestId ||
+      !hasCapabilities(device.capabilities, [contentReadCapability(envelope.payload.surface), AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])
+    ) {
       return 'rejected';
     }
     const request = await readContentRequest(stores, deviceId, envelope.payload.requestId);
     if (request === undefined || !matchesContentReadReceipt(request, envelope.payload)) return 'rejected';
     const key = contentReceiptKey(deviceId, envelope.payload.requestId);
-    const encoded = encodeEnvelope(envelope);
-    const receipt = await stores.receipts.record({ key, body: encoded });
-    return receipt.created ? 'accepted' : receipt.receipt.body === encoded ? 'duplicate' : 'rejected';
+    // The durable fact is the protocol-validated payload, not a transport
+    // envelope whose id/timestamp changes when the Agent replays its spool.
+    // Zod has already projected this to its canonical field order, so equal
+    // protocol facts have one byte representation while a changed cursor or
+    // BlobRef metadata is rejected as a conflicting second receipt.
+    const body = JSON.stringify(envelope.payload);
+    const receipt = await stores.receipts.record({ key, body });
+    return receipt.created ? 'accepted' : receipt.receipt.body === body ? 'duplicate' : 'rejected';
   }
 
   const taskId = envelope.task_id;

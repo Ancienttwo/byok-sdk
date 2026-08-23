@@ -17,6 +17,8 @@ import {
   AgentReliableSpool,
   type AgentReliableAck,
   type AgentReliableAppendInput,
+  type AgentContentReceiptAppendInput,
+  type AgentContentReceiptWithoutReliableIdentity,
   type AgentReliableEgressRecord,
 } from './agent-egress-spool';
 import { sanitizeReliablePayload, type AgentEgressSanitizer } from './agent-egress-sanitizer';
@@ -42,6 +44,14 @@ export interface AgentEgressReliableInput {
   readonly sessionRef: string;
   readonly taskId?: string;
   readonly eventId?: string;
+}
+
+export interface AgentEgressContentReceiptInput {
+  readonly homeDir: string;
+  readonly agentRef: AgentRef;
+  /** The content-free payload before the spool supplies stable event/cursor identity. */
+  readonly payload: AgentContentReceiptWithoutReliableIdentity;
+  readonly taskId?: string;
 }
 
 export type AgentEgressReliableAppendResult =
@@ -138,6 +148,34 @@ export class AgentEgressController {
         ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
         ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
       } satisfies AgentReliableAppendInput, this.options.policy, this.tenantPendingBytes());
+      return { ok: true, record };
+    } catch (error) {
+      const reason: AgentEgressDropReason = error instanceof AgentReliableQuotaError ? error.reason : 'backpressure';
+      this.noteDrop('reliable', reason, input.agentRef);
+      return { ok: false, reason };
+    }
+  }
+
+  /**
+   * Content decisions are reliable facts too. They never enter the generic
+   * egress payload authority: the spool persists their exact protocol payload
+   * with `wireType: agent.content.receipt` before any transport attempt.
+   */
+  async appendContentReceipt(input: AgentEgressContentReceiptInput): Promise<AgentEgressReliableAppendResult> {
+    if (this.options.tenantId === undefined) {
+      this.noteDrop('reliable', 'policy_denied', input.agentRef);
+      return { ok: false, reason: 'policy_denied' };
+    }
+    try {
+      const spool = await this.spoolFor(input.homeDir, input.agentRef);
+      const record = await spool.appendContentReceipt({
+        agentRef: input.agentRef,
+        tenantId: this.options.tenantId,
+        policyRevision: this.options.policy.policyRevision,
+        sessionRef: input.payload.sessionRef,
+        payload: input.payload,
+        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+      } satisfies AgentContentReceiptAppendInput, this.options.policy, this.tenantPendingBytes());
       return { ok: true, record };
     } catch (error) {
       const reason: AgentEgressDropReason = error instanceof AgentReliableQuotaError ? error.reason : 'backpressure';

@@ -131,6 +131,14 @@ function matchesContentReadReceipt(
   );
 }
 
+interface AgentContentReceiptRecord {
+  readonly deviceId: string;
+  readonly payload: AgentContentReceiptPayload;
+  /** Content request id is its receipt authority and stable ack identity. */
+  readonly receiptId: string;
+  readonly recordedAt: string;
+}
+
 function contentReadCapability(surface: AgentContentReadPayload['surface']): string {
   switch (surface) {
     case 'workspace':
@@ -459,7 +467,7 @@ export class ConnectionHub {
   /** Accepted requests are the authority that later receipts/transfers must echo exactly. */
   private readonly agentContentReadRequests = new Map<string, AgentContentReadPayload>();
   /** Content-free explicit-read audit facts keyed by exact authenticated device/request identity. */
-  private readonly agentContentReceipts = new Map<string, AgentContentReceiptPayload>();
+  private readonly agentContentReceipts = new Map<string, AgentContentReceiptRecord>();
   /**
    * Per-task last-inbound-activity timestamp (epoch ms) — the task-lease
    * reaper's condition (c), see the "task-lease reaper" section below. Reset
@@ -848,21 +856,48 @@ export class ConnectionHub {
 
   private handleAgentContentReceipt(deviceId: string, payload: AgentContentReceiptPayload): 'accepted' | 'duplicate' | 'rejected' {
     const capability = contentReadCapability(payload.surface);
-    if (!this.hasDeviceCapabilities(deviceId, [capability])) return 'rejected';
+    if (!this.hasDeviceCapabilities(deviceId, [capability, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])) return 'rejected';
+    if (payload.eventId !== payload.requestId) return 'rejected';
     const key = `${deviceId}\u0000${payload.requestId}`;
     const request = this.agentContentReadRequests.get(key);
     if (request === undefined || !matchesContentReadReceipt(request, payload)) return 'rejected';
     const existing = this.agentContentReceipts.get(key);
     if (existing !== undefined) {
-      if (JSON.stringify(existing) !== JSON.stringify(payload)) return 'rejected';
+      if (JSON.stringify(existing.payload) !== JSON.stringify(payload)) return 'rejected';
+      this.sendAgentContentReceiptAck(deviceId, existing);
       this.dedupDropCount++;
       return 'duplicate';
     }
-    this.agentContentReceipts.set(key, payload);
+    const receipt: AgentContentReceiptRecord = {
+      deviceId,
+      payload,
+      receiptId: payload.requestId,
+      recordedAt: new Date().toISOString(),
+    };
+    // Store first. The acknowledgement is only materialized after this exact
+    // content-free receipt fact is available for duplicate replay.
+    this.agentContentReceipts.set(key, receipt);
+    this.sendAgentContentReceiptAck(deviceId, receipt);
     return 'accepted';
   }
 
   private sendAgentEgressAck(deviceId: string, receipt: AgentEgressReceipt): void {
+    this.sendToDevice(
+      deviceId,
+      'agent.egress.ack',
+      {
+        agentRef: receipt.payload.agentRef,
+        sessionRef: receipt.payload.sessionRef,
+        policyRevision: receipt.payload.policyRevision,
+        eventId: receipt.payload.eventId,
+        cursor: receipt.payload.cursor,
+        receiptId: receipt.receiptId,
+      },
+      {},
+    );
+  }
+
+  private sendAgentContentReceiptAck(deviceId: string, receipt: AgentContentReceiptRecord): void {
     this.sendToDevice(
       deviceId,
       'agent.egress.ack',
@@ -1856,9 +1891,9 @@ export class ConnectionHub {
       throw new Error(`device ${deviceId} is not connected`);
     }
     const capability = contentReadCapability(payload.surface);
-    if (!this.hasDeviceCapabilities(deviceId, [capability])) {
+    if (!this.hasDeviceCapabilities(deviceId, [capability, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])) {
       throw new Error(
-        `device ${deviceId} did not advertise ${capability}; refusing Agent content read before enqueue`,
+        `device ${deviceId} did not advertise ${capability} and reliable acknowledgement support; refusing Agent content read before enqueue`,
       );
     }
     const key = `${deviceId}\u0000${payload.requestId}`;

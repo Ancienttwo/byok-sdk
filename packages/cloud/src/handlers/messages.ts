@@ -20,7 +20,11 @@
  * `duplicate` for whatever already landed.
  */
 import type { Context } from 'hono';
-import { MessagesSendRequestSchema, type MessagesSendResponse } from '@byok-sdk/protocol';
+import {
+  MessagesSendRequestSchema,
+  type AgentContentReceiptPayload,
+  type MessagesSendResponse,
+} from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../inbound';
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
@@ -35,6 +39,12 @@ export interface MessagesRouteDeps extends DeviceRouteDeps {
    * transport retry cannot turn a committed reliable event into an unacked one.
    */
   readonly appendReliableEgressAck: (stores: TenantStores, record: AgentEgressRecord) => Promise<void>;
+  /** Content receipt rows share the reliable spool/ack protocol but preserve their own exact payload authority. */
+  readonly appendContentReceiptAck: (
+    stores: TenantStores,
+    deviceId: string,
+    payload: AgentContentReceiptPayload,
+  ) => Promise<void>;
 }
 
 export function messagesHandler(deps: MessagesRouteDeps) {
@@ -62,6 +72,9 @@ export function messagesHandler(deps: MessagesRouteDeps) {
           throw new Error(`Accepted reliable egress ${envelope.payload.eventId} has no durable receipt record.`);
         }
         await deps.appendReliableEgressAck(stores, record);
+      }
+      if (envelope.type === 'agent.content.receipt' && (outcome === 'accepted' || outcome === 'duplicate')) {
+        await deps.appendContentReceiptAck(stores, device.deviceId, envelope.payload);
       }
       // A duplicate is still a wire-level success (§8.2/§9's idempotency
       // window) — it just did not re-run a handler. Only a gate rejection

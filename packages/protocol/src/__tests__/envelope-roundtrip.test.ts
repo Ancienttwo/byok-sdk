@@ -261,6 +261,8 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       type,
       createEnvelope(type, {
         requestId: '10000000-0000-4000-8000-000000000062',
+        eventId: '10000000-0000-4000-8000-000000000062',
+        cursor: 2,
         surface: 'workspace',
         actor: { kind: 'user', id: 'actor-1' },
         agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },

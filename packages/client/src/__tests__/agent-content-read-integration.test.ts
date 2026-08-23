@@ -81,6 +81,19 @@ function receipts(requestId: string): Envelope[] {
   ) ?? [];
 }
 
+async function acknowledgeLongPollReceipt(receipt: Envelope): Promise<void> {
+  if (receipt.type !== 'agent.content.receipt') throw new Error('expected content receipt');
+  server?.pushLongPollEvent(createEnvelope('agent.egress.ack', {
+    agentRef: receipt.payload.agentRef,
+    sessionRef: receipt.payload.sessionRef,
+    policyRevision: receipt.payload.policyRevision,
+    eventId: receipt.payload.eventId,
+    cursor: receipt.payload.cursor,
+    receiptId: receipt.payload.requestId,
+  }, { seq: server.nextSeq() }));
+  await vi.waitFor(() => expect(daemon?.status().egress.reliable.pendingEvents).toBe(0));
+}
+
 async function prepareAgentHome(hostStorageRoot: string): Promise<string> {
   const home = (await new AgentHomeLayout(hostStorageRoot).resolve(agentRef)).canonicalHome;
   await fs.mkdir(home, { recursive: true });
@@ -103,6 +116,7 @@ async function startDaemon(
   longPoll = false,
   pair = true,
 ): Promise<Daemon> {
+  currentServer.setAckCapabilities(['agent-egress-reliable-ack']);
   const config: DaemonConfig = {
     localAgentRelease: { version: '0.0.0-content-test' },
     productName: 'Content test',
@@ -142,7 +156,7 @@ async function startDaemon(
 }
 
 describe('agent.content.read daemon integration', () => {
-  it('advertises only locally enabled surfaces, uploads exact WS content once per requestId, and reads the same audit receipt after restart', async () => {
+  it('spools a content-free allowed receipt before send, then crash/restart replays the exact receipt without a second upload', async () => {
     server = await TestServer.start();
     const hostStorageRoot = await tmpDir('byok-content-home-');
     const storeDir = await tmpDir('byok-content-store-');
@@ -164,25 +178,32 @@ describe('agent.content.read daemon integration', () => {
     if (first.type !== 'agent.content.receipt' || first.payload.decision !== 'allowed') throw new Error('expected allowed receipt');
     expect(first.payload).toMatchObject({
       requestId,
+      eventId: requestId,
+      cursor: expect.any(Number),
       cwd: home,
       target: 'notes.txt',
       byteCount: Buffer.byteLength('ws explicit bytes'),
       contentHash: 'sha256:80a11c57edc23806bb79f0644d26b60cd3cc47c1ccc188e3cda40ff4183c5ec6',
     });
     expect(server.blobContent(first.payload.blobRef.blobId)?.toString('utf8')).toBe('ws explicit bytes');
+    const spoolBytes = await fs.readFile(path.join(home, '.byok', 'egress', 'reliable-v1.jsonl'), 'utf8');
+    expect(spoolBytes).toContain(first.payload.blobRef.blobId);
+    expect(spoolBytes).not.toContain('ws explicit bytes');
 
-    // A fresh daemon process sees the durable audit receipt and the same
-    // requestId reservation. It must read back the committed BlobRef rather
-    // than issue a second PUT/finalize against an already-committed object.
+    // The TestServer deliberately does not emit a receipt ack. A fresh daemon
+    // must recover the pending spool row and resend that exact content receipt
+    // as `agent.content.receipt`, not generic reliable egress.
     const runningDaemon = daemon;
     await runningDaemon?.stop();
     daemon = undefined;
     const restartedDaemon = await startDaemon(server, hostStorageRoot, storeDir, policy(), false, false);
-    server.send(readEnvelope(server.nextSeq(), { requestId, surface: 'workspace', cwd: home, target: 'notes.txt' }));
     await vi.waitFor(() => expect(receipts(requestId)).toHaveLength(2));
     const second = receipts(requestId)[1]!;
     if (second.type !== 'agent.content.receipt' || second.payload.decision !== 'allowed') throw new Error('expected replay receipt');
+    expect(second.payload.eventId).toBe(first.payload.eventId);
+    expect(second.payload.cursor).toBe(first.payload.cursor);
     expect(second.payload.blobRef).toEqual(first.payload.blobRef);
+    expect(server.received.filter((envelope) => envelope.type === 'agent.egress.reliable')).toHaveLength(0);
     expect(server.httpRequests.filter((request) => request.method === 'PUT' && request.pathname.startsWith('/_test/blob-upload/'))).toHaveLength(1);
 
     await restartedDaemon.stop();
@@ -214,6 +235,7 @@ describe('agent.content.read daemon integration', () => {
     const allowed = receipts(allowedId)[0]!;
     if (allowed.type !== 'agent.content.receipt' || allowed.payload.decision !== 'allowed') throw new Error('expected long-poll allowed receipt');
     expect(allowed.payload.cwd).toBe(home);
+    await acknowledgeLongPollReceipt(allowed);
 
     const identityMismatches = [
       { agentRef: { agentId: 'other-agent', profileRevision: agentRef.profileRevision } },
@@ -239,6 +261,7 @@ describe('agent.content.read daemon integration', () => {
       const denied = receipts(requestId)[0]!;
       if (denied.type !== 'agent.content.receipt' || denied.payload.decision !== 'denied') throw new Error('expected denied receipt');
       expect(denied.payload.reason).toBe('identity-mismatch');
+      await acknowledgeLongPollReceipt(denied);
     }
   });
 });

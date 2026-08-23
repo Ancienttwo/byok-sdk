@@ -11,6 +11,7 @@ import {
   TASK_TRANSITIONS,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+  AgentContentReceiptPayloadSchema,
 } from '@byok-sdk/protocol';
 import type {
   AgentEgressPolicy,
@@ -110,7 +111,7 @@ import {
 import { AgentEgressController, type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { resolveAgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy';
 import { sanitizeEgressEnvelope, type AgentEgressSanitizer } from './agent-egress-sanitizer';
-import type { AgentReliableEgressRecord } from './agent-egress-spool';
+import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRecord } from './agent-egress-spool';
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import {
   AGENT_CONTENT_READ_CAPABILITIES,
@@ -1806,13 +1807,29 @@ export function buildDaemonWithAdapters(
         mimeType: payload.mimeType,
         decodeAs: payload.decodeAs,
       } as const;
+      const appendAndDispatchContentReceipt = async (
+        contentReceipt: AgentContentReceiptWithoutReliableIdentity,
+      ): Promise<void> => {
+        const appended = await agentEgress.appendContentReceipt({
+          homeDir: canonicalHome,
+          agentRef: payload.agentRef,
+          payload: contentReceipt,
+        });
+        if (!appended.ok) {
+          // Throwing keeps the inbound request unacknowledged, so the server
+          // redelivers rather than treating a non-durable content decision as
+          // complete or silently moving it to latest-value activity.
+          throw new Error(`content receipt could not enter reliable spool: ${appended.reason}`);
+        }
+        dispatchReliableRecord(appended.record);
+      };
       if (result.decision === 'deny') {
-        connection?.send(createEnvelope('agent.content.receipt', {
+        await appendAndDispatchContentReceipt({
           ...receipt,
           decision: 'denied',
           byteCount: 0,
           reason: result.reason,
-        }));
+        });
         return true;
       }
 
@@ -1822,13 +1839,13 @@ export function buildDaemonWithAdapters(
       const blobRef = await blobClient.uploadArtifact(result.content, payload.mimeType, {
         idempotencyKey: payload.requestId,
       });
-      connection?.send(createEnvelope('agent.content.receipt', {
+      await appendAndDispatchContentReceipt({
         ...receipt,
         decision: 'allowed',
         byteCount: result.byteCount,
         contentHash: `sha256:${result.contentHash}`,
         blobRef,
-      }));
+      });
       return true;
     };
 
@@ -2751,19 +2768,28 @@ export function buildDaemonWithAdapters(
       agentEgress.noteTransportDrop('capability_missing', record.agentRef);
       return;
     }
-    const envelope = createEnvelope('agent.egress.reliable', {
-      agentRef: record.agentRef,
-      sessionRef: record.sessionRef,
-      policyRevision: record.policyRevision,
-      eventId: record.eventId,
-      cursor: record.cursor,
-      payload: record.payload as AgentEgressReliablePayload['payload'],
-      contentHash: record.payloadHash,
-      byteCount: record.byteCount,
-    }, {
-      ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
-      sessionRef: record.sessionRef,
-    });
+    const envelope = record.wireType === 'agent.egress.reliable'
+      ? createEnvelope('agent.egress.reliable', {
+          agentRef: record.agentRef,
+          sessionRef: record.sessionRef,
+          policyRevision: record.policyRevision,
+          eventId: record.eventId,
+          cursor: record.cursor,
+          payload: record.payload as AgentEgressReliablePayload['payload'],
+          contentHash: record.payloadHash,
+          byteCount: record.byteCount,
+        }, {
+          ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
+          sessionRef: record.sessionRef,
+        })
+      : createEnvelope(
+          'agent.content.receipt',
+          AgentContentReceiptPayloadSchema.parse(record.payload),
+          {
+            ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
+            sessionRef: record.sessionRef,
+          },
+        );
     // The payload's optional host redaction already ran before append/hash;
     // this second SDK boundary pass validates the frozen envelope without
     // invoking a non-idempotent host sanitizer a second time.

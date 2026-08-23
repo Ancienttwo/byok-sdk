@@ -180,6 +180,8 @@ describe('hosted Agent egress contract', () => {
     expect(request.envelope.type).toBe('agent.content.read');
     const receipt = createEnvelope('agent.content.receipt', {
       requestId: '10000000-0000-4000-8000-000000000021',
+      eventId: '10000000-0000-4000-8000-000000000021',
+      cursor: 8,
       surface: 'workspace',
       actor: { kind: 'user', id: 'actor-cloud-1' },
       agentRef: AGENT_REF,
@@ -209,6 +211,41 @@ describe('hosted Agent egress contract', () => {
     const durableReceipt = await deviceStores(harness, device.deviceId).receipts.get(
       `agent-content:${device.deviceId}:${receipt.payload.requestId}`,
     );
-    expect(durableReceipt === undefined ? undefined : decodeEnvelope(durableReceipt.body)).toEqual(receipt);
+    expect(durableReceipt === undefined ? undefined : JSON.parse(durableReceipt.body)).toEqual(receipt.payload);
+    const acknowledgements = (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages
+      .map((message) => decodeEnvelope(message.body))
+      .filter((envelope) => envelope.type === 'agent.egress.ack');
+    expect(acknowledgements).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          eventId: receipt.payload.requestId,
+          cursor: receipt.payload.cursor,
+          receiptId: receipt.payload.requestId,
+        }),
+      }),
+    ]);
+
+    const duplicate = await harness.request('/byok/messages', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [createEnvelope('agent.content.receipt', receipt.payload)] }),
+    });
+    expect(await duplicate.json()).toEqual({ accepted: 1 });
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages
+        .map((message) => decodeEnvelope(message.body))
+        .filter((envelope) => envelope.type === 'agent.egress.ack'),
+    ).toHaveLength(1);
+
+    const mismatch = createEnvelope('agent.content.receipt', {
+      ...receipt.payload,
+      cursor: receipt.payload.cursor + 1,
+    });
+    const rejected = await harness.request('/byok/messages', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [mismatch] }),
+    });
+    expect(await rejected.json()).toEqual({ accepted: 0, rejected: 1 });
   });
 });

@@ -132,7 +132,7 @@ describe('reference-server Agent egress contract', () => {
     const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
       productId: PRODUCT_ID,
-      capabilities: ['agent-home-contract', 'agent-content-workspace-read'],
+      capabilities: ['agent-home-contract', 'agent-egress-reliable-ack', 'agent-content-workspace-read'],
     });
     ws = daemon.ws;
 
@@ -174,9 +174,47 @@ describe('reference-server Agent egress contract', () => {
         policy: { maxBytes: 1024, allowedMimeTypes: ['text/plain'] },
       },
     });
-    await expect(request).resolves.toMatchObject({
+    const delivered = await request;
+    expect(delivered).toMatchObject({
       type: 'agent.content.read',
       payload: { surface: 'workspace', agentRef: AGENT_REF, sessionRef: 'session-server' },
+    });
+    if (delivered.type !== 'agent.content.read') throw new Error('unreachable');
+    const receipt = createEnvelope('agent.content.receipt', {
+      requestId: delivered.payload.requestId,
+      eventId: delivered.payload.requestId,
+      cursor: 20,
+      surface: delivered.payload.surface,
+      actor: delivered.payload.actor,
+      agentRef: delivered.payload.agentRef,
+      sessionRef: delivered.payload.sessionRef,
+      runtime: delivered.payload.runtime,
+      cwd: delivered.payload.cwd,
+      policyRevision: delivered.payload.policyRevision,
+      target: delivered.payload.target,
+      mimeType: delivered.payload.mimeType,
+      decodeAs: delivered.payload.decodeAs,
+      decision: 'denied',
+      byteCount: 0,
+      reason: 'policy-disabled',
+    });
+    const firstAck = nextEnvelope(ws);
+    send(ws, receipt);
+    const first = await firstAck;
+    expect(first).toMatchObject({
+      type: 'agent.egress.ack',
+      payload: {
+        eventId: delivered.payload.requestId,
+        cursor: 20,
+        receiptId: delivered.payload.requestId,
+      },
+    });
+    const replayAck = nextEnvelope(ws);
+    send(ws, createEnvelope('agent.content.receipt', receipt.payload));
+    const replay = await replayAck;
+    expect(replay).toMatchObject({
+      type: 'agent.egress.ack',
+      payload: first.payload,
     });
   });
 });
