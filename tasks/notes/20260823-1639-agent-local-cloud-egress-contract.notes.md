@@ -1,6 +1,6 @@
 # Implementation Notes: agent-local-cloud-egress-contract
 
-> **Status**: Active
+> **Status**: Review
 > **Plan**: plans/plan-20260823-1639-agent-local-cloud-egress-contract.md
 > **Contract**: tasks/contracts/20260823-1639-agent-local-cloud-egress-contract.contract.md
 > **Review**: tasks/reviews/20260823-1639-agent-local-cloud-egress-contract.review.md
@@ -104,6 +104,11 @@
   rejected `fac1c0c` subject and are historical only. The replacement subject
   must regenerate machine evidence and semantic acceptance after the two gate
   fixes; no stale receipt may be reused.
+- Replacement-subject `repo-harness run verify-contract ... --strict` passed
+  26/26 after `cdf1c5e` and `1145c68`: all focused tests, full build,
+  full typecheck, full test, strict workflow, and the required real
+  Postgres/MinIO dataplane oracle passed. The disposable substrate was removed
+  again with `down -v`.
 
 ## Promotion Filter
 

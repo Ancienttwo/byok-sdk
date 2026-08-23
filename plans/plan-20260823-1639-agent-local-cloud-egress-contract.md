@@ -1,6 +1,6 @@
 # Plan: Agent local/cloud typed egress contract
 
-> **Status**: Executing
+> **Status**: Review
 > **Created**: 20260823-1639
 > **Slug**: agent-local-cloud-egress-contract
 > **Artifact Level**: work-package
@@ -152,4 +152,4 @@ runtime event / reliable evidence / explicit content request
 - [x] Implement capability-gated workspace/transcript/artifact reads with containment, size/type/sensitive-name policy and durable audit receipts.
 - [x] Persist and validate exact capability/AgentRef/session/cursor/ack/receipt facts in reference server and hosted cloud/dataplane.
 - [x] Update Salesko/downstream configuration, responsibility and one-shot migration guidance without adding product schema to SDK.
-- [ ] Run focused negative/restart suites, disposable Postgres oracle, full required gates, semantic review and typed acceptance. The first semantic gate found two blockers; their focused regressions pass and the replacement subject is pending full verification.
+- [ ] Run focused negative/restart suites, disposable Postgres oracle, full required gates, semantic review and typed acceptance. Replacement-subject machine gates are complete; second semantic review/acceptance is pending.

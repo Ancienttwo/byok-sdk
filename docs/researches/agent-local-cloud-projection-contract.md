@@ -2,8 +2,8 @@
 
 > **Status:** implemented local candidate on
 > `codex/agent-local-cloud-egress-contract`; focused post-review regressions
-> pass, while replacement-subject repository gates and subject-bound
-> acceptance remain pending. The accepted Agent-home contract is
+> and replacement-subject repository gates pass, while subject-bound
+> acceptance remains pending. The accepted Agent-home contract is
 > the parent authority; this work-package adds consumed egress, durable
 > delivery, quota, sanitization, and explicit content-read surfaces without a
 > compatibility path.
@@ -222,8 +222,8 @@ At minimum, behavior tests must prove:
 - server/cloud capability admission and persistence readback are exact;
 - legacy Agent-home cwd/session semantics remain unchanged.
 
-The focused behavior suites cover this matrix. Replacement-subject repository
-gates, disposable Postgres readback, semantic review, and the subject-bound
-AcceptanceReceipt remain the promotion boundary; this document does not claim
-merge, publication, deployment, migration execution, DLP, or downstream
-enablement.
+The focused behavior suites, replacement-subject repository gates, and
+disposable Postgres readback cover this matrix. Semantic review and the
+subject-bound AcceptanceReceipt remain the promotion boundary; this document
+does not claim merge, publication, deployment, migration execution, DLP, or
+downstream enablement.
