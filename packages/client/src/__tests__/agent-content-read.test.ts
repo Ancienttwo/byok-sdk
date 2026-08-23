@@ -14,6 +14,7 @@ import {
   type AgentContentReadRequest,
   type AgentContentReadSurface,
   type AgentContentSessionIdentity,
+  type AgentContentAuditReceipt,
 } from '../daemon/agent-content-read';
 import { AgentContentAuditStore, AgentContentAuditStoreError } from '../daemon/agent-content-audit-store';
 
@@ -78,6 +79,28 @@ function transcriptIdentity(cwd: string): AgentContentSessionIdentity {
     runtimeId: 'pi',
     cwd,
   };
+}
+
+function deniedReceipt(
+  requestId: string,
+  receiptAgentRef: AgentContentAuditReceipt['agentRef'] = agentRef,
+  relativeTarget = 'notes/readme.md',
+): AgentContentAuditReceipt {
+  return Object.freeze({
+    version: 1,
+    requestId,
+    actor: { kind: 'user' as const, id: 'actor-1' },
+    tenantId: 'tenant-1',
+    deviceId: 'device-1',
+    agentRef: receiptAgentRef,
+    surface: 'workspace',
+    relativeTarget,
+    policyRevision: 'policy-1',
+    byteCount: 0,
+    decision: 'deny',
+    reason: 'policy-disabled',
+    recordedAt: '2026-08-23T00:00:00.000Z',
+  });
 }
 
 async function makeEngine(options: {
@@ -374,6 +397,50 @@ describe('Agent content-read policy engine', () => {
     await expect(restarted.readback()).resolves.toEqual([receipt]);
     await expect(restarted.append({ ...receipt, relativeTarget: 'notes/other.md' }))
       .rejects.toBeInstanceOf(AgentContentAuditStoreError);
+  });
+
+  it('serializes concurrent exact requestId replays from independently-created same-Agent stores', async () => {
+    const root = await makeRoot();
+    const home = (await new AgentHomeLayout(root).resolve(agentRef)).canonicalHome;
+    const receipt = deniedReceipt('request-concurrent-replay');
+    const first = AgentContentAuditStore.forCanonicalAgentHome(home);
+    const second = AgentContentAuditStore.forCanonicalAgentHome(home);
+
+    const [left, right] = await Promise.all([
+      first.append(receipt),
+      second.append({ ...receipt, recordedAt: '2026-08-23T00:01:00.000Z' }),
+    ]);
+    expect(left).toEqual(receipt);
+    expect(right).toEqual(receipt);
+
+    const restarted = AgentContentAuditStore.forCanonicalAgentHome(home);
+    await expect(restarted.readback()).resolves.toEqual([receipt]);
+  });
+
+  it('fails closed on concurrent conflicting requestId reuse while keeping different Agents isolated', async () => {
+    const root = await makeRoot();
+    const layout = new AgentHomeLayout(root);
+    const home = (await layout.resolve(agentRef)).canonicalHome;
+    const otherAgentRef = { agentId: 'agent-two', profileRevision: 'profile-1' } as const;
+    const otherHome = (await layout.resolve(otherAgentRef)).canonicalHome;
+    const requestId = 'request-concurrent-conflict';
+    const receipt = deniedReceipt(requestId);
+
+    const sameAgentOutcomes = await Promise.allSettled([
+      AgentContentAuditStore.forCanonicalAgentHome(home).append(receipt),
+      AgentContentAuditStore.forCanonicalAgentHome(home).append(
+        deniedReceipt(requestId, agentRef, 'notes/other.md'),
+      ),
+    ]);
+    expect(sameAgentOutcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(sameAgentOutcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+    const rejection = sameAgentOutcomes.find((outcome) => outcome.status === 'rejected');
+    expect(rejection?.status === 'rejected' && rejection.reason).toBeInstanceOf(AgentContentAuditStoreError);
+    await expect(AgentContentAuditStore.forCanonicalAgentHome(home).readback()).resolves.toHaveLength(1);
+
+    const otherReceipt = deniedReceipt(requestId, otherAgentRef);
+    await expect(AgentContentAuditStore.forCanonicalAgentHome(otherHome).append(otherReceipt)).resolves.toEqual(otherReceipt);
+    await expect(AgentContentAuditStore.forCanonicalAgentHome(otherHome).readback()).resolves.toEqual([otherReceipt]);
   });
 
   it('rejects invalid policy/request shapes instead of inventing roots, MIME or bounds', async () => {

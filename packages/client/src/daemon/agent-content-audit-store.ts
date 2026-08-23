@@ -1,6 +1,7 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { AGENT_HOME_INTERNAL_DIRECTORY } from '../agent-home';
 import type {
   AgentContentAuditReceipt,
   AgentContentActorKind,
@@ -28,6 +29,7 @@ export class AgentContentAuditStoreError extends Error {
 
 const AUDIT_VERSION = 1 as const;
 const MAX_AUDIT_FILE_BYTES = 16 * 1024 * 1024;
+const AGENT_CONTENT_AUDIT_FILENAME = 'content-read-audit-v1.jsonl';
 
 const DECISIONS = new Set<AgentContentReadDecision>(['allow', 'deny']);
 const SURFACES = new Set<AgentContentReadSurface>(['workspace', 'transcript', 'artifact']);
@@ -249,11 +251,22 @@ async function assertAuditFile(filePath: string): Promise<void> {
  * path after a daemon restart; no in-memory cursor is authoritative.
  */
 export class AgentContentAuditStore {
+  /**
+   * `agent.content.read` creates a policy engine per envelope. Queue ownership
+   * must therefore be keyed by the canonical Agent-home ledger path, not an
+   * individual store instance.
+   */
+  private static readonly queues = new Map<string, Promise<void>>();
   readonly filePath: string;
-  private readonly queues = new Map<string, Promise<void>>();
 
   constructor(filePath: string) {
     this.filePath = assertAbsoluteFilePath(filePath);
+  }
+
+  /** The daemon may address this ledger only through an AgentHomeLayout resolution. */
+  static forCanonicalAgentHome(canonicalHome: string): AgentContentAuditStore {
+    const home = assertAbsoluteFilePath(canonicalHome);
+    return new AgentContentAuditStore(path.join(home, AGENT_HOME_INTERNAL_DIRECTORY, AGENT_CONTENT_AUDIT_FILENAME));
   }
 
   async append(receipt: AgentContentAuditReceipt): Promise<AgentContentAuditReceipt> {
@@ -349,12 +362,12 @@ export class AgentContentAuditStore {
 
   private enqueue<T>(task: () => Promise<T>): Promise<T> {
     const key = this.filePath;
-    const previous = this.queues.get(key) ?? Promise.resolve();
+    const previous = AgentContentAuditStore.queues.get(key) ?? Promise.resolve();
     const result = previous.then(task);
     const tail = result.then(() => undefined, () => undefined);
-    this.queues.set(key, tail);
+    AgentContentAuditStore.queues.set(key, tail);
     void tail.finally(() => {
-      if (this.queues.get(key) === tail) this.queues.delete(key);
+      if (AgentContentAuditStore.queues.get(key) === tail) AgentContentAuditStore.queues.delete(key);
     });
     return result;
   }

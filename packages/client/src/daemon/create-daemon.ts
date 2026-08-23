@@ -846,9 +846,6 @@ function computeCapabilities(
   return flags;
 }
 
-const AGENT_CONTENT_AUDIT_DIRECTORY = '.byok';
-const AGENT_CONTENT_AUDIT_FILENAME = 'content-read-audit-v1.jsonl';
-
 function resolveContentReadPolicies(
   egressPolicy: AgentEgressPolicy,
   config: AgentContentReadConfig | undefined,
@@ -1778,11 +1775,10 @@ export function buildDaemonWithAdapters(
             cwd: handoff.cwd,
           });
         },
-        // The SDK owns this address. It is never host-configurable and cannot
-        // escape the canonical home selected from the exact AgentRef.
-        auditStore: new AgentContentAuditStore(
-          path.join(canonicalHome, AGENT_CONTENT_AUDIT_DIRECTORY, AGENT_CONTENT_AUDIT_FILENAME),
-        ),
+        // This factory derives the SDK-owned address solely from the canonical
+        // AgentHomeLayout resolution and shares its writer queue with every
+        // same-Agent envelope in this daemon process.
+        auditStore: AgentContentAuditStore.forCanonicalAgentHome(canonicalHome),
       });
       const result = await policyEngine.read({
         requestId: payload.requestId,
