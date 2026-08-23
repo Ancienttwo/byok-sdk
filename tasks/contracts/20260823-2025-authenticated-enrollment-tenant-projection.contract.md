@@ -1,6 +1,6 @@
 # Task Contract: authenticated-enrollment-tenant-projection
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260823-2025-authenticated-enrollment-tenant-projection.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict

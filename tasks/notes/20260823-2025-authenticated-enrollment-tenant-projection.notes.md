@@ -1,6 +1,6 @@
 # Implementation Notes: authenticated-enrollment-tenant-projection
 
-> **Status**: Active
+> **Status**: Ready for Review
 > **Plan**: plans/plan-20260823-2025-authenticated-enrollment-tenant-projection.md
 > **Contract**: tasks/contracts/20260823-2025-authenticated-enrollment-tenant-projection.contract.md
 > **Review**: tasks/reviews/20260823-2025-authenticated-enrollment-tenant-projection.review.md
@@ -89,6 +89,16 @@
   that runtime tenant identity comes only from persisted authenticated
   enrollment. Published-current install pins intentionally remain 0.6.1 and
   keys 0.2.2 until a separately authorized registry publication.
+- The replacement frozen subject `1dfc34d323948438499a21262ab92235df33c698`
+  passed the independent gate with no findings. Its final local pack manifest
+  binds that exact SHA, 0.7.0, and 10 tarballs; the packed empty-database
+  migration smoke passed. npm registry readback remains 0.6.1 for all aligned
+  dispatch packages and 0.2.2 for keys.
+- Owner approval was recorded as a typed `user_waiver` limited to source/RC
+  acceptance. It is not an external Claude pass and does not authorize merge,
+  push, publish, registry mutation, deploy, production migration, secrets, or
+  downstream cutover. Durable project memory was updated with the same
+  authority split.
 
 ## Promotion Filter
 

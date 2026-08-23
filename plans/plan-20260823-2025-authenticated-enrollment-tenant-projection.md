@@ -1,6 +1,6 @@
 # Plan: Authenticated Enrollment Tenant Projection
 
-> **Status**: Executing
+> **Status**: Review
 > **Created**: 20260823-2025
 > **Slug**: authenticated-enrollment-tenant-projection
 > **Artifact Level**: work-package
@@ -122,5 +122,5 @@ Re-pair is `new authenticated PairResponse -> atomic full-record replacement`.
 - [x] Add old-record, tamper, re-pair, restart, renewal and no-token-parsing negatives.
 - [x] Prepare aligned 0.7.0 and keys 0.3.0 exact release graph without publication.
 - [x] Run focused/full gates and real disposable dataplane evidence.
-- [ ] Freeze the source subject and obtain an independent gate/typed acceptance receipt.
-- [ ] Update durable BYOK memory and report source/RC/npm/registry states separately.
+- [x] Freeze the source subject and obtain an independent gate/typed acceptance receipt.
+- [x] Update durable BYOK memory and report source/RC/npm/registry states separately.
