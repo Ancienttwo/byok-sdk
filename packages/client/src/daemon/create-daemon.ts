@@ -20,6 +20,11 @@ import type {
   McpToolsetReloadReceipt,
 } from '../types';
 import {
+  AgentHomeManager,
+  AgentHomeResolver,
+  type AgentHomeLifecycle,
+} from '../agent-home';
+import {
   resolveLocalAgentReleaseIdentity,
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
@@ -64,6 +69,7 @@ import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { SessionWorkspaceStore } from './session-workspace-store';
+import { AgentSessionHandoffStore } from './agent-session-handoff-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceStore, type DeviceRecord } from './store';
@@ -191,6 +197,15 @@ export interface DaemonConfig {
   serverUrl: string;
   deviceName?: string;
   workspaceRoot: string;
+  /**
+   * Host-owned strict Agent execution boundary. The resolver receives only
+   * an opaque AgentRef and the lifecycle owns profile/MEMORY projection; the
+   * SDK never reads either product schema or credential material.
+   */
+  agentHome?: {
+    resolver: AgentHomeResolver;
+    lifecycle: AgentHomeLifecycle;
+  };
   /** Disabled by default. Enables local-only Git checkpoint repositories. */
   gitWorkspace?: GitWorkspaceConfig;
   /** Disabled by default. Enables the durable local task journal — see {@link HostedJournalConfig}. */
@@ -662,7 +677,7 @@ function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIdentity):
     bytes,
     bytesHash: journalHash(bytes),
     receivedAt: new Date().toISOString(),
-    opensTask: envelope.type === 'task.offer' || envelope.type === 'task.offer_with_toolsets',
+    opensTask: envelope.type === 'task.offer' || envelope.type === 'task.offer_with_toolsets' || envelope.type === 'task.offer_for_agent',
   };
 }
 
@@ -711,7 +726,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
  * gate, and therefore safe to advertise unconditionally the moment a daemon
  * genuinely does what it claims (as this one already does).
  */
-function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
+function computeCapabilities(adapters: RuntimeAdapter[], agentHomeConfigured = false): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
@@ -728,6 +743,7 @@ function computeCapabilities(adapters: RuntimeAdapter[]): CapabilityFlag[] {
   if (adapters.some((adapter) => adapter.descriptor.capabilities.mcpToolsets === true)) {
     flags.push('toolset-selection');
   }
+  if (agentHomeConfigured) flags.push('agent-home-contract');
   return flags;
 }
 
@@ -917,6 +933,10 @@ export function buildDaemonWithAdapters(
   let maintenanceSequence = 0;
   const cursorStore = new CursorStore(storeDir);
   const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
+  const agentHomeManager = config.agentHome === undefined
+    ? undefined
+    : new AgentHomeManager({ resolver: config.agentHome.resolver, lifecycle: config.agentHome.lifecycle });
+  const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore(storeDir);
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
   // S3b (L-002), same three-part shape as `gitWorkspace` above: optional
@@ -1330,7 +1350,7 @@ export function buildDaemonWithAdapters(
     // own doc comment on why this isn't re-probed on every reconnect).
     observer.noteRuntimesDetected(runtimes);
     detectedRuntimeFacts = runtimes;
-    const capabilities = computeCapabilities(adapters);
+    const capabilities = computeCapabilities(adapters, config.agentHome !== undefined);
 
     // S3b: this daemon's journal identity — only knowable here, after
     // `auth.loadExisting()` has resolved the deviceId.
@@ -1396,6 +1416,8 @@ export function buildDaemonWithAdapters(
       runtimePreference: config.runtimePreference,
       permissionDefaults: config.permissionDefaults,
       workspaceRoot: config.workspaceRoot,
+      ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
+      ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
       deviceId: record.deviceId,
       // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
       runtimeEnvironment: config.runtimeEnvironment,

@@ -20,6 +20,42 @@ export type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
 } from './types';
+export type { AgentRef } from './agent-home';
+export {
+  AgentHomeError,
+  AgentRefValidationError,
+  AgentHomeResolutionError,
+  AgentHomeCollisionError,
+  AgentHomeBusyError,
+  AgentHomeResolver,
+  AgentHomeLeaseManager,
+  AgentHomeManager,
+  createAgentHomeLifecycle,
+  validateAgentRef,
+  validateAgentId,
+  validateProfileRevision,
+} from './agent-home';
+export {
+  AgentSessionHandoffStore,
+  AgentSessionHandoffStoreError,
+  AgentSessionHandoffCorruptError,
+  AgentSessionHandoffMismatchError,
+} from './daemon/agent-session-handoff-store';
+export type {
+  AgentSessionHandoff,
+  AgentSessionHandoffMatch,
+  AgentTerminalCause,
+} from './daemon/agent-session-handoff-store';
+export type {
+  AgentHomeResolverOptions,
+  AgentHomeResolverResult,
+  AgentHomeResolution,
+  AgentHomeLifecycle,
+  AgentHomeLifecycleInput,
+  AgentHomeLifecycleFunction,
+  AgentHomeLease,
+  AgentHomeBinding,
+} from './agent-home';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';

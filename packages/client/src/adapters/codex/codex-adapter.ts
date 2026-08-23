@@ -182,6 +182,13 @@ export class CodexAdapter implements RuntimeAdapter {
     const queue = new AsyncQueue<AgentEvent>();
     const terminal: RuntimeTurnTerminal = {};
     const recordUnmapped = makeUnmappedFrameRecorder(new Map<string, number>());
+    const manifestCwd = startInput.manifest.cwd;
+    if (manifestCwd === undefined) {
+      throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'authority', retry: 'non-retryable',
+        reason: 'prepared codex operation received a manifest without a sealed cwd',
+      });
+    }
 
     // Realpath'd once, up front — see `resolveRealWorkspaceDir`'s doc
     // comment for why this matters even on a single-machine, non-adversarial
@@ -194,7 +201,7 @@ export class CodexAdapter implements RuntimeAdapter {
     // every run, not just a contrived edge case.
     let workspaceDir: string;
     try {
-      workspaceDir = await resolveRealWorkspaceDir(startInput.manifest.workspace.workspaceDir);
+      workspaceDir = await resolveRealWorkspaceDir(manifestCwd);
     } catch (cause) {
       throw new RuntimeExecutionFailure({
         phase: 'start', category: 'infrastructure', retry: 'retryable',
@@ -228,7 +235,7 @@ export class CodexAdapter implements RuntimeAdapter {
       instruction: startInput.instruction,
       modelId: manifestModelId,
       policyArgs: [...policyArgs],
-      cwd: startInput.manifest.workspace.workspaceDir,
+      cwd: manifestCwd,
       env: runtimeEnv,
       spawnFn: this.options.spawnFn,
       workspaceDir,

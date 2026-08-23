@@ -339,6 +339,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
         reason: 'prepared claude operation received a manifest with different runtime selection',
       });
     }
+    const manifestCwd = startInput.manifest.cwd;
+    if (manifestCwd === undefined) {
+      throw new RuntimeExecutionFailure({
+        phase: 'start', category: 'authority', retry: 'non-retryable',
+        reason: 'prepared claude operation received a manifest without a sealed cwd',
+      });
+    }
     const args = [
       '-p',
       '--input-format',
@@ -360,7 +367,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       client = new ClaudeProcessClient({
         command: bin.command,
         args,
-        cwd: startInput.manifest.workspace.workspaceDir,
+        cwd: manifestCwd,
         env: withoutProviderCredentials(startInput.env),
         spawnFn: this.options.spawnFn,
       });
@@ -440,7 +447,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return new ClaudeSession(
       sessionRef,
       client,
-      startInput.manifest.workspace.workspaceDir,
+      manifestCwd,
       startInput.approvalChannel,
       mcpConfigDir,
       manifestModelId,

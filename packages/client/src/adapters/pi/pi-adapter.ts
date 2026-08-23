@@ -265,6 +265,13 @@ export class PiAdapter implements RuntimeAdapter {
             });
           }
           const resumeSessionId = startInput.manifest.sessionRef;
+          const manifestCwd = startInput.manifest.cwd;
+          if (manifestCwd === undefined) {
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'authority', retry: 'non-retryable',
+              reason: 'prepared pi operation received a manifest without a sealed cwd',
+            });
+          }
           let mcpConfigDir: string | undefined;
           let runtimeEnv = manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env);
           const taskMcpServers = startInput.mcpServers ?? {};
@@ -291,7 +298,7 @@ export class PiAdapter implements RuntimeAdapter {
             rpc = new PiRpcClient({
               command,
               args,
-              cwd: startInput.manifest.workspace.workspaceDir,
+              cwd: manifestCwd,
               env: runtimeEnv,
               spawnFn: this.options.spawnFn,
             });

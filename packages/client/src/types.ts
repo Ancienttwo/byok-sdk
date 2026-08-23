@@ -1,5 +1,8 @@
 import type { AgentEvent, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
+import type { AgentRef } from './agent-home';
+
+export type { AgentRef } from './agent-home';
 
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 
@@ -230,6 +233,15 @@ export interface RuntimeOperationManifest {
   /** The credential-free runtime/lane/provider/model authority for this operation. */
   readonly dispatchSelection?: TaskOfferPayload['dispatchSelection'];
   readonly sessionRef?: string;
+  /** Strict Agent identity, present only for task.offer_for_agent. */
+  readonly agentRef?: AgentRef;
+  /** Canonical runtime cwd; for an Agent task this is the Agent home root. */
+  readonly cwd?: string;
+  /** Opaque local lease identity sealed with the Agent manifest. */
+  readonly lease?: {
+    readonly leaseId: string;
+    readonly canonicalHome: string;
+  };
   readonly workspace: {
     readonly workspaceDir: string;
     readonly workspaceId?: string;
@@ -317,6 +329,13 @@ export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest)
     requiredToolsetIds: Object.freeze([...manifest.requiredToolsetIds]),
     ...(manifest.dispatchSelection === undefined ? {} : { dispatchSelection: Object.freeze({ ...manifest.dispatchSelection }) }),
     ...(manifest.sessionRef === undefined ? {} : { sessionRef: manifest.sessionRef }),
+    ...(manifest.agentRef === undefined
+      ? {}
+      : { agentRef: Object.freeze({ agentId: manifest.agentRef.agentId, profileRevision: manifest.agentRef.profileRevision }) }),
+    cwd: manifest.cwd ?? manifest.workspace.workspaceDir,
+    ...(manifest.lease === undefined
+      ? {}
+      : { lease: Object.freeze({ leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome }) }),
     workspace: Object.freeze({ ...manifest.workspace }),
     forwardedEnvironmentNames: Object.freeze([...manifest.forwardedEnvironmentNames]),
   });
