@@ -95,11 +95,12 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     await vi.waitFor(() => expect(offerCallCount).toBe(1));
     expect(received).toHaveLength(0);
 
-    // The cursor must NOT have advanced past the failed envelope — nothing
-    // persisted on disk yet for this (serverUrl, deviceId) pair.
+    // The cursor must NOT have advanced past the failed envelope. Zero is a
+    // durable resume baseline (not an ack): it makes a restart request all
+    // tracked envelopes with seq > 0 instead of looking first-ever.
     await vi.waitFor(async () => {
       const persisted = await cursorStore.load(server.url, record.deviceId);
-      expect(persisted).toBeUndefined();
+      expect(persisted).toBe(0);
     });
 
     // Simulate the server redelivering the same envelope after a reconnect

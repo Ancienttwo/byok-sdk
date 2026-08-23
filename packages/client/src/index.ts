@@ -33,6 +33,8 @@ export {
   AgentHomeLeaseManager,
   AgentHomeManager,
   createAgentHomeProjection,
+  createAgentHomeProjectionConsumer,
+  AGENT_HOME_PROJECTION_STATE_FILE,
   stableAgentHomeOwnerId,
   validateAgentRef,
 } from './agent-home';
@@ -53,7 +55,9 @@ export type {
   AgentHomeResolution,
   AgentHomeProjection,
   AgentHomeProjectionInput,
+  AgentHomeProjectionApplyInput,
   AgentHomeProjectionFunction,
+  AgentHomeProjectionApplyFunction,
   AgentHomeLease,
   AgentHomeBinding,
 } from './agent-home';

@@ -1375,6 +1375,18 @@ home fsync 后以 stable cursor 重试并由 exact ack 退休，latest-value act
 投影；cloud 不成为 provider loop、runtime transcript 或 Agent-home mirror 的
 authority。
 
+Profile/Agent-home projection 是上述 egress/read projection 之外的 task-free
+control lane。Cloud 复用 tenant-scoped immutable `RequestReceiptStore` 保存
+desired/completion 两个事实，并用既有 exact-device mailbox 交付；不新增 task
+row、projection table 或第二个 cursor authority。Client 在 TaskRunner 与 hosted
+task journal 之前截获 `agent.home.projection`，以 SDK-owned Agent-home manager
+完成 canonical path、lease、初始化/保留、revision/hash ordering 与 fsync，再经
+authenticated completion PUT 获取 exact durable readback。只有该 readback
+成功后 handler 才 resolve；首次 tracked control 预先持久化 cursor 0 基线，故
+首次处理失败/崩溃也能在 restart 后重投。Host hook 只消费 opaque value 与
+canonical cwd；Salesko Profile schema、`profile.json` 内容、删除/UI 状态及
+credentials 均不进入 SDK authority。
+
 #### 12.6.8 Fresh Agent egress 与 resume session authority（0.7.0 deadlock，upstream reopened）
 
 已发布的 `0.7.0` strict egress path 把 `sessionRef` 放进

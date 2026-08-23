@@ -28,6 +28,7 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
 const CLOUD_PROTOCOL_CAPABILITIES = [
   'result-document',
   'agent-home-contract',
+  'agent-home-projection',
   'agent-egress-policy',
   'agent-egress-reliable-ack',
   'agent-egress-fresh-session',

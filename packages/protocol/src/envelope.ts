@@ -3,6 +3,7 @@ import { MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, type MessageType } fro
 
 const REQUIRED_TASK_ID = z.string().min(1);
 const OPTIONAL_TASK_ID = REQUIRED_TASK_ID.optional();
+const FORBIDDEN_TASK_ID = z.never().optional();
 const REQUIRED_SEQ = z.number().int();
 const OPTIONAL_SEQ = REQUIRED_SEQ.optional();
 
@@ -66,6 +67,7 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('task.offer_for_agent_with_egress_fresh', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.egress.ack', OPTIONAL_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.content.read', OPTIONAL_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('agent.home.projection', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.approve', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.reject', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.cancel', REQUIRED_TASK_ID, REQUIRED_SEQ),

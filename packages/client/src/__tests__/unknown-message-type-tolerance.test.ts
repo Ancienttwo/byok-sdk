@@ -580,12 +580,12 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
 
     // Generous real-time window for the FIFO chain (both the failing
     // handler's own settle AND the skip's now-chained cursor bookkeeping)
-    // to fully resolve. The durable cursor must NOT have moved AT ALL —
-    // not to 1 (seq1 never succeeded) and not to 2 (the skip must not leap
-    // ahead of the still-unresolved seq1 failure).
+    // to fully resolve. Zero is the durable first-delivery resume baseline,
+    // not an ack: the cursor must not move to 1 (seq1 never succeeded) or 2
+    // (the skip must not leap ahead of the unresolved failure).
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(attempts).toBe(1); // no redelivery pushed yet — exactly one attempt so far
-    expect(await cursorStore.load(server.url, record.deviceId)).toBeUndefined();
+    expect(await cursorStore.load(server.url, record.deviceId)).toBe(0);
 
     // Redeliver seq1 ONLY (mirrors the real server's retain-and-redeliver
     // outbox, hub.ts's collectRelevant — TestServer's own queue is a plain

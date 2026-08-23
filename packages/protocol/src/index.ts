@@ -55,6 +55,22 @@ export type {
   AgentContentReadDenialReason,
 } from './agent-egress';
 
+export {
+  AGENT_HOME_PROJECTION_CAPABILITY,
+  AGENT_HOME_PROJECTION_MAX_BYTES,
+  AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM,
+  AgentHomeProjectionProfileRevisionSchema,
+  AgentHomeProjectionHashSchema,
+  AgentHomeProjectionOutcomeSchema,
+  AgentHomeProjectionValueSchema,
+} from './agent-home-projection';
+export type {
+  AgentHomeProjectionProfileRevision,
+  AgentHomeProjectionHash,
+  AgentHomeProjectionOutcome,
+  AgentHomeProjectionValue,
+} from './agent-home-projection';
+
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
 
@@ -68,6 +84,7 @@ export {
   RuntimeInfoSchema,
   RuntimeCapabilitiesSchema,
   AgentRefSchema,
+  AgentHomeProjectionAgentRefSchema,
   AGENT_REF_MAX_BYTES,
   DispatchSelectionSchema,
   ToolsetIdSchema,
@@ -85,6 +102,7 @@ export {
   AgentEgressAckPayloadSchema,
   AgentContentReadPayloadSchema,
   AgentContentReceiptPayloadSchema,
+  AgentHomeProjectionPayloadSchema,
   TaskApprovePayloadSchema,
   TaskRejectPayloadSchema,
   TaskCancelPayloadSchema,
@@ -115,6 +133,7 @@ export type {
   RuntimeInfo,
   RuntimeCapabilities,
   AgentRef,
+  AgentHomeProjectionAgentRef,
   DispatchSelection,
   ToolsetId,
   ConnHelloPayload,
@@ -128,6 +147,7 @@ export type {
   AgentEgressAckPayload,
   AgentContentReadPayload,
   AgentContentReceiptPayload,
+  AgentHomeProjectionPayload,
   TaskApprovePayload,
   TaskRejectPayload,
   TaskCancelPayload,
@@ -175,6 +195,9 @@ export {
   EventsPollResponseSchema,
   MessagesSendRequestSchema,
   MessagesSendResponseSchema,
+  AgentHomeProjectionCompletionRequestSchema,
+  AgentHomeProjectionStatusSchema,
+  AgentHomeProjectionReadbackSchema,
   MAX_MESSAGES_PER_BATCH,
   BYOK_WS_PATH,
   BYOK_PAIR_PATH,
@@ -183,6 +206,9 @@ export {
   BYOK_CAPABILITIES_PATH,
   BYOK_EVENTS_PATH,
   BYOK_MESSAGES_PATH,
+  BYOK_AGENT_HOME_PROJECTIONS_PATH,
+  BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
+  byokAgentHomeProjectionCompletionPath,
   BYOK_PRESENCE_PATH,
   BYOK_ACTIVITY_PATH,
   BYOK_BOARD_PATH,
@@ -219,4 +245,7 @@ export type {
   EventsPollResponse,
   MessagesSendRequest,
   MessagesSendResponse,
+  AgentHomeProjectionCompletionRequest,
+  AgentHomeProjectionStatus,
+  AgentHomeProjectionReadback,
 } from './http-api';

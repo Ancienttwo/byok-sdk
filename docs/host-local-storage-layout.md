@@ -13,6 +13,7 @@ the only Agent-home composition rule:
       notes/                          create-if-missing, preserve existing
       .byok/                           SDK-reserved internal namespace
         agent-home.lease
+        agent-home-projection.json     exact applied revision/hash ordering
         egress/
           reliable-v1.jsonl           append/fsync, exact-ack retirement
         content-read-audit-v1.jsonl   content-free per-Agent decisions
@@ -73,6 +74,17 @@ re-pair atomically replaces the complete binding. A legacy or malformed record
 without the binding fails closed and requires re-pairing—Salesko must not fill
 it from Profile, editable config, deviceId, JWT/access-token parsing or a shadow
 store.
+
+Profile creation may enqueue a separate task-free `agent.home.projection`
+control to one exact enrolled device. BYOK durably retains desired/status,
+delivers only after the device declares `agent-home-projection`, acquires the
+same Agent-home lease used by execution, and passes the opaque JSON value plus
+SDK-supplied canonical cwd to the host hook. The SDK-owned local ordering file
+records only request identity, AgentRef and projection hash. The hook owns an
+atomic/idempotent product write such as `profile.json`; BYOK does not know that
+schema, create `.salesko`, accept credentials, or delete local product files.
+Enqueue remains pending until the daemon's dedicated authenticated completion
+request receives an exact durable readback.
 
 ## Admission and migration
 

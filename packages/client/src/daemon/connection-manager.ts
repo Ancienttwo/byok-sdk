@@ -26,7 +26,10 @@ export type { ConnectionState } from './ws-transport';
  * uniformity and never move this cursor.
  */
 function isCursorEnvelopeType(type: Envelope['type']): boolean {
-  return type.startsWith('task.') || type === 'agent.egress.ack' || type === 'agent.content.read';
+  return type.startsWith('task.') ||
+    type === 'agent.egress.ack' ||
+    type === 'agent.content.read' ||
+    type === 'agent.home.projection';
 }
 
 export interface ConnectionManagerOptions {
@@ -642,6 +645,15 @@ export class ConnectionManager {
   private async process(envelope: Envelope, tracked: boolean): Promise<void> {
     const seq = tracked ? envelope.seq! : undefined;
     try {
+      // An absent cursor means "this device has never accepted tracked
+      // delivery", so reconnect handshakes omit it and a server correctly
+      // sends no backlog. Persist zero before the very first handler side
+      // effect so a crash/failure during that handler is distinguishable
+      // from a genuinely first-ever connection and can request seq > 0.
+      if (tracked && this.cursor === undefined) {
+        await this.opts.cursorStore.save(this.opts.serverUrl, this.opts.deviceId, 0);
+        this.cursor = 0;
+      }
       await this.opts.onEnvelope(envelope);
       if (!tracked) return;
       this.processedSeqs.add(seq!); // finding P2 (Fix 2b) — see its own doc comment

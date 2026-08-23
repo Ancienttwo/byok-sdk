@@ -11,6 +11,8 @@ import { attachWebSocket as attachWsUpgrade } from './ws-server';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
+  AgentHomeProjectionRequest,
+  AgentHomeProjectionStatusReadback,
   AgentEgressReceipt,
   CreateByokServerOptions,
   DispatchInput,
@@ -24,6 +26,8 @@ import type {
 export type {
   ByokServerEvent,
   AgentContentReadRequest,
+  AgentHomeProjectionRequest,
+  AgentHomeProjectionStatusReadback,
   AgentEgressReceipt,
   CreateByokServerOptions,
   DispatchInput,
@@ -55,6 +59,8 @@ export { StaleApprovalError } from './hub';
  */
 export { SteerRejectedError } from './hub';
 export type { SteerRejectionCode } from './hub';
+export { AgentHomeProjectionCompletionError } from './hub';
+export type { AgentHomeProjectionCompletionErrorCode } from './hub';
 export { PairingCodeInvalidError } from './pairing';
 export type { PairingCodeClaims, PairingCodeInfo } from './pairing';
 export type {
@@ -121,6 +127,10 @@ export interface ByokServer {
   dispatchFreshAgentEgress(input: FreshAgentEgressDispatchInput): Promise<TaskHandle>;
   /** Enqueue one capability-gated, exact-identity content-read request. */
   requestAgentContentRead(input: AgentContentReadRequest): Promise<void>;
+  /** Enqueue one task-free, exact-device Agent-home projection. */
+  enqueueAgentHomeProjection(input: AgentHomeProjectionRequest): Promise<AgentHomeProjectionStatusReadback>;
+  /** Reference-only in-process status readback; production durability belongs to @byok-sdk/cloud stores. */
+  readAgentHomeProjection(deviceId: string, requestId: string): AgentHomeProjectionStatusReadback | undefined;
   tasks: {
     get(taskId: string): TaskSnapshot | undefined;
     list(): TaskSnapshot[];
@@ -227,6 +237,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     dispatch: (input: DispatchInput) => hub.dispatch(input),
     dispatchFreshAgentEgress: (input: FreshAgentEgressDispatchInput) => hub.dispatchFreshAgentEgress(input),
     requestAgentContentRead: (input: AgentContentReadRequest) => hub.requestAgentContentRead(input),
+    enqueueAgentHomeProjection: (input: AgentHomeProjectionRequest) => hub.enqueueAgentHomeProjection(input),
+    readAgentHomeProjection: (deviceId: string, requestId: string) => hub.readAgentHomeProjection(deviceId, requestId),
     tasks: {
       get: (taskId: string) => hub.getTask(taskId),
       list: () => hub.listTasks(),

@@ -87,13 +87,14 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
     let baseline: number | undefined;
     await vi.waitFor(async () => {
       baseline = await cursorStore.load(real.url, record.deviceId);
-      expect(baseline).toBeTypeOf('number');
+      expect(baseline).toBeGreaterThan(0);
     });
 
     // Force the NEXT steer to throw — a genuine, uncaught handler failure
     // propagating from `StubSession.steer` up through
     // `TaskRunner.handleSteer` -> `handleEnvelope` -> `ConnectionManager.process`.
     session.steerError = new Error('simulated transient steer failure');
+    const releaseRetry = session.blockSteer();
 
     await handle.steer('first attempt');
 
@@ -103,8 +104,10 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
     await vi.waitFor(() => expect(session.steerError).toBeUndefined());
     expect(session.steerCalls).toHaveLength(0); // it threw before recording the call
 
-    // The persisted cursor must NOT have passed the steer's envelope — still
-    // exactly at the pre-steer baseline (the offer's own seq).
+    // Hold the automatically redelivered successful retry inside the handler.
+    // The cursor must remain at the pre-steer baseline until that handler
+    // resolves, even though the retry has already arrived.
+    await vi.waitFor(() => expect(session.steerAttempts).toBeGreaterThanOrEqual(2));
     await vi.waitFor(async () => {
       const persisted = await cursorStore.load(real.url, record.deviceId);
       expect(persisted).toBe(baseline);
@@ -113,6 +116,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
     // A re-poll must redeliver the SAME task.steer (its task is still
     // Running, non-terminal, and its seq is still > the reported cursor) —
     // this time it succeeds (steerError was already cleared above).
+    releaseRetry();
     await vi.waitFor(() => expect(session.steerCalls).toEqual(['first attempt']), { timeout: 5000 });
 
     // Only NOW does the cursor advance past the steer's own seq.

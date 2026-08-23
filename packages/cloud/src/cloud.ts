@@ -34,6 +34,7 @@ import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
 import {
   BYOK_ACTIVITY_PATH,
+  BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
   BYOK_BLOB_CONTENT_ROUTE,
   BYOK_BLOB_FINALIZE_ROUTE,
   BYOK_BLOB_URL_ROUTE,
@@ -57,6 +58,7 @@ import {
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
   AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
+  AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
@@ -66,6 +68,8 @@ import {
   type Envelope,
   AgentContentReadPayloadSchema,
   AgentContentReceiptPayloadSchema,
+  AgentHomeProjectionCompletionRequestSchema,
+  AgentHomeProjectionPayloadSchema,
   AgentEgressAckPayloadSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentWithEgressFreshPayloadSchema,
@@ -75,6 +79,9 @@ import {
   type AgentContentReadPayload,
   type AgentEgressAckPayload,
   type AgentEgressReliablePayload,
+  type AgentHomeProjectionCompletionRequest,
+  type AgentHomeProjectionPayload,
+  type AgentHomeProjectionReadback,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
@@ -110,6 +117,7 @@ import { capabilitiesHandler } from './handlers/capabilities';
 import { challengeHandler, pairHandler, tokenHandler } from './handlers/auth';
 import { eventsHandler } from './handlers/events';
 import { messagesHandler } from './handlers/messages';
+import { agentHomeProjectionCompletionHandler } from './handlers/agent-home-projections';
 import {
   boardClaimHandler,
   boardListHandler,
@@ -135,6 +143,13 @@ import {
 } from './handlers/truth';
 import { CloudRouteRegistry, type RouteDescriptor } from './router/registry';
 import { terminalReceiptKey } from './inbound';
+import {
+  agentHomeProjectionRequestKey,
+  readAgentHomeProjectionStatus,
+  recordAgentHomeProjectionCompletion,
+  sameAgentHomeProjectionRequest,
+  type AgentHomeProjectionReceiptInput,
+} from './agent-home-projections';
 import type {
   BlobContentProxy,
   CloudStores,
@@ -261,9 +276,19 @@ export interface AgentContentReadInput {
   readonly payload: AgentContentReadPayload;
 }
 
+/** Task-free exact-device projection desired state, intentionally unrelated to TaskAttempt. */
+export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
+
+/** Exact request identity a host must echo to read back durable projection status. */
+export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
+
 export interface EnqueuedAgentControl {
   readonly seq: number;
   readonly envelope: Envelope;
+}
+
+export interface EnqueuedAgentHomeProjection extends EnqueuedAgentControl {
+  readonly status: AgentHomeProjectionReadback;
 }
 
 export interface EnqueuedOffer {
@@ -324,6 +349,24 @@ export interface ByokCloud {
     deviceId: string,
     input: AgentContentReadInput,
   ): Promise<EnqueuedAgentControl>;
+  /** Durable, task-free projection request for precisely one admitted device. */
+  enqueueAgentHomeProjection(
+    tenant: TenantId,
+    deviceId: string,
+    input: AgentHomeProjectionInput,
+  ): Promise<EnqueuedAgentHomeProjection>;
+  /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
+  getAgentHomeProjectionStatus(
+    tenant: TenantId,
+    deviceId: string,
+    input: AgentHomeProjectionStatusInput,
+  ): Promise<AgentHomeProjectionReadback | undefined>;
+  /** Direct device completion endpoint authority; first exact terminal receipt wins. */
+  completeAgentHomeProjection(
+    tenant: TenantId,
+    deviceId: string,
+    receipt: AgentHomeProjectionCompletionRequest,
+  ): Promise<AgentHomeProjectionReadback>;
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
@@ -432,6 +475,14 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       }),
     );
   }
+
+  registry.register(
+    { method: 'PUT', path: BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, class: 'device' },
+    agentHomeProjectionCompletionHandler({
+      ...deviceRouteDeps,
+      complete: (stores, deviceId, receipt) => completeAgentHomeProjectionFromStores(stores, deviceId, receipt),
+    }),
+  );
 
   if (declares(declaration, CLOUD_CAPABILITIES.boardCoordination)) {
     const boardDeps = {
@@ -749,6 +800,49 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return { seq: message.seq, envelope };
   }
 
+  async function getAgentHomeProjectionStatus(
+    tenant: TenantId,
+    deviceId: string,
+    input: AgentHomeProjectionStatusInput,
+  ): Promise<AgentHomeProjectionReadback | undefined> {
+    return readAgentHomeProjectionStatus(
+      tenantStoresFor(controlPlane(tenant), root).receipts,
+      tenant,
+      deviceId,
+      input,
+    );
+  }
+
+  async function completeAgentHomeProjection(
+    tenant: TenantId,
+    deviceId: string,
+    receiptInput: AgentHomeProjectionCompletionRequest,
+  ): Promise<AgentHomeProjectionReadback> {
+    return completeAgentHomeProjectionFromStores(
+      tenantStoresFor(controlPlane(tenant), root),
+      deviceId,
+      receiptInput,
+    );
+  }
+
+  async function completeAgentHomeProjectionFromStores(
+    stores: TenantStores,
+    deviceId: string,
+    receiptInput: AgentHomeProjectionCompletionRequest,
+  ): Promise<AgentHomeProjectionReadback> {
+    const receipt = AgentHomeProjectionCompletionRequestSchema.parse(receiptInput);
+    await assertAgentCapabilities(stores.tenant, deviceId, [
+      AGENT_HOME_CONTRACT_CAPABILITY,
+      AGENT_HOME_PROJECTION_CAPABILITY,
+    ]);
+    return recordAgentHomeProjectionCompletion(
+      stores.receipts,
+      stores.tenant,
+      deviceId,
+      receipt,
+    );
+  }
+
   async function enqueueReliableEgressAck(stores: TenantStores, record: AgentEgressRecord): Promise<void> {
     const payload: AgentEgressAckPayload = AgentEgressAckPayloadSchema.parse({
       agentRef: record.payload.agentRef,
@@ -922,6 +1016,58 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       }
       return control;
     },
+
+    async enqueueAgentHomeProjection(tenant, deviceId, input) {
+      // Validate the bounded opaque request before durable capability admission
+      // or receipt/mailbox allocation. A malformed control can therefore never
+      // leave an immutable desired fact or delivery row behind.
+      const payload = AgentHomeProjectionPayloadSchema.parse(input);
+      await assertAgentCapabilities(tenant, deviceId, [
+        AGENT_HOME_CONTRACT_CAPABILITY,
+        AGENT_HOME_PROJECTION_CAPABILITY,
+      ]);
+      const stores = tenantStoresFor(controlPlane(tenant), root);
+      const requestBody = JSON.stringify(payload);
+      const persisted = await stores.receipts.record({
+        key: agentHomeProjectionRequestKey(deviceId, payload.requestId),
+        body: requestBody,
+      });
+      const persistedPayload = AgentHomeProjectionPayloadSchema.parse(JSON.parse(persisted.receipt.body));
+      if (!sameAgentHomeProjectionRequest(payload, persistedPayload)) {
+        throw new ByokCloudError(
+          'agent_home_projection_request_conflict',
+          `Agent-home projection request ${payload.requestId} already exists with a different immutable desired body.`,
+        );
+      }
+      const control = await enqueueAgentControlEnvelope(tenant, deviceId, payload.requestId, (seq) =>
+        createEnvelope('agent.home.projection', payload, { id: payload.requestId, seq }),
+      );
+      if (
+        control.envelope.type !== 'agent.home.projection' ||
+        !sameAgentHomeProjectionRequest(payload, control.envelope.payload)
+      ) {
+        throw new ByokCloudError(
+          'agent_home_projection_request_conflict',
+          `Mailbox request ${payload.requestId} does not match its immutable Agent-home projection fact.`,
+        );
+      }
+      const status = await getAgentHomeProjectionStatus(tenant, deviceId, {
+        requestId: payload.requestId,
+        agentRef: payload.agentRef,
+        projectionHash: payload.projectionHash,
+      });
+      if (status === undefined) {
+        throw new ByokCloudError(
+          'agent_home_projection_receipt_invalid',
+          `Agent-home projection request ${payload.requestId} disappeared after durable allocation.`,
+        );
+      }
+      return { ...control, status };
+    },
+
+    getAgentHomeProjectionStatus,
+
+    completeAgentHomeProjection,
 
     async cancelTask(tenant, taskId, reason) {
       const stores = tenantStoresFor(controlPlane(tenant), root);

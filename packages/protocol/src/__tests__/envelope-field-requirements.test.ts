@@ -125,6 +125,13 @@ function minimalPayload(type: MessageType): unknown {
         byteCount: 0,
         reason: 'policy-disabled',
       };
+    case 'agent.home.projection':
+      return {
+        requestId: '00000000-0000-4000-8000-000000000024',
+        agentRef: { agentId: 'agent-1', profileRevision: '1' },
+        projectionHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        projection: { schemaVersion: 'opaque.v1' },
+      };
     case 'task.approve':
       return {};
     case 'task.reject':

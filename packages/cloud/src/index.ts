@@ -29,11 +29,21 @@ export type {
   AgentEgressDispatchInput,
   AgentEgressFreshSessionDispatchInput,
   AgentContentReadInput,
+  AgentHomeProjectionInput,
+  AgentHomeProjectionStatusInput,
   EnqueueOfferInput,
   EnqueueToolsetOfferInput,
   EnqueuedAgentControl,
+  EnqueuedAgentHomeProjection,
   EnqueuedOffer,
 } from './cloud';
+export {
+  agentHomeProjectionCompletionKey,
+  agentHomeProjectionRequestKey,
+  readAgentHomeProjectionStatus,
+  recordAgentHomeProjectionCompletion,
+} from './agent-home-projections';
+export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export {
   AGENT_HOME_CONTRACT_CAPABILITY,
   DEFAULT_EVENTS_PAGE_LIMIT,

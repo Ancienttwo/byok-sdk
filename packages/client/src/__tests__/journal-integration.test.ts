@@ -236,7 +236,7 @@ describe('hosted journal integration (L-002)', () => {
       // not resolved — which is exactly the property the ordering rests on.
       expect(adapter.startCalls).toHaveLength(0);
       expect(server.received.some((e) => e.type === 'task.claim')).toBe(false);
-      expect(await cursorStore.load(server.url, deviceId)).toBe(cursorBeforeOffer);
+      expect(await cursorStore.load(server.url, deviceId)).toBe(cursorBeforeOffer ?? 0);
 
       release();
 

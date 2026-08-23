@@ -33,6 +33,9 @@ import {
   EventsPollResponseSchema,
   MessagesSendRequestSchema,
   MessagesSendResponseSchema,
+  AgentHomeProjectionCompletionRequestSchema,
+  AgentHomeProjectionStatusSchema,
+  AgentHomeProjectionReadbackSchema,
   MAX_MESSAGES_PER_BATCH,
   createEnvelope,
   encodeEnvelope,
@@ -120,6 +123,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'agent.egress.ack': { taskId: 'optional', seq: 'required' },
     'agent.content.read': { taskId: 'optional', seq: 'required' },
     'agent.content.receipt': { taskId: 'optional', seq: 'optional' },
+    'agent.home.projection': { taskId: 'optional', seq: 'required' },
     'task.approve': { taskId: 'required', seq: 'required' },
     'task.reject': { taskId: 'required', seq: 'required' },
     'task.cancel': { taskId: 'required', seq: 'required' },
@@ -192,6 +196,10 @@ type CodecRequirednessMatrix = {
   'agent.content.receipt': {
     taskId: FieldRequiredness<'agent.content.receipt', 'taskId'>;
     seq: FieldRequiredness<'agent.content.receipt', 'seq'>;
+  };
+  'agent.home.projection': {
+    taskId: FieldRequiredness<'agent.home.projection', 'taskId'>;
+    seq: FieldRequiredness<'agent.home.projection', 'seq'>;
   };
   'task.approve': { taskId: FieldRequiredness<'task.approve', 'taskId'>; seq: FieldRequiredness<'task.approve', 'seq'> };
   'task.reject': { taskId: FieldRequiredness<'task.reject', 'taskId'>; seq: FieldRequiredness<'task.reject', 'seq'> };
@@ -269,6 +277,9 @@ function buildFrozenSnapshot() {
       eventsPollResponse: z.toJSONSchema(EventsPollResponseSchema),
       messagesSendRequest: z.toJSONSchema(MessagesSendRequestSchema),
       messagesSendResponse: z.toJSONSchema(MessagesSendResponseSchema),
+      agentHomeProjectionCompletionRequest: z.toJSONSchema(AgentHomeProjectionCompletionRequestSchema),
+      agentHomeProjectionStatus: z.toJSONSchema(AgentHomeProjectionStatusSchema),
+      agentHomeProjectionReadback: z.toJSONSchema(AgentHomeProjectionReadbackSchema),
     },
   };
 }
@@ -566,6 +577,13 @@ function minimalPayloadForProbe(type: MessageType): unknown {
         byteCount: 0,
         reason: 'policy-disabled',
       };
+    case 'agent.home.projection':
+      return {
+        requestId: '00000000-0000-4000-8000-000000000024',
+        agentRef: { agentId: 'agent-1', profileRevision: '1' },
+        projectionHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        projection: { schemaVersion: 'opaque.v1', name: 'Agent' },
+      };
     case 'task.approve':
       return {};
     case 'task.reject':
@@ -603,15 +621,16 @@ function minimalPayloadForProbe(type: MessageType): unknown {
 
 /** A fully-populated (task_id + seq both present) envelope for `type` — used to isolate one field's requiredness at a time by stripping just that field and re-checking `EnvelopeSchema.safeParse`. */
 function fullEnvelopeFor(type: MessageType): Record<string, unknown> {
-  return {
+  const envelope: Record<string, unknown> = {
     v: 1,
     id: '00000000-0000-4000-8000-000000000099',
     ts: '2026-01-01T00:00:00.000Z',
     type,
-    task_id: 'task-1',
     seq: 1,
     payload: minimalPayloadForProbe(type),
   };
+  if (type !== 'agent.home.projection') envelope.task_id = 'task-1';
+  return envelope;
 }
 
 /** The runtime half of the dual-source cross-check: what `envelope.ts`'s actual `EnvelopeSchema` requires per type, probed directly (not read from any hand-maintained table). */

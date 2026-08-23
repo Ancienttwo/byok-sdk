@@ -12,6 +12,7 @@ import {
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+  AGENT_HOME_PROJECTION_CAPABILITY,
   AgentContentReceiptPayloadSchema,
 } from '@byok-sdk/protocol';
 import type {
@@ -114,6 +115,7 @@ import { resolveAgentEgressPolicy, type AgentEgressStatus } from './agent-egress
 import { sanitizeEgressEnvelope, type AgentEgressSanitizer } from './agent-egress-sanitizer';
 import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRecord } from './agent-egress-spool';
 import { AgentContentAuditStore } from './agent-content-audit-store';
+import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
 import {
   AGENT_CONTENT_READ_CAPABILITIES,
   AgentContentReadPolicyEngine,
@@ -811,6 +813,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
 function computeCapabilities(
   adapters: RuntimeAdapter[],
   agentHomeConfigured = false,
+  agentHomeProjectionConfigured = false,
   agentEgressConfigured = false,
   contentReadPolicies?: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
 ): CapabilityFlag[] {
@@ -831,6 +834,7 @@ function computeCapabilities(
     flags.push('toolset-selection');
   }
   if (agentHomeConfigured) flags.push('agent-home-contract');
+  if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
   if (agentEgressConfigured) {
     flags.push(
       AGENT_EGRESS_POLICY_CAPABILITY,
@@ -1587,9 +1591,18 @@ export function buildDaemonWithAdapters(
     const capabilities = computeCapabilities(
       adapters,
       config.agentHome !== undefined,
+      agentHomeManager?.supportsTaskFreeProjection() === true,
       config.agentEgress !== undefined,
       agentContentReadPolicies,
     );
+    const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
+      ? new AgentHomeProjectionCompletionClient({
+          serverUrl: config.serverUrl,
+          auth,
+          tenantId: record.tenantId,
+          deviceId: record.deviceId,
+        })
+      : undefined;
 
     // S3b: this daemon's journal identity — only knowable here, after
     // `auth.loadExisting()` has resolved the deviceId.
@@ -1761,6 +1774,22 @@ export function buildDaemonWithAdapters(
       ...(activePressureEngine ? { admissionGuard: () => activePressureEngine.admissionGuard() } : {}),
     };
     runner = new TaskRunner(deps);
+    const handleAgentHomeProjectionEnvelope = async (envelope: Envelope): Promise<boolean> => {
+      if (envelope.type !== 'agent.home.projection') return false;
+      if (agentHomeManager === undefined || agentHomeProjectionCompletion === undefined) {
+        // A sender cannot turn a missing local consumer into a successful
+        // no-op. Throwing retains the mailbox row/cursor for operator repair.
+        throw new Error('task-free Agent-home projection is not configured on this daemon');
+      }
+      const outcome = await agentHomeManager.project(envelope.payload);
+      await agentHomeProjectionCompletion.complete({
+        requestId: envelope.payload.requestId,
+        agentRef: envelope.payload.agentRef,
+        projectionHash: envelope.payload.projectionHash,
+        outcome,
+      });
+      return true;
+    };
     const handleAgentEgressEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'agent.egress.ack') return false;
       if (config.agentEgress === undefined) return true;
@@ -1939,6 +1968,7 @@ export function buildDaemonWithAdapters(
                 throw new Error('tenant enrollment is being re-paired; inbound work is blocked until restart');
               }
               observer.handleInboundEnvelope(envelope);
+              if (await handleAgentHomeProjectionEnvelope(envelope)) return;
               if (await handleAgentEgressEnvelope(envelope)) return;
               if (await handleAgentContentReadEnvelope(envelope)) return;
               // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
@@ -1957,6 +1987,7 @@ export function buildDaemonWithAdapters(
                 return Promise.reject(new Error('tenant enrollment is being re-paired; inbound work is blocked until restart'));
               }
               observer.handleInboundEnvelope(envelope);
+              if (envelope.type === 'agent.home.projection') return handleAgentHomeProjectionEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();

@@ -91,6 +91,7 @@ interface EnvelopeShapeOptions {
   'agent.egress.reliable': { taskId?: string; seq?: number };
   'agent.egress.ack': { taskId?: string; seq: number };
   'agent.content.read': { taskId?: string; seq: number };
+  'agent.home.projection': { taskId?: never; seq: number };
   'agent.content.receipt': { taskId?: string; seq?: number };
   'task.approve': { taskId: string; seq: number };
   'task.reject': { taskId: string; seq: number };

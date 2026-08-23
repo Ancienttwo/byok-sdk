@@ -1,5 +1,7 @@
 import type {
   AgentContentReadPayload,
+  AgentHomeProjectionPayload,
+  AgentHomeProjectionReadback,
   AgentEventOrUnknown,
   AgentEgressPolicy,
   AgentEgressReliablePayload,
@@ -138,6 +140,15 @@ export interface AgentContentReadRequest {
   readonly deviceId: string;
   readonly payload: AgentContentReadPayload;
 }
+
+/** Host control-plane input for one exact task-free Agent-home projection. */
+export interface AgentHomeProjectionRequest {
+  readonly deviceId: string;
+  readonly payload: AgentHomeProjectionPayload;
+}
+
+/** Reference-server readback. The default implementation is process-local only. */
+export type AgentHomeProjectionStatusReadback = AgentHomeProjectionReadback;
 
 /** First-write-wins reference-server readback for a reliable Agent egress item. */
 export interface AgentEgressReceipt {

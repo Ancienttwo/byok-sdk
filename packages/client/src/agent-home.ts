@@ -1,12 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { AgentRefSchema, type AgentRef } from '@byok-sdk/protocol';
+import {
+  AgentHomeProjectionPayloadSchema,
+  AgentRefSchema,
+  type AgentHomeProjectionOutcome,
+  type AgentHomeProjectionPayload,
+  type AgentRef,
+} from '@byok-sdk/protocol';
+import { atomicWriteFile } from './util/atomic-write';
 
 export type { AgentRef } from '@byok-sdk/protocol';
 
 export const AGENT_HOME_DIRECTORY = 'agents';
 export const AGENT_HOME_INTERNAL_DIRECTORY = '.byok';
+export const AGENT_HOME_PROJECTION_STATE_FILE = 'agent-home-projection.json';
 
 export class AgentHomeError extends Error {
   constructor(message: string) {
@@ -66,16 +74,26 @@ export interface AgentHomeProjectionInput extends AgentHomeResolution {
   readonly cwd: string;
 }
 
+export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput {
+  readonly requestId: string;
+  readonly projectionHash: string;
+  readonly projection: unknown;
+}
+
 /**
  * Optional downstream projection hook. The SDK supplies the canonical home;
  * the host supplies opaque, redacted product content and never joins
  * `agents/<agentId>` itself. The SDK does not parse the projected content.
  */
 export interface AgentHomeProjection {
-  prepare(input: AgentHomeProjectionInput): void | Promise<void>;
+  /** Optional creation/task-time host preparation retained as a distinct lifecycle. */
+  prepare?(input: AgentHomeProjectionInput): void | Promise<void>;
+  /** Task-free opaque projection consumer. Its successful return means its own bytes are durable. */
+  apply?(input: AgentHomeProjectionApplyInput): void | Promise<void>;
 }
 
 export type AgentHomeProjectionFunction = (input: AgentHomeProjectionInput) => void | Promise<void>;
+export type AgentHomeProjectionApplyFunction = (input: AgentHomeProjectionApplyInput) => void | Promise<void>;
 
 export interface AgentHomeLease {
   readonly leaseId: string;
@@ -471,6 +489,92 @@ async function initializeAgentHome(resolution: AgentHomeResolution): Promise<voi
   await ensurePreservedFile(path.join(resolution.canonicalHome, 'MEMORY.md'));
 }
 
+interface StoredAgentHomeProjectionState {
+  readonly version: 1;
+  readonly agentRef: AgentRef;
+  readonly requestId: string;
+  readonly projectionHash: string;
+}
+
+function projectionStatePath(resolution: AgentHomeResolution): string {
+  return path.join(
+    resolution.canonicalHome,
+    AGENT_HOME_INTERNAL_DIRECTORY,
+    AGENT_HOME_PROJECTION_STATE_FILE,
+  );
+}
+
+async function readProjectionState(
+  resolution: AgentHomeResolution,
+): Promise<StoredAgentHomeProjectionState | undefined> {
+  const filePath = projectionStatePath(resolution);
+  try {
+    const stat = await fs.lstat(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new AgentHomeResolutionError(`Agent projection state is not a regular file: ${filePath}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
+  } catch (error) {
+    throw new AgentHomeResolutionError(
+      `Agent projection state is corrupt: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    (parsed as { version?: unknown }).version !== 1 ||
+    typeof (parsed as { requestId?: unknown }).requestId !== 'string' ||
+    typeof (parsed as { projectionHash?: unknown }).projectionHash !== 'string'
+  ) {
+    throw new AgentHomeResolutionError('Agent projection state has an invalid shape');
+  }
+  const candidate = parsed as Omit<StoredAgentHomeProjectionState, 'agentRef'> & { agentRef?: unknown };
+  const agentRef = validateAgentRef(candidate.agentRef);
+  if (agentRef.agentId !== resolution.agentRef.agentId) {
+    throw new AgentHomeCollisionError('Agent projection state belongs to a different Agent home');
+  }
+  return Object.freeze({
+    version: 1,
+    agentRef,
+    requestId: candidate.requestId,
+    projectionHash: candidate.projectionHash,
+  });
+}
+
+async function writeProjectionState(
+  resolution: AgentHomeResolution,
+  payload: AgentHomeProjectionPayload,
+): Promise<void> {
+  const filePath = projectionStatePath(resolution);
+  const existing = await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (existing !== undefined && (!existing.isFile() || existing.isSymbolicLink())) {
+    throw new AgentHomeResolutionError(`Agent projection state is not a regular file: ${filePath}`);
+  }
+  const state: StoredAgentHomeProjectionState = {
+    version: 1,
+    agentRef: payload.agentRef,
+    requestId: payload.requestId,
+    projectionHash: payload.projectionHash,
+  };
+  await atomicWriteFile(filePath, `${JSON.stringify(state)}\n`, { mode: 0o600, fsync: true });
+}
+
+function compareProjectionRevision(left: string, right: string): -1 | 0 | 1 {
+  const leftRevision = BigInt(left);
+  const rightRevision = BigInt(right);
+  return leftRevision < rightRevision ? -1 : leftRevision > rightRevision ? 1 : 0;
+}
+
 /** Coordinates SDK-owned initialization, optional projection, and the lease. */
 export class AgentHomeManager {
   readonly layout: AgentHomeLayout;
@@ -514,14 +618,72 @@ export class AgentHomeManager {
   async initialize(binding: AgentHomeBinding): Promise<void> {
     const { resolution, lease } = binding;
     await initializeAgentHome(resolution);
-    await this.projection?.prepare({ ...resolution, cwd: lease.cwd });
+    const prepare = this.projection?.prepare;
+    if (prepare !== undefined) await prepare({ ...resolution, cwd: lease.cwd });
     if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
       throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
     }
     await initializeAgentHome(resolution);
   }
+
+  supportsTaskFreeProjection(): boolean {
+    return this.projection?.apply !== undefined;
+  }
+
+  /**
+   * Apply one task-free projection under the same canonical-home writer lease
+   * used by Agent execution. Only a successful host hook followed by the
+   * SDK-owned fsynced ordering record can return `applied`.
+   */
+  async project(input: AgentHomeProjectionPayload): Promise<AgentHomeProjectionOutcome> {
+    const payload = AgentHomeProjectionPayloadSchema.parse(input);
+    const binding = await this.acquire(payload.agentRef);
+    try {
+      const { resolution, lease } = binding;
+      await initializeAgentHome(resolution);
+      const current = await readProjectionState(resolution);
+      if (current !== undefined) {
+        const order = compareProjectionRevision(
+          payload.agentRef.profileRevision,
+          current.agentRef.profileRevision,
+        );
+        if (order < 0) return 'stale';
+        if (order === 0) {
+          return payload.projectionHash === current.projectionHash ? 'idempotent' : 'conflict';
+        }
+      }
+
+      const apply = this.projection?.apply;
+      if (apply === undefined) {
+        throw new AgentHomeError('task-free Agent-home projection is not configured');
+      }
+      await apply({
+        ...resolution,
+        cwd: lease.cwd,
+        requestId: payload.requestId,
+        projectionHash: payload.projectionHash,
+        projection: payload.projection,
+      });
+      if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
+        throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
+      }
+      await initializeAgentHome(resolution);
+      await writeProjectionState(resolution, payload);
+      return 'applied';
+    } finally {
+      // A release failure is itself ack-critical: do not let the caller post a
+      // completion or advance the mailbox cursor while writer ownership is
+      // uncertain.
+      await binding.lease.release();
+    }
+  }
 }
 
 export function createAgentHomeProjection(prepare: AgentHomeProjectionFunction): AgentHomeProjection {
   return Object.freeze({ prepare });
+}
+
+/** Create only the task-free opaque projection consumer; no task-time fallback is inferred. */
+export function createAgentHomeProjectionConsumer(apply: AgentHomeProjectionApplyFunction): AgentHomeProjection {
+  return Object.freeze({ apply });
 }

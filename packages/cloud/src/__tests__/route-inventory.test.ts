@@ -27,6 +27,7 @@ const EXPECTED_INVENTORY: Record<string, RouteClass> = {
   'GET /byok/capabilities': 'public',
   'GET /byok/events': 'device',
   'POST /byok/messages': 'device',
+  'PUT /byok/agent-home-projections/:requestId/completion': 'device',
   'GET /byok/board': 'device',
   'POST /byok/board/:id/claim': 'device',
   'POST /byok/board/:id/unclaim': 'device',
@@ -152,6 +153,7 @@ describe('tenant isolation across every device-class resource', () => {
       capabilities: [
         'result-document',
         'agent-home-contract',
+        'agent-home-projection',
         'agent-egress-policy',
         'agent-egress-reliable-ack',
         'agent-egress-fresh-session',
@@ -244,6 +246,7 @@ const ALWAYS_MOUNTED = [
   'POST /byok/challenge',
   'POST /byok/token',
   'GET /byok/capabilities',
+  'PUT /byok/agent-home-projections/:requestId/completion',
 ] as const;
 
 const GRANT_ROUTES = [

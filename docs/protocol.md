@@ -191,9 +191,9 @@ exists purely so a reconnecting daemon can tell the server "replay anything
 I might have missed after N." See [§9](#9-at-least-once-delivery--idempotency)
 for the full redelivery procedure.
 
-Server → daemon types (`seq` required): `conn.ack`, `task.offer`,
-`task.offer_with_toolsets`, `task.approve`, `task.reject`, `task.cancel`,
-`task.steer`. Every other type is daemon → server and leaves `seq` optional —
+Server → daemon types (`seq` required): `conn.ack`, all `task.*` control
+messages, `agent.egress.ack`, `agent.content.read`, and
+`agent.home.projection`. Every daemon → server type leaves `seq` optional —
 M1 only specifies server-to-daemon redelivery, not the reverse.
 
 **Do not confuse this with `task.progress`'s payload-level `seq`.** That field
@@ -215,8 +215,10 @@ queued for this device (§9) — so `conn.ack`'s `seq` is always higher than
 every backlog envelope about to follow it. Advancing the cursor to
 `conn.ack`'s value before that backlog even arrives makes every one of those
 (necessarily lower) backlog `seq`s look already-delivered, and a
-cursor-dedupe check silently drops all of them. Cursor accounting covers
-`task.*` envelopes only.
+cursor-dedupe check silently drops all of them. Cursor accounting covers every
+server → daemon control that requires durable handler completion, including
+`task.*`, `agent.egress.ack`, `agent.content.read`, and
+`agent.home.projection`; it excludes `conn.*`.
 
 ### 1.3 `session_ref`
 
@@ -266,8 +268,9 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `policy`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
-| `agent.egress.ack` | S→D | optional | optional | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
-| `agent.content.read` | S→D | optional | optional | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
+| `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
+| `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
+| `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -334,6 +337,32 @@ duplicate re-ack preserve that identity. An allowed receipt contains a
 `BlobRef` whose hash, size and content type exactly match the receipt; denial
 carries `byteCount: 0`. The receipt is content-free metadata and does not make
 cloud a transcript authority.
+
+### 2.2 Task-free Agent-home projection
+
+`agent.home.projection` is gated by the additive `agent-home-projection`
+capability in addition to the base `agent-home-contract`. It is not a task and
+forbids `task_id`. The opaque JSON payload is at most 64 KiB and has no
+credential-specific field; the embedding producer remains responsible for
+excluding secret values because this boundary is not a DLP scanner.
+
+Cloud persists the immutable desired fact before appending the exact-device
+mailbox row. Duplicate request identity and exact body are idempotent; changed
+immutable bytes conflict. Offline delivery remains pending and is never
+rerouted. The daemon applies the local ordering contract under the canonical
+Agent-home lease and then calls:
+
+```text
+PUT /byok/agent-home-projections/:requestId/completion
+{ requestId, agentRef, projectionHash, outcome }
+```
+
+The endpoint authenticates the enrolled device, exact-matches the stored
+request, writes a first-terminal immutable completion receipt, and returns the
+full tenant/device/request/AgentRef/hash/outcome readback. Unknown or
+cross-device request is `404`; identity mismatch is `422`; changing a terminal
+fact is `409`. Handler failure or non-exact readback does not advance the
+server-to-daemon cursor.
 
 **`TaskOfferPayload.dispatchSelection` is the authoritative LLM target when
 present.** It is a strict discriminated union:
@@ -1360,8 +1389,10 @@ This requires the server to retain enough state per device to reconstruct
 regenerate from current task state) — an implementation detail for the M1-2
 server worker, not specified further here.
 
-**Cursor scope (client-side rule — see §1.2).** Only `task.*` envelopes count
-toward the cursor a daemon reports as `conn.hello.cursor` in step 1 —
+**Cursor scope (client-side rule — see §1.2).** Every durable server control
+(`task.*`, `agent.egress.ack`, `agent.content.read`, and
+`agent.home.projection`) counts toward the cursor a daemon reports as
+`conn.hello.cursor` in step 1 —
 `conn.ack` never does, even though it also carries a `seq`. Step 2 (server
 sends `conn.ack`) always happens immediately before step 3 (server
 redelivers the backlog) on the same reconnection, and `conn.ack`'s `seq` is
@@ -1369,9 +1400,15 @@ always higher than everything in that backlog; a client that doesn't
 observe this scoping rule will drop its own redelivered backlog as
 already-seen.
 
+Before the first tracked handler side effect, the daemon durably writes a zero
+resume baseline. Zero is not an acknowledgement; it ensures that a crash or
+failure on the first tracked message reconnects with `cursor: 0` rather than
+omitting the cursor and looking like a first-ever connection.
+
 **Cursor advance timing (client-side rule).** A daemon must persist its
 redelivery cursor only *after* it has finished successfully whatever a
-`task.*` envelope asked for — never before receiving it, and never for an
+tracked envelope asked for — never past it before the handler succeeds, and
+never for an
 envelope whose handling raised an error. Persisting eagerly (e.g. the moment
 the envelope arrives, before its handler even runs or resolves) turns a
 single failed or still-in-flight handler into a permanent gap: the daemon's

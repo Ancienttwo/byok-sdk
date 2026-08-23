@@ -8,12 +8,14 @@ import {
   BYOK_CHALLENGE_PATH,
   BYOK_EVENTS_PATH,
   BYOK_MESSAGES_PATH,
+  BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
   BYOK_PAIR_PATH,
   BYOK_TOKEN_PATH,
   CAPABILITY_FLAGS,
   ChallengeRequestSchema,
   CreateBlobRequestSchema,
   MessagesSendRequestSchema,
+  AgentHomeProjectionCompletionRequestSchema,
   PairRequestSchema,
   PairResponseSchema,
   TokenRequestSchema,
@@ -28,6 +30,7 @@ import {
 import { authenticateBearer, mintAccessToken, verifyNonceSignature, type AuthDeps, type NonceStore } from './auth';
 import { BlobDeclarationConflictError, type BlobStore } from './blob-store';
 import type { ConnectionHub } from './hub';
+import { AgentHomeProjectionCompletionError } from './hub';
 import { generateDeviceId } from './ids';
 import { PairingCodeInvalidError, type PairingCodeClaims, type PairingManager } from './pairing';
 
@@ -374,6 +377,25 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     // nothing rejected keeps the pre-P2 `{ accepted }` response shape.
     const response: MessagesSendResponse = rejected > 0 ? { accepted, rejected } : { accepted };
     return c.json(response, 200);
+  });
+
+  app.put(BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, async (c) => {
+    const principal = await authenticateBearer(c.req.header('authorization'), deps);
+    if (!principal) return c.json({ error: 'unauthorized' }, 401);
+    const parsed = AgentHomeProjectionCompletionRequestSchema.safeParse(await readJsonBody(c));
+    if (!parsed.success || parsed.data.requestId !== c.req.param('requestId')) {
+      return c.json({ error: 'invalid Agent-home projection completion' }, 422);
+    }
+    try {
+      return c.json(deps.hub.completeAgentHomeProjection(principal.deviceId, parsed.data), 200);
+    } catch (error) {
+      if (error instanceof AgentHomeProjectionCompletionError) {
+        if (error.code === 'not_found') return c.json({ error: error.message }, 404);
+        if (error.code === 'conflict') return c.json({ error: error.message }, 409);
+        return c.json({ error: error.message }, 422);
+      }
+      throw error;
+    }
   });
 
   // M4 Phase 3 note: task approval (resolving a task currently

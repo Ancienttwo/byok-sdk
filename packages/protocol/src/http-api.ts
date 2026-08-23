@@ -5,7 +5,12 @@ import {
   ConfiguredToolsetsSchema,
   ProtocolVersionNumberSchema,
   RuntimeIdSchema,
+  AgentHomeProjectionAgentRefSchema,
 } from './messages';
+import {
+  AgentHomeProjectionHashSchema,
+  AgentHomeProjectionOutcomeSchema,
+} from './agent-home-projection';
 
 /**
  * HTTP-side request/response shapes for the reference server's auth and blob
@@ -233,6 +238,46 @@ export const MessagesSendResponseSchema = z.object({
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// Task-free Agent-home projection completion/readback. These are authenticated
+// HTTP bodies, not daemon/server envelope messages. The completion request is
+// terminal and binds the exact request, AgentRef and projection hash; the
+// readback additionally carries the tenant/device routing identity and allows
+// `pending` before a daemon completion is durably recorded.
+// ---------------------------------------------------------------------------
+
+export const AgentHomeProjectionCompletionRequestSchema = z
+  .object({
+    requestId: z.uuid(),
+    agentRef: AgentHomeProjectionAgentRefSchema,
+    projectionHash: AgentHomeProjectionHashSchema,
+    outcome: AgentHomeProjectionOutcomeSchema,
+  })
+  .strict();
+export type AgentHomeProjectionCompletionRequest = z.infer<typeof AgentHomeProjectionCompletionRequestSchema>;
+
+export const AgentHomeProjectionStatusSchema = z.enum([
+  'pending',
+  'applied',
+  'idempotent',
+  'stale',
+  'conflict',
+]);
+export type AgentHomeProjectionStatus = z.infer<typeof AgentHomeProjectionStatusSchema>;
+
+export const AgentHomeProjectionReadbackSchema = z
+  .object({
+    tenantId: z.string().min(1),
+    deviceId: z.string().min(1),
+    requestId: z.uuid(),
+    agentRef: AgentHomeProjectionAgentRefSchema,
+    projectionHash: AgentHomeProjectionHashSchema,
+    status: AgentHomeProjectionStatusSchema,
+    completedAt: z.iso.datetime({ offset: true }).optional(),
+  })
+  .strict();
+export type AgentHomeProjectionReadback = z.infer<typeof AgentHomeProjectionReadbackSchema>;
+
+// ---------------------------------------------------------------------------
 // Route paths — the single source of truth for the `/byok/*` HTTP surface.
 //
 // These literals were previously hand-copied across client, cloud, server, and
@@ -266,6 +311,14 @@ export const BYOK_CAPABILITIES_PATH = '/byok/capabilities';
 export const BYOK_EVENTS_PATH = '/byok/events';
 /** `POST /byok/messages` — long-poll batched send (§8.2). */
 export const BYOK_MESSAGES_PATH = '/byok/messages';
+
+/** `PUT /byok/agent-home-projections/:requestId/completion`. */
+export const BYOK_AGENT_HOME_PROJECTIONS_PATH = '/byok/agent-home-projections';
+export const BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE =
+  '/byok/agent-home-projections/:requestId/completion';
+export function byokAgentHomeProjectionCompletionPath(requestId: string): string {
+  return `${BYOK_AGENT_HOME_PROJECTIONS_PATH}/${encodeURIComponent(requestId)}/completion`;
+}
 
 /** `PUT /byok/presence` — presence heartbeat. */
 export const BYOK_PRESENCE_PATH = '/byok/presence';

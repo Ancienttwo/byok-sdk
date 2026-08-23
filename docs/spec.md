@@ -547,6 +547,25 @@ mutually exclusive configuration authorities; strict Agent execution never
 inherits task-scoped Git workspace semantics or creates a second durable
 workspace owner.
 
+Profile projection is a separate task-free control. A daemon advertises
+`agent-home-projection` only when the host supplied an opaque projection hook.
+Cloud admission binds one request to the authenticated tenant, exact device,
+exact AgentRef/profile revision, request id, projection hash, and a JSON value
+bounded to 64 KiB. The durable desired receipt is written before the exact
+device mailbox row; enqueue means `pending`, never “locally synced.” An old
+daemon or missing capability is rejected before either fact is allocated.
+
+The client handles `agent.home.projection` before the task runner or hosted
+task journal. Under the canonical Agent-home lease it initializes/preserves
+`MEMORY.md` and `notes/`, applies only a higher revision, and fsyncs the SDK
+ordering record at `.byok/agent-home-projection.json`. Equal revision/equal
+hash is idempotent, equal revision/different hash conflicts, and a lower
+revision is stale. Only a dedicated authenticated completion PUT returning an
+exact durable readback lets the handler resolve and the mailbox cursor advance.
+Busy, containment, hook, fsync, transport, or readback mismatch leaves the
+cursor at its prior value and redelivers after reconnect/restart. No fake task,
+runtime, session, terminal event, or task journal record is created.
+
 The daemon publishes the same authenticated `conn.hello` capability snapshot
 on WS and long-poll; the hosted composition persists that snapshot before an
 Agent offer can be enqueued. Runtime-session terminal evidence is normally
@@ -599,7 +618,9 @@ transcript or shared-history authority. See
 The host selects the branded root, authors stable identity plus redacted
 profile projection content, and selects an SDK-valid egress/content-read
 policy. It does not compose the Agent path, journal path, or runtime-session
-path. Credentials
+path. The hook alone decides whether and how to write a product file such as
+`profile.json`; the SDK neither interprets its fields nor defines deletion/UI
+sync semantics. Credentials
 remain in an OS credential store; only non-secret references/configured state
 may be projected. Legacy task offers retain their existing
 `workspaceRoot/<taskId>` behavior as a separate API, never as a fallback for an

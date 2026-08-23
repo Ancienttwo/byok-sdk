@@ -54,6 +54,16 @@ export const CLOUD_ERROR_CODES = {
   agent_content_request_mismatch: 'agent_content_request_mismatch',
   /** A durable mailbox receipt id resolved to an envelope other than its exact acknowledgement. */
   mailbox_receipt_mismatch: 'mailbox_receipt_mismatch',
+  /** A task-free Agent-home request id already names a different immutable desired projection. */
+  agent_home_projection_request_conflict: 'agent_home_projection_request_conflict',
+  /** A direct Agent-home completion did not identify a stored desired request for this exact device. */
+  agent_home_projection_request_not_found: 'agent_home_projection_request_not_found',
+  /** A direct Agent-home completion changed the first durable terminal outcome. */
+  agent_home_projection_completion_conflict: 'agent_home_projection_completion_conflict',
+  /** A task-free completion did not exactly echo its immutable desired projection binding. */
+  agent_home_projection_receipt_mismatch: 'agent_home_projection_receipt_mismatch',
+  /** A receipt-store row at the projection namespace violated the frozen projection schema. */
+  agent_home_projection_receipt_invalid: 'agent_home_projection_receipt_invalid',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

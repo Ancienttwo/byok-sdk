@@ -9,7 +9,11 @@ import {
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+  AGENT_HOME_PROJECTION_CAPABILITY,
   AgentRefSchema,
+  AgentHomeProjectionCompletionRequestSchema,
+  AgentHomeProjectionPayloadSchema,
+  AgentHomeProjectionReadbackSchema,
   AgentContentReadPayloadSchema,
   AgentEgressPolicySchema,
   DispatchSelectionSchema,
@@ -24,6 +28,9 @@ import {
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
   type AgentEgressReliablePayload,
+  type AgentHomeProjectionCompletionRequest,
+  type AgentHomeProjectionPayload,
+  type AgentHomeProjectionReadback,
   type MessageType,
   type PermissionPolicy,
   type RuntimeId,
@@ -49,6 +56,7 @@ import type { TaskStore } from './task-store';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
+  AgentHomeProjectionRequest,
   AgentEgressReceipt,
   DispatchInput,
   FreshAgentEgressDispatchInput,
@@ -458,6 +466,18 @@ export class SteerRejectedError extends Error {
   }
 }
 
+export type AgentHomeProjectionCompletionErrorCode = 'not_found' | 'conflict' | 'invalid';
+
+export class AgentHomeProjectionCompletionError extends Error {
+  constructor(
+    public readonly code: AgentHomeProjectionCompletionErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AgentHomeProjectionCompletionError';
+  }
+}
+
 export class ConnectionHub {
   private readonly connections = new Map<string, ConnectionState>();
   private readonly outboxes = new Map<string, DeviceOutbox>();
@@ -472,6 +492,10 @@ export class ConnectionHub {
   private readonly agentContentReadRequests = new Map<string, AgentContentReadPayload>();
   /** Content-free explicit-read audit facts keyed by exact authenticated device/request identity. */
   private readonly agentContentReceipts = new Map<string, AgentContentReceiptRecord>();
+  /** Immutable requested projection facts, keyed by authenticated device/request. */
+  private readonly agentHomeProjectionRequests = new Map<string, AgentHomeProjectionPayload>();
+  /** First terminal completion for each exact projection request. */
+  private readonly agentHomeProjectionCompletions = new Map<string, AgentHomeProjectionReadback>();
   /**
    * Per-task last-inbound-activity timestamp (epoch ms) — the task-lease
    * reaper's condition (c), see the "task-lease reaper" section below. Reset
@@ -1954,6 +1978,90 @@ export class ConnectionHub {
     this.sendToDevice(deviceId, 'agent.content.read', payload, {});
   }
 
+  /** Task-free exact-device projection; no task record, runtime or session is created. */
+  async enqueueAgentHomeProjection(input: AgentHomeProjectionRequest): Promise<AgentHomeProjectionReadback> {
+    const payload = AgentHomeProjectionPayloadSchema.parse(input.payload);
+    const deviceId = input.deviceId;
+    if (!this.connections.get(deviceId)?.connected) {
+      throw new Error(`device ${deviceId} is not connected`);
+    }
+    if (!this.hasDeviceCapabilities(deviceId, ['agent-home-contract', AGENT_HOME_PROJECTION_CAPABILITY])) {
+      throw new Error(
+        `device ${deviceId} did not advertise ${AGENT_HOME_PROJECTION_CAPABILITY}; refusing Agent-home projection before enqueue`,
+      );
+    }
+    const key = `${deviceId}\u0000${payload.requestId}`;
+    const existing = this.agentHomeProjectionRequests.get(key);
+    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(payload)) {
+      throw new Error(`Agent-home projection ${payload.requestId} already exists with a different immutable body`);
+    }
+    if (existing === undefined) {
+      this.agentHomeProjectionRequests.set(key, payload);
+      this.sendToDevice(deviceId, 'agent.home.projection', payload, { id: payload.requestId });
+    }
+    const readback = this.readAgentHomeProjection(deviceId, payload.requestId);
+    if (readback === undefined) throw new Error('Agent-home projection request was not retained');
+    return readback;
+  }
+
+  readAgentHomeProjection(deviceId: string, requestId: string): AgentHomeProjectionReadback | undefined {
+    const key = `${deviceId}\u0000${requestId}`;
+    const completion = this.agentHomeProjectionCompletions.get(key);
+    if (completion !== undefined) return completion;
+    const desired = this.agentHomeProjectionRequests.get(key);
+    if (desired === undefined) return undefined;
+    const device = this.devices.resolveByDeviceId(deviceId);
+    if (device === undefined || device.revoked) return undefined;
+    return AgentHomeProjectionReadbackSchema.parse({
+      tenantId: device.tenantId,
+      deviceId,
+      requestId: desired.requestId,
+      agentRef: desired.agentRef,
+      projectionHash: desired.projectionHash,
+      status: 'pending',
+    });
+  }
+
+  completeAgentHomeProjection(
+    deviceId: string,
+    input: AgentHomeProjectionCompletionRequest,
+  ): AgentHomeProjectionReadback {
+    const completion = AgentHomeProjectionCompletionRequestSchema.parse(input);
+    const key = `${deviceId}\u0000${completion.requestId}`;
+    const desired = this.agentHomeProjectionRequests.get(key);
+    if (desired === undefined) {
+      throw new AgentHomeProjectionCompletionError('not_found', 'Agent-home projection request was not found');
+    }
+    if (
+      JSON.stringify(desired.agentRef) !== JSON.stringify(completion.agentRef) ||
+      desired.projectionHash !== completion.projectionHash
+    ) {
+      throw new AgentHomeProjectionCompletionError('invalid', 'Agent-home projection completion identity mismatch');
+    }
+    const existing = this.agentHomeProjectionCompletions.get(key);
+    if (existing !== undefined) {
+      if (existing.status !== completion.outcome) {
+        throw new AgentHomeProjectionCompletionError('conflict', 'Agent-home projection terminal outcome changed');
+      }
+      return existing;
+    }
+    const device = this.devices.resolveByDeviceId(deviceId);
+    if (device === undefined || device.revoked) {
+      throw new AgentHomeProjectionCompletionError('not_found', 'Agent-home projection device was not found');
+    }
+    const readback = AgentHomeProjectionReadbackSchema.parse({
+      tenantId: device.tenantId,
+      deviceId,
+      requestId: desired.requestId,
+      agentRef: desired.agentRef,
+      projectionHash: desired.projectionHash,
+      status: completion.outcome,
+      completedAt: new Date().toISOString(),
+    });
+    this.agentHomeProjectionCompletions.set(key, readback);
+    return readback;
+  }
+
   private buildTaskHandle(taskId: string): TaskHandle {
     const hub = this;
     return {
@@ -2137,11 +2245,11 @@ export class ConnectionHub {
    * (everything except `conn.ack`), same as calling `createEnvelope`
    * directly would require.
    */
-  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.offer_for_agent' | 'task.offer_for_agent_with_egress' | 'task.offer_for_agent_with_egress_fresh' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer' | 'agent.egress.ack' | 'agent.content.read'>(
+  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.offer_for_agent' | 'task.offer_for_agent_with_egress' | 'task.offer_for_agent_with_egress_fresh' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer' | 'agent.egress.ack' | 'agent.content.read' | 'agent.home.projection'>(
     deviceId: string,
     type: T,
     payload: Parameters<typeof createEnvelope<T>>[1],
-    opts: Omit<CreateEnvelopeOptions<T>, 'seq' | 'v' | 'id' | 'ts'>,
+    opts: Omit<CreateEnvelopeOptions<T>, 'seq' | 'v' | 'ts'>,
   ): Extract<Envelope, { type: T }> {
     this.envelopesOutCount++;
     const outbox = this.getOrCreateOutbox(deviceId);
@@ -2163,7 +2271,8 @@ export class ConnectionHub {
     // non-terminal state), so the exemption is moot — and correctly
     // omitted — for them.
     const redeliverThroughTerminal = type === 'task.cancel' || type === 'task.reject';
-    const redeliverWithoutTask = type === 'agent.egress.ack' || type === 'agent.content.read';
+    const redeliverWithoutTask =
+      type === 'agent.egress.ack' || type === 'agent.content.read' || type === 'agent.home.projection';
     outbox.ring.push({ seq, taskId, envelope, redeliverThroughTerminal, redeliverWithoutTask });
     if (outbox.ring.length > OUTBOX_RING_CAPACITY) outbox.ring.shift();
     this.deliverToDevice(deviceId, envelope);

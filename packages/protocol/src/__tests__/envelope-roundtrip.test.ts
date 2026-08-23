@@ -318,6 +318,24 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('agent.home.projection', () => {
+    const type = 'agent.home.projection' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          requestId: '10000000-0000-4000-8000-000000000062',
+          agentRef: { agentId: 'agent-home-projection', profileRevision: '9007199254740992' },
+          projectionHash: `sha256:${'a'.repeat(64)}`,
+          projection: { schemaVersion: 'opaque.product.projection.v1', name: 'Research Agent' },
+        },
+        { seq: 8 },
+      ),
+    );
+  });
+
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);

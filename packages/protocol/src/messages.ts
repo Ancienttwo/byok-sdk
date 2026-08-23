@@ -13,6 +13,11 @@ import {
   AgentEgressPolicySchema,
   ContentReadPolicySchema,
 } from './agent-egress';
+import {
+  AgentHomeProjectionHashSchema,
+  AgentHomeProjectionProfileRevisionSchema,
+  AgentHomeProjectionValueSchema,
+} from './agent-home-projection';
 
 /** Max size of an inlined artifact payload, per the delivery-model spec (<=64KB). */
 const MAX_INLINE_BYTES = 64 * 1024;
@@ -129,6 +134,12 @@ export const AgentRefSchema = z
   })
   .strict();
 export type AgentRef = z.infer<typeof AgentRefSchema>;
+
+/** AgentRef constrained to the canonical Profile revision required by projection control. */
+export const AgentHomeProjectionAgentRefSchema = AgentRefSchema.extend({
+  profileRevision: AgentHomeProjectionProfileRevisionSchema,
+}).strict();
+export type AgentHomeProjectionAgentRef = z.infer<typeof AgentHomeProjectionAgentRefSchema>;
 
 function rejectDuplicateToolsets(
   ids: readonly string[],
@@ -467,6 +478,23 @@ export const AgentContentReceiptPayloadSchema = z.discriminatedUnion('decision',
   }
 });
 export type AgentContentReceiptPayload = z.infer<typeof AgentContentReceiptPayloadSchema>;
+
+/**
+ * Server -> daemon: one task-free exact-device Agent-home projection.
+ *
+ * `agentRef.profileRevision` is the projection contract's canonical comparable
+ * revision. It is validated without interpreting the opaque product
+ * projection, whose fields are never inspected for product semantics.
+ */
+export const AgentHomeProjectionPayloadSchema = z
+  .object({
+    requestId: z.uuid(),
+    agentRef: AgentHomeProjectionAgentRefSchema,
+    projectionHash: AgentHomeProjectionHashSchema,
+    projection: AgentHomeProjectionValueSchema,
+  })
+  .strict();
+export type AgentHomeProjectionPayload = z.infer<typeof AgentHomeProjectionPayloadSchema>;
 
 /**
  * server -> daemon: approve a pending `task.await_approval` request.
@@ -1047,6 +1075,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'agent.egress.ack': AgentEgressAckPayloadSchema,
   'agent.content.read': AgentContentReadPayloadSchema,
   'agent.content.receipt': AgentContentReceiptPayloadSchema,
+  'agent.home.projection': AgentHomeProjectionPayloadSchema,
   'task.approve': TaskApprovePayloadSchema,
   'task.reject': TaskRejectPayloadSchema,
   'task.cancel': TaskCancelPayloadSchema,
@@ -1081,6 +1110,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.offer_for_agent_with_egress_fresh',
   'agent.egress.ack',
   'agent.content.read',
+  'agent.home.projection',
   'task.approve',
   'task.reject',
   'task.cancel',

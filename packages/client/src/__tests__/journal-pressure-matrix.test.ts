@@ -533,7 +533,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       } finally {
         logged.mockRestore();
       }
-      expect(await cursorStore.load(server.url, deviceId)).toBe(cursorBefore);
+      expect(await cursorStore.load(server.url, deviceId)).toBe(cursorBefore ?? 0);
       // Not acked, and not recorded: the envelope never reached the journal.
       expect(countRows(storeDir, 'journal_envelope')).toBe(envelopesBefore);
       expect(readRows(storeDir, "SELECT task_id FROM journal_task WHERE task_id = 'task-emergency'")).toEqual([]);
