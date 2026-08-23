@@ -18,13 +18,11 @@ async function tmpDir(prefix: string): Promise<string> {
  * would have caught the original design before it shipped. S0's steer gate
  * fails closed unless the server holds a claim-time capability snapshot saying
  * `steer: true`. That snapshot was first sourced from
- * `conn.hello.runtimes[].capabilities` — but `conn.hello` is sent only by the
- * WS transport (`ws-transport.ts`), so a long-poll-only daemon never produces
- * one, the snapshot was permanently `undefined` for the entire long-poll
- * deployment surface, and the gate silently disabled a control path that had
- * always worked there. Capabilities now ride `task.claim`, which every
- * transport sends, so a pure long-poll daemon is steerable on the strength of
- * its own claim.
+ * `conn.hello.runtimes[].capabilities`. At D-4 that snapshot existed only on
+ * WS, which disabled the long-poll deployment surface. Long-poll now also
+ * publishes `conn.hello`, but the task-level authority remains
+ * `task.claim.capabilities`: it identifies the adapter that actually claimed
+ * this task and every transport sends it.
  *
  * Deliberately end-to-end rather than a hub unit test: the whole point is that
  * the capability survives the REAL long-poll round trip — adapter

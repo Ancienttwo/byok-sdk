@@ -398,9 +398,8 @@ export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
  * (above) rather than introducing a second capability shape. Same source of
  * truth as `conn.hello.runtimes[].capabilities`, different scope: `conn.hello`
  * is CONNECTION-level discovery ("what could this device run"), which no
- * server-side control decision may read, because it is transport-shaped — a
- * long-poll-only daemon never sends `conn.hello` at all — and it describes a
- * device, not a task. This field is task-shaped: it shares a lifecycle with
+ * server-side task control decision may read, because it describes a device,
+ * not the adapter that claimed this task. This field is task-shaped: it shares a lifecycle with
  * the task↔runtime binding the claim itself establishes, so a control gate
  * (`steerTask()`, `packages/server`'s `hub.ts`) can key off it and stay
  * correct across reconnects, adapter-set changes, and transports. Plain

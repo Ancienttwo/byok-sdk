@@ -13,7 +13,7 @@ import { serve } from '@hono/node-server';
 // for canonical device-proof bytes and truth selector contracts; it still does
 // not make the daemon depend on the hosted implementation.
 import type { PresenceHint } from '@byok-sdk/core';
-import type { TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import type { TaskOfferForAgentPayload, TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import {
   createInMemoryByokCloud,
   fullCapabilityDeclaration,
@@ -58,6 +58,8 @@ export interface RealCloudHandle {
   enqueueOffer(deviceId: string, instruction: string): Promise<EnqueuedOffer>;
   /** Additive hosted offer whose logical toolset ids must resolve on the target device before claim. */
   enqueueToolsetOffer(deviceId: string, payload: TaskOfferWithToolsetsPayload): Promise<EnqueuedOffer>;
+  /** Strict Agent offer admitted only after the daemon's authenticated capability snapshot is durable. */
+  enqueueAgentOffer(deviceId: string, payload: TaskOfferForAgentPayload): Promise<EnqueuedOffer>;
   /** Accept a host cancellation and durably enqueue the frozen-v1 `task.cancel` message. */
   cancelTask(taskId: string, reason?: string): ReturnType<ByokCloud['cancelTask']>;
   readTaskAttempt(taskId: string): Promise<TaskAttempt | undefined>;
@@ -140,6 +142,8 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
           cloud.enqueueOffer(tenant, deviceId, { payload: { instruction, policy: { mode: 'auto' } } }),
         enqueueToolsetOffer: (deviceId, payload) =>
           cloud.enqueueToolsetOffer(tenant, deviceId, { payload }),
+        enqueueAgentOffer: (deviceId, payload) =>
+          cloud.enqueueAgentOffer(tenant, deviceId, { payload }),
         cancelTask: (taskId, reason) => cloud.cancelTask(tenant, taskId, reason),
         readTaskAttempt: (taskId) => cloud.readTaskAttempt(tenant, taskId),
         readTerminalBody: async (taskId) => (await cloud.readTerminalReceipt(tenant, taskId))?.body,

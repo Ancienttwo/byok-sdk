@@ -388,6 +388,8 @@ flowchart TB
 
 ### 3.3 已知边界
 
+> **2026-08-23 transport correction:** WS 与 long-poll 现在都会发布同形状的 authenticated `conn.hello`。下方关于 long-poll reach 的描述只记录 sprint D-4 当时的历史成因；当前仍成立的不变量是 scope：connection snapshot 描述设备，不能替代拿下这个 task 的 adapter 在 `task.claim.capabilities` 中给出的 task-level authority。
+
 - M0/M5 embedded 模式不支持 queue-until-connect；设备从未连上时 `dispatch` 直接失败。
 - task lease 只在设备已 dark 且 `Claimed/Running/AwaitApproval` 自最后活动满 `taskLeaseMs` 后触发，结果是 retryable failure。
 - `steer` 已是 **task-level gate（已实现、已接线）**：claim 时 hub 把 `task.claim.capabilities`——claiming adapter 在拿下这个 task 那一刻的自报——快照写入 task record（`TaskSnapshot.claimedRuntimeCapabilities`，SQLite 以 `claimed_runtime_capabilities_json` 列持久化），`steerTask()` 按 unknown task → 终态 `task_terminal` → 非 Running `task_not_running` → 快照 `steer !== true` 的顺序判定，最后一档抛 typed `SteerRejectedError`（code `steer_unsupported_runtime`），在构造 envelope 之前就拒绝，unsupported 时零 envelope 上 wire。

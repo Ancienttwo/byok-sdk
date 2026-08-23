@@ -78,17 +78,22 @@ describe('hosted Agent-home contract', () => {
     ).toHaveLength(1);
   });
 
-  it('records capability from the authenticated long-poll handshake, never from presence', async () => {
+  it('records capability from the authenticated long-poll HTTP handshake, never from presence', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const stores = deviceStores(harness, device.deviceId);
     const hello = createEnvelope('conn.hello', {
       protocolVersions: [1],
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
       deviceId: device.deviceId,
       productId: 'test-product',
     });
-    expect(await handleInboundEnvelope(stores, device.deviceId, hello)).toBe('accepted');
+    const response = await harness.request('/byok/messages', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [hello] }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ accepted: 1 });
     expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual([
       AGENT_HOME_CONTRACT_CAPABILITY,
     ]);

@@ -109,6 +109,57 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     expect(daemon.status().degraded).toBe(true);
   }, 15000);
 
+  it('admits and runs an Agent offer only after long-poll publishes agent-home-contract', async () => {
+    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, longPollIntervalMs: 20 });
+    const workspaceRoot = await tmpDir('byok-cloud-agent-workspace-');
+    const storeDir = await tmpDir('byok-cloud-agent-store-');
+    const hostStorageRoot = await tmpDir('byok-cloud-agent-home-');
+    const adapter = new StubRuntimeAdapter('pi');
+    daemon = createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test',
+        productId: 'test-product',
+        serverUrl: cloud.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+      },
+      [adapter],
+      {
+        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
+        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+      },
+    );
+
+    const record = await daemon.pair((await cloud.createPairingCode()).code);
+    await daemon.start();
+    let offer: Awaited<ReturnType<RealCloudHandle['enqueueAgentOffer']>> | undefined;
+    await vi.waitFor(async () => {
+      offer = await cloud.enqueueAgentOffer(record.deviceId, {
+        instruction: 'run the durable Agent over hosted long-poll',
+        policy: { mode: 'auto' },
+        runtime: 'pi',
+        agentRef: { agentId: 'agent-hosted-longpoll', profileRevision: 'profile-1' },
+      });
+      expect(offer).toBeDefined();
+    }, { timeout: 5000, interval: 20 });
+
+    await vi.waitFor(async () => {
+      expect((await cloud.readTaskAttempt(offer!.taskId))?.status).toBe('running');
+    });
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const expectedCwd = path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-hosted-longpoll');
+    expect(adapter.startCalls[0]?.ctx.workspaceDir).toBe(expectedCwd);
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(async () => {
+      expect(await cloud.readTaskAttempt(offer!.taskId)).toMatchObject({
+        status: 'complete',
+        agentRef: { agentId: 'agent-hosted-longpoll', profileRevision: 'profile-1' },
+      });
+    });
+  }, 15000);
+
   it('host cancellation interrupts the running session and the device acknowledges cancellation over long-poll', async () => {
     cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, longPollIntervalMs: 20 });
 

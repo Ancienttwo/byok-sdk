@@ -262,8 +262,8 @@ export interface TaskSnapshot {
    *
    * Sourced from the claim and from nothing else. The connection-level
    * `conn.hello.runtimes[].capabilities` is discovery data — it describes a
-   * device rather than a task, and a long-poll-only daemon never sends
-   * `conn.hello` at all — so it is never read here or by the gate; see
+   * device rather than the adapter that claimed this task — so it is never
+   * read here or by the gate; see
    * `SteerRejectedError` (`hub.ts`) for the full argument.
    *
    * A SNAPSHOT, deliberately — not a live read of anything: the same device

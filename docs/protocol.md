@@ -230,7 +230,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
-| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | Opening (or reopening) the WSS connection |
+| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | Opening (or reopening) the authenticated WS or long-poll connection snapshot |
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
@@ -1128,10 +1128,11 @@ for new events before returning an empty `events` array. Same cursor
 semantics as the WSS path (§9) — `cursor` in the query is "last seq I've
 seen," `cursor` in the response is "resume from here next time." A client
 using long-poll instead of WSS establishes its per-device session through the
-HTTP layer's own auth rather than through a `conn.hello` frame: it sends NO
-`conn.hello` at all (`conn.hello` is a WSS-only frame — see
-`DAEMON_TO_SERVER_TYPES`, which deliberately excludes it from the inbound
-message gate). `capabilities` is the HTTP transport's equivalent of
+HTTP layer's bearer auth and sends the same bounded `conn.hello` capability
+snapshot as the first `POST /byok/messages` envelope. The route accepts that
+one non-task envelope only when its device, product, and protocol version
+exactly match the authenticated principal; it is ordered ahead of queued task
+messages. `capabilities` is the HTTP transport's equivalent of
 `conn.ack.capabilities`: it describes the server that produced THIS response,
 is refreshed on every successful poll, and is applied before the response's
 events are delivered. The field is additive and optional only for N/N-1 wire
@@ -1147,8 +1148,8 @@ values regardless of transport.
 
 ### 8.1.1 First-hop presence — `PUT /byok/presence`
 
-Long-poll has no `conn.hello`, but a daemon using either transport publishes
-the same first-hop presence snapshot:
+In addition to the authenticated `conn.hello` admission snapshot, a daemon
+using either transport publishes the same lossy first-hop presence snapshot:
 
 ```
 PUT /byok/presence
@@ -1612,9 +1613,8 @@ envelope is consumed, the cursor advances, and redelivery does not loop.
 the claim payload and nothing else: not the connection-level flag list, not
 `conn.hello.runtimes[].capabilities`, and not either of them as a backstop for
 a claim that carried no `capabilities`. Connection-level data is discovery —
-it describes a DEVICE rather than a task, and `conn.hello` is transport-shaped
-(a long-poll-only daemon never sends one at all), so a gate reading it is
-structurally blind across an entire transport. A claim without `capabilities`
+it describes a DEVICE rather than a task, so it cannot prove the adapter that
+claimed this exact task. A claim without `capabilities`
 (a daemon predating that field) records nothing and is refused. That is
 fail-closed, not a compatibility path: `undefined` means "this server does not
 know", never "supported", and the server never infers a capability from a
@@ -1702,7 +1702,7 @@ itself at the moment it took it. That distinction is what makes it usable as a
 control-gate input — it shares a lifecycle with the task↔runtime binding the
 claim itself establishes, so it stays correct across reconnects, adapter-set
 changes, and transports, whereas connection-level data is re-derived on every
-connection and absent entirely on a transport that sends no `conn.hello`.
+authenticated connection snapshot.
 
 Additive-minor, exactly like `runtime` (§3.1): a plain optional field on an
 already-tolerant payload schema, no `PROTOCOL_VERSION` bump, no emission

@@ -302,65 +302,86 @@ export class AgentHomeLeaseManager {
 
   async acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease> {
     const { canonicalHome, agentRef } = resolution;
-    await ensureDirectoryNoSymlink(resolution.agentsRoot, canonicalHome);
+    const leaseId = randomUUID();
+    // Reserve synchronously before the first await. Two acquire() calls in
+    // one process must not both pass an async filesystem preflight and then
+    // misclassify the winner's marker as restart residue.
     if (AgentHomeLeaseManager.held.has(canonicalHome)) {
       throw new AgentHomeBusyError(`Agent home ${canonicalHome} already has a mutable writer lease`);
     }
-    const internalDir = await ensureDirectoryNoSymlink(
-      canonicalHome,
-      path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY),
-    );
-    const leaseId = randomUUID();
-    const lockPath = path.join(internalDir, 'agent-home.lease');
-    let handle: fs.FileHandle;
+    AgentHomeLeaseManager.held.set(canonicalHome, leaseId);
+    let lockPath: string | undefined;
+    let handle: fs.FileHandle | undefined;
+    let ownsMarker = false;
     try {
+      await ensureDirectoryNoSymlink(resolution.agentsRoot, canonicalHome);
+      const internalDir = await ensureDirectoryNoSymlink(
+        canonicalHome,
+        path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY),
+      );
+      lockPath = path.join(internalDir, 'agent-home.lease');
       handle = await this.openLeaseMarker(lockPath, canonicalHome, agentRef.agentId);
+      ownsMarker = true;
+      const marker: StoredLeaseMarker = {
+        version: 1,
+        ownerId: this.ownerId,
+        leaseId,
+        agentRef,
+        canonicalHome,
+      };
+      await handle.writeFile(JSON.stringify(marker), 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
     } catch (error) {
+      await handle?.close().catch(() => {});
+      if (ownsMarker && lockPath !== undefined) await fs.rm(lockPath, { force: true }).catch(() => {});
+      if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) {
+        AgentHomeLeaseManager.held.delete(canonicalHome);
+      }
       if (error instanceof AgentHomeBusyError) throw error;
       throw new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const marker: StoredLeaseMarker = {
-      version: 1,
-      ownerId: this.ownerId,
-      leaseId,
-      agentRef,
-      canonicalHome,
-    };
-    try {
-      await handle.writeFile(JSON.stringify(marker), 'utf8');
-      await handle.sync();
-    } catch (error) {
-      await handle.close().catch(() => {});
-      await fs.rm(lockPath, { force: true }).catch(() => {});
-      throw new AgentHomeError(`could not persist Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    await handle.close();
-    AgentHomeLeaseManager.held.set(canonicalHome, leaseId);
+    const acquiredLockPath = lockPath;
+    if (acquiredLockPath === undefined) throw new AgentHomeError('Agent home lease marker path was not established');
     let released = false;
+    let releaseAttempt: Promise<void> | undefined;
     return {
       leaseId,
       agentRef,
       canonicalHome,
       cwd: canonicalHome,
-      release: async () => {
-        if (released) return;
-        released = true;
-        if (AgentHomeLeaseManager.held.get(canonicalHome) !== leaseId) {
-          throw new AgentHomeBusyError(`Agent home lease ${leaseId} is no longer owned by this process`);
-        }
-        AgentHomeLeaseManager.held.delete(canonicalHome);
-        let contents: string;
-        try {
-          contents = await fs.readFile(lockPath, 'utf8');
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      release: () => {
+        if (released) return Promise.resolve();
+        if (releaseAttempt !== undefined) return releaseAttempt;
+        const attempt = (async () => {
+          if (AgentHomeLeaseManager.held.get(canonicalHome) !== leaseId) {
+            throw new AgentHomeBusyError(`Agent home lease ${leaseId} is no longer owned by this process`);
+          }
+          let contents: string;
+          try {
+            contents = await fs.readFile(acquiredLockPath, 'utf8');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+              AgentHomeLeaseManager.held.delete(canonicalHome);
+              released = true;
+              return;
+            }
+            throw error;
+          }
+          const parsed = parseLeaseMarker(contents, acquiredLockPath);
+          if (parsed.leaseId !== leaseId || parsed.ownerId !== this.ownerId) {
+            throw new AgentHomeBusyError(`Agent home lease marker ${acquiredLockPath} belongs to another writer`);
+          }
+          await fs.rm(acquiredLockPath);
+          AgentHomeLeaseManager.held.delete(canonicalHome);
+          released = true;
+        })();
+        releaseAttempt = attempt.catch((error: unknown) => {
+          releaseAttempt = undefined;
           throw error;
-        }
-        const parsed = parseLeaseMarker(contents, lockPath);
-        if (parsed.leaseId !== leaseId || parsed.ownerId !== this.ownerId) {
-          throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} belongs to another writer`);
-        }
-        await fs.rm(lockPath);
+        });
+        return releaseAttempt;
       },
     };
   }

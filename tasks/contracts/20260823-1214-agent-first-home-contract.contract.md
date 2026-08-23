@@ -126,6 +126,7 @@ allowed_paths:
   - docs/spec.md
   - docs/protocol.md
   - docs/host-local-storage-layout.md
+  - docs/architecture/sdk-architecture.md
   - docs/researches/
   - README.md
   - packages/client/README.md

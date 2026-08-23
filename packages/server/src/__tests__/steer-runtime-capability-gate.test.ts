@@ -35,9 +35,8 @@ const PRODUCT_ID = 'acme';
  * S0/D-4 — WHERE that snapshot comes from: `task.claim.capabilities`, the
  * claiming adapter's own self-report on the very message that establishes the
  * task↔runtime binding. NOT `conn.hello.runtimes[].capabilities`, which is
- * connection-level discovery: it describes a device rather than a task, and a
- * long-poll-only daemon never sends `conn.hello` at all, so a gate reading it
- * was structurally blind across an entire transport. The
+ * connection-level discovery: it describes a device rather than the adapter
+ * that claimed this task. The
  * "connection-advertised capabilities cannot feed the gate" describe block
  * below is the machine-checkable guard on that separation, in both directions.
  *
@@ -343,10 +342,9 @@ describe('S0/D-4: connection-advertised capabilities cannot feed the steer gate'
     expect(envelope.task_id).toBe(handle.taskId);
   });
 
-  it('a device that advertised NO runtimes at all still steers when its claim says so — the transport shape of conn.hello is irrelevant to the gate', async () => {
-    // The long-poll case in miniature: a daemon that never populated
-    // `conn.hello.runtimes` (or, on a real long-poll-only daemon, never sent a
-    // `conn.hello` at all) has no connection-level capability data anywhere,
+  it('a device that advertised NO runtimes at all still steers when its claim says so — device discovery is irrelevant to the task gate', async () => {
+    // The long-poll case in miniature: a daemon whose authenticated
+    // `conn.hello` snapshot has no runtime capability data anywhere
     // and must still be steerable on the strength of its own claim. This is
     // the regression the D-4 amendment exists for — the WS-shaped version of
     // it, kept here next to the hub; the real pure-long-poll path is covered

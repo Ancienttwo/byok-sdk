@@ -10,6 +10,7 @@ import type { CursorStore } from './cursor-store';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { LongPollClient } from './long-poll-transport';
 import {
+  createConnectionHelloEnvelope,
   WsTransport,
   WsUnexpectedStatusError,
   type BackoffOptions,
@@ -861,6 +862,19 @@ export class ConnectionManager {
     this.ws.stopAutoReconnect();
     this.opts.onStateChange?.('degraded');
     this.longPoll.start();
+    // Long-poll is a complete transport, not an implicit old-daemon mode.
+    // Publish the same authenticated capability snapshot WS sends, ahead of
+    // every queued task message, so an Agent offer cannot race capability
+    // admission or silently fall back to task-only workspace semantics.
+    this.outbox.unshift(createConnectionHelloEnvelope({
+      deviceId: this.opts.deviceId,
+      productId: this.opts.productId,
+      capabilities: this.opts.capabilities,
+      clientVersion: this.opts.clientVersion,
+      runtimes: this.opts.runtimes,
+      getConfiguredToolsets: this.opts.getConfiguredToolsets,
+      getCursor: () => this.cursor,
+    }));
     this.notifySettled();
     void this.drainOutbox(); // Design B: anything already queued now drains over the freshly-started long-poll POST path
 

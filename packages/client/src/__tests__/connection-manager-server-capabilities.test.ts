@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
+import { LongPollClient } from '../daemon/long-poll-transport';
 import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
 
@@ -145,6 +146,49 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
 
     server.setFailEventsPolls(true);
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
+  });
+
+  it('a long-poll transition publishes the exact daemon conn.hello snapshot before task messages', async () => {
+    server = await TestServer.start();
+    server.setRejectWs(true);
+    const storeDir = await tmpDir('byok-agent-capability-longpoll-');
+    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const record = await auth.pair('pairing-code');
+    const postBatch = vi.spyOn(LongPollClient.prototype, 'postBatch');
+
+    connection = new ConnectionManager({
+      serverUrl: server.url,
+      deviceId: record.deviceId,
+      productId: 'test-product',
+      capabilities: ['agent-home-contract'],
+      runtimes: [],
+      auth,
+      cursorStore: new CursorStore(storeDir),
+      onEnvelope: () => {},
+      wsFailureThreshold: 1,
+      longPollRetryDelayMs: 20,
+      longPollIdleDelayMs: 20,
+    });
+    await connection.start();
+    await connection.waitForAck();
+    connection.send(createEnvelope('task.fail', { reason: 'ordered after hello' }, { taskId: 'task-after-hello' }));
+
+    await vi.waitFor(() => {
+      expect(postBatch.mock.calls.flatMap(([batch]) => batch).some((envelope) => envelope.type === 'task.fail')).toBe(true);
+    });
+    const flattened = postBatch.mock.calls.flatMap(([batch]) => batch);
+    const helloIndex = flattened.findIndex((envelope) => envelope.type === 'conn.hello');
+    const terminalIndex = flattened.findIndex((envelope) => envelope.type === 'task.fail');
+    expect(helloIndex).toBeGreaterThanOrEqual(0);
+    expect(terminalIndex).toBeGreaterThan(helloIndex);
+    expect(flattened[helloIndex]).toMatchObject({
+      type: 'conn.hello',
+      payload: {
+        deviceId: record.deviceId,
+        productId: 'test-product',
+        capabilities: ['agent-home-contract'],
+      },
+    });
   });
 
   it('an N-1 long-poll responder that omits capabilities remains fail-closed', async () => {

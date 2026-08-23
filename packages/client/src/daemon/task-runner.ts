@@ -99,6 +99,10 @@ export const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
  */
 export const DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS = 5_000;
 
+/** Bounded retry before terminal publication degrades observably. */
+export const AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS = 3;
+const AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS = 20;
+
 /** Bound best-effort Git observation so terminal protocol outcomes cannot wait forever on repository I/O. */
 const GIT_OBSERVATION_TIMEOUT_MS = 5_000;
 
@@ -318,6 +322,22 @@ export interface TaskRunnerDeps {
     reason: string;
   }) => void;
   /**
+   * Local audit signal emitted only after bounded Agent-home terminal
+   * evidence retries are exhausted. The wire terminal still proceeds so a
+   * cloud task cannot remain Claimed/Running forever behind auxiliary local
+   * storage failure.
+   */
+  onAgentTerminalEvidenceFailure?: (event: {
+    taskId: string;
+    agentRef: AgentRef;
+    runtimeId: string;
+    cwd: string;
+    cause: AgentTerminalCause;
+    reason?: string;
+    attempts: number;
+    error: string;
+  }) => void;
+  /**
    * M4 Phase 3: this daemon's control-socket identity + the shared registry
    * backing the control socket's own `approvals.list`/`approvals.resolve`
    * methods (`create-daemon.ts` constructs ONE `ApprovalRegistry` and passes
@@ -446,6 +466,7 @@ interface ActiveTask {
   terminalCause?: AgentTerminalCause;
   terminalReason?: string;
   agentTerminalPersisted?: boolean;
+  agentTerminalEvidenceFailureReported?: boolean;
   gitWorkspaceId?: string;
   gitLease?: GitWorkspaceLease;
   gitBaseline?: string;
@@ -1048,7 +1069,7 @@ export class TaskRunner {
     const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
     await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
     if (this.tasks.get(active.taskId) !== active) return true;
-    if (!(await this.persistAgentTerminalEvidence(active, 'failed', reason))) return false;
+    await this.persistAgentTerminalEvidence(active, 'failed', reason);
     this.deps.send(
       createEnvelope(
         'task.fail',
@@ -1468,9 +1489,8 @@ export class TaskRunner {
             // same message that establishes the task↔runtime binding. The
             // server gates control messages (`task.steer`) on this and only
             // this — connection-level `conn.hello.runtimes[].capabilities`
-            // stays discovery, because it is transport-shaped (a long-poll-only
-            // daemon never sends `conn.hello`) and describes a device rather
-            // than a task.
+            // stays device discovery on both transports and cannot replace
+            // the claim-time truth for this exact task/runtime binding.
             //
             // Sent UNCONDITIONALLY, deliberately NOT gated on
             // `isKnownRuntimeId` the way `runtime` above is: `runtime` is a
@@ -1688,7 +1708,7 @@ export class TaskRunner {
           // best-effort — still report cancellation below
         }
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
-        if (!(await this.persistAgentTerminalEvidence(active, 'cancelled', reason))) return;
+        await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
         this.deps.send(
           createEnvelope(
             'task.cancelled',
@@ -1954,7 +1974,7 @@ export class TaskRunner {
             return;
           }
           if (!this.reserveSemanticTerminal(active)) return;
-          if (!(await this.persistAgentTerminalEvidence(active, 'complete'))) return;
+          await this.persistAgentTerminalEvidence(active, 'complete');
           this.deps.send(
             createEnvelope(
               'task.complete',
@@ -2137,7 +2157,7 @@ export class TaskRunner {
     // the batcher; nothing else needs to happen with its buffer contents.
     // M1 gap #6: the canonical, explicit cancellation message — no longer
     // `task.fail({reason:'cancelled'})`.
-    if (!(await this.persistAgentTerminalEvidence(active, 'cancelled', reason))) return;
+    await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
     this.deps.send(
       createEnvelope(
         'task.cancelled',
@@ -2693,7 +2713,7 @@ export class TaskRunner {
     // task to `Failed` and closed its event queue before this notification
     // arrived, so flushing buffered progress here would be unobservable and
     // only trigger a spurious server-side warning.
-    if (!(await this.persistAgentTerminalEvidence(active, 'failed', reason ?? 'rejected'))) return;
+    await this.persistAgentTerminalEvidence(active, 'failed', reason ?? 'rejected');
     this.deps.send(
       createEnvelope(
         'task.fail',
@@ -2724,7 +2744,7 @@ export class TaskRunner {
       return;
     }
     if (active) await this.observeGit(active, 'salvage');
-    if (active && !(await this.persistAgentTerminalEvidence(active, 'failed', reason))) return;
+    if (active) await this.persistAgentTerminalEvidence(active, 'failed', reason);
     this.deps.send(
       createEnvelope(
         'task.fail',
@@ -2739,10 +2759,10 @@ export class TaskRunner {
 
   /**
    * Claimed Agent failures before ActiveTask registration still carry the
-   * exact AgentRef and have Agent-local, fsynced terminal evidence. If the
-   * evidence write fails, do not publish a terminal that the local authority
-   * cannot prove; the lease is released by handleOffer's finally block and a
-   * later redelivery may retry the operation.
+   * exact AgentRef and normally have Agent-local, fsynced terminal evidence
+   * first. A bounded storage failure degrades observably but cannot strand
+   * the already-claimed cloud task forever; the exact terminal still goes on
+   * the wire and handleOffer's finally block releases the lease.
    */
   private async failClaimedAgent(
     taskId: string,
@@ -2751,8 +2771,8 @@ export class TaskRunner {
     context: ClaimedAgentFailureContext,
   ): Promise<boolean> {
     const agentRef = context.binding.resolution.agentRef;
-    try {
-      await this.deps.agentSessionHandoffs!.recordTaskTerminal({
+    const result = await this.retryAgentTerminalEvidence(() =>
+      this.deps.agentSessionHandoffs!.recordTaskTerminal({
         agentRef,
         taskId,
         runtimeId: context.runtimeId,
@@ -2760,19 +2780,25 @@ export class TaskRunner {
         leaseId: context.binding.lease.leaseId,
         ...(context.sessionRef === undefined ? {} : { sessionRef: context.sessionRef }),
         terminalReason: reason,
+      }),
+    );
+    if (!result.ok) {
+      this.reportAgentTerminalEvidenceFailure({
+        taskId,
+        agentRef,
+        runtimeId: context.runtimeId,
+        cwd: context.binding.lease.cwd,
+        cause: 'failed',
+        reason,
+        error: result.error,
       });
-    } catch (error) {
-      console.error(
-        `[byok/client] claimed Agent failure evidence could not be persisted before task.fail for ${taskId}: ${errorMessage(error)}`,
-      );
-      return false;
     }
     this.deps.send(createEnvelope(
       'task.fail',
       { reason, retryable, agentRef },
       { taskId },
     ));
-    return true;
+    return result.ok;
   }
 
   /**
@@ -2958,7 +2984,7 @@ export class TaskRunner {
     await this.deps.gitWorkspaceStore.upsert({ ...current, phase, ...(errorCategory ? { errorCategory } : {}) }).catch(() => {});
   }
 
-  /** Persist Agent terminal truth before its externally visible wire message. */
+  /** Persist Agent terminal truth before wire when local storage is available. */
   private async persistAgentTerminalEvidence(
     active: ActiveTask,
     cause: AgentTerminalCause,
@@ -2969,26 +2995,76 @@ export class TaskRunner {
     if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) {
       return true;
     }
-    try {
-      await this.deps.agentSessionHandoffs!.recordTerminal(
+    const agentRef = active.agentRef;
+    const handoff = active.agentHandoff;
+    const result = await this.retryAgentTerminalEvidence(() =>
+      this.deps.agentSessionHandoffs!.recordTerminal(
         {
-          agentRef: active.agentRef,
-          sessionRef: active.agentHandoff.sessionRef,
-          runtimeId: active.agentHandoff.runtimeId,
-          cwd: active.agentHandoff.cwd,
+          agentRef,
+          sessionRef: handoff.sessionRef,
+          runtimeId: handoff.runtimeId,
+          cwd: handoff.cwd,
         },
         cause,
         reason,
-      );
+      ),
+    );
+    if (result.ok) {
       active.agentTerminalPersisted = true;
       return true;
-    } catch (error) {
-      console.error(
-        `[byok/client] Agent terminal evidence could not be persisted before wire terminal for ${active.taskId}: ${errorMessage(error)}`,
-      );
-      active.resolveSemanticTerminalSettled?.(false);
-      return false;
     }
+    console.warn(
+      `[byok/client] Agent terminal evidence for ${active.taskId} remained unavailable after ` +
+        `${AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS} attempts; publishing the exact terminal and retrying during cleanup: ${errorMessage(result.error)}`,
+    );
+    return false;
+  }
+
+  private async retryAgentTerminalEvidence(
+    write: () => Promise<unknown>,
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: unknown }> {
+    let lastError: unknown = new Error('Agent terminal evidence write did not run');
+    for (let attempt = 1; attempt <= AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS; attempt++) {
+      try {
+        await write();
+        return { ok: true };
+      } catch (error) {
+        lastError = error;
+        if (attempt < AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS) {
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS);
+            timer.unref?.();
+          });
+        }
+      }
+    }
+    return { ok: false, error: lastError };
+  }
+
+  private reportAgentTerminalEvidenceFailure(input: {
+    taskId: string;
+    agentRef: AgentRef;
+    runtimeId: string;
+    cwd: string;
+    cause: AgentTerminalCause;
+    reason?: string;
+    error: unknown;
+  }): void {
+    const error = errorMessage(input.error);
+    console.error(
+      `[byok/client] Agent terminal evidence permanently unavailable for ${input.taskId} after ` +
+        `${AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS} attempts; terminal publication continued to avoid a stuck cloud task: ${error}`,
+    );
+    this.deps.onAgentTerminalEvidenceFailure?.({
+      taskId: input.taskId,
+      agentRef: input.agentRef,
+      runtimeId: input.runtimeId,
+      cwd: input.cwd,
+      cause: input.cause,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+      attempts: AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS,
+      error,
+    });
   }
 
   private async finish(taskId: string): Promise<boolean> {
@@ -3066,27 +3142,35 @@ export class TaskRunner {
     }
     if (this.tasks.get(taskId) !== active) return true;
     if (active.agentBinding !== undefined && active.agentRef !== undefined && active.agentHandoff !== undefined) {
+      const agentRef = active.agentRef;
+      const handoff = active.agentHandoff;
       if (!active.agentTerminalPersisted) {
         const cause = active.terminalCause ?? 'failed';
-        try {
-          await this.deps.agentSessionHandoffs!.recordTerminal(
+        const result = await this.retryAgentTerminalEvidence(() =>
+          this.deps.agentSessionHandoffs!.recordTerminal(
             {
-              agentRef: active.agentRef,
-              sessionRef: active.agentHandoff.sessionRef,
-              runtimeId: active.agentHandoff.runtimeId,
-              cwd: active.agentHandoff.cwd,
+              agentRef,
+              sessionRef: handoff.sessionRef,
+              runtimeId: handoff.runtimeId,
+              cwd: handoff.cwd,
             },
             cause,
             active.terminalReason,
-          );
+          ),
+        );
+        if (result.ok) {
           active.agentTerminalPersisted = true;
-        } catch (error) {
-          // Do not release the home or forget the active task when exact
-          // terminal evidence cannot be durably recorded. The host can retry
-          // finish after repairing the store; silent evidence loss is unsafe.
-          console.error(`[byok/client] Agent terminal evidence could not be persisted for ${taskId}: ${errorMessage(error)}`);
-          active.resolveSemanticTerminalSettled?.(false);
-          return false;
+        } else if (!active.agentTerminalEvidenceFailureReported) {
+          active.agentTerminalEvidenceFailureReported = true;
+          this.reportAgentTerminalEvidenceFailure({
+            taskId,
+            agentRef,
+            runtimeId: handoff.runtimeId,
+            cwd: handoff.cwd,
+            cause,
+            reason: active.terminalReason,
+            error: result.error,
+          });
         }
       }
       try {

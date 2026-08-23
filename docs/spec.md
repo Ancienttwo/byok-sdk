@@ -529,6 +529,25 @@ fails closed. One canonical Agent home has one mutable writer across tasks;
 another Agent home remains independent. Crash residue is reclaimable only by
 the same stable daemon owner identity.
 
+The daemon publishes the same authenticated `conn.hello` capability snapshot
+on WS and long-poll; the hosted composition persists that snapshot before an
+Agent offer can be enqueued. Runtime-session terminal evidence is normally
+fsynced before the exact wire terminal. If the local evidence store remains
+unavailable after bounded retries, the daemon reports that audit failure and
+still publishes the exact AgentRef terminal so the cloud attempt and Agent
+lease cannot remain stuck indefinitely.
+
+Cloud orchestration does not make the runtime cloud-hosted: provider access,
+tool execution, runtime-native transcript, credential custody, and opaque
+Agent-home contents remain local authorities. The Agent-home feature does not
+authorize recursive mirroring or explicit file/transcript reads. Current
+`task.progress` is a separate contentful projection with an in-memory
+transport outbox; it is not a durable local-first history. The proposed typed
+metadata-default/content-opt-in egress and explicit content-read contract is
+documented separately in
+[Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md)
+and is not yet a shipped public config surface.
+
 The host selects the branded root and authors stable identity plus redacted
 profile projection content. It does not compose the Agent path. Credentials
 remain in an OS credential store; only non-secret references/configured state

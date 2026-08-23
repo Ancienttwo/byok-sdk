@@ -10,6 +10,7 @@ import {
   PROTOCOL_VERSION,
   TASK_STATES,
   type CreateEnvelopeOptions,
+  type ConnHelloPayload,
   type Envelope,
   type AgentRef,
   type MessageType,
@@ -175,7 +176,8 @@ type TaskPatch = Partial<
  * transports (`ws-server.ts`'s WS message handler, `http.ts`'s
  * `POST /byok/messages`) call instead of reaching into per-type handlers
  * directly. Runs, in order: (1) type-allow — only `DAEMON_TO_SERVER_TYPES`
- * may pass, a server -> daemon type arriving inbound is rejected (P2); (2)
+ * plus the authenticated long-poll `conn.hello` snapshot may pass, a server
+ * -> daemon type arriving inbound is rejected (P2); (2)
  * ownership (N2) — an envelope for a task already owned by a *different*
  * device is dropped and logged, never force-failed (force-failing on an
  * authz mismatch would let an attacker who merely guesses a `taskId` kill
@@ -363,15 +365,11 @@ function steerRejectionMessage(
  * Two reasons, either sufficient. First, scope: connection-level data is
  * discovery describing a daemon BUILD, not the per-runtime, per-task,
  * claim-time truth this gate needs — conflating the two is the original bug.
- * Second, reach: `conn.hello` is transport-shaped. A long-poll-only daemon
- * never sends one (sole sender: `ws-transport.ts:192`, `packages/client`), so
- * a connection-sourced snapshot is permanently `undefined` for an entire
- * transport and a fail-closed gate reading it disables steer across that whole
- * deployment surface — a regression, not a safety property. The claim, by
- * contrast, is the message that establishes the task↔runtime binding on every
- * transport, so the gate's input now shares a lifecycle with the thing it
- * judges. Adding a connection-level fallback here would restore both defects
- * at once and is what this design exists to forbid.
+ * Second, lifecycle: the authenticated `conn.hello` snapshot on either
+ * transport describes the device build, while the claim establishes the
+ * exact task↔runtime binding. Only the latter shares a lifecycle with the
+ * thing this gate judges. Adding a connection-level fallback here would
+ * restore the scope defect and is what this design exists to forbid.
  */
 export class SteerRejectedError extends Error {
   constructor(
@@ -663,9 +661,10 @@ export class ConnectionHub {
    *    taskStore lookup or dedup bookkeeping. See {@link handleRateLimited}
    *    for what happens on exceed (never a silent drop).
    * 1. **type-allow (P2)** — only {@link DAEMON_TO_SERVER_TYPES} may pass; a
-   *    server -> daemon type (or anything unrecognized, e.g. a stale/future
-   *    `conn.hello` outside the handshake) arriving inbound is rejected
-   *    before it's dispatched or counted accepted.
+   *    server -> daemon type arriving inbound is rejected before it's
+   *    dispatched or counted accepted. `conn.hello` is the one non-task
+   *    exception, and is accepted only from the bearer-authenticated
+   *    long-poll route with an exact device/product/protocol match.
    * 2. **ownership (N2)** — an envelope for a task already owned by a
    *    *different* device is dropped (logged), never force-failed:
    *    force-failing on an authz mismatch would let an attacker who merely
@@ -685,7 +684,11 @@ export class ConnectionHub {
    * wire-level success even though no handler ran a second time; only
    * `rejected`/`rate_limited` (gate steps 0-2) are excluded from that count.
    */
-  handleInbound(deviceId: string, envelope: Envelope): 'accepted' | 'duplicate' | 'rejected' | 'rate_limited' {
+  handleInbound(
+    deviceId: string,
+    envelope: Envelope,
+    authenticatedProductId?: string,
+  ): 'accepted' | 'duplicate' | 'rejected' | 'rate_limited' {
     this.envelopesInCount++;
 
     if (!this.rateLimiter.consume(deviceId)) {
@@ -698,6 +701,24 @@ export class ConnectionHub {
     // embedder event rather than being silently coalesced into a flood it
     // already recovered from.
     this.rateLimitEventEmittedFor.delete(deviceId);
+
+    if (envelope.type === 'conn.hello') {
+      const payload = envelope.payload;
+      if (
+        authenticatedProductId === undefined ||
+        payload.deviceId !== deviceId ||
+        payload.productId !== authenticatedProductId ||
+        !payload.protocolVersions.includes(PROTOCOL_VERSION)
+      ) {
+        return 'rejected';
+      }
+      if (this.checkAndRecordDuplicate(deviceId, envelope.id)) {
+        this.dedupDropCount++;
+        return 'duplicate';
+      }
+      this.registerLongPollHello(deviceId, payload);
+      return 'accepted';
+    }
 
     if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) {
       return 'rejected';
@@ -719,6 +740,17 @@ export class ConnectionHub {
 
     this.dispatchToHandler(deviceId, taskId, envelope);
     return 'accepted';
+  }
+
+  /** Record the authenticated long-poll equivalent of the WS opening frame. */
+  private registerLongPollHello(deviceId: string, payload: ConnHelloPayload): void {
+    this.takeOverAsLongPoll(deviceId);
+    const connection = this.connections.get(deviceId);
+    if (!connection) return;
+    connection.runtimes = payload.runtimes;
+    connection.capabilities = payload.capabilities;
+    connection.configuredToolsets = payload.configuredToolsets;
+    connection.lastSeen = new Date().toISOString();
   }
 
   /**
@@ -851,8 +883,9 @@ export class ConnectionHub {
         this.onApprovalResolved(envelope.task_id, envelope.payload);
         return;
       default:
-        // conn.hello is handled during the handshake (ws-server.ts); the
-        // remaining types (conn.ack/task.offer/approve/reject/cancel/steer)
+        // conn.hello is handled before this task-scoped dispatcher (WS in
+        // ws-server.ts, long-poll in handleInbound); the remaining types
+        // (conn.ack/task.offer/approve/reject/cancel/steer)
         // are server->daemon only, and handleInbound's type-allow gate
         // already rejects those before this is ever reached. Kept as a safe
         // no-op default (rather than throwing) purely so this switch stays
@@ -1769,8 +1802,7 @@ export class ConnectionHub {
    * not {@link getDeviceCapabilities}, not `ConnectionState.runtimes`, and
    * with no fallback to either when the snapshot is absent. See
    * {@link SteerRejectedError} for why a connection-sourced input is wrong
-   * both in scope (describes a daemon build, not this task's runtime) and in
-   * reach (absent entirely on long-poll-only daemons).
+   * in scope (it describes a daemon build, not this task's runtime).
    */
   private async steerTask(taskId: string, text: string): Promise<void> {
     const record = this.taskStore.get(taskId);

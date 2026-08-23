@@ -1,7 +1,7 @@
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: 2026-08-23 12:39
+> **Updated**: 2026-08-23 15:15
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
@@ -11,6 +11,7 @@ Do not duplicate that execution checklist here. Record only work intentionally d
 
 | Goal | Why Deferred | Tradeoff | Revisit Trigger |
 |------|--------------|----------|-----------------|
+| **P1 — Agent local/cloud typed egress contract**：metadata/status 默认、contentful trajectory 显式 opt-in、reliable spool 与 latest-value activity 分轨、per-Agent/per-tenant quota、envelope-boundary sanitizer，以及 capability-gated workspace/transcript/artifact read receipts | 当前 Agent-first work-package 只拥有 canonical Agent home、session journal、lease 和 cwd；`task.progress` 仍是 contentful projection，经 `ProgressBatcher` 后进入 in-memory transport outbox。把它描述成 durable/redacted local-first history，或只增加未消费 config，都会制造假 authority。完整 P1/P2/P3 与验收边界见 `docs/researches/agent-local-cloud-projection-contract.md`。 | 在实现前，Salesko 不得把 `task.progress` 当完整 transcript/shared-history，不得假设 generic DLP、restart-safe outbound activity 或远程 Agent-home browse 已存在；可靠事件与显式内容读取仍缺通用上游 primitive。 | 当前 Agent-home contract 验收后立即新建独立 strict work-package；首个切片必须同时交付 consumed typed policy、metadata-default envelope guard、distinct capability admission 和 negative wire tests，禁止在本 contract 内夹带 no-op config 或 dual lane fallback。 |
 | **P1 — long-lived connector supervisor 与本地 enable/disable authority**：裁定 daemon 是否拥有常驻 connector 进程、启动/崩溃/恢复探测，以及 host-only enable/disable | `connector-readonly-operability` 已交付 content-addressed registry、CAS reload、redacted status 与显式 host lifecycle observation；但 Claude 仍按 task 拥有 MCP 子进程，daemon 没有可诚实观测的常驻进程。 | 没有 host observation 时状态明确为 `unobserved`；SDK 不会谎报 ready/crashed，但也不会自动恢复一个它并不拥有的 connector。 | 第二个真实 long-running connector 或 Gmail 常驻 dogfood 明确要求 daemon supervision 时；先裁进程所有权与 crash receipt，再实现 enable/disable，禁止以 command presence 推断健康或引入 SaaS executable definition。权威边界见 `docs/researches/2026-08-21_raft-toolset-operability-application.md`。 |
 | **P1 — MCP tool 级 policy / approval / audit**：给 task/toolset manifest 增加 exact tool allowlist、read-vs-mutation classification、本地 approval gate 与脱敏调用审计 | 当前选择粒度是整个 logical toolset；既有 runtime permission/approval seam 不能等价保证任意 MCP connector tool call 都被拦截。Browser、LinkedIn 发消息、邮件发送等 mutation 需要独立 authority。 | 在只有 read-only Gmail metadata 时可接受；一旦加入 mutation，toolset 全开会扩大本地账号权限与误操作半径。 | 第一个 write/mutation connector 上线前硬触发；同一 slice 交付拒绝路径、approval targeting、secret/body 不落日志守卫，不能只加声明文法。最小范围清单见 `docs/researches/2026-08-20_post-042-progress-and-sprint-audit.md` §7.3 Sprint B2。 |
 | `packages/cloud/src/auth/bearer.ts` 与修前的 server 同形状：只查 row==claims，没有 instance-product 等值检查 | hosted 部署的「实例 product 权威」与 embedded 不同——一个 cloud 部署可能合法服务多个 product，没有 `createByokServer({ productId })` 那样的单值权威可比。照搬 server 的第四条检查会把一个尚未裁定的部署形态写死。 | 在裁定前，hosted 侧一个 product 的 token 在同部署内跨 product 面上仍只受 row==claims 约束；embedded 侧已闭合，两侧安全姿态暂不对齐，且这层不对齐只有读代码才看得出来。 | 下一把 cloud auth 刀，或第一个服务多于一个 product 的 hosted 部署——那时先裁「hosted 的实例 product 权威是什么」（单值？tenant→product 映射？），再决定检查落在哪；裁定约束（禁 dual-read/fallback、禁照搬 embedded 单 product 语义）见 `docs/researches/2026-08-20_post-042-progress-and-sprint-audit.md` §7.3 hosted-product-authority。 |

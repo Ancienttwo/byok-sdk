@@ -94,4 +94,52 @@ describe('a full task lifecycle over long-poll only, WS never connects (finding 
     expect(daemon.status().connected).toBe(false);
     expect(daemon.status().degraded).toBe(true);
   }, 15000);
+
+  it('publishes agent-home-contract over long-poll before Agent dispatch admission', async () => {
+    real = await startRealServerWithoutWebSocket({ productId: 'test-product', longPollHoldMs: 200 });
+    const workspaceRoot = await tmpDir('byok-agent-longpoll-workspace-');
+    const storeDir = await tmpDir('byok-agent-longpoll-store-');
+    const hostStorageRoot = await tmpDir('byok-agent-longpoll-home-');
+    const adapter = new StubRuntimeAdapter('pi');
+
+    daemon = createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test',
+        productId: 'test-product',
+        serverUrl: real.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+      },
+      [adapter],
+      {
+        backoff: { baseMs: 20, maxMs: 50, factor: 2 },
+        longPoll: { wsFailureThreshold: 1, wsRetryIntervalMs: 60_000, retryDelayMs: 20, idleDelayMs: 20 },
+      },
+    );
+
+    const record = await daemon.pair(real.createPairingCode().code);
+    await daemon.start();
+    expect(daemon.status().degraded).toBe(true);
+
+    let handle: Awaited<ReturnType<typeof real.byok.dispatch>> | undefined;
+    await vi.waitFor(async () => {
+      handle = await real.byok.dispatch({
+        deviceId: record.deviceId,
+        instruction: 'run in the durable Agent home over long-poll',
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-longpoll', profileRevision: 'profile-1' },
+      });
+      expect(handle).toBeDefined();
+    }, { timeout: 5000, interval: 20 });
+
+    await waitForTaskEvent(handle!, (event) => event.kind === 'state' && event.state === 'Running');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await expect(handle!.result()).resolves.toMatchObject({ state: 'Complete' });
+    expect(adapter.startCalls[0]?.ctx.workspaceDir).toBe(
+      path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-longpoll'),
+    );
+  }, 15000);
 });

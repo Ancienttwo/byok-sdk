@@ -97,6 +97,37 @@ export interface WsTransportOptions {
 }
 
 /**
+ * One canonical authenticated capability snapshot for both transports.
+ * Long-poll sends this envelope through `POST /byok/messages`; WS sends the
+ * same shape as its opening frame. Keeping construction here prevents one
+ * transport from silently omitting a newly added daemon capability.
+ */
+export function createConnectionHelloEnvelope(
+  opts: Pick<
+    WsTransportOptions,
+    | 'deviceId'
+    | 'productId'
+    | 'capabilities'
+    | 'clientVersion'
+    | 'runtimes'
+    | 'getConfiguredToolsets'
+    | 'getCursor'
+  >,
+): Envelope {
+  const configuredToolsets = opts.getConfiguredToolsets?.();
+  return createEnvelope('conn.hello', {
+    protocolVersions: [PROTOCOL_VERSION],
+    capabilities: opts.capabilities,
+    deviceId: opts.deviceId,
+    productId: opts.productId,
+    clientVersion: opts.clientVersion,
+    runtimes: opts.runtimes,
+    configuredToolsets: configuredToolsets === undefined ? undefined : [...configuredToolsets],
+    cursor: opts.getCursor?.(),
+  });
+}
+
+/**
  * The daemon's outbound-only WS connection: opens, sends `conn.hello`, waits
  * for `conn.ack`, and reconnects with capped exponential backoff + jitter on
  * drop.
@@ -216,17 +247,7 @@ export class WsTransport {
     this.startLivenessCheck(socket);
 
     socket.on('open', () => {
-      const configuredToolsets = this.opts.getConfiguredToolsets?.();
-      const hello = createEnvelope('conn.hello', {
-        protocolVersions: [PROTOCOL_VERSION],
-        capabilities: this.opts.capabilities,
-        deviceId: this.opts.deviceId,
-        productId: this.opts.productId,
-        clientVersion: this.opts.clientVersion,
-        runtimes: this.opts.runtimes,
-        configuredToolsets: configuredToolsets === undefined ? undefined : [...configuredToolsets],
-        cursor: this.opts.getCursor?.(),
-      });
+      const hello = createConnectionHelloEnvelope(this.opts);
       socket.send(encodeEnvelope(hello));
     });
 

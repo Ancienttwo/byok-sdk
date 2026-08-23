@@ -20,10 +20,13 @@
   lease/session evidence. Every other Agent file is opaque; `artifacts` is not
   a required directory or content schema.
 - Resume checks exact AgentRef/profileRevision/session/runtime/cwd before the
-  downstream projection hook runs. Terminal evidence is fsynced before the
-  corresponding Agent terminal envelope becomes externally visible. Claimed
-  failures before active-session registration use a separate task-addressed
-  JSONL receipt and still echo the exact AgentRef.
+  downstream projection hook runs. Terminal evidence is normally fsynced
+  before the corresponding Agent terminal envelope becomes externally
+  visible. After three bounded failures the daemon emits an explicit host
+  audit signal, still publishes the exact AgentRef terminal, retries during
+  cleanup, and releases the lease so neither cloud state nor the Agent home is
+  stranded. Claimed failures before active-session registration use a
+  separate task-addressed JSONL receipt and the same bounded-degradation rule.
 - One canonical home has one writer. Restart reclaims a crash marker only for
   the exact stable daemon store/product owner and canonical Agent identity;
   another owner or corrupt marker fails closed.
@@ -41,6 +44,23 @@
   start/handoff failures omitted AgentRef and local terminal evidence. The
   layout now materializes the exact lexical Agent segment before realpath, and
   both failure boundaries fsync task-addressed evidence before `task.fail`.
+- The first external Claude acceptance review found three P1 gaps in the
+  frozen candidate: long-poll never projected `agent-home-contract`, the
+  in-process lease claim started after an async preflight, and permanent local
+  terminal-evidence failure could leave a claimed/running cloud task and lease
+  indefinitely active. The remediation uses one shared WS/long-poll hello
+  constructor and authenticated HTTP admission, synchronously reserves the
+  canonical home before the first await, and applies bounded observable
+  terminal-evidence degradation. No legacy workspace fallback was added.
+- The later RAFT local/cloud projection probe corrected a topology
+  overgeneralization: recovered RAFT is cloud-orchestrated/local-executed, but
+  ordinary activity is contentful and immediately projected rather than a
+  uniform durable-local/redact/upload pipeline. The current Agent-home slice
+  therefore claims only local home/session authority. The generic typed egress,
+  reliable-vs-latest delivery, quota, sanitizer, and explicit content-read
+  contract is recorded in
+  `docs/researches/agent-local-cloud-projection-contract.md` as a separate
+  unimplemented work-package, not as behavior delivered by this contract.
 
 ## Tradeoffs Considered
 
@@ -62,25 +82,34 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
-- Targeted Agent suites: 29 Agent-contract tests passed across
-  protocol/server/cloud/cloud-dataplane/client; the client suite has 15 tests
-  including three real adapter cwd receipts.
+- Targeted remediation suites passed: protocol 3, server 5, hosted cloud 6,
+  client 31, and disposable-Postgres Agent readback 1. The client selection
+  includes real reference-server and hosted-cloud long-poll Agent dispatch,
+  same-process lease overlap, terminal-evidence outage, and adapter cwd paths.
 - Postgres runtime oracle:
   `packages/cloud-dataplane/src/__tests__/agent-home-contract.test.ts` passed
   against the disposable migrated compose substrate. It writes durable device
   capabilities plus task AgentRef/owner/terminal cause, then reads the exact
   rows through a fresh pool/store composition and rejects cross-tenant reads.
-- Full required dataplane mode with `BYOK_REQUIRE_DATAPLANE=1`: 24 files and
-  289 tests passed; 5 explicitly non-applicable tests skipped. This is runtime
-  Postgres/MinIO evidence, separate from migration/static SQL checks.
+- Exact required dataplane command first refused to run because the shell had
+  no substrate URLs. After the repository disposable Postgres/MinIO compose
+  became healthy, the same command with both fixed test endpoints passed its
+  Agent-home runtime readback (1 file / 1 test); the disposable containers and
+  network were then removed. This is runtime evidence, separate from
+  migration/static SQL checks.
 - The first acceptance preparation found the harness treats `deploy` as a
   subject-wide irreversible-risk category. The declared runtime oracle was
   widened from two implementation directories to the normalized final subject;
   its executable command remains the mandatory disposable-Postgres readback,
   not a documentation or static-SQL assertion.
-- Full `bun run test`: client 1339, cloud 192, cloud-dataplane 74 (83 live
-  tests skipped), conformance 141, core 251, protocol 293, server 247, and all
-  remaining package suites passed.
+- The first full-suite remediation run found three stale behavior assertions:
+  two shutdown-drain counts and one chunking count assumed long-poll queued no
+  opening hello. The tests now wait for the hello when isolating one stalled
+  terminal, and count task ids separately while proving the hello shares the
+  capped outbox. Their focused rerun passed 2 files / 4 tests.
+- Fresh full `bun run test`: client 1344, cloud 192, cloud-dataplane 74 (84
+  substrate-dependent tests skipped in ordinary mode), conformance 141, core
+  251, protocol 293, server 248, and all remaining package suites passed.
 - `bun run build`, `bun run typecheck`, `git diff --check`, strict workflow,
   and strict contract verification passed; contract verification reported
   `total=19 failed=0 status=Fulfilled`.

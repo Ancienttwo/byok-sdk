@@ -71,16 +71,22 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
     // cares about the HTTP-level batching/delivery behavior.
     const postedBatchSizes: number[] = [];
     const post400s: number[] = [];
-    const acceptedIds = new Set<string>();
+    const acceptedTaskIds = new Set<string>();
+    let acceptedHelloCount = 0;
     originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
       const res = await originalFetch(input, init);
       if (url.includes('/byok/messages') && typeof init?.body === 'string') {
-        const body = JSON.parse(init.body) as { messages: Array<{ id: string }> };
+        const body = JSON.parse(init.body) as { messages: Array<{ id: string; type: string }> };
         postedBatchSizes.push(body.messages.length);
         if (res.status === 400) post400s.push(body.messages.length);
-        else if (res.ok) for (const m of body.messages) acceptedIds.add(m.id);
+        else if (res.ok) {
+          for (const message of body.messages) {
+            if (message.type === 'conn.hello') acceptedHelloCount += 1;
+            else acceptedTaskIds.add(message.id);
+          }
+        }
       }
       return res;
     }) as typeof globalThis.fetch;
@@ -113,7 +119,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
 
     await vi.waitFor(
       () => {
-        expect(acceptedIds.size).toBe(totalEnvelopes);
+        expect(acceptedTaskIds.size).toBe(totalEnvelopes);
       },
       { timeout: 5000 },
     );
@@ -123,6 +129,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
     expect(post400s).toEqual([]); // the server never rejected a batch as oversized
     expect(postedBatchSizes.every((n) => n <= MAX_MESSAGES_PER_BATCH)).toBe(true); // every POST honored the cap
     expect(postedBatchSizes.length).toBeGreaterThanOrEqual(2); // an over-cap queue required more than one POST
-    expect(acceptedIds).toEqual(sentIds); // every single envelope was actually delivered, none dropped
+    expect(acceptedHelloCount).toBeGreaterThanOrEqual(1); // long-poll admission snapshot shares the same capped outbox
+    expect(acceptedTaskIds).toEqual(sentIds); // every single task envelope was actually delivered, none dropped
   }, 15000);
 });

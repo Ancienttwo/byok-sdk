@@ -277,16 +277,10 @@ export function buildHonoApp(deps: HttpDeps): Hono {
   // -------------------------------------------------------------------
   // Long-poll fallback (§8)
   //
-  // No protocol-version negotiation here, deliberately — this transport has
-  // no `conn.hello` equivalent and is not getting one. A WS connection is a
-  // session, so it announces its versions once and the server closes it up
-  // front on skew; a long-poll request is standalone, and every envelope it
-  // carries (below, on `POST /byok/messages`) already passes `EnvelopeSchema`
-  // plus `hub.handleInbound`'s gate, so skew surfaces per envelope, at the
-  // exact point it would actually break something. An announcement header
-  // here would add a field whose only purpose is to be validated: it could
-  // not gate anything the per-envelope path does not already gate, and a
-  // device lying in it would still be caught envelope by envelope.
+  // Long-poll publishes the same typed `conn.hello` snapshot as WS through
+  // the authenticated `POST /byok/messages` path. That is the admission
+  // authority for connection-scoped features such as Agent homes; task-level
+  // runtime capabilities remain authoritative on each claim.
   //
   // The product boundary is NOT part of that waiver: it is enforced, one
   // level up, inside `authenticateBearer` (`auth.ts`) — a token whose device
@@ -353,7 +347,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     let accepted = 0;
     let rejected = 0;
     for (const envelope of parsed.data.messages) {
-      const result = deps.hub.handleInbound(principal.deviceId, envelope);
+      const result = deps.hub.handleInbound(principal.deviceId, envelope, principal.productId);
       if (result === 'rate_limited') {
         return c.json({ error: 'rate limit exceeded' }, 429);
       }

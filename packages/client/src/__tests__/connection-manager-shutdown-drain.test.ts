@@ -67,6 +67,12 @@ describe('ConnectionManager.stop(drainTimeoutMs) — bounded outbox drain before
     await connection.start();
     await connection.waitForAck();
     expect(connection.isTransportDegraded()).toBe(true);
+    // `waitForAck()` reflects the server capability snapshot carried by the
+    // poll response. Long-poll's own authenticated `conn.hello` is an
+    // independent outbound envelope, so freeze this test only after that
+    // opening snapshot has drained; the assertions below remain about the
+    // one shutdown terminal the test deliberately stalls.
+    await vi.waitFor(() => expect(connection!.outboxLength()).toBe(0));
     return { deviceId: record.deviceId };
   }
 

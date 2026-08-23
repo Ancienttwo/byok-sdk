@@ -17,7 +17,11 @@ import { AgentSessionHandoffStore, AgentSessionHandoffMismatchError } from '../d
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
-import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import {
+  AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS,
+  TaskRunner,
+  type TaskRunnerDeps,
+} from '../daemon/task-runner';
 import { sealRuntimeOperationManifest } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -41,6 +45,7 @@ async function makeRoot(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  vi.restoreAllMocks();
 });
 
 function ref(agentId: string, profileRevision = 'profile-1') {
@@ -124,14 +129,23 @@ describe('SDK-owned Agent home contract', () => {
     await expect(fs.stat(path.join(home, 'artifacts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('enforces same-Agent single writer while different Agents remain independent', async () => {
+  it('atomically pre-claims concurrent same-Agent writers while different Agents remain independent', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });
-    const one = await manager.prepare(ref('one'));
-    await expect(manager.prepare(ref('one', 'profile-2'))).rejects.toBeInstanceOf(AgentHomeBusyError);
+    const resolution = await manager.layout.resolve(ref('one'));
+    const overlap = await Promise.allSettled([
+      manager.leaseManager.acquire(resolution),
+      manager.leaseManager.acquire({ ...resolution, agentRef: ref('one', 'profile-2') }),
+    ]);
+    const acquired = overlap.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<AgentHomeLeaseManager['acquire']>>> =>
+      result.status === 'fulfilled');
+    const declined = overlap.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(acquired).toHaveLength(1);
+    expect(declined).toHaveLength(1);
+    expect(declined[0]!.reason).toBeInstanceOf(AgentHomeBusyError);
     const two = await manager.prepare(ref('two'));
     await two.lease.release();
-    await one.lease.release();
+    await Promise.all([acquired[0]!.value.release(), acquired[0]!.value.release()]);
     const retry = await manager.prepare(ref('one', 'profile-2'));
     await retry.lease.release();
   });
@@ -236,8 +250,11 @@ describe('SDK-owned Agent home contract', () => {
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const handoffs = new AgentSessionHandoffStore();
     const recordTerminal = handoffs.recordTerminal.bind(handoffs);
+    let terminalAttempts = 0;
     const terminalEvidence = vi.spyOn(handoffs, 'recordTerminal').mockImplementation(async (...args) => {
       expect(sent.some((entry) => entry.type === 'task.complete')).toBe(false);
+      terminalAttempts += 1;
+      if (terminalAttempts < AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS) throw new Error('transient evidence outage');
       return recordTerminal(...args);
     });
     const blobClient: BlobResolver = {
@@ -272,7 +289,7 @@ describe('SDK-owned Agent home contract', () => {
 
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
-    expect(terminalEvidence).toHaveBeenCalledTimes(1);
+    expect(terminalEvidence).toHaveBeenCalledTimes(AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS);
     await expect(handoffs.get({
       agentRef,
       sessionRef: adapter.sessions[0]!.sessionRef,
@@ -385,6 +402,96 @@ describe('SDK-owned Agent home contract', () => {
       terminalCause: 'failed',
       terminalReason: expect.stringContaining('disk unavailable'),
       });
+  });
+
+  it('publishes a claimed failure after bounded permanent evidence failure and releases the Agent lease', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const hostStorageRoot = await makeRoot();
+    const storeDir = await makeRoot();
+    const adapter = new StubRuntimeAdapter('pi');
+    adapter.startError = new Error('spawn failed permanently');
+    const sent: Envelope[] = [];
+    const handoffs = new AgentSessionHandoffStore();
+    const terminalEvidence = vi.spyOn(handoffs, 'recordTaskTerminal').mockRejectedValue(new Error('disk offline'));
+    const evidenceFailures: NonNullable<TaskRunnerDeps['onAgentTerminalEvidenceFailure']> extends (event: infer T) => void ? T[] : never = [];
+    const agentHome = new AgentHomeManager({ hostStorageRoot });
+    const agentRef = ref('agent-permanent-prestart-failure', 'profile-1');
+    const runner = new TaskRunner({
+      adapters: [adapter],
+      workspaceRoot: await makeRoot(),
+      agentHome,
+      agentSessionHandoffs: handoffs,
+      deviceId: 'device-1',
+      send: (envelope) => sent.push(envelope),
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'product-1',
+      onAgentTerminalEvidenceFailure: (event) => evidenceFailures.push(event),
+    });
+
+    await runner.handleEnvelope(createEnvelope(
+      'task.offer_for_agent',
+      { instruction: 'fail safely', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { taskId: 'task-permanent-prestart-failure', seq: 1 },
+    ));
+
+    expect(terminalEvidence).toHaveBeenCalledTimes(AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS);
+    expect(sent.map((entry) => entry.type)).toEqual(['task.claim', 'task.fail']);
+    expect(evidenceFailures).toHaveLength(1);
+    expect(evidenceFailures[0]).toMatchObject({ agentRef, cause: 'failed', attempts: AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS });
+    const reacquired = await agentHome.prepare(agentRef);
+    await reacquired.lease.release();
+  });
+
+  it('does not strand a running Agent or its lease when terminal evidence remains unavailable', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const hostStorageRoot = await makeRoot();
+    const storeDir = await makeRoot();
+    const adapter = new StubRuntimeAdapter('pi');
+    const sent: Envelope[] = [];
+    const handoffs = new AgentSessionHandoffStore();
+    const terminalEvidence = vi.spyOn(handoffs, 'recordTerminal').mockRejectedValue(new Error('disk offline'));
+    const evidenceFailures: NonNullable<TaskRunnerDeps['onAgentTerminalEvidenceFailure']> extends (event: infer T) => void ? T[] : never = [];
+    const agentHome = new AgentHomeManager({ hostStorageRoot });
+    const agentRef = ref('agent-permanent-active-failure', 'profile-1');
+    const runner = new TaskRunner({
+      adapters: [adapter],
+      workspaceRoot: await makeRoot(),
+      agentHome,
+      agentSessionHandoffs: handoffs,
+      deviceId: 'device-1',
+      send: (envelope) => sent.push(envelope),
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'product-1',
+      onAgentTerminalEvidenceFailure: (event) => evidenceFailures.push(event),
+    });
+
+    await runner.handleEnvelope(createEnvelope(
+      'task.offer_for_agent',
+      { instruction: 'complete despite evidence outage', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { taskId: 'task-permanent-active-failure', seq: 1 },
+    ));
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+
+    expect(sent.some((entry) => entry.type === 'task.complete')).toBe(true);
+    expect(terminalEvidence).toHaveBeenCalledTimes(AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS * 2);
+    expect(evidenceFailures).toHaveLength(1);
+    expect(evidenceFailures[0]).toMatchObject({ agentRef, cause: 'complete' });
+    const reacquired = await agentHome.prepare(agentRef);
+    await reacquired.lease.release();
   });
 
   it('declines profile-revision and cross-Agent resume before projection or adapter start', async () => {
