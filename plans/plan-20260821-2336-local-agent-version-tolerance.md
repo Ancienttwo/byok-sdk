@@ -1,6 +1,6 @@
 # Plan: Local Agent Version Tolerance Closure
 
-> **Status**: Executing
+> **Status**: Review
 > **Created**: 20260821-2336
 > **Slug**: local-agent-version-tolerance
 > **Planning Source**: codex-plan

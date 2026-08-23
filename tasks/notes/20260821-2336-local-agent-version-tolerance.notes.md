@@ -1,10 +1,10 @@
 # Implementation Notes: local-agent-version-tolerance
 
-> **Status**: Active
+> **Status**: Ready for Review
 > **Plan**: plans/plan-20260821-2336-local-agent-version-tolerance.md
 > **Contract**: tasks/contracts/20260821-2336-local-agent-version-tolerance.contract.md
 > **Review**: tasks/reviews/20260821-2336-local-agent-version-tolerance.review.md
-> **Last Updated**: 2026-08-21 23:40
+> **Last Updated**: 2026-08-23 19:04
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -45,13 +45,17 @@
 - Focused server integration: 18/18 passed, including the older-release full
   task completion and legacy-unknown cases.
 - Package gates: server typecheck and build passed.
-- Repository gates: full build, root typecheck, architecture sync, task sync,
-  and strict workflow passed.
+- Repository gates on rebased current `main`: full build, root typecheck, full
+  test suite, architecture sync, task sync, and strict workflow passed. The
+  initial full test attempt used stale worktree dependencies; after
+  `bun install --force --frozen-lockfile`, all five focused failures passed
+  43/43 and the full client suite passed 1375/1375.
 - Installed repo-harness contract verification:
   `.ai/harness/runs/20260821-2336-local-agent-version-tolerance-contract.json`
   reports 12/12 pass and records the package-owned command
   `bun run --cwd packages/server test -- src/__tests__/integration.test.ts`.
-- No push, PR, merge, publish, deploy, or production mutation was performed.
+- No push, merge, publish, deploy, or production mutation had been performed
+  when this verification evidence was frozen.
 
 ## Promotion Filter
 

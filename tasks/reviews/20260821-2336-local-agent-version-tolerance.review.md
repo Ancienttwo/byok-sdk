@@ -5,7 +5,7 @@
 > **Contract**: tasks/contracts/20260821-2336-local-agent-version-tolerance.contract.md
 > **Notes File**: tasks/notes/20260821-2336-local-agent-version-tolerance.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-21 23:40
+> **Last Updated**: 2026-08-23 19:04
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
@@ -14,13 +14,14 @@
 
 ## Human Review Card
 
-- Verdict: pass for the local implementation diff; typed AcceptanceReceipt is unavailable.
+- Verdict: pass for the rebased current-main implementation diff; explicit
+  user authorization covers integration and the subsequent 0.6.1 release.
 - Change type: code-change
 - Intended files changed: self-hosted MachineInfo projection, WS/hub forwarding, fixtures, integration tests, spec, and workflow evidence.
 - Actual files changed: matches the contract allowlist.
-- Commands passed: server integration 18/18; server typecheck/build; full workspace build; root typecheck; architecture/task/workflow gates; strict read-only contract 12/12.
+- Commands passed: server integration 18/18; server typecheck/build; full workspace build; root typecheck; full test suite including client 1375/1375; architecture/task/workflow gates; strict contract 12/12.
 - Residual risks: the branch is local and unmerged; published `v0.6.0` does not contain this self-hosted readback closure.
-- Reviewer action required: obtain the configured external acceptance or explicit waiver before merge.
+- Reviewer action required: record and verify the typed user-waiver AcceptanceReceipt before merge.
 - Rollback: revert the additive field, forwarding, tests, and spec text together.
 
 ## Mode Evidence
@@ -34,7 +35,7 @@
 - Waza `/check` run: not invoked; no explicit Claude review request was made.
 - Commands run: see Human Review Card and implementation notes.
 - Manual checks: diff contains no Latest lookup, SemVer comparison, protocol change, fallback, or inferred identity.
-- Supporting artifacts: `.ai/harness/runs/20260821-2336-local-agent-version-tolerance-contract.json`.
+- Supporting artifacts: `.ai/harness/runs/run-20260823T190319-38409-20260821-2336-local-agent-version-tolerance.json`.
 - Implementation notes reviewed: yes.
 - Run snapshot: strict read-only contract verification 12/12 pass.
 
@@ -69,7 +70,8 @@ screenshot/artifact path, or reviewer observation.
 
 ## Residual Risks / Follow-ups
 
-- AcceptanceReceipt and branch integration remain separate gates.
+- Branch integration and registry publication remain separate gates after the
+  subject-bound AcceptanceReceipt.
 - The published 0.6.0 artifacts predate this local additive server readback.
 
 ## Scorecard
@@ -84,7 +86,7 @@ screenshot/artifact path, or reviewer observation.
 ## Failing Items
 
 - No implementation finding.
-- Closeout-only: no typed AcceptanceReceipt and no upstream integration.
+- Closeout-only: record the typed AcceptanceReceipt and integrate upstream.
 
 ## Retest Steps
 
@@ -93,5 +95,6 @@ screenshot/artifact path, or reviewer observation.
 
 ## Summary
 
-- Local implementation is complete and verified. It is ready for external
-  acceptance/integration, but no merge or release claim is made.
+- The rebased implementation is complete and verified. It is ready for the
+  authorized typed user-waiver receipt and upstream integration; no merge or
+  release claim is made by this review alone.

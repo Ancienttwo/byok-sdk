@@ -1,12 +1,12 @@
 # Task Contract: local-agent-version-tolerance
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260821-2336-local-agent-version-tolerance.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-21 23:36
+> **Last Updated**: 2026-08-23 19:04
 > **Review File**: `tasks/reviews/20260821-2336-local-agent-version-tolerance.review.md`
 > **Notes File**: `tasks/notes/20260821-2336-local-agent-version-tolerance.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
