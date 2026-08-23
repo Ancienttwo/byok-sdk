@@ -167,7 +167,7 @@ export async function handleInboundEnvelope(
 
   if (await stores.dedup.checkAndRecord(deviceId, envelope.id)) return 'duplicate';
 
-  await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds);
+  await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
   return 'accepted';
 }
 
@@ -184,16 +184,25 @@ async function applyLifecycle(
   taskId: string,
   envelope: Envelope,
   activityBounds: ActivityBounds,
+  persistedAgentRef: AgentRef | undefined,
 ): Promise<void> {
   switch (envelope.type) {
     case 'task.claim':
       await stores.tasks.claim({ taskId, deviceId });
       return;
     case 'task.started':
-      await stores.tasks.recordStatus({ taskId, status: 'running' });
+      await stores.tasks.recordStatus({
+        taskId,
+        status: 'running',
+        ...(persistedAgentRef === undefined ? {} : { agentRef: persistedAgentRef }),
+      });
       return;
     case 'task.decline':
-      await stores.tasks.recordStatus({ taskId, status: 'failed' });
+      await stores.tasks.recordStatus({
+        taskId,
+        status: 'failed',
+        ...(persistedAgentRef === undefined ? {} : { agentRef: persistedAgentRef }),
+      });
       return;
     case 'task.progress':
       if (envelope.payload.events.length > 0) {
@@ -291,7 +300,11 @@ async function recordTerminal(
   });
   if (attempt?.cancellation !== undefined) {
     if (status === 'cancelled') {
-      await stores.tasks.recordStatus({ taskId, status: 'cancelled' });
+      await stores.tasks.recordStatus({
+        taskId,
+        status: 'cancelled',
+        ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+      });
     }
     return;
   }

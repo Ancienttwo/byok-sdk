@@ -160,6 +160,14 @@
   hosted-cloud Agent suites passed (4 files / 39 tests), sequential monorepo
   typecheck passed, and the disposable-Postgres Agent oracle passed with the
   new illegal-character plus omitted-AgentRef assertions.
+- The first full test after the exact-presence gate exposed one real hosted
+  integration regression: `task.started` carried no AgentRef by protocol and
+  the cloud lifecycle writer omitted the attempt's already-validated durable
+  AgentRef, leaving the attempt `claimed`. `handleInboundEnvelope` now passes
+  that persisted authority into started/decline/cancellation status writes;
+  the direct store API still rejects omitted identity. The real-cloud
+  long-poll Agent lifecycle, cloud cancellation/Agent suites, and monorepo
+  typecheck passed after the fix.
 
 ## Promotion Filter
 
