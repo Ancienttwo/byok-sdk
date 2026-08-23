@@ -111,6 +111,7 @@ export const CAPABILITY_FLAGS = [
   'result-document',
   'dispatch-selection',
   'toolset-selection',
+  'agent-home-contract',
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

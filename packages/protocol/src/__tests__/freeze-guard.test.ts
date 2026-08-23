@@ -161,6 +161,7 @@ type CodecRequirednessMatrix = {
     taskId: FieldRequiredness<'task.offer_with_toolsets', 'taskId'>;
     seq: FieldRequiredness<'task.offer_with_toolsets', 'seq'>;
   };
+  'task.offer_for_agent': { taskId: FieldRequiredness<'task.offer_for_agent', 'taskId'>; seq: FieldRequiredness<'task.offer_for_agent', 'seq'> };
   'task.approve': { taskId: FieldRequiredness<'task.approve', 'taskId'>; seq: FieldRequiredness<'task.approve', 'seq'> };
   'task.reject': { taskId: FieldRequiredness<'task.reject', 'taskId'>; seq: FieldRequiredness<'task.reject', 'seq'> };
   'task.cancel': { taskId: FieldRequiredness<'task.cancel', 'taskId'>; seq: FieldRequiredness<'task.cancel', 'seq'> };
@@ -445,6 +446,8 @@ function minimalPayloadForProbe(type: MessageType): unknown {
       return { instruction: 'do it', policy: { mode: 'auto' } };
     case 'task.offer_with_toolsets':
       return { instruction: 'find leads', policy: { mode: 'auto' }, requiredToolsets: ['salesko'] };
+    case 'task.offer_for_agent':
+      return { instruction: 'run for agent', policy: { mode: 'auto' }, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
     case 'task.approve':
       return {};
     case 'task.reject':

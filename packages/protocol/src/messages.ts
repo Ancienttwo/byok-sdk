@@ -88,6 +88,29 @@ export const ToolsetIdSchema = z
   .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u, 'toolset ids must be lowercase logical identifiers');
 export type ToolsetId = z.infer<typeof ToolsetIdSchema>;
 
+/** Stable, host-owned Agent identity carried across transport and storage. */
+export const AGENT_REF_MAX_LENGTH = 160;
+const AGENT_REF_VALUE = z
+  .string()
+  .min(1)
+  .max(AGENT_REF_MAX_LENGTH)
+  .regex(/^[^\u0000-\u001f\u007f\r\n]+$/u, 'AgentRef values must not contain control characters');
+
+/**
+ * Agent ids are opaque to the SDK but must remain one safe pathname segment;
+ * the host owns the eventual Agent-home mapping.
+ */
+export const AgentRefSchema = z
+  .object({
+    agentId: AGENT_REF_VALUE.regex(/^[^\\/:]+$/u, 'agentId must be one pathname segment').refine(
+      (value) => value !== '.' && value !== '..',
+      'agentId must not be a dot segment',
+    ),
+    profileRevision: AGENT_REF_VALUE,
+  })
+  .strict();
+export type AgentRef = z.infer<typeof AgentRefSchema>;
+
 function rejectDuplicateToolsets(
   ids: readonly string[],
   ctx: z.RefinementCtx,
@@ -246,6 +269,30 @@ export const TaskOfferWithToolsetsPayloadSchema = TaskOfferPayloadSchema.extend(
 export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsPayloadSchema>;
 
 /**
+ * Strict additive offer for a durable host-owned Agent. An older daemon that
+ * does not advertise `agent-home-contract` skips this distinct message type
+ * instead of stripping identity and applying legacy workspace semantics.
+ */
+export const TaskOfferForAgentPayloadSchema = z
+  .object({
+    instruction: z.union([z.string(), InstructionBlobRefSchema]),
+    policy: PermissionPolicySchema,
+    agentRef: AgentRefSchema,
+    requiredToolsets: RequiredToolsetsSchema.optional(),
+    runtime: RuntimeIdSchema.optional(),
+    dispatchSelection: DispatchSelectionSchema.optional(),
+    sessionRef: z.string().optional(),
+    limits: z
+      .object({
+        maxDurationMs: z.number().int().positive().optional(),
+        maxTokens: z.number().int().positive().optional(),
+      })
+      .optional(),
+  })
+  .strict();
+export type TaskOfferForAgentPayload = z.infer<typeof TaskOfferForAgentPayloadSchema>;
+
+/**
  * server -> daemon: approve a pending `task.await_approval` request.
  *
  * Semantics (M1 gap #3): the server's own state is authoritative on its own
@@ -361,6 +408,7 @@ export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
 export const TaskClaimPayloadSchema = z.object({
   deviceId: z.string(),
   agentId: z.string().optional(),
+  agentRef: AgentRefSchema.optional(),
   runtime: RuntimeIdSchema.optional(),
   capabilities: RuntimeCapabilitiesSchema.optional(),
 });
@@ -393,6 +441,7 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
 export const TaskDeclinePayloadSchema = z.object({
   reason: z.string(),
   retryable: z.boolean().optional(),
+  agentRef: AgentRefSchema.optional(),
 });
 export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
 
@@ -724,6 +773,7 @@ export const TaskCompletePayloadSchema = z.object({
       message: `task.complete.document must be plain JSON data (equal to its own JSON round trip) and at most ${RESULT_DOCUMENT_MAX_BYTES} bytes as canonical JSON (UTF-8)`,
     }),
   usage: TerminalInferenceUsageSchema.optional(),
+  agentRef: AgentRefSchema.optional(),
 });
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
@@ -732,6 +782,7 @@ export const TaskFailPayloadSchema = z.object({
   reason: z.string(),
   retryable: z.boolean().optional(),
   usage: TerminalInferenceUsageSchema.optional(),
+  agentRef: AgentRefSchema.optional(),
 });
 export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
 
@@ -757,6 +808,7 @@ export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
 export const TaskCancelledPayloadSchema = z.object({
   reason: z.string().optional(),
   usage: TerminalInferenceUsageSchema.optional(),
+  agentRef: AgentRefSchema.optional(),
 });
 export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
 
@@ -813,6 +865,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'conn.ack': ConnAckPayloadSchema,
   'task.offer': TaskOfferPayloadSchema,
   'task.offer_with_toolsets': TaskOfferWithToolsetsPayloadSchema,
+  'task.offer_for_agent': TaskOfferForAgentPayloadSchema,
   'task.approve': TaskApprovePayloadSchema,
   'task.reject': TaskRejectPayloadSchema,
   'task.cancel': TaskCancelPayloadSchema,
@@ -842,6 +895,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'conn.ack',
   'task.offer',
   'task.offer_with_toolsets',
+  'task.offer_for_agent',
   'task.approve',
   'task.reject',
   'task.cancel',

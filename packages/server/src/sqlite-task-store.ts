@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   policy_json         TEXT NOT NULL,
   device_id           TEXT,
   session_ref         TEXT,
+  agent_ref_json      TEXT,
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL,
   result_json         TEXT,
@@ -68,6 +69,7 @@ const ADDITIVE_COLUMNS: ReadonlyArray<{ name: string; ddl: string }> = [
     name: 'claimed_runtime_capabilities_json',
     ddl: 'ALTER TABLE tasks ADD COLUMN claimed_runtime_capabilities_json TEXT',
   },
+  { name: 'agent_ref_json', ddl: 'ALTER TABLE tasks ADD COLUMN agent_ref_json TEXT' },
 ];
 
 function currentTaskColumns(db: DatabaseSync): Set<string> {
@@ -120,6 +122,7 @@ function rowToRecord(row: Record<string, unknown>): TaskRecord {
   const resultJson = row.result_json as string | null;
   const requiredToolsetsJson = row.required_toolsets_json as string | null;
   const claimedRuntimeCapabilitiesJson = row.claimed_runtime_capabilities_json as string | null;
+  const agentRefJson = row.agent_ref_json as string | null;
   return {
     taskId: row.task_id as string,
     state: row.state as TaskState,
@@ -131,6 +134,7 @@ function rowToRecord(row: Record<string, unknown>): TaskRecord {
     policy: JSON.parse(row.policy_json as string) as TaskRecord['policy'],
     deviceId: (row.device_id as string | null) ?? undefined,
     sessionRef: (row.session_ref as string | null) ?? undefined,
+    agentRef: agentRefJson ? (JSON.parse(agentRefJson) as TaskRecord['agentRef']) : undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
     result: resultJson ? (JSON.parse(resultJson) as TaskResult) : undefined,
@@ -200,8 +204,8 @@ export class SqliteTaskStore implements TaskStore {
       secureSqliteFilePermissions(opts.path);
       this.insertStmt = this.db.prepare(
         `INSERT INTO tasks
-           (task_id, state, instruction, runtime, required_toolsets_json, policy_json, device_id, session_ref, created_at, updated_at, result_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (task_id, state, instruction, runtime, required_toolsets_json, policy_json, device_id, session_ref, agent_ref_json, created_at, updated_at, result_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       // A separate UPDATE-in-place (rather than reusing `INSERT OR REPLACE`,
       // which is a delete+insert under the hood) so a transitioned task keeps
@@ -217,7 +221,7 @@ export class SqliteTaskStore implements TaskStore {
       this.updateStmt = this.db.prepare(
         `UPDATE tasks SET
            state = ?, instruction = ?, runtime = ?, required_toolsets_json = ?, policy_json = ?, device_id = ?,
-           session_ref = ?, created_at = ?, updated_at = ?, result_json = ?, pending_approval_id = ?,
+           session_ref = ?, agent_ref_json = ?, created_at = ?, updated_at = ?, result_json = ?, pending_approval_id = ?,
            claimed_runtime = ?, claimed_runtime_capabilities_json = ?
          WHERE task_id = ? AND state = ?`,
       );
@@ -260,6 +264,7 @@ export class SqliteTaskStore implements TaskStore {
       policy: input.policy,
       deviceId: input.deviceId,
       sessionRef: input.sessionRef,
+      agentRef: input.agentRef,
       createdAt: now,
       updatedAt: now,
     };
@@ -272,6 +277,7 @@ export class SqliteTaskStore implements TaskStore {
       JSON.stringify(record.policy),
       record.deviceId ?? null,
       record.sessionRef ?? null,
+      record.agentRef ? JSON.stringify(record.agentRef) : null,
       record.createdAt,
       record.updatedAt,
       record.result ? JSON.stringify(record.result) : null,
@@ -338,6 +344,7 @@ export class SqliteTaskStore implements TaskStore {
         JSON.stringify(updated.policy),
         updated.deviceId ?? null,
         updated.sessionRef ?? null,
+        updated.agentRef ? JSON.stringify(updated.agentRef) : null,
         updated.createdAt,
         updated.updatedAt,
         updated.result ? JSON.stringify(updated.result) : null,

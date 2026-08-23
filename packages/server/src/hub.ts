@@ -3,6 +3,7 @@ import {
   canTransition,
   createEnvelope,
   DAEMON_TO_SERVER_TYPES,
+  AgentRefSchema,
   DispatchSelectionSchema,
   RequiredToolsetsSchema,
   encodeEnvelope,
@@ -10,6 +11,7 @@ import {
   TASK_STATES,
   type CreateEnvelopeOptions,
   type Envelope,
+  type AgentRef,
   type MessageType,
   type PermissionPolicy,
   type RuntimeId,
@@ -74,6 +76,10 @@ function isTerminal(state: TaskState): state is Extract<TaskState, 'Complete' | 
 /** Claimed/Running/AwaitApproval — the task-lease reaper's reapable set. `Offered` is excluded: it has no owning device yet, so there's nothing to be "dark". */
 function isClaimedState(state: TaskState): state is Extract<TaskState, 'Claimed' | 'Running' | 'AwaitApproval'> {
   return state === 'Claimed' || state === 'Running' || state === 'AwaitApproval';
+}
+
+function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean {
+  return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
 }
 
 /** A device's live transport (WS or long-poll — never both, §8) plus last-known metadata. */
@@ -895,6 +901,10 @@ export class ConnectionHub {
   private onClaim(deviceId: string, taskId: string, payload: TaskClaimPayload): void {
     const record = this.taskStore.get(taskId);
     if (!record) return;
+    if (record.agentRef && !sameAgentRef(record.agentRef, payload.agentRef)) {
+      this.forceFailOrDrop(taskId, 'task.claim AgentRef does not exactly match the offered AgentRef');
+      return;
+    }
     // Claim is an idempotent CAS: a retried claim from the device that
     // already owns this task (e.g. the daemon didn't see the first claim's
     // effect land before retrying) is a no-op, not an illegal-transition
@@ -932,6 +942,10 @@ export class ConnectionHub {
     const record = this.taskStore.get(taskId);
     if (!record) return;
     if (record.state !== 'Offered') return;
+    if (record.agentRef && !sameAgentRef(record.agentRef, payload.agentRef)) {
+      this.forceFailOrDrop(taskId, 'task.decline AgentRef does not exactly match the offered AgentRef');
+      return;
+    }
     this.applyOrFail(taskId, 'Failed', {
       result: { state: 'Failed', reason: payload.reason, retryable: payload.retryable },
     });
@@ -1018,6 +1032,10 @@ export class ConnectionHub {
     // Terminal messages arriving for an already-terminal task are stale/
     // duplicate (§9) — drop silently, not a warning.
     if (isTerminal(record.state)) return;
+    if (record.agentRef && !sameAgentRef(record.agentRef, payload.agentRef)) {
+      this.forceFailOrDrop(taskId, 'task.complete AgentRef does not exactly match the offered AgentRef');
+      return;
+    }
     // Implicit-resume first (no-op unless still AwaitApproval) so a task
     // completing right after a LOCAL-only approval lands on the normal
     // Running -> Complete edge below, not the illegal AwaitApproval ->
@@ -1049,6 +1067,10 @@ export class ConnectionHub {
     // resolves the M0 gatekeeper's cancel-race finding: a task.fail racing a
     // server-initiated cancel that already landed is now a silent drop.
     if (isTerminal(record.state)) return;
+    if (record.agentRef && !sameAgentRef(record.agentRef, payload.agentRef)) {
+      this.forceFailOrDrop(taskId, 'task.fail AgentRef does not exactly match the offered AgentRef');
+      return;
+    }
     const result: TaskResult = { state: 'Failed', reason: payload.reason, retryable: payload.retryable };
     this.applyOrFail(taskId, 'Failed', { result });
   }
@@ -1068,6 +1090,10 @@ export class ConnectionHub {
     if (!record) return;
     if (record.state === 'Cancelled') return;
     if (isTerminal(record.state)) return; // Complete/Failed already reached — stale (§9), drop silently.
+    if (record.agentRef && !sameAgentRef(record.agentRef, payload.agentRef)) {
+      this.forceFailOrDrop(taskId, 'task.cancelled AgentRef does not exactly match the offered AgentRef');
+      return;
+    }
     this.applyOrFail(taskId, 'Cancelled', { result: { state: 'Cancelled', reason: payload.reason } });
   }
 
@@ -1484,6 +1510,7 @@ export class ConnectionHub {
   // ---------------------------------------------------------------------
 
   async dispatch(input: DispatchInput): Promise<TaskHandle> {
+    const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
     const dispatchSelection =
       input.dispatchSelection === undefined
         ? undefined
@@ -1493,6 +1520,9 @@ export class ConnectionHub {
         ? undefined
         : RequiredToolsetsSchema.parse(input.requiredToolsets);
     const deviceId = input.deviceId ?? this.pickFirstConnectedDevice(requiredToolsets);
+    if (agentRef !== undefined && input.deviceId === undefined) {
+      throw new Error('Agent-bound dispatch requires an explicit deviceId for capability admission');
+    }
     // M0 routing has no queue-until-connect: reject clearly instead of
     // silently queuing a task nothing will ever claim.
     if (!deviceId || !this.connections.get(deviceId)?.connected) {
@@ -1500,6 +1530,12 @@ export class ConnectionHub {
         deviceId
           ? `device ${deviceId} is not connected`
           : 'no connected device to dispatch to (M0 does not queue tasks until a device connects)',
+      );
+    }
+
+    if (agentRef !== undefined && !(this.getDeviceCapabilities(deviceId)?.includes('agent-home-contract') ?? false)) {
+      throw new Error(
+        `device ${deviceId} did not advertise agent-home-contract capability; refusing Agent-bound dispatch`,
       );
     }
 
@@ -1558,6 +1594,7 @@ export class ConnectionHub {
       requiredToolsets,
       deviceId,
       sessionRef: input.sessionRef,
+      agentRef,
     });
 
     const queue = new AsyncEventQueue<ServerTaskEvent>();
@@ -1576,7 +1613,14 @@ export class ConnectionHub {
       dispatchSelection,
       sessionRef: input.sessionRef,
     };
-    if (requiredToolsets === undefined) {
+    if (agentRef !== undefined) {
+      this.sendToDevice(
+        deviceId,
+        'task.offer_for_agent',
+        { ...commonOffer, agentRef, ...(requiredToolsets === undefined ? {} : { requiredToolsets }) },
+        { taskId, sessionRef: input.sessionRef },
+      );
+    } else if (requiredToolsets === undefined) {
       this.sendToDevice(deviceId, 'task.offer', commonOffer, { taskId, sessionRef: input.sessionRef });
     } else {
       this.sendToDevice(

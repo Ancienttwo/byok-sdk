@@ -36,6 +36,8 @@ function minimalPayload(type: MessageType): unknown {
       return { instruction: 'do it', policy: { mode: 'auto' } };
     case 'task.offer_with_toolsets':
       return { instruction: 'find leads', policy: { mode: 'auto' }, requiredToolsets: ['salesko'] };
+    case 'task.offer_for_agent':
+      return { instruction: 'run for agent', policy: { mode: 'auto' }, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
     case 'task.approve':
       return {};
     case 'task.reject':

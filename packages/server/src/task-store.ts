@@ -1,4 +1,4 @@
-import { canTransition, type PermissionPolicy, type RuntimeId, type TaskState, type ToolsetId } from '@byok-sdk/protocol';
+import { canTransition, type AgentRef, type PermissionPolicy, type RuntimeId, type TaskState, type ToolsetId } from '@byok-sdk/protocol';
 import type { TaskSnapshot } from './types';
 
 /** Thrown by a {@link TaskStore}'s `transition` when `from -> to` is not in TASK_TRANSITIONS. Every implementation (in-memory, SQLite, or otherwise) must throw this rather than silently applying an invalid move. */
@@ -21,6 +21,7 @@ export interface CreateTaskInput {
   requiredToolsets?: ToolsetId[];
   deviceId?: string;
   sessionRef?: string;
+  agentRef?: AgentRef;
 }
 
 /** A task's full persisted state, as tracked by any {@link TaskStore} implementation. Same shape as {@link TaskSnapshot} — kept as its own (structurally identical) type so this storage-layer contract can evolve independently of the SDK-facing `TaskSnapshot` if a future need arises. */
@@ -121,6 +122,7 @@ export class InMemoryTaskStore implements TaskStore {
       requiredToolsets: input.requiredToolsets,
       deviceId: input.deviceId,
       sessionRef: input.sessionRef,
+      agentRef: input.agentRef,
       createdAt: now,
       updatedAt: now,
     };

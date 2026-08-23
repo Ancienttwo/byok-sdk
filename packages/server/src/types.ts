@@ -1,5 +1,6 @@
 import type {
   AgentEventOrUnknown,
+  AgentRef,
   BlobRef,
   DispatchSelection,
   PermissionPolicy,
@@ -109,6 +110,8 @@ export interface DispatchInput {
   sessionRef?: string;
   /** Logical device-local MCP toolsets required for this task; never executable definitions. */
   requiredToolsets?: ToolsetId[];
+  /** Explicit durable Agent identity; dispatches through task.offer_for_agent. */
+  agentRef?: AgentRef;
 }
 
 /** Outcome of a task that reached a terminal state. */
@@ -216,6 +219,8 @@ export interface TaskSnapshot {
   requiredToolsets?: ToolsetId[];
   deviceId?: string;
   sessionRef?: string;
+  /** Exact Agent identity for an Agent-bound task; absent for legacy tasks. */
+  agentRef?: AgentRef;
   createdAt: string;
   updatedAt: string;
   result?: TaskResult;
