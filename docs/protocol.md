@@ -220,9 +220,38 @@ cursor-dedupe check silently drops all of them. Cursor accounting covers
 
 ### 1.3 `session_ref`
 
-Opaque server-issued token the daemon maps to a runtime session id (`claude
---resume`, codex resume, pi session). A follow-up task carries the same
-`session_ref` in a new `task.offer`. Always optional; unchanged in M1.
+For ordinary offers, `session_ref` is an opaque continuation token the daemon
+maps to a runtime session id (`claude --resume`, codex resume, pi session). A
+follow-up task carries the same `session_ref` in a new `task.offer`. That
+legacy/ordinary meaning is unchanged in M1.
+
+#### 1.3.1 Strict Agent fresh versus resume authority
+
+The published `0.7.0` strict egress path exposed a fresh-session deadlock:
+`task.offer_for_agent_with_egress` requires `sessionRef`, while a fresh runtime
+cannot mint its native session until after `start()`. The client must reject a
+missing, preseeded, or invented Agent-home handoff, so task id or a server-side
+reservation cannot substitute for the runtime session.
+
+Protocol v1 remains frozen. The repair is additive and keeps these wire facts
+distinct:
+
+- `task.offer_for_agent_with_egress` stays byte-compatible and
+  exact-resume-only. Its `sessionRef` must match the existing durable canonical
+  Agent-home handoff; missing, stale, cross-Agent/profile, runtime, or cwd
+  evidence fails closed and never becomes fresh execution.
+- `task.offer_for_agent_with_egress_fresh` is fresh-only and carries no
+  `sessionRef`. It is deliverable only to a device with the durable
+  `agent-egress-fresh-session` capability. An older daemon cannot receive this
+  additive message and cannot strip it into a task-only offer.
+
+The runtime, not cloud or task identity, owns a fresh native session. After the
+fresh offer is claimed, the daemon starts the selected runtime without resume
+arguments, receives the runtime-issued session, fsyncs the exact
+`AgentRef/profileRevision/runtime/cwd/sessionRef` handoff in the canonical
+Agent home, and only then sends `task.started` or exposes reliable egress. The
+public reliable publisher re-reads and exact-matches that handoff before
+append/send; receipt and ack are delivery facts, not session authority.
 
 ## 2. Message catalog
 
@@ -236,6 +265,7 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
 | `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `policy`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
+| `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
 | `agent.egress.ack` | S→D | optional | optional | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | optional | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
@@ -262,6 +292,15 @@ optional field on `task.offer_for_agent`. Server and hosted cloud require
 `agent-home-contract`, `agent-egress-policy`, and
 `agent-egress-reliable-ack` before allocating the task/mailbox row. An old
 daemon cannot strip the policy and continue with task-only semantics.
+
+`task.offer_for_agent_with_egress_fresh` is a second additive message for the
+fresh case. Server and hosted cloud require the same Agent/egress declarations
+plus durable `agent-egress-fresh-session` before allocating its task/mailbox
+row. The fresh payload has no `sessionRef`; the runtime mints that value after
+claim/start, and the client must fsync the exact Agent-home handoff before
+`task.started` or any reliable egress. The existing message remains
+exact-resume-only and never falls back to this path when its handoff is absent
+or mismatched.
 
 The policy has one exact `policyRevision`. Activity is either
 `metadata-status`/`latest-value`, or explicit
@@ -1705,6 +1744,20 @@ When emitted, a `usage` event is placed immediately before the `turn_end` (or
 ordering is load-bearing (both adapters' own doc comments call this out
 explicitly) — so a consumer processing a batch in arrival order always sees
 a turn's usage before that turn's terminal marker.
+
+**Upstream reopened additive candidate: fresh Agent egress session.** The
+published `0.7.0` `task.offer_for_agent_with_egress` contract remains frozen and
+exact-resume-only. To close its fresh-session deadlock without a protocol-v2
+cut, the candidate adds the distinct
+`task.offer_for_agent_with_egress_fresh` message and
+`agent-egress-fresh-session` capability. The fresh message has no `sessionRef`;
+the selected runtime mints the native session after start, the client fsyncs
+the exact AgentRef/profile/runtime/cwd/session handoff, and only then emits
+`task.started` or reliable egress. The public reliable publisher must prove
+that exact handoff; cloud receipt/ack is not a session authority. The aligned
+fresh-session RC is not published, and this candidate does not authorize
+publish, merge, push, deploy, migration, secret changes, or Agent-home
+deletion.
 
 ### 11.4 Per-runtime capabilities on `conn.hello` (`RuntimeInfo.capabilities`, additive)
 

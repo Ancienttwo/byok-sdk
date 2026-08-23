@@ -1375,6 +1375,55 @@ home fsync 后以 stable cursor 重试并由 exact ack 退休，latest-value act
 投影；cloud 不成为 provider loop、runtime transcript 或 Agent-home mirror 的
 authority。
 
+#### 12.6.8 Fresh Agent egress 与 resume session authority（0.7.0 deadlock，upstream reopened）
+
+已发布的 `0.7.0` strict egress path 把 `sessionRef` 放进
+`task.offer_for_agent_with_egress`。这个要求对 exact resume 是正确的，但对
+fresh execution 形成了可复现的 deadlock：runtime 只能在 `start()` 后 mint
+真实 native session，client 又必须拒绝没有 Agent-home handoff 的伪造或
+preseeded `sessionRef`，所以 fresh task 在启动前既没有合法 session，也不能
+安全地产生一个。这个问题是 authority 顺序错误，不是允许 server 预留
+session、以 task id 代替 session，或把 resume 缺失 silently fallback 成 fresh
+的理由。
+
+Datum authority 必须保持单一且可追溯：
+
+| Datum | 唯一 authority | 约束 |
+| --- | --- | --- |
+| Fresh native session | 实际启动的 runtime adapter/session | runtime 在 fresh `start()` 后 mint；server、task id、client 不能预造 |
+| Durable handoff | SDK-owned canonical Agent home `.byok/runtime-sessions/` | 记录 exact `AgentRef/profileRevision/runtime/cwd/sessionRef`，fsync 成功才算可消费 |
+| Resume session | 既有 durable handoff | 旧 `task.offer_for_agent_with_egress` 继续要求 exact `sessionRef`，缺失、过期或 mismatch fail closed |
+| Egress policy/capability | host 选择的 typed policy + device 的 durable declaration | server/cloud 只按 capability admission；不由 presence 或 runtime guess |
+| Reliable event identity | public publisher 读取的 exact handoff + stable event/cursor | publisher 证明 Agent/session/runtime/cwd 后才 append/send；cloud receipt/ack 不 mint session |
+
+修复保持 Protocol v1 frozen，采用两个 additive facts：
+
+- `task.offer_for_agent_with_egress_fresh` 是 fresh-only message，明确不带
+  `sessionRef`；目标设备必须持久声明 `agent-egress-fresh-session`，旧 daemon
+  不会收到它。
+- `task.offer_for_agent_with_egress` 保持 byte-compatible、exact-resume-only，
+  仍要求原有 `sessionRef` 和 handoff；任何缺失或错配都不能转成 fresh。
+
+Fresh 的真实顺序是 `claim` 后以无 resume 参数启动 runtime，runtime mint
+session，SDK 将 exact AgentRef/runtime/cwd/session handoff fsync 到 canonical
+Agent home，随后才发送 `task.started` 并开放 reliable egress。因而 wire
+execution（`Offered/Claimed/Running/...`）、runtime process/session、handoff
+durability、以及 latest-value 与 reliable 两条 egress lane 是四套分离事实；
+任何一套都不能由另一套反推。Public reliable publisher 每次重新读取并 exact
+match handoff，不能接受调用者自带的 invented session。
+
+P1/P2/P3 已在本次 upstream reopen 对齐：P1 是 protocol additive message /
+capability、client runtime+handoff、cloud/server durable admission 与
+existing Agent-home spool；P2 是 fresh offer → runtime-issued session →
+handoff fsync → started/reliable spool/ack，resume 仍走原 exact-match path；
+P3 是 additive fresh message 而非修改 frozen resume 或增加 cloud reservation
+table，10x 压力仍首先落在 per-Agent/tenant reliable backlog。
+
+当前状态是 source/research/plan 已重新打开的 upstream candidate：`0.7.0`
+本身的 registry/release 事实不被改写，fresh-session aligned RC **尚未发布**。
+Rollback 仍限于隔离 branch 的 revert/delete；不包含 publish、merge、push、deploy、
+production migration、secret change 或 Agent-home deletion。
+
 ### 12.7 数据与存储架构（云端面为目标设计；本机 journal 面已实现）
 
 主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 持有按 daemon 声明的 canonical hash 命名、且由 cloud 观测 size/content-type 的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok-sdk/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。

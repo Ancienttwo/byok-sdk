@@ -8,6 +8,14 @@
 > delivery, quota, sanitization, and explicit content-read surfaces without a
 > compatibility path.
 
+> **2026-08-23 authority correction:** published `0.7.0` is accepted for
+> authenticated tenant projection but its strict egress offer is resume-only
+> in practice: it requires a `sessionRef` before the runtime can mint one.
+> Fresh Agent execution is therefore blocked pending the additive
+> `task.offer_for_agent_with_egress_fresh` plus
+> `agent-egress-fresh-session` source/RC.  This note does not imply registry
+> publication or downstream cutover.
+
 ## Evidence correction
 
 RAFT is a recovered precedent for a **cloud-orchestrated / local-executed**
@@ -100,6 +108,33 @@ explicit agent.content.read
 Legacy `task.progress` remains legacy task projection and is not reclassified
 as Agent reliable history. `AgentHome` containment alone still does not grant
 upload authority.
+
+### Fresh versus resume session trace
+
+The egress policy and the runtime session cross the task boundary at different
+times.  A fresh offer can carry the policy, AgentRef, runtime and canonical-home
+binding, but it cannot carry a native session id that does not exist yet.
+
+```text
+fresh offer_for_agent_with_egress_fresh (no sessionRef)
+  -> durable device capability admission
+  -> canonical Agent-home lease/cwd
+  -> runtime fresh start
+  -> runtime-issued sessionRef
+  -> fsynced SDK handoff
+  -> task.started / metadata projection / reliable spool
+  -> cloud durable receipt
+  -> exact ack retirement
+
+resume offer_for_agent_with_egress (required sessionRef)
+  -> exact SDK handoff requireMatch before runtime start
+  -> mismatch declines; never converts to fresh
+```
+
+The public reliable append seam consumes the same handoff: `AgentRef`,
+runtime, canonical cwd and session must exact-match before sanitized bytes can
+enter the spool.  Neither task id, cloud receipt, local projection nor a host
+preseeded record may author a runtime session.
 
 ## P3: frozen design direction
 

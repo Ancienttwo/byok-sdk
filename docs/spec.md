@@ -609,6 +609,51 @@ read, dual write, or implicit adoption of task workspaces.
 See [host local storage](host-local-storage-layout.md) for the responsibility
 matrix and downstream Salesko configuration.
 
+### Fresh Agent egress versus exact resume
+
+The published `0.7.0` strict egress offer exposed a fresh-execution deadlock.
+`task.offer_for_agent_with_egress` requires `sessionRef`, which is valid when a
+runtime is resuming an existing session, but a fresh runtime cannot mint its
+native session until after `start()`. The client must also reject a missing,
+preseeded, or invented handoff. Therefore the fresh path cannot be repaired by
+using the task id, reserving a cloud session, or silently converting resume to
+fresh; those would create a second session authority.
+
+The authority for each datum is explicit:
+
+| Datum | Authority | Required ordering |
+| --- | --- | --- |
+| Fresh `sessionRef` | The runtime session actually started by the selected adapter | Runtime mints it after fresh `start()`; no server/client preseed |
+| Session handoff | SDK-owned canonical Agent-home `.byok/runtime-sessions/` | SDK records exact AgentRef/profile/runtime/cwd/session and fsyncs it before exposing the session |
+| Resume `sessionRef` | Existing exact handoff | The old egress offer remains exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
+| Egress policy and fresh capability | Host-selected typed policy plus durable device declaration | Cloud/server admit only the exact declared capability; presence is not authority |
+| Reliable egress identity | The handoff read by the public publisher | Publisher proves exact handoff before durable append/send; cloud receipt and ack do not mint a session |
+
+Protocol v1 remains frozen. The repair is additive and keeps the old wire facts
+separate:
+
+- `task.offer_for_agent_with_egress_fresh` carries the strict Agent fields and
+  policy but no `sessionRef`; it is gated by the durable
+  `agent-egress-fresh-session` capability, so an older daemon is never sent the
+  message.
+- `task.offer_for_agent_with_egress` remains byte-compatible and requires an
+  exact resume `sessionRef` plus its canonical handoff. There is no fresh
+  fallback for a missing or mismatched resume.
+
+The fresh trace is `claim` → start the runtime without resume arguments → runtime
+issues its real session → SDK fsyncs the exact AgentRef/runtime/cwd/session
+handoff → `task.started` → reliable egress. `wire execution` state,
+`runtime/session` state, durable handoff state, and the latest-value/reliable
+egress lanes remain separate state vocabularies; one cannot be inferred from
+another. The public reliable publisher rejects an invented session even when a
+caller supplies otherwise plausible identity fields.
+
+This is an upstream-reopened source candidate after the `0.7.0` deadlock. The
+existing `0.7.0` release/registry facts are unchanged; the fresh-session
+aligned RC is **not published**. Rollback is limited to reverting/deleting the
+isolated source branch. No publish, merge, push, deploy, production migration,
+secret change, or Agent-home deletion is part of this contract.
+
 ## Local Git task workspaces
 
 The client optionally provides local Git checkpoint workspaces for operators who want a consistent, recoverable code-state convention around connected coding agents. The feature is disabled by default and is enabled only by the local daemon configuration:
