@@ -52,8 +52,8 @@
 
 ## Open Questions
 
-- Final public method/type names remain provisional until exact packed-RC
-  Salesko acceptance. This is the only permitted downstream adjustment.
+- None. Exact packed-RC Salesko acceptance froze the public names without a
+  downstream semantic-manifest change.
 
 ## Evidence Links
 
@@ -73,9 +73,8 @@
 - Real disposable Postgres projection receipt restart/tenant/device isolation
   probe passed before the disposable substrate was removed.
 - Release graph is aligned at dispatch `0.8.0` and keys `0.3.1`.
-- Release pack correctly refused the dirty tree. The next evidence step is a
-  local frozen source commit, followed by pack against that exact SHA; this is
-  not a product or code failure.
+- Release pack succeeded from the clean frozen implementation commit and the
+  manifest readback binds the exact source SHA and all ten tarball hashes.
 - The daemon-level reference-server probe proves a failed completion persists
   cursor `0`, restart redelivers exact seq `2`, returns `idempotent`, invokes
   the product hook only once, and creates no task or runtime session.
