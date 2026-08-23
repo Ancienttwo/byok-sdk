@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/server",
-  "version": "0.8.0",
+  "version": "0.8.0-beta.0",
   "description": "BYOK SDK server: in-memory M0 reference implementation of the SaaS-side coordinator",
   "type": "module",
   "license": "MIT",

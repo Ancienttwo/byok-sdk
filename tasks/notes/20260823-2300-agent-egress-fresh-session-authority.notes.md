@@ -44,11 +44,13 @@
 
 ## Open Questions
 
-- The RC is now the aligned dispatch/testkit/umbrella train `0.8.0` plus
-  independently versioned keys `0.3.1`, whose packed edge must close to core
-  `0.8.0`.  This follows the pre-1.0 MINOR rule for additive public API and a
-  tightened public client input. npm publication remains separately
-  unauthorized.
+- The user explicitly replaced stable-first release sequencing with beta-first
+  downstream acceptance. The next immutable artifact subject is the aligned
+  dispatch/testkit/umbrella train `0.8.0-beta.0` plus independently versioned
+  keys `0.3.1-beta.0`, published only under npm dist-tag `beta`; `latest` must
+  remain on 0.7.0/keys 0.3.0. Salesko exact-pins these beta artifacts in an
+  isolated worktree and must pass fresh-first-job plus later exact-resume
+  acceptance before any stable version is considered.
 
 ## Evidence Links
 
@@ -75,6 +77,14 @@
   fresh dispatch and makes taskId mandatory/exact before append/send. Focused
   server/client tests and both typechecks pass on the corrected tree; no
   AcceptanceReceipt was issued for the failed subject.
+- Beta-first release tooling now treats testkit as the ninth aligned manifest,
+  accepts exact SemVer prereleases while keeping Pi on an exact stable pin,
+  requires a safe non-`latest` dist-tag for prerelease publication, rejects a
+  partially published beta instead of resuming it, and checks every public
+  package's beta tag plus unchanged stable latest sentinel on readback. The
+  focused release-tool suite passes 8/8 and release graph closes nine aligned
+  manifests at 0.8.0-beta.0 plus keys 0.3.1-beta.0. Real pack/publish/readback
+  remains pending the clean frozen commit.
 
 ## Promotion Filter
 

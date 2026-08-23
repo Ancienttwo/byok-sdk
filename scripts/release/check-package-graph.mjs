@@ -12,9 +12,13 @@ const dispatchPackages = [
   ['packages/cloud-dataplane', '@byok-sdk/cloud-dataplane'],
   ['packages/ui-runtime', '@byok-sdk/ui-runtime'],
 ];
+const testkit = ['packages/testkit', '@byok-sdk/testkit'];
 const umbrella = ['packages/sdk', 'byok-sdk'];
 const keys = ['packages/keys', '@byok-sdk/keys'];
-const publicPackages = [...dispatchPackages, umbrella, keys];
+// testkit ships independently of the umbrella's public namespaces, but it is
+// still part of the aligned release graph and must not escape the train check.
+const alignedPackages = [...dispatchPackages, testkit];
+const publicPackages = [...alignedPackages, umbrella, keys];
 const expectedUmbrellaDependencies = dispatchPackages.map(([, name]) => name).sort();
 const errors = [];
 
@@ -92,20 +96,24 @@ function readJson(relativePath) {
 // independently from packages/keys, and the pi pin from packages/client.
 // Every check below compares against these derived values, so a train bump
 // cannot desync the gate from the manifests it guards.
-const exactVersion = /^\d+\.\d+\.\d+$/;
+// Release packages may use an exact SemVer prerelease (for example
+// 0.8.0-beta.0). The Pi runtime remains a stable, exact pin because it is not
+// part of the SDK release channel.
+const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const releaseVersion = readJson('packages/core/package.json').version;
 const keysVersion = readJson('packages/keys/package.json').version;
 const piVersion = readJson('packages/client/package.json').dependencies?.['@earendil-works/pi-coding-agent'];
-if (typeof releaseVersion !== 'string' || !exactVersion.test(releaseVersion)) {
-  errors.push('packages/core/package.json: version must be an exact x.y.z release train version');
+if (typeof releaseVersion !== 'string' || !exactReleaseVersion.test(releaseVersion)) {
+  errors.push('packages/core/package.json: version must be an exact SemVer release train version');
 }
-if (typeof keysVersion !== 'string' || !exactVersion.test(keysVersion)) {
-  errors.push('packages/keys/package.json: version must be an exact x.y.z version');
+if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
+  errors.push('packages/keys/package.json: version must be an exact SemVer version');
 }
 if (keysVersion === releaseVersion) {
   errors.push(`packages/keys/package.json: keys must remain independently versioned from the ${releaseVersion} dispatch train`);
 }
-if (typeof piVersion !== 'string' || !exactVersion.test(piVersion)) {
+if (typeof piVersion !== 'string' || !exactStableVersion.test(piVersion)) {
   errors.push('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
 }
 
@@ -223,7 +231,7 @@ function runtimeEdges(manifest) {
   return runtimeFields.flatMap((field) => Object.keys(manifest[field] ?? {}));
 }
 
-for (const [, packageName] of [...dispatchPackages, umbrella]) {
+for (const [, packageName] of [...alignedPackages, umbrella]) {
   const seen = new Set();
   const queue = [packageName];
   while (queue.length > 0) {
@@ -358,4 +366,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`[release-graph] OK: ${dispatchPackages.length + 1} dispatch manifests at ${releaseVersion}, keys at ${keysVersion}; umbrella has ${dispatchPackages.length} dispatch namespaces and no keys edge`);
+console.log(`[release-graph] OK: ${alignedPackages.length + 1} aligned manifests at ${releaseVersion}, keys at ${keysVersion}; umbrella has ${dispatchPackages.length} dispatch namespaces and no keys edge`);
