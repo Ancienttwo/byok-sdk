@@ -485,7 +485,9 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       // redelivered copy is idempotently skip-advanced (`advanceCursor`'s
       // own `seq <= this.cursor` no-op guard makes repeat pushes of the
       // identical seq harmless).
-      expect(await cursorStore.load(server.url, record.deviceId)).toBe(5);
+      await vi.waitFor(async () => {
+        expect(await cursorStore.load(server.url, record.deviceId)).toBe(5);
+      });
     } finally {
       keepPoisoning = false;
       clearInterval(poisonTimer);
