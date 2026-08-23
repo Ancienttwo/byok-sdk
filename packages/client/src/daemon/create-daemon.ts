@@ -12,7 +12,15 @@ import {
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
 } from '@byok-sdk/protocol';
-import type { AgentEgressPolicy, AgentEgressReliablePayload, CapabilityFlag, Envelope, RuntimeId, RuntimeInfo } from '@byok-sdk/protocol';
+import type {
+  AgentEgressPolicy,
+  AgentEgressReliablePayload,
+  CapabilityFlag,
+  ContentReadPolicy,
+  Envelope,
+  RuntimeId,
+  RuntimeInfo,
+} from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
@@ -103,6 +111,17 @@ import { AgentEgressController, type AgentEgressReliableAppendResult } from './a
 import { resolveAgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy';
 import { sanitizeEgressEnvelope, type AgentEgressSanitizer } from './agent-egress-sanitizer';
 import type { AgentReliableEgressRecord } from './agent-egress-spool';
+import { AgentContentAuditStore } from './agent-content-audit-store';
+import {
+  AGENT_CONTENT_READ_CAPABILITIES,
+  AgentContentReadPolicyEngine,
+  createAgentContentReadPolicy,
+  type AgentContentReadPolicy,
+  type AgentContentReadPolicySelection,
+  type AgentContentReadRoot,
+  type AgentContentReadSurface,
+  type AgentContentSessionIdentity,
+} from './agent-content-read';
 
 /**
  * M4 Phase 2 (originally control-socket-only). M5 batch-3 (workstream 2):
@@ -459,6 +478,32 @@ export interface AgentEgressConfig {
   policy: AgentEgressPolicy;
   /** Named redaction hook for explicit contentful trajectory only. */
   sanitizer?: AgentEgressSanitizer;
+  /**
+   * Device-local additions required to make one server-selected transfer
+   * policy executable. These values only supplement `policy.transfers`: a
+   * locally configured surface never enables a server-disabled transfer, and
+   * cannot widen its maxBytes or MIME authority.
+   */
+  contentRead?: AgentContentReadConfig;
+}
+
+/** Local root and text handling authority for one independently-gated surface. */
+export interface AgentContentReadSurfaceConfig {
+  readonly root: AgentContentReadRoot;
+  readonly maxTextBytes: number;
+  readonly textMimeTypes: readonly string[];
+  readonly sensitiveNames?: readonly string[];
+}
+
+/**
+ * Host-local portions of the content-read contract. The audit ledger has no
+ * host path option: SDK composition fixes it per Agent home.
+ */
+export interface AgentContentReadConfig {
+  readonly workspace?: AgentContentReadSurfaceConfig;
+  readonly transcript?: AgentContentReadSurfaceConfig;
+  readonly artifact?: AgentContentReadSurfaceConfig;
+  readonly runtimeAllowlistedRoots?: readonly string[];
 }
 
 export interface AgentReliableEgressInput {
@@ -767,7 +812,12 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
  * gate, and therefore safe to advertise unconditionally the moment a daemon
  * genuinely does what it claims (as this one already does).
  */
-function computeCapabilities(adapters: RuntimeAdapter[], agentHomeConfigured = false, agentEgressConfigured = false): CapabilityFlag[] {
+function computeCapabilities(
+  adapters: RuntimeAdapter[],
+  agentHomeConfigured = false,
+  agentEgressConfigured = false,
+  contentReadPolicies?: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
+): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
@@ -786,7 +836,70 @@ function computeCapabilities(adapters: RuntimeAdapter[], agentHomeConfigured = f
   }
   if (agentHomeConfigured) flags.push('agent-home-contract');
   if (agentEgressConfigured) flags.push(AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY);
+  if (contentReadPolicies !== undefined) {
+    for (const surface of Object.keys(AGENT_CONTENT_READ_CAPABILITIES) as AgentContentReadSurface[]) {
+      const policy = contentReadPolicies[surface];
+      if (policy !== 'disabled') flags.push(policy.capability as CapabilityFlag);
+    }
+  }
   return flags;
+}
+
+const AGENT_CONTENT_AUDIT_DIRECTORY = '.byok';
+const AGENT_CONTENT_AUDIT_FILENAME = 'content-read-audit-v1.jsonl';
+
+function resolveContentReadPolicies(
+  egressPolicy: AgentEgressPolicy,
+  config: AgentContentReadConfig | undefined,
+): Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>> {
+  const policies: Partial<Record<AgentContentReadSurface, AgentContentReadPolicySelection>> = {};
+  for (const surface of Object.keys(AGENT_CONTENT_READ_CAPABILITIES) as AgentContentReadSurface[]) {
+    const remote = egressPolicy.transfers[surface];
+    const local = config?.[surface];
+    if (remote === 'disabled' || local === undefined) {
+      policies[surface] = 'disabled';
+      continue;
+    }
+    policies[surface] = createAgentContentReadPolicy({
+      enabled: true,
+      capability: AGENT_CONTENT_READ_CAPABILITIES[surface],
+      root: local.root,
+      policyRevision: egressPolicy.policyRevision,
+      maxBytes: remote.maxBytes,
+      maxTextBytes: local.maxTextBytes,
+      allowedMimeTypes: remote.allowedMimeTypes,
+      textMimeTypes: local.textMimeTypes,
+      ...(local.sensitiveNames === undefined ? {} : { sensitiveNames: local.sensitiveNames }),
+    });
+  }
+  return Object.freeze({
+    workspace: policies.workspace ?? 'disabled',
+    transcript: policies.transcript ?? 'disabled',
+    artifact: policies.artifact ?? 'disabled',
+  });
+}
+
+function hasExactContentReadTransfer(expected: ContentReadPolicy | 'disabled', actual: ContentReadPolicy): boolean {
+  return (
+    expected !== 'disabled' &&
+    expected.maxBytes === actual.maxBytes &&
+    expected.allowedMimeTypes.length === actual.allowedMimeTypes.length &&
+    expected.allowedMimeTypes.every((mimeType, index) => mimeType === actual.allowedMimeTypes[index])
+  );
+}
+
+/** Keep the received policy revision in the audit receipt while refusing any non-exact wire policy. */
+function policyRevisionMismatchPolicies(
+  policies: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
+  surface: AgentContentReadSurface,
+): Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>> {
+  const selected = policies[surface];
+  if (selected === 'disabled') return policies;
+  const mismatch: AgentContentReadPolicy = Object.freeze({
+    ...selected,
+    policyRevision: `${selected.policyRevision}:wire-policy-mismatch`,
+  });
+  return Object.freeze({ ...policies, [surface]: mismatch });
 }
 
 /**
@@ -1003,6 +1116,7 @@ export function buildDaemonWithAdapters(
         }),
       });
   const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();
+  const agentContentReadPolicies = resolveContentReadPolicies(egressPolicy, config.agentEgress?.contentRead);
   const agentEgress = new AgentEgressController({
     policy: egressPolicy,
     ...(config.agentEgress?.tenantId === undefined ? {} : { tenantId: config.agentEgress.tenantId }),
@@ -1428,7 +1542,12 @@ export function buildDaemonWithAdapters(
     // own doc comment on why this isn't re-probed on every reconnect).
     observer.noteRuntimesDetected(runtimes);
     detectedRuntimeFacts = runtimes;
-    const capabilities = computeCapabilities(adapters, config.agentHome !== undefined, config.agentEgress !== undefined);
+    const capabilities = computeCapabilities(
+      adapters,
+      config.agentHome !== undefined,
+      config.agentEgress !== undefined,
+      agentContentReadPolicies,
+    );
 
     // S3b: this daemon's journal identity — only knowable here, after
     // `auth.loadExisting()` has resolved the deviceId.
@@ -1600,6 +1719,118 @@ export function buildDaemonWithAdapters(
       await agentEgress.acknowledge({ ...envelope.payload, tenantId });
       return true;
     };
+    const handleAgentContentReadEnvelope = async (envelope: Envelope): Promise<boolean> => {
+      if (envelope.type !== 'agent.content.read') return false;
+      // This build could not have advertised a content-read capability without
+      // both authorities. A stale or malicious sender gets no implicit local
+      // path, tenant, or receipt synthesized from incomplete identity.
+      if (config.agentEgress === undefined || agentHomeManager === undefined || agentSessionHandoffs === undefined) {
+        return true;
+      }
+
+      const payload = envelope.payload;
+      const session: AgentContentSessionIdentity = Object.freeze({
+        agentRef: payload.agentRef,
+        sessionRef: payload.sessionRef,
+        runtimeId: payload.runtime,
+        cwd: payload.cwd,
+      });
+      const canonicalHome = (await agentHomeManager.layout.resolve(payload.agentRef)).canonicalHome;
+      const exactWirePolicy =
+        payload.policyRevision === egressPolicy.policyRevision &&
+        hasExactContentReadTransfer(egressPolicy.transfers[payload.surface], payload.policy);
+      const policies = exactWirePolicy
+        ? agentContentReadPolicies
+        : policyRevisionMismatchPolicies(agentContentReadPolicies, payload.surface);
+      const policyEngine = new AgentContentReadPolicyEngine({
+        agentHomeLayout: agentHomeManager.layout,
+        policies,
+        capabilities,
+        ...(config.agentEgress.contentRead?.runtimeAllowlistedRoots === undefined
+          ? {}
+          : { runtimeAllowlistedRoots: config.agentEgress.contentRead.runtimeAllowlistedRoots }),
+        // `requireMatch` is the only session authority for every surface. A
+        // wire cwd must be the exact canonical Agent home before any bytes can
+        // be read; there is no workspace/artifact exception.
+        resolveSessionIdentity: async (request) => {
+          const requestedSession = request.session;
+          if (requestedSession === undefined) return undefined;
+          if (requestedSession.cwd !== canonicalHome) return undefined;
+          const handoff = await agentSessionHandoffs.requireMatch({
+            agentRef: request.agentRef,
+            sessionRef: requestedSession.sessionRef,
+            runtimeId: requestedSession.runtimeId,
+            cwd: requestedSession.cwd,
+          });
+          if (handoff.cwd !== canonicalHome) return undefined;
+          return Object.freeze({
+            agentRef: handoff.agentRef,
+            sessionRef: handoff.sessionRef,
+            runtimeId: handoff.runtimeId,
+            cwd: handoff.cwd,
+          });
+        },
+        // The SDK owns this address. It is never host-configurable and cannot
+        // escape the canonical home selected from the exact AgentRef.
+        auditStore: new AgentContentAuditStore(
+          path.join(canonicalHome, AGENT_CONTENT_AUDIT_DIRECTORY, AGENT_CONTENT_AUDIT_FILENAME),
+        ),
+      });
+      const result = await policyEngine.read({
+        requestId: payload.requestId,
+        actor: payload.actor,
+        tenantId: config.agentEgress.tenantId,
+        deviceId: record.deviceId,
+        agentRef: payload.agentRef,
+        surface: payload.surface,
+        relativeTarget: payload.target,
+        mimeType: payload.mimeType,
+        capability: AGENT_CONTENT_READ_CAPABILITIES[payload.surface],
+        policyRevision: payload.policyRevision,
+        maxBytes: payload.policy.maxBytes,
+        allowedMimeTypes: payload.policy.allowedMimeTypes,
+        decodeAs: payload.decodeAs,
+        session,
+      });
+
+      const receipt = {
+        requestId: payload.requestId,
+        surface: payload.surface,
+        actor: payload.actor,
+        agentRef: payload.agentRef,
+        sessionRef: payload.sessionRef,
+        runtime: payload.runtime,
+        cwd: payload.cwd,
+        policyRevision: payload.policyRevision,
+        target: payload.target,
+        mimeType: payload.mimeType,
+        decodeAs: payload.decodeAs,
+      } as const;
+      if (result.decision === 'deny') {
+        connection?.send(createEnvelope('agent.content.receipt', {
+          ...receipt,
+          decision: 'denied',
+          byteCount: 0,
+          reason: result.reason,
+        }));
+        return true;
+      }
+
+      // A committed audit receipt plus this requestId-stable blob reservation
+      // makes a crash/redelivery retry the same upload rather than minting a
+      // second cloud object.
+      const blobRef = await blobClient.uploadArtifact(result.content, payload.mimeType, {
+        idempotencyKey: payload.requestId,
+      });
+      connection?.send(createEnvelope('agent.content.receipt', {
+        ...receipt,
+        decision: 'allowed',
+        byteCount: result.byteCount,
+        contentHash: `sha256:${result.contentHash}`,
+        blobRef,
+      }));
+      return true;
+    };
 
     connection = new ConnectionManager({
       serverUrl: config.serverUrl,
@@ -1643,6 +1874,7 @@ export function buildDaemonWithAdapters(
           ? async (envelope) => {
               observer.handleInboundEnvelope(envelope);
               if (await handleAgentEgressEnvelope(envelope)) return;
+              if (await handleAgentContentReadEnvelope(envelope)) return;
               // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
               // 新 mailbox row；保留现有 recovery evidence". Throwing HERE, ahead
               // of the append, reuses the ordering the journal branch already
@@ -1657,6 +1889,7 @@ export function buildDaemonWithAdapters(
           : (envelope) => {
               observer.handleInboundEnvelope(envelope);
               if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
+              if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();
             },
       onStateChange: (state) => {

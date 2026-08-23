@@ -193,6 +193,10 @@ export interface AgentContentReadPolicyEngineOptions {
   readonly capabilities: Iterable<string>;
   readonly runtimeAllowlistedRoots?: readonly string[];
   readonly auditStore: AgentContentAuditStore;
+  /** Optional all-surface session gate for hosts that require a live handoff before every read. */
+  readonly resolveSessionIdentity?: (
+    request: AgentContentReadRequest,
+  ) => Promise<AgentContentSessionIdentity | undefined> | AgentContentSessionIdentity | undefined;
   /** Binds transcript claims to AgentSessionHandoffStore-backed exact identity. */
   readonly resolveTranscriptIdentity?: (
     request: AgentContentReadRequest,
@@ -606,6 +610,7 @@ export class AgentContentReadPolicyEngine {
   private readonly capabilities: ReadonlySet<string>;
   private readonly runtimeRoots: readonly string[];
   private readonly runtimeRootCache = new Map<string, Promise<string>>();
+  private readonly resolveSessionIdentity?: AgentContentReadPolicyEngineOptions['resolveSessionIdentity'];
   private readonly resolveTranscriptIdentity?: AgentContentReadPolicyEngineOptions['resolveTranscriptIdentity'];
 
   constructor(private readonly options: AgentContentReadPolicyEngineOptions) {
@@ -620,6 +625,7 @@ export class AgentContentReadPolicyEngine {
       if (!path.isAbsolute(value)) throw new AgentContentReadPolicyError('runtime allowlisted roots must be absolute');
       return path.resolve(value);
     }));
+    this.resolveSessionIdentity = options.resolveSessionIdentity;
     this.resolveTranscriptIdentity = options.resolveTranscriptIdentity;
   }
 
@@ -637,6 +643,10 @@ export class AgentContentReadPolicyEngine {
 
     if (policySelection === 'disabled') return this.deny(request, relativeTarget, 'policy-disabled');
     const policy = policySelection;
+    if (this.resolveSessionIdentity !== undefined) {
+      const identityDecision = await this.checkSessionIdentity(request, this.resolveSessionIdentity);
+      if (identityDecision !== undefined) return this.deny(request, relativeTarget, identityDecision);
+    }
     if (request.capability !== policy.capability || !this.capabilities.has(policy.capability)) {
       return this.deny(request, relativeTarget, 'capability-missing');
     }
@@ -750,18 +760,22 @@ export class AgentContentReadPolicyEngine {
     return root;
   }
 
-  private async checkTranscriptIdentity(
+  private async checkSessionIdentity(
     request: AgentContentReadRequest,
-    policy: AgentContentReadPolicy,
-    root: string,
+    resolver: NonNullable<AgentContentReadPolicyEngineOptions['resolveSessionIdentity']>,
+    requiredCwd?: string,
   ): Promise<AgentContentReadReason | undefined> {
     const session = request.session;
-    if (session === undefined || !sameAgentRef(session.agentRef, request.agentRef) || session.cwd !== root) {
+    if (
+      session === undefined ||
+      !sameAgentRef(session.agentRef, request.agentRef) ||
+      (requiredCwd !== undefined && session.cwd !== requiredCwd)
+    ) {
       return 'identity-mismatch';
     }
     let expected: AgentContentSessionIdentity | undefined;
     try {
-      expected = policy.expectedTranscriptIdentity ?? await this.resolveTranscriptIdentity?.(request);
+      expected = await resolver(request);
     } catch {
       return 'identity-mismatch';
     }
@@ -772,6 +786,21 @@ export class AgentContentReadPolicyEngine {
     } catch {
       return 'identity-mismatch';
     }
+  }
+
+  private async checkTranscriptIdentity(
+    request: AgentContentReadRequest,
+    policy: AgentContentReadPolicy,
+    root: string,
+  ): Promise<AgentContentReadReason | undefined> {
+    return this.checkSessionIdentity(
+      request,
+      async (candidate) =>
+        policy.expectedTranscriptIdentity ??
+        await this.resolveTranscriptIdentity?.(candidate) ??
+        await this.resolveSessionIdentity?.(candidate),
+      root,
+    );
   }
 
   private async deny(

@@ -347,6 +347,35 @@ describe('Agent content-read policy engine', () => {
     await expect(new AgentContentAuditStore(auditPath).readback()).rejects.toBeInstanceOf(AgentContentAuditStoreError);
   });
 
+  it('reuses one durable receipt for an exact requestId replay and fails closed on a conflicting reuse after restart', async () => {
+    const root = await makeRoot();
+    const auditPath = path.join(root, 'audit', 'receipts.jsonl');
+    const receipt = {
+      version: 1 as const,
+      requestId: 'request-replayed',
+      actor: { kind: 'user' as const, id: 'actor-1' },
+      tenantId: 'tenant-1',
+      deviceId: 'device-1',
+      agentRef,
+      surface: 'workspace' as const,
+      relativeTarget: 'notes/readme.md',
+      policyRevision: 'policy-1',
+      byteCount: 0,
+      decision: 'deny' as const,
+      reason: 'policy-disabled' as const,
+      recordedAt: '2026-08-23T00:00:00.000Z',
+    };
+    const first = new AgentContentAuditStore(auditPath);
+    await expect(first.append(receipt)).resolves.toEqual(receipt);
+
+    const restarted = new AgentContentAuditStore(auditPath);
+    const replay = await restarted.append({ ...receipt, recordedAt: '2026-08-23T00:01:00.000Z' });
+    expect(replay).toEqual(receipt);
+    await expect(restarted.readback()).resolves.toEqual([receipt]);
+    await expect(restarted.append({ ...receipt, relativeTarget: 'notes/other.md' }))
+      .rejects.toBeInstanceOf(AgentContentAuditStoreError);
+  });
+
   it('rejects invalid policy/request shapes instead of inventing roots, MIME or bounds', async () => {
     expect(() => createAgentContentReadPolicy({
       enabled: true,

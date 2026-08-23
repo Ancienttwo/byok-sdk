@@ -8,7 +8,11 @@ import { toHttpBase } from './url';
 /** Seam `TaskRunner` depends on, so tests can substitute a fake without spinning up real HTTP endpoints. */
 export interface BlobResolver {
   resolveInstruction(blobRef: BlobRef): Promise<string>;
-  uploadArtifact(content: string | Uint8Array, contentType: string): Promise<BlobRef>;
+  uploadArtifact(
+    content: string | Uint8Array,
+    contentType: string,
+    options?: { readonly idempotencyKey?: string },
+  ): Promise<BlobRef>;
 }
 
 async function safeErrorText(res: Response): Promise<string> {
@@ -67,11 +71,17 @@ export class BlobClient implements BlobResolver {
   }
 
   /** `POST /byok/blobs` (declares size/contentType/contentHash) -> PUT the bytes to the presigned upload URL -> a `BlobRef` for `task.artifact.blobRef`. */
-  async uploadArtifact(content: string | Uint8Array, contentType: string): Promise<BlobRef> {
+  async uploadArtifact(
+    content: string | Uint8Array,
+    contentType: string,
+    options: { readonly idempotencyKey?: string } = {},
+  ): Promise<BlobRef> {
     const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
     const contentHash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     const base = toHttpBase(this.serverUrl);
-    const reservationId = `blob_${randomUUID()}`;
+    // A caller-owned stable key makes a recovered operation replay the same
+    // reservation. Ordinary task-artifact uploads retain their fresh key.
+    const reservationId = options.idempotencyKey ?? `blob_${randomUUID()}`;
 
     const createRes = await authedFetch(
       new URL(BYOK_BLOBS_PATH, base),
@@ -89,6 +99,16 @@ export class BlobClient implements BlobResolver {
       throw new Error(`failed to create blob: HTTP ${createRes.status} ${await safeErrorText(createRes)}`.trimEnd());
     }
     const { blobId, uploadUrl } = (await createRes.json()) as { blobId: string; uploadUrl: string };
+    const blobRef: BlobRef = { blobId, contentHash, size: bytes.length, contentType };
+
+    // A replayed create reservation can already point at committed bytes.
+    // Read them back before issuing PUT/finalize: repeating a PUT against a
+    // committed LocalDisk/SQLite object may conflict, and treating that 409 as
+    // success would accept unrelated bytes. Only an exact hash/size readback
+    // proves this request's previously committed object is safe to reuse.
+    if (options.idempotencyKey !== undefined && await this.#hasExactCommittedBlob(base, blobRef)) {
+      return blobRef;
+    }
 
     // Same relative-vs-absolute handling as resolveInstruction() above.
     const putRes = await fetch(new URL(uploadUrl, base), {
@@ -102,7 +122,37 @@ export class BlobClient implements BlobResolver {
 
     await this.#finalize(base, blobId, reservationId);
 
-    return { blobId, contentHash, size: bytes.length, contentType };
+    return blobRef;
+  }
+
+  async #hasExactCommittedBlob(base: string, blobRef: BlobRef): Promise<boolean> {
+    const urlRes = await authedFetch(
+      new URL(byokBlobUrlPath(blobRef.blobId), base),
+      { method: 'GET' },
+      this.auth,
+    );
+    if (urlRes.status === 404) return false;
+    if (!urlRes.ok) {
+      throw new Error(`failed to read back idempotent blob: HTTP ${urlRes.status} ${await safeErrorText(urlRes)}`.trimEnd());
+    }
+    const { downloadUrl } = (await urlRes.json()) as { downloadUrl?: unknown };
+    if (typeof downloadUrl !== 'string' || downloadUrl.length === 0) {
+      throw new Error('failed to read back idempotent blob: response omitted downloadUrl');
+    }
+    const contentRes = await fetch(new URL(downloadUrl, base));
+    // A created reservation without a committed object remains uploadable.
+    if (contentRes.status === 404) return false;
+    if (!contentRes.ok) {
+      throw new Error(`failed to read back idempotent blob content: HTTP ${contentRes.status}`);
+    }
+    const bytes = new Uint8Array(await contentRes.arrayBuffer());
+    const observedHash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    if (observedHash !== blobRef.contentHash || bytes.length !== blobRef.size) {
+      throw new Error(
+        `idempotent blob readback failed declared integrity: expected ${blobRef.contentHash}/${blobRef.size} bytes, observed ${observedHash}/${bytes.length} bytes`,
+      );
+    }
+    return true;
   }
 
   async #finalize(base: string, blobId: string, reservationId: string): Promise<void> {

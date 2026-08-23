@@ -20,9 +20,13 @@ import {
 
 export type { ConnectionState } from './ws-transport';
 
-/** `true` for every `task.*` envelope type — the ONLY types the redelivery cursor accounts for (protocol §1.2/§9; finding F2). `conn.*` types (e.g. `conn.ack`) carry a `seq` for schema uniformity but are never cursor-tracked. */
-function isTaskEnvelopeType(type: Envelope['type']): boolean {
-  return type.startsWith('task.');
+/**
+ * Server work requiring durable handler completion before acknowledgement.
+ * `conn.*` frames (including `conn.ack`) carry a sequence only for schema
+ * uniformity and never move this cursor.
+ */
+function isCursorEnvelopeType(type: Envelope['type']): boolean {
+  return type.startsWith('task.') || type === 'agent.egress.ack' || type === 'agent.content.read';
 }
 
 export interface ConnectionManagerOptions {
@@ -578,7 +582,7 @@ export class ConnectionManager {
    *   documented idempotent (protocol §9).
    */
   private deliver(envelope: Envelope): void {
-    const tracked = isTaskEnvelopeType(envelope.type) && typeof envelope.seq === 'number';
+    const tracked = isCursorEnvelopeType(envelope.type) && typeof envelope.seq === 'number';
     const watermark = this.dedupWatermark();
     if (tracked && watermark !== undefined && envelope.seq! <= watermark) return; // redelivered — idempotent skip (protocol §9)
 

@@ -116,4 +116,73 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       expect(persisted).toBe(offerSeq);
     });
   });
+
+  it('tracks agent.egress.ack and agent.content.read while excluding conn.ack, then retries a failed content read', async () => {
+    server = await TestServer.start();
+    const storeDir = await tmpDir('byok-cm-content-cursor-store-');
+    const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
+    const record = await auth.pair('pairing-code');
+    const cursorStore = new CursorStore(storeDir);
+    let contentAttempts = 0;
+
+    connection = new ConnectionManager({
+      serverUrl: server.url,
+      deviceId: record.deviceId,
+      productId: 'test-product',
+      capabilities: [],
+      runtimes: [],
+      auth,
+      cursorStore,
+      onEnvelope: async (envelope) => {
+        if (envelope.type === 'agent.content.read') {
+          contentAttempts += 1;
+          if (contentAttempts === 1) throw new Error('transient content receipt failure');
+        }
+      },
+      backoff: { baseMs: 20, maxMs: 100, factor: 2 },
+    });
+    await connection.start();
+    await connection.waitForAck();
+
+    // The handshake's conn.ack has a seq but must never be cursor-tracked.
+    await expect(cursorStore.load(server.url, record.deviceId)).resolves.toBeUndefined();
+
+    const ackSeq = server.nextSeq();
+    server.send(createEnvelope('agent.egress.ack', {
+      agentRef: { agentId: 'agent-cursor', profileRevision: 'profile-1' },
+      sessionRef: 'session-cursor',
+      policyRevision: 'policy-cursor',
+      eventId: '00000000-0000-4000-8000-000000000001',
+      cursor: 1,
+      receiptId: '00000000-0000-4000-8000-000000000002',
+    }, { seq: ackSeq }));
+    await vi.waitFor(async () => {
+      await expect(cursorStore.load(server.url, record.deviceId)).resolves.toBe(ackSeq);
+    });
+
+    const contentSeq = server.nextSeq();
+    const content = createEnvelope('agent.content.read', {
+      requestId: '00000000-0000-4000-8000-000000000003',
+      surface: 'workspace',
+      actor: { kind: 'user', id: 'actor-cursor' },
+      agentRef: { agentId: 'agent-cursor', profileRevision: 'profile-1' },
+      sessionRef: 'session-cursor',
+      runtime: 'pi',
+      cwd: '/tmp/agent-cursor',
+      policyRevision: 'policy-cursor',
+      target: 'notes/readme.md',
+      mimeType: 'text/plain',
+      decodeAs: 'utf8',
+      policy: { maxBytes: 1024, allowedMimeTypes: ['text/plain'] },
+    }, { seq: contentSeq });
+    server.send(content);
+    await vi.waitFor(() => expect(contentAttempts).toBe(1));
+    await expect(cursorStore.load(server.url, record.deviceId)).resolves.toBe(ackSeq);
+
+    server.send(content);
+    await vi.waitFor(() => expect(contentAttempts).toBe(2));
+    await vi.waitFor(async () => {
+      await expect(cursorStore.load(server.url, record.deviceId)).resolves.toBe(contentSeq);
+    });
+  });
 });

@@ -165,6 +165,47 @@ function validateReceipt(value: unknown): AgentContentAuditReceipt {
   });
 }
 
+/** `recordedAt` is evidence timing, not request semantics. */
+function sameSemanticReceipt(left: AgentContentAuditReceipt, right: AgentContentAuditReceipt): boolean {
+  return (
+    left.version === right.version &&
+    left.requestId === right.requestId &&
+    left.actor.kind === right.actor.kind &&
+    left.actor.id === right.actor.id &&
+    left.tenantId === right.tenantId &&
+    left.deviceId === right.deviceId &&
+    left.agentRef.agentId === right.agentRef.agentId &&
+    left.agentRef.profileRevision === right.agentRef.profileRevision &&
+    left.surface === right.surface &&
+    left.session?.agentRef.agentId === right.session?.agentRef.agentId &&
+    left.session?.agentRef.profileRevision === right.session?.agentRef.profileRevision &&
+    left.session?.sessionRef === right.session?.sessionRef &&
+    left.session?.runtimeId === right.session?.runtimeId &&
+    left.session?.cwd === right.session?.cwd &&
+    left.relativeTarget === right.relativeTarget &&
+    left.policyRevision === right.policyRevision &&
+    left.byteCount === right.byteCount &&
+    left.contentHash === right.contentHash &&
+    left.decision === right.decision &&
+    left.reason === right.reason
+  );
+}
+
+function assertUniqueRequestIds(entries: readonly AgentContentAuditReceipt[]): void {
+  const seen = new Map<string, AgentContentAuditReceipt>();
+  for (const entry of entries) {
+    const prior = seen.get(entry.requestId);
+    if (prior === undefined) {
+      seen.set(entry.requestId, entry);
+      continue;
+    }
+    if (sameSemanticReceipt(prior, entry)) {
+      throw new AgentContentAuditStoreError(`content audit ledger duplicates requestId ${entry.requestId}`);
+    }
+    throw new AgentContentAuditStoreError(`content audit ledger reuses requestId ${entry.requestId} with conflicting semantics`);
+  }
+}
+
 function assertAbsoluteFilePath(filePath: string): string {
   if (typeof filePath !== 'string' || filePath.length === 0 || !path.isAbsolute(filePath)) {
     throw new AgentContentAuditStoreError('content audit path must be absolute');
@@ -222,7 +263,16 @@ export class AgentContentAuditStore {
       await assertAuditFile(this.filePath);
       // Validate the existing ledger before appending. A corrupt or widened
       // ledger is integrity failure, never a reason to add more records.
-      await this.readAllUnlocked();
+      const entries = await this.readAllUnlocked();
+      const prior = entries.find((entry) => entry.requestId === validated.requestId);
+      if (prior !== undefined) {
+        if (!sameSemanticReceipt(prior, validated)) {
+          throw new AgentContentAuditStoreError(
+            `content audit requestId ${validated.requestId} conflicts with its durable receipt`,
+          );
+        }
+        return prior;
+      }
 
       let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
       try {
@@ -285,6 +335,7 @@ export class AgentContentAuditStore {
       const raw = buffer.toString('utf8');
       if (raw.length === 0) return Object.freeze([]);
       const entries = raw.split('\n').filter((line) => line.length > 0).map((line) => validateReceipt(JSON.parse(line) as unknown));
+      assertUniqueRequestIds(entries);
       return Object.freeze(entries);
     } catch (error) {
       if (error instanceof AgentContentAuditStoreError) throw error;

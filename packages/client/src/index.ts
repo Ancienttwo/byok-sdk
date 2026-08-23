@@ -96,6 +96,8 @@ export type {
   HostedJournalConfig,
   DeviceAssertionConfig,
   AgentEgressConfig,
+  AgentContentReadConfig,
+  AgentContentReadSurfaceConfig,
   AgentReliableEgressInput,
 } from './daemon/create-daemon';
 export type {
@@ -104,6 +106,32 @@ export type {
   AgentEgressStatus,
 } from './daemon/agent-egress-policy';
 export type { AgentEgressSanitizer, AgentEgressSanitizerContext } from './daemon/agent-egress-sanitizer';
+export {
+  AGENT_CONTENT_READ_CAPABILITIES,
+  AGENT_CONTENT_READ_CAPABILITY_WORKSPACE,
+  AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT,
+  AGENT_CONTENT_READ_CAPABILITY_ARTIFACT,
+  AgentContentReadPolicyEngine,
+  AgentContentReadPolicyError,
+  AgentContentReadRequestError,
+  AgentContentReadAuditError,
+  createAgentContentReadPolicy,
+} from './daemon/agent-content-read';
+export type {
+  AgentContentReadSurface,
+  AgentContentReadDecision,
+  AgentContentReadReason,
+  AgentContentReadRoot,
+  AgentContentReadPolicy,
+  AgentContentReadPolicySelection,
+  AgentContentReadRequest,
+  AgentContentReadResult,
+  AgentContentReadAllowed,
+  AgentContentReadDenied,
+  AgentContentSessionIdentity,
+  AgentContentAuditReceipt,
+} from './daemon/agent-content-read';
+export { AgentContentAuditStore, AgentContentAuditStoreError } from './daemon/agent-content-audit-store';
 export {
   AgentReliableSpool,
   AgentReliableSpoolError,
