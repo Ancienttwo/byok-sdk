@@ -160,25 +160,40 @@ export class AgentEgressController {
 
   /** Re-open every existing Agent-local spool before retrying stable records after restart. */
   async recover(agentsRoot: string): Promise<void> {
+    if (!path.isAbsolute(agentsRoot)) throw new Error('Agent egress recovery root must be absolute');
+    if (this.options.tenantId === undefined) {
+      throw new Error('Agent egress recovery requires one authenticated tenant authority');
+    }
+    const canonicalAgentsRoot = await fs.realpath(agentsRoot);
     let entries: import('node:fs').Dirent[];
     try {
-      entries = await fs.readdir(agentsRoot, { withFileTypes: true });
+      entries = await fs.readdir(canonicalAgentsRoot, { withFileTypes: true });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
       throw error;
     }
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      const homeDir = path.join(agentsRoot, entry.name);
+      const homeDir = path.join(canonicalAgentsRoot, entry.name);
+      const canonicalHome = await fs.realpath(homeDir);
+      const relativeHome = path.relative(canonicalAgentsRoot, canonicalHome);
+      if (relativeHome !== entry.name || relativeHome.includes(path.sep) || path.isAbsolute(relativeHome)) {
+        throw new Error(`Agent egress recovery home escaped the canonical agents root: ${entry.name}`);
+      }
       try {
         await fs.lstat(path.join(homeDir, AGENT_EGRESS_DIRECTORY));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
         throw error;
       }
-      const spool = await AgentReliableSpool.open(homeDir);
+      const spool = await AgentReliableSpool.open(canonicalHome);
       for (const record of spool.records()) {
-        if (this.options.tenantId !== undefined && record.tenantId !== this.options.tenantId) continue;
+        if (record.agentRef.agentId !== entry.name) {
+          throw new Error(`Agent egress spool in ${entry.name} claims Agent ${record.agentRef.agentId}`);
+        }
+        if (record.tenantId !== this.options.tenantId) {
+          throw new Error(`Agent egress spool in ${entry.name} claims a different tenant`);
+        }
         const key = agentKey(record.agentRef);
         const existing = this.spools.get(key);
         if (existing && existing !== spool) throw new Error('multiple Agent egress spools claim the same AgentRef');

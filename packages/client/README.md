@@ -120,6 +120,55 @@ files other than the SDK-reserved `.byok` namespace are opaque; there is no
 required `artifacts/` directory and the client does not parse or index their
 contents.
 
+## Agent egress and explicit content reads
+
+`agentEgress` is consumed configuration, not a profile projection. The host
+must select one exact policy revision and an authenticated tenant id. Omitting
+contentful mode keeps runtime activity metadata/status-only; enabling it is an
+explicit product decision and requires the server capability. Reliable events
+are fsynced under the canonical Agent home and retire only after an exact ack.
+
+```ts
+createDaemon({
+  // ...normal device, transport and agentHome configuration
+  agentEgress: {
+    tenantId: 'tenant-authority-from-salesko',
+    policy: {
+      policyRevision: 'salesko-agent-egress-r1',
+      activity: { mode: 'metadata-status', delivery: 'latest-value' },
+      reliable: {
+        maxPendingEventsPerAgent: 256,
+        maxPendingBytesPerAgent: 4 * 1024 * 1024,
+        maxPendingBytesPerTenant: 16 * 1024 * 1024,
+      },
+      transfers: {
+        workspace: { maxBytes: 1024 * 1024, allowedMimeTypes: ['text/plain'] },
+        transcript: 'disabled',
+        artifact: 'disabled',
+      },
+    },
+    contentRead: {
+      workspace: {
+        root: { kind: 'agent-home' },
+        maxTextBytes: 1024 * 1024,
+        textMimeTypes: ['text/plain'],
+      },
+    },
+  },
+});
+```
+
+Each content surface requires both the matching non-disabled wire policy and
+its local supplement. The local supplement can only narrow root, text, MIME,
+size and sensitive-name behavior; it cannot enable a wire-disabled surface.
+The SDK derives `agents/<agentId>`, `.byok/egress`, runtime-session evidence and
+the per-Agent content-read audit path. Salesko must not compose those paths.
+Tenant/device identity comes from authenticated host state; a request cannot
+override it. Transcript reads additionally require the exact persisted
+AgentRef/session/runtime/cwd handoff. Allowed content is uploaded through the
+authenticated blob channel and cloud receives a content-free receipt with an
+exact `BlobRef`; no API recursively mirrors an Agent home.
+
 For a concrete private host composition, see the
 [`examples/salesko-connector-broker`](../../examples/salesko-connector-broker)
 reference. It keeps `@byok-sdk/client` credential-blind while combining

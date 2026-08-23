@@ -102,7 +102,7 @@ flowchart LR
 | 本机 library | `createDaemon()` / `createDaemonWithAdapters()` | 配对、连接、任务执行、observer、service lifecycle |
 | 本机 CLI | `byok-agent` | pair/start/status/runtimes/tasks/workspaces/unpair/approval/service commands |
 | Approval helper | `byok-approval-mcp` | Claude confirm 模式的 stdio MCP 子进程，经 control socket 回调 daemon |
-| Wire contract | `@byok-sdk/protocol` public index | envelope、18 类消息、HTTP schema、状态机、capability flags |
+| Wire contract | `@byok-sdk/protocol` public index | envelope、typed messages、HTTP schema、状态机、capability flags |
 | Key custody | `ProviderRegistry` | profile 与 secret 分库存储，构造 OpenAI-compatible / Anthropic client |
 
 ### 1.2 Monorepo 与依赖图
@@ -209,7 +209,7 @@ flowchart TB
   classDef safety fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
 
   Version(["version.ts<br/>PROTOCOL_VERSION / flags"]):::safety
-  Messages(["messages.ts<br/>17 payload schemas"]):::schema
+  Messages(["messages.ts<br/>typed payload schemas"]):::schema
   Envelope(["envelope.ts<br/>direction-aware union"]):::schema
   Codec(["codec.ts<br/>parse / encode / decode / create"]):::core
   Events(["agent-event.ts<br/>8 known + unknown tolerance"]):::schema
@@ -1349,22 +1349,31 @@ S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回
 
 #### 12.6.7 Device、Agent、placement 与 runtime session
 
-当前 BYOK 是 **multi-device + multi-runtime + task session**，足以支撑
-AiphaBee Local Agent CLI；它尚未实现 first-class multi-Agent fleet。下面四个
-概念不得互换：
+当前 BYOK 已实现 **multi-device + multi-runtime + durable local Agent home +
+task/session execution**，但仍未实现 control-plane placement/fleet
+lifecycle。下面四个概念不得互换：
 
 | 概念 | Authority | 当前状态 |
 | --- | --- | --- |
 | `Device` | tenant/product 下已配对的物理机或 VM 执行宿主、device key、presence 与 runtime capability | **已实现** |
-| `Agent` | 可命名、持久、可独立启停并可重新 placement 的逻辑资源 | **目标设计，未实现** |
+| `Agent` | `AgentRef { agentId, profileRevision }` 绑定 canonical local home、cwd、lease、session journal 与 egress policy；fleet lifecycle 仍属后续 | **本地持久化/执行已实现；fleet lifecycle 未实现** |
 | `AgentPlacement` | control plane 对 `agentId → deviceId + generation + lease` 的唯一 assignment authority；observation 不得反向覆盖它 | **目标设计，未实现** |
-| `RuntimeSession` | Device 上临时 runtime process、session 与 workspace；服务 task 或 Agent generation，但不是稳定 Agent identity | **task path 已实现；Agent path 未实现** |
+| `RuntimeSession` | Device 上临时 runtime process/session；严格 Agent path 的 cwd、handoff 与 terminal cause 必须 exact-match canonical Agent home | **task 与 Agent execution path 已实现** |
 
 未来 fleet slice 必须另设 `AgentObservation` 作为非权威运行态投影，并以
 generation/lease 拒绝 stale lifecycle command。显式 placement 不可用时禁止
 回退到 `pickFirstConnectedDevice()`；runtime discovery 也不得创建或迁移
 Agent。Protocol v1 保持冻结，Agent lifecycle 只能进入新 control-plane/API
 或明确批准的 versioned surface。完整裁定见 ADR-025。
+
+Agent local/cloud projection 使用 additive capability 和 distinct wire
+messages，不把 fleet placement 写进 task schema。`agent-egress-policy` 绑定
+metadata-default/content-opt-in policy；reliable Agent evidence 在本地 Agent
+home fsync 后以 stable cursor 重试并由 exact ack 退休，latest-value activity
+保持可替换。Workspace、transcript、artifact read 各自 capability-gated，内容
+经 explicit root/MIME/size policy 与本地 audit 后只通过 authenticated BlobRef
+投影；cloud 不成为 provider loop、runtime transcript 或 Agent-home mirror 的
+authority。
 
 ### 12.7 数据与存储架构（云端面为目标设计；本机 journal 面已实现）
 

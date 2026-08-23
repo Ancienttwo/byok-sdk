@@ -235,6 +235,9 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
 | `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `policy`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
+| `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
+| `agent.egress.ack` | S→D | optional | optional | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
+| `agent.content.read` | S→D | optional | optional | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -249,6 +252,40 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
+| `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, sanitized payload hash and byte count | A locally fsynced reliable event is sent or retried |
+| `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
+
+### 2.1 Agent egress and explicit content reads
+
+`task.offer_for_agent_with_egress` is a distinct message rather than an
+optional field on `task.offer_for_agent`. Server and hosted cloud require
+`agent-home-contract`, `agent-egress-policy`, and
+`agent-egress-reliable-ack` before allocating the task/mailbox row. An old
+daemon cannot strip the policy and continue with task-only semantics.
+
+The policy has one exact `policyRevision`. Activity is either
+`metadata-status`/`latest-value`, or explicit
+`contentful-trajectory`/`latest-value` with positive coalesce and event-byte
+bounds. Reliable quotas are positive and independently bound per Agent and
+authenticated tenant. Workspace, transcript and artifact transfers are each
+`disabled` or carry an explicit MIME/byte policy; no surface inherits another
+surface's capability.
+
+`agent.egress.reliable` is at-least-once. The daemon appends/fsyncs before the
+first send and retains the stable id/cursor until an exact
+`agent.egress.ack`. A duplicate exact event returns the existing durable
+receipt; a changed AgentRef, profile revision, session, policy, id, cursor,
+hash or bytes fails closed. It never degrades to latest-value activity.
+
+`agent.content.read` is task-independent but cursor-tracked and redeliverable.
+Its target is a portable relative path (no absolute path, dot segment or
+backslash); cwd is absolute. The daemon derives the capability from the
+surface, binds tenant/device from authenticated local state rather than the
+payload, and applies its own narrower root/text/sensitive-name policy. Allowed
+bytes travel only through the authenticated blob channel. The
+`agent.content.receipt` contains a `BlobRef` whose hash, size and content type
+must exactly match the receipt; denial carries `byteCount: 0`. The receipt is
+content-free metadata and does not make cloud a transcript authority.
 
 **`TaskOfferPayload.dispatchSelection` is the authoritative LLM target when
 present.** It is a strict discriminated union:

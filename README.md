@@ -75,6 +75,18 @@ Profile projection content and every non-`.byok` Agent file remain downstream
 owned and opaque. In particular, `artifacts` is not an SDK schema or a required
 directory. See [the host local-storage contract](docs/host-local-storage-layout.md).
 
+The unreleased Agent egress contract adds one consumed `AgentEgressPolicy`.
+Metadata/status activity is the safe default; contentful trajectory is an
+explicit capability-gated opt-in. Reliable evidence is fsynced under the
+canonical Agent home and retried with stable cursors until an exact ack, while
+latest-value activity remains replaceable and reports typed drop reasons.
+Workspace, transcript, and artifact reads are separately disabled/enabled,
+path/MIME/size checked locally, audited per Agent, and represented to cloud by
+content-free receipts plus authenticated `BlobRef`s. Salesko supplies tenant
+authorization, stable Agent/Profile identity, policy and retention; it does
+not compose Agent paths, implement SDK journals, or mirror the full local
+transcript as shared history.
+
 ## Key management is separate
 
 `@byok-sdk/keys` stores provider credentials and makes direct provider calls.

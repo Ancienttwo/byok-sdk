@@ -61,6 +61,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'tasks',
   'cancellations',
   'receipts',
+  'egress',
   'proofReceipts',
   'blobs',
   'rateLimiter',

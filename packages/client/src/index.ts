@@ -111,11 +111,6 @@ export {
   AGENT_CONTENT_READ_CAPABILITY_WORKSPACE,
   AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT,
   AGENT_CONTENT_READ_CAPABILITY_ARTIFACT,
-  AgentContentReadPolicyEngine,
-  AgentContentReadPolicyError,
-  AgentContentReadRequestError,
-  AgentContentReadAuditError,
-  createAgentContentReadPolicy,
 } from './daemon/agent-content-read';
 export type {
   AgentContentReadSurface,
@@ -131,20 +126,6 @@ export type {
   AgentContentSessionIdentity,
   AgentContentAuditReceipt,
 } from './daemon/agent-content-read';
-export { AgentContentAuditStore, AgentContentAuditStoreError } from './daemon/agent-content-audit-store';
-export {
-  AgentReliableSpool,
-  AgentReliableSpoolError,
-  AgentReliableQuotaError,
-  AGENT_EGRESS_DIRECTORY,
-  AGENT_RELIABLE_SPOOL_FILENAME,
-} from './daemon/agent-egress-spool';
-export type {
-  AgentReliableAck,
-  AgentReliableAppendInput,
-  AgentReliableEgressRecord,
-  LatestValueRecord,
-} from './daemon/agent-egress-spool';
 export {
   McpToolsetRevisionConflictError,
   McpToolsetDefinitionRevisionConflictError,

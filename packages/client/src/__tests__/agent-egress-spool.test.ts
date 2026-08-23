@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -83,5 +83,58 @@ describe('Agent reliable egress spool', () => {
     expect(controller.reliableRecords()).toHaveLength(1);
     expect(controller.status().latestValue.pendingEvents).toBe(0);
     expect(controller.status().reliable.lastDropReason).toBe('quota_exceeded');
+  });
+
+  it('isolates different Agents while enforcing one tenant-wide byte quota', async () => {
+    const policy: AgentEgressPolicy = {
+      ...DEFAULT_AGENT_EGRESS_POLICY,
+      policyRevision: 'tenant-isolation-r1',
+      reliable: { maxPendingEventsPerAgent: 2, maxPendingBytesPerAgent: 1024, maxPendingBytesPerTenant: 31 },
+    };
+    const controller = new AgentEgressController({ policy, tenantId: 'tenant-isolation' });
+    const first = await controller.appendReliable({
+      homeDir: await home('isolation-one'),
+      agentRef: { agentId: 'agent-one', profileRevision: 'r1' },
+      sessionRef: 'session-one',
+      payload: { status: 'one' },
+    });
+    expect(first.ok).toBe(true);
+    const second = await controller.appendReliable({
+      homeDir: await home('isolation-two'),
+      agentRef: { agentId: 'agent-two', profileRevision: 'r1' },
+      sessionRef: 'session-two',
+      payload: { status: 'two' },
+    });
+    expect(second).toEqual({ ok: false, reason: 'quota_exceeded' });
+    expect(controller.reliableRecords()).toHaveLength(1);
+  });
+
+  it('fails closed when restart recovery finds a spool under another Agent or tenant home', async () => {
+    const storageRoot = await home('recovery-root');
+    const agentsRoot = path.join(storageRoot, 'agents');
+    await mkdir(agentsRoot);
+    const originalHome = path.join(agentsRoot, 'agent-original');
+    await mkdir(originalHome);
+    const spool = await AgentReliableSpool.open(originalHome);
+    await spool.append({
+      agentRef: { agentId: 'agent-original', profileRevision: 'r1' },
+      tenantId: 'tenant-original',
+      policyRevision: DEFAULT_AGENT_EGRESS_POLICY.policyRevision,
+      payload: { status: 'pending' },
+      sessionRef: 'session-original',
+    }, DEFAULT_AGENT_EGRESS_POLICY, 0);
+
+    const movedHome = path.join(agentsRoot, 'agent-moved');
+    await rename(originalHome, movedHome);
+    await expect(new AgentEgressController({
+      policy: DEFAULT_AGENT_EGRESS_POLICY,
+      tenantId: 'tenant-original',
+    }).recover(agentsRoot)).rejects.toThrow(/claims Agent agent-original/);
+
+    await rename(movedHome, originalHome);
+    await expect(new AgentEgressController({
+      policy: DEFAULT_AGENT_EGRESS_POLICY,
+      tenantId: 'tenant-other',
+    }).recover(agentsRoot)).rejects.toThrow(/different tenant/);
   });
 });

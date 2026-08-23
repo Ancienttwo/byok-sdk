@@ -13,6 +13,9 @@ the only Agent-home composition rule:
       notes/                          create-if-missing, preserve existing
       .byok/                           SDK-reserved internal namespace
         agent-home.lease
+        egress/
+          reliable-v1.jsonl           append/fsync, exact-ack retirement
+        content-read-audit-v1.jsonl   content-free per-Agent decisions
         runtime-sessions/
           <runtime>-<session-hash>.jsonl
           <runtime>-task-<task-hash>.jsonl
@@ -55,6 +58,8 @@ SDK-reserved namespace in the Agent home.
 | Agent files | Enforce home containment and cross-Agent isolation only | Own names, formats, directories, and business semantics |
 | Runtime | Seal AgentRef, canonical cwd, runtime/session and lease in the manifest | Select allowed runtimes and product policy |
 | Sessions | Persist append-only exact-match handoff and terminal evidence under `.byok/runtime-sessions`; report bounded write exhaustion without stranding the cloud task or lease | Treat mismatch as a product-visible failed admission and surface the host audit signal; do not invent migration semantics |
+| Egress | Own metadata-default projection, sanitizer boundary, per-Agent reliable spool, cursor/ack/retry, quota and typed drop facts | Select one exact policy revision; contentful trajectory is an explicit product decision |
+| Explicit reads | Own per-surface capability, canonical path policy, per-Agent audit journal and BlobRef receipt fidelity | Author tenant/actor authz plus narrower root/MIME/text/size policy; never infer authorization from file presence |
 | Concurrency | Enforce one mutable writer per canonical Agent home | Do not schedule around or bypass a busy decline |
 | Credentials | Never persist credential bytes in Agent home | Store secrets in Keychain or Windows Credential Manager; project references/configured state only |
 
@@ -77,6 +82,16 @@ AgentRef, profile revision mismatch, session/cwd/runtime mismatch, or busy
 Agent home fails closed; none silently falls back to
 `workspaceRoot/<taskId>`.
 
+Egress enablement is a second explicit admission step. Salesko first authors
+one exact policy revision, then waits for the daemon's durable
+`agent-egress-policy`/`agent-egress-reliable-ack` declaration before enqueuing
+the distinct egress-aware Agent offer. A workspace, transcript or artifact read
+is admitted only after that surface's own capability is present. Existing
+`task.progress`, local transcripts, blobs and audit rows are not relabelled,
+backfilled or uploaded during cutover. A policy/profile/session mismatch fails
+closed and requires a new authorized request; there is no dual-read or legacy
+fallback period.
+
 RAFT recovered behavior is precedent, not BYOK acceptance and not a directory
 template. Its product-private secrets, tokens, app storage, and direct
 `join(agentId)` behavior are not copied. A PDF observed in a recovered Agent
@@ -92,11 +107,16 @@ transcript, credential custody, or arbitrary Agent-home files into cloud
 authority. `MEMORY.md`, `notes/`, and opaque Agent files are not recursively
 mirrored.
 
-This work-package does not claim a generic egress sanitizer or durable
-activity spool. Current `task.progress` is a separate contentful runtime
-projection and the transport outbox is in memory. Salesko must not treat it as
-the complete local transcript or shared-history authority. The typed
-metadata-default/content-opt-in policy, reliable-vs-latest delivery lanes,
-quotas, envelope-boundary sanitizer, and explicit workspace/transcript/artifact
-read receipts are frozen as the next generic design contract in
-[Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md).
+The typed Agent egress contract is additive to Agent-home admission. Salesko
+configures an exact `AgentEgressPolicy`; metadata/status remains the safe
+default, while contentful trajectory requires explicit opt-in. Reliable facts
+use the Agent-local `.byok/egress` spool and exact acknowledgements; latest
+activity remains replaceable and is never backfill or shared history.
+
+Workspace, transcript and artifact reads are disabled independently unless
+the corresponding capability and local policy are configured. BYOK owns path
+containment, MIME/text/size checks, per-Agent audit persistence and transport
+fidelity. Salesko owns tenant/actor authorization and cloud retention. Neither
+side treats a full runtime transcript, `MEMORY.md`, `notes/`, or opaque Agent
+files as implicitly uploadable. The design rationale and acceptance boundary
+remain in [Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md).

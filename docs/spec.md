@@ -552,17 +552,38 @@ lease cannot remain stuck indefinitely.
 
 Cloud orchestration does not make the runtime cloud-hosted: provider access,
 tool execution, runtime-native transcript, credential custody, and opaque
-Agent-home contents remain local authorities. The Agent-home feature does not
-authorize recursive mirroring or explicit file/transcript reads. Current
-`task.progress` is a separate contentful projection with an in-memory
-transport outbox; it is not a durable local-first history. The proposed typed
-metadata-default/content-opt-in egress and explicit content-read contract is
-documented separately in
-[Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md)
-and is not yet a shipped public config surface.
+Agent-home contents remain local authorities. Recursive mirroring is never
+authorized. The additive Agent egress path consumes one exact, revisioned
+`AgentEgressPolicy`: activity defaults to metadata/status latest-value
+projection; contentful trajectory requires explicit host selection plus the
+`agent-egress-policy` capability. Every outbound envelope passes the same
+fail-closed sanitizer boundary before WS or long-poll encoding. A rejected or
+throwing sanitizer emits no original bytes.
 
-The host selects the branded root and authors stable identity plus redacted
-profile projection content. It does not compose the Agent path. Credentials
+Reliable Agent evidence is a different lane and store from latest-value
+activity. It is appended and fsynced under the canonical Agent home's `.byok`
+namespace before its first send, retains a stable event id and cursor across
+daemon restart, and retires only after an exact AgentRef/session/policy/id/
+cursor acknowledgement. Positive per-Agent and authenticated-tenant event/
+byte quotas fail closed with typed drop facts; no reliable event falls back to
+the lossy lane.
+
+Workspace, transcript, and artifact reads are three independent additive
+capabilities. A request carries exact AgentRef/profile revision, session,
+runtime, cwd, actor, policy revision, relative target, declared MIME and decode
+mode. The daemon applies canonical containment, existing-ancestor/realpath,
+symlink, sensitive-name, explicit MIME, text and byte limits, durably audits
+the decision locally, and uploads allowed bytes through the authenticated blob
+channel. The wire receipt contains only identity, decision, hash/size/type and
+`BlobRef`, never inline content. Cloud admission and readback preserve that
+exact fact; neither the blob nor the receipt becomes a complete local
+transcript or shared-history authority. See
+[Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md).
+
+The host selects the branded root, authors stable identity plus redacted
+profile projection content, and selects an SDK-valid egress/content-read
+policy. It does not compose the Agent path, journal path, or runtime-session
+path. Credentials
 remain in an OS credential store; only non-secret references/configured state
 may be projected. Legacy task offers retain their existing
 `workspaceRoot/<taskId>` behavior as a separate API, never as a fallback for an
