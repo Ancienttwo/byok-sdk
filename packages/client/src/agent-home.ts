@@ -411,6 +411,14 @@ export class AgentHomeLeaseManager {
         })();
         releaseAttempt = attempt.catch((error: unknown) => {
           releaseAttempt = undefined;
+          // `release()` is the caller relinquishing this in-process writer.
+          // Keep an unknown/other on-disk marker intact, but never let the
+          // process registry outlive the failed relinquish and wedge this home
+          // after the external marker is repaired or removed.
+          if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) {
+            AgentHomeLeaseManager.held.delete(canonicalHome);
+          }
+          released = true;
           throw error;
         });
         return releaseAttempt;

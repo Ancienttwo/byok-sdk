@@ -212,6 +212,18 @@ export interface TaskAttemptStore {
       readonly agentRef?: AgentRef;
     },
   ): Promise<TaskAttempt>;
+  /**
+   * Atomically reserve one strict Agent offer. `created: false` means the task
+   * id already had durable authority and no caller may append another offer.
+   */
+  reserveAgentOffer(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly agentRef: AgentRef;
+    },
+  ): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }>;
   get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Batch lookup used by mailbox projection; implementations must not turn one poll into N queries. */
   getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;

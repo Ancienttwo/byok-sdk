@@ -111,6 +111,11 @@ export interface TenantBoundTaskAttempts {
     readonly deviceId: string;
     readonly agentRef?: TaskAttempt['agentRef'];
   }): Promise<TaskAttempt>;
+  reserveAgentOffer(input: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly agentRef: NonNullable<TaskAttempt['agentRef']>;
+  }): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }>;
   get(taskId: string): Promise<TaskAttempt | undefined>;
   getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
   claim(input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt | undefined>;
@@ -228,6 +233,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     },
     tasks: {
       open: (input) => cloud.tasks.open(tenant, input),
+      reserveAgentOffer: (input) => cloud.tasks.reserveAgentOffer(tenant, input),
       get: (taskId) => cloud.tasks.get(tenant, taskId),
       getMany: (taskIds) => cloud.tasks.getMany(tenant, taskIds),
       claim: (input) => cloud.tasks.claim(tenant, input),

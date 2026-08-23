@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260823-1214-agent-first-home-contract.md
 > **Contract**: tasks/contracts/20260823-1214-agent-first-home-contract.contract.md
 > **Review**: tasks/reviews/20260823-1214-agent-first-home-contract.review.md
-> **Last Updated**: 2026-08-23 15:34
+> **Last Updated**: 2026-08-23 15:52
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -72,6 +72,16 @@
   authorities are mutually exclusive, mailbox append failure closes its
   reserved Agent attempt, offer type is the strict-Agent authority, and lease
   release failure no longer strands `activeTaskCount`.
+- The next frozen-subject review found two P1s in those remediations: a failed
+  lease relinquish left the process-local reservation behind after the disk
+  marker was externally repaired, and an exact task-id retry could append a
+  second Agent offer against an existing/terminal attempt. Release now drops
+  only its own process reservation while preserving any foreign marker; tests
+  remove the external marker and prove reacquisition. Cloud stores now expose
+  an atomic `reserveAgentOffer` result, and any existing task id is rejected
+  before mailbox append. In-memory and Postgres concurrency tests prove one
+  winner. Store-level lifecycle updates also preserve exact Agent identity;
+  the protocol/SQL boundary rejects Windows-reserved segments.
 
 ## Tradeoffs Considered
 
@@ -116,7 +126,7 @@
   opening hello. The tests now wait for the hello when isolating one stalled
   terminal, and count task ids separately while proving the hello shares the
   capped outbox. Their focused rerun passed 2 files / 4 tests.
-- Fresh full `bun run test`: client 1347, cloud 194, cloud-dataplane 74 (84
+- Fresh full `bun run test`: client 1347, cloud 196, cloud-dataplane 74 (84
   substrate-dependent tests skipped in ordinary mode), conformance 141, core
   251, protocol 293, server 248, and all remaining package suites passed.
 - `bun run build`, `bun run typecheck`, `git diff --check`, strict workflow,
@@ -126,7 +136,14 @@
   cloud 1 / 8, server 2 / 22, protocol 3 / 70, plus monorepo typecheck.
 - The disposable-Postgres oracle passed again after migration 0012 changed;
   it now also proves a single-backslash Agent id is rejected by the actual
-  `task_agent_ref_bounded` constraint and leaves no task row.
+  `task_agent_ref_bounded` constraint and leaves no task row. The latest
+  oracle additionally proves Windows-reserved-name rejection, atomic
+  same-task Agent reservation, and wrong-Agent lifecycle immutability.
+- One parallel verification attempt ran `bun run build` and `bun run
+  typecheck` concurrently; build's intentional `dist/` cleanup briefly made
+  workspace package declarations unavailable to typecheck. After build
+  completed, the required sequential monorepo typecheck passed. This was a
+  verification-orchestration race, not a source failure.
 
 ## Promotion Filter
 

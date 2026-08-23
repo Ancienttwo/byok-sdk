@@ -320,7 +320,10 @@ See `docs/architecture/sdk-architecture.md` ADR-023.
 `profileRevision`; both are limited by UTF-8 byte length. The target device
 must have durably declared `agent-home-contract` before the server/cloud creates
 or enqueues the task. A legacy daemon therefore cannot strip identity and run
-the instruction in `workspaceRoot/<taskId>`.
+the instruction in `workspaceRoot/<taskId>`. `agentId` must also be a portable
+Windows pathname segment: reserved device names and trailing dot/space are
+rejected. A strict Agent `taskId` is reserved exactly once; any later enqueue
+with that id fails closed instead of appending a second offer.
 
 The daemon accepts an absolute `hostStorageRoot` from its local host config and
 the SDK exclusively composes `<hostStorageRoot>/agents/<agentId>`. It then

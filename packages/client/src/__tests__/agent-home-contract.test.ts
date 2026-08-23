@@ -604,6 +604,9 @@ describe('SDK-owned Agent home contract', () => {
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+    await fs.rm(path.join(home, '.byok', 'agent-home.lease'));
+    const reacquired = await manager.prepare(agentRef);
+    await reacquired.lease.release();
   });
 
   it.each(['pi', 'claude', 'codex'] as const)(

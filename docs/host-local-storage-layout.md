@@ -32,6 +32,11 @@ but unusable root therefore never admits a cloud Agent offer.
 authorities. Agent execution never silently inherits task-scoped Git workspace
 semantics or creates a second durable workspace owner.
 
+`agentId` is also rejected when it is not a portable Windows pathname segment
+(reserved device names or a trailing dot/space). A strict Agent `taskId` is a
+single-use durable reservation: retrying enqueue with the same id fails closed
+instead of creating a second mailbox offer against an existing attempt.
+
 `artifacts` is an ownership category, not a required literal directory and not
 an SDK configuration schema. Projects, PDFs, images, temporary work, and other
 Agent files remain opaque. BYOK does not parse, index, classify, rename, scan,

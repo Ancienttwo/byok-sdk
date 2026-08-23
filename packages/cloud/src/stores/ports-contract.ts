@@ -23,7 +23,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   pairingCodes: ['issue', 'redeem'],
   nonces: ['issue', 'validate', 'markUsed'],
   dedup: ['checkAndRecord'],
-  tasks: ['open', 'get', 'getMany', 'claim', 'recordStatus'],
+  tasks: ['open', 'reserveAgentOffer', 'get', 'getMany', 'claim', 'recordStatus'],
   cancellations: ['request'],
   receipts: ['record', 'get'],
   proofReceipts: ['record', 'get'],

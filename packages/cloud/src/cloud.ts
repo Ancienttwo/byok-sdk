@@ -529,10 +529,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     // Strict Agent attempts reserve their identity before delivery allocation.
     // This makes concurrent re-enqueues converge on one durable AgentRef
     // instead of allowing two mailbox bodies to race a later task.open.
-    const openedBeforeAppend =
+    const reservation =
       agentRef === undefined
         ? undefined
-        : await stores.tasks.open({ taskId, deviceId, agentRef });
+        : await stores.tasks.reserveAgentOffer({ taskId, deviceId, agentRef });
+    const openedBeforeAppend = reservation?.attempt;
     if (
       agentRef !== undefined &&
       (openedBeforeAppend === undefined ||
@@ -543,6 +544,12 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       throw new ByokCloudError(
         'agent_ref_mismatch',
         `Task ${taskId} already has a different durable Agent identity or target device.`,
+      );
+    }
+    if (reservation !== undefined && !reservation.created) {
+      throw new ByokCloudError(
+        'agent_task_already_exists',
+        `Task ${taskId} already has a durable Agent attempt and cannot be enqueued again.`,
       );
     }
 

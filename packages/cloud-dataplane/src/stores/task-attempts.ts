@@ -109,6 +109,27 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     return existing;
   }
 
+  async reserveAgentOffer(
+    tenant: TenantId,
+    input: { readonly taskId: string; readonly deviceId: string; readonly agentRef: AgentRef },
+  ): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }> {
+    const inserted = await this.#pool.query<TaskRow>(
+      `INSERT INTO task (
+         tenant_id, task_id, device_id, agent_id, agent_profile_revision,
+         owner_device_id, status, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, NULL, 'offered', $6)
+       ON CONFLICT (tenant_id, task_id) DO NOTHING
+       RETURNING ${TASK_SELECT_COLUMNS}`,
+      [tenant, input.taskId, input.deviceId, input.agentRef.agentId, input.agentRef.profileRevision, this.#now()],
+    );
+    const created = inserted.rows[0];
+    if (created !== undefined) return { attempt: taskRowToAttempt(created), created: true };
+    const existing = await this.get(tenant, input.taskId);
+    if (existing === undefined) throw new Error(`task ${input.taskId} vanished during Agent offer reservation`);
+    return { attempt: existing, created: false };
+  }
+
   async get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined> {
     const result = await this.#pool.query<TaskRow>(
       `SELECT ${TASK_SELECT_COLUMNS} FROM task WHERE tenant_id = $1 AND task_id = $2`,
@@ -160,11 +181,13 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     const result = await this.#pool.query<TaskRow>(
       `UPDATE task
           SET status = $3,
-              agent_id = COALESCE($5, agent_id),
-              agent_profile_revision = COALESCE($6, agent_profile_revision),
               terminal_cause = COALESCE($7, terminal_cause),
               updated_at = $4
         WHERE tenant_id = $1 AND task_id = $2
+          AND (
+            ($5::text IS NULL AND $6::text IS NULL)
+            OR (agent_id = $5 AND agent_profile_revision = $6)
+          )
           AND (
             (cancel_requested_at IS NULL AND status NOT IN ('complete', 'failed', 'cancelled'))
             OR (cancel_requested_at IS NOT NULL AND $3 = 'cancelled' AND status <> 'cancelled')

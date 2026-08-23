@@ -529,6 +529,13 @@ fails closed. One canonical Agent home has one mutable writer across tasks;
 another Agent home remains independent. Crash residue is reclaimable only by
 the same stable daemon owner identity.
 
+Agent ids are also portable Windows path segments: reserved device names and
+trailing dot/space are rejected before any path or row is created. Hosted
+cloud atomically reserves each strict Agent task id once; a duplicate or retry
+with the same task id fails closed and cannot append a second mailbox offer or
+execute against a terminal attempt. Task-attempt stores never attach or
+overwrite AgentRef through lifecycle updates.
+
 Daemon startup materializes and write-probes the canonical Agent root before
 advertising `agent-home-contract`. `agentHome` and legacy `gitWorkspace` are
 mutually exclusive configuration authorities; strict Agent execution never

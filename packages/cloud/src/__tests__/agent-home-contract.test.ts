@@ -28,6 +28,14 @@ describe('hosted Agent-home contract', () => {
   it('fails closed on capability omission before mailbox append or task open', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await harness.core.presence.publish(TENANT_A, {
+      deviceId: device.deviceId,
+      level: 'online',
+      protocolVersions: [1],
+      configuredToolsets: ['agent-home-contract'],
+      ttlMs: 60_000,
+      minimumIntervalMs: 0,
+    });
 
     await expect(
       harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: agentPayload() }),
@@ -38,6 +46,7 @@ describe('hosted Agent-home contract', () => {
         .messages,
     ).toHaveLength(0);
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'task_missing')).toBeUndefined();
+    expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toBeUndefined();
   });
 
   it('persists the exact AgentRef through mailbox decode and task-attempt readback', async () => {
@@ -69,9 +78,43 @@ describe('hosted Agent-home contract', () => {
     await expect(
       harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
         taskId: 'agent-task-1',
+        payload: agentPayload(),
+      }),
+    ).rejects.toMatchObject({ code: 'agent_task_already_exists' });
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-task-1',
         payload: { ...agentPayload(), agentRef: { agentId: 'agent-other', profileRevision: 'profile-r1' } },
       }),
     ).rejects.toMatchObject({ code: 'agent_ref_mismatch' });
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 }))
+        .messages,
+    ).toHaveLength(1);
+  });
+
+  it('atomically admits only one concurrent enqueue for an exact Agent task id', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+    });
+
+    const outcomes = await Promise.allSettled([
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-concurrent-enqueue',
+        payload: agentPayload(),
+      }),
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-concurrent-enqueue',
+        payload: agentPayload(),
+      }),
+    ]);
+    expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = outcomes.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]!.reason).toMatchObject({ code: 'agent_task_already_exists' });
     expect(
       (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 }))
         .messages,
@@ -200,6 +243,35 @@ describe('hosted Agent-home contract', () => {
       agentRef: AGENT_REF,
       terminalCause: 'mailbox append failed before Agent offer delivery',
     });
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-mailbox-failure',
+        payload: agentPayload(),
+      }),
+    ).rejects.toMatchObject({ code: 'agent_task_already_exists' });
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 }))
+        .messages,
+    ).toHaveLength(0);
+  });
+
+  it('does not let lifecycle callers attach Agent identity to a legacy attempt', async () => {
+    const harness = createHarness();
+    await harness.stores.tasks.open(TENANT_A, {
+      taskId: 'legacy-agent-attachment',
+      deviceId: 'legacy-device',
+    });
+
+    await harness.stores.tasks.recordStatus(TENANT_A, {
+      taskId: 'legacy-agent-attachment',
+      status: 'failed',
+      agentRef: AGENT_REF,
+      terminalCause: 'must not attach identity',
+    });
+    await expect(harness.stores.tasks.get(TENANT_A, 'legacy-agent-attachment')).resolves.toMatchObject({
+      status: 'offered',
+    });
+    expect((await harness.stores.tasks.get(TENANT_A, 'legacy-agent-attachment'))?.agentRef).toBeUndefined();
   });
 
   it('rejects claim/terminal AgentRef mismatches and protects the first terminal fact', async () => {

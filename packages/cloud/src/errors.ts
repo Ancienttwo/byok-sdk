@@ -48,6 +48,8 @@ export const CLOUD_ERROR_CODES = {
   agent_capability_missing: 'agent_capability_missing',
   /** Inbound Agent identity did not exactly match the offered identity. */
   agent_ref_mismatch: 'agent_ref_mismatch',
+  /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
+  agent_task_already_exists: 'agent_task_already_exists',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

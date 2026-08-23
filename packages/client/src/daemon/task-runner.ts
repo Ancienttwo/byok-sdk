@@ -34,6 +34,7 @@ import {
 } from '../types';
 import {
   AgentHomeBusyError,
+  AgentHomeResolutionError,
   AgentHomeManager,
   type AgentHomeBinding,
   type AgentRef,
@@ -1356,7 +1357,7 @@ export class TaskRunner {
         } catch (error) {
           decline(
             `Agent home admission failed: ${errorMessage(error)}`,
-            error instanceof AgentHomeBusyError,
+            error instanceof AgentHomeBusyError || !(error instanceof AgentHomeResolutionError),
           );
           return;
         }

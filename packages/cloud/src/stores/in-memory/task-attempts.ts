@@ -18,6 +18,10 @@
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { AgentRef, TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '../ports';
 
+function sameAgentRef(left: AgentRef | undefined, right: AgentRef | undefined): boolean {
+  return left?.agentId === right?.agentId && left?.profileRevision === right?.profileRevision;
+}
+
 export class InMemoryTaskAttemptStore implements TaskAttemptStore {
   readonly #state: InMemoryTaskAttemptState;
 
@@ -43,6 +47,27 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       };
       this.#state.attempts.set(key, attempt);
       return attempt;
+    });
+  }
+
+  async reserveAgentOffer(
+    tenant: TenantId,
+    input: { readonly taskId: string; readonly deviceId: string; readonly agentRef: AgentRef },
+  ): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }> {
+    const key = tenantKey(tenant, input.taskId);
+    return this.#state.mutate(key, () => {
+      const existing = this.#state.attempts.get(key);
+      if (existing !== undefined) return { attempt: existing, created: false };
+      const attempt: TaskAttempt = {
+        tenantId: tenant,
+        taskId: input.taskId,
+        deviceId: input.deviceId,
+        agentRef: { ...input.agentRef },
+        status: 'offered',
+        updatedAt: this.#now(),
+      };
+      this.#state.attempts.set(key, attempt);
+      return { attempt, created: true };
     });
   }
 
@@ -91,6 +116,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     return this.#state.mutate(key, () => {
       const existing = this.#state.attempts.get(key);
       if (existing === undefined) return undefined;
+      if (input.agentRef !== undefined && !sameAgentRef(existing.agentRef, input.agentRef)) return existing;
       if (existing.cancellation !== undefined) {
         if (input.status !== 'cancelled' || existing.status === 'cancelled') return existing;
       } else if (
@@ -103,7 +129,6 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       const updated: TaskAttempt = {
         ...existing,
         status: input.status,
-        ...(input.agentRef === undefined ? {} : { agentRef: { ...input.agentRef } }),
         ...(input.terminalCause === undefined ? {} : { terminalCause: input.terminalCause }),
         updatedAt: this.#now(),
       };

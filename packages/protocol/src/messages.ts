@@ -99,6 +99,8 @@ const AGENT_REF_VALUE = z
   })
   .regex(/^[^\u0000-\u001f\u007f\r\n]+$/u, 'AgentRef values must not contain control characters');
 
+const WINDOWS_RESERVED_AGENT_SEGMENT = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+
 /**
  * Agent ids are opaque to the SDK but must remain one safe pathname segment;
  * the SDK owns the deterministic `<hostStorageRoot>/agents/<agentId>` mapping.
@@ -108,6 +110,9 @@ export const AgentRefSchema = z
     agentId: AGENT_REF_VALUE.regex(/^[^\\/:]+$/u, 'agentId must be one pathname segment').refine(
       (value) => value !== '.' && value !== '..',
       'agentId must not be a dot segment',
+    ).refine(
+      (value) => !/[. ]$/u.test(value) && !WINDOWS_RESERVED_AGENT_SEGMENT.test(value),
+      'agentId must be a portable Windows-safe pathname segment',
     ),
     profileRevision: AGENT_REF_VALUE,
   })

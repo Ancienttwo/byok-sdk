@@ -31,6 +31,10 @@ describe('agent-home-contract protocol', () => {
     expect(AgentRefSchema.safeParse({ agentId: '..', profileRevision: 'r1' }).success).toBe(false);
     expect(AgentRefSchema.safeParse({ agentId: '../escape', profileRevision: 'r1' }).success).toBe(false);
     expect(AgentRefSchema.safeParse({ agentId: 'agent\u0000', profileRevision: 'r1' }).success).toBe(false);
+    expect(AgentRefSchema.safeParse({ agentId: 'agent.', profileRevision: 'r1' }).success).toBe(false);
+    expect(AgentRefSchema.safeParse({ agentId: 'agent ', profileRevision: 'r1' }).success).toBe(false);
+    expect(AgentRefSchema.safeParse({ agentId: 'CON', profileRevision: 'r1' }).success).toBe(false);
+    expect(AgentRefSchema.safeParse({ agentId: 'nul.txt', profileRevision: 'r1' }).success).toBe(false);
     expect(AgentRefSchema.safeParse({ agentId: 'a'.repeat(161), profileRevision: 'r1' }).success).toBe(false);
     expect(AgentRefSchema.safeParse({ agentId: 'é'.repeat(100), profileRevision: 'r1' }).success).toBe(false);
     expect(AgentRefSchema.safeParse({ agentId: 'agent-1', profileRevision: 'r'.repeat(161) }).success).toBe(false);
