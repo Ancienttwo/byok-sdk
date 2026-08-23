@@ -30,6 +30,7 @@
 import {
   DAEMON_TO_SERVER_TYPES,
   encodeEnvelope,
+  PROTOCOL_VERSION,
   type AgentRef,
   type Envelope,
   type MessageType,
@@ -62,6 +63,7 @@ function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean
 function inboundAgentRef(envelope: Envelope): AgentRef | undefined {
   switch (envelope.type) {
     case 'task.claim':
+    case 'task.decline':
     case 'task.complete':
     case 'task.fail':
     case 'task.cancelled':
@@ -74,6 +76,7 @@ function inboundAgentRef(envelope: Envelope): AgentRef | undefined {
 function agentRefEchoRequired(envelope: Envelope): boolean {
   return (
     envelope.type === 'task.claim' ||
+    envelope.type === 'task.decline' ||
     envelope.type === 'task.complete' ||
     envelope.type === 'task.fail' ||
     envelope.type === 'task.cancelled'
@@ -94,6 +97,7 @@ export async function handleInboundEnvelope(
   // cloud path that admits the target capability; presence is not consulted.
   if (envelope.type === 'conn.hello') {
     if (envelope.payload.deviceId !== deviceId) return 'rejected';
+    if (!envelope.payload.protocolVersions.includes(PROTOCOL_VERSION)) return 'rejected';
     const device = await stores.devices.get(deviceId);
     if (device === undefined || device.revoked || device.productId !== envelope.payload.productId) {
       return 'rejected';

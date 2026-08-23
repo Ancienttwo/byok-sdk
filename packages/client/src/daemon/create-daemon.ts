@@ -208,7 +208,11 @@ export interface DaemonConfig {
     hostStorageRoot: string;
     projection?: AgentHomeProjection;
   };
-  /** Disabled by default. Enables local-only Git checkpoint repositories. */
+  /**
+   * Disabled by default. Enables local-only Git checkpoint repositories for
+   * legacy task workspaces. Mutually exclusive with `agentHome`: strict Agent
+   * execution has one canonical workspace authority.
+   */
   gitWorkspace?: GitWorkspaceConfig;
   /** Disabled by default. Enables the durable local task journal — see {@link HostedJournalConfig}. */
   hostedJournal?: HostedJournalConfig;
@@ -876,6 +880,11 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
+  if (config.agentHome !== undefined && config.gitWorkspace !== undefined) {
+    throw new Error(
+      'DaemonConfig.agentHome and DaemonConfig.gitWorkspace are mutually exclusive; Agent home is the only workspace authority for Agent offers',
+    );
+  }
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
@@ -1248,6 +1257,10 @@ export function buildDaemonWithAdapters(
     if (!record) {
       throw new Error('device is not paired yet; call pair(pairingCode) first');
     }
+    // Capability publication happens only after this SDK-owned preflight has
+    // proved the canonical root/agents namespace can be materialized and
+    // mutated. A configured-but-unusable root must never admit cloud work.
+    await agentHomeManager?.preflight();
     fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
     // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own

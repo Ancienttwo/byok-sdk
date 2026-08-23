@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260823-1214-agent-first-home-contract.md
 > **Contract**: tasks/contracts/20260823-1214-agent-first-home-contract.contract.md
 > **Review**: tasks/reviews/20260823-1214-agent-first-home-contract.review.md
-> **Last Updated**: 2026-08-23 13:32
+> **Last Updated**: 2026-08-23 15:34
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -61,6 +61,17 @@
   contract is recorded in
   `docs/researches/agent-local-cloud-projection-contract.md` as a separate
   unimplemented work-package, not as behavior delivered by this contract.
+- A second full-diff Claude acceptance pass found three further P1 gaps:
+  deterministic Agent mismatch declines were incorrectly retryable, a daemon
+  could advertise Agent capability before proving its root usable, and hosted
+  cloud omitted `task.decline` from exact AgentRef enforcement. Remediation
+  makes only a live same-home writer conflict retryable, write-probes the
+  canonical root before hello, and gates decline identity exactly. Closely
+  related advisories were also closed: hosted hello now requires the frozen
+  protocol version, SQL rejects a single backslash, Agent/Git workspace
+  authorities are mutually exclusive, mailbox append failure closes its
+  reserved Agent attempt, offer type is the strict-Agent authority, and lease
+  release failure no longer strands `activeTaskCount`.
 
 ## Tradeoffs Considered
 
@@ -73,10 +84,8 @@
 
 ## Open Questions
 
-- Hosted Agent enqueue reserves exact task identity before mailbox append to
-  serialize concurrent retries. A mailbox failure can leave an un-delivered
-  offered attempt; retry with the same explicit taskId converges, while an
-  auto-generated taskId can leave bounded orphan state for ordinary retention.
+- None inside the Agent-home contract. Typed local/cloud egress remains a
+  separate work-package in `tasks/todos.md`, not an unfinished Agent-home path.
 
 ## Evidence Links
 
@@ -107,12 +116,17 @@
   opening hello. The tests now wait for the hello when isolating one stalled
   terminal, and count task ids separately while proving the hello shares the
   capped outbox. Their focused rerun passed 2 files / 4 tests.
-- Fresh full `bun run test`: client 1344, cloud 192, cloud-dataplane 74 (84
+- Fresh full `bun run test`: client 1347, cloud 194, cloud-dataplane 74 (84
   substrate-dependent tests skipped in ordinary mode), conformance 141, core
   251, protocol 293, server 248, and all remaining package suites passed.
 - `bun run build`, `bun run typecheck`, `git diff --check`, strict workflow,
   and strict contract verification passed; contract verification reported
   `total=19 failed=0 status=Fulfilled`.
+- Post-review remediation focused gates passed: client 6 files / 34 tests,
+  cloud 1 / 8, server 2 / 22, protocol 3 / 70, plus monorepo typecheck.
+- The disposable-Postgres oracle passed again after migration 0012 changed;
+  it now also proves a single-backslash Agent id is rejected by the actual
+  `task_agent_ref_bounded` constraint and leaves no task row.
 
 ## Promotion Filter
 

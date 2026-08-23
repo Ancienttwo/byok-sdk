@@ -551,8 +551,59 @@ describe('SDK-owned Agent home contract', () => {
     expect(projectionCalls).toBe(1);
     const declines = sent.filter((entry) => entry.type === 'task.decline');
     expect(declines).toHaveLength(2);
-    expect(declines[0]?.payload).toMatchObject({ agentRef: ref('one', 'profile-2') });
-    expect(declines[1]?.payload).toMatchObject({ agentRef: ref('two', 'profile-1') });
+    expect(declines[0]?.payload).toMatchObject({
+      agentRef: ref('one', 'profile-2'),
+      retryable: false,
+    });
+    expect(declines[1]?.payload).toMatchObject({
+      agentRef: ref('two', 'profile-1'),
+      retryable: false,
+    });
+  });
+
+  it('drains a terminal task when an externally changed lease marker cannot be released', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const hostStorageRoot = await makeRoot();
+    const storeDir = await makeRoot();
+    const adapter = new StubRuntimeAdapter('pi');
+    const manager = new AgentHomeManager({ hostStorageRoot });
+    const agentRef = ref('agent-release-conflict', 'profile-1');
+    const runner = new TaskRunner({
+      adapters: [adapter],
+      workspaceRoot: await makeRoot(),
+      agentHome: manager,
+      agentSessionHandoffs: new AgentSessionHandoffStore(),
+      deviceId: 'device-1',
+      send: () => {},
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'product-1',
+    });
+
+    await runner.handleEnvelope(createEnvelope(
+      'task.offer_for_agent',
+      { instruction: 'finish after lease marker conflict', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { taskId: 'task-release-conflict', seq: 1 },
+    ));
+    const home = path.join(await fs.realpath(hostStorageRoot), 'agents', agentRef.agentId);
+    await fs.writeFile(
+      path.join(home, '.byok', 'agent-home.lease'),
+      JSON.stringify({
+        version: 1,
+        ownerId: 'other-owner',
+        leaseId: 'other-lease',
+        agentRef,
+        canonicalHome: home,
+      }),
+    );
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
   });
 
   it.each(['pi', 'claude', 'codex'] as const)(

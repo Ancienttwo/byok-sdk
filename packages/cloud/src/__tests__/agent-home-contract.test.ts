@@ -1,5 +1,5 @@
 import { createEnvelope, decodeEnvelope } from '@byok-sdk/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_HOME_CONTRACT_CAPABILITY,
   handleInboundEnvelope,
@@ -133,6 +133,21 @@ describe('hosted Agent-home contract', () => {
     ).toHaveLength(0);
   });
 
+  it('rejects a long-poll hello that does not support the frozen protocol version', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const stores = deviceStores(harness, device.deviceId);
+    const incompatibleHello = createEnvelope('conn.hello', {
+      protocolVersions: [2],
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+      deviceId: device.deviceId,
+      productId: 'test-product',
+    });
+
+    expect(await handleInboundEnvelope(stores, device.deviceId, incompatibleHello)).toBe('rejected');
+    expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toBeUndefined();
+  });
+
   it('rejects malformed or oversized AgentRef before reserving mailbox state', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
@@ -163,6 +178,28 @@ describe('hosted Agent-home contract', () => {
     ).toHaveLength(0);
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-malformed')).toBeUndefined();
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-oversized')).toBeUndefined();
+  });
+
+  it('durably closes a reserved Agent attempt when mailbox append fails', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+    });
+    vi.spyOn(harness.core.mailbox, 'append').mockRejectedValueOnce(new Error('mailbox unavailable'));
+
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-mailbox-failure',
+        payload: agentPayload(),
+      }),
+    ).rejects.toThrow('mailbox unavailable');
+    await expect(harness.cloud.readTaskAttempt(TENANT_A, 'agent-mailbox-failure')).resolves.toMatchObject({
+      status: 'failed',
+      agentRef: AGENT_REF,
+      terminalCause: 'mailbox append failed before Agent offer delivery',
+    });
   });
 
   it('rejects claim/terminal AgentRef mismatches and protects the first terminal fact', async () => {
@@ -197,6 +234,23 @@ describe('hosted Agent-home contract', () => {
       { taskId },
     );
     expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedClaim)).toBe('rejected');
+
+    const missingDecline = createEnvelope(
+      'task.decline',
+      { reason: 'missing AgentRef', retryable: false },
+      { taskId },
+    );
+    expect(await handleInboundEnvelope(stores, device.deviceId, missingDecline)).toBe('rejected');
+    const mismatchedDecline = createEnvelope(
+      'task.decline',
+      {
+        reason: 'wrong AgentRef',
+        retryable: false,
+        agentRef: { agentId: 'agent-other', profileRevision: 'profile-r1' },
+      },
+      { taskId },
+    );
+    expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedDecline)).toBe('rejected');
 
     const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF }, { taskId });
     expect(await handleInboundEnvelope(stores, device.deviceId, claim)).toBe('accepted');

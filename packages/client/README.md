@@ -108,7 +108,12 @@ createDaemon({
 });
 ```
 
-Configuring this advertises `agent-home-contract`. Agent offers are distinct
+Startup materializes and write-probes the canonical root before publishing
+`agent-home-contract`. `agentHome` and `gitWorkspace` are mutually exclusive;
+strict Agent execution has one workspace authority and never falls back to a
+task-scoped Git workspace.
+
+Successful startup with this configuration advertises `agent-home-contract`. Agent offers are distinct
 from legacy task offers and fail closed when identity, profile revision,
 session/runtime/cwd evidence, or the one-writer lease does not match. Agent
 files other than the SDK-reserved `.byok` namespace are opaque; there is no

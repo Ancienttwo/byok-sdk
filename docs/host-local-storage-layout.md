@@ -24,7 +24,13 @@ an absolute path. Salesko must not join `agents/<agentId>` itself. The SDK
 validates the typed `AgentRef`, composes that suffix, creates missing
 directories and seed assets, resolves existing ancestors and real paths,
 rejects symlink/traversal/cross-Agent escape, and seals the canonical Agent
-home as runtime cwd.
+home as runtime cwd. Daemon startup materializes and write-probes the canonical
+root/`agents` namespace before advertising `agent-home-contract`; a configured
+but unusable root therefore never admits a cloud Agent offer.
+
+`agentHome` and legacy `gitWorkspace` are mutually exclusive daemon
+authorities. Agent execution never silently inherits task-scoped Git workspace
+semantics or creates a second durable workspace owner.
 
 `artifacts` is an ownership category, not a required literal directory and not
 an SDK configuration schema. Projects, PDFs, images, temporary work, and other

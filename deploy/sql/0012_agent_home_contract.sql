@@ -29,7 +29,7 @@ ALTER TABLE task
       octet_length(agent_id) BETWEEN 1 AND 160
       AND octet_length(agent_profile_revision) BETWEEN 1 AND 160
       AND position('/' IN agent_id) = 0
-      AND position(E'\\\\' IN agent_id) = 0
+      AND position(E'\\' IN agent_id) = 0
       AND position(':' IN agent_id) = 0
       AND agent_id NOT IN ('.', '..')
       AND agent_id !~ '[[:cntrl:]]'

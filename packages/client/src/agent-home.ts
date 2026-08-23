@@ -238,6 +238,38 @@ export class AgentHomeLayout {
     });
   }
 
+  /**
+   * Prove the canonical root is materializable and writable before the daemon
+   * advertises Agent-home capability. No Agent identity or persistent Agent
+   * file is created by this preflight.
+   */
+  async preflight(): Promise<void> {
+    let probePath: string | undefined;
+    let handle: fs.FileHandle | undefined;
+    let created = false;
+    try {
+      const hostStorageRoot = await this.resolveRoot();
+      const agentsRoot = await ensureDirectoryNoSymlink(
+        hostStorageRoot,
+        path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
+      );
+      probePath = path.join(agentsRoot, `.byok-agent-home-preflight-${randomUUID()}`);
+      handle = await fs.open(probePath, 'wx', 0o600);
+      created = true;
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await fs.rm(probePath);
+      created = false;
+    } catch (error) {
+      await handle?.close().catch(() => {});
+      if (created && probePath !== undefined) await fs.rm(probePath, { force: true }).catch(() => {});
+      throw new AgentHomeResolutionError(
+        `agentHome.hostStorageRoot preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   private async resolveRoot(): Promise<string> {
     if (this.canonicalRoot !== undefined) return this.canonicalRoot;
     try {
@@ -450,6 +482,11 @@ export class AgentHomeManager {
     }
   }
 
+  /** Validate the configured root before capability publication. */
+  async preflight(): Promise<void> {
+    await this.layout.preflight();
+  }
+
   /** Resolve and lease without applying downstream projection side effects. */
   async acquire(agentRef: AgentRef): Promise<AgentHomeBinding> {
     const resolution = await this.layout.resolve(agentRef);
@@ -460,16 +497,12 @@ export class AgentHomeManager {
   /** Initialize only after any requested session exact-match has succeeded. */
   async initialize(binding: AgentHomeBinding): Promise<void> {
     const { resolution, lease } = binding;
-    try {
-      await initializeAgentHome(resolution);
-      await this.projection?.prepare({ ...resolution, cwd: lease.cwd });
-      if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
-        throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
-      }
-      await initializeAgentHome(resolution);
-    } catch (error) {
-      throw error;
+    await initializeAgentHome(resolution);
+    await this.projection?.prepare({ ...resolution, cwd: lease.cwd });
+    if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
+      throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
     }
+    await initializeAgentHome(resolution);
   }
 }
 

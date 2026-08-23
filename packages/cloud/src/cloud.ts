@@ -546,23 +546,43 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     }
 
-    const message = await stores.mailbox.append({
-      deviceId,
-      messageId,
-      materialize: async (seq) => {
-        // Core stays protocol-free: the mailbox reserves the one authoritative
-        // delivery number, then asks this producer to build opaque bytes while
-        // allocation and insertion are still serialized per device.
-        const envelope = buildEnvelope(taskId, seq, messageId);
-        const body = encodeEnvelope(envelope);
-        const bytes = new TextEncoder().encode(body);
-        return {
-          body,
-          bodyHash: contentHash(await options.crypto.sha256(bytes)),
-          byteSize: BigInt(bytes.length),
-        };
-      },
-    });
+    let message;
+    try {
+      message = await stores.mailbox.append({
+        deviceId,
+        messageId,
+        materialize: async (seq) => {
+          // Core stays protocol-free: the mailbox reserves the one authoritative
+          // delivery number, then asks this producer to build opaque bytes while
+          // allocation and insertion are still serialized per device.
+          const envelope = buildEnvelope(taskId, seq, messageId);
+          const body = encodeEnvelope(envelope);
+          const bytes = new TextEncoder().encode(body);
+          return {
+            body,
+            bodyHash: contentHash(await options.crypto.sha256(bytes)),
+            byteSize: BigInt(bytes.length),
+          };
+        },
+      });
+    } catch (error) {
+      if (openedBeforeAppend !== undefined) {
+        try {
+          await stores.tasks.recordStatus({
+            taskId,
+            status: 'failed',
+            agentRef,
+            terminalCause: 'mailbox append failed before Agent offer delivery',
+          });
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            `Agent task ${taskId} could not be delivered or durably closed`,
+          );
+        }
+      }
+      throw error;
+    }
     const envelope = decodeEnvelope(message.body);
     if (envelope.seq !== message.seq) {
       throw new ByokCloudError(

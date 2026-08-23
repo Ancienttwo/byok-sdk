@@ -268,4 +268,48 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
     expect(hello.payload.capabilities).toContain('agent-home-contract');
   });
+
+  it('fails start before advertising Agent capability when hostStorageRoot is not a directory', async () => {
+    const workspaceRoot = await tmpDir('byok-conn-hello-agent-invalid-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-agent-invalid-store-');
+    const parent = await tmpDir('byok-conn-hello-agent-invalid-root-');
+    const hostStorageRoot = path.join(parent, 'not-a-directory');
+    await fs.writeFile(hostStorageRoot, 'not a directory');
+    daemon = createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test Product',
+        productId: 'test-product',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+      },
+      [],
+    );
+    await daemon.pair('pairing-code');
+
+    await expect(daemon.start()).rejects.toThrow(/hostStorageRoot/);
+    expect(server.received.some((event) => event.type === 'conn.hello')).toBe(false);
+  });
+
+  it('rejects simultaneous Agent-home and Git workspace authorities', async () => {
+    const workspaceRoot = await tmpDir('byok-conn-hello-agent-git-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-agent-git-store-');
+    const hostStorageRoot = await tmpDir('byok-conn-hello-agent-git-root-');
+
+    expect(() => createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test Product',
+        productId: 'test-product',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+        gitWorkspace: { mode: 'local-checkpoints' },
+      },
+      [],
+    )).toThrow(/mutually exclusive/);
+  });
 });

@@ -529,6 +529,12 @@ fails closed. One canonical Agent home has one mutable writer across tasks;
 another Agent home remains independent. Crash residue is reclaimable only by
 the same stable daemon owner identity.
 
+Daemon startup materializes and write-probes the canonical Agent root before
+advertising `agent-home-contract`. `agentHome` and legacy `gitWorkspace` are
+mutually exclusive configuration authorities; strict Agent execution never
+inherits task-scoped Git workspace semantics or creates a second durable
+workspace owner.
+
 The daemon publishes the same authenticated `conn.hello` capability snapshot
 on WS and long-poll; the hosted composition persists that snapshot before an
 Agent offer can be enqueued. Runtime-session terminal evidence is normally

@@ -33,6 +33,7 @@ import {
   type Session,
 } from '../types';
 import {
+  AgentHomeBusyError,
   AgentHomeManager,
   type AgentHomeBinding,
   type AgentRef,
@@ -1139,13 +1140,13 @@ export class TaskRunner {
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
       case 'task.offer':
-        await this.handleOffer(envelope.task_id, envelope.payload);
+        await this.handleOffer(envelope.task_id, envelope.payload, false);
         return;
       case 'task.offer_with_toolsets':
-        await this.handleOffer(envelope.task_id, envelope.payload);
+        await this.handleOffer(envelope.task_id, envelope.payload, false);
         return;
       case 'task.offer_for_agent':
-        await this.handleOffer(envelope.task_id, envelope.payload);
+        await this.handleOffer(envelope.task_id, envelope.payload, true);
         return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
@@ -1164,7 +1165,11 @@ export class TaskRunner {
     }
   }
 
-  private async handleOffer(taskId: string, payload: AcceptedOfferPayload): Promise<void> {
+  private async handleOffer(
+    taskId: string,
+    payload: AcceptedOfferPayload,
+    strictAgentOffer: boolean,
+  ): Promise<void> {
     // Finding P2, Fix 2c (redelivered offer for an already-active/finished
     // task): checked first, ahead of everything below — a redelivered
     // `task.offer` for a taskId this device already claimed/started, or
@@ -1178,7 +1183,6 @@ export class TaskRunner {
       return;
     }
 
-    const strictAgentOffer = Object.prototype.hasOwnProperty.call(payload, 'agentRef');
     let agentRef: AgentRef | undefined;
     if (strictAgentOffer) {
       try {
@@ -1350,7 +1354,10 @@ export class TaskRunner {
         try {
           agentBinding = await this.deps.agentHome!.acquire(agentRef);
         } catch (error) {
-          decline(`Agent home admission failed: ${errorMessage(error)}`, true);
+          decline(
+            `Agent home admission failed: ${errorMessage(error)}`,
+            error instanceof AgentHomeBusyError,
+          );
           return;
         }
       }
@@ -1375,7 +1382,7 @@ export class TaskRunner {
           } catch (error) {
             await agentBinding.lease.release().catch(() => {});
             agentBinding = undefined;
-            decline(`Agent session handoff mismatch: ${errorMessage(error)}`, true);
+            decline(`Agent session handoff mismatch: ${errorMessage(error)}`, false);
             return;
           }
         }
@@ -1384,7 +1391,7 @@ export class TaskRunner {
         } catch (error) {
           await agentBinding.lease.release().catch(() => {});
           agentBinding = undefined;
-          decline(`Agent home initialization failed: ${errorMessage(error)}`, true);
+          decline(`Agent home initialization failed: ${errorMessage(error)}`, false);
           return;
         }
       } else if (this.deps.gitWorkspaceManager && this.deps.gitWorkspaceStore) {
@@ -3173,13 +3180,17 @@ export class TaskRunner {
           });
         }
       }
+      let leaseReleased = true;
       try {
         await active.agentBinding.lease.release();
       } catch (error) {
         console.error(`[byok/client] Agent home lease could not be released for ${taskId}: ${errorMessage(error)}`);
-        active.resolveSemanticTerminalSettled?.(false);
-        return false;
+        leaseReleased = false;
       }
+      active.gitLease?.release();
+      this.tasks.delete(taskId);
+      active.resolveSemanticTerminalSettled?.(leaseReleased);
+      return leaseReleased;
     }
     active.gitLease?.release();
     this.tasks.delete(taskId);

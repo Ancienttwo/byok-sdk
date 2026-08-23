@@ -43,6 +43,12 @@ if (POSTGRES_URL === undefined) {
           deviceId: 'agent-home-device',
           capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'result-document'],
         });
+        await expect(tasks.open(TENANT, {
+          taskId: 'agent-home-invalid-backslash',
+          deviceId: 'agent-home-device',
+          agentRef: { agentId: 'invalid\\agent', profileRevision: 'profile-r7' },
+        })).rejects.toThrow(/task_agent_ref_bounded/);
+        await expect(tasks.get(TENANT, 'agent-home-invalid-backslash')).resolves.toBeUndefined();
         await tasks.open(TENANT, {
           taskId: 'agent-home-task',
           deviceId: 'agent-home-device',
