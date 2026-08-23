@@ -1,8 +1,34 @@
 # Changelog
 
-## 0.6.1 / @byok-sdk/keys 0.2.2 — Unreleased
+## 0.6.1 / @byok-sdk/keys 0.2.2 — 2026-08-23
 
-Explicit macOS credential-authority selection for isolated Local Agent hosts.
+Agent-first persistence, controlled local/cloud projection, device-local
+toolset operability, and explicit host credential authority.
+
+- Added typed Agent dispatch with exact `AgentRef`/profile revision, SDK-owned
+  canonical `<hostStorageRoot>/agents/<agentId>` composition, create-if-missing
+  and preserve-existing `MEMORY.md`/`notes`, canonical/symlink containment,
+  same-Agent single-writer leases, exact runtime cwd binding, and append-only
+  runtime-session terminal evidence. Legacy daemons without the additive
+  `agent-home-contract` capability fail closed before enqueue.
+- Added consumed `AgentEgressPolicy`: metadata/status is the default projection,
+  contentful trajectory requires explicit opt-in, reliable Agent-local events
+  use durable cursor/ack/retry, and latest-value activity remains replaceable
+  with observable quota/backpressure/drop reasons. Workspace, transcript and
+  artifact reads are independent capabilities with local root/type/size/audit
+  gates; cloud receives authenticated blob references and content-free durable
+  receipts rather than a second transcript authority.
+- Added a content-addressed device-local MCP toolset registry with expected-
+  revision CAS reload, frozen per-task projections, redacted status/receipts,
+  explicit host lifecycle observations, and `unobserved` when no lifecycle
+  evidence exists. Pi loads the pinned web and MCP extensions explicitly.
+- Kept the runtime authority pinned exactly to
+  `@earendil-works/pi-coding-agent@0.84.2` and added a live RPC packaging probe
+  for native `toolCallId`/`isError` projection.
+- Projected the process-immutable Local Agent release through the self-hosted
+  machine read model without turning SemVer or Latest into a connection or
+  dispatch gate; protocol intersection and advertised capabilities remain the
+  behavior authorities.
 
 - Added optional absolute `macosKeychainPath` configuration to the macOS
   secret store and Pi BYOK launcher. When selected, availability and every
@@ -13,6 +39,9 @@ Explicit macOS credential-authority selection for isolated Local Agent hosts.
   non-macOS uses fail closed.
 - Kept credential bytes out of argv and kept the Pi child environment closed;
   isolated hosts no longer need to widen the launcher or Pi child `HOME`.
+- Advanced the aligned public train to 0.6.1 and independently advanced
+  `@byok-sdk/keys` to 0.2.2 with its exact `@byok-sdk/core@0.6.1` edge. The
+  hosted data-plane artifact carries migrations `0001` through `0013`.
 
 ## 0.6.0 / @byok-sdk/keys 0.2.1 — 2026-08-21
 

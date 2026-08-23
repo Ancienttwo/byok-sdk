@@ -7,12 +7,18 @@ Postgres and R2.
 
 ## Current release
 
-The current release is `byok-sdk@0.6.0`, with the independently versioned
-`@byok-sdk/keys@0.2.1`. It adds hosted cancellation, optional bounded terminal
-inference usage, SDK-owned tenant readiness, immutable Local Agent release
-identity, and recoverable Postgres + R2 tenant erasure. The hosted data plane
-ships migrations `0001` through `0011` and verifies their exact ledger before
-serving traffic.
+The current release is `byok-sdk@0.6.1`, with the independently versioned
+`@byok-sdk/keys@0.2.2`. It adds durable Agent-first local homes, exact
+Agent/session identity across hosted dispatch, policy-controlled local/cloud
+egress with reliable Agent-local evidence, atomically reloadable device-local
+MCP toolsets, Pi web/MCP extension loading, and self-hosted Local Agent release
+readback. The hosted data plane ships migrations `0001` through `0013` and
+verifies their exact ledger before serving traffic.
+
+The bundled Pi runtime authority remains the exact
+`@earendil-works/pi-coding-agent@0.84.2` dependency. Release SemVer is
+observability only; protocol intersection and advertised capabilities remain
+the execution gates.
 
 All ten npm artifacts were frozen from one source commit and passed registry
 integrity, dependency-edge, fresh-import, and single-version closure readback.
@@ -31,7 +37,7 @@ adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
 ```sh
-npm install byok-sdk@0.6.0
+npm install byok-sdk@0.6.1
 ```
 
 ```ts
@@ -61,7 +67,7 @@ same modules are also directly installable as `@byok-sdk/client`,
 Both profiles share the frozen v1 protocol, tenant isolation, durable device
 proof, truth CAS, explicit capabilities, and fail-closed policy handling.
 
-## Agent-first local homes (unreleased)
+## Agent-first local homes and egress
 
 The additive Agent execution path treats a task as one run of a durable Agent.
 The host supplies an absolute branded `hostStorageRoot` plus an exact
@@ -75,7 +81,7 @@ Profile projection content and every non-`.byok` Agent file remain downstream
 owned and opaque. In particular, `artifacts` is not an SDK schema or a required
 directory. See [the host local-storage contract](docs/host-local-storage-layout.md).
 
-The unreleased Agent egress contract adds one consumed `AgentEgressPolicy`.
+The Agent egress contract adds one consumed `AgentEgressPolicy`.
 Metadata/status activity is the safe default; contentful trajectory is an
 explicit capability-gated opt-in. Reliable evidence is fsynced under the
 canonical Agent home and retried with stable cursors until an exact ack, while
@@ -94,7 +100,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.2.1
+npm install @byok-sdk/keys@0.2.2
 ```
 
 ## Host connector composition
@@ -110,5 +116,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.2.1`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.2.2`
 require Node.js 22.22.0 or newer. MIT licensed.
