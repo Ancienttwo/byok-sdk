@@ -71,6 +71,16 @@ describe('Agent egress policy and sanitizer', () => {
     expect(controller.status().latestValue.lastDropReason).toBe('capability_missing');
   });
 
+  it('does not reclassify a legacy task that has no AgentRef into the Agent egress lane', () => {
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY });
+    const events = [{ type: 'progress', text: 'legacy task reason and progress remain unchanged' }] as const;
+    expect(controller.projectLatestValue({
+      taskId: 'legacy-task',
+      events,
+      serverCapabilities: [],
+    })).toEqual(events);
+  });
+
   it('rejects malformed policy instead of silently selecting contentful semantics', () => {
     expect(() => resolveAgentEgressPolicy({
       ...DEFAULT_AGENT_EGRESS_POLICY,

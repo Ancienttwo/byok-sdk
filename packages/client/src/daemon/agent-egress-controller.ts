@@ -99,12 +99,15 @@ export class AgentEgressController {
 
   /** Project before TaskRunner builds a `task.progress` envelope. */
   projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[] {
+    // No Agent identity means this is the established legacy task lane. The
+    // additive Agent egress contract has no authority to rewrite it.
+    if (input.agentRef === undefined) return Object.freeze([...input.events]);
     if (this.options.policy.activity.mode === 'contentful-trajectory' && !input.serverCapabilities.includes('agent-egress-policy')) {
       this.noteDrop('latest-value', 'capability_missing', input.agentRef);
       return [];
     }
     const projected = input.events.map((event) => this.options.policy.activity.mode === 'metadata-status' ? metadataStatusEvent(event) : event);
-    if (input.agentRef === undefined || this.options.tenantId === undefined) return Object.freeze(projected);
+    if (this.options.tenantId === undefined) return Object.freeze(projected);
 
     let latest: AgentEvent | undefined;
     for (const event of projected) {

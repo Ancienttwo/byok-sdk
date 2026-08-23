@@ -1607,6 +1607,13 @@ export function buildDaemonWithAdapters(
             connection?.send(envelope);
           };
     const sendEnvelope: TaskRunnerDeps['send'] = (candidate) => {
+      // The egress policy is additive and applies only to a running
+      // task.offer_for_agent_with_egress. Legacy tasks and plain Agent-home
+      // offers retain their exact established task.* wire semantics.
+      if (candidate.task_id === undefined || runner?.usesAgentEgress(candidate.task_id) !== true) {
+        sendSanitizedEnvelope(candidate);
+        return;
+      }
       const sanitized = sanitizeEgressEnvelope(candidate, egressPolicy, config.agentEgress?.sanitizer);
       if (!sanitized.ok) {
         // Fail closed at the single outbound boundary. In particular, a

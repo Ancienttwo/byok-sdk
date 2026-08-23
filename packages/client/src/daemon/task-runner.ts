@@ -462,6 +462,8 @@ export type AdmissionGuardDecision =
 
 interface ActiveTask {
   taskId: string;
+  /** True only for the distinct task.offer_for_agent_with_egress contract. */
+  egressEnabled: boolean;
   adapter: RuntimeAdapter;
   session: Session;
   workspaceDir: string;
@@ -973,6 +975,15 @@ export class TaskRunner {
 
   get activeTaskCount(): number {
     return this.tasks.size;
+  }
+
+  /**
+   * Transport-boundary classification for the currently active task. Legacy
+   * tasks and plain Agent-home offers are deliberately false: the additive
+   * egress contract must never reclassify their existing wire semantics.
+   */
+  usesAgentEgress(taskId: string): boolean {
+    return this.tasks.get(taskId)?.egressEnabled === true;
   }
 
   /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
@@ -1662,6 +1673,7 @@ export class TaskRunner {
       let active!: ActiveTask;
       active = {
         taskId,
+        egressEnabled: 'egressPolicy' in payload,
         adapter: pick.adapter,
         session,
         workspaceDir,
@@ -1680,12 +1692,14 @@ export class TaskRunner {
         summaryParts: [],
         batcher: new ProgressBatcher(
           (seq, events) => {
-            const projected = this.deps.agentEgress?.projectLatestValue({
-              agentRef: active.agentRef,
-              taskId,
-              events,
-              serverCapabilities: this.deps.getServerCapabilities?.() ?? [],
-            }) ?? events;
+            const projected = active.egressEnabled
+              ? this.deps.agentEgress?.projectLatestValue({
+                  agentRef: active.agentRef,
+                  taskId,
+                  events,
+                  serverCapabilities: this.deps.getServerCapabilities?.() ?? [],
+                }) ?? []
+              : events;
             if (projected.length > 0) this.deps.send(createEnvelope('task.progress', { seq, events: [...projected] }, { taskId, seq }));
           },
           this.deps.batcherOptions,
