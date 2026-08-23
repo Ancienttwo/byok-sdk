@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:1e82c6b887a4da30164f7c60ef7d01c7eb228af18fa329ea6d57bd8ece5dff8f
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: d5d84605bb23a3b862d948246455972e8699618e
+> **Verification Evidence SHA256**: sha256:c6d23e60b66f192894cec7aa0853397956fe5d898eb1c383312bc60d7cfbe87c
+> **Issued At**: 2026-08-23T11:05:58.745Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Accept the rebased additive self-hosted Local Agent release readback closure; release identity remains observational and protocol/capability gates remain authoritative.
 - Findings: none
 
 ## Behavior Diff Notes
