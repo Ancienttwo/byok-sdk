@@ -7,13 +7,16 @@ Postgres and R2.
 
 ## Current release
 
-The current release is `byok-sdk@0.6.1`, with the independently versioned
-`@byok-sdk/keys@0.2.2`. It adds durable Agent-first local homes, exact
-Agent/session identity across hosted dispatch, policy-controlled local/cloud
-egress with reliable Agent-local evidence, atomically reloadable device-local
-MCP toolsets, Pi web/MCP extension loading, and self-hosted Local Agent release
-readback. The hosted data plane ships migrations `0001` through `0013` and
-verifies their exact ledger before serving traffic.
+The current release is `byok-sdk@0.7.0`, with the independently versioned
+`@byok-sdk/keys@0.3.0`. It binds the daemon tenant to the authenticated pairing
+response and persists that non-secret identity atomically in the local
+`DeviceRecord`; legacy 0.6.x records fail closed and must re-pair. It also
+includes durable Agent-first local homes, exact Agent/session identity across
+hosted dispatch, policy-controlled local/cloud egress with reliable Agent-local
+evidence, atomically reloadable device-local MCP toolsets, Pi web/MCP extension
+loading, and self-hosted Local Agent release readback. The hosted data plane
+ships migrations `0001` through `0013` and verifies their exact ledger before
+serving traffic.
 
 The bundled Pi runtime authority remains the exact
 `@earendil-works/pi-coding-agent@0.84.2` dependency. Release SemVer is
@@ -37,7 +40,7 @@ adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
 ```sh
-npm install byok-sdk@0.6.1
+npm install byok-sdk@0.7.0
 ```
 
 ```ts
@@ -103,7 +106,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.2.2
+npm install @byok-sdk/keys@0.3.0
 ```
 
 ## Host connector composition
@@ -119,5 +122,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.2.2`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.3.0`
 require Node.js 22.22.0 or newer. MIT licensed.

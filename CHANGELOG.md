@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 release candidate / @byok-sdk/keys 0.3.0 — Unreleased
+## 0.7.0 / @byok-sdk/keys 0.3.0 — 2026-08-23
 
 Authenticated enrollment tenant projection.
 
@@ -14,10 +14,10 @@ Authenticated enrollment tenant projection.
   renewal preserves the exact binding and re-pair atomically replaces it.
   There is no JWT/access-token parsing, Profile/config fallback, deviceId
   inference or steady-state dual-read path.
-- Prepares the aligned public train at 0.7.0 and keys at 0.3.0 with its exact
-  core 0.7.0 edge. This entry records an unreleased source candidate; npm
-  publication, registry readback, merge/push, deploy and downstream cutover
-  require separate authority.
+- Published the aligned public train at 0.7.0 and keys at 0.3.0 with its exact
+  core 0.7.0 edge. All ten registry artifacts passed integrity, dependency-edge,
+  fresh-install and single-version closure readback. Deployment, production
+  migration and downstream cutover remain separate authorities.
 
 ## 0.6.1 / @byok-sdk/keys 0.2.2 — 2026-08-23
 
