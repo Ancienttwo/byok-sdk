@@ -100,15 +100,26 @@ export interface TenantBoundDevices {
   get(deviceId: string): Promise<DeviceRecord | undefined>;
   list(): Promise<readonly DeviceRecord[]>;
   revoke(deviceId: string): Promise<void>;
+  /** Persist the authenticated device's own capability snapshot. */
+  recordCapabilities(input: { readonly capabilities: readonly string[] }): Promise<DeviceRecord | undefined>;
   readiness(): Promise<TenantReadiness>;
 }
 
 export interface TenantBoundTaskAttempts {
-  open(input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt>;
+  open(input: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly agentRef?: TaskAttempt['agentRef'];
+  }): Promise<TaskAttempt>;
   get(taskId: string): Promise<TaskAttempt | undefined>;
   getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
   claim(input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt | undefined>;
-  recordStatus(input: { readonly taskId: string; readonly status: TaskAttemptStatus }): Promise<TaskAttempt | undefined>;
+  recordStatus(input: {
+    readonly taskId: string;
+    readonly status: TaskAttemptStatus;
+    readonly agentRef?: TaskAttempt['agentRef'];
+    readonly terminalCause?: TaskAttempt['terminalCause'];
+  }): Promise<TaskAttempt | undefined>;
 }
 
 export interface TenantBoundTaskCancellations {
@@ -206,6 +217,13 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       get: (deviceId) => cloud.devices.get(tenant, deviceId),
       list: () => cloud.devices.list(tenant),
       revoke: (deviceId) => cloud.devices.revoke(tenant, deviceId),
+      recordCapabilities: (input) =>
+        principal.kind === 'device'
+          ? cloud.devices.recordCapabilities(tenant, {
+              deviceId: principal.deviceId,
+              capabilities: input.capabilities,
+            })
+          : Promise.resolve(undefined),
       readiness: () => cloud.devices.readiness(tenant, core.presence),
     },
     tasks: {

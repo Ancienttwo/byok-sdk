@@ -14,7 +14,7 @@
  * `claim` and `recordStatus` on a task this tenant never offered write nothing
  * and return `undefined`.
  */
-import type { TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '@byok-sdk/cloud';
+import type { AgentRef, TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
@@ -22,8 +22,11 @@ export interface TaskRow {
   readonly tenant_id: string;
   readonly task_id: string;
   readonly device_id: string;
+  readonly agent_id: string | null;
+  readonly agent_profile_revision: string | null;
   readonly owner_device_id: string | null;
   readonly status: string;
+  readonly terminal_cause: string | null;
   readonly cancel_requested_at: Date | null;
   readonly cancel_reason: string | null;
   readonly cancel_message_id: string | null;
@@ -31,19 +34,28 @@ export interface TaskRow {
 }
 
 export const TASK_SELECT_COLUMNS =
-  'tenant_id, task_id, device_id, owner_device_id, status, cancel_requested_at, cancel_reason, cancel_message_id, updated_at';
+  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, updated_at';
 
 export function taskRowToAttempt(row: TaskRow): TaskAttempt {
   return {
     tenantId: row.tenant_id as TenantId,
     taskId: row.task_id,
     deviceId: row.device_id,
+    ...(row.agent_id == null || row.agent_profile_revision == null
+      ? {}
+      : {
+          agentRef: {
+            agentId: row.agent_id,
+            profileRevision: row.agent_profile_revision,
+          },
+        }),
     // `exactOptionalPropertyTypes` is off here, but an explicit absent key is
     // still what the in-memory reference produces for an unclaimed attempt, and
     // `toEqual` in the suite treats `undefined` and absent alike only for the
     // former.
     ...(row.owner_device_id === null ? {} : { ownerDeviceId: row.owner_device_id }),
     status: row.status as TaskAttemptStatus,
+    ...(row.terminal_cause == null ? {} : { terminalCause: row.terminal_cause }),
     ...(row.cancel_requested_at === null
       ? {}
       : {
@@ -67,16 +79,26 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
 
   async open(
     tenant: TenantId,
-    input: { readonly taskId: string; readonly deviceId: string },
+    input: { readonly taskId: string; readonly deviceId: string; readonly agentRef?: AgentRef },
   ): Promise<TaskAttempt> {
     // First offer wins: a re-open returns the existing attempt untouched, so a
     // second offer cannot retarget a task at a different device.
     const inserted = await this.#pool.query<TaskRow>(
-      `INSERT INTO task (tenant_id, task_id, device_id, owner_device_id, status, updated_at)
-       VALUES ($1, $2, $3, NULL, 'offered', $4)
+      `INSERT INTO task (
+         tenant_id, task_id, device_id, agent_id, agent_profile_revision,
+         owner_device_id, status, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, NULL, 'offered', $6)
        ON CONFLICT (tenant_id, task_id) DO NOTHING
        RETURNING ${TASK_SELECT_COLUMNS}`,
-      [tenant, input.taskId, input.deviceId, this.#now()],
+      [
+        tenant,
+        input.taskId,
+        input.deviceId,
+        input.agentRef?.agentId ?? null,
+        input.agentRef?.profileRevision ?? null,
+        this.#now(),
+      ],
     );
     const created = inserted.rows[0];
     if (created !== undefined) return taskRowToAttempt(created);
@@ -128,18 +150,35 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
 
   async recordStatus(
     tenant: TenantId,
-    input: { readonly taskId: string; readonly status: TaskAttemptStatus },
+    input: {
+      readonly taskId: string;
+      readonly status: TaskAttemptStatus;
+      readonly agentRef?: AgentRef;
+      readonly terminalCause?: string;
+    },
   ): Promise<TaskAttempt | undefined> {
     const result = await this.#pool.query<TaskRow>(
       `UPDATE task
-          SET status = $3, updated_at = $4
+          SET status = $3,
+              agent_id = COALESCE($5, agent_id),
+              agent_profile_revision = COALESCE($6, agent_profile_revision),
+              terminal_cause = COALESCE($7, terminal_cause),
+              updated_at = $4
         WHERE tenant_id = $1 AND task_id = $2
           AND (
             (cancel_requested_at IS NULL AND status NOT IN ('complete', 'failed', 'cancelled'))
             OR (cancel_requested_at IS NOT NULL AND $3 = 'cancelled' AND status <> 'cancelled')
           )
       RETURNING ${TASK_SELECT_COLUMNS}`,
-      [tenant, input.taskId, input.status, this.#now()],
+      [
+        tenant,
+        input.taskId,
+        input.status,
+        this.#now(),
+        input.agentRef?.agentId ?? null,
+        input.agentRef?.profileRevision ?? null,
+        input.terminalCause ?? null,
+      ],
     );
     const row = result.rows[0];
     return row === undefined ? this.get(tenant, input.taskId) : taskRowToAttempt(row);

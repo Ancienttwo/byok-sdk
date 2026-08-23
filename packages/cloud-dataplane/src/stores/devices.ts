@@ -29,6 +29,7 @@ interface DeviceRow {
   readonly proof_key_id: string;
   readonly proof_key_epoch: number;
   readonly revoked: boolean;
+  readonly capabilities: readonly string[] | null;
 }
 
 /**
@@ -47,11 +48,12 @@ function toRecord(row: DeviceRow): DeviceRecord {
     proofKeyId: row.proof_key_id,
     proofKeyEpoch: row.proof_key_epoch,
     revoked: row.revoked,
+    ...(row.capabilities == null ? {} : { capabilities: Object.freeze([...row.capabilities]) }),
   };
 }
 
 const SELECT_COLUMNS =
-  'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked';
+  'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked, capabilities';
 
 export class PostgresDeviceDirectory implements DeviceDirectory {
   readonly #pool: Pool;
@@ -78,7 +80,8 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
              device_public_key = EXCLUDED.device_public_key,
              proof_key_id = EXCLUDED.proof_key_id,
              proof_key_epoch = EXCLUDED.proof_key_epoch,
-             revoked = false
+             revoked = false,
+             capabilities = NULL
        RETURNING ${SELECT_COLUMNS}`,
       [
         tenant,
@@ -109,6 +112,21 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
       tenant,
       deviceId,
     ]);
+  }
+
+  async recordCapabilities(
+    tenant: TenantId,
+    input: { readonly deviceId: string; readonly capabilities: readonly string[] },
+  ): Promise<DeviceRecord | undefined> {
+    const result = await this.#pool.query<DeviceRow>(
+      `UPDATE device
+          SET capabilities = $3::jsonb
+        WHERE tenant_id = $1 AND device_id = $2 AND revoked = false
+      RETURNING ${SELECT_COLUMNS}`,
+      [tenant, input.deviceId, JSON.stringify([...input.capabilities])],
+    );
+    const row = result.rows[0];
+    return row === undefined ? undefined : toRecord(row);
   }
 
   async list(tenant: TenantId): Promise<readonly DeviceRecord[]> {

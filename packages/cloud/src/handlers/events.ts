@@ -25,7 +25,7 @@ import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sd
 import { authenticateDevice, type DeviceRouteDeps } from './shared';
 
 /** Protocol features this cloud build accepts from a long-poll daemon. */
-const CLOUD_PROTOCOL_CAPABILITIES = ['result-document'];
+const CLOUD_PROTOCOL_CAPABILITIES = ['result-document', 'agent-home-contract'];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {
   /** How long an empty poll is held open, ms. */
@@ -71,7 +71,9 @@ export function eventsHandler(deps: EventsRouteDeps) {
         if (page.messages.length === 0) break;
         const decoded: Envelope[] = page.messages.map((message) => decodeEnvelope(message.body));
         const offeredTaskIds = decoded.flatMap((event) =>
-          (event.type === 'task.offer' || event.type === 'task.offer_with_toolsets') &&
+          (event.type === 'task.offer' ||
+            event.type === 'task.offer_with_toolsets' ||
+            event.type === 'task.offer_for_agent') &&
           event.task_id !== undefined
             ? [event.task_id]
             : [],
@@ -80,7 +82,13 @@ export function eventsHandler(deps: EventsRouteDeps) {
           (await stores.tasks.getMany(offeredTaskIds)).map((attempt) => [attempt.taskId, attempt]),
         );
         const events = decoded.filter((event) => {
-          if (event.type !== 'task.offer' && event.type !== 'task.offer_with_toolsets') return true;
+          if (
+            event.type !== 'task.offer' &&
+            event.type !== 'task.offer_with_toolsets' &&
+            event.type !== 'task.offer_for_agent'
+          ) {
+            return true;
+          }
           return event.task_id === undefined || attemptsByTaskId[event.task_id]?.cancellation === undefined;
         });
         if (events.length === 0 && page.hasMore) {

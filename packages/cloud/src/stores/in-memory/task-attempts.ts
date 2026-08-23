@@ -16,7 +16,7 @@
  * unfalsifiable.
  */
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
-import type { TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '../ports';
+import type { AgentRef, TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '../ports';
 
 export class InMemoryTaskAttemptStore implements TaskAttemptStore {
   readonly #state: InMemoryTaskAttemptState;
@@ -25,7 +25,10 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     this.#state = state;
   }
 
-  async open(tenant: TenantId, input: { taskId: string; deviceId: string }): Promise<TaskAttempt> {
+  async open(
+    tenant: TenantId,
+    input: { readonly taskId: string; readonly deviceId: string; readonly agentRef?: AgentRef },
+  ): Promise<TaskAttempt> {
     const key = tenantKey(tenant, input.taskId);
     return this.#state.mutate(key, () => {
       const existing = this.#state.attempts.get(key);
@@ -34,6 +37,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
         tenantId: tenant,
         taskId: input.taskId,
         deviceId: input.deviceId,
+        ...(input.agentRef === undefined ? {} : { agentRef: { ...input.agentRef } }),
         status: 'offered',
         updatedAt: this.#now(),
       };
@@ -76,7 +80,12 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
 
   async recordStatus(
     tenant: TenantId,
-    input: { taskId: string; status: TaskAttemptStatus },
+    input: {
+      readonly taskId: string;
+      readonly status: TaskAttemptStatus;
+      readonly agentRef?: AgentRef;
+      readonly terminalCause?: string;
+    },
   ): Promise<TaskAttempt | undefined> {
     const key = tenantKey(tenant, input.taskId);
     return this.#state.mutate(key, () => {
@@ -91,7 +100,13 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       ) {
         return existing;
       }
-      const updated: TaskAttempt = { ...existing, status: input.status, updatedAt: this.#now() };
+      const updated: TaskAttempt = {
+        ...existing,
+        status: input.status,
+        ...(input.agentRef === undefined ? {} : { agentRef: { ...input.agentRef } }),
+        ...(input.terminalCause === undefined ? {} : { terminalCause: input.terminalCause }),
+        updatedAt: this.#now(),
+      };
       this.#state.attempts.set(key, updated);
       return updated;
     });

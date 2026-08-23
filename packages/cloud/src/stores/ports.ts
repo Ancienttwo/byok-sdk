@@ -42,6 +42,8 @@ import type {
   TenantId,
   TenantReadiness,
 } from '@byok-sdk/core';
+import type { AgentRef } from '@byok-sdk/protocol';
+export type { AgentRef } from '@byok-sdk/protocol';
 import type { ActivityStore } from '../activity';
 import type { ApprovalTimelineStore } from '../approval-timeline';
 
@@ -61,6 +63,12 @@ export interface DeviceRecord {
   /** Current proof signing-key rotation generation. */
   readonly proofKeyEpoch: number;
   readonly revoked: boolean;
+  /**
+   * The latest capability snapshot written by an authenticated device
+   * handshake. This is deliberately separate from core presence: presence is
+   * lossy/TTL-bounded and cannot authorize Agent dispatch.
+   */
+  readonly capabilities?: readonly string[];
 }
 
 /** Everything `POST /byok/pair` knows at registration time. `tenantId` is the store's first parameter; `revoked` is the store's own to set. */
@@ -81,6 +89,15 @@ export interface DeviceDirectory {
   list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
   /** Set-wise tenant observation; revoked devices never contribute presence. */
   readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness>;
+  /**
+   * Persist a capability snapshot obtained from an authenticated device
+   * message. Implementations may return `undefined` for an unknown/revoked
+   * device; callers must fail closed in that case.
+   */
+  recordCapabilities(
+    tenant: TenantId,
+    input: { readonly deviceId: string; readonly capabilities: readonly string[] },
+  ): Promise<DeviceRecord | undefined>;
   /** Pre-tenant. Two callers only: `POST /byok/challenge` and `POST /byok/token`. Never exposed through the tenant facade. */
   resolveByDeviceId(deviceId: string): Promise<DeviceRecord | undefined>;
 }
@@ -170,9 +187,13 @@ export interface TaskAttempt {
   readonly taskId: string;
   /** The device the offer was addressed to. */
   readonly deviceId: string;
-  /** Set by `task.claim`, and only by the first one. Until then the task has no owner and the gate lets any of this tenant's devices through, matching the reference server. */
+  /** Exact Agent identity sealed when the strict Agent offer was opened. */
+  readonly agentRef?: AgentRef;
+  /** Set by `task.claim`, and only by the first one. Legacy attempts remain claimable by any tenant device until then; strict Agent attempts are target-device bound before this field is consulted. */
   readonly ownerDeviceId?: string;
   readonly status: TaskAttemptStatus;
+  /** Runtime-reported terminal cause from the first winning terminal. */
+  readonly terminalCause?: string;
   /** Durable host cancellation authority. Its presence outranks later device terminal receipts. */
   readonly cancellation?: {
     readonly requestedAt: string;
@@ -183,7 +204,14 @@ export interface TaskAttempt {
 
 export interface TaskAttemptStore {
   /** Called when an offer is enqueued: records the pending attempt with no owner yet. */
-  open(tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt>;
+  open(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly agentRef?: AgentRef;
+    },
+  ): Promise<TaskAttempt>;
   get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Batch lookup used by mailbox projection; implementations must not turn one poll into N queries. */
   getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
@@ -192,7 +220,12 @@ export interface TaskAttemptStore {
   /** Record a lifecycle transition. No-op (returns `undefined`) for an unknown task — same shape as the reference server's per-type handlers. */
   recordStatus(
     tenant: TenantId,
-    input: { readonly taskId: string; readonly status: TaskAttemptStatus },
+    input: {
+      readonly taskId: string;
+      readonly status: TaskAttemptStatus;
+      readonly agentRef?: AgentRef;
+      readonly terminalCause?: string;
+    },
   ): Promise<TaskAttempt | undefined>;
 }
 

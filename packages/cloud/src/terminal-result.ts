@@ -1,4 +1,10 @@
-import { decodeEnvelope, type BlobRef, type Envelope, type TerminalInferenceUsage } from '@byok-sdk/protocol';
+import {
+  decodeEnvelope,
+  type AgentRef,
+  type BlobRef,
+  type Envelope,
+  type TerminalInferenceUsage,
+} from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
 import type { RequestReceipt } from './stores/ports';
 
@@ -12,6 +18,8 @@ import type { RequestReceipt } from './stores/ports';
 export interface TerminalResult {
   readonly taskId: string;
   readonly state: 'complete' | 'failed' | 'cancelled';
+  /** Exact Agent identity echoed by the winning terminal, when Agent-bound. */
+  readonly agentRef?: AgentRef;
   readonly summary?: string;
   readonly sessionRef?: string;
   readonly artifactRefs?: readonly BlobRef[];
@@ -29,6 +37,8 @@ export interface TerminalResult {
    */
   readonly usage?: TerminalInferenceUsage;
   readonly reason?: string;
+  /** Terminal cause projection; currently the protocol's terminal reason. */
+  readonly terminalCause?: string;
   readonly retryable?: boolean;
   /** When the receipt store wrote the terminal fact — the first one, by its own first-write-wins rule. */
   readonly recordedAt: string;
@@ -60,6 +70,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
       return {
         taskId,
         state: 'complete',
+        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         summary: envelope.payload.summary,
         sessionRef: envelope.payload.sessionRef,
         ...(envelope.payload.artifactRefs !== undefined
@@ -73,7 +84,9 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
       return {
         taskId,
         state: 'failed',
+        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         reason: envelope.payload.reason,
+        terminalCause: envelope.payload.reason,
         ...(envelope.payload.retryable !== undefined
           ? { retryable: envelope.payload.retryable }
           : {}),
@@ -84,7 +97,9 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
       return {
         taskId,
         state: 'cancelled',
+        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         ...(envelope.payload.reason !== undefined ? { reason: envelope.payload.reason } : {}),
+        ...(envelope.payload.reason === undefined ? {} : { terminalCause: envelope.payload.reason }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };

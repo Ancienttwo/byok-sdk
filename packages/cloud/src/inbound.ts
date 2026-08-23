@@ -9,9 +9,10 @@
  *    else, so a flood of garbage-typed envelopes costs the same budget as a
  *    flood of well-formed ones. S3a's reference limiter allows everything; the
  *    seam is what matters at this position.
- * 1. **type-allow** — only `DAEMON_TO_SERVER_TYPES` may pass. A server ->
- *    daemon type arriving inbound, or anything unrecognized, is rejected
- *    before it is dispatched or counted accepted.
+ * 1. **type-allow** — only `DAEMON_TO_SERVER_TYPES` may pass, plus the
+ *    authenticated long-poll `conn.hello` capability snapshot handled below.
+ *    A server -> daemon type arriving inbound, or anything unrecognized, is
+ *    rejected before it is dispatched or counted accepted.
  * 2. **ownership** — an envelope for a task already owned by a DIFFERENT
  *    device is dropped, never force-failed: force-failing on an authz mismatch
  *    would let an attacker who merely guesses a `taskId` kill the real owner's
@@ -29,6 +30,7 @@
 import {
   DAEMON_TO_SERVER_TYPES,
   encodeEnvelope,
+  type AgentRef,
   type Envelope,
   type MessageType,
 } from '@byok-sdk/protocol';
@@ -53,6 +55,31 @@ export function terminalReceiptKey(taskId: string): string {
   return `task:${taskId}:terminal`;
 }
 
+function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean {
+  return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
+}
+
+function inboundAgentRef(envelope: Envelope): AgentRef | undefined {
+  switch (envelope.type) {
+    case 'task.claim':
+    case 'task.complete':
+    case 'task.fail':
+    case 'task.cancelled':
+      return envelope.payload.agentRef;
+    default:
+      return undefined;
+  }
+}
+
+function agentRefEchoRequired(envelope: Envelope): boolean {
+  return (
+    envelope.type === 'task.claim' ||
+    envelope.type === 'task.complete' ||
+    envelope.type === 'task.fail' ||
+    envelope.type === 'task.cancelled'
+  );
+}
+
 export async function handleInboundEnvelope(
   stores: TenantStores,
   deviceId: string,
@@ -60,6 +87,22 @@ export async function handleInboundEnvelope(
   activityBounds: ActivityBounds = DEFAULT_ACTIVITY_BOUNDS,
 ): Promise<InboundOutcome> {
   if (!(await stores.rateLimiter.consume(deviceId))) return 'rate_limited';
+
+  // Long-poll has no live WS handshake. A bearer-authenticated conn.hello is
+  // therefore accepted only as a capability snapshot for the same device
+  // principal, and is persisted in the durable device row. This is the sole
+  // cloud path that admits the target capability; presence is not consulted.
+  if (envelope.type === 'conn.hello') {
+    if (envelope.payload.deviceId !== deviceId) return 'rejected';
+    const device = await stores.devices.get(deviceId);
+    if (device === undefined || device.revoked || device.productId !== envelope.payload.productId) {
+      return 'rejected';
+    }
+    if (await stores.dedup.checkAndRecord(deviceId, envelope.id)) return 'duplicate';
+    return (await stores.devices.recordCapabilities({ capabilities: envelope.payload.capabilities })) === undefined
+      ? 'rejected'
+      : 'accepted';
+  }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return 'rejected';
 
@@ -69,7 +112,21 @@ export async function handleInboundEnvelope(
   if (taskId === undefined) return 'rejected';
 
   const attempt = await stores.tasks.get(taskId);
+  // Strict Agent offers are explicitly placed. Unlike legacy unowned task
+  // attempts, a different tenant device may not claim or report one merely by
+  // guessing its task id.
+  if (attempt?.agentRef !== undefined && attempt.deviceId !== deviceId) return 'rejected';
   if (attempt?.ownerDeviceId !== undefined && attempt.ownerDeviceId !== deviceId) return 'rejected';
+  // Agent identity is an exact-match boundary. A missing echo is a mismatch
+  // just like a different id or profile revision; accepting it would let an
+  // unrelated session write a terminal for the durable Agent attempt.
+  if (
+    attempt?.agentRef !== undefined &&
+    agentRefEchoRequired(envelope) &&
+    !sameAgentRef(attempt.agentRef, inboundAgentRef(envelope))
+  ) {
+    return 'rejected';
+  }
 
   if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
     try {
@@ -235,7 +292,14 @@ async function recordTerminal(
     return;
   }
   if (!created) return;
-  const recordedAttempt = await stores.tasks.recordStatus({ taskId, status });
+  const cause =
+    envelope.type === 'task.fail' || envelope.type === 'task.cancelled' ? envelope.payload.reason : undefined;
+  const recordedAttempt = await stores.tasks.recordStatus({
+    taskId,
+    status,
+    ...(attempt?.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
+    ...(cause === undefined ? {} : { terminalCause: cause }),
+  });
   // The attempt mutation is the ordering CAS. Cancellation may have landed
   // after the read above but before this write; in that race the store returns
   // the cancellation-bearing attempt and no business projection is allowed.

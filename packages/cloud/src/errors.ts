@@ -44,6 +44,10 @@ export const CLOUD_ERROR_CODES = {
   activity_batch_too_large: 'activity_batch_too_large',
   /** Host control-plane task lookup is tenant-closed and found no task. */
   task_not_found: 'task_not_found',
+  /** Durable target-device capability is absent, revoked, or unavailable. */
+  agent_capability_missing: 'agent_capability_missing',
+  /** Inbound Agent identity did not exactly match the offered identity. */
+  agent_ref_mismatch: 'agent_ref_mismatch',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

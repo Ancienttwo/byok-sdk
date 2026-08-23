@@ -49,6 +49,21 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     this.#byTenant.set(key, { ...record, revoked: true });
   }
 
+  async recordCapabilities(
+    tenant: TenantId,
+    input: { readonly deviceId: string; readonly capabilities: readonly string[] },
+  ): Promise<DeviceRecord | undefined> {
+    const key = tenantKey(tenant, input.deviceId);
+    const record = this.#byTenant.get(key);
+    if (record === undefined || record.revoked) return undefined;
+    const updated: DeviceRecord = {
+      ...record,
+      capabilities: Object.freeze([...input.capabilities]),
+    };
+    this.#byTenant.set(key, updated);
+    return updated;
+  }
+
   async list(tenant: TenantId): Promise<readonly DeviceRecord[]> {
     const prefix = tenantKey(tenant, '');
     return [...this.#byTenant.entries()]

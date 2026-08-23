@@ -25,11 +25,13 @@ export { createByokCloud } from './cloud';
 export type {
   ByokCloud,
   ByokCloudOptions,
+  AgentDispatchInput,
   EnqueueOfferInput,
   EnqueueToolsetOfferInput,
   EnqueuedOffer,
 } from './cloud';
 export {
+  AGENT_HOME_CONTRACT_CAPABILITY,
   DEFAULT_EVENTS_PAGE_LIMIT,
   DEFAULT_LONG_POLL_HOLD_MS,
   DEFAULT_LONG_POLL_INTERVAL_MS,
@@ -249,6 +251,7 @@ export type {
   TaskAttempt,
   TaskAttemptStatus,
   TaskAttemptStore,
+  AgentRef,
   TaskCancellationMutation,
   TaskCancellationRequest,
   TaskCancellationStore,

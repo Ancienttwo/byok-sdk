@@ -58,7 +58,10 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   type Envelope,
+  TaskOfferForAgentPayloadSchema,
+  type AgentRef,
   type TaskOfferPayload,
+  type TaskOfferForAgentPayload,
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
@@ -135,6 +138,12 @@ export const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
 export const DEFAULT_LONG_POLL_INTERVAL_MS = 250;
 /** Rows per `GET /byok/events` response. */
 export const DEFAULT_EVENTS_PAGE_LIMIT = 50;
+/** Device capability required by the strict Agent offer path. */
+export const AGENT_HOME_CONTRACT_CAPABILITY = 'agent-home-contract';
+
+function sameAgentRef(expected: AgentRef, actual: AgentRef | undefined): boolean {
+  return actual?.agentId === expected.agentId && actual.profileRevision === expected.profileRevision;
+}
 
 export interface ByokCloudOptions {
   readonly core: CoreStores;
@@ -202,6 +211,18 @@ export interface EnqueueToolsetOfferInput {
   readonly payload: TaskOfferWithToolsetsPayload;
 }
 
+/**
+ * Strict Agent dispatch input. The device path is intentionally a separate
+ * argument on {@link ByokCloud.enqueueAgentOffer}; no legacy offer field is
+ * interpreted as an Agent placement hint.
+ */
+export interface AgentDispatchInput {
+  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
+  readonly taskId?: string;
+  /** Strict Agent payload carrying the exact opaque AgentRef. */
+  readonly payload: TaskOfferForAgentPayload;
+}
+
 export interface EnqueuedOffer {
   readonly taskId: string;
   /** The per-(tenant, device) delivery seq — the daemon's redelivery cursor position for this envelope. */
@@ -229,6 +250,12 @@ export interface ByokCloud {
   enqueueOffer(tenant: TenantId, deviceId: string, input: EnqueueOfferInput): Promise<EnqueuedOffer>;
   /** Host control plane: enqueue the additive fail-closed offer variant that requires local MCP toolsets. */
   enqueueToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueToolsetOfferInput): Promise<EnqueuedOffer>;
+  /**
+   * Host control plane: enqueue a strict Agent offer to an explicit device.
+   * Capability admission is read from the durable authenticated device row
+   * before either the mailbox append or task-attempt open.
+   */
+  enqueueAgentOffer(tenant: TenantId, deviceId: string, input: AgentDispatchInput): Promise<EnqueuedOffer>;
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
@@ -493,11 +520,31 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     tenant: TenantId,
     deviceId: string,
     requestedTaskId: string | undefined,
+    agentRef: AgentRef | undefined,
     buildEnvelope: (taskId: string, seq: number, messageId: string) => Envelope,
   ): Promise<EnqueuedOffer> {
     const stores = tenantStoresFor(controlPlane(tenant), root);
     const taskId = requestedTaskId ?? `task_${options.crypto.randomUuid()}`;
     const messageId = options.crypto.randomUuid();
+    // Strict Agent attempts reserve their identity before delivery allocation.
+    // This makes concurrent re-enqueues converge on one durable AgentRef
+    // instead of allowing two mailbox bodies to race a later task.open.
+    const openedBeforeAppend =
+      agentRef === undefined
+        ? undefined
+        : await stores.tasks.open({ taskId, deviceId, agentRef });
+    if (
+      agentRef !== undefined &&
+      (openedBeforeAppend === undefined ||
+        openedBeforeAppend.deviceId !== deviceId ||
+        openedBeforeAppend.agentRef === undefined ||
+        !sameAgentRef(agentRef, openedBeforeAppend.agentRef))
+    ) {
+      throw new ByokCloudError(
+        'agent_ref_mismatch',
+        `Task ${taskId} already has a different durable Agent identity or target device.`,
+      );
+    }
 
     const message = await stores.mailbox.append({
       deviceId,
@@ -524,8 +571,29 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     }
 
-    const attempt = await stores.tasks.open({ taskId, deviceId });
+    const attempt =
+      openedBeforeAppend ??
+      (await stores.tasks.open({
+        taskId,
+        deviceId,
+      }));
     return { taskId, seq: message.seq, envelope, attempt };
+  }
+
+  async function assertAgentDispatchCapability(tenant: TenantId, deviceId: string): Promise<void> {
+    // This is deliberately a durable device-row read. Core presence is
+    // lossy/TTL-bounded and is never consulted for an execution admission.
+    const device = await options.cloud.devices.get(tenant, deviceId);
+    if (
+      device === undefined ||
+      device.revoked ||
+      !device.capabilities?.includes(AGENT_HOME_CONTRACT_CAPABILITY)
+    ) {
+      throw new ByokCloudError(
+        'agent_capability_missing',
+        `Device ${deviceId} has no durable ${AGENT_HOME_CONTRACT_CAPABILITY} capability; refusing Agent dispatch before mailbox append.`,
+      );
+    }
   }
 
   return {
@@ -539,14 +607,25 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueOffer(tenant, deviceId, input) {
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, (taskId, seq, messageId) =>
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
         createEnvelope('task.offer', input.payload, { id: messageId, taskId, seq }),
       );
     },
 
     async enqueueToolsetOffer(tenant, deviceId, input) {
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, (taskId, seq, messageId) =>
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
         createEnvelope('task.offer_with_toolsets', input.payload, { id: messageId, taskId, seq }),
+      );
+    },
+
+    async enqueueAgentOffer(tenant, deviceId, input) {
+      await assertAgentDispatchCapability(tenant, deviceId);
+      // Parse the strict control payload before reserving a mailbox sequence.
+      // A malformed/oversized AgentRef therefore cannot leave a durable
+      // delivery row behind.
+      const payload = TaskOfferForAgentPayloadSchema.parse(input.payload);
+      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, payload.agentRef, (taskId, seq, messageId) =>
+        createEnvelope('task.offer_for_agent', payload, { id: messageId, taskId, seq }),
       );
     },
 
@@ -602,9 +681,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         return {
           taskId,
           state: 'cancelled',
+          ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
           ...(attempt.cancellation.reason === undefined
             ? {}
             : { reason: attempt.cancellation.reason }),
+          ...(attempt.cancellation.reason === undefined
+            ? {}
+            : { terminalCause: attempt.cancellation.reason }),
           recordedAt: attempt.cancellation.requestedAt,
         };
       }
