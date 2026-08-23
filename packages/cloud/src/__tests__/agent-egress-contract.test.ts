@@ -1,4 +1,4 @@
-import { createEnvelope, decodeEnvelope, type AgentEgressPolicy } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, type AgentEgressPolicy, type EventsPollResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { tenantStoresFor } from '../tenant-stores';
 import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
@@ -135,6 +135,23 @@ describe('hosted Agent egress contract', () => {
       ]),
     );
     expect(pollBody.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'agent.egress.ack' })]));
+  });
+
+  it('filters a pre-lease cancelled egress Agent offer and delivers only task.cancel', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await admitFullEgress(harness, device.deviceId);
+
+    const offered = await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, {
+      taskId: 'cancelled-agent-egress-task',
+      payload: egressOfferPayload(),
+    });
+    await harness.cloud.cancelTask(TENANT_A, offered.taskId, 'stop before lease');
+
+    const polled = await harness.request('/byok/events?cursor=0', { headers: device.authorization });
+    const pollBody = (await polled.json()) as EventsPollResponse;
+    expect(pollBody.events.map((event) => event.type)).toEqual(['task.cancel']);
+    expect(pollBody.events[0]).toMatchObject({ task_id: offered.taskId });
   });
 
   it('admits content reads per surface and persists the content-free receipt fact', async () => {

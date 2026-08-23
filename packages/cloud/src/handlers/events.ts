@@ -81,7 +81,8 @@ export function eventsHandler(deps: EventsRouteDeps) {
         const offeredTaskIds = decoded.flatMap((event) =>
           (event.type === 'task.offer' ||
             event.type === 'task.offer_with_toolsets' ||
-            event.type === 'task.offer_for_agent') &&
+            event.type === 'task.offer_for_agent' ||
+            event.type === 'task.offer_for_agent_with_egress') &&
           event.task_id !== undefined
             ? [event.task_id]
             : [],
@@ -93,7 +94,8 @@ export function eventsHandler(deps: EventsRouteDeps) {
           if (
             event.type !== 'task.offer' &&
             event.type !== 'task.offer_with_toolsets' &&
-            event.type !== 'task.offer_for_agent'
+            event.type !== 'task.offer_for_agent' &&
+            event.type !== 'task.offer_for_agent_with_egress'
           ) {
             return true;
           }
