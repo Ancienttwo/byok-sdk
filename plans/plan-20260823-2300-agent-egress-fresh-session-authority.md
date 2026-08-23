@@ -166,7 +166,7 @@ At 10x scale the first pressure point remains per-Agent/tenant reliable backlog,
 - [x] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
 - [x] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent source gate.
 - [x] Add fail-closed prerelease/dist-tag release support and align the immutable `0.8.0-beta.0` plus keys `0.3.1-beta.0` train.
-- [ ] Publish the complete train under npm dist-tag `beta`, prove exact registry integrity/dependency closure, and keep `latest` unchanged.
+- [x] Publish the complete train under npm dist-tag `beta`, prove exact registry integrity/dependency closure, and keep `latest` unchanged.
 - [ ] Complete Salesko downstream fresh/resume acceptance against the exact beta artifacts, then independently gate the combined artifact subject.
 
 ## Failure Handling and Rollback
@@ -192,5 +192,5 @@ Before beta publication, rollback is deletion/revert of this isolated source bra
 - [x] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
 - [x] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent source gate.
 - [x] Add fail-closed prerelease/dist-tag release support and align the immutable `0.8.0-beta.0` plus keys `0.3.1-beta.0` train.
-- [ ] Publish the complete train under npm dist-tag `beta`, prove exact registry integrity/dependency closure, and keep `latest` unchanged.
+- [x] Publish the complete train under npm dist-tag `beta`, prove exact registry integrity/dependency closure, and keep `latest` unchanged.
 - [ ] Complete Salesko downstream fresh/resume acceptance against the exact beta artifacts, then independently gate the combined artifact subject.

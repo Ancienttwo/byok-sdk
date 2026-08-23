@@ -83,8 +83,27 @@
   partially published beta instead of resuming it, and checks every public
   package's beta tag plus unchanged stable latest sentinel on readback. The
   focused release-tool suite passes 8/8 and release graph closes nine aligned
-  manifests at 0.8.0-beta.0 plus keys 0.3.1-beta.0. Real pack/publish/readback
-  remains pending the clean frozen commit.
+  manifests at 0.8.0-beta.0 plus keys 0.3.1-beta.0.
+
+## 2026-08-24 beta publication and registry closure
+
+- Frozen release source `18e9a8e2797b943cb2cb6b5ca5890208ced5305e`
+  produced the complete ten-tarball train and was tagged locally as
+  `v0.8.0-beta.0`. Nine aligned public packages were published at
+  0.8.0-beta.0 and `@byok-sdk/keys` at 0.3.1-beta.0, all under npm dist-tag
+  `beta`.
+- Registry readback verified the release-manifest integrity for every tarball,
+  exact internal dependency edges, one installed `@byok-sdk/core` version, and
+  declaration/install closure. Stable sentinels remained aligned packages
+  0.7.0 and keys 0.3.0; `latest` was not mutated.
+- Final typecheck passed. Two full-test attempts each hit a different known
+  environment-sensitive test: one Wrangler dry-run exceeded its 5 second
+  timeout by 176 ms, and one live SQLite WAL snapshot changed while the hosted
+  daemon owned it. Each exact failing file passed immediately in isolated
+  rerun (6/6 and 24/24 respectively); no product or test source was changed.
+- Registry availability is now closed, but this is not stable promotion or
+  downstream acceptance. The remaining gate is Salesko exact-beta
+  fresh/resume acceptance and its independent frozen-subject review.
 
 ## Promotion Filter
 
