@@ -138,6 +138,25 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('task.offer_for_agent', () => {
+    const type = 'task.offer_for_agent' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        {
+          instruction: 'continue durable Agent work',
+          policy: { mode: 'auto' },
+          runtime: 'pi',
+          agentRef: { agentId: 'agent-1', profileRevision: 'profile-r7' },
+          sessionRef: 'session-agent-1',
+        },
+        { taskId: 'task-agent-1', seq: 4 },
+      ),
+    );
+  });
+
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);

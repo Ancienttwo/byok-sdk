@@ -13,6 +13,7 @@
 --   deploy/sql/0009_task_cancellation.sql (durable host cancellation tombstone and delivery identity)
 --   deploy/sql/0010_tenant_readiness.sql (optional frozen presence facts)
 --   deploy/sql/0011_tenant_erasure.sql (package/operator erasure receipt, not product data)
+--   deploy/sql/0012_agent_home_contract.sql (durable capability + exact AgentRef task identity)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -71,6 +72,46 @@ BEGIN
     RAISE EXCEPTION
       'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 27 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql; 0009_task_cancellation.sql and 0010_tenant_readiness.sql are checked separately)',
       current_database(), current_schema(), port_tables;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.4 Agent-home durable admission and task identity columns are installed
+-- ---------------------------------------------------------------------------
+--
+-- 0012 changes no tenant-first key shape and creates no table. These columns
+-- are nullable for legacy devices/tasks; the application gate treats missing
+-- device capabilities as unsupported and requires the AgentRef pair together.
+DO $$
+DECLARE
+  missing_columns text;
+BEGIN
+  SELECT string_agg(required.table_name || '.' || required.column_name, ', ' ORDER BY required.table_name, required.column_name)
+    INTO missing_columns
+    FROM (
+      VALUES
+        ('device'::text, 'capabilities'::text, 'jsonb'::regtype),
+        ('task'::text, 'agent_id'::text, 'text'::regtype),
+        ('task'::text, 'agent_profile_revision'::text, 'text'::regtype),
+        ('task'::text, 'terminal_cause'::text, 'text'::regtype)
+    ) AS required(table_name, column_name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = required.table_name
+         AND a.attname = required.column_name
+         AND a.atttypid = required.type_oid
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without 0012_agent_home_contract.sql: missing column(s): %',
+      missing_columns;
   END IF;
 END $$;
 

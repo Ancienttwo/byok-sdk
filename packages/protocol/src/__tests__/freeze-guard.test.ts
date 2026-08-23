@@ -113,6 +113,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'conn.ack': { taskId: 'optional', seq: 'required' },
     'task.offer': { taskId: 'required', seq: 'required' },
     'task.offer_with_toolsets': { taskId: 'required', seq: 'required' },
+    'task.offer_for_agent': { taskId: 'required', seq: 'required' },
     'task.approve': { taskId: 'required', seq: 'required' },
     'task.reject': { taskId: 'required', seq: 'required' },
     'task.cancel': { taskId: 'required', seq: 'required' },

@@ -61,6 +61,20 @@ same modules are also directly installable as `@byok-sdk/client`,
 Both profiles share the frozen v1 protocol, tenant isolation, durable device
 proof, truth CAS, explicit capabilities, and fail-closed policy handling.
 
+## Agent-first local homes (unreleased)
+
+The additive Agent execution path treats a task as one run of a durable Agent.
+The host supplies an absolute branded `hostStorageRoot` plus an exact
+`AgentRef`; the SDK alone composes `<hostStorageRoot>/agents/<agentId>`,
+initializes and preserves `MEMORY.md`/`notes/`, enforces one writer, and seals
+that canonical home as the Pi/Claude/Codex cwd. An Agent dispatch requires the
+target daemon's durable `agent-home-contract` capability and never falls back
+to `workspaceRoot/<taskId>`.
+
+Profile projection content and every non-`.byok` Agent file remain downstream
+owned and opaque. In particular, `artifacts` is not an SDK schema or a required
+directory. See [the host local-storage contract](docs/host-local-storage-layout.md).
+
 ## Key management is separate
 
 `@byok-sdk/keys` stores provider credentials and makes direct provider calls.

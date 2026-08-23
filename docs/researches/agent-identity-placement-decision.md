@@ -1,6 +1,6 @@
 # ADR-025: Device、Agent、placement 与 runtime session 分权
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by the 2026-08-23 Agent-home work-package
 - **Date:** 2026-08-10
 - **Deciders:** Ancienttwo
 - **Scope:** BYOK multi-device / future multi-Agent fleet authority boundary
@@ -157,3 +157,23 @@ AiphaBee 或第二个宿主批准具体 fleet workflow 与 acceptance scenarios 
 只有新的已批准 ADR 可以改变以下任一边界：复用 task/runtime identity 作为
 Agent、允许多 placement authority、允许 presence 自动重建 placement、把
 fleet control 塞入 frozen protocol v1，或引入 multi-control-plane attachment。
+
+## 2026-08-23 Agent-home amendment
+
+The approved Agent-first work-package activates the local persistence portion
+without introducing the broader placement/supervision system deferred above.
+It adds strict `AgentRef` transport and a distinct Agent offer, but it does not
+make task, runtime, Device, or presence the Agent lifecycle authority.
+
+The local path authority is now frozen as SDK code, not host policy: the host
+supplies one absolute branded `hostStorageRoot`, and BYOK composes only
+`<hostStorageRoot>/agents/<validated-agentId>`. The host never joins that suffix
+or supplies an arbitrary path resolver. BYOK owns initialization/preservation,
+canonical containment, one-writer lease, manifest cwd binding, and its `.byok`
+runtime-session evidence. The host owns stable AgentRef, redacted profile
+projection content, credential custody, and every opaque non-`.byok` Agent
+file. `artifacts` is a category, not necessarily a directory or SDK schema.
+
+This amendment does not copy RAFT private layout or treat its inventory as
+acceptance. The recovered Agent-home behavior is precedent only; BYOK's own
+behavior tests are the acceptance authority.

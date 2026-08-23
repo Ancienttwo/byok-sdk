@@ -234,19 +234,20 @@ Opaque server-issued token the daemon maps to a runtime session id (`claude
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Handshake acknowledgement |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
+| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `policy`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
 | `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
-| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
+| `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `agentRef?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
 | `task.started` | D→S | **required** | optional | `{}` | Daemon actually starts the runtime session — `Claimed → Running` |
-| `task.decline` | D→S | **required** | optional | `reason`, `retryable?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
+| `task.decline` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
-| `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2) | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?` | Task ends in error |
-| `task.cancelled` | D→S | **required** | optional | `reason?` | Task ends `Cancelled` (server- or daemon-initiated) |
+| `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?` | Runtime reached `turn_end` |
+| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?` | Task ends in error |
+| `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
 
 **`TaskOfferPayload.dispatchSelection` is the authoritative LLM target when
@@ -308,10 +309,26 @@ a breaking wire-v1 change, so it is kept as declared-but-unconsumed rather
 than either wired up opportunistically or deleted. The rule that follows from
 that: no public documentation, SDK surface, or UI may present this field as a
 workspace-selection capability, and no code may start reading it as a
-side effect of unrelated work. Wiring it later requires its own ADR that
-first settles the resolver design — precedence against the `sessionRef`-keyed
+side effect of unrelated work. Wiring it later requires its own ADR that first
+settles legacy task-workspace precedence against the `sessionRef`-keyed
 mapping, path validation and confinement, and what a device does with a hint
-it cannot honor. See `docs/architecture/sdk-architecture.md` ADR-023.
+it cannot honor. The Agent-home contract below does not activate this field.
+See `docs/architecture/sdk-architecture.md` ADR-023.
+
+**`task.offer_for_agent` is the strict Agent-home path.** Its required
+`agentRef` contains a bounded single-segment `agentId` and bounded
+`profileRevision`; both are limited by UTF-8 byte length. The target device
+must have durably declared `agent-home-contract` before the server/cloud creates
+or enqueues the task. A legacy daemon therefore cannot strip identity and run
+the instruction in `workspaceRoot/<taskId>`.
+
+The daemon accepts an absolute `hostStorageRoot` from its local host config and
+the SDK exclusively composes `<hostStorageRoot>/agents/<agentId>`. It then
+requires exact AgentRef/profileRevision/session/runtime/cwd agreement for
+resume and echoes exact AgentRef through claim/decline/terminal messages.
+`workspaceHint` has no precedence because it is absent from the strict Agent
+offer. Profile contents and non-`.byok` Agent files are opaque; `artifacts` is
+not a protocol field, schema, index, or required directory.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

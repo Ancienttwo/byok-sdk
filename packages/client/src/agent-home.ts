@@ -1,14 +1,12 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { AgentRefSchema, type AgentRef } from '@byok-sdk/protocol';
 
-/** Opaque host-owned Agent identity. The SDK never parses profile content. */
-export interface AgentRef {
-  readonly agentId: string;
-  readonly profileRevision: string;
-}
+export type { AgentRef } from '@byok-sdk/protocol';
 
-export const AGENT_REF_MAX_BYTES = 160;
-export const AGENT_PROFILE_REVISION_MAX_BYTES = 160;
+export const AGENT_HOME_DIRECTORY = 'agents';
+export const AGENT_HOME_INTERNAL_DIRECTORY = '.byok';
 
 export class AgentHomeError extends Error {
   constructor(message: string) {
@@ -47,29 +45,29 @@ export class AgentHomeBusyError extends AgentHomeError {
 
 export interface AgentHomeResolution {
   readonly agentRef: AgentRef;
-  /** Canonical absolute path used as runtime cwd. */
+  /** Absolute branded storage root supplied by the host, after realpath. */
+  readonly hostStorageRoot: string;
+  /** SDK-owned `<hostStorageRoot>/agents` authority, after realpath. */
+  readonly agentsRoot: string;
+  /** Canonical absolute Agent home. This is also the runtime cwd. */
   readonly homeDir: string;
   readonly canonicalHome: string;
-  readonly configuredRoot: string;
 }
 
-export type AgentHomeResolverResult = string | { readonly homeDir: string };
-
-export interface AgentHomeResolverOptions {
-  readonly configuredRoot: string;
-  readonly resolve: (agentRef: AgentRef) => AgentHomeResolverResult | Promise<AgentHomeResolverResult>;
-}
-
-export interface AgentHomeLifecycleInput extends AgentHomeResolution {
+export interface AgentHomeProjectionInput extends AgentHomeResolution {
   readonly cwd: string;
 }
 
-export interface AgentHomeLifecycle {
-  /** The host owns profile projection and initialization; this must be idempotent. */
-  prepare(input: AgentHomeLifecycleInput): void | Promise<void>;
+/**
+ * Optional downstream projection hook. The SDK supplies the canonical home;
+ * the host supplies opaque, redacted product content and never joins
+ * `agents/<agentId>` itself. The SDK does not parse the projected content.
+ */
+export interface AgentHomeProjection {
+  prepare(input: AgentHomeProjectionInput): void | Promise<void>;
 }
 
-export type AgentHomeLifecycleFunction = (input: AgentHomeLifecycleInput) => void | Promise<void>;
+export type AgentHomeProjectionFunction = (input: AgentHomeProjectionInput) => void | Promise<void>;
 
 export interface AgentHomeLease {
   readonly leaseId: string;
@@ -85,46 +83,15 @@ export interface AgentHomeBinding {
 }
 
 export function validateAgentRef(value: unknown): AgentRef {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new AgentRefValidationError('AgentRef must be an object');
-  }
-  const candidate = value as { agentId?: unknown; profileRevision?: unknown };
-  validateAgentId(candidate.agentId);
-  validateProfileRevision(candidate.profileRevision);
-  return Object.freeze({ agentId: candidate.agentId, profileRevision: candidate.profileRevision });
-}
-
-export function validateAgentId(value: unknown): asserts value is string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new AgentRefValidationError('AgentRef.agentId must be a non-empty string');
-  }
-  if (Buffer.byteLength(value, 'utf8') > AGENT_REF_MAX_BYTES) {
-    throw new AgentRefValidationError(`AgentRef.agentId exceeds ${AGENT_REF_MAX_BYTES} UTF-8 bytes`);
-  }
-  if (value === '.' || value === '..' || path.isAbsolute(value) || /^[A-Za-z]:/u.test(value) || /[\\/]/u.test(value)) {
-    throw new AgentRefValidationError('AgentRef.agentId must be one relative path segment');
-  }
-  if (/[\u0000-\u001f\u007f]/u.test(value)) {
-    throw new AgentRefValidationError('AgentRef.agentId contains a control character');
-  }
-}
-
-export function validateProfileRevision(value: unknown): asserts value is string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new AgentRefValidationError('AgentRef.profileRevision must be a non-empty string');
-  }
-  if (Buffer.byteLength(value, 'utf8') > AGENT_PROFILE_REVISION_MAX_BYTES) {
+  let candidate: AgentRef;
+  try {
+    candidate = AgentRefSchema.parse(value);
+  } catch (error) {
     throw new AgentRefValidationError(
-      `AgentRef.profileRevision exceeds ${AGENT_PROFILE_REVISION_MAX_BYTES} UTF-8 bytes`,
+      `AgentRef does not match the protocol contract: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (/[\u0000-\u001f\u007f]/u.test(value)) {
-    throw new AgentRefValidationError('AgentRef.profileRevision contains a control character');
-  }
-}
-
-function sameAgentRef(left: AgentRef, right: AgentRef): boolean {
-  return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
+  return Object.freeze({ agentId: candidate.agentId, profileRevision: candidate.profileRevision });
 }
 
 function isWithin(root: string, candidate: string): boolean {
@@ -168,97 +135,199 @@ async function canonicalPath(inputPath: string): Promise<string> {
   return path.resolve(canonical, ...tail);
 }
 
-/** Wraps a host resolver with absolute-path and canonical containment checks. */
-export class AgentHomeResolver {
-  private readonly configuredRootInput: string;
-  private readonly resolveHost: AgentHomeResolverOptions['resolve'];
-  private readonly canonicalByHome = new Map<string, AgentRef>();
+async function materializeDirectory(inputPath: string): Promise<string> {
+  const { canonical, tail } = await resolveExistingAncestor(inputPath);
+  let cursor = canonical;
+  for (const component of tail) {
+    cursor = path.join(cursor, component);
+    try {
+      const stat = await fs.lstat(cursor);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new AgentHomeResolutionError(`Agent home path component is not a real directory: ${cursor}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      await fs.mkdir(cursor, { mode: 0o700 });
+    }
+  }
+  const realized = await fs.realpath(inputPath);
+  if (realized !== cursor) {
+    throw new AgentHomeResolutionError(`Agent home path changed through a symlink while being created: ${inputPath}`);
+  }
+  return realized;
+}
+
+async function ensureDirectoryNoSymlink(root: string, target: string): Promise<string> {
+  if (!isWithin(root, target)) throw new AgentHomeResolutionError('Agent home is outside hostStorageRoot');
+  const relative = path.relative(root, target);
+  const components = relative === '' ? [] : relative.split(path.sep);
+  let cursor = root;
+  for (const component of components) {
+    cursor = path.join(cursor, component);
+    try {
+      const stat = await fs.lstat(cursor);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new AgentHomeResolutionError(`Agent home path component is not a real directory: ${cursor}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      await fs.mkdir(cursor, { mode: 0o700 });
+    }
+  }
+  const realized = await fs.realpath(target);
+  if (!isWithin(root, realized) || realized !== target) {
+    throw new AgentHomeResolutionError('Agent home changed through a symlink while it was being prepared');
+  }
+  return realized;
+}
+
+async function ensurePreservedFile(filePath: string): Promise<void> {
+  try {
+    const handle = await fs.open(filePath, 'wx', 0o600);
+    await handle.close();
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  const stat = await fs.lstat(filePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new AgentHomeResolutionError(`Agent home preserved file is not a regular file: ${filePath}`);
+  }
+}
+
+/**
+ * SDK-owned deterministic Agent-home layout. The downstream supplies exactly
+ * one absolute branded storage root; there is deliberately no host path
+ * resolver and no second workspace authority.
+ */
+export class AgentHomeLayout {
+  private readonly hostStorageRootInput: string;
+  private readonly agentIdByCanonicalHome = new Map<string, string>();
   private canonicalRoot?: string;
 
-  constructor(options: AgentHomeResolverOptions) {
-    assertAbsolutePath(options.configuredRoot, 'AgentHomeResolver.configuredRoot');
-    this.configuredRootInput = path.resolve(options.configuredRoot);
-    this.resolveHost = options.resolve;
+  constructor(hostStorageRoot: string) {
+    assertAbsolutePath(hostStorageRoot, 'agentHome.hostStorageRoot');
+    this.hostStorageRootInput = path.resolve(hostStorageRoot);
   }
 
   async resolve(agentRefInput: AgentRef): Promise<AgentHomeResolution> {
     const agentRef = validateAgentRef(agentRefInput);
-    const configuredRoot = await this.resolveRoot();
-    let hostResult: AgentHomeResolverResult;
-    try {
-      hostResult = await this.resolveHost(agentRef);
-    } catch (error) {
-      throw new AgentHomeResolutionError(
-        `host Agent home resolver failed for ${agentRef.agentId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-    const rawHome = typeof hostResult === 'string' ? hostResult : hostResult?.homeDir;
-    assertAbsolutePath(rawHome, 'host Agent home resolver result');
-    const lexicalHome = path.resolve(rawHome);
-    // Check the host's lexical result against the exact configured spelling
-    // first (important on macOS, where os.tmpdir() commonly contains a
-    // symlink), then check canonical containment below. The canonical check
-    // remains the authority against symlink escapes.
-    if (!isWithin(this.configuredRootInput, lexicalHome)) {
-      throw new AgentHomeResolutionError('host Agent home resolver returned a path outside the configured root');
-    }
-    let canonicalHome: string;
-    try {
-      canonicalHome = await canonicalPath(lexicalHome);
-    } catch (error) {
-      throw new AgentHomeResolutionError(
-        `host Agent home resolver returned an unreadable path: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-    if (!isWithin(configuredRoot, canonicalHome)) {
-      throw new AgentHomeResolutionError('host Agent home resolver returned a path whose existing ancestor escapes the configured root');
-    }
-    const prior = this.canonicalByHome.get(canonicalHome);
-    if (prior !== undefined && !sameAgentRef(prior, agentRef)) {
+    const hostStorageRoot = await this.resolveRoot();
+    const agentsRoot = await ensureDirectoryNoSymlink(
+      hostStorageRoot,
+      path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
+    );
+    const lexicalHome = path.join(agentsRoot, agentRef.agentId);
+    // Materialize and verify the exact lexical Agent segment. Canonicalizing
+    // first would accidentally turn an in-root `two -> one` symlink into the
+    // already-valid `one` directory and bypass cross-Agent isolation.
+    const canonicalHome = await ensureDirectoryNoSymlink(agentsRoot, lexicalHome);
+    const priorAgentId = this.agentIdByCanonicalHome.get(canonicalHome);
+    if (priorAgentId !== undefined && priorAgentId !== agentRef.agentId) {
       throw new AgentHomeCollisionError(
-        `canonical Agent home ${canonicalHome} is already bound to AgentRef ${prior.agentId}@${prior.profileRevision}`,
+        `canonical Agent home ${canonicalHome} is already bound to Agent ${priorAgentId}`,
       );
     }
-    this.canonicalByHome.set(canonicalHome, agentRef);
-    return Object.freeze({ agentRef, homeDir: canonicalHome, canonicalHome, configuredRoot });
+    this.agentIdByCanonicalHome.set(canonicalHome, agentRef.agentId);
+    return Object.freeze({
+      agentRef,
+      hostStorageRoot,
+      agentsRoot,
+      homeDir: canonicalHome,
+      canonicalHome,
+    });
   }
 
   private async resolveRoot(): Promise<string> {
     if (this.canonicalRoot !== undefined) return this.canonicalRoot;
     try {
-      this.canonicalRoot = await canonicalPath(this.configuredRootInput);
+      this.canonicalRoot = await materializeDirectory(this.hostStorageRootInput);
     } catch (error) {
       throw new AgentHomeResolutionError(
-        `configured Agent home root is not accessible: ${error instanceof Error ? error.message : String(error)}`,
+        `agentHome.hostStorageRoot is not accessible: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     return this.canonicalRoot;
   }
 }
 
+interface StoredLeaseMarker {
+  readonly version: 1;
+  readonly ownerId: string;
+  readonly leaseId: string;
+  readonly agentRef: AgentRef;
+  readonly canonicalHome: string;
+}
+
+export function stableAgentHomeOwnerId(storeDir: string, productId: string): string {
+  const identity = `${path.resolve(storeDir)}\0${productId}`;
+  return `store-product:${createHash('sha256').update(identity).digest('hex')}`;
+}
+
+function parseLeaseMarker(value: string, lockPath: string): StoredLeaseMarker {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} is corrupt`);
+  }
+  if (
+    typeof parsed !== 'object' || parsed === null ||
+    (parsed as { version?: unknown }).version !== 1 ||
+    typeof (parsed as { ownerId?: unknown }).ownerId !== 'string' ||
+    typeof (parsed as { leaseId?: unknown }).leaseId !== 'string' ||
+    typeof (parsed as { canonicalHome?: unknown }).canonicalHome !== 'string' ||
+    !path.isAbsolute((parsed as { canonicalHome: string }).canonicalHome)
+  ) {
+    throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} has an invalid shape`);
+  }
+  let agentRef: AgentRef;
+  try {
+    agentRef = validateAgentRef((parsed as { agentRef?: unknown }).agentRef);
+  } catch {
+    throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} has an invalid AgentRef`);
+  }
+  const marker = parsed as Omit<StoredLeaseMarker, 'agentRef'>;
+  return { ...marker, agentRef, canonicalHome: path.resolve(marker.canonicalHome) };
+}
+
 /** One-writer lease backed by both a process registry and an exclusive marker. */
 export class AgentHomeLeaseManager {
   private static readonly held = new Map<string, string>();
+  private readonly ownerId: string;
+
+  constructor(options: { ownerId?: string } = {}) {
+    this.ownerId = options.ownerId ?? `process:${randomUUID()}`;
+  }
 
   async acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease> {
     const { canonicalHome, agentRef } = resolution;
-    await ensureDirectoryNoSymlink(resolution.configuredRoot, canonicalHome);
+    await ensureDirectoryNoSymlink(resolution.agentsRoot, canonicalHome);
     if (AgentHomeLeaseManager.held.has(canonicalHome)) {
       throw new AgentHomeBusyError(`Agent home ${canonicalHome} already has a mutable writer lease`);
     }
-    const leaseId = crypto.randomUUID();
-    const lockPath = path.join(canonicalHome, '.byok-agent-home.lease');
+    const internalDir = await ensureDirectoryNoSymlink(
+      canonicalHome,
+      path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY),
+    );
+    const leaseId = randomUUID();
+    const lockPath = path.join(internalDir, 'agent-home.lease');
     let handle: fs.FileHandle;
     try {
-      handle = await fs.open(lockPath, 'wx', 0o600);
+      handle = await this.openLeaseMarker(lockPath, canonicalHome, agentRef.agentId);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new AgentHomeBusyError(`Agent home ${canonicalHome} already has a mutable writer lease`);
-      }
+      if (error instanceof AgentHomeBusyError) throw error;
       throw new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
     }
+    const marker: StoredLeaseMarker = {
+      version: 1,
+      ownerId: this.ownerId,
+      leaseId,
+      agentRef,
+      canonicalHome,
+    };
     try {
-      await handle.writeFile(JSON.stringify({ leaseId, agentRef, canonicalHome }), 'utf8');
+      await handle.writeFile(JSON.stringify(marker), 'utf8');
       await handle.sync();
     } catch (error) {
       await handle.close().catch(() => {});
@@ -280,78 +349,109 @@ export class AgentHomeLeaseManager {
           throw new AgentHomeBusyError(`Agent home lease ${leaseId} is no longer owned by this process`);
         }
         AgentHomeLeaseManager.held.delete(canonicalHome);
-        let contents: string | undefined;
+        let contents: string;
         try {
           contents = await fs.readFile(lockPath, 'utf8');
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+          throw error;
         }
-        if (contents === undefined) return;
-        let parsed: { leaseId?: unknown };
-        try {
-          parsed = JSON.parse(contents) as { leaseId?: unknown };
-        } catch {
-          throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} is corrupt; refusing to remove it`);
-        }
-        if (parsed.leaseId !== leaseId) {
+        const parsed = parseLeaseMarker(contents, lockPath);
+        if (parsed.leaseId !== leaseId || parsed.ownerId !== this.ownerId) {
           throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} belongs to another writer`);
         }
         await fs.rm(lockPath);
       },
     };
   }
-}
 
-async function ensureDirectoryNoSymlink(root: string, target: string): Promise<void> {
-  if (!isWithin(root, target)) throw new AgentHomeResolutionError('Agent home is outside the configured root');
-  const relative = path.relative(root, target);
-  const components = relative === '' ? [] : relative.split(path.sep);
-  let cursor = root;
-  for (const component of components) {
-    cursor = path.join(cursor, component);
+  private async openLeaseMarker(lockPath: string, canonicalHome: string, agentId: string): Promise<fs.FileHandle> {
     try {
-      const stat = await fs.lstat(cursor);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) {
-        throw new AgentHomeResolutionError(`Agent home path component is not a real directory: ${cursor}`);
-      }
+      return await fs.open(lockPath, 'wx', 0o600);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      await fs.mkdir(cursor);
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     }
-  }
-  if (await fs.realpath(target) !== target) {
-    throw new AgentHomeResolutionError('Agent home changed through a symlink while it was being prepared');
-  }
-}
-
-/** Coordinates host projection lifecycle and the exclusive mutable lease. */
-export class AgentHomeManager {
-  readonly resolver: AgentHomeResolver;
-  readonly lifecycle: AgentHomeLifecycle;
-  readonly leaseManager: AgentHomeLeaseManager;
-
-  constructor(options: { resolver: AgentHomeResolver; lifecycle: AgentHomeLifecycle; leaseManager?: AgentHomeLeaseManager }) {
-    this.resolver = options.resolver;
-    this.lifecycle = options.lifecycle;
-    this.leaseManager = options.leaseManager ?? new AgentHomeLeaseManager();
-  }
-
-  async prepare(agentRef: AgentRef): Promise<AgentHomeBinding> {
-    const resolution = await this.resolver.resolve(agentRef);
-    const lease = await this.leaseManager.acquire(resolution);
+    const prior = parseLeaseMarker(await fs.readFile(lockPath, 'utf8'), lockPath);
+    if (prior.ownerId !== this.ownerId) {
+      throw new AgentHomeBusyError(`Agent home ${prior.canonicalHome} already has a mutable writer lease`);
+    }
+    if (prior.canonicalHome !== canonicalHome || prior.agentRef.agentId !== agentId) {
+      throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} does not match its canonical Agent identity`);
+    }
+    // A marker owned by this daemon identity but absent from the in-process
+    // registry is crash residue. DaemonOwnerLease prevents two live daemon
+    // processes for the same store/product identity, so exact-owner reclaim is
+    // the only permitted restart path.
+    await fs.rm(lockPath);
     try {
-      await this.lifecycle.prepare({ ...resolution, cwd: lease.cwd });
-      if (await canonicalPath(resolution.homeDir) !== resolution.canonicalHome) {
-        throw new AgentHomeResolutionError('host Agent lifecycle changed the canonical home path');
-      }
-      return Object.freeze({ resolution, lease });
+      return await fs.open(lockPath, 'wx', 0o600);
     } catch (error) {
-      await lease.release().catch(() => {});
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new AgentHomeBusyError(`Agent home lease ${lockPath} was concurrently reclaimed`);
+      }
       throw error;
     }
   }
 }
 
-export function createAgentHomeLifecycle(prepare: AgentHomeLifecycleFunction): AgentHomeLifecycle {
+async function initializeAgentHome(resolution: AgentHomeResolution): Promise<void> {
+  await ensureDirectoryNoSymlink(
+    resolution.canonicalHome,
+    path.join(resolution.canonicalHome, 'notes'),
+  );
+  await ensurePreservedFile(path.join(resolution.canonicalHome, 'MEMORY.md'));
+}
+
+/** Coordinates SDK-owned initialization, optional projection, and the lease. */
+export class AgentHomeManager {
+  readonly layout: AgentHomeLayout;
+  readonly projection?: AgentHomeProjection;
+  readonly leaseManager: AgentHomeLeaseManager;
+
+  constructor(options: {
+    hostStorageRoot: string;
+    projection?: AgentHomeProjection;
+    leaseManager?: AgentHomeLeaseManager;
+  }) {
+    this.layout = new AgentHomeLayout(options.hostStorageRoot);
+    this.projection = options.projection;
+    this.leaseManager = options.leaseManager ?? new AgentHomeLeaseManager();
+  }
+
+  async prepare(agentRef: AgentRef): Promise<AgentHomeBinding> {
+    const binding = await this.acquire(agentRef);
+    try {
+      await this.initialize(binding);
+      return binding;
+    } catch (error) {
+      await binding.lease.release().catch(() => {});
+      throw error;
+    }
+  }
+
+  /** Resolve and lease without applying downstream projection side effects. */
+  async acquire(agentRef: AgentRef): Promise<AgentHomeBinding> {
+    const resolution = await this.layout.resolve(agentRef);
+    const lease = await this.leaseManager.acquire(resolution);
+    return Object.freeze({ resolution, lease });
+  }
+
+  /** Initialize only after any requested session exact-match has succeeded. */
+  async initialize(binding: AgentHomeBinding): Promise<void> {
+    const { resolution, lease } = binding;
+    try {
+      await initializeAgentHome(resolution);
+      await this.projection?.prepare({ ...resolution, cwd: lease.cwd });
+      if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
+        throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
+      }
+      await initializeAgentHome(resolution);
+    } catch (error) {
+      throw error;
+    }
+  }
+}
+
+export function createAgentHomeProjection(prepare: AgentHomeProjectionFunction): AgentHomeProjection {
   return Object.freeze({ prepare });
 }

@@ -30,7 +30,7 @@ export {
   RuntimeInfoSchema,
   RuntimeCapabilitiesSchema,
   AgentRefSchema,
-  AGENT_REF_MAX_LENGTH,
+  AGENT_REF_MAX_BYTES,
   DispatchSelectionSchema,
   ToolsetIdSchema,
   ConfiguredToolsetsSchema,

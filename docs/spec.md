@@ -503,6 +503,43 @@ metadata-only result projection. It remains host glue rather than public SDK
 API; Google verification/security assessment and the subprocess's OS authority
 remain host deployment responsibilities.
 
+## Durable Agent homes
+
+The additive Agent path makes `AgentRef { agentId, profileRevision }` the
+durable execution identity. The embedding host supplies one absolute
+`hostStorageRoot`; the client SDK exclusively composes
+`<hostStorageRoot>/agents/<agentId>` after validating `agentId` as one bounded
+path segment. No host resolver or `workspaceHint` participates in this path.
+
+The client validates existing-ancestor and realpath containment, rejects
+symlink and cross-Agent collisions, creates missing Agent home, `MEMORY.md`,
+and `notes/`, and preserves existing bytes. The canonical Agent home root is
+the sole runtime cwd and is sealed with AgentRef, runtime/session identity and
+lease in the immutable operation manifest. `.byok` is the SDK's reserved
+internal namespace for the one-writer lease and exact-match runtime-session
+evidence. All other files are opaque Agent-owned content: the SDK does not
+require a literal `artifacts/` directory or parse/index projects, PDFs, images,
+notes, memory, or profile schema.
+
+Agent dispatch requires an explicit device and its durable authenticated
+`agent-home-contract` declaration before task creation or mailbox enqueue.
+Claim, decline, and every terminal message echo exact AgentRef. Resume requires
+exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
+fails closed. One canonical Agent home has one mutable writer across tasks;
+another Agent home remains independent. Crash residue is reclaimable only by
+the same stable daemon owner identity.
+
+The host selects the branded root and authors stable identity plus redacted
+profile projection content. It does not compose the Agent path. Credentials
+remain in an OS credential store; only non-secret references/configured state
+may be projected. Legacy task offers retain their existing
+`workspaceRoot/<taskId>` behavior as a separate API, never as a fallback for an
+Agent offer. Migration is an explicitly enabled one-shot cutover with no dual
+read, dual write, or implicit adoption of task workspaces.
+
+See [host local storage](host-local-storage-layout.md) for the responsibility
+matrix and downstream Salesko configuration.
+
 ## Local Git task workspaces
 
 The client optionally provides local Git checkpoint workspaces for operators who want a consistent, recoverable code-state convention around connected coding agents. The feature is disabled by default and is enabled only by the local daemon configuration:

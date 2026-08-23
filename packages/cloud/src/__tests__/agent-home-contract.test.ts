@@ -100,6 +100,34 @@ describe('hosted Agent-home contract', () => {
     ).resolves.toMatchObject({ taskId: 'agent-authenticated-capability' });
   });
 
+  it('removes stale support when a later authenticated hello omits the capability', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const stores = deviceStores(harness, device.deviceId);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+    });
+    const downgradedHello = createEnvelope('conn.hello', {
+      protocolVersions: [1],
+      capabilities: [],
+      deviceId: device.deviceId,
+      productId: 'test-product',
+    });
+    expect(await handleInboundEnvelope(stores, device.deviceId, downgradedHello)).toBe('accepted');
+    expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual([]);
+    await expect(
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+        taskId: 'agent-stale-capability',
+        payload: agentPayload(),
+      }),
+    ).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    expect(
+      (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0, limit: 10 }))
+        .messages,
+    ).toHaveLength(0);
+  });
+
   it('rejects malformed or oversized AgentRef before reserving mailbox state', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

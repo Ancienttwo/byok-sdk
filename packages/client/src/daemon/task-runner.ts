@@ -445,6 +445,7 @@ interface ActiveTask {
   };
   terminalCause?: AgentTerminalCause;
   terminalReason?: string;
+  agentTerminalPersisted?: boolean;
   gitWorkspaceId?: string;
   gitLease?: GitWorkspaceLease;
   gitBaseline?: string;
@@ -506,6 +507,12 @@ interface ActiveTask {
   resolveSemanticTerminalSettled?: (disposed: boolean) => void;
   /** Shared receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
   disposalAttempt?: Promise<void>;
+}
+
+interface ClaimedAgentFailureContext {
+  readonly binding: AgentHomeBinding;
+  readonly runtimeId: string;
+  readonly sessionRef?: string;
 }
 
 /** One not-yet-dispatched `requestApproval` call waiting its turn — see `ActiveTask.approvalQueue`. */
@@ -1041,8 +1048,7 @@ export class TaskRunner {
     const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
     await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
     if (this.tasks.get(active.taskId) !== active) return true;
-    active.terminalCause = 'failed';
-    active.terminalReason = reason;
+    if (!(await this.persistAgentTerminalEvidence(active, 'failed', reason))) return false;
     this.deps.send(
       createEnvelope(
         'task.fail',
@@ -1151,6 +1157,29 @@ export class TaskRunner {
       return;
     }
 
+    const strictAgentOffer = Object.prototype.hasOwnProperty.call(payload, 'agentRef');
+    let agentRef: AgentRef | undefined;
+    if (strictAgentOffer) {
+      try {
+        agentRef = offeredAgentRef(payload);
+      } catch (error) {
+        this.decline(taskId, `invalid AgentRef: ${errorMessage(error)}`, false);
+        return;
+      }
+      if (agentRef === undefined || this.deps.agentHome === undefined || this.deps.agentSessionHandoffs === undefined) {
+        this.decline(
+          taskId,
+          'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
+          false,
+          agentRef,
+        );
+        return;
+      }
+    }
+    const decline = (reason: string, retryable: boolean): void => {
+      this.decline(taskId, reason, retryable, agentRef);
+    };
+
     // S3b (L-002): the pre-claim admission veto — see
     // `TaskRunnerDeps.admissionGuard`'s own doc comment. Consulted here,
     // AFTER the dedup check above (a redelivery of an offer this device
@@ -1160,7 +1189,7 @@ export class TaskRunner {
     // beyond its own `task.decline`.
     const guarded = this.deps.admissionGuard?.({ taskId, payload });
     if (guarded !== undefined && !guarded.admit) {
-      this.decline(taskId, guarded.reason, guarded.retryable);
+      decline(guarded.reason, guarded.retryable);
       return;
     }
 
@@ -1169,7 +1198,7 @@ export class TaskRunner {
     // comment) — any offer arriving after that point is declined outright,
     // never claimed.
     if (this.stoppingOffers) {
-      this.decline(taskId, 'daemon is shutting down', true);
+      decline('daemon is shutting down', true);
       return;
     }
 
@@ -1193,23 +1222,8 @@ export class TaskRunner {
       if (this.pendingCancelled.has(taskId)) {
         const reason = this.pendingCancelled.get(taskId);
         this.pendingCancelled.delete(taskId);
-        this.decline(taskId, reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
+        decline(reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
         return;
-      }
-
-      const strictAgentOffer = Object.prototype.hasOwnProperty.call(payload, 'agentRef');
-      let agentRef: AgentRef | undefined;
-      if (strictAgentOffer) {
-        try {
-          agentRef = offeredAgentRef(payload);
-        } catch (error) {
-          this.decline(taskId, `invalid AgentRef: ${errorMessage(error)}`, false);
-          return;
-        }
-        if (agentRef === undefined || this.deps.agentHome === undefined || this.deps.agentSessionHandoffs === undefined) {
-          this.decline(taskId, 'Agent offer requires the host-owned agent-home-contract resolver and handoff store', false);
-          return;
-        }
       }
 
       // M5 batch-3 (workstream 1): `limits.maxTokens` has no hard-enforcement
@@ -1227,8 +1241,7 @@ export class TaskRunner {
       // active — see `armMaxDurationTimer` — not delegated to any adapter),
       // so there is no gap here to decline fail-closed for.
       if (payload.limits?.maxTokens !== undefined) {
-        this.decline(
-          taskId,
+        decline(
           `offer requests limits.maxTokens (${payload.limits.maxTokens}), which no bundled runtime adapter enforces — declining fail-closed rather than silently ignoring it`,
           true,
         );
@@ -1255,8 +1268,7 @@ export class TaskRunner {
       // configures ANY ceiling workspaceRoot, not just the ones that actually
       // asked for one.
       if (payload.policy.workspaceRoot !== undefined) {
-        this.decline(
-          taskId,
+        decline(
           'offer policy requests workspaceRoot, which no bundled runtime adapter enforces — declining fail-closed rather than silently accepting an unenforced security control',
           true,
         );
@@ -1268,8 +1280,7 @@ export class TaskRunner {
         payload.runtime !== undefined &&
         payload.runtime !== payload.dispatchSelection.runtimeId
       ) {
-        this.decline(
-          taskId,
+        decline(
           `offer runtime ${payload.runtime} does not match dispatchSelection.runtimeId ${payload.dispatchSelection.runtimeId}`,
           false,
         );
@@ -1279,13 +1290,13 @@ export class TaskRunner {
       const requiredToolsets = 'requiredToolsets' in payload ? payload.requiredToolsets : undefined;
       const resolvedMcp = requiredToolsets ? this.resolveMcpServers(requiredToolsets) : undefined;
       if (resolvedMcp && !resolvedMcp.ok) {
-        this.decline(taskId, resolvedMcp.reason, true);
+        decline(resolvedMcp.reason, true);
         return;
       }
 
       const decision = computeEffectivePolicy(payload.policy, this.deps.permissionDefaults);
       if (!decision.ok) {
-        this.decline(taskId, decision.reason ?? 'policy rejected', false);
+        decline(decision.reason ?? 'policy rejected', false);
         return;
       }
 
@@ -1293,7 +1304,7 @@ export class TaskRunner {
       const requestedRuntime = payload.dispatchSelection?.runtimeId ?? payload.runtime;
       const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode, requiredToolsets !== undefined);
       if (!pick.ok) {
-        this.decline(taskId, pick.reason, pick.retryable);
+        decline(pick.reason, pick.retryable);
         return;
       }
       let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
@@ -1306,26 +1317,25 @@ export class TaskRunner {
           ...(resolvedMcp?.ok ? { mcpServers: resolvedMcp.servers } : {}),
         });
       } catch (error) {
-        this.decline(taskId, `runtime preparation failed: ${errorMessage(error)}`, true);
+        decline(`runtime preparation failed: ${errorMessage(error)}`, true);
         return;
       }
       if (prepared.kind === 'reject') {
-        this.decline(taskId, prepared.reason, prepared.retryable);
+        decline(prepared.reason, prepared.retryable);
         return;
       }
 
       if (agentRef !== undefined) {
         try {
-          agentBinding = await this.deps.agentHome!.prepare(agentRef);
+          agentBinding = await this.deps.agentHome!.acquire(agentRef);
         } catch (error) {
-          this.decline(taskId, `Agent home admission failed: ${errorMessage(error)}`, true);
+          decline(`Agent home admission failed: ${errorMessage(error)}`, true);
           return;
         }
       }
 
       let known: Awaited<ReturnType<SessionWorkspaceStore['get']>> = undefined;
       let workspaceDir: string;
-      let agentHandoff: Awaited<ReturnType<AgentSessionHandoffStore['get']>> = undefined;
       let gitLease: GitWorkspaceLease | undefined;
       let gitWorkspaceId: string | undefined;
       let gitBaseline: string | undefined;
@@ -1335,7 +1345,7 @@ export class TaskRunner {
         workspaceDir = agentBinding.lease.cwd;
         if (payload.sessionRef !== undefined) {
           try {
-            agentHandoff = await this.deps.agentSessionHandoffs!.requireMatch({
+            await this.deps.agentSessionHandoffs!.requireMatch({
               agentRef: agentBinding.resolution.agentRef,
               sessionRef: payload.sessionRef,
               runtimeId: pick.descriptor.id,
@@ -1344,9 +1354,17 @@ export class TaskRunner {
           } catch (error) {
             await agentBinding.lease.release().catch(() => {});
             agentBinding = undefined;
-            this.decline(taskId, `Agent session handoff mismatch: ${errorMessage(error)}`, true);
+            decline(`Agent session handoff mismatch: ${errorMessage(error)}`, true);
             return;
           }
+        }
+        try {
+          await this.deps.agentHome!.initialize(agentBinding);
+        } catch (error) {
+          await agentBinding.lease.release().catch(() => {});
+          agentBinding = undefined;
+          decline(`Agent home initialization failed: ${errorMessage(error)}`, true);
+          return;
         }
       } else if (this.deps.gitWorkspaceManager && this.deps.gitWorkspaceStore) {
         known = payload.sessionRef ? await this.deps.sessionWorkspaces.get(payload.sessionRef) : undefined;
@@ -1361,7 +1379,7 @@ export class TaskRunner {
               ledger.workspaceId !== known.gitWorkspaceId || ledger.sessionRef !== payload.sessionRef ||
               path.resolve(ledger.workspaceDir) !== path.resolve(known.workspaceDir) ||
               interruptedOldTask || activeDifferentTask) {
-            this.decline(taskId, 'session is incompatible with Git workspace mode', true);
+            decline('session is incompatible with Git workspace mode', true);
             return;
           }
           workspaceDir = known.workspaceDir;
@@ -1371,7 +1389,7 @@ export class TaskRunner {
           try {
             await gitManager.validateExisting(workspaceDir);
           } catch {
-            this.decline(taskId, 'workspace is busy or unavailable', true);
+            decline('workspace is busy or unavailable', true);
             return;
           }
         } else {
@@ -1381,7 +1399,7 @@ export class TaskRunner {
         try {
           gitLease = await gitManager.acquireLease(workspaceDir, payload.sessionRef);
         } catch {
-          this.decline(taskId, 'workspace is busy or unavailable', true);
+          decline('workspace is busy or unavailable', true);
           return;
         }
       } else if (!this.deps.gitWorkspaceManager && !this.deps.gitWorkspaceStore) {
@@ -1389,7 +1407,7 @@ export class TaskRunner {
         workspaceDir = known?.workspaceDir ?? path.join(this.deps.workspaceRoot, taskId);
         plainWorkspaceNeedsResolve = true;
       } else {
-        this.decline(taskId, 'workspace mode is unavailable', true);
+        decline('workspace mode is unavailable', true);
         return;
       }
 
@@ -1405,7 +1423,9 @@ export class TaskRunner {
         policy: decision.policy,
         requiredToolsetIds: requiredToolsets ?? [],
         ...(offered.dispatchSelection === undefined ? {} : { dispatchSelection: offered.dispatchSelection }),
-        ...(known === undefined || payload.sessionRef === undefined ? {} : { sessionRef: payload.sessionRef }),
+        ...(payload.sessionRef === undefined || (known === undefined && agentBinding === undefined)
+          ? {}
+          : { sessionRef: payload.sessionRef }),
         ...(agentBinding === undefined ? {} : {
           agentRef: agentBinding.resolution.agentRef,
           cwd: agentBinding.lease.cwd,
@@ -1472,7 +1492,15 @@ export class TaskRunner {
         if (plainWorkspaceNeedsResolve) workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
       } catch (err) {
         gitLease?.release();
-        await this.fail(taskId, `failed to resolve instruction blob: ${errorMessage(err)}`, true);
+        const reason = `failed to resolve instruction blob: ${errorMessage(err)}`;
+        if (agentBinding === undefined) {
+          await this.fail(taskId, reason, true);
+        } else {
+          await this.failClaimedAgent(taskId, reason, true, {
+            binding: agentBinding,
+            runtimeId: pick.descriptor.id,
+          });
+        }
         return;
       }
 
@@ -1572,7 +1600,14 @@ export class TaskRunner {
         }
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', 'repository-invalid');
         gitLease?.release();
-        await this.fail(taskId, failure.reason, failure.retryable);
+        if (agentBinding === undefined) {
+          await this.fail(taskId, failure.reason, failure.retryable);
+        } else {
+          await this.failClaimedAgent(taskId, failure.reason, failure.retryable, {
+            binding: agentBinding,
+            runtimeId: pick.descriptor.id,
+          });
+        }
         return;
       }
 
@@ -1611,6 +1646,7 @@ export class TaskRunner {
         try {
           await this.deps.agentSessionHandoffs!.record({
             agentRef: agentBinding.resolution.agentRef,
+            taskId,
             sessionRef: session.sessionRef,
             runtimeId: pick.descriptor.id,
             cwd: workspaceDir,
@@ -1618,7 +1654,16 @@ export class TaskRunner {
           });
         } catch (error) {
           await session.close().catch(() => {});
-          await this.fail(taskId, `Agent session handoff could not be durably written before start: ${errorMessage(error)}`, false);
+          await this.failClaimedAgent(
+            taskId,
+            `Agent session handoff could not be durably written before start: ${errorMessage(error)}`,
+            false,
+            {
+              binding: agentBinding,
+              runtimeId: pick.descriptor.id,
+              sessionRef: session.sessionRef,
+            },
+          );
           return;
         }
       }
@@ -1643,8 +1688,7 @@ export class TaskRunner {
           // best-effort — still report cancellation below
         }
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
-        active.terminalCause = 'cancelled';
-        active.terminalReason = reason;
+        if (!(await this.persistAgentTerminalEvidence(active, 'cancelled', reason))) return;
         this.deps.send(
           createEnvelope(
             'task.cancelled',
@@ -1910,8 +1954,7 @@ export class TaskRunner {
             return;
           }
           if (!this.reserveSemanticTerminal(active)) return;
-          active.terminalCause = 'complete';
-          active.terminalReason = undefined;
+          if (!(await this.persistAgentTerminalEvidence(active, 'complete'))) return;
           this.deps.send(
             createEnvelope(
               'task.complete',
@@ -2094,8 +2137,7 @@ export class TaskRunner {
     // the batcher; nothing else needs to happen with its buffer contents.
     // M1 gap #6: the canonical, explicit cancellation message — no longer
     // `task.fail({reason:'cancelled'})`.
-    active.terminalCause = 'cancelled';
-    active.terminalReason = reason;
+    if (!(await this.persistAgentTerminalEvidence(active, 'cancelled', reason))) return;
     this.deps.send(
       createEnvelope(
         'task.cancelled',
@@ -2651,8 +2693,7 @@ export class TaskRunner {
     // task to `Failed` and closed its event queue before this notification
     // arrived, so flushing buffered progress here would be unobservable and
     // only trigger a spurious server-side warning.
-    active.terminalCause = 'failed';
-    active.terminalReason = reason ?? 'rejected';
+    if (!(await this.persistAgentTerminalEvidence(active, 'failed', reason ?? 'rejected'))) return;
     this.deps.send(
       createEnvelope(
         'task.fail',
@@ -2664,8 +2705,12 @@ export class TaskRunner {
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
-  private decline(taskId: string, reason: string, retryable: boolean): void {
-    this.deps.send(createEnvelope('task.decline', { reason, retryable }, { taskId }));
+  private decline(taskId: string, reason: string, retryable: boolean, agentRef?: AgentRef): void {
+    this.deps.send(createEnvelope(
+      'task.decline',
+      { reason, retryable, ...(agentRef === undefined ? {} : { agentRef }) },
+      { taskId },
+    ));
   }
 
   private async fail(taskId: string, reason: string, retryable: boolean): Promise<void> {
@@ -2679,10 +2724,7 @@ export class TaskRunner {
       return;
     }
     if (active) await this.observeGit(active, 'salvage');
-    if (active) {
-      active.terminalCause = 'failed';
-      active.terminalReason = reason;
-    }
+    if (active && !(await this.persistAgentTerminalEvidence(active, 'failed', reason))) return;
     this.deps.send(
       createEnvelope(
         'task.fail',
@@ -2693,6 +2735,44 @@ export class TaskRunner {
       ),
     );
     await this.finish(taskId);
+  }
+
+  /**
+   * Claimed Agent failures before ActiveTask registration still carry the
+   * exact AgentRef and have Agent-local, fsynced terminal evidence. If the
+   * evidence write fails, do not publish a terminal that the local authority
+   * cannot prove; the lease is released by handleOffer's finally block and a
+   * later redelivery may retry the operation.
+   */
+  private async failClaimedAgent(
+    taskId: string,
+    reason: string,
+    retryable: boolean,
+    context: ClaimedAgentFailureContext,
+  ): Promise<boolean> {
+    const agentRef = context.binding.resolution.agentRef;
+    try {
+      await this.deps.agentSessionHandoffs!.recordTaskTerminal({
+        agentRef,
+        taskId,
+        runtimeId: context.runtimeId,
+        cwd: context.binding.lease.cwd,
+        leaseId: context.binding.lease.leaseId,
+        ...(context.sessionRef === undefined ? {} : { sessionRef: context.sessionRef }),
+        terminalReason: reason,
+      });
+    } catch (error) {
+      console.error(
+        `[byok/client] claimed Agent failure evidence could not be persisted before task.fail for ${taskId}: ${errorMessage(error)}`,
+      );
+      return false;
+    }
+    this.deps.send(createEnvelope(
+      'task.fail',
+      { reason, retryable, agentRef },
+      { taskId },
+    ));
+    return true;
   }
 
   /**
@@ -2878,6 +2958,39 @@ export class TaskRunner {
     await this.deps.gitWorkspaceStore.upsert({ ...current, phase, ...(errorCategory ? { errorCategory } : {}) }).catch(() => {});
   }
 
+  /** Persist Agent terminal truth before its externally visible wire message. */
+  private async persistAgentTerminalEvidence(
+    active: ActiveTask,
+    cause: AgentTerminalCause,
+    reason?: string,
+  ): Promise<boolean> {
+    active.terminalCause = cause;
+    active.terminalReason = reason;
+    if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) {
+      return true;
+    }
+    try {
+      await this.deps.agentSessionHandoffs!.recordTerminal(
+        {
+          agentRef: active.agentRef,
+          sessionRef: active.agentHandoff.sessionRef,
+          runtimeId: active.agentHandoff.runtimeId,
+          cwd: active.agentHandoff.cwd,
+        },
+        cause,
+        reason,
+      );
+      active.agentTerminalPersisted = true;
+      return true;
+    } catch (error) {
+      console.error(
+        `[byok/client] Agent terminal evidence could not be persisted before wire terminal for ${active.taskId}: ${errorMessage(error)}`,
+      );
+      active.resolveSemanticTerminalSettled?.(false);
+      return false;
+    }
+  }
+
   private async finish(taskId: string): Promise<boolean> {
     const active = this.tasks.get(taskId);
     if (!active) return true;
@@ -2953,25 +3066,28 @@ export class TaskRunner {
     }
     if (this.tasks.get(taskId) !== active) return true;
     if (active.agentBinding !== undefined && active.agentRef !== undefined && active.agentHandoff !== undefined) {
-      const cause = active.terminalCause ?? 'failed';
-      try {
-        await this.deps.agentSessionHandoffs!.recordTerminal(
-          {
-            agentRef: active.agentRef,
-            sessionRef: active.agentHandoff.sessionRef,
-            runtimeId: active.agentHandoff.runtimeId,
-            cwd: active.agentHandoff.cwd,
-          },
-          cause,
-          active.terminalReason,
-        );
-      } catch (error) {
-        // Do not release the home or forget the active task when exact
-        // terminal evidence cannot be durably recorded. The host can retry
-        // finish after repairing the store; silent evidence loss is unsafe.
-        console.error(`[byok/client] Agent terminal evidence could not be persisted for ${taskId}: ${errorMessage(error)}`);
-        active.resolveSemanticTerminalSettled?.(false);
-        return false;
+      if (!active.agentTerminalPersisted) {
+        const cause = active.terminalCause ?? 'failed';
+        try {
+          await this.deps.agentSessionHandoffs!.recordTerminal(
+            {
+              agentRef: active.agentRef,
+              sessionRef: active.agentHandoff.sessionRef,
+              runtimeId: active.agentHandoff.runtimeId,
+              cwd: active.agentHandoff.cwd,
+            },
+            cause,
+            active.terminalReason,
+          );
+          active.agentTerminalPersisted = true;
+        } catch (error) {
+          // Do not release the home or forget the active task when exact
+          // terminal evidence cannot be durably recorded. The host can retry
+          // finish after repairing the store; silent evidence loss is unsafe.
+          console.error(`[byok/client] Agent terminal evidence could not be persisted for ${taskId}: ${errorMessage(error)}`);
+          active.resolveSemanticTerminalSettled?.(false);
+          return false;
+        }
       }
       try {
         await active.agentBinding.lease.release();

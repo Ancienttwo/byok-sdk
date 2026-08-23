@@ -26,10 +26,13 @@ ALTER TABLE task
   CHECK (
     agent_id IS NULL
     OR (
-      char_length(agent_id) BETWEEN 1 AND 160
-      AND char_length(agent_profile_revision) BETWEEN 1 AND 160
-      AND agent_id NOT LIKE '%/%'
-      AND agent_id NOT LIKE '%\\%'
+      octet_length(agent_id) BETWEEN 1 AND 160
+      AND octet_length(agent_profile_revision) BETWEEN 1 AND 160
+      AND position('/' IN agent_id) = 0
+      AND position(E'\\\\' IN agent_id) = 0
+      AND position(':' IN agent_id) = 0
       AND agent_id NOT IN ('.', '..')
+      AND agent_id !~ '[[:cntrl:]]'
+      AND agent_profile_revision !~ '[[:cntrl:]]'
     )
   );

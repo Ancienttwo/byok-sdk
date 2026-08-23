@@ -27,13 +27,12 @@ export {
   AgentHomeResolutionError,
   AgentHomeCollisionError,
   AgentHomeBusyError,
-  AgentHomeResolver,
+  AgentHomeLayout,
   AgentHomeLeaseManager,
   AgentHomeManager,
-  createAgentHomeLifecycle,
+  createAgentHomeProjection,
+  stableAgentHomeOwnerId,
   validateAgentRef,
-  validateAgentId,
-  validateProfileRevision,
 } from './agent-home';
 export {
   AgentSessionHandoffStore,
@@ -44,15 +43,15 @@ export {
 export type {
   AgentSessionHandoff,
   AgentSessionHandoffMatch,
+  AgentTaskTerminalEvidence,
+  AgentTaskTerminalMatch,
   AgentTerminalCause,
 } from './daemon/agent-session-handoff-store';
 export type {
-  AgentHomeResolverOptions,
-  AgentHomeResolverResult,
   AgentHomeResolution,
-  AgentHomeLifecycle,
-  AgentHomeLifecycleInput,
-  AgentHomeLifecycleFunction,
+  AgentHomeProjection,
+  AgentHomeProjectionInput,
+  AgentHomeProjectionFunction,
   AgentHomeLease,
   AgentHomeBinding,
 } from './agent-home';

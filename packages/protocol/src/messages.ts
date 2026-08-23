@@ -88,17 +88,20 @@ export const ToolsetIdSchema = z
   .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u, 'toolset ids must be lowercase logical identifiers');
 export type ToolsetId = z.infer<typeof ToolsetIdSchema>;
 
-/** Stable, host-owned Agent identity carried across transport and storage. */
-export const AGENT_REF_MAX_LENGTH = 160;
+/** Stable Agent identity carried across transport and storage. */
+export const AGENT_REF_MAX_BYTES = 160;
 const AGENT_REF_VALUE = z
   .string()
   .min(1)
-  .max(AGENT_REF_MAX_LENGTH)
+  .max(AGENT_REF_MAX_BYTES)
+  .refine((value) => new TextEncoder().encode(value).byteLength <= AGENT_REF_MAX_BYTES, {
+    message: `AgentRef values must not exceed ${AGENT_REF_MAX_BYTES} UTF-8 bytes`,
+  })
   .regex(/^[^\u0000-\u001f\u007f\r\n]+$/u, 'AgentRef values must not contain control characters');
 
 /**
  * Agent ids are opaque to the SDK but must remain one safe pathname segment;
- * the host owns the eventual Agent-home mapping.
+ * the SDK owns the deterministic `<hostStorageRoot>/agents/<agentId>` mapping.
  */
 export const AgentRefSchema = z
   .object({

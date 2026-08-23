@@ -20,9 +20,10 @@ import type {
   McpToolsetReloadReceipt,
 } from '../types';
 import {
+  AgentHomeLeaseManager,
   AgentHomeManager,
-  AgentHomeResolver,
-  type AgentHomeLifecycle,
+  stableAgentHomeOwnerId,
+  type AgentHomeProjection,
 } from '../agent-home';
 import {
   resolveLocalAgentReleaseIdentity,
@@ -198,13 +199,14 @@ export interface DaemonConfig {
   deviceName?: string;
   workspaceRoot: string;
   /**
-   * Host-owned strict Agent execution boundary. The resolver receives only
-   * an opaque AgentRef and the lifecycle owns profile/MEMORY projection; the
-   * SDK never reads either product schema or credential material.
+   * Strict Agent execution boundary. The host selects one absolute branded
+   * storage root; the SDK alone composes `agents/<agentId>`, initializes the
+   * durable home, and binds it as runtime cwd. `projection` may write opaque,
+   * redacted host content into the canonical home supplied by the SDK.
    */
   agentHome?: {
-    resolver: AgentHomeResolver;
-    lifecycle: AgentHomeLifecycle;
+    hostStorageRoot: string;
+    projection?: AgentHomeProjection;
   };
   /** Disabled by default. Enables local-only Git checkpoint repositories. */
   gitWorkspace?: GitWorkspaceConfig;
@@ -935,8 +937,14 @@ export function buildDaemonWithAdapters(
   const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
   const agentHomeManager = config.agentHome === undefined
     ? undefined
-    : new AgentHomeManager({ resolver: config.agentHome.resolver, lifecycle: config.agentHome.lifecycle });
-  const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore(storeDir);
+    : new AgentHomeManager({
+        hostStorageRoot: config.agentHome.hostStorageRoot,
+        ...(config.agentHome.projection === undefined ? {} : { projection: config.agentHome.projection }),
+        leaseManager: new AgentHomeLeaseManager({
+          ownerId: stableAgentHomeOwnerId(storeDir, config.productId),
+        }),
+      });
+  const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
   // S3b (L-002), same three-part shape as `gitWorkspace` above: optional

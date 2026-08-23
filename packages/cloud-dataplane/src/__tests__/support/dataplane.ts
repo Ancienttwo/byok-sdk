@@ -110,6 +110,12 @@ export interface DataplaneScope {
    * state.
    */
   readonly applicationName: string;
+  /**
+   * A fresh application pool over the same schema/role. Integration tests use
+   * this to prove durable readback through a restarted store composition,
+   * without sharing adapter instances or in-memory state.
+   */
+  openRestartPool(poolSize?: number): Pool;
   dispose(): Promise<void>;
 }
 
@@ -174,6 +180,13 @@ export async function createDataplaneScope(poolSize = 8): Promise<DataplaneScope
     schema,
     role,
     applicationName: schema,
+    openRestartPool(restartPoolSize = 8) {
+      return createByokPool({
+        connectionString: applicationUrl(url, role),
+        max: restartPoolSize,
+        application_name: schema,
+      });
+    },
     async dispose() {
       await pool.end();
       const cleanup = createByokPool({ connectionString: url, max: 1 });

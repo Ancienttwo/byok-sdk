@@ -244,4 +244,28 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
     expect(hello.payload.capabilities).not.toContain('dispatch-selection');
   });
+
+  it('advertises agent-home-contract only when an absolute hostStorageRoot is configured', async () => {
+    const workspaceRoot = await tmpDir('byok-conn-hello-agent-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-agent-store-');
+    const hostStorageRoot = await tmpDir('byok-conn-hello-agent-root-');
+    daemon = createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test Product',
+        productId: 'test-product',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+      },
+      [],
+    );
+    await daemon.pair('pairing-code');
+    await daemon.start();
+
+    const hello = await server.waitFor((event) => event.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    expect(hello.payload.capabilities).toContain('agent-home-contract');
+  });
 });

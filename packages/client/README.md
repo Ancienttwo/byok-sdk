@@ -85,6 +85,36 @@ createDaemon({
 The value is intentionally host-owned and has no SDK default because it is a
 deployment/read-model policy, not a frozen protocol limit.
 
+## Durable Agent homes
+
+An Agent-capable daemon receives one absolute branded storage root. The SDK,
+not the host, composes `agents/<agentId>`, validates canonical containment,
+creates missing `MEMORY.md` and `notes/` without overwriting existing bytes,
+and binds the resulting Agent home as runtime cwd.
+
+```ts
+import { createAgentHomeProjection, createDaemon } from '@byok-sdk/client';
+
+createDaemon({
+  // ...normal device and transport configuration
+  agentHome: {
+    hostStorageRoot: '/Users/alice/.salesko',
+    projection: createAgentHomeProjection(async ({ agentRef, cwd }) => {
+      // Host code receives the canonical home. It supplies redacted profile
+      // content but never joins `agents/<agentId>` and never writes secrets.
+      await profileProjection.write({ agentRef, canonicalAgentHome: cwd });
+    }),
+  },
+});
+```
+
+Configuring this advertises `agent-home-contract`. Agent offers are distinct
+from legacy task offers and fail closed when identity, profile revision,
+session/runtime/cwd evidence, or the one-writer lease does not match. Agent
+files other than the SDK-reserved `.byok` namespace are opaque; there is no
+required `artifacts/` directory and the client does not parse or index their
+contents.
+
 For a concrete private host composition, see the
 [`examples/salesko-connector-broker`](../../examples/salesko-connector-broker)
 reference. It keeps `@byok-sdk/client` credential-blind while combining
