@@ -40,7 +40,7 @@ const ENCODED_PREFIX = 'byok-device-credential-v1:';
 const NOT_FOUND = 44;
 
 function providerDiagnostic(stderr: string): string {
-  const match = /^credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11})\)$/u.exec(stderr.trim());
+  const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11})\)/u.exec(stderr);
   return match === null ? '' : ` (${match[1]})`;
 }
 

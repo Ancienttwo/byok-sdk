@@ -86,12 +86,13 @@ describe('DeviceCredentialStore', () => {
     const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
       exitCode: 1,
       stdout: '',
-      stderr: 'credential operation failed (hresult=-2146233087)',
+      stderr: 'PowerShell prefix that must not escape\ncredential operation failed (hresult=-2146233087)\nunowned suffix',
     });
     const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
     await expect(store.read()).rejects.toThrow(
       'operating-system credential provider could not read device credentials (hresult=-2146233087)',
     );
+    await expect(store.read()).rejects.not.toThrow(/PowerShell prefix|unowned suffix/u);
   });
 
   it('does not echo unowned provider stderr into the error', async () => {

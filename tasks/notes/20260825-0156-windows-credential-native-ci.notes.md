@@ -62,6 +62,11 @@
   PowerShell type authority and can itself mask the nested provider exception.
   The next probe uses `[System.ComponentModel.Win32Exception]` and falls back
   only to the outer numeric HRESULT, never the exception message.
+- The second bounded run still projected a generic error. PowerShell can append
+  its own stderr around the bridge marker, while the parser required the whole
+  stderr to equal that marker. The final diagnostic iteration extracts only the
+  unique numeric marker from surrounding output and has a unit guard proving
+  prefix/suffix text cannot escape into the product error.
 
 ## Promotion Filter
 
