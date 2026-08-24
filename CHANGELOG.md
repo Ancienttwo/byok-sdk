@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.0 / @byok-sdk/keys 0.3.1 — 2026-08-24
+
+Task-free Agent-home projection and explicit fresh-session Agent dispatch.
+
+- Added a capability-gated, task-free, exact-device control lane for bounded
+  opaque Agent-home projections, with exact tenant/device/`AgentRef`/revision/
+  hash/request receipts and durable offline redelivery.
+- Reused the SDK-owned canonical Agent-home containment, initialization, and
+  single-writer lease lifecycle. Projection failures do not advance the durable
+  cursor, and projection handling does not create a fake task, task journal,
+  runtime process, or runtime session.
+- Added a distinct fresh-session Agent offer that creates a new runtime-native
+  session without weakening the existing exact-match rules for session-bound
+  resume.
+- Published the aligned public train at 0.8.0 and keys at 0.3.1. All ten
+  registry artifacts passed exact integrity, dependency-edge, fresh-install,
+  and single-version readback. Deployment, production migration, downstream
+  exact-pin adoption, and live rollout remain separate authorities.
+
 ## 0.7.0 / @byok-sdk/keys 0.3.0 — 2026-08-23
 
 Authenticated enrollment tenant projection.
