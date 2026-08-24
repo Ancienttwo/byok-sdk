@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   DeviceCredentialStore,
+  DeviceCredentialStoreError,
   DeviceCredentialStoreUnavailableError,
   type DeviceCommandRunner,
 } from '../daemon/device-credential-store';
 
 const credentials = {
+  deviceId: 'device-credential-test',
+  tenantId: 'tenant-credential-test',
+  devicePublicKey: 'test-public-key',
   accessToken: 'opaque-token',
   expiresAt: '2030-01-01T00:00:00.000Z',
   devicePrivateKeyPem: 'test-private-key',
@@ -31,5 +35,38 @@ describe('DeviceCredentialStore', () => {
     const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'linux', commandRunner: run });
     await expect(store.read()).rejects.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
     await expect(store.replace(credentials)).rejects.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
+  });
+
+  it('round-trips the Windows Credential Manager UTF-8 blob without a second base64 layer', async () => {
+    let stored: string | undefined;
+    const run: DeviceCommandRunner = async (_executable, _args, stdin) => {
+      const request = JSON.parse(stdin ?? '{}') as {
+        operation?: string;
+        secret_base64?: string;
+      };
+      if (request.operation === 'replace') {
+        stored = Buffer.from(request.secret_base64 ?? '', 'base64').toString('utf8');
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      if (request.operation === 'read') {
+        return stored === undefined
+          ? { exitCode: 44, stdout: '', stderr: '' }
+          : { exitCode: 0, stdout: stored, stderr: '' };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    await store.replace(credentials);
+    await expect(store.read()).resolves.toEqual(credentials);
+  });
+
+  it('does not classify a Linux provider error as a missing credential', async () => {
+    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'secret service is unavailable',
+    });
+    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'linux', commandRunner: run });
+    await expect(store.read()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
   });
 });

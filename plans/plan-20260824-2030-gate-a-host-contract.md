@@ -46,10 +46,11 @@ version reservation:
 ### GA-01
 
 `Daemon.pair()` → authenticated pair response → generate/reuse device key →
-replace one OS credential value → replace bounded `device.json` metadata →
-update in-memory cache. Restart/status reads metadata plus OS authority; renewal
-signs with the current credential and replaces the whole credential before
-changing cache. Unpair stops daemon ownership then clears the one credential
+write bounded `device.json` projection → atomically replace one complete OS
+enrollment record → update in-memory cache. Restart reads the OS authority and
+repairs missing/stale projection; status is credential-blind but derives paired
+identity from that same authority. Renewal signs with and replaces the complete
+record before changing cache. Unpair stops daemon ownership then clears the one credential
 authority; a failed clear leaves the in-memory paired state observable.
 
 ### GA-02

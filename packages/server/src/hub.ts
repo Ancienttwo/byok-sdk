@@ -20,6 +20,7 @@ import {
   RequiredToolsetsSchema,
   encodeEnvelope,
   PROTOCOL_VERSION,
+  STRICT_AGENT_ONLY_CAPABILITY,
   TASK_STATES,
   type CreateEnvelopeOptions,
   type ConnHelloPayload,
@@ -1816,7 +1817,7 @@ export class ConnectionHub {
     // mutation so an explicit legacy dispatch is side-effect free.
     if (
       agentRef === undefined &&
-      this.getDeviceCapabilities(deviceId)?.includes('strict-agent-only') === true
+      this.getDeviceCapabilities(deviceId)?.includes(STRICT_AGENT_ONLY_CAPABILITY) === true
     ) {
       throw new Error(
         `device ${deviceId} advertises strict-agent-only; legacy task dispatch is refused before enqueue`,
@@ -2235,7 +2236,7 @@ export class ConnectionHub {
   ): string | undefined {
     for (const [deviceId, conn] of this.connections) {
       if (!conn.connected) continue;
-      if (!allowStrictAgentOnly && conn.capabilities?.includes('strict-agent-only')) continue;
+      if (!allowStrictAgentOnly && conn.capabilities?.includes(STRICT_AGENT_ONLY_CAPABILITY)) continue;
       if (requiredToolsets === undefined) return deviceId;
       if (!conn.capabilities?.includes('toolset-selection')) continue;
       if (conn.configuredToolsets === undefined) continue;

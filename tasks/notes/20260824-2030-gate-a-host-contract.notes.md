@@ -85,3 +85,24 @@ clean frozen source SHA; focused tests run during development.
 - `repo-harness run check-task-workflow --strict` passed after evidence
   scaffolding. Independent review/semantic acceptance has not been authored by
   this implementation worker.
+
+## Primary-agent takeover review
+
+The worker result was treated as implementation evidence, not acceptance. A
+manual source trace found two defects that its green suite did not exercise:
+
+- the Windows bridge returned an additional base64 wrapper while the common
+  decoder expected the owned UTF-8 envelope; every real Windows read would
+  therefore fail;
+- secret bytes and enrollment metadata were committed to separate authorities,
+  so a crash or failure between writes could combine a token/private key from
+  one pairing response with device/tenant/public-key metadata from another.
+
+The takeover correction makes one OS credential entry contain the complete
+validated enrollment record. `device.json` remains a deterministic non-secret
+projection: pair writes the projection before the authoritative OS replace,
+restart repairs missing/stale projection from the OS record, renewal replaces
+the complete record, and status never derives paired identity from the file.
+Focused fault-injection now covers failed OS replace, failed projection write,
+projection-loss repair, Windows UTF-8 round-trip, and Linux provider-error
+classification. No real user credential provider was touched.

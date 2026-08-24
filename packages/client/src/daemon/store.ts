@@ -15,28 +15,21 @@ import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir
 import {
   DeviceCredentialStore,
   InMemoryDeviceCredentialStore,
-  type DeviceCredentials,
+  type DeviceMetadata,
+  type DeviceRecord,
 } from './device-credential-store';
+
+export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
 
 /**
  * Non-secret projection of an authenticated device enrollment. This is the
- * complete permitted `device.json` shape; bearer and private-key bytes live
- * exclusively in DeviceCredentialStore.
+ * complete permitted `device.json` shape. The complete record, including
+ * these authenticated metadata fields and secret bytes, lives atomically in
+ * DeviceCredentialStore; this file is only its deterministic projection.
  *
  * Internal only: the package root exposes DeviceEnrollment/status, never this
  * storage record.
  */
-export interface DeviceMetadata {
-  deviceId: string;
-  /** Opaque tenant binding returned by the authenticated pairing response. */
-  tenantId: string;
-  /** Ed25519 public key, base64url — re-sent verbatim on a post-revocation re-pair (protocol §6.3). */
-  devicePublicKey: string;
-}
-
-/** Internal composition used only by daemon/auth/signer modules. */
-export type DeviceRecord = DeviceMetadata & DeviceCredentials;
-
 /** Public credential-blind result of explicit pairing. */
 export interface DeviceEnrollment {
   readonly deviceId: string;
@@ -316,18 +309,14 @@ export async function readDeviceEnrollmentStatus(
   const storeDir = DeviceStore.resolveDir(options.productId, options.storeDir);
   try {
     const store = new DeviceStore(storeDir, undefined, options.productId);
-    const record = await store.load();
-    if (record === undefined) {
-      return { state: 'unpaired' };
-    }
+    const authority = await store.credentials.read();
+    if (authority !== undefined) return { state: 'paired', deviceId: authority.deviceId };
 
-    // Metadata is only an enrollment projection. A paired status is valid only
-    // while the separate OS credential authority still contains the current
-    // credential record; never project that record into this public API.
-    if (await store.credentials.read() === undefined) {
-      return { state: 're_pair_required' };
-    }
-    return { state: 'paired', deviceId: record.deviceId };
+    // An enrollment projection without its OS authority is not an unpaired
+    // machine: it is a partial/legacy state that requires explicit recovery.
+    return (await store.load()) === undefined
+      ? { state: 'unpaired' }
+      : { state: 're_pair_required' };
   } catch (error) {
     if (error instanceof DeviceRecordRePairRequiredError) {
       return { state: 're_pair_required' };

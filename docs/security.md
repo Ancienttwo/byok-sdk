@@ -159,8 +159,8 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 
 | Asset | Where it lives | Who touches it |
 |---|---|---|
-| Device Ed25519 private key | SDK-internal OS credential entry (Keychain / Credential Manager / Secret Service) | Daemon only — signs **domain-separated** nonces at renewal time (`byok-nonce-v1\n` + nonce, S1); never leaves the device. No plaintext file fallback exists. |
-| JWT access token | The same SDK-internal OS credential entry | Daemon (wire auth); carries the identity triple `{tenantId, productId, deviceId}` (S1). Server verifies, never issues without a valid pairing code or signed nonce, and treats the claims as **lookup keys only** — the device row is the authority (`packages/server/src/auth.ts`) |
+| Device enrollment authority | One SDK-internal OS credential entry (Keychain / Credential Manager / Secret Service) containing authenticated device/tenant/public-key metadata, expiry, access token, and private key | Daemon only. Keeping the full record in one replaceable entry prevents crash-time identity/key mixing. The private key signs **domain-separated** nonces at renewal time (`byok-nonce-v1\n` + nonce, S1); no plaintext fallback exists. |
+| Device metadata projection | `<storeDir>/device.json` (0600), exactly `{deviceId, tenantId, devicePublicKey}` | Credential-blind CLI/status and diagnostics only. It is deterministically repaired from the OS authority and never authors enrollment or secret bytes. |
 | Pairing code | Server-side only, minted out of band by the SaaS's own auth/device-flow UI | Server mints it already bound to `{tenantId, productId}` (S1); single-use, ~10min TTL. `PairRequest` carries neither field, so a device can never choose or influence the tenant it lands in (`packages/server/src/pairing.ts`, `docs/protocol.md` §6.1) |
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
@@ -310,8 +310,8 @@ rate limiting (`packages/server/src/rate-limiter.ts`, keyed and isolated by
 | Remote network, no valid device credentials | Attempt connections, flood a device's inbound budget (isolated per-device — see `rate-limit.test.ts`'s isolation test) | Forge a JWT (HS256, server-held random secret — `auth.ts`'s `createHmacTokenSigner`); forge an Ed25519 device signature; reuse a device signature produced for a different purpose (S1: nonce signatures are domain-separated under `byok-nonce-v1\n`, and an unprefixed signature is rejected — `auth.ts`'s `verifyNonceSignature`); replay a pairing code (single-use, ~10min TTL — `pairing.ts`) or a challenge nonce (single-use, ~5min TTL, bound to `deviceId` — `auth.ts`'s `NonceStore`) |
 | Holder of one tenant's valid device credentials | Everything that tenant's own devices can do | Reach another tenant's device on any surface (S1: `DeviceRegistry` is keyed by `(tenantId, deviceId)`, so a mismatched tenant finds nothing rather than finding a row it then fails a check against); revoke or enumerate another tenant's devices (`devices.revoke(tenantId, deviceId)` — no naked deviceId lookup is exported); learn whether another tenant's device exists — unknown device, wrong tenant, product mismatch, and revoked all return the same `401` with the same body, so there is no existence oracle (`auth.ts`'s `authenticateBearer`) |
 | Malicious or compromised SaaS | Offer any task/policy it wants; send `task.approve`/`task.reject`/`task.cancel` for tasks it itself offered (this is the wire's legitimate approve channel — see the approval-path section on why this isn't a privilege escalation) | Read the device's private key or forge its signature; force an adapter to run with a looser effective policy than offered (fail-closed mapping — `docs/protocol.md` §11.1); reach the daemon's local control socket or audit log (no network path to a Unix socket/named pipe) |
-| Same-user local process | Read `device.json`/the JWT directly off disk (same-user files) | — |
-| Other local user | — | Read `device.json` (0600), or anything else under `storeDir` (0700) |
+| Same-user local process | Read the non-secret `device.json` projection; invoke OS credential APIs subject to the user's OS credential-store policy | Bypass whatever access-control/prompt policy the selected OS credential provider enforces |
+| Other local user | — | Read `device.json` (0600), anything else under `storeDir` (0700), or the owning user's OS credential entry |
 
 TLS termination itself is a deployment concern, not something this SDK
 provides: `packages/client/src/daemon/url.ts` maps whatever scheme is
@@ -569,17 +569,17 @@ is an explicit operator decision that adds a local authentication surface.
    own response is written, which closes the window between the shutdown
    acknowledgement and the control socket actually closing (bounded by the
    shutdown grace deadline, 10s by default). An `unpair` walks through that
-   window on every run — the CLI shuts the daemon down first and clears
-   `device.json` afterwards.
+   window on every run — the CLI shuts the daemon down first, clears the OS
+   enrollment authority, and then removes the metadata projection.
 5. `revoked` — the server has revoked this device (`AuthManager.isRevoked()`).
-6. `not_paired` — `device.json` is re-read from disk on **every** call, never
-   cached, so clearing it removes local signing authority immediately rather
-   than at the next restart.
+6. `not_paired` — the complete OS enrollment authority is re-read on **every**
+   call, never reconstructed from `device.json`, so clearing the credential
+   entry removes local signing authority immediately rather than at restart.
 
 **Revocation is honestly two halves, and this daemon is only one of them.**
 Gates 4-6 make this daemon stop minting promptly (and the shutdown/revocation
 flags are re-checked once more at the signing point itself, after the async
-`store.load()`, so a revocation or shutdown that lands mid-call still blocks
+OS-authority read, so a revocation or shutdown that lands mid-call still blocks
 the signature — there is no check-then-await-then-sign gap). They do **not**
 recall an assertion already in a caller's hands. Nothing in this SDK provides
 synchronous invalidation on its own, and no documentation, release note, or
@@ -653,10 +653,10 @@ What is persisted is the metadata an incident needs: `result`, the gate
 byte size only when it is caller-supplied free text from a denied request.
 
 The audience allowlist and the TTL cap are **not** a same-UID security
-boundary, and this table does not pretend otherwise. A same-UID process can
-read the 0600 `device.json` directly and forge an assertion with any claims it
-likes — the same way it can read every runtime credential the OS trust
-boundary already grants it. The allowlist and TTL constrain a
+boundary, and this table does not pretend otherwise. A same-UID process that
+the OS credential provider authorizes to read the device entry can forge an
+assertion with any claims it likes — the same way it can use other credentials
+available inside the same OS-user trust boundary. The allowlist and TTL constrain a
 **control-socket client that does NOT have direct key access** (or chooses to
 go through the broker rather than reimplement signing), and the broker's job
 is to **not widen** the same-UID boundary — not to close it, which it cannot.
@@ -667,7 +667,7 @@ explicitly.
 |---|---|---|
 | Remote network / malicious SaaS | — | Reach `assertion.issue` at all — it is control-socket only |
 | Same-UID process using the broker | Mint assertions for any **allowlisted** audience, at the configured TTL, while the daemon is paired, running, and not shutting down | *Over the broker:* mint for a non-allowlisted audience, choose the TTL, influence any claim other than `audience`, or read key material out of the result |
-| Same-UID process NOT using the broker | Read `device.json` (0600) and forge an assertion with **arbitrary** claims — audience, issuer, TTL, all of it | Nothing the broker adds: this is within the OS trust boundary (same-UID = device owner), exactly as it can read any runtime credential. The broker neither enables nor prevents this; it simply does not widen it |
+| Same-UID process NOT using the broker | If authorized by the OS credential provider, read/use the device entry and forge an assertion with **arbitrary** claims — audience, issuer, TTL, all of it | Nothing the broker adds: this is within the selected OS credential-provider trust boundary. The broker neither enables nor prevents it; it simply does not widen it |
 | Other local user | — | Complete the control handshake without `control.token` (0600), and therefore reach this method at all |
 | Holder of a leaked assertion, **against a conforming exchange** (one that performs the downstream-MUST list above — compares `audience`/`issuer`/`productId` and burns `jti`) | Present it to the named audience until it expires (≤300s) or that exchange burns its `jti` | Use it against a different audience/issuer/product, extend it, or replay it once that exchange has burned the `jti` — *because the exchange enforces those comparisons.* `verifyDeviceAssertion` itself does NOT compare audience/issuer/product; it surfaces the claims for exactly that comparison. Against a NON-conforming exchange that skips the checks, none of these "Cannot"s hold — which is why the downstream-MUST list is mandatory, not advisory |
 

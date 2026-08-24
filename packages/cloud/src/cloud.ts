@@ -62,6 +62,7 @@ import {
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+  STRICT_AGENT_ONLY_CAPABILITY,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -767,7 +768,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
    */
   async function assertLegacyAdmission(tenant: TenantId, deviceId: string): Promise<void> {
     const device = await options.cloud.devices.get(tenant, deviceId);
-    if (device?.capabilities?.includes('strict-agent-only') === true) {
+    if (device?.capabilities?.includes(STRICT_AGENT_ONLY_CAPABILITY) === true) {
       throw new ByokCloudError(
         'agent_capability_missing',
         `Device ${deviceId} advertises strict-agent-only; refusing legacy offer before mailbox append.`,

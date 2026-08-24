@@ -477,7 +477,7 @@ Library exports 分成六组：
 
 | 组 | 主要 public API |
 | --- | --- |
-| daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、`AuthManager`、`DeviceRevokedError`、`BlobClient` |
+| daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、credential-blind `readDeviceEnrollmentStatus` / `DeviceEnrollment*`、`BlobClient`；`AuthManager`、secret-bearing local record/store/signer 均为 package-internal |
 | adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
 | bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter` 与 options |
 | observability | `DaemonObserver`、event/task projection types |

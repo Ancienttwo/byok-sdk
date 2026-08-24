@@ -40,8 +40,11 @@ describe('credential-blind authenticated enrollment status', () => {
     expect(JSON.stringify(paired)).not.toContain(record.accessToken);
     expect(JSON.stringify(paired)).not.toContain(record.devicePrivateKeyPem);
 
+    await new DeviceStore(storeDir, undefined, options.productId).remove();
+    expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 'paired', deviceId: 'device-status' });
+
     await new DeviceStore(storeDir, undefined, options.productId).credentials.clear();
-    expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 're_pair_required' });
+    expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 'unpaired' });
 
     await fs.writeFile(path.join(storeDir, 'device.json'), JSON.stringify({
       deviceId: 'legacy-device',

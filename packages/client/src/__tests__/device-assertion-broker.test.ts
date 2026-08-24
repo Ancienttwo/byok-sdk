@@ -22,6 +22,7 @@ import { connectControlClient, type ControlClient } from '../bin/control-client'
 import { createAuditAppender, auditLogPath } from '../bin/audit-log';
 import { formatDaemonEventLine } from '../bin/format';
 import { NONCE_SIGNING_DOMAIN } from '../daemon/device-keys';
+import { DeviceStore } from '../daemon/store';
 import type { DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -329,16 +330,15 @@ describe('device assertion broker: assertion.issue', () => {
   // Gates 4/5/6 — the three "this device may not sign right now" branches
   // -------------------------------------------------------------------------
 
-  it('refuses with not_paired once the device record is gone, without a restart', async () => {
+  it('refuses with not_paired once the OS enrollment authority is gone, without a restart', async () => {
     const built = await pairedAndStarted('acme-assert-unpaired');
     daemon = built.daemon;
     const client = await control(built.storeDir, built.config.productId);
 
-    // Proves the store is genuinely re-read per call rather than cached at
-    // start(): the same live daemon answers differently the moment the record
-    // is removed from disk.
+    // Proves the OS authority is genuinely re-read per call rather than cached
+    // at start. device.json alone is only a repairable non-secret projection.
     await client.request<AssertionIssueResult>('assertion.issue', { audience: ALLOWED_AUDIENCE });
-    await fs.rm(path.join(built.storeDir, 'device.json'), { force: true });
+    await new DeviceStore(built.storeDir, undefined, built.config.productId).credentials.clear();
 
     const err = await expectControlError(client.request('assertion.issue', { audience: ALLOWED_AUDIENCE }));
     expect(err.code).toBe('not_paired');

@@ -1,4 +1,4 @@
-export { PROTOCOL_VERSION, CAPABILITY_FLAGS } from './version';
+export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';

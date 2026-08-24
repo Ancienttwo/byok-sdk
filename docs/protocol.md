@@ -850,10 +850,12 @@ request/response shapes, not wire envelopes, and never touch the WSS
 connection. `v:1` is unaffected — pairing and token renewal are out-of-band
 calls that happen before/alongside the WSS connection.
 
-Device identity is a locally generated Ed25519 keypair; the private key and
-access token never leave the device's OS credential authority (macOS Keychain,
-Windows Credential Manager, or Linux Secret Service). There is no plaintext
-file fallback. It is
+Device identity is a locally generated Ed25519 keypair. The complete local
+enrollment record—authenticated device/tenant/public-key metadata, token,
+expiry, and private key—is one atomically replaceable OS credential authority
+(macOS Keychain, Windows Credential Manager, or Linux Secret Service). The
+bounded `device.json` file is only a non-secret deterministic projection. There
+is no plaintext secret fallback. It is
 completely separate from runtime credentials (`~/.claude`, `~/.codex`) — the
 daemon never reads, proxies, or forwards those.
 

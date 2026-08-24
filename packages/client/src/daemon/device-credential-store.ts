@@ -1,12 +1,27 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { isTenantId } from '@byok-sdk/core';
 
-/** Internal secret half of a paired device. Never re-export from the package root. */
+/** Secret fields inside the internal complete enrollment authority. */
 export interface DeviceCredentials {
   readonly accessToken: string;
   readonly expiresAt: string;
   readonly devicePrivateKeyPem: string;
 }
+
+/** Non-secret deterministic projection of the authenticated enrollment. */
+export interface DeviceMetadata {
+  readonly deviceId: string;
+  readonly tenantId: string;
+  readonly devicePublicKey: string;
+}
+
+/**
+ * The single local enrollment authority. Keeping identity and credential
+ * bytes in one OS-managed entry prevents a crash from composing a token/key
+ * from one pairing response with metadata from another.
+ */
+export type DeviceRecord = DeviceMetadata & DeviceCredentials;
 
 export interface DeviceCommandResult {
   readonly exitCode: number;
@@ -39,19 +54,24 @@ export class DeviceCredentialStoreError extends Error {
   }
 }
 
-function assertCredentials(value: unknown): asserts value is DeviceCredentials {
+function assertRecord(value: unknown): asserts value is DeviceRecord {
   if (
     typeof value !== 'object' ||
     value === null ||
     Array.isArray(value) ||
+    typeof (value as Partial<DeviceRecord>).deviceId !== 'string' ||
+    !isTenantId((value as Partial<DeviceRecord>).tenantId) ||
+    typeof (value as Partial<DeviceRecord>).devicePublicKey !== 'string' ||
     typeof (value as Partial<DeviceCredentials>).accessToken !== 'string' ||
     typeof (value as Partial<DeviceCredentials>).expiresAt !== 'string' ||
     typeof (value as Partial<DeviceCredentials>).devicePrivateKeyPem !== 'string'
   ) {
     throw new DeviceCredentialStoreError('OS credential entry has an invalid device credential shape');
   }
-  const credential = value as DeviceCredentials;
+  const credential = value as DeviceRecord;
   if (
+    credential.deviceId.length === 0 ||
+    credential.devicePublicKey.length === 0 ||
     credential.accessToken.length === 0 ||
     credential.expiresAt.length === 0 ||
     credential.devicePrivateKeyPem.length === 0
@@ -60,9 +80,9 @@ function assertCredentials(value: unknown): asserts value is DeviceCredentials {
   }
 }
 
-function encode(credentials: DeviceCredentials): string {
-  assertCredentials(credentials);
-  const encoded = Buffer.from(JSON.stringify(credentials), 'utf8').toString('base64');
+function encode(record: DeviceRecord): string {
+  assertRecord(record);
+  const encoded = Buffer.from(JSON.stringify(record), 'utf8').toString('base64');
   const value = `${ENCODED_PREFIX}${encoded}`;
   // Windows generic-credential blobs are limited; do not silently truncate a
   // bearer/key authority into a different credential.
@@ -72,7 +92,7 @@ function encode(credentials: DeviceCredentials): string {
   return value;
 }
 
-function decode(value: string): DeviceCredentials {
+function decode(value: string): DeviceRecord {
   if (!value.startsWith(ENCODED_PREFIX)) {
     throw new DeviceCredentialStoreError('OS credential entry is not owned by this client credential store');
   }
@@ -94,8 +114,11 @@ function decode(value: string): DeviceCredentials {
   } catch {
     throw new DeviceCredentialStoreError('OS credential entry is not valid JSON');
   }
-  assertCredentials(parsed);
+  assertRecord(parsed);
   return Object.freeze({
+    deviceId: parsed.deviceId,
+    tenantId: parsed.tenantId,
+    devicePublicKey: parsed.devicePublicKey,
     accessToken: parsed.accessToken,
     expiresAt: parsed.expiresAt,
     devicePrivateKeyPem: parsed.devicePrivateKeyPem,
@@ -137,16 +160,19 @@ export class DeviceCredentialStore {
     this.#run = options.commandRunner ?? runDeviceCommand;
   }
 
-  async read(): Promise<DeviceCredentials | undefined> {
+  async read(): Promise<DeviceRecord | undefined> {
     const result = await this.#invoke('read');
-    if (result.exitCode === NOT_FOUND || (this.#platform === 'linux' && result.exitCode === 1)) return undefined;
+    if (
+      result.exitCode === NOT_FOUND ||
+      (this.#platform === 'linux' && result.exitCode === 1 && result.stderr.trim().length === 0)
+    ) return undefined;
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) throw new DeviceCredentialStoreError('operating-system credential provider could not read device credentials');
     return decode(result.stdout.trimEnd());
   }
 
-  async replace(credentials: DeviceCredentials): Promise<void> {
-    const encoded = encode(credentials);
+  async replace(record: DeviceRecord): Promise<void> {
+    const encoded = encode(record);
     const result = await this.#invoke('replace', encoded);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) throw new DeviceCredentialStoreError('operating-system credential provider could not replace device credentials');
@@ -204,20 +230,20 @@ export class DeviceCredentialStore {
 
 /** Test-only double; it is intentionally internal and never selected by a production config. */
 export class InMemoryDeviceCredentialStore {
-  #credentials: DeviceCredentials | undefined;
+  #record: DeviceRecord | undefined;
 
-  async read(): Promise<DeviceCredentials | undefined> {
-    return this.#credentials === undefined ? undefined : Object.freeze({ ...this.#credentials });
+  async read(): Promise<DeviceRecord | undefined> {
+    return this.#record === undefined ? undefined : Object.freeze({ ...this.#record });
   }
 
-  async replace(credentials: DeviceCredentials): Promise<void> {
-    assertCredentials(credentials);
-    this.#credentials = Object.freeze({ ...credentials });
+  async replace(record: DeviceRecord): Promise<void> {
+    assertRecord(record);
+    this.#record = Object.freeze({ ...record });
   }
 
   async clear(): Promise<boolean> {
-    const had = this.#credentials !== undefined;
-    this.#credentials = undefined;
+    const had = this.#record !== undefined;
+    this.#record = undefined;
     return had;
   }
 }
@@ -253,5 +279,5 @@ public static class ByokDeviceCredential {
  public static bool Delete(string t) { if(D(t,1,0)) return true; if(Marshal.GetLastWin32Error()==1168) return false; throw new Win32Exception(Marshal.GetLastWin32Error()); }
 }
 "@
-try { $r=([Console]::In.ReadToEnd()|ConvertFrom-Json); if($r.operation -eq 'replace'){[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,[Convert]::FromBase64String([string]$r.secret_base64));exit 0}; if($r.operation -eq 'read'){$b=[ByokDeviceCredential]::Get([string]$r.target);if($null -eq $b){exit 44};[Console]::Out.Write([Convert]::ToBase64String($b));exit 0}; if($r.operation -eq 'clear'){if([ByokDeviceCredential]::Delete([string]$r.target)){exit 0};exit 44};exit 2 } catch { [Console]::Error.Write('credential operation failed'); exit 1 }
+try { $r=([Console]::In.ReadToEnd()|ConvertFrom-Json); if($r.operation -eq 'replace'){[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,[Convert]::FromBase64String([string]$r.secret_base64));exit 0}; if($r.operation -eq 'read'){$b=[ByokDeviceCredential]::Get([string]$r.target);if($null -eq $b){exit 44};[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b));exit 0}; if($r.operation -eq 'clear'){if([ByokDeviceCredential]::Delete([string]$r.target)){exit 0};exit 44};exit 2 } catch { [Console]::Error.Write('credential operation failed'); exit 1 }
 `, 'utf16le').toString('base64');

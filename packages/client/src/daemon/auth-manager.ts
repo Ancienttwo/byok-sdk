@@ -2,7 +2,7 @@ import os from 'node:os';
 import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, PairResponseSchema } from '@byok-sdk/protocol';
 import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
 import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceMetadata, type DeviceRecord } from './store';
-import type { DeviceCredentialStore, DeviceCredentials, InMemoryDeviceCredentialStore } from './device-credential-store';
+import type { DeviceCredentialStore, InMemoryDeviceCredentialStore } from './device-credential-store';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
 import { toHttpBase } from './url';
 
@@ -133,16 +133,18 @@ export class AuthManager {
           tenantId: body.tenantId,
           devicePublicKey: keyPair.publicKeyBase64Url,
         };
-        const credentials: DeviceCredentials = {
+        const record: DeviceRecord = {
+          ...metadata,
           accessToken: body.accessToken,
           expiresAt: resolvePairExpiry(body.refreshHint),
           devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
         };
-        // OS replace commits the sole secret authority first. Cache changes
-        // only after the secret write and metadata projection both succeed.
-        await this.credentials.replace(credentials);
+        // device.json is a deterministic non-secret projection. Write it
+        // first, then atomically replace the complete OS enrollment authority.
+        // If the authoritative replace fails, a restart repairs the projection
+        // from the still-current OS record; no mixed identity/key can load.
         await this.opts.store.save(metadata);
-        const record: DeviceRecord = { ...metadata, ...credentials };
+        await this.credentials.replace(record);
         this.record = record;
         this.revoked = false;
         return record;
@@ -223,14 +225,14 @@ export class AuthManager {
       throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
     }
     const body = (await tokenRes.json()) as TokenResponse;
-    const updatedCredentials: DeviceCredentials = {
+    const updated: DeviceRecord = {
+      ...record,
       accessToken: body.accessToken,
       expiresAt: body.expiresAt,
-      devicePrivateKeyPem: record.devicePrivateKeyPem,
     };
-    // Renewal is one whole-credential replacement; never a token-only write.
-    await this.credentials.replace(updatedCredentials);
-    const updated: DeviceRecord = { ...record, ...updatedCredentials };
+    // Renewal atomically replaces the complete enrollment authority; identity
+    // and key cannot drift from the new token/expiry.
+    await this.credentials.replace(updated);
     this.record = updated;
     this.scheduleProactiveRenewal();
     return updated.accessToken;
@@ -276,11 +278,35 @@ export class AuthManager {
 
   /** Read the current paired authority afresh; metadata without its OS secret is re-pair required. */
   private async loadRecord(): Promise<DeviceRecord | undefined> {
-    const metadata = await this.opts.store.load();
-    if (metadata === undefined) return undefined;
-    const credentials = await this.credentials.read();
-    if (credentials === undefined) throw new DeviceRecordRePairRequiredError();
-    return Object.freeze({ ...metadata, ...credentials });
+    const authority = await this.credentials.read();
+    if (authority === undefined) {
+      // Distinguish a genuinely unpaired machine from a partial/legacy file.
+      if ((await this.opts.store.load()) === undefined) return undefined;
+      throw new DeviceRecordRePairRequiredError();
+    }
+
+    const projection: DeviceMetadata = {
+      deviceId: authority.deviceId,
+      tenantId: authority.tenantId,
+      devicePublicKey: authority.devicePublicKey,
+    };
+    let current: DeviceMetadata | undefined;
+    try {
+      current = await this.opts.store.load();
+    } catch (error) {
+      // A bounded regular legacy record is safe to replace but never import.
+      // Path/symlink/race errors remain fail-closed and are not overwritten.
+      if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+    }
+    if (
+      current === undefined ||
+      current.deviceId !== projection.deviceId ||
+      current.tenantId !== projection.tenantId ||
+      current.devicePublicKey !== projection.devicePublicKey
+    ) {
+      await this.opts.store.save(projection);
+    }
+    return Object.freeze({ ...authority });
   }
 }
 

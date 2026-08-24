@@ -174,6 +174,56 @@ describe('authenticated enrollment tenant projection', () => {
     await auth.stop();
   });
 
+  it('keeps the previous complete OS authority when re-pair credential replacement fails', async () => {
+    server = await TestServer.start();
+    server.setPairingTenantId('atomic-first-code', 'tenant-atomic-first');
+    server.setPairingTenantId('atomic-replacement-code', 'tenant-atomic-replacement');
+    const store = new DeviceStore(await tmpDir('byok-enrollment-atomic-replace-'));
+    const auth = new AuthManager({ serverUrl: server.url, store });
+    const first = await auth.pair('atomic-first-code');
+    vi.spyOn(store.credentials, 'replace').mockRejectedValueOnce(new Error('injected OS replace failure'));
+
+    await expect(auth.pair('atomic-replacement-code')).rejects.toThrow('injected OS replace failure');
+    const recovered = await auth.readCurrent();
+    expect(recovered).toEqual(first);
+    expect(await store.load()).toEqual({
+      deviceId: first.deviceId,
+      tenantId: first.tenantId,
+      devicePublicKey: first.devicePublicKey,
+    });
+    await auth.stop();
+  });
+
+  it('does not replace the OS authority when the non-secret projection cannot be written', async () => {
+    server = await TestServer.start();
+    server.setPairingTenantId('projection-first-code', 'tenant-projection-first');
+    server.setPairingTenantId('projection-replacement-code', 'tenant-projection-replacement');
+    const store = new DeviceStore(await tmpDir('byok-enrollment-projection-failure-'));
+    const auth = new AuthManager({ serverUrl: server.url, store });
+    const first = await auth.pair('projection-first-code');
+    vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('injected projection failure'));
+
+    await expect(auth.pair('projection-replacement-code')).rejects.toThrow('injected projection failure');
+    expect(await store.credentials.read()).toEqual(first);
+    await auth.stop();
+  });
+
+  it('repairs a missing non-secret projection from the complete OS authority on restart', async () => {
+    server = await TestServer.start();
+    server.setPairingTenantId('projection-repair-code', 'tenant-projection-repair');
+    const store = new DeviceStore(await tmpDir('byok-enrollment-projection-repair-'));
+    const paired = await new AuthManager({ serverUrl: server.url, store }).pair('projection-repair-code');
+    await store.remove();
+
+    const restarted = await new AuthManager({ serverUrl: server.url, store }).loadExisting();
+    expect(restarted).toEqual(paired);
+    expect(await store.load()).toEqual({
+      deviceId: paired.deviceId,
+      tenantId: paired.tenantId,
+      devicePublicKey: paired.devicePublicKey,
+    });
+  });
+
   it('stops before re-pairing a running daemon so active tenant composition cannot remain stale', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('active-first-code', 'tenant-active-first');

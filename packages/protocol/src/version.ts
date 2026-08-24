@@ -24,6 +24,9 @@
  */
 export const PROTOCOL_VERSION = 1;
 
+/** Host declares that this device accepts only Agent-bound offer variants. */
+export const STRICT_AGENT_ONLY_CAPABILITY = 'strict-agent-only' as const;
+
 /**
  * Capability flags exchanged during the connection handshake (`conn.hello` /
  * `conn.ack`). Additional flags may be introduced without a protocol version
@@ -112,7 +115,7 @@ export const CAPABILITY_FLAGS = [
   'dispatch-selection',
   'toolset-selection',
   'agent-home-contract',
-  'strict-agent-only',
+  STRICT_AGENT_ONLY_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,

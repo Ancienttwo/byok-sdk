@@ -721,7 +721,8 @@ Operational rollback is deliberately simple: remove `gitWorkspace` from the loca
 ## Gate A: device credential custody and strict Agent-only admission
 
 `@byok-sdk/client` has one internal `DeviceCredentialStore` authority for the
-paired access token and device private key. It uses macOS Keychain, Windows
+complete paired enrollment: authenticated device/tenant/public-key metadata,
+access token, expiry, and device private key. It uses macOS Keychain, Windows
 Credential Manager, or Linux Secret Service; provider unavailability is typed
 and fail-closed, and there is no file, path-injection, or `@byok-sdk/keys`
 fallback. `<storeDir>/device.json` is only a bounded non-secret projection
@@ -732,9 +733,12 @@ never imported, parsed as a JWT, or dual-read: normal load/start/status reports
 The public enrollment boundary is credential-blind: `Daemon.pair()` returns
 `{deviceId}`, while the cold read model is exactly `unpaired | paired{deviceId}
 | re_pair_required`. Auth, store, record, and signer internals are not
-package-root exports. Pair and renewal replace the whole OS credential entry
-before changing the in-process cache; a signer reads the current authority for
-each signature. Unpair executes under the daemon owner/stop boundary, clears
+package-root exports. Pair writes the deterministic metadata projection before
+atomically replacing the complete OS authority; if the authoritative replace
+fails, restart repairs the projection from the previous OS record. Renewal
+replaces the whole OS entry before changing cache, and a signer reads the
+current authority for each signature. Unpair executes under the daemon
+owner/stop boundary, clears
 the OS authority first, and leaves enrollment observable and fail-closed if
 that clearance cannot be confirmed.
 

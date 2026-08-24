@@ -8,6 +8,7 @@ import {
   createEnvelope,
   encodeEnvelope,
   PROTOCOL_VERSION,
+  STRICT_AGENT_ONLY_CAPABILITY,
   TASK_TRANSITIONS,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
@@ -88,7 +89,7 @@ import { SessionWorkspaceStore } from './session-workspace-store';
 import { AgentSessionHandoffStore } from './agent-session-handoff-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
-import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceEnrollment, type DeviceMetadata, type DeviceRecord } from './store';
+import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceEnrollment, type DeviceRecord } from './store';
 import { JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
@@ -841,7 +842,7 @@ function computeCapabilities(
     flags.push('toolset-selection');
   }
   if (agentHomeConfigured) flags.push('agent-home-contract');
-  if (strictAgentOnly) flags.push('strict-agent-only');
+  if (strictAgentOnly) flags.push(STRICT_AGENT_ONLY_CAPABILITY);
   if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
   if (agentEgressConfigured) {
     flags.push(
@@ -1406,9 +1407,9 @@ export function buildDaemonWithAdapters(
     // not `start()`/`loadExisting()` ran in this process before `pair()`.
     let replacementPersisted = false;
     try {
-      let previous: DeviceMetadata | undefined;
+      let previous: DeviceRecord | undefined;
       try {
-        previous = await store.load();
+        previous = await auth.readCurrent();
       } catch (error) {
         // Pairing may replace a legacy/tampered record, but must not derive a
         // cursor/device identity from an untrusted file.
@@ -2450,7 +2451,12 @@ export function buildDaemonWithAdapters(
       // device and cursor mutations. A pair that wins stop()'s release gap is
       // therefore either wholly before this cleanup (and is fully removed) or
       // wholly after it; stale pre-lease identity can never drive cleanup.
-      const current = await store.load();
+      let current: DeviceRecord | undefined;
+      try {
+        current = await auth.readCurrent();
+      } catch (error) {
+        if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+      }
       try {
         await store.credentials.clear();
       } catch {
@@ -2769,7 +2775,12 @@ export function buildDaemonWithAdapters(
           throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
         }
         // Gate 6. Read from disk every time — never a cached record.
-        const record = await auth.readCurrent();
+        let record: DeviceRecord | undefined;
+        try {
+          record = await auth.readCurrent();
+        } catch (error) {
+          if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
+        }
         if (record === undefined) {
           observer.noteDeviceAssertion({ result: 'denied', reason: 'not_paired', audience: parsed.audience });
           throw new ControlError('not_paired', 'this device is not paired; nothing can be asserted about it');
