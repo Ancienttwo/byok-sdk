@@ -40,7 +40,7 @@ const ENCODED_PREFIX = 'byok-device-credential-v1:';
 const NOT_FOUND = 44;
 
 function providerDiagnostic(stderr: string): string {
-  const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},hresult=-?\d{1,11})\)/u.exec(stderr);
+  const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},source=\d{1,2},depth=\d{1,2},hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},hresult=-?\d{1,11})\)/u.exec(stderr);
   return match === null ? '' : ` (${match[1]})`;
 }
 
@@ -320,7 +320,17 @@ try {
  $e=$root
  $code=$null
  while($null -ne $e){if($e -is [System.ComponentModel.Win32Exception]){$code=$e.NativeErrorCode;break};$e=$e.InnerException}
- if($null -ne $code){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code))}elseif($null -ne $root){$kind=9;if($root -is [System.Management.Automation.MethodException]){$kind=2}elseif($root -is [System.Management.Automation.MethodInvocationException]){$kind=3}elseif($root -is [System.SystemException]){$kind=4}elseif($root -is [System.Management.Automation.RuntimeException]){$kind=5};[Console]::Error.Write(('credential operation failed (stage={0},kind={1},hresult={2})' -f $stage,$kind,$root.HResult))}else{[Console]::Error.Write('credential operation failed')}
+ if($null -ne $code){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code))}elseif($null -ne $root){
+  $leaf=$root
+  $depth=0
+  while($null -ne $leaf.InnerException -and $depth -lt 8){$leaf=$leaf.InnerException;$depth++}
+  $kind=99
+  if($leaf -is [System.DllNotFoundException]){$kind=1}elseif($leaf -is [System.EntryPointNotFoundException]){$kind=2}elseif($leaf -is [System.BadImageFormatException]){$kind=3}elseif($leaf -is [System.Runtime.InteropServices.MarshalDirectiveException]){$kind=4}elseif($leaf -is [System.Runtime.InteropServices.SEHException]){$kind=5}elseif($leaf -is [System.AccessViolationException]){$kind=6}elseif($leaf -is [System.TypeInitializationException]){$kind=7}elseif($leaf -is [System.TypeLoadException]){$kind=8}elseif($leaf -is [System.InvalidCastException]){$kind=9}elseif($leaf -is [System.ArgumentException]){$kind=10}elseif($leaf -is [System.InvalidOperationException]){$kind=11}elseif($leaf -is [System.ComponentModel.Win32Exception]){$kind=12}elseif($leaf -is [System.Management.Automation.MethodInvocationException]){$kind=13}elseif($leaf -is [System.Management.Automation.MethodException]){$kind=14}elseif($leaf -is [System.Management.Automation.RuntimeException]){$kind=15}elseif($leaf.GetType() -eq [System.SystemException]){$kind=16}elseif($leaf -is [System.SystemException]){$kind=17}
+  $source=99
+  $fqid=[string]$_.FullyQualifiedErrorId
+  if($fqid -eq 'MethodInvocationException'){$source=1}elseif($fqid -eq 'MethodException'){$source=2}elseif($fqid -eq 'NativeCommandError'){$source=3}elseif($fqid -eq 'RuntimeException'){$source=4}
+  [Console]::Error.Write(('credential operation failed (stage={0},kind={1},source={2},depth={3},hresult={4})' -f $stage,$kind,$source,$depth,$leaf.HResult))
+ }else{[Console]::Error.Write('credential operation failed')}
  $exitCode=1
 }
 exit $exitCode

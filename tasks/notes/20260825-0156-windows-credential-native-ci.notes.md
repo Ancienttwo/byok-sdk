@@ -94,6 +94,18 @@
   outer PowerShell `COR_E_SYSTEM` remains unproved. No further production
   mutation is allowed until that bounded classifier is observed once.
 
+## Successor Classifier Slice
+
+- The successor probe traverses at most eight `InnerException` links and maps
+  the deepest type into a fixed numeric `kind`. It separately maps only four
+  known `FullyQualifiedErrorId` values into numeric `source`; unknown values are
+  `99`. `depth` is bounded to two digits and the host parser accepts only the
+  complete numeric marker. No raw type name, identifier, message, stack or
+  provider stderr enters the product error.
+- Exactly one exact-head Windows probe is authorized for this classifier. Its
+  observed tuple selects the next production correction; absence of a tuple is
+  itself a fail-closed result, not permission to expand diagnostics.
+
 ## Evidence Links
 
 - Checks: `.ai/harness/checks/latest.json`

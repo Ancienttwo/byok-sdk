@@ -121,6 +121,19 @@ describe('DeviceCredentialStore', () => {
     await expect(store.read()).rejects.not.toThrow(/unowned prefix|unowned suffix/u);
   });
 
+  it('surfaces only bounded deepest-exception classifier fields', async () => {
+    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'unowned prefix\ncredential operation failed (stage=4,kind=13,source=1,depth=2,hresult=-2146233087)\nunowned suffix',
+    });
+    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    await expect(store.read()).rejects.toThrow(
+      'operating-system credential provider could not read device credentials (stage=4,kind=13,source=1,depth=2,hresult=-2146233087)',
+    );
+    await expect(store.read()).rejects.not.toThrow(/unowned prefix|unowned suffix/u);
+  });
+
   it('does not echo unowned provider stderr into the error', async () => {
     const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
       exitCode: 1,
