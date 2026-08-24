@@ -113,13 +113,28 @@ describe('client public surface', () => {
     // has no override to expose. The invariant outlives the seam, so the names
     // stay listed here and any reintroduction turns this red.)
     const exported = Object.keys(publicApi);
-    for (const forbidden of ['__setStoreMutexPortProviderForTests', 'AcquireDaemonOwnerOptions', 'acquireDaemonOwner']) {
+    expect(exported).toContain('localStateRelocation');
+    for (const forbidden of [
+      '__setStoreMutexPortProviderForTests',
+      'AcquireDaemonOwnerOptions',
+      'acquireDaemonOwner',
+      'acquirePathMutationGate',
+      'acquirePathMutationGates',
+      'PathMutationGate',
+    ]) {
       expect(exported).not.toContain(forbidden);
     }
 
     const index = readFileSync(new URL('../index.ts', import.meta.url), 'utf8');
     const indexNoComments = index.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
-    for (const forbidden of ['__setStoreMutexPortProviderForTests', 'mutexPort', 'storeMutexPort', 'AcquireDaemonOwnerOptions']) {
+    for (const forbidden of [
+      '__setStoreMutexPortProviderForTests',
+      'mutexPort',
+      'storeMutexPort',
+      'AcquireDaemonOwnerOptions',
+      'acquirePathMutationGate',
+      'PathMutationGateBusyError',
+    ]) {
       expect(indexNoComments, `index.ts must not surface ${forbidden}`).not.toContain(forbidden);
     }
 

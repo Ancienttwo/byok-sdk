@@ -61,6 +61,16 @@ export type {
   AgentHomeLease,
   AgentHomeBinding,
 } from './agent-home';
+export {
+  localStateRelocation,
+  LocalStateRelocationError,
+  LocalStateRelocationBusyError,
+  LocalStateRelocationIntegrityError,
+} from './local-state-relocation';
+export type {
+  LocalStateRelocationInput,
+  LocalStateRelocationLease,
+} from './local-state-relocation';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';

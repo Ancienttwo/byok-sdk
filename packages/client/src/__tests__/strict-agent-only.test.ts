@@ -52,6 +52,24 @@ describe('strict Agent-only daemon admission', () => {
     }, [new StubRuntimeAdapter('pi')])).toThrow(/strictAgentOnly requires.*agentHome/i);
   });
 
+  it('keeps strict construction filesystem-free until daemon ownership and async preflight', async () => {
+    const root = await temp('byok-strict-construction-');
+    const hostStorageRoot = path.join(root, 'not-created-yet');
+    daemon = createDaemonWithAdapters({
+      localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Strict test',
+      productId: `strict-construction-${path.basename(root)}`,
+      serverUrl: server.url,
+      workspaceRoot: path.join(root, 'workspace'),
+      storeDir: path.join(root, 'store'),
+      agentHome: { hostStorageRoot },
+      strictAgentOnly: true,
+    }, [new StubRuntimeAdapter('pi')]);
+
+    await expect(fs.lstat(hostStorageRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.lstat(path.join(root, 'store'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('declines both legacy offer variants after receive while producing no runtime side effects', async () => {
     const adapter = await startStrict();
     server.send(createEnvelope('task.offer', { instruction: 'legacy', policy: { mode: 'auto' } }, { taskId: 'strict-legacy', seq: server.nextSeq() }));

@@ -21,6 +21,8 @@ version reservation:
    enrollment.
 2. Make `strictAgentOnly` reject both legacy task-offer variants locally before
    any execution side effect, with server/cloud scheduling defenses.
+3. Supply the frozen Salesko Gate B2 consumer with an SDK-owned exclusive
+   local-state relocation/quiescence lease before any destination path effect.
 
 ## P1 — Architecture Map
 
@@ -79,6 +81,16 @@ bad scheduling. At 10x scale the first pressure is credential-provider
 availability and capability freshness, not a need for shadow storage or a
 second admission authority.
 
+Expose one high-level `localStateRelocation` coordinator, never the internal
+daemon owner or a caller-selectable mutex address. Daemon/store ownership and
+Agent-home lease publication each briefly acquire an SDK-internal path gate;
+relocation holds the same gates for the whole operator transaction and then
+checks persisted owner/lease state. Therefore a writer that wins first leaves
+a visible authority and relocation refuses, while relocation that wins first
+prevents a writer from publishing. Fixed OS-temp gate endpoints avoid creating
+the destination tree. Salesko remains responsible for product mapping,
+snapshot/stage/promote/readback and receipt semantics.
+
 ## Promotion Gate
 
 - **Merge/PR unit**: the complete Gate A host-contract source, tests, and immutable local-RC evidence form one independent review unit.
@@ -109,6 +121,29 @@ second admission authority.
   source verification once after source freeze.
 - [ ] Obtain independent review and resolve the pre-existing, read-only Salesko
   root-only consumer failure before declaring composite Gate A acceptance.
+- [x] Freeze the Salesko Gate B2 relocation consumer subject
+  `sha256:ba94b50f645ed0ee944c5edcaa8efeac6b718dfc23c7ef2e2a7b3522512b0488`
+  and the pre-fix `PRE_FIX_EXIT=1` evidence.
+- [x] Implement the internal store/Agent-root path gates and public high-level
+  relocation lease with active/unknown/corrupt refusal and exact release.
+- [ ] Pack an unpublished successor RC and pass the frozen Salesko Gate B2
+  consumer plus prior Gate B regression without publishing a version.
+
+## Gate B2 relocation trace
+
+```text
+host calls localStateRelocation.acquire(exact source/destination roots)
+-> canonicalize intended paths without creating them
+-> acquire store + Agent-root gates in deterministic identity order
+-> reject any source/destination daemon owner, reclaim marker, Agent-home lease,
+   symlink/unknown entry or corrupt state before destination effects
+-> return an exact idempotent lease while host snapshots/stages/promotes
+-> release every gate exactly once after host commit or rollback
+```
+
+The primitive does not move files, parse product state, rewrite SDK sessions or
+select rollback policy. Those remain host responsibilities under the retained
+exclusive lease.
 
 ## Rollback
 

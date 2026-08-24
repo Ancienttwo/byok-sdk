@@ -1128,8 +1128,9 @@ export function buildDaemonWithAdapters(
         }),
       });
   const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();
-  // Strict admission is a construction property, not a deferred start-time
-  // promise: an unusable agent home cannot advertise strict Agent-only work.
+  // Construction performs only non-mutating path/config validation. The real
+  // writable preflight runs after daemon ownership below and before transport
+  // or capability publication, so relocation can exclude it race-free.
   if (config.strictAgentOnly === true) agentHomeManager?.preflightSync();
   const agentContentReadPolicies = resolveContentReadPolicies(egressPolicy, config.agentEgress?.contentRead);
   // Before authenticated enrollment is loaded, egress is deliberately unable

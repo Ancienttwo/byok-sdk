@@ -1,14 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  fsyncSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  promises as fs,
-  realpathSync,
-  rmSync,
-} from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   AgentHomeProjectionPayloadSchema,
@@ -18,6 +9,11 @@ import {
   type AgentRef,
 } from '@byok-sdk/protocol';
 import { atomicWriteFile } from './util/atomic-write';
+import {
+  acquirePathMutationGate,
+  PathMutationGateBusyError,
+  type PathMutationGate,
+} from './daemon/path-mutation-gate';
 
 export type { AgentRef } from '@byok-sdk/protocol';
 
@@ -250,31 +246,36 @@ export class AgentHomeLayout {
   }
 
   async resolve(agentRefInput: AgentRef): Promise<AgentHomeResolution> {
-    const agentRef = validateAgentRef(agentRefInput);
-    const hostStorageRoot = await this.resolveRoot();
-    const agentsRoot = await ensureDirectoryNoSymlink(
-      hostStorageRoot,
-      path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
-    );
-    const lexicalHome = path.join(agentsRoot, agentRef.agentId);
-    // Materialize and verify the exact lexical Agent segment. Canonicalizing
-    // first would accidentally turn an in-root `two -> one` symlink into the
-    // already-valid `one` directory and bypass cross-Agent isolation.
-    const canonicalHome = await ensureDirectoryNoSymlink(agentsRoot, lexicalHome);
-    const priorAgentId = this.agentIdByCanonicalHome.get(canonicalHome);
-    if (priorAgentId !== undefined && priorAgentId !== agentRef.agentId) {
-      throw new AgentHomeCollisionError(
-        `canonical Agent home ${canonicalHome} is already bound to Agent ${priorAgentId}`,
+    const gate = await this.acquireRootMutationGate();
+    try {
+      const agentRef = validateAgentRef(agentRefInput);
+      const hostStorageRoot = await this.resolveRoot();
+      const agentsRoot = await ensureDirectoryNoSymlink(
+        hostStorageRoot,
+        path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
       );
+      const lexicalHome = path.join(agentsRoot, agentRef.agentId);
+      // Materialize and verify the exact lexical Agent segment. Canonicalizing
+      // first would accidentally turn an in-root `two -> one` symlink into the
+      // already-valid `one` directory and bypass cross-Agent isolation.
+      const canonicalHome = await ensureDirectoryNoSymlink(agentsRoot, lexicalHome);
+      const priorAgentId = this.agentIdByCanonicalHome.get(canonicalHome);
+      if (priorAgentId !== undefined && priorAgentId !== agentRef.agentId) {
+        throw new AgentHomeCollisionError(
+          `canonical Agent home ${canonicalHome} is already bound to Agent ${priorAgentId}`,
+        );
+      }
+      this.agentIdByCanonicalHome.set(canonicalHome, agentRef.agentId);
+      return Object.freeze({
+        agentRef,
+        hostStorageRoot,
+        agentsRoot,
+        homeDir: canonicalHome,
+        canonicalHome,
+      });
+    } finally {
+      await gate.release();
     }
-    this.agentIdByCanonicalHome.set(canonicalHome, agentRef.agentId);
-    return Object.freeze({
-      agentRef,
-      hostStorageRoot,
-      agentsRoot,
-      homeDir: canonicalHome,
-      canonicalHome,
-    });
   }
 
   /**
@@ -283,6 +284,7 @@ export class AgentHomeLayout {
    * file is created by this preflight.
    */
   async preflight(): Promise<void> {
+    const gate = await this.acquireRootMutationGate();
     let probePath: string | undefined;
     let handle: fs.FileHandle | undefined;
     let created = false;
@@ -306,48 +308,19 @@ export class AgentHomeLayout {
       throw new AgentHomeResolutionError(
         `agentHome.hostStorageRoot preflight failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      await gate.release();
     }
   }
 
   /**
-   * Construction-time counterpart to {@link preflight}. Strict Agent-only
-   * daemons must prove this root before they can expose any daemon instance or
-   * capability. It intentionally creates no Agent identity or persistent
-   * Agent file; only the SDK-owned `agents` namespace and a removed probe.
+   * Construction-time validation is deliberately non-mutating. The actual
+   * writable preflight runs asynchronously after daemon ownership is acquired
+   * and before transport/capability publication, where it can participate in
+   * the cross-process relocation gate without a sync shadow lock.
    */
   preflightSync(): void {
-    let probePath: string | undefined;
-    let fd: number | undefined;
-    try {
-      const root = this.resolveRootSync();
-      const agentsRoot = path.join(root, AGENT_HOME_DIRECTORY);
-      mkdirSync(agentsRoot, { recursive: true, mode: 0o700 });
-      const agentsStat = lstatSync(agentsRoot);
-      if (!agentsStat.isDirectory() || agentsStat.isSymbolicLink()) {
-        throw new AgentHomeResolutionError(`Agent home path component is not a real directory: ${agentsRoot}`);
-      }
-      const canonicalAgentsRoot = realpathSync(agentsRoot);
-      if (!isWithin(root, canonicalAgentsRoot) || canonicalAgentsRoot !== agentsRoot) {
-        throw new AgentHomeResolutionError('Agent home changed through a symlink while being prepared');
-      }
-      probePath = path.join(canonicalAgentsRoot, `.byok-agent-home-preflight-${randomUUID()}`);
-      fd = openSync(probePath, 'wx', 0o600);
-      fsyncSync(fd);
-      closeSync(fd);
-      fd = undefined;
-      rmSync(probePath);
-      probePath = undefined;
-    } catch (error) {
-      if (fd !== undefined) {
-        try { closeSync(fd); } catch { /* best effort cleanup */ }
-      }
-      if (probePath !== undefined) {
-        try { rmSync(probePath, { force: true }); } catch { /* best effort cleanup */ }
-      }
-      throw new AgentHomeResolutionError(
-        `agentHome.hostStorageRoot preflight failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    assertAbsolutePath(this.hostStorageRootInput, 'agentHome.hostStorageRoot');
   }
 
   private async resolveRoot(): Promise<string> {
@@ -362,17 +335,18 @@ export class AgentHomeLayout {
     return this.canonicalRoot;
   }
 
-  private resolveRootSync(): string {
-    if (this.canonicalRoot !== undefined) return this.canonicalRoot;
+  private async acquireRootMutationGate(): Promise<PathMutationGate> {
     try {
-      mkdirSync(this.hostStorageRootInput, { recursive: true, mode: 0o700 });
-      this.canonicalRoot = realpathSync(this.hostStorageRootInput);
+      return await acquirePathMutationGate({
+        scope: 'agent-home-root',
+        targetPath: path.join(this.hostStorageRootInput, AGENT_HOME_DIRECTORY),
+      });
     } catch (error) {
-      throw new AgentHomeResolutionError(
-        `agentHome.hostStorageRoot is not accessible: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      if (error instanceof PathMutationGateBusyError) {
+        throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
+      }
+      throw error;
     }
-    return this.canonicalRoot;
   }
 }
 
@@ -437,8 +411,13 @@ export class AgentHomeLeaseManager {
     AgentHomeLeaseManager.held.set(canonicalHome, leaseId);
     let lockPath: string | undefined;
     let handle: fs.FileHandle | undefined;
+    let rootGate: PathMutationGate | undefined;
     let ownsMarker = false;
     try {
+      rootGate = await acquirePathMutationGate({
+        scope: 'agent-home-root',
+        targetPath: resolution.agentsRoot,
+      });
       await ensureDirectoryNoSymlink(resolution.agentsRoot, canonicalHome);
       const internalDir = await ensureDirectoryNoSymlink(
         canonicalHome,
@@ -458,11 +437,17 @@ export class AgentHomeLeaseManager {
       await handle.sync();
       await handle.close();
       handle = undefined;
+      await rootGate.release();
+      rootGate = undefined;
     } catch (error) {
       await handle?.close().catch(() => {});
       if (ownsMarker && lockPath !== undefined) await fs.rm(lockPath, { force: true }).catch(() => {});
+      await rootGate?.release().catch(() => {});
       if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) {
         AgentHomeLeaseManager.held.delete(canonicalHome);
+      }
+      if (error instanceof PathMutationGateBusyError) {
+        throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
       }
       if (error instanceof AgentHomeError) throw error;
       throw new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);

@@ -3,6 +3,11 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
 import { ensureSecureDir } from '../util/secure-dir';
+import {
+  acquirePathMutationGate,
+  PathMutationGateBusyError,
+  type PathMutationGate,
+} from './path-mutation-gate';
 
 export const DAEMON_OWNER_FILENAME = 'daemon-owner.json';
 const RECLAIM_FILENAME = `${DAEMON_OWNER_FILENAME}.reclaim`;
@@ -510,6 +515,35 @@ async function createOwner(filePath: string, record: OwnerRecord): Promise<boole
 }
 
 /**
+ * Read-only relocation inspection. The caller must already hold this store's
+ * path-mutation gate, so a conforming writer cannot publish after this check.
+ * Any persisted owner or reclaim object is a refusal; relocation never
+ * reclaims crash residue or repairs SDK-private state.
+ *
+ * @internal Used only by the high-level local-state relocation coordinator.
+ */
+export async function assertDaemonStoreQuiescent(storeDir: string): Promise<void> {
+  const inspect = async (filePath: string, label: string): Promise<void> => {
+    let stat: import('node:fs').Stats;
+    try {
+      stat = await fs.lstat(filePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`${label} is not a real regular file`);
+    }
+    const record = await readOwner(filePath);
+    if (record === undefined) throw new Error(`${label} is corrupt or incomplete`);
+    throw new DaemonOwnerActiveError(record.role);
+  };
+
+  await inspect(path.join(storeDir, DAEMON_OWNER_FILENAME), 'store mutation owner');
+  await inspect(path.join(storeDir, RECLAIM_FILENAME), 'store mutation reclaim marker');
+}
+
+/**
  * Cross-process, fail-closed ownership for store mutations that must never
  * race a daemon. A separate exclusive reclaim file serializes stale-owner recovery so two
  * starters cannot accidentally rename each other's newly-acquired lease.
@@ -519,38 +553,37 @@ export async function acquireDaemonOwner(
   role: OwnerRecord['role'],
   clock: () => Date = () => new Date(),
 ): Promise<DaemonOwnerLease> {
-  await ensureSecureDir(storeDir);
-  // Resolve aliases before deriving the lock endpoint and its identity.
-  // `ownerPath` may still be reached through the operator-supplied spelling
-  // below, but a symlink/junction alias and the canonical directory must
-  // contend for the same transition mutex or they could otherwise run two
-  // stale-owner reclaim sequences against the same underlying pathnames.
-  const canonicalStoreDir = await fs.realpath(storeDir);
-  // The mutex closes the stale-owner/reclaim TOCTOU: only one conforming
-  // process can inspect, remove and republish these pathnames at a time. It is
-  // retained for the full lease so another process cannot pass the pathname
-  // checks during the small owner-file publication/release windows.
-  const mutex = await acquireStoreMutex(canonicalStoreDir);
+  let pathGate: PathMutationGate | undefined;
+  try {
+    pathGate = await acquirePathMutationGate({ scope: 'store', targetPath: storeDir });
+  } catch (error) {
+    if (error instanceof PathMutationGateBusyError) throw new DaemonOwnerActiveError('unknown');
+    throw error;
+  }
+  let mutex: StoreMutexLock | undefined;
   let liveness: LivenessListener | undefined;
   try {
+    // No target path is created until the fixed OS-temp path gate is held.
+    // Relocation uses the same gate and therefore cannot pass inspection
+    // between this directory creation and owner publication.
+    await ensureSecureDir(storeDir);
+    const canonicalStoreDir = await fs.realpath(storeDir);
+    // The retained store mutex still owns stale-owner recovery and the full
+    // daemon lifetime. The path gate is narrower: publication only.
+    mutex = await acquireStoreMutex(canonicalStoreDir);
     liveness = await createLivenessListener();
-  } catch (err) {
-    await mutex.close().catch(() => undefined);
-    throw err;
-  }
-  const ownerPath = path.join(storeDir, DAEMON_OWNER_FILENAME);
-  const reclaimPath = path.join(storeDir, RECLAIM_FILENAME);
-  const record: OwnerRecord = {
-    version: 2,
-    pid: process.pid,
-    nonce: randomUUID(),
-    role,
-    acquiredAt: clock().toISOString(),
-    processStartedAt: SELF_PROCESS_STARTED_AT,
-    livenessPort: liveness.port,
-  };
+    const ownerPath = path.join(canonicalStoreDir, DAEMON_OWNER_FILENAME);
+    const reclaimPath = path.join(canonicalStoreDir, RECLAIM_FILENAME);
+    const record: OwnerRecord = {
+      version: 2,
+      pid: process.pid,
+      nonce: randomUUID(),
+      role,
+      acquiredAt: clock().toISOString(),
+      processStartedAt: SELF_PROCESS_STARTED_AT,
+      livenessPort: liveness.port,
+    };
 
-  try {
     for (;;) {
       if (await reclaimExistsAndIsActive(reclaimPath)) {
         throw new Error('store mutation lease is being reclaimed; retry after the current operation finishes');
@@ -558,20 +591,34 @@ export async function acquireDaemonOwner(
       await fs.rm(reclaimPath, { force: true });
 
       if (await createOwner(ownerPath, record)) {
+        try {
+          await pathGate.release();
+          pathGate = undefined;
+        } catch (error) {
+          await fs.rm(ownerPath, { force: true }).catch(() => undefined);
+          throw error;
+        }
+        const ownedLiveness = liveness;
+        const ownedMutex = mutex;
         let released = false;
         return {
           release: async () => {
             if (released) return;
-            const current = await readOwner(ownerPath);
-            if (current?.nonce !== record.nonce) {
-              throw new Error('store mutation lease identity changed before release');
-            }
-            await fs.rm(ownerPath);
-            released = true;
+            const releaseGate = await acquirePathMutationGate({
+              scope: 'store',
+              targetPath: canonicalStoreDir,
+            });
             try {
-              await liveness.close();
+              const current = await readOwner(ownerPath);
+              if (current?.nonce !== record.nonce) {
+                throw new Error('store mutation lease identity changed before release');
+              }
+              await ownedLiveness.close();
+              await ownedMutex.close();
+              await fs.rm(ownerPath);
+              released = true;
             } finally {
-              await mutex.close();
+              await releaseGate.release();
             }
           },
         };
@@ -598,8 +645,9 @@ export async function acquireDaemonOwner(
       }
     }
   } catch (err) {
-    await liveness.close().catch(() => undefined);
-    await mutex.close().catch(() => undefined);
+    await liveness?.close().catch(() => undefined);
+    await mutex?.close().catch(() => undefined);
+    await pathGate?.release().catch(() => undefined);
     throw err;
   }
 }

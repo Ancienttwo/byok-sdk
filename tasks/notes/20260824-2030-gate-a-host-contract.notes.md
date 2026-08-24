@@ -123,3 +123,37 @@ classification. No real user credential provider was touched.
   subject hashes were recomputed unchanged. The known Salesko root-only
   blocker was not rerun because the replacement RC does not alter host-root
   composition. The disposable copy was moved to Trash and is recoverable.
+
+## Salesko Gate B2 relocation handoff
+
+- Frozen downstream subject:
+  `sha256:ba94b50f645ed0ee944c5edcaa8efeac6b718dfc23c7ef2e2a7b3522512b0488`.
+  Its exact local-RC pre-fix command exits non-zero because the high-level
+  primitive is absent.
+- A service-manager status check is not a mutation authority. The SDK must
+  serialize relocation against the same store and Agent-home writer publication
+  paths used by real daemons, including foreground execution.
+- Public scope is deliberately narrow: `localStateRelocation.acquire(...)`
+  returns an idempotent lease. Internal daemon-owner acquisition, marker
+  parsing, endpoint selection and stale-state classification remain private.
+- The host may adapt public naming in its consumer adapter, but semantics are
+  fixed: exact paths, no destination tree effect, active/unknown/corrupt
+  refusal, no scan-then-writer race, opaque SDK state and exact release.
+
+## Gate B2 source implementation
+
+- `localStateRelocation.acquire()` is the only new public coordinator. Store
+  owner internals, marker readers and gate endpoints remain private.
+- One fixed OS-temp path-mutation gate now covers daemon/store owner publish
+  and release, Agent-home directory materialization/preflight, and Agent lease
+  marker publication. Relocation acquires the same four source/destination
+  gates in deterministic identity order and holds them for the host transaction.
+- The prior synchronous strict-Agent preflight could create the branded root
+  before daemon ownership and could not participate in an async cross-process
+  gate. It is now non-mutating construction validation; the existing async
+  writable preflight remains after daemon ownership and before transport or
+  capability publication.
+- Focused client verification passed 43/43 across relocation, Agent home,
+  strict admission, public-surface constraints and daemon-owner collision.
+  Client TypeScript passed. Full workspace/artifact evidence remains deferred
+  until the source subject is frozen, per the plan's cost boundary.

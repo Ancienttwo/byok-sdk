@@ -64,6 +64,20 @@ SDK-reserved namespace in the Agent home.
 | Concurrency | Enforce one mutable writer per canonical Agent home | Do not schedule around or bypass a busy decline |
 | Credentials | Never persist credential bytes in Agent home | Store secrets in SDK-owned macOS Keychain, Windows Credential Manager, or Linux Secret Service entries; project references/configured state only |
 
+## Host-root relocation authority
+
+An embedding host may run an explicit one-shot migration, but it cannot infer
+quiescence from its service manager or inspect `.byok` markers. The public
+client exposes only a high-level relocation lease. Internally, daemon/store
+owner publication and Agent-home directory/lease publication contend with the
+same path-scoped gates held by relocation. A writer that wins first is observed
+and rejected; a relocation that wins first prevents publication until release.
+
+Relocation acquisition canonicalizes intended paths without creating them and
+must leave an absent destination absent. Active, unknown or corrupt owner/lease
+state fails closed. The SDK lease does not move bytes or choose product mapping,
+retention, rollback or service-cutover policy; those remain host authority.
+
 The daemon tenant binding is part of authenticated enrollment, not host product
 configuration. A successful pair response projects the opaque non-secret
 tenant identifier already bound to the redeemed pairing code and cloud device
