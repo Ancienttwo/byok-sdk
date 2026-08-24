@@ -138,6 +138,15 @@
   exit expression. The final bounded correction uses
   `exit ([Environment]::ExitCode)` so the static property is parsed as the sole
   exit argument and cannot become pipeline output.
+- Exact head `3f24b6d` and push run `32773026090` disproved that final
+  correction: Windows native job `97577656769` still reached `decode()` from
+  `initial_read` with exit 0 and non-owned stdout; WinSW job `97577656873`
+  failed the same way. There was no owned provider diagnostic, so C# did not
+  report a native failure. Three production repair loops for PowerShell exit
+  propagation are exhausted. The branch remains unmerged and the duplicate
+  in-flight runs were canceled. Any successor must remove PowerShell host exit
+  propagation as an authority and first freeze the replacement executable/temp
+  lifecycle contract; another return/exit syntax tweak is not permitted.
 
 ## Evidence Links
 

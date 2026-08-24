@@ -165,6 +165,7 @@ Revert this slice only. Do not delete or migrate credentials, modify package ver
 <!-- [NOTE]: The final location is line 31 offset 9 category InvalidOperation: PowerShell return-code branching after the C# Get call. Native result and process-exit ownership move into the C# bridge; PowerShell retains only JSON stdin projection and one entrypoint invocation. -->
 <!-- [NOTE]: Immediate Environment.Exit produced only a generic provider failure. The void bridge now assigns Environment.ExitCode and returns; PowerShell performs one literal exit without inspecting any native return object. -->
 <!-- [NOTE]: The literal exit requires a parenthesized static-property expression; without it the process returned 0 and decoder received non-owned stdout. The final correction is exit ([Environment]::ExitCode). -->
+<!-- [NOTE]: Exact head 3f24b6d still returned process exit 0 plus non-owned stdout at initial_read; the parenthesized ExitCode correction is rejected. Three production loops are exhausted. A successor must remove PowerShell exit propagation itself, with an explicit ephemeral executable lifecycle contract, before another implementation attempt. -->
 
 ## Task Breakdown
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.

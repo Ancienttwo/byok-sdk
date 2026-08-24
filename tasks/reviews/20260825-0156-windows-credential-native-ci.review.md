@@ -5,7 +5,7 @@
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Notes File**: tasks/notes/20260825-0156-windows-credential-native-ci.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-25 03:55
+> **Last Updated**: 2026-08-25 04:22
 > **Recommendation**: fail
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
@@ -19,8 +19,8 @@
 - Intended files changed: Windows credential bridge, native falsifier, CI wiring and task artifacts only
 - Actual files changed: intended files only; no manifest, lockfile, Salesko or release files
 - Commands passed: focused client tests, client typecheck, workflow YAML parse, strict task workflow, `git diff --check`
-- Residual risks: hosted Windows still reports only an outer PowerShell `COR_E_SYSTEM`; the deepest exception kind is not yet observed
-- Reviewer action required: require a new bounded deepest-inner classifier before any further production correction
+- Residual risks: hosted Windows now completes the C# bridge without an owned native error, but PowerShell still returns exit 0 and non-owned stdout for an absent target
+- Reviewer action required: require a successor contract that removes PowerShell exit propagation; do not accept another syntax-level return/exit tweak
 - Rollback: revert this slice to `d0940f131cac4df44be506dc9d05153f1fb58e2f`
 
 ## Mode Evidence
@@ -81,17 +81,19 @@ screenshot/artifact path, or reviewer observation.
 
 ## Failing Items
 
-- Native Windows absent-target read still fails at static bridge stage 4 with
-  outer `kind=4,hresult=-2146233087`; primitive return, C# internal catches and
-  moving process exit outside the outer catch did not expose the deepest cause.
-  No round trip, IPC smoke or WinSW control-socket acceptance exists.
+- Native Windows absent-target read at exact head `3f24b6d` reaches `decode()`
+  with exit 0 and non-owned stdout after the void C# bridge reports no native
+  failure. Direct `Environment.Exit`, `Environment.ExitCode` and its
+  parenthesized PowerShell exit expression all failed to establish exact child
+  exit semantics. No round trip, IPC smoke or WinSW acceptance exists.
 
 ## Retest Steps
 
-- Re-run: only after a bounded deepest-inner/FullyQualifiedErrorId classifier is frozen
+- Re-run: only after a successor contract removes PowerShell host exit propagation and freezes the replacement executable/temp lifecycle
 - Re-check: native round trip, then exact Windows IPC and WinSW jobs
 
 ## Summary
 
 - Merge recommendation: FAIL. Local static checks pass, but the only authoritative
-  Windows provider acceptance remains red and the three repair iterations are exhausted.
+  Windows provider acceptance remains red and the three PowerShell exit-propagation
+  repair iterations are exhausted.
