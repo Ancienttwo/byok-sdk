@@ -195,3 +195,35 @@ classification. No real user credential provider was touched.
 - Independent semantic review for the composite Gate A work package remains a
   separate acceptance authority. This implementation and downstream packed-RC
   result do not self-approve publication, merge or rollout.
+
+## Independent gate symlink finding and replacement RC
+
+- The first independent semantic gate rejected source `7edb054`: requested
+  roots were canonicalized through `realpath` before symlink validation, so a
+  lexical alias could be accepted while the lease returned that alias to the
+  host. The existing reverse-order test incorrectly encoded this acceptance.
+- Replacement source `64cd0607fd4a4e32986623eb25c513a3f81cd84a`
+  validates every requested absolute root before canonicalization and again
+  after the four mutation gates are held. A changed canonical target or any
+  symlink component is a typed integrity refusal before destination effects.
+  Canonical paths remain internal gate identities only.
+- The replacement test covers each of the four requested path inputs and keeps
+  reverse-order deadlock serialization as a separate case. Focused client
+  verification passed 49/49; full build, typecheck, tests, release graph,
+  strict workflow and diff check passed. Client completed 1,414 pass / 1
+  intentional skip.
+- Replacement unpublished RC is `artifacts/gate-a/64cd060/`. Its release
+  manifest SHA-256 is
+  `6aa12cb3196968f0546f83af8c9c2f89688485596b25314eee46af6e53c6bc79`;
+  client tarball SHA-256 is
+  `0d7fa125a8025b324a4aa4d69f8cc5e77fb3ceb4e2789eb1df59611a2350c621`.
+- The frozen Salesko subject remains `ba94b50f...0488`. macOS's default test
+  temp spelling begins at symlink alias `/var`; the fixed SDK correctly refused
+  the first attempt. Re-running the unchanged frozen consumer with canonical
+  `TMPDIR=/private/tmp` passed 1/1, the focused matrix passed 45 with one
+  intentional Postgres skip, Local Agent TypeScript passed, and root
+  `bun run check` passed. This fixture environment is recorded in the artifact
+  result rather than hidden by weakening product symlink refusal.
+- The prior `7edb054` packed RC and acceptance result are superseded. Neither
+  RC is published or a committed Salesko dependency. A fresh independent gate
+  must review `64cd060` before composite acceptance.
