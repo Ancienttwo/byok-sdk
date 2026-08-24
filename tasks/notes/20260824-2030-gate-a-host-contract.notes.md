@@ -153,7 +153,12 @@ classification. No real user credential provider was touched.
   gate. It is now non-mutating construction validation; the existing async
   writable preflight remains after daemon ownership and before transport or
   capability publication.
-- Focused client verification passed 43/43 across relocation, Agent home,
-  strict admission, public-surface constraints and daemon-owner collision.
-  Client TypeScript passed. Full workspace/artifact evidence remains deferred
-  until the source subject is frozen, per the plan's cost boundary.
+- The first frozen full run exposed one direct concurrency regression: eight
+  simultaneous content-read root resolutions treated the brief internal gate
+  as relocation contention. Internal writers now use a bounded wait on the
+  same gate, while relocation acquisition remains fail-fast; a long relocation
+  still ends in typed fail-closed refusal rather than a fallback path.
+- Focused client verification then passed 48/48 across relocation, Agent home,
+  content read, strict admission, public-surface constraints and daemon-owner
+  collision. Client TypeScript passed. The full workspace/artifact envelope is
+  rerun only after this corrected source subject is frozen.

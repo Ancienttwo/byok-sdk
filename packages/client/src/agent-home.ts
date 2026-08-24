@@ -340,7 +340,7 @@ export class AgentHomeLayout {
       return await acquirePathMutationGate({
         scope: 'agent-home-root',
         targetPath: path.join(this.hostStorageRootInput, AGENT_HOME_DIRECTORY),
-      });
+      }, { waitMs: 1_000 });
     } catch (error) {
       if (error instanceof PathMutationGateBusyError) {
         throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
@@ -417,7 +417,7 @@ export class AgentHomeLeaseManager {
       rootGate = await acquirePathMutationGate({
         scope: 'agent-home-root',
         targetPath: resolution.agentsRoot,
-      });
+      }, { waitMs: 1_000 });
       await ensureDirectoryNoSymlink(resolution.agentsRoot, canonicalHome);
       const internalDir = await ensureDirectoryNoSymlink(
         canonicalHome,

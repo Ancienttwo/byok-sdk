@@ -555,7 +555,7 @@ export async function acquireDaemonOwner(
 ): Promise<DaemonOwnerLease> {
   let pathGate: PathMutationGate | undefined;
   try {
-    pathGate = await acquirePathMutationGate({ scope: 'store', targetPath: storeDir });
+    pathGate = await acquirePathMutationGate({ scope: 'store', targetPath: storeDir }, { waitMs: 1_000 });
   } catch (error) {
     if (error instanceof PathMutationGateBusyError) throw new DaemonOwnerActiveError('unknown');
     throw error;
@@ -607,7 +607,7 @@ export async function acquireDaemonOwner(
             const releaseGate = await acquirePathMutationGate({
               scope: 'store',
               targetPath: canonicalStoreDir,
-            });
+            }, { waitMs: 2_000 });
             try {
               const current = await readOwner(ownerPath);
               if (current?.nonce !== record.nonce) {

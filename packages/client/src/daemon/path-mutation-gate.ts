@@ -11,6 +11,11 @@ export interface PathMutationGateInput {
   readonly targetPath: string;
 }
 
+export interface PathMutationGateAcquireOptions {
+  /** Bounded wait for another conforming short-lived writer; relocation uses zero. */
+  readonly waitMs?: number;
+}
+
 export interface PathMutationGate {
   readonly scope: PathMutationGateScope;
   readonly targetPath: string;
@@ -214,6 +219,23 @@ export async function acquirePathMutationGates(inputs: readonly PathMutationGate
   }
 }
 
-export async function acquirePathMutationGate(input: PathMutationGateInput): Promise<PathMutationGate> {
-  return acquireOne(input);
+export async function acquirePathMutationGate(
+  input: PathMutationGateInput,
+  options: PathMutationGateAcquireOptions = {},
+): Promise<PathMutationGate> {
+  const waitMs = options.waitMs ?? 0;
+  if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 30_000) {
+    throw new Error('path mutation gate waitMs must be an integer from 0 through 30000');
+  }
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      return await acquireOne(input);
+    } catch (error) {
+      if (!(error instanceof PathMutationGateBusyError) || Date.now() >= deadline) throw error;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, Math.min(10, Math.max(1, deadline - Date.now())));
+      });
+    }
+  }
 }
