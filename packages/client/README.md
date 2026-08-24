@@ -139,6 +139,13 @@ keeps runtime activity metadata/status-only; enabling it is an explicit product
 decision and requires the server capability. Reliable events are fsynced under
 the canonical Agent home and retire only after an exact ack.
 
+Hosts that need cold setup or diagnostic state use
+`readDeviceEnrollmentStatus({ productId, storeDir })`. It validates the
+complete SDK-owned record but returns only `unpaired`, `paired` with
+`deviceId`, or `re_pair_required`; tenant, token, expiry and device keys are
+never projected. Only explicit pairing may replace `re_pair_required` state,
+while filesystem-safety failures remain errors.
+
 ```ts
 createDaemon({
   // ...normal device, transport and agentHome configuration
