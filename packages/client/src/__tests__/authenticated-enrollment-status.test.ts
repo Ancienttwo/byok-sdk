@@ -40,6 +40,21 @@ describe('credential-blind authenticated enrollment status', () => {
     expect(JSON.stringify(paired)).not.toContain(record.accessToken);
     expect(JSON.stringify(paired)).not.toContain(record.devicePrivateKeyPem);
 
+    await fs.writeFile(path.join(storeDir, 'device.json'), JSON.stringify({
+      deviceId: 'legacy-device-with-authority',
+      accessToken: 'legacy-token-with-authority',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      devicePrivateKeyPem: 'legacy-private-key-with-authority',
+      devicePublicKey: 'legacy-public-key-with-authority',
+    }));
+    expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 're_pair_required' });
+
+    await new DeviceStore(storeDir, undefined, options.productId).save({
+      deviceId: record.deviceId,
+      tenantId: record.tenantId,
+      devicePublicKey: record.devicePublicKey,
+    });
+
     await new DeviceStore(storeDir, undefined, options.productId).remove();
     expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 'paired', deviceId: 'device-status' });
 

@@ -290,14 +290,10 @@ export class AuthManager {
       tenantId: authority.tenantId,
       devicePublicKey: authority.devicePublicKey,
     };
-    let current: DeviceMetadata | undefined;
-    try {
-      current = await this.opts.store.load();
-    } catch (error) {
-      // A bounded regular legacy record is safe to replace but never import.
-      // Path/symlink/race errors remain fail-closed and are not overwritten.
-      if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
-    }
+    // Missing or valid-but-stale non-secret projection is repairable. A
+    // legacy secret-bearing, malformed or tampered projection throws and may
+    // only be replaced by explicit authenticated pair(), never steady state.
+    const current = await this.opts.store.load();
     if (
       current === undefined ||
       current.deviceId !== projection.deviceId ||

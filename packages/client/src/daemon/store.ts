@@ -309,12 +309,16 @@ export async function readDeviceEnrollmentStatus(
   const storeDir = DeviceStore.resolveDir(options.productId, options.storeDir);
   try {
     const store = new DeviceStore(storeDir, undefined, options.productId);
+    // Inspect the bounded projection even when the OS authority exists. A
+    // legacy secret-bearing or otherwise invalid file is an explicit
+    // re-pair-required state; steady-state status must never hide or repair it.
+    const projection = await store.load();
     const authority = await store.credentials.read();
     if (authority !== undefined) return { state: 'paired', deviceId: authority.deviceId };
 
     // An enrollment projection without its OS authority is not an unpaired
     // machine: it is a partial/legacy state that requires explicit recovery.
-    return (await store.load()) === undefined
+    return projection === undefined
       ? { state: 'unpaired' }
       : { state: 're_pair_required' };
   } catch (error) {
