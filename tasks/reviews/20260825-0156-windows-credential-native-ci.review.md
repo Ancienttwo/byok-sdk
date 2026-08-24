@@ -57,17 +57,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:ed3a0427844282db99643d20044f93349d5df8c34e0e6bae0528df9e204c2dc6
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 4dd7b03d9c5d70d8d36dc091b758bf24698e321a
+> **Verification Evidence SHA256**: sha256:10db28639365a587b37b83699d8de003a77511b3bae6bd4be5a4fd89c10c3777
+> **Issued At**: 2026-08-24T21:22:28.805Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: User explicitly approved completing and shipping the bounded Gate A Sprint; composite predecessor evidence and exact Windows native, IPC, WinSW, lifecycle, packed-install and full CI gates all passed without publication or deployment.
 - Findings: none
 
 ## Behavior Diff Notes
