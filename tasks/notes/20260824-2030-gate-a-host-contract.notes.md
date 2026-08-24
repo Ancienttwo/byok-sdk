@@ -106,3 +106,20 @@ the complete record, and status never derives paired identity from the file.
 Focused fault-injection now covers failed OS replace, failed projection write,
 projection-loss repair, Windows UTF-8 round-trip, and Linux provider-error
 classification. No real user credential provider was touched.
+
+### Replacement frozen source and RC
+
+- Corrected source commit: `ff89d99cdab37a8a6ddb82bc21261861a95bfac8`.
+- Post-freeze `bun run build`, `bun run typecheck`, and `bun run test` passed.
+  Client was 1,408 pass / 1 intentional skip; cloud 210, server 263,
+  protocol 334, and every other workspace suite completed successfully.
+- Replacement unpublished RC: `artifacts/gate-a/ff89d99/`. Its release
+  manifest SHA-256 is
+  `4dc7a968eed84291deb9bb068f60fccf1355db8b77b5525ec870cf814a072b1a`;
+  package versions remain 0.8.1 and keys 0.3.2, so source SHA plus integrity
+  are the artifact authority rather than the colliding version string.
+- Disposable exact-tarball Salesko consumption passed 9/9 across GA-01, the
+  separate Phase B strict producer subject, and runtime/session/lease. Frozen
+  subject hashes were recomputed unchanged. The known Salesko root-only
+  blocker was not rerun because the replacement RC does not alter host-root
+  composition. The disposable copy was moved to Trash and is recoverable.
