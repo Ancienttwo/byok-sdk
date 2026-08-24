@@ -1,6 +1,6 @@
 # Implementation Notes: Gate A host contract
 
-> **Status**: Active
+> **Status**: Complete
 > **Plan**: `plans/plan-20260824-2030-gate-a-host-contract.md`
 > **Contract**: `tasks/contracts/20260824-2030-gate-a-host-contract.contract.md`
 > **Last Updated**: 2026-08-24
@@ -263,3 +263,23 @@ classification. No real user credential provider was touched.
 - This evidence is ready for a fresh independent whole-package re-gate. It does
   not self-authorize merge, push, publication, downstream pin, release, deploy,
   migration or production cutover.
+
+## Whole-package independent acceptance
+
+- The fresh independent whole-package re-gate returned PASS against evidence
+  HEAD `df1e7a92def2f18d81e7b8eccc99723e7247c6f2` and implementation
+  ancestor `9377594ca6798e1d5726ffbef56ec45194cfca44`. It confirmed the
+  worktree was clean and unmoved at the end of review.
+- The reviewer traced the OS credential authority, legacy-projection refusal,
+  strict local and producer admission, and relocation path/lease lifecycle. It
+  also checked ten packed tarballs against both SHA-256 and SHA-512 manifest
+  values and confirmed the public declaration stays bounded.
+- Independent focused execution passed client 31/31, server 2/2, cloud 14/14,
+  client TypeScript and `git diff --check`. The exact source's previously
+  frozen full build/typecheck/test/release-graph/strict-workflow evidence was
+  reused because an external worktree cleanup removed ignored harness runtime
+  inputs; this was recorded as an evidence-availability boundary, not treated
+  as a product test failure.
+- Source-ready and unpublished packed-RC acceptance are complete. Merge, push,
+  registry/npm publication, Salesko exact pin/release, deploy, migration and
+  production remain separate unexecuted authorities.

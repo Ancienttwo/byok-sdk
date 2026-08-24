@@ -1,6 +1,6 @@
 # Plan: Gate A host contract
 
-> **Status**: Executing
+> **Status**: Complete
 > **Created**: 2026-08-24
 > **Slug**: gate-a-host-contract
 > **Artifact Level**: work-package
@@ -119,8 +119,9 @@ snapshot/stage/promote/readback and receipt semantics.
   manifest/integrity/readback evidence.
 - [x] Run disposable Phase B Salesko consumption with exact tarballs and full
   source verification once after source freeze.
-- [ ] Obtain independent review and resolve the pre-existing, read-only Salesko
-  root-only consumer failure before declaring composite Gate A acceptance.
+- [x] Obtain independent whole-package review and close the pre-existing,
+  read-only Salesko root-only consumer through the frozen Gate B2 relocation
+  contract before declaring composite Gate A source acceptance.
 - [x] Freeze the Salesko Gate B2 relocation consumer subject
   `sha256:ba94b50f645ed0ee944c5edcaa8efeac6b718dfc23c7ef2e2a7b3522512b0488`
   and the pre-fix `PRE_FIX_EXIT=1` evidence.

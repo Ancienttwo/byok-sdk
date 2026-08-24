@@ -1,10 +1,10 @@
 # Review: Gate A host contract
 
-> **Status**: Partial
+> **Status**: PASS
 > **Gate B2 relocation verdict**: PASS
-> **Composite Gate A recommendation**: pending replacement whole-package re-review
+> **Composite Gate A recommendation**: source-ready; unpublished packed RC accepted
 > **Implementation subject**: `9377594ca6798e1d5726ffbef56ec45194cfca44`
-> **Evidence projection**: pending local evidence commit
+> **Evidence projection**: `df1e7a92def2f18d81e7b8eccc99723e7247c6f2`
 
 ## Independent Gate B2 review
 
@@ -43,7 +43,7 @@ The independent re-review returned PASS after checking:
 No review outcome authorizes merge, push, tag, npm publication, Salesko release,
 deployment, production migration, secret mutation or live Agent-home changes.
 
-## Whole-package review correction pending
+## Whole-package independent review
 
 The first independent whole-package review returned FAIL on the prior subject:
 
@@ -57,6 +57,28 @@ projection before reporting paired status, and fails restart closed on a
 legacy/tampered projection. Full BYOK verification and exact packed-RC Salesko
 consumption passed and are recorded under `artifacts/gate-a/9377594/`.
 
-This section records the correction candidate only. Composite Gate A remains
-pending until a fresh independent reviewer returns a verdict on this exact
-source and evidence projection.
+The fresh independent re-review returned PASS on the exact source and evidence
+projection. It confirmed:
+
+- complete enrollment records remain only in the OS credential authority;
+  legacy secret-bearing projections fail closed through status and restart;
+- both legacy task variants refuse locally before execution side effects, with
+  server/cloud explicit and implicit scheduling defenses retained;
+- all four relocation paths reject lexical dot segments before normalization,
+  and internal gates remain held through exact idempotent release;
+- all ten packed tarballs match the tracked manifest's package, version,
+  SHA-256 and SHA-512 values, while public declarations expose neither secret
+  internals nor raw gate/owner primitives;
+- client focused 31/31, server 2/2, cloud 14/14, client TypeScript and
+  `git diff --check` pass.
+
+The review reused the frozen source's recorded full
+build/typecheck/test/release-graph/strict-workflow evidence. An external
+worktree cleanup had removed ignored harness runtime inputs, so the reviewer
+could not re-run the workflow projection itself; package source did not change
+after the frozen implementation commit, and this limitation is an evidence
+availability boundary rather than a source failure.
+
+This PASS means source-ready plus unpublished packed-RC acceptance only. It
+does not authorize merge, push, npm publication, Salesko exact pin/release,
+deploy, migration or production cutover.
