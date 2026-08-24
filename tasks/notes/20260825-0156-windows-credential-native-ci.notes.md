@@ -113,6 +113,11 @@
   rejects the receiver type. The final classifier therefore adds only a fixed
   `PSLanguageMode` number and two exact policy FQID numbers; no raw identifier,
   type, message or environment value can escape.
+- The next exact run returned `mode=1` with `source=99`, so constrained or
+  restricted language policy is excluded. The last diagnostic iteration adds
+  only the invocation's static script line/offset and numeric `ErrorCategory`,
+  plus exact PowerShell source-owned method error IDs. This is the final
+  classifier attempt: its location selects the production boundary to remove.
 
 ## Evidence Links
 
