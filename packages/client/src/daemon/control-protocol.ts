@@ -453,6 +453,30 @@ export interface ToolsetsReloadParams {
   mcpToolsets: Record<string, McpToolsetConfig>;
 }
 
+/** Maximum opaque pairing-code payload accepted over local control IPC. */
+export const ENROLLMENT_PAIRING_CODE_MAX_BYTES = 1024;
+
+export interface EnrollmentPairParams {
+  pairingCode: string;
+}
+
+/**
+ * Exact shape gate for service-identity pairing. The code is opaque server
+ * authority: this only bounds transport bytes and rejects unknown fields; it
+ * never parses, normalizes or logs the code.
+ */
+export function parseEnrollmentPairParams(value: unknown): EnrollmentPairParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'pairingCode')) return undefined;
+  if (
+    typeof value.pairingCode !== 'string' ||
+    value.pairingCode.length === 0 ||
+    Buffer.byteLength(value.pairingCode, 'utf8') > ENROLLMENT_PAIRING_CODE_MAX_BYTES
+  ) {
+    return undefined;
+  }
+  return { pairingCode: value.pairingCode };
+}
+
 /** Shape-only parser; executable definition validation remains registry-owned. */
 export function parseToolsetsReloadParams(value: unknown): ToolsetsReloadParams | undefined {
   if (!isRecord(value) || Object.keys(value).some((key) => key !== 'expectedRevision' && key !== 'mcpToolsets')) {

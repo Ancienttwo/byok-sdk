@@ -55,6 +55,10 @@ function assertAbsolutePath(value: string, label: string): void {
   if (typeof value !== 'string' || !path.isAbsolute(value) || /[\x00\r\n]/u.test(value)) {
     throw new LocalStateRelocationIntegrityError(`${label} must be an absolute path without NUL or line breaks`);
   }
+  const segments = process.platform === 'win32' ? value.split(/[\\/]/u) : value.split('/');
+  if (segments.some((segment) => segment === '.' || segment === '..')) {
+    throw new LocalStateRelocationIntegrityError(`${label} must not contain lexical . or .. path segments`);
+  }
 }
 
 async function assertNoSymlinkComponents(input: string, label: string): Promise<void> {

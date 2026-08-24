@@ -128,6 +128,45 @@ describe('authenticated enrollment tenant projection', () => {
     });
   });
 
+  it('does not repair a legacy secret-bearing projection from an existing OS authority', async () => {
+    server = await TestServer.start();
+    server.setPairingTenantId('legacy-with-authority-code', 'tenant-legacy-authority');
+    const productId = 'legacy-authority-refusal-test';
+    const storeDir = await tmpDir('byok-enrollment-legacy-authority-');
+    const workspaceRoot = await tmpDir('byok-enrollment-legacy-authority-workspace-');
+    const store = new DeviceStore(storeDir, undefined, productId);
+    const initial = new AuthManager({ serverUrl: server.url, store });
+    await initial.pair('legacy-with-authority-code');
+    await initial.stop();
+    const filePath = path.join(storeDir, 'device.json');
+    const legacy = {
+      deviceId: 'legacy-device-with-authority',
+      accessToken: 'legacy-token-with-authority',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      devicePrivateKeyPem: 'legacy-private-key-with-authority',
+      devicePublicKey: 'legacy-public-key-with-authority',
+    };
+    await fs.writeFile(filePath, JSON.stringify(legacy));
+
+    await expect(new AuthManager({ serverUrl: server.url, store }).loadExisting())
+      .rejects.toThrow(/re-pair required/);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(legacy);
+
+    daemon = createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Legacy authority refusal test',
+        productId,
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+      },
+      [new StubRuntimeAdapter('pi')],
+    );
+    await expect(daemon.start()).rejects.toThrow(/re-pair required/);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(legacy);
+  });
+
   it('rejects a pair response without the required authenticated tenant before writing device.json', async () => {
     const store = new DeviceStore(await tmpDir('byok-enrollment-pair-response-'));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({

@@ -485,11 +485,45 @@ jobs:
       - name: Install dependencies
         run: bun ci
 
+      - name: Install ephemeral Secret Service dependencies on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+
       - name: Build (needed for @byok-sdk/client + @byok-sdk/server dist/ this script drives)
         run: bun run build
 
+      - name: Inspect bounded Windows credential runtime facts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vault = Get-Service -Name VaultSvc -ErrorAction SilentlyContinue
+          $vaultState = if ($null -eq $vault) { "missing" } else { $vault.Status.ToString().ToLowerInvariant() }
+          $sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+          $interactive = [Environment]::UserInteractive.ToString().ToLowerInvariant()
+          Write-Host "windows-credential-runtime vaultsvc=$vaultState session_id=$sessionId interactive=$interactive"
+
+      - name: Probe native Windows Credential Manager
+        if: runner.os == 'Windows'
+        env:
+          BYOK_NATIVE_WINDOWS_CREDENTIAL_SMOKE: '1'
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/device-credential-store.native.test.ts
+
       - name: Run the IPC control socket smoke
-        run: node packages/client/scripts/ipc-smoke.mjs
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            keyring_home="$RUNNER_TEMP/byok-ipc-keyring-home"
+            mkdir -p "$keyring_home"
+            chmod 700 "$keyring_home"
+            env HOME="$keyring_home" dbus-run-session -- bash -euo pipefail -c '
+              printf "%s" "byok-ci-ephemeral" | gnome-keyring-daemon --unlock >/dev/null
+              gnome-keyring-daemon --start --components=secrets >/dev/null
+              node packages/client/scripts/ipc-smoke.mjs
+            '
+          else
+            node packages/client/scripts/ipc-smoke.mjs
+          fi
 
       # M5 pilot: credential-isolation audit. The client audit command owns the
       # exact adapter smoke and runs it under Linux strace; this leg supplies the

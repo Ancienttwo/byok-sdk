@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import type { Dirent } from 'node:fs';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 
 /** Secret fields inside the internal complete enrollment authority. */
@@ -38,6 +42,49 @@ export type DeviceCommandRunner = (
 const ENTRY_ACCOUNT = 'device-enrollment';
 const ENCODED_PREFIX = 'byok-device-credential-v1:';
 const NOT_FOUND = 44;
+const WINDOWS_BRIDGE_DIRECTORY_PREFIX = 'byok-device-credential-';
+const WINDOWS_BRIDGE_STALE_MS = 24 * 60 * 60 * 1_000;
+
+function providerDiagnostic(stderr: string): string {
+  const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},hresult=-?\d{1,11})\)/u.exec(stderr);
+  return match === null ? '' : ` (${match[1]})`;
+}
+
+function isNodeError(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && error.code === code;
+}
+
+async function scavengeStaleWindowsBridges(): Promise<void> {
+  const temporaryRoot = os.tmpdir();
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(temporaryRoot, { withFileTypes: true });
+  } catch {
+    throw new DeviceCredentialStoreError('temporary Windows credential bridge root is unavailable');
+  }
+
+  const staleBefore = Date.now() - WINDOWS_BRIDGE_STALE_MS;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(WINDOWS_BRIDGE_DIRECTORY_PREFIX)) continue;
+    const candidate = path.join(temporaryRoot, entry.name);
+    try {
+      const info = await fs.lstat(candidate);
+      if (!info.isDirectory() || info.isSymbolicLink() || info.mtimeMs >= staleBefore) continue;
+      await fs.rm(candidate, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    } catch (error) {
+      if (isNodeError(error, 'ENOENT')) continue;
+      throw new DeviceCredentialStoreError('stale Windows credential bridge cleanup failed');
+    }
+  }
+}
+
+function windowsPowerShellExecutable(): string {
+  const systemRoot = process.env.SystemRoot;
+  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot)) {
+    throw new DeviceCredentialStoreError('Windows system root is unavailable');
+  }
+  return path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
 
 /** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
 export class DeviceCredentialStoreUnavailableError extends Error {
@@ -167,7 +214,11 @@ export class DeviceCredentialStore {
       (this.#platform === 'linux' && result.exitCode === 1 && result.stderr.trim().length === 0)
     ) return undefined;
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
-    if (result.exitCode !== 0) throw new DeviceCredentialStoreError('operating-system credential provider could not read device credentials');
+    if (result.exitCode !== 0) {
+      throw new DeviceCredentialStoreError(
+        `operating-system credential provider could not read device credentials${providerDiagnostic(result.stderr)}`,
+      );
+    }
     return decode(result.stdout.trimEnd());
   }
 
@@ -175,7 +226,11 @@ export class DeviceCredentialStore {
     const encoded = encode(record);
     const result = await this.#invoke('replace', encoded);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
-    if (result.exitCode !== 0) throw new DeviceCredentialStoreError('operating-system credential provider could not replace device credentials');
+    if (result.exitCode !== 0) {
+      throw new DeviceCredentialStoreError(
+        `operating-system credential provider could not replace device credentials${providerDiagnostic(result.stderr)}`,
+      );
+    }
   }
 
   /** Returns true only after the sole secret authority is confirmed absent. */
@@ -185,7 +240,9 @@ export class DeviceCredentialStore {
     const result = await this.#invoke('clear');
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0 && result.exitCode !== NOT_FOUND) {
-      throw new DeviceCredentialStoreError('operating-system credential provider could not clear device credentials');
+      throw new DeviceCredentialStoreError(
+        `operating-system credential provider could not clear device credentials${providerDiagnostic(result.stderr)}`,
+      );
     }
     if ((await this.read()) !== undefined) {
       throw new DeviceCredentialStoreError('operating-system credential provider reported deletion but device credentials remain');
@@ -222,9 +279,43 @@ export class DeviceCredentialStore {
     return this.#run('secret-tool', ['store', '--label=BYOK device enrollment', ...attrs], encoded);
   }
 
-  #windows(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
-    const request = JSON.stringify({ operation, target: this.#service, username: ENTRY_ACCOUNT, ...(encoded === undefined ? {} : { secret_base64: Buffer.from(encoded, 'utf8').toString('base64') }) });
-    return this.#run('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', WINDOWS_CREDENTIAL_MANAGER_SCRIPT], request);
+  async #windows(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
+    await scavengeStaleWindowsBridges();
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), WINDOWS_BRIDGE_DIRECTORY_PREFIX));
+    const executable = path.join(directory, 'credential-bridge.exe');
+    const request = [
+      operation,
+      Buffer.from(this.#service, 'utf8').toString('base64'),
+      Buffer.from(ENTRY_ACCOUNT, 'utf8').toString('base64'),
+      encoded === undefined ? '' : Buffer.from(encoded, 'utf8').toString('base64'),
+    ].join('\n');
+    let result: DeviceCommandResult | undefined;
+    let cleanupFailed = false;
+
+    try {
+      const compiler = await this.#run(
+        windowsPowerShellExecutable(),
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', WINDOWS_CREDENTIAL_COMPILER_SCRIPT],
+        executable,
+      );
+      result = compiler.exitCode === 0
+        ? await this.#run(executable, [], request)
+        : { exitCode: compiler.exitCode, stdout: '', stderr: compiler.stderr };
+    } finally {
+      try {
+        await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+
+    if (cleanupFailed) {
+      throw new DeviceCredentialStoreError('temporary Windows credential bridge cleanup failed');
+    }
+    if (result === undefined) {
+      throw new DeviceCredentialStoreError('Windows credential bridge did not produce a result');
+    }
+    return result;
   }
 }
 
@@ -263,21 +354,37 @@ export async function runDeviceCommand(executable: string, args: readonly string
   });
 }
 
-// Windows Credential Manager bridge. The request and credential bytes travel
-// only on stdin; argv contains a static encoded script.
-const WINDOWS_CREDENTIAL_MANAGER_SCRIPT = Buffer.from(String.raw`
-Add-Type -TypeDefinition @"
-using System; using System.ComponentModel; using System.Runtime.InteropServices; using System.Runtime.InteropServices.ComTypes;
+// PowerShell only compiles this static, non-secret console executable. The
+// executable itself owns Credential Manager result bytes and process exit.
+const WINDOWS_CREDENTIAL_COMPILER_SCRIPT = Buffer.from(String.raw`
+$assembly=[Console]::In.ReadToEnd()
+try {
+Add-Type -OutputAssembly $assembly -OutputType ConsoleApplication -ErrorAction Stop -TypeDefinition @"
+using System; using System.Runtime.InteropServices; using System.Text;
 public static class ByokDeviceCredential {
- [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] private struct C { public UInt32 Flags; public UInt32 Type; [MarshalAs(UnmanagedType.LPWStr)] public string TargetName; [MarshalAs(UnmanagedType.LPWStr)] public string Comment; public FILETIME LastWritten; public UInt32 CredentialBlobSize; public IntPtr CredentialBlob; public UInt32 Persist; public UInt32 AttributeCount; public IntPtr Attributes; [MarshalAs(UnmanagedType.LPWStr)] public string TargetAlias; [MarshalAs(UnmanagedType.LPWStr)] public string UserName; }
+ [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] private struct C { public UInt32 Flags; public UInt32 Type; [MarshalAs(UnmanagedType.LPWStr)] public string TargetName; [MarshalAs(UnmanagedType.LPWStr)] public string Comment; public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten; public UInt32 CredentialBlobSize; public IntPtr CredentialBlob; public UInt32 Persist; public UInt32 AttributeCount; public IntPtr Attributes; [MarshalAs(UnmanagedType.LPWStr)] public string TargetAlias; [MarshalAs(UnmanagedType.LPWStr)] public string UserName; }
  [DllImport("Advapi32.dll", EntryPoint="CredWriteW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool W(ref C c, UInt32 f);
  [DllImport("Advapi32.dll", EntryPoint="CredReadW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool R(string t, UInt32 ty, UInt32 f, out IntPtr p);
  [DllImport("Advapi32.dll", EntryPoint="CredDeleteW", CharSet=CharSet.Unicode, SetLastError=true)] private static extern bool D(string t, UInt32 ty, UInt32 f);
  [DllImport("Advapi32.dll")] private static extern void CredFree(IntPtr p);
- public static void Set(string t,string u,byte[] b) { IntPtr p=IntPtr.Zero; try { p=Marshal.AllocHGlobal(b.Length); Marshal.Copy(b,0,p,b.Length); C c=new C { Type=1,TargetName=t,CredentialBlobSize=(UInt32)b.Length,CredentialBlob=p,Persist=2,UserName=u}; if(!W(ref c,0)) throw new Win32Exception(Marshal.GetLastWin32Error()); } finally { if(p!=IntPtr.Zero) { Marshal.Copy(new byte[b.Length],0,p,b.Length); Marshal.FreeHGlobal(p); } } }
- public static byte[] Get(string t) { IntPtr p; if(!R(t,1,0,out p)) { if(Marshal.GetLastWin32Error()==1168) return null; throw new Win32Exception(Marshal.GetLastWin32Error()); } try { C c=(C)Marshal.PtrToStructure(p,typeof(C)); byte[] b=new byte[c.CredentialBlobSize]; if(b.Length>0) Marshal.Copy(c.CredentialBlob,b,0,b.Length); return b; } finally { CredFree(p); } }
- public static bool Delete(string t) { if(D(t,1,0)) return true; if(Marshal.GetLastWin32Error()==1168) return false; throw new Win32Exception(Marshal.GetLastWin32Error()); }
+ private static int Set(string t,string u,byte[] b) { IntPtr p=IntPtr.Zero; try { p=Marshal.AllocHGlobal(b.Length); Marshal.Copy(b,0,p,b.Length); C c=new C { Type=1,TargetName=t,CredentialBlobSize=(UInt32)b.Length,CredentialBlob=p,Persist=2,UserName=u}; if(!W(ref c,0)) return Marshal.GetLastWin32Error(); return 0; } finally { if(p!=IntPtr.Zero) { Marshal.Copy(new byte[b.Length],0,p,b.Length); Marshal.FreeHGlobal(p); } } }
+ private static int Kind(Exception e) { if(e is DllNotFoundException)return 1;if(e is EntryPointNotFoundException)return 2;if(e is BadImageFormatException)return 3;if(e is MarshalDirectiveException)return 4;if(e is SEHException)return 5;if(e is AccessViolationException)return 6;if(e is TypeInitializationException)return 7;if(e is TypeLoadException)return 8;if(e is InvalidCastException)return 9;if(e is ArgumentException)return 10;if(e is InvalidOperationException)return 11;if(e.GetType()==typeof(SystemException))return 12;if(e is SystemException)return 13;return 99; }
+ private static int Failure(int stage,Exception e) { Console.Error.Write("credential operation failed (stage="+stage+",kind="+Kind(e)+",hresult="+e.HResult+")"); return -1; }
+ private static int InputFailure(int kind) { Console.Error.Write("credential operation failed (stage=0,kind="+kind+",hresult=0)"); return 2; }
+ private static int Get(string t) { IntPtr p=IntPtr.Zero; bool found; try { found=R(t,1,0,out p); } catch(Exception e) { return Failure(1,e); } if(!found) return Marshal.GetLastWin32Error(); int code=0; try { C c=(C)Marshal.PtrToStructure(p,typeof(C)); byte[] b=new byte[c.CredentialBlobSize]; if(b.Length>0) { Marshal.Copy(c.CredentialBlob,b,0,b.Length); using(var output=Console.OpenStandardOutput()) { output.Write(b,0,b.Length); output.Flush(); } } } catch(Exception e) { code=Failure(2,e); } try { CredFree(p); } catch(Exception e) { return Failure(3,e); } return code; }
+ private static int Delete(string t) { if(D(t,1,0)) return 0; return Marshal.GetLastWin32Error(); }
+ private static int ExitFor(int code,bool missingIsAbsent) { if(code==0)return 0;if(missingIsAbsent&&code==1168)return 44;if(code<0)return 1;Console.Error.Write("credential operation failed (win32="+code+")");return 1; }
+ private static string Decode(string value) { return Encoding.UTF8.GetString(Convert.FromBase64String(value)); }
+ public static int Main() { int stage=1;byte[] secret=null;try { string[] fields=Console.In.ReadToEnd().Split(new[]{'\n'},StringSplitOptions.None);if(fields.Length!=4)return InputFailure(fields.Length<100?fields.Length:99);string operation=fields[0];string target=Decode(fields[1]);string username=Decode(fields[2]);if(target.Length==0||username.Length==0)return InputFailure(20);if(operation=="replace") { stage=2;secret=Convert.FromBase64String(fields[3]);stage=3;return ExitFor(Set(target,username,secret),false); } if(operation=="read") { stage=4;return ExitFor(Get(target),true); } if(operation=="clear") { stage=6;return ExitFor(Delete(target),true); } return InputFailure(21); } catch(Exception e) { Failure(stage,e);return 1; } finally { if(secret!=null)Array.Clear(secret,0,secret.Length); } }
 }
 "@
-try { $r=([Console]::In.ReadToEnd()|ConvertFrom-Json); if($r.operation -eq 'replace'){[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,[Convert]::FromBase64String([string]$r.secret_base64));exit 0}; if($r.operation -eq 'read'){$b=[ByokDeviceCredential]::Get([string]$r.target);if($null -eq $b){exit 44};[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b));exit 0}; if($r.operation -eq 'clear'){if([ByokDeviceCredential]::Delete([string]$r.target)){exit 0};exit 44};exit 2 } catch { [Console]::Error.Write('credential operation failed'); exit 1 }
+if(Test-Path -LiteralPath $assembly -PathType Leaf){exit 0}
+[Console]::Error.Write("credential operation failed (stage=8,kind=2,hresult=0)")
+} catch {
+$compilerCode=99
+$errorNumber=[string]$_.TargetObject.ErrorNumber
+if($errorNumber -match '\ACS([0-9]{4})\z'){$compilerCode=[Convert]::ToInt32($Matches[1])}
+[Console]::Error.Write("credential operation failed (stage=8,kind=3,hresult="+$compilerCode+")")
+}
+exit 1
 `, 'utf16le').toString('base64');

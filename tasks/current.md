@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-24T17:04:00+0800 -->
+<!-- updated_at: 2026-08-25T05:23:22+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-24T17:04:00+0800
-> **Source Branch**: codex/release-0.8.1-enrollment-read-model
-> **Source Commit**: b6a641e
+> **Updated At**: 2026-08-25T05:23:22+0800
+> **Source Branch**: codex/byok-gate-a-host-contract
+> **Source Commit**: 99f2560
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -33,10 +33,6 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 - /Users/kito/Projects/byok-sdk: plans/plan-20260824-1223-release-0-8-0-docs.md
 - /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
-- /Users/kito/Projects/byok-sdk-wt-agent-egress-fresh-session: plans/plan-20260823-2300-agent-egress-fresh-session-authority.md
-- /Users/kito/Projects/byok-sdk-wt-agent-egress-fresh-session: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-agent-egress-fresh-session
-- /Users/kito/Projects/byok-sdk-wt-agent-home-idempotent-repair: plans/plan-20260824-1254-agent-home-idempotent-repair.md
-- /Users/kito/Projects/byok-sdk-wt-agent-home-idempotent-repair: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-agent-home-idempotent-repair
 - /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model: plans/plan-20260824-0248-credential-blind-enrollment-status.md
 - /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model
 ## Active Sprint
@@ -47,7 +43,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: (none)
+- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
 
 ## Checks
 
@@ -58,16 +54,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
- D tasks/contracts/20260824-1648-release-0-8-1-enrollment-read-model.contract.md
- D tasks/notes/20260824-1648-release-0-8-1-enrollment-read-model.notes.md
- D tasks/reviews/20260824-1648-release-0-8-1-enrollment-read-model.review.md
+ D plans/plan-20260825-0156-windows-credential-native-ci.md
+ D tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
+ D tasks/notes/20260825-0156-windows-credential-native-ci.notes.md
+ D tasks/reviews/20260825-0156-windows-credential-native-ci.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
-?? tasks/archive/contract-20260824-1703-release-0-8-1-enrollment-read-model.md
-?? tasks/archive/notes-20260824-1703-release-0-8-1-enrollment-read-model.md
-?? tasks/archive/review-20260824-1703-release-0-8-1-enrollment-read-model.md
-?? tasks/archive/todo-20260824-1703-release-0-8-1-enrollment-read-model.md
+?? plans/archive/plan-20260825-0156-windows-credential-native-ci.md
+?? tasks/archive/contract-20260825-0523-windows-credential-native-ci.md
+?? tasks/archive/notes-20260825-0523-windows-credential-native-ci.md
+?? tasks/archive/review-20260825-0523-windows-credential-native-ci.md
+?? tasks/archive/todo-20260825-0523-windows-credential-native-ci.md
 ```
 
 ## Source Artifacts

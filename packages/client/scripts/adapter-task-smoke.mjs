@@ -143,6 +143,10 @@ try {
     PATH: hostPath,
     HOME: home,
     ...platformEnvironment,
+    // This is a hermetic test process, not a product daemon. Pairing must not
+    // depend on or mutate the runner's real Keychain/Credential Manager/Secret
+    // Service, which may be absent (as on a fresh Linux CI host).
+    BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1',
     LANG: 'C',
     LC_ALL: 'C',
     TZ: 'UTC',

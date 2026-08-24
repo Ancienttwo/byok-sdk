@@ -23,9 +23,30 @@ binary.
 
 ## Quick start
 
+Windows Credential Manager entries are scoped to the current process token,
+while WinSW runs as `LocalSystem` by default. For a WinSW composition, set the
+following explicit host policy in the daemon config:
+
+```json
+{
+  "serviceEnrollment": { "enabled": true }
+}
+```
+
+Then install/start the unpaired service **before** pairing:
+
 ```powershell
 byok-agent install --config C:\path\to\your\config.json --winsw-bin C:\path\to\WinSW-x64.exe
+byok-agent pair <code> --server https://your-control-plane.example --config C:\path\to\your\config.json
 ```
+
+The unpaired service exposes only the existing HMAC-authenticated local control
+endpoint. `pair` sends the opaque code over that endpoint; the service process
+redeems it and writes the complete enrollment into Credential Manager under
+the same Windows token that will read it after reboot. The code and resulting
+credential never enter WinSW XML, service argv, config, logs, or a file store.
+Without the explicit `serviceEnrollment` opt-in, unpaired `start` keeps its
+original fail-closed behavior.
 
 This copies `WinSW-x64.exe` into
 `~/.byok/<productId>/service-logs/<productId>.exe` (WinSW's own convention:
@@ -121,13 +142,13 @@ of a single shell-quoted string — see above.
 ## Talking to the running service (M4 Phase 2: the control socket)
 
 Once installed, the service is reachable through a local control socket — on
-Windows this is a named pipe (`\\.\pipe\byok-<hash of productId+storeDir+
-user>`, deterministically derived so the CLI computes the identical name
+Windows this is a named pipe (`\\.\pipe\byok-<hash of productId+storeDir>`,
+deterministically derived so the CLI computes the identical name
 independently, no path/file involved the way a Unix socket has), authenticated
 by a per-run token still written to a real file at
 `<storeDir>\control.token` (mode 0600 — never transmitted over the pipe
 itself, only used to compute an HMAC proof each side shows the other).
-`byok-agent status`, `tasks --follow`, `unpair`, `approve`, and `reject` all
+`byok-agent pair`, `status`, `tasks --follow`, `unpair`, `approve`, and `reject` all
 talk to the running service through this pipe automatically — no separate
 flag needed — falling back to a persisted-state view (or, for `unpair`, the
 `sc.exe`-based service-state check described above) whenever it isn't
@@ -149,8 +170,9 @@ runs on every push (`.github/workflows/ci.yml`'s `windows-service-smoke`
 job) on a real `windows-latest` runner — this SDK's own macOS/Linux
 development machines cannot execute WinSW at all, so that CI job (not a
 local run) is the real proof this recipe works. It then additionally
-installs a SECOND scratch service running the real `byok-agent start`
-(paired against a real, ephemeral `@byok-sdk/server`) and confirms `byok-agent
+installs a SECOND unpaired scratch service running the real `byok-agent start`,
+pairs it through the service-owned control endpoint against a real, ephemeral
+`@byok-sdk/server`, and confirms `byok-agent
 status` reaches its control socket live over a Windows named pipe (M4
 Phase 2 — see `packages/client/scripts/control-socket-check.mjs`), before
 uninstalling that one too.

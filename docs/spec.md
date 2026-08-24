@@ -742,6 +742,19 @@ owner/stop boundary, clears
 the OS authority first, and leaves enrollment observable and fail-closed if
 that clearance cannot be confirmed.
 
+Windows service composition has one additional identity invariant. Credential
+Manager selects the credential set associated with the calling process token,
+and WinSW defaults to `LocalSystem`; an interactive pre-service pair therefore
+cannot authorize the service daemon. A host may explicitly set
+`DaemonConfig.serviceEnrollment.enabled=true`. An unpaired daemon then holds
+the normal single-writer lease and exposes only the existing
+HMAC-authenticated local control endpoint. `byok-agent pair` prefers that live
+endpoint and invokes exact `enrollment.pair`; the service process redeems and
+persists the code under its own OS token, acknowledges only `{deviceId}`, and
+then enters normal startup. Default unpaired `start()` still fails closed.
+No pairing code or credential is placed in WinSW XML, service argv, config,
+logs, or a second file authority.
+
 `DaemonConfig.strictAgentOnly` is an additive local-security gate. It requires
 successful construction-time Agent-home preflight and only then advertises
 `strict-agent-only` in addition to `agent-home-contract`. The local runner is

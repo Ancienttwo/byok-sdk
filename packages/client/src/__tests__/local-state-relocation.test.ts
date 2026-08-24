@@ -167,4 +167,28 @@ describe('localStateRelocation', () => {
       }
     }
   });
+
+  it('refuses lexical dot and traversal segments in every requested root before destination effects', async () => {
+    const pathFields = [
+      'sourceStoreDir',
+      'sourceHostStorageRoot',
+      'destinationStoreDir',
+      'destinationHostStorageRoot',
+    ] as const;
+
+    for (const pathField of pathFields) {
+      for (const lexicalSegment of ['.', '..']) {
+        const root = await makeRoot();
+        const input = relocationInput(root);
+        const requested = input[pathField];
+        const lexicalPath = [path.dirname(requested), 'intermediate', lexicalSegment, path.basename(requested)]
+          .join(path.sep);
+
+        await expect(localStateRelocation.acquire({ ...input, [pathField]: lexicalPath }))
+          .rejects.toBeInstanceOf(LocalStateRelocationIntegrityError);
+        await expect(fs.lstat(input.destinationStoreDir)).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(fs.lstat(input.destinationHostStorageRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    }
+  });
 });

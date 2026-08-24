@@ -66,9 +66,11 @@ import { AnotherControlServerRunningError, startControlServer } from './control-
 import type { ControlMethods, ControlServerHandle } from './control-server';
 import {
   ControlError,
+  ENROLLMENT_PAIRING_CODE_MAX_BYTES,
   parseApprovalsRequestParams,
   parseApprovalsResolveParams,
   parseAssertionIssueParams,
+  parseEnrollmentPairParams,
   parseShutdownParams,
   parseToolsetsReloadParams,
   type AssertionIssueResult,
@@ -326,6 +328,15 @@ export interface DaemonConfig {
    */
   permissionDefaults?: PermissionPolicy;
   storeDir?: string;
+  /**
+   * Opt-in host composition for a daemon launched under a different OS
+   * principal than the interactive CLI (notably a WinSW service). When true,
+   * an unpaired daemon holds the normal writer lease and exposes only the
+   * existing HMAC-authenticated local control surface so `enrollment.pair`
+   * can persist the credential under the daemon's own OS token. Absent by
+   * default: ordinary foreground `start()` keeps rejecting an unpaired device.
+   */
+  serviceEnrollment?: { readonly enabled: true };
   /** Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`. */
   branding?: DaemonBranding;
   /**
@@ -1280,6 +1291,8 @@ export function buildDaemonWithAdapters(
   // running, or when binding it failed non-fatally (see `start()`'s own
   // try/catch below).
   let controlServerHandle: ControlServerHandle | undefined;
+  let serviceEnrollmentWaiting = false;
+  let serviceEnrollmentTransitioning = false;
   let daemonOwnerLease: DaemonOwnerLease | undefined;
   // The presence producer (§12.3). Both are `undefined` whenever this daemon
   // is not running, and neither is on the task path in any way: capability
@@ -1458,6 +1471,31 @@ export function buildDaemonWithAdapters(
     }
   }
 
+  async function replaceControlServer(required: boolean, enrollmentOnly = false): Promise<void> {
+    if (controlServerHandle) {
+      await controlServerHandle.close();
+      controlServerHandle = undefined;
+    }
+    try {
+      const methods = enrollmentOnly
+        ? {
+            unary: {
+              status: controlMethods.unary.status!,
+              'enrollment.pair': controlMethods.unary['enrollment.pair']!,
+            },
+            stream: {},
+          }
+        : controlMethods;
+      controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
+    } catch (err) {
+      if (required || err instanceof AnotherControlServerRunningError) throw err;
+      console.warn(
+        `[byok/client] control socket failed to start (continuing without it): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      controlServerHandle = undefined;
+    }
+  }
+
   async function start(): Promise<void> {
     checkServerUrl();
     await runLifecycleMutation(startUnderLease);
@@ -1466,21 +1504,40 @@ export function buildDaemonWithAdapters(
   async function startUnderLease(): Promise<void> {
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
+    // Only the explicitly enabled service-enrollment path resolves credential
+    // custody before hosted storage. A WinSW service has a different Windows
+    // logon token from the operator CLI, so an unpaired service must be able to
+    // bind the authenticated local control endpoint without first opening any
+    // hosted writer. Default daemon startup preserves the established ordering
+    // below: acquire the lease, initialize hosted storage, then load identity.
+    let record: DeviceRecord | undefined;
+    if (config.serviceEnrollment?.enabled === true) {
+      record = await auth.loadExisting();
+      if (!record) {
+        startedAt = Date.now();
+        serviceEnrollmentWaiting = true;
+        serviceEnrollmentTransitioning = false;
+        await replaceControlServer(true, true);
+        return;
+      }
+    }
+    serviceEnrollmentWaiting = false;
+    serviceEnrollmentTransitioning = false;
     // This is the first point at which daemon-owned hosted storage may touch
     // the filesystem. The lease was acquired above, so SQLite open/schema/
     // quarantine and every pressure-engine writer are inside the same
     // authority boundary as auth renewal and the rest of daemon lifecycle.
     initializeOwnedHostedStorage();
+    record ??= await auth.loadExisting();
+    if (!record) {
+      throw new Error('device is not paired yet; call pair(pairingCode) first');
+    }
     const activeJournal = journal;
     const activePressureEngine = pressureEngine;
     const activeOwnedPressureEngine = ownedPressureEngine;
     // Loading an existing record arms proactive token renewal, whose final
     // step writes device.json. Acquire the store mutation lease first so a
     // rejected second daemon can never leave that timer behind as a writer.
-    const record = await auth.loadExisting();
-    if (!record) {
-      throw new Error('device is not paired yet; call pair(pairingCode) first');
-    }
     if (config.agentEgress !== undefined) {
       agentEgress = new AgentEgressController({
         policy: egressPolicy,
@@ -1565,25 +1622,13 @@ export function buildDaemonWithAdapters(
     // which are also silently replaced on a second start()). Only a
     // DIFFERENT process/instance still holding this storeDir's control
     // socket open is the "another daemon is running" fatal case below.
-    if (controlServerHandle) {
-      await controlServerHandle.close();
-      controlServerHandle = undefined;
-    }
     // The control socket must never brick the rest of the daemon: "another
     // daemon's control server is already running against this exact
     // storeDir" is the one bind failure that stays fatal (a second daemon
     // writing to the same store concurrently is a real hazard); any other
     // bind failure (e.g. an unsupported filesystem) is logged and the
     // daemon proceeds without a control socket at all.
-    try {
-      controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods: controlMethods });
-    } catch (err) {
-      if (err instanceof AnotherControlServerRunningError) throw err;
-      console.warn(
-        `[byok/client] control socket failed to start (continuing without it): ${err instanceof Error ? err.message : String(err)}`,
-      );
-      controlServerHandle = undefined;
-    }
+    await replaceControlServer(false);
     // The run marker begins only after this process has passed the daemon's
     // existing single-owner bind check. Writing it before that check would let
     // a rejected second process overwrite the live daemon's marker and create
@@ -2654,6 +2699,47 @@ export function buildDaemonWithAdapters(
   const controlMethods: ControlMethods = {
     unary: {
       status: () => buildControlStatus(),
+      'enrollment.pair': async (params) => {
+        if (config.serviceEnrollment?.enabled !== true) {
+          throw new ControlError('enrollment_disabled', 'service enrollment is not enabled for this daemon');
+        }
+        const parsed = parseEnrollmentPairParams(params);
+        if (!parsed) {
+          throw new ControlError(
+            'bad_request',
+            `enrollment.pair requires exactly {pairingCode} with 1-${ENROLLMENT_PAIRING_CODE_MAX_BYTES} UTF-8 bytes`,
+          );
+        }
+        if (!serviceEnrollmentWaiting || daemonStarted) {
+          throw new ControlError('already_paired', 'this service daemon is not waiting for initial enrollment');
+        }
+        if (serviceEnrollmentTransitioning) {
+          throw new ControlError('pairing_in_progress', 'service enrollment is already in progress');
+        }
+        serviceEnrollmentTransitioning = true;
+        let record: DeviceRecord;
+        try {
+          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode));
+        } catch (err) {
+          serviceEnrollmentTransitioning = false;
+          throw err;
+        }
+
+        // `control-server.ts` writes this handler's result in the current
+        // microtask. Starting on the next macrotask lets that persisted-id
+        // receipt leave before normal startup replaces the enrollment-only
+        // listener. A crash in this narrow window is safe: WinSW restarts,
+        // loadExisting() sees the already-persisted credential, and takes the
+        // same normal startup path.
+        setImmediate(() => {
+          void runLifecycleMutation(startUnderLease).catch(() => {
+            // Do not project provider/server exception text into service logs;
+            // the stopped/non-ready daemon is the fail-closed observable fact.
+            console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
+          });
+        });
+        return { deviceId: record.deviceId };
+      },
       'toolsets.reload': (params) => {
         const parsed = parseToolsetsReloadParams(params);
         if (!parsed) {
