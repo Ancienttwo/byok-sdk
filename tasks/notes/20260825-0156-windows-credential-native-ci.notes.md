@@ -122,6 +122,22 @@
   boundary and fails closed when `SystemRoot` is absent or non-absolute; it no
   longer accepts ambient `PATH` selection of an incompatible host.
 
+## Successor run 3 and stop boundary
+
+- Subject: `0cad78c9f6913f829238c0748b53431e07c6c23e`.
+- Exact push CI: `32774889347`; Windows IPC job `97583589867` failed at
+  `initial_read` with the same `stage=8,kind=1,hresult=0`. Windows PowerShell
+  5.1 was selected by fixed absolute path, so ambient PowerShell Core selection
+  is excluded. WinSW job `97583589872` failed at pair for the same marker.
+- The executable never existed and no Credential Manager call ran. Local unit
+  tests, client typecheck, strict workflow and diff check remain green, but
+  these are not substitutes for the native/IPC/WinSW acceptance.
+- Three successor fail/fix/reverify rounds are exhausted. No fourth compiler
+  mutation, merge, package publication or downstream rollout is authorized by
+  this work package. A later slice must first expose only the bounded CodeDom
+  compiler error number (for example the numeric part of one `CS####` code) or
+  otherwise prove the exact compiler contract before replacing `Add-Type`.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |
