@@ -126,7 +126,7 @@ snapshot/stage/promote/readback and receipt semantics.
   and the pre-fix `PRE_FIX_EXIT=1` evidence.
 - [x] Implement the internal store/Agent-root path gates and public high-level
   relocation lease with active/unknown/corrupt refusal and exact release.
-- [ ] Pack an unpublished successor RC and pass the frozen Salesko Gate B2
+- [x] Pack an unpublished successor RC and pass the frozen Salesko Gate B2
   consumer plus prior Gate B regression without publishing a version.
 
 ## Gate B2 relocation trace

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "artifactLabel": "gate-a-relocation-7edb054",
+  "unpublishedLocalRc": true,
+  "sourceGitSha": "7edb05440df74406547071bce74ae4f41a87184a",
+  "versionIdentity": {
+    "releaseTrain": "0.8.1",
+    "keys": "0.3.2",
+    "authority": "sourceGitSha plus release-manifest package integrity",
+    "registryRuntimeVersionMayCollide": true,
+    "releaseAssertion": "none; this artifact is not published, tagged, or deployed"
+  },
+  "packageManifest": {
+    "file": "release-manifest.json",
+    "sha256": "e80e3b9759cf100c8a50a76bb52c9d22b2a591a356336bcd2bc42ef06d889c90"
+  },
+  "frozenDownstreamAuthorities": {
+    "ga01DeviceCredentialSubjectSha256": "cba06056cbda569e8e8e0f99c80b9d341d8ae593638a984198d434e976c0a886",
+    "ga02StrictAdmissionSubjectSha256": "a3c498868313bfac8b3a620d4759b21060f29bdad31179030bd3aae740a75179",
+    "saleskoGateACompositeSha256": "ff8b75fe884769208190adef9705a92184ea0704c403b2ca2a92afc9d8c70635",
+    "saleskoGateB2RelocationSubjectSha256": "ba94b50f645ed0ee944c5edcaa8efeac6b718dfc23c7ef2e2a7b3522512b0488"
+  },
+  "consumerInstall": {
+    "scope": "disposable Salesko copy only",
+    "dependencyMode": "exact file tarballs temporarily written outside both deliverable worktrees",
+    "deliverableManifestOrLockContainsFileDependency": false
+  }
+}

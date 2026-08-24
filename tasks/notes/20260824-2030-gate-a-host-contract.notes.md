@@ -162,3 +162,36 @@ classification. No real user credential provider was touched.
   content read, strict admission, public-surface constraints and daemon-owner
   collision. Client TypeScript passed. The full workspace/artifact envelope is
   rerun only after this corrected source subject is frozen.
+
+## Gate B2 frozen source, packed RC and consumer acceptance
+
+- Corrected relocation source is frozen at
+  `7edb05440df74406547071bce74ae4f41a87184a`, after
+  `66fa655f0b4afc514d6115af00c10304a6bc04fb` added the exclusive relocation
+  lease and `7edb05440df74406547071bce74ae4f41a87184a` serialized brief Agent-root
+  writers without changing relocation's fail-fast behavior.
+- Frozen full BYOK verification passed: `bun run build`, `bun run typecheck`,
+  `bun run test`, `bun run check:release-graph`, strict task workflow and
+  `git diff --check`. Client completed 1,413 pass / 1 intentional skip; the
+  remaining package suites also passed.
+- `artifacts/gate-a/7edb054/` is an unpublished local RC. Its release manifest
+  SHA-256 is
+  `e80e3b9759cf100c8a50a76bb52c9d22b2a591a356336bcd2bc42ef06d889c90`;
+  packed client SHA-256 is
+  `96bece951f62b723e919481e6a8cd53fcf4787b2999d1d3115c04d3169a6b8e6`.
+  Package version identity remains 0.8.1 and keys 0.3.2, so source SHA plus
+  content integrity are the authority; no registry or release claim is made.
+- The packed client declaration exposes only `localStateRelocation` and typed
+  relocation errors. Internal path gates and daemon-owner operations remain
+  private.
+- A disposable Salesko copy consumed only the exact tarballs. Frozen relocation
+  subject `ba94b50f...0488` passed 1/1 with 7 assertions; the existing Gate B
+  focused matrix passed 45 with one intentional Postgres skip; Local Agent
+  TypeScript passed; full root `bun run check` passed with exit 0. Exact results
+  are recorded in `artifacts/gate-a/7edb054/salesko-consumer-results.md`.
+- The disposable copy is not an artifact authority. It will be moved to Trash
+  after evidence is frozen; neither Salesko manifests/lock nor either source
+  worktree contains a `file:` dependency.
+- Independent semantic review for the composite Gate A work package remains a
+  separate acceptance authority. This implementation and downstream packed-RC
+  result do not self-approve publication, merge or rollout.
