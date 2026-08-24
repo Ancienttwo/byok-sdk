@@ -27,6 +27,12 @@
 - CI records only `VaultSvc` state, numeric process session id and the bounded
   interactive flag. It does not print the runner account, target name, provider
   stderr, request, or credential bytes.
+- The first phase-bounded run proved the failure is `initial_read`, not a hang:
+  `VaultSvc` was running in interactive session 2 and the bridge returned in
+  about 4.6 seconds with generic `COR_E_SYSTEM`. The C# bridge previously threw
+  native API failures and depended on PowerShell exception wrapping to preserve
+  `NativeErrorCode`; the next iteration returns the Win32 code as a bounded
+  integer across that internal boundary before PowerShell can erase it.
 
 ## Deviations From Plan Or Spec
 
