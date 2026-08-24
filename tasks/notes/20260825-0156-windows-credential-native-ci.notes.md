@@ -97,6 +97,19 @@
   (cannot read credential blobs), file credential fallback, and another
   PowerShell return/exit expression.
 
+## Successor run 1
+
+- Subject: `b9e955c00eaa783dd402a44581f8bb4f8dcb27cb`.
+- Exact push CI: `32774144180`; Windows IPC job `97581180056` failed in the
+  native probe at `initial_read` before IPC execution.
+- Build and runtime facts were healthy (`VaultSvc=running`, session 2,
+  interactive); the provider error contained no accepted Win32/HRESULT marker.
+  This isolates the remaining pressure point to compiler/input executable
+  setup before `CredReadW`, rather than Credential Manager policy.
+- Next bounded probe: add only static numeric compiler/input stage and kind
+  diagnostics. No exception text, credential field or request payload is
+  permitted to escape.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |
