@@ -32,6 +32,8 @@ behavior or changing package/release identity.
   - bounded non-secret native-provider diagnostics;
   - the Windows Credential Manager bridge and its focused unit/native tests;
   - Windows IPC/control-socket/WinSW smoke composition and CI workflow;
+  - a per-invocation, non-secret OS-temp C# console bridge whose real process
+    exit replaces PowerShell result/exit propagation;
   - this plan, contract, notes, review and check projections.
 - Out of scope:
   - macOS/Linux provider semantics, Salesko source, package versions/lockfile, registry/tag/release/deploy/migration, real user credentials, and any plaintext/in-memory production fallback.
@@ -40,6 +42,10 @@ behavior or changing package/release identity.
   key, credential blob, or exception message may enter diagnostics. A numeric
   Win32 code or HRESULT is the maximum provider detail allowed. The approved
   phase probe may attach only static numeric stage/kind codes to that HRESULT.
+  The compiled bridge path may contain only a unique OS-temp location; the
+  executable is static code, is never reused as state, and must be removed
+  after the child exits. Crash scavenging may select only SDK-owned prefix,
+  old, real directories and must never follow a symlink.
 
 ## Stop Conditions
 

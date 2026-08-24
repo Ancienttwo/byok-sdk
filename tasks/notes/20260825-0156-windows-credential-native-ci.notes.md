@@ -79,6 +79,24 @@
 
 - None recorded.
 
+## Successor executable decision
+
+- Observable: `CredReadW` returns without an owned error, while every
+  PowerShell return/exit projection still gives Node exit 0 plus non-owned
+  stdout. The controllable boundary is the host process, not Credential
+  Manager or the runner session.
+- Selected: compile the existing static C# as a console executable in a unique
+  OS-temp directory, then spawn that executable directly. `Main()` owns the
+  exact provider exit and stdout. PowerShell is only a compiler and its stdout
+  is never interpreted as credential data.
+- Lifecycle: the output path is supplied on compiler stdin, never contains
+  secret material, and is removed recursively only after the executable child
+  closes. A later invocation scavenges only old real directories with the
+  fixed SDK prefix; symlinks and fresh directories are ignored.
+- Rejected: committed binary, install script, package dependency, `cmdkey`
+  (cannot read credential blobs), file credential fallback, and another
+  PowerShell return/exit expression.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |

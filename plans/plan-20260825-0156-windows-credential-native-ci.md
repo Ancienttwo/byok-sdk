@@ -148,6 +148,23 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
 - [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
 - [ ] Run strict workflow/change review and re-read the exact PR merge gate.
 
+## Successor executable boundary
+
+- P1: `powershell.exe` may compile one static AnyCPU console executable into a
+  unique OS-temp directory, but it no longer executes Credential Manager calls
+  or authors provider result/exit semantics. The executable is non-secret,
+  per-invocation and not a credential authority.
+- P2: Node creates the unique directory, invokes the static compiler with only
+  the output path on stdin, directly spawns the resulting executable with the
+  bounded credential request on stdin, waits for its real process exit, then
+  recursively removes the directory. C# `Main()` alone maps Win32 status to
+  `0 | 44 | 1 | 2` and writes successful credential bytes to stdout.
+- P3: this removes the disproved PowerShell result boundary without adding a
+  package, public API, persisted binary or secret file. Normal cleanup is
+  mandatory; stale crash residue is static code only and must be scavenged by
+  prefix/age without following symlinks. Any compile, spawn or cleanup failure
+  remains fail closed.
+
 ## Rollback
 
 Revert this slice only. Do not delete or migrate credentials, modify package versions, publish, release, deploy, or alter Salesko.
