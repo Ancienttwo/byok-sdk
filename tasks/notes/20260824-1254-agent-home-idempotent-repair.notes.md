@@ -47,6 +47,9 @@
 - Existing ordering/daemon coverage was updated so exact replay invokes the
   consumer, while stale/conflict remain hook-free and restart redelivery still
   keeps completion/cursor behind the local lifecycle.
+- Source freeze gates pass: full repository build, sequential typecheck and full
+  tests; client reports 1,394 passing tests including the four new repair guards.
+  Release graph closes the aligned dispatch train at 0.8.1 and keys at 0.3.2.
 
 ## Promotion Filter
 
