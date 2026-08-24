@@ -127,6 +127,12 @@
   production fix moves operation/Win32 exit mapping into C# and calls
   `Environment.Exit` only inside the spawned PowerShell child. PowerShell keeps
   JSON stdin parsing but no longer authors native result semantics.
+- The first production rerun emitted no owned native marker and returned the
+  generic provider error. Its only new post-mapping action was the immediate
+  `Environment.Exit` call. The second bounded production correction keeps the
+  void entrypoint but assigns standard `Environment.ExitCode`, returns normally,
+  and lets PowerShell perform one literal exit. It still never reads, compares
+  or translates a native return object.
 
 ## Evidence Links
 

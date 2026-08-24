@@ -295,10 +295,10 @@ public static class ByokDeviceCredential {
  public static int Get(string t) { IntPtr p=IntPtr.Zero; bool found; try { found=R(t,1,0,out p); } catch(Exception e) { return Failure(1,e); } if(!found) return Marshal.GetLastWin32Error(); int code=0; try { C c=(C)Marshal.PtrToStructure(p,typeof(C)); byte[] b=new byte[c.CredentialBlobSize]; if(b.Length>0) { Marshal.Copy(c.CredentialBlob,b,0,b.Length); using(var output=Console.OpenStandardOutput()) { output.Write(b,0,b.Length); output.Flush(); } } } catch(Exception e) { code=Failure(2,e); } try { CredFree(p); } catch(Exception e) { return Failure(3,e); } return code; }
  public static int Delete(string t) { if(D(t,1,0)) return 0; return Marshal.GetLastWin32Error(); }
  private static int ExitFor(int code) { if(code==0)return 0;if(code==1168)return 44;if(code<0)return 1;Console.Error.Write("credential operation failed (win32="+code+")");return 1; }
- public static void Execute(string operation,string target,string username,string secretBase64) { int stage=1;int exitCode=2;byte[] secret=null;try { if(operation=="replace") { stage=2;secret=Convert.FromBase64String(secretBase64);stage=3;exitCode=ExitFor(Set(target,username,secret)); } else if(operation=="read") { stage=4;exitCode=ExitFor(Get(target)); } else if(operation=="clear") { stage=6;exitCode=ExitFor(Delete(target)); } } catch(Exception e) { Failure(stage,e);exitCode=1; } finally { if(secret!=null)Array.Clear(secret,0,secret.Length); } Environment.Exit(exitCode); }
+ public static void Execute(string operation,string target,string username,string secretBase64) { int stage=1;int exitCode=2;byte[] secret=null;try { if(operation=="replace") { stage=2;secret=Convert.FromBase64String(secretBase64);stage=3;exitCode=ExitFor(Set(target,username,secret)); } else if(operation=="read") { stage=4;exitCode=ExitFor(Get(target)); } else if(operation=="clear") { stage=6;exitCode=ExitFor(Delete(target)); } } catch(Exception e) { Failure(stage,e);exitCode=1; } finally { if(secret!=null)Array.Clear(secret,0,secret.Length); } Environment.ExitCode=exitCode; }
 }
 "@
 $r=([Console]::In.ReadToEnd()|ConvertFrom-Json)
 [ByokDeviceCredential]::Execute([string]$r.operation,[string]$r.target,[string]$r.username,[string]$r.secret_base64)
-exit 2
+exit [Environment]::ExitCode
 `, 'utf16le').toString('base64');

@@ -69,9 +69,9 @@ describe('DeviceCredentialStore', () => {
     const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
 
     await expect(store.read()).resolves.toBeUndefined();
-    expect(script).toContain('Environment.Exit(exitCode)');
+    expect(script).toContain('Environment.ExitCode=exitCode');
     expect(script).not.toMatch(/if\(\$code|exit \$exitCode/u);
-    expect(script.trimEnd()).toMatch(/\[ByokDeviceCredential\]::Execute\([^\n]+\)\s*exit 2$/u);
+    expect(script.trimEnd()).toMatch(/\[ByokDeviceCredential\]::Execute\([^\n]+\)\s*exit \[Environment\]::ExitCode$/u);
   });
 
   it('does not classify a Linux provider error as a missing credential', async () => {
