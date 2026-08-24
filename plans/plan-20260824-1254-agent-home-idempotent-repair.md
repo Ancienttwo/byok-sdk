@@ -23,10 +23,10 @@
 - P2: new exact-device request -> daemon `project()` -> canonical-home lease ->
   read ordering state -> equal revision/hash currently returns before hook ->
   completion/cursor advances while product-derived bytes may remain absent.
-- P3: add an explicit opt-in idempotent `ensure` lifecycle. Preserve existing
-  `apply` semantics for consumers that may have non-idempotent side effects;
-  exact replay invokes `ensure` under the same lease and still returns
-  `idempotent`. Stale/conflict never invoke either hook.
+- P3: enforce the existing documented atomic/idempotent product-hook contract.
+  Exact replay invokes the existing `apply` under the same lease and still
+  returns `idempotent`; stale/conflict never invoke the hook. No second public
+  lifecycle or downstream migration is introduced.
 
 ## Workflow Inventory
 
@@ -44,14 +44,13 @@
 
 ### Public contract
 
-- Add optional `AgentHomeProjection.ensure` and its typed input/function export.
-- Add a clearly named helper that opts one idempotent opaque consumer into both
-  initial apply and exact-replay ensure; keep the existing apply-only helper unchanged.
-- Equal revision/hash with configured ensure runs it after initialization and
-  before an `idempotent` result. Ensure failure leaves ordering state unchanged
-  and prevents completion/cursor acknowledgement.
-- Exact replay without an ensure retains existing 0.8.0 apply-only behavior;
-  hosts opt in explicitly rather than silently replaying non-idempotent effects.
+- Keep the existing `AgentHomeProjection.apply` API and
+  `createAgentHomeProjectionConsumer` helper.
+- Clarify that the already-documented atomic/idempotent product consumer is an
+  ensure of the exact opaque desired state and may run again on replay.
+- Equal revision/hash runs apply after initialization and before an
+  `idempotent` result. Hook failure leaves ordering state unchanged and prevents
+  completion/cursor acknowledgement.
 
 ### Release candidate
 
@@ -67,7 +66,7 @@
 
 | Risk | Mitigation |
 |------|------------|
-| Existing apply has non-idempotent side effects | Do not replay apply implicitly; explicit ensure opt-in only. |
+| A host violates the documented idempotent hook contract | Replays expose the violation; document and test the required ensure semantics. |
 | Exact replay advances after failed repair | Throw before completion; preserve cursor redelivery and ordering state. |
 | Repair races Agent execution | Reuse the same canonical-home writer lease and test overlap. |
 | Ordering semantics drift | Focused stale/conflict/newer/exact tests and exact completion readback. |
@@ -75,7 +74,7 @@
 
 ## Promotion Gate
 
-- **Merge/PR unit**: client lifecycle/API/tests/docs plus exact aligned RC metadata.
+- **Merge/PR unit**: client lifecycle/tests/docs plus exact aligned RC metadata.
 - **Rollback surface**: one unpublished branch and disposable tarballs.
 - **Verification boundary**: focused/full upstream gates, pack/install closure,
   and frozen Salesko consumer acceptance against exact RC bytes.
@@ -93,14 +92,14 @@
 - **Evaluator rubric**: product-only and whole-home loss converge; equal replay
   is idempotent after ensure; stale/conflict never call hooks; failure remains
   unacked/retryable; lease/restart/readback stay exact.
-- **Stop condition**: stop on implicit apply replay, public outcome change,
+- **Stop condition**: stop on public API/outcome change,
   non-exact RC dependency graph, or any request for publish/merge/push/deploy.
 - **Rollback surface**: discard branch/RC and restore Salesko's guard-only edit.
 
 ## Task Breakdown
 
-- [ ] Activate a strict bugfix contract and capture the real pre-fix regression.
-- [ ] Freeze and implement the explicit generic ensure lifecycle and negatives.
+- [x] Activate a strict bugfix contract and capture the real pre-fix regression.
+- [x] Freeze and implement the existing idempotent consumer as the ensure lifecycle and negatives.
 - [ ] Run focused plus full upstream verification and disposable integration gates.
 - [ ] Pack aligned 0.8.1/keys 0.3.2 RC with exact manifest/integrity readback.
 - [ ] Consume exact RC bytes in frozen Salesko and pass Phase 2 plus existing acceptance.

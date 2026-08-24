@@ -9,10 +9,10 @@
 
 ## Design Decisions
 
-- Preserve `apply` as a new-state lifecycle because the public 0.8.0 contract
-  does not promise it is safe to replay. Add an explicit idempotent `ensure`
-  lifecycle and a clearly named opt-in helper instead.
-- Exact replay retains the public `idempotent` outcome. Ensure is a repair of a
+- `docs/host-local-storage-layout.md` already requires the product hook to own
+  an atomic/idempotent write. Reuse `apply` as the exact desired-state ensure;
+  do not add a second lifecycle or helper.
+- Exact replay retains the public `idempotent` outcome. Re-apply is a repair of a
   deterministic projection, not a new Profile revision.
 
 ## Deviations From Plan Or Spec
@@ -23,8 +23,8 @@
 
 | Option | Decision | Reason |
 |--------|----------|--------|
-| Replay every existing `apply` | Rejected | Silently replays potentially non-idempotent host side effects. |
-| Explicit idempotent `ensure` | Adopted | Additive, fail-closed opt-in with preserved ordering outcomes. |
+| Explicit second `ensure` API | Rejected | Duplicates an invariant already required by host-storage docs. |
+| Re-run documented idempotent `apply` | Adopted | Smallest fix; no public API or downstream composition change. |
 
 ## Open Questions
 
@@ -40,6 +40,13 @@
 - Captured downstream failure: expected `applied`, received `idempotent`, with
   `profile.json` absent and `PHASE_2_EXIT=1`; the corrected semantic expectation
   is `idempotent` plus restored opaque product bytes.
+- Upstream regression artifact records the real pre-fix `ENOENT` after the
+  exact replay returned idempotent without recreating the derived file. The
+  focused fixed guard covers product-only loss, whole-home loss, hook failure
+  with unchanged ordering state, and serialization against an execution lease.
+- Existing ordering/daemon coverage was updated so exact replay invokes the
+  consumer, while stale/conflict remain hook-free and restart redelivery still
+  keeps completion/cursor behind the local lifecycle.
 
 ## Promotion Filter
 

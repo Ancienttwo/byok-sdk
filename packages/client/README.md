@@ -108,6 +108,14 @@ createDaemon({
 });
 ```
 
+For task-free desired-state projection, use
+`createAgentHomeProjectionConsumer`. Its hook must atomically and idempotently
+ensure its opaque product bytes. BYOK may invoke it again under the same
+canonical-home writer lease when a new request carries the exact current
+revision/hash; the terminal outcome remains `idempotent`. This permits repair
+of locally lost derived files without giving the SDK product path or schema
+knowledge. Stale and same-revision/different-hash requests do not invoke it.
+
 Startup materializes and write-probes the canonical root before publishing
 `agent-home-contract`. `agentHome` and `gitWorkspace` are mutually exclusive;
 strict Agent execution has one workspace authority and never falls back to a

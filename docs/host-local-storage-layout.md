@@ -83,6 +83,11 @@ SDK-supplied canonical cwd to the host hook. The SDK-owned local ordering file
 records only request identity, AgentRef and projection hash. The hook owns an
 atomic/idempotent product write such as `profile.json`; BYOK does not know that
 schema, create `.salesko`, accept credentials, or delete local product files.
+For a new request carrying the exact current revision and hash, BYOK re-runs
+that desired-state hook under the same writer lease before returning an
+`idempotent` receipt. This repairs locally lost derived bytes without inventing
+a revision, deleting SDK ordering state, or inspecting a product filename.
+Stale and same-revision/different-hash requests return before the hook.
 Enqueue remains pending until the daemon's dedicated authenticated completion
 request receives an exact durable readback.
 

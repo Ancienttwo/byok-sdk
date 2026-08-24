@@ -21,22 +21,22 @@ as idempotent before any product consumer can repair the missing bytes.
 
 ## Goal
 
-Add an explicit generic idempotent ensure lifecycle under the existing
-canonical-home writer lease. An opted-in exact revision/hash replay must run
-the ensure hook and return `idempotent`; stale/conflict must not run it, failures
-must remain unacked/retryable, and no SDK component may know product paths or schema.
+Enforce the existing generic atomic/idempotent product-consumer contract under
+the canonical-home writer lease. Exact revision/hash replay must run `apply` as
+an ensure and return `idempotent`; stale/conflict must not run it, failures must
+remain unacked/retryable, and no SDK component may know product paths or schema.
 
 ## Scope
 
-- In scope: client projection lifecycle/types/helper/tests, client/protocol/local
+- In scope: client projection lifecycle/tests, client/protocol/local
   storage docs, aligned 0.8.1/keys 0.3.2 packed RC metadata, full gates, and
   exact frozen Salesko RC acceptance.
-- Out of scope: implicit replay of existing apply-only hooks; Salesko schema or
+- Out of scope: a new public hook/API; Salesko schema or
   path knowledge; cloud polling; revision/hash synthesis; SDK state deletion;
   npm publish, merge, push, tag, deploy, production migration/DDL, secrets, or
   production wiring.
-- Taste constraints: one ordering authority; one canonical-home lease; additive
-  opt-in ensure API; exact replay remains externally `idempotent`.
+- Taste constraints: one ordering authority; one canonical-home lease; existing
+  atomic/idempotent consumer as ensure; exact replay remains externally `idempotent`.
 
 ## Stop Conditions
 
@@ -46,7 +46,7 @@ must remain unacked/retryable, and no SDK component may know product paths or sc
 
 ## Falsifier
 
-The design is falsified if exact replay can complete without the opted-in ensure,
+The design is falsified if exact replay can complete without the product consumer,
 if stale/conflict invokes any product hook, if ensure failure advances ordering
 or cursor, if a repair overlaps task execution, or if the Salesko Phase 2 guard
 still leaves `profile.json` absent. Cheapest proof is the focused client regression.
@@ -74,7 +74,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"agent-home-ensure-ordering","kind":"deterministic_test","paths":["packages/client/src/agent-home.ts","packages/client/src/index.ts","packages/client/src/__tests__/agent-home-idempotent-repair.test.ts"]},{"id":"packed-rc-and-downstream-readback","kind":"runtime_readback","paths":["*"]}]}
+{"protocol":1,"oracles":[{"id":"agent-home-ensure-ordering","kind":"deterministic_test","paths":["packages/client/src/agent-home.ts","packages/client/src/__tests__/agent-home-idempotent-repair.test.ts","packages/client/src/__tests__/agent-home-projection.test.ts"]},{"id":"packed-rc-and-downstream-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
@@ -180,12 +180,12 @@ exit_criteria:
 
 ## Acceptance Notes (Human Review)
 
-- Functional behavior: opted-in exact replay ensures product-derived bytes and
+- Functional behavior: exact replay ensures product-derived bytes and
   returns idempotent without creating tasks/runtimes/sessions.
 - Edge cases: whole-home loss, intact replay, derived-file loss, hook failure,
   stale/conflict/newer ordering, same-Agent overlap, restart/redelivery.
-- Regression risks: non-idempotent apply-only consumers must remain unchanged;
-  release train must close exactly before downstream consumption.
+- Regression risks: hosts that violated the documented idempotent consumer
+  contract may observe replayed side effects; release train must close exactly.
 
 ## Rollback Point
 
