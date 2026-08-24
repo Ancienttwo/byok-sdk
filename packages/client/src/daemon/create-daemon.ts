@@ -1504,22 +1504,22 @@ export function buildDaemonWithAdapters(
   async function startUnderLease(): Promise<void> {
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
-    // Credential custody must be resolved before any hosted writer starts.
-    // A WinSW service has a different Windows logon token from the operator
-    // CLI, so an explicitly enabled unpaired service keeps the one daemon
-    // lease and exposes the existing authenticated local control endpoint.
-    // Pairing then executes inside THIS process/token; no credential bytes are
-    // copied between stores or placed in service arguments.
-    const record = await auth.loadExisting();
-    if (!record) {
-      if (config.serviceEnrollment?.enabled !== true) {
-        throw new Error('device is not paired yet; call pair(pairingCode) first');
+    // Only the explicitly enabled service-enrollment path resolves credential
+    // custody before hosted storage. A WinSW service has a different Windows
+    // logon token from the operator CLI, so an unpaired service must be able to
+    // bind the authenticated local control endpoint without first opening any
+    // hosted writer. Default daemon startup preserves the established ordering
+    // below: acquire the lease, initialize hosted storage, then load identity.
+    let record: DeviceRecord | undefined;
+    if (config.serviceEnrollment?.enabled === true) {
+      record = await auth.loadExisting();
+      if (!record) {
+        startedAt = Date.now();
+        serviceEnrollmentWaiting = true;
+        serviceEnrollmentTransitioning = false;
+        await replaceControlServer(true, true);
+        return;
       }
-      startedAt = Date.now();
-      serviceEnrollmentWaiting = true;
-      serviceEnrollmentTransitioning = false;
-      await replaceControlServer(true, true);
-      return;
     }
     serviceEnrollmentWaiting = false;
     serviceEnrollmentTransitioning = false;
@@ -1528,6 +1528,10 @@ export function buildDaemonWithAdapters(
     // quarantine and every pressure-engine writer are inside the same
     // authority boundary as auth renewal and the rest of daemon lifecycle.
     initializeOwnedHostedStorage();
+    record ??= await auth.loadExisting();
+    if (!record) {
+      throw new Error('device is not paired yet; call pair(pairingCode) first');
+    }
     const activeJournal = journal;
     const activePressureEngine = pressureEngine;
     const activeOwnedPressureEngine = ownedPressureEngine;

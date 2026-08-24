@@ -199,6 +199,28 @@
   `git diff --check` pass. The real process-token/SCM claim remains gated on
   the exact hosted Windows WinSW job.
 
+### Service-identity acceptance and hosted-storage ordering regression
+
+- Subject `784cac6b5d5de86256bc9e77a3121a24704e75ab`, exact push run
+  `32777329260`: Windows native/IPC job `97591281350` passed and the WinSW job
+  `97591281071` passed. The WinSW proof installs and starts the daemon while
+  unpaired, sends the opaque pairing code through the authenticated local
+  control endpoint, persists enrollment under the `LocalSystem` process token,
+  reaches normal daemon readiness, and completes service restart/uninstall.
+- The same run exposed one deterministic lifecycle regression in both the full
+  Linux suite (`97591281119`) and Windows diagnostics (`97591280883`): the
+  post-open SQLite cleanup-fault child released its daemon lease. The new
+  unconditional pre-storage `auth.loadExisting()` ran before the injected
+  SQLite fault and failed on the intentionally process-local cross-process test
+  credential, so shutdown correctly saw no uncertain SQLite handle and released
+  the lease—but the test never reached the fault it exists to prove.
+- The correction confines credential-first ordering to explicit
+  `serviceEnrollment`. Default startup preserves the established sequence:
+  acquire daemon lease -> initialize hosted storage -> load identity. The
+  focused `daemon-auth` plus control-socket matrix now passes `37` with one
+  Windows-only skip; client TypeScript, strict workflow and `git diff --check`
+  pass before the replacement exact-head CI run.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |
