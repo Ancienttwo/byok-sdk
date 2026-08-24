@@ -251,6 +251,11 @@
   existing independent PASS. This is not a compatibility fallback, a source
   edit, or a reclassification of registry/runtime truth; it makes the actual
   PR unit and acceptance subject identical.
+- Change Assessment routes the composite auth/security/release subject to two
+  explicit whole-subject oracles: deterministic required tests plus exact
+  Windows CI, and runtime readback from the tracked packed RC/downstream result
+  plus native/IPC/WinSW service execution. No registry or production oracle is
+  claimed.
 
 ## Tradeoffs Considered
 

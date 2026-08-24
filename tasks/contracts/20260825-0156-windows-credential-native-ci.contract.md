@@ -98,7 +98,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"gate-a-required-and-windows-ci","kind":"deterministic_test","paths":["*"]},{"id":"packed-rc-downstream-and-windows-runtime","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
