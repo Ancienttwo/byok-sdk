@@ -1,6 +1,6 @@
 # Implementation Notes: windows-credential-native-ci
 
-> **Status**: Active
+> **Status**: Blocked
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Review**: tasks/reviews/20260825-0156-windows-credential-native-ci.review.md
@@ -36,9 +36,10 @@
 
 ## Open Questions
 
-- Exact hosted-runner native code remains pending the first Windows execution
-  of `device-credential-store.native.test.ts`. The current evidence only proves
-  that both pre-existing Windows jobs returned provider exit 1 before write.
+- Which exact bridge operation is still active when the hosted runner exceeds
+  ten seconds remains unproved. The next proof must bound and label each
+  `read | replace | read | clear | read` phase without printing provider stderr
+  or credential values; it may not simply raise the global test timeout.
 
 ## Evidence Links
 
@@ -67,6 +68,12 @@
   stderr to equal that marker. The final diagnostic iteration extracts only the
   unique numeric marker from surrounding output and has a unit guard proving
   prefix/suffix text cannot escape into the product error.
+- Final permitted remote iteration reached the native test but timed out after
+  ten seconds rather than returning a provider error. No numeric marker was
+  observed, so the current evidence is a bridge/runner latency-or-hang boundary,
+  not proof of a specific Win32 code. The three-round repair cap is exhausted;
+  PR #87 remains open and unmerged at the failing exact head. No fourth CI
+  mutation, skip, fallback, merge, publication or downstream rollout was made.
 
 ## Promotion Filter
 

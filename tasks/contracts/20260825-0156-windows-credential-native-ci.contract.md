@@ -1,6 +1,6 @@
 # Task Contract: windows-credential-native-ci
 
-> **Status**: Active
+> **Status**: Blocked
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->

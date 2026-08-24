@@ -1,6 +1,6 @@
 # Plan: Windows credential native CI
 
-> **Status**: Executing
+> **Status**: Blocked
 > **Created**: 20260825-0156
 > **Slug**: windows-credential-native-ci
 > **Planning Source**: user-approved-plan
@@ -142,7 +142,7 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
 
 ## Task Breakdown
 
-- [ ] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
+- [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
 - [ ] Prove the exact native error and choose bridge versus runner-composition correction.
 - [ ] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
 - [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
@@ -156,7 +156,7 @@ Revert this slice only. Do not delete or migrate credentials, modify package ver
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
+- [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
 - [ ] Prove the exact native error and choose bridge versus runner-composition correction.
 - [ ] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
 - [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
