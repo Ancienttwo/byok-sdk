@@ -300,5 +300,5 @@ public static class ByokDeviceCredential {
 "@
 $r=([Console]::In.ReadToEnd()|ConvertFrom-Json)
 [ByokDeviceCredential]::Execute([string]$r.operation,[string]$r.target,[string]$r.username,[string]$r.secret_base64)
-exit [Environment]::ExitCode
+exit ([Environment]::ExitCode)
 `, 'utf16le').toString('base64');

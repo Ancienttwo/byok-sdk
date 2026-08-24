@@ -133,6 +133,11 @@
   void entrypoint but assigns standard `Environment.ExitCode`, returns normally,
   and lets PowerShell perform one literal exit. It still never reads, compares
   or translates a native return object.
+- That rerun reached `decode()` with process exit 0 and non-owned stdout, so the
+  bridge no longer failed. The new issue was the non-parenthesized PowerShell
+  exit expression. The final bounded correction uses
+  `exit ([Environment]::ExitCode)` so the static property is parsed as the sole
+  exit argument and cannot become pipeline output.
 
 ## Evidence Links
 
