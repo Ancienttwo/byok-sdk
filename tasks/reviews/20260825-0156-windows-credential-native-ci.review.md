@@ -16,8 +16,12 @@
 
 - Verdict: pass
 - Change type: code-change
-- Intended files changed: Windows credential bridge, native falsifier, CI wiring and task artifacts only
-- Actual files changed: intended files only; no manifest, lockfile, Salesko or release files
+- Intended files changed: frozen predecessor Gate A subject plus the additive
+  Windows credential bridge, native falsifier, CI/service wiring and terminal
+  task artifacts
+- Actual files changed: exact composite PR paths declared by the terminal
+  contract; no manifest, lockfile, Salesko source, package-version or release
+  file change
 - Commands passed: root build/typecheck/test; focused client tests; strict task workflow; `git diff --check`; exact push and PR CI `21/21` jobs each
 - Residual risks: source/CI acceptance does not publish packages or integrate a downstream host; those remain separate release authorities
 - Reviewer action required: record and verify the contract-allowed typed user waiver, then create and verify the exact local merge seal
@@ -35,6 +39,8 @@
 - Commands run: root build/typecheck/test; focused tests; typecheck; strict workflow; diff check; exact GitHub push/PR job readback
 - Manual checks: exact Windows native/IPC, WinSW `LocalSystem` service enrollment, lifecycle lease, packed install and full suite jobs all passed
 - Supporting artifacts: task notes and GitHub Actions job logs
+- Predecessor supporting evidence: tracked `artifacts/gate-a/9377594/` and the
+  independent whole-package PASS in the predecessor review
 - Implementation notes reviewed: yes
 - Run snapshot: exact push `32777757995` and PR `32777762537`, both success at `337f2a0`
 
@@ -77,6 +83,8 @@ screenshot/artifact path, or reviewer observation.
 
 - No source finding remains open. npm publication, registry readback,
   downstream exact pin and deployment are intentionally outside this Sprint.
+- The terminal receipt is composite because PR #87 includes the accepted Gate A
+  predecessor; the successor did not modify those frozen source/artifact paths.
 
 ## Scorecard
 

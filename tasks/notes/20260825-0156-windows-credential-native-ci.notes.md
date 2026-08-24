@@ -239,6 +239,19 @@
   is source/CI acceptance only until the typed receipt and exact merge seal are
   verified.
 
+### Terminal composite acceptance boundary
+
+- The first `verify-sprint --prepare-acceptance` passed all `13/13` successor
+  contract checks but correctly failed `allowed_paths`: the policy review base
+  is `origin/main`, so the final subject also contains the frozen predecessor
+  Gate A source and RC evidence already carried by PR #87. A slice-only receipt
+  would not authorize merging that composite PR.
+- The successor terminal contract now names those exact predecessor paths as
+  read-only composite evidence and the review consumes the predecessor's
+  existing independent PASS. This is not a compatibility fallback, a source
+  edit, or a reclassification of registry/runtime truth; it makes the actual
+  PR unit and acceptance subject identical.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |

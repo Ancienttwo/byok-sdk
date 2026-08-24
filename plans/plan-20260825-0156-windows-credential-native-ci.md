@@ -125,7 +125,10 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
 
 ## Promotion Gate
 
-- **Merge/PR unit**: one additive PR #87 slice containing the native falsifier, minimum bridge or Windows-runner composition fix, and exact green Windows jobs.
+- **Merge/PR unit**: PR #87's already accepted Gate A predecessor plus this
+  additive Windows slice. The terminal receipt reviews their composite final
+  subject; it does not replace or weaken the predecessor's frozen independent
+  source/packed-RC/downstream evidence.
 - **Rollback surface**: revert only this slice's commits; prior Gate A source and RC remain intact.
 - **Verification boundary**: focused client tests plus the exact Windows IPC and WinSW jobs; full PR required checks remain the remote merge authority.
 - **Review/acceptance boundary**: review verifies no secret-bearing diagnostics, no fallback authority, and exact cross-process native readback before merge.
@@ -134,7 +137,9 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
 
 ## Evidence Contract
 
-- **State/progress path**: this plan, its generated task contract/notes/review, GitHub PR checks, and repo-harness checks.
+- **State/progress path**: this plan, its generated task contract/notes/review,
+  the immutable predecessor Gate A plan/contract/notes/review and tracked RC
+  evidence, GitHub PR checks, and repo-harness checks.
 - **Verification evidence**: pre-fix Windows native failure, focused unit/native commands, exact Windows CI job URLs, full PR required-check readback, and `git diff --check`.
 - **Evaluator rubric**: unique target absent/replace/separate-process read/clear passes; IPC and WinSW pair no longer fail; no secret values enter logs or files; non-Windows behavior and prior frozen subjects do not change.
 - **Stop condition**: stop if the hosted Windows runner cannot provide a usable native credential session without a plaintext/shadow authority, or if the fix requires product credential fallback or package publication.

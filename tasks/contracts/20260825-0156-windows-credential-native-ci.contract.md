@@ -29,6 +29,9 @@ behavior or changing package/release identity.
 ## Scope
 
 - In scope:
+  - terminal composite acceptance of the already frozen and independently
+    reviewed Gate A predecessor paths carried by PR #87; those paths are
+    read-only evidence in this successor and are not reopened for edits;
   - bounded non-secret native-provider diagnostics;
   - the Windows Credential Manager bridge and its focused unit/native tests;
   - Windows IPC/control-socket/WinSW smoke composition and CI workflow;
@@ -109,23 +112,35 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ```yaml
 allowed_paths:
   - .github/workflows/ci.yml
+  - artifacts/gate-a/
+  - packages/client/scripts/adapter-task-smoke.mjs
   - packages/client/src/daemon/device-credential-store.ts
   - packages/client/src/daemon/create-daemon.ts
   - packages/client/src/daemon/control-protocol.ts
+  - packages/client/src/daemon/auth-manager.ts
+  - packages/client/src/daemon/store.ts
+  - packages/client/src/local-state-relocation.ts
   - packages/client/src/bin/commands/pair.ts
+  - packages/client/src/__tests__/authenticated-enrollment-status.test.ts
+  - packages/client/src/__tests__/authenticated-enrollment-tenant-projection.test.ts
   - packages/client/src/__tests__/device-credential-store.test.ts
   - packages/client/src/__tests__/device-credential-store.native.test.ts
   - packages/client/src/__tests__/bin-commands.test.ts
   - packages/client/src/__tests__/daemon-control-socket.test.ts
+  - packages/client/src/__tests__/local-state-relocation.test.ts
   - packages/client/scripts/ipc-smoke.mjs
   - packages/client/scripts/control-socket-check.mjs
   - templates/service/winsw/smoke-test.mjs
   - templates/service/winsw/README.md
   - docs/spec.md
+  - plans/plan-20260824-2030-gate-a-host-contract.md
   - plans/plan-20260825-0156-windows-credential-native-ci.md
   - tasks/todos.md
+  - tasks/contracts/20260824-2030-gate-a-host-contract.contract.md
   - tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
+  - tasks/reviews/20260824-2030-gate-a-host-contract.review.md
   - tasks/reviews/20260825-0156-windows-credential-native-ci.review.md
+  - tasks/notes/20260824-2030-gate-a-host-contract.notes.md
   - tasks/notes/20260825-0156-windows-credential-native-ci.notes.md
 ```
 
