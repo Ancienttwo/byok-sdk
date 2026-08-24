@@ -253,6 +253,18 @@ describe('bin/commands/pair: runPairCommand', () => {
     expect(pair).toHaveBeenCalledWith('the-code');
     expect(lines).toEqual(['paired: deviceId=dev-9']);
   });
+
+  it('routes pairing through a reachable service control endpoint and never invokes a local daemon authority', async () => {
+    const handleRequest = vi.fn().mockResolvedValue({ deviceId: 'dev-service-1' });
+    const { connectControl, close } = fakeConnected(handleRequest);
+    const { log, lines } = collectLog();
+
+    await runPairCommand(baseConfig('/service-store'), 'opaque-pair-code', { log, connectControl });
+
+    expect(handleRequest).toHaveBeenCalledWith('enrollment.pair', { pairingCode: 'opaque-pair-code' });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(lines).toEqual(['paired: deviceId=dev-service-1']);
+  });
 });
 
 describe('bin/commands/approve-reject (M4 Phase 2: control socket, not a live in-process Daemon)', () => {

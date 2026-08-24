@@ -176,6 +176,29 @@
   seconds. It does not relax product timeouts, infer readiness from SCM state,
   inspect logs, or change daemon/service behavior.
 
+### WinSW process-identity root cause
+
+- Subject `538f6c172f888760dd9c849758706d1d6dc1235f`, exact push run
+  `32775982481`: Windows IPC job `97587097823` and the full build/typecheck/
+  test job `97587097841` passed. WinSW job `97587097397` remained red after
+  the full 15-second daemon-readiness poll; it never created `control.token`.
+- This disproves the cold-start-only hypothesis. `byok-agent pair` wrote the
+  generic credential under the interactive runner token, while WinSW's
+  documented default service account is `LocalSystem`. Windows `CredRead`
+  selects the credential set associated with the current process token, so the
+  service cannot read the interactive user's entry and exits before binding
+  the control endpoint.
+- The selected correction keeps Credential Manager as the only secret
+  authority: an explicitly enabled unpaired service binds the existing HMAC
+  control endpoint and accepts one exact `enrollment.pair` request. Pairing is
+  executed by the service process itself; no pairing code or credential bytes
+  enter argv, XML, config, logs or a file fallback.
+- Local successor acceptance: focused service-enrollment/CLI/credential tests
+  pass `74` with one Windows-only skip; the complete client suite passes
+  `1424` with two skips; client TypeScript, strict task workflow and
+  `git diff --check` pass. The real process-token/SCM claim remains gated on
+  the exact hosted Windows WinSW job.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |

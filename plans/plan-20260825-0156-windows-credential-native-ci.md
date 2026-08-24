@@ -148,6 +148,26 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
 - [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
 - [ ] Run strict workflow/change review and re-read the exact PR merge gate.
 
+## Successor service-identity boundary
+
+- P1: Windows Credential Manager resolves the credential set from the current
+  process token. WinSW runs as `LocalSystem` by default, while the existing
+  interactive `byok-agent pair` process runs as the operator. A successful
+  interactive write therefore cannot authorize the service daemon; SCM
+  `RUNNING` is not daemon readiness.
+- P2: an explicitly enabled, unpaired daemon acquires the existing single
+  writer lease, binds the existing HMAC-authenticated local control endpoint,
+  and exposes only a bounded `enrollment.pair` unary method. The CLI sends the
+  opaque pairing code over that authenticated IPC channel; the service process
+  redeems and persists it under its own OS token. The handler acknowledges the
+  persisted device id, then schedules the normal paired startup on the same
+  lifecycle queue. A crash after persistence is repaired by WinSW restart.
+- P3: enrollment-only mode is opt-in host composition and fail closed. No code,
+  token, key or credential bytes enter argv, WinSW XML, config, logs or a
+  second store. Default foreground `start()` still refuses an unpaired device,
+  and direct `pair()` remains the non-service path. The existing control
+  protocol/token/lease stay the only local IPC and writer authorities.
+
 ## Successor executable boundary
 
 - P1: `powershell.exe` may compile one static AnyCPU console executable into a

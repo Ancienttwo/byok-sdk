@@ -7,6 +7,7 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOv
 import { controlSocketPath, controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { connectControlClient } from '../bin/control-client';
 import { LongPollClient } from '../daemon/long-poll-transport';
+import { DeviceStore } from '../daemon/store';
 import type { DaemonEvent } from '../daemon/observer';
 import { runStartCommand } from '../bin/commands/start';
 import { runStatusCommand } from '../bin/commands/status';
@@ -66,6 +67,53 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     await built.start();
     return { daemon: built, config, storeDir };
   }
+
+  it('service enrollment pairs under the running daemon identity, then converges to normal startup', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const workspaceRoot = await tmpDir('byok-ctl-service-enroll-ws-');
+    const storeDir = await tmpDir('byok-ctl-service-enroll-store-');
+    const config: DaemonConfig = {
+      localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Acme',
+      productId: 'acme-ctl-service-enroll',
+      serverUrl: server.url,
+      workspaceRoot,
+      storeDir,
+      serviceEnrollment: { enabled: true },
+    };
+    daemon = createDaemonWithAdapters(config, [adapter]);
+
+    await daemon.start();
+    const enrollment = await connectControlClient({ storeDir, productId: config.productId });
+    if (!enrollment.ok) throw new Error('expected enrollment control endpoint');
+    const before = await enrollment.client.request<ControlStatusResult>('status');
+    expect(before.paired).toBe(false);
+    expect(before.transport).toBe('closed');
+    await expect(enrollment.client.request('toolsets.reload', {})).rejects.toMatchObject({ code: 'unknown_method' });
+    await expect(enrollment.client.request('enrollment.pair', { pairingCode: '', extra: true })).rejects.toMatchObject({
+      code: 'bad_request',
+    });
+
+    const receipt = await enrollment.client.request<{ deviceId: string }>('enrollment.pair', { pairingCode: 'pairing-code' });
+    expect(receipt.deviceId).toBe('device-1');
+    enrollment.client.close();
+
+    await vi.waitFor(async () => {
+      const conn = await connectControlClient({ storeDir, productId: config.productId });
+      expect(conn.ok).toBe(true);
+      if (!conn.ok) return;
+      try {
+        const status = await conn.client.request<ControlStatusResult>('status');
+        expect(status.paired).toBe(true);
+        expect(status.transport).toBe('open');
+      } finally {
+        conn.client.close();
+      }
+    }, { timeout: 5000 });
+
+    const projection = await new DeviceStore(storeDir).load();
+    expect(projection?.deviceId).toBe(receipt.deviceId);
+  }, 10000);
 
   it('status reports live pid/uptime/transport/activeTasks/runtimeIds', async () => {
     const adapter = new StubRuntimeAdapter('pi');

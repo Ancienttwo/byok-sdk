@@ -103,15 +103,18 @@ try {
   const { code: pairingCode } = byok.pairing.createPairingCode({ tenantId: 'tenant-smoke', productId: name });
   await fs.writeFile(
     configPath,
-    JSON.stringify({ productName: 'Control Socket Check', productId: name, serverUrl, workspaceRoot, storeDir }, null, 2),
+    JSON.stringify({
+      productName: 'Control Socket Check',
+      productId: name,
+      serverUrl,
+      workspaceRoot,
+      storeDir,
+      serviceEnrollment: { enabled: true },
+    }, null, 2),
     'utf8',
   );
 
-  console.log('==> byok-agent pair');
-  await runCli(['pair', pairingCode, '--server', serverUrl, '--config', configPath]);
-  console.log('PASS: pair succeeded');
-
-  console.log(`==> installing scratch service (name=${name}) running the REAL byok-agent start`);
+  console.log(`==> installing unpaired scratch service (name=${name}) running the REAL byok-agent start`);
   lifecycle = createServiceLifecycle({
     name,
     displayName: 'BYOK control socket check',
@@ -133,6 +136,29 @@ try {
   }
   if (!running) throw new Error('service never reported running -- see logDir for the daemon\'s own stdout/stderr');
   console.log('PASS: service is running');
+
+  // Credential Manager selects the credential set associated with the
+  // current process token. On Windows, WinSW defaults to LocalSystem, so an
+  // interactive pre-service pair would write the wrong authority. Wait for
+  // the opt-in enrollment-only control endpoint, then send the opaque code
+  // over that existing HMAC-authenticated IPC channel. The service process
+  // itself performs the only credential write.
+  console.log('==> waiting for the service enrollment control endpoint');
+  let enrollmentReady = false;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const { stdout } = await runCli(['status', '--config', configPath]);
+    if (/^live: pid=\d+/m.test(stdout)) {
+      enrollmentReady = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  if (!enrollmentReady) throw new Error('service never exposed its authenticated enrollment control endpoint');
+  console.log('PASS: service enrollment control endpoint is ready');
+
+  console.log('==> byok-agent pair through the service control endpoint');
+  await runCli(['pair', pairingCode, '--server', serverUrl, '--config', configPath]);
+  console.log('PASS: service-identity pair succeeded');
 
   console.log('==> byok-agent status --config <path> (a SEPARATE, short-lived invocation reaching the service-launched daemon)');
   let live = false;

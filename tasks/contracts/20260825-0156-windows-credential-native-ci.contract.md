@@ -32,12 +32,17 @@ behavior or changing package/release identity.
   - bounded non-secret native-provider diagnostics;
   - the Windows Credential Manager bridge and its focused unit/native tests;
   - Windows IPC/control-socket/WinSW smoke composition and CI workflow;
+  - an opt-in enrollment-only daemon mode and exact local control RPC so a
+    WinSW service performs pairing under the same Windows logon token that
+    later reads the Credential Manager entry;
   - a per-invocation, non-secret OS-temp C# console bridge whose real process
     exit replaces PowerShell result/exit propagation;
   - this plan, contract, notes, review and check projections.
 - Out of scope:
   - macOS/Linux provider semantics, Salesko source, package versions/lockfile, registry/tag/release/deploy/migration, real user credentials, and any plaintext/in-memory production fallback.
-  - No new dependency or public SDK API is expected.
+  - No new dependency is permitted. One additive daemon host-composition flag
+    and one local control method are allowed because the hosted Windows trace
+    proved process identity is part of the credential authority.
 - Taste constraints: no target name, enrollment field, request body, token,
   key, credential blob, or exception message may enter diagnostics. A numeric
   Win32 code or HRESULT is the maximum provider detail allowed. The approved
@@ -105,11 +110,18 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 allowed_paths:
   - .github/workflows/ci.yml
   - packages/client/src/daemon/device-credential-store.ts
+  - packages/client/src/daemon/create-daemon.ts
+  - packages/client/src/daemon/control-protocol.ts
+  - packages/client/src/bin/commands/pair.ts
   - packages/client/src/__tests__/device-credential-store.test.ts
   - packages/client/src/__tests__/device-credential-store.native.test.ts
+  - packages/client/src/__tests__/bin-commands.test.ts
+  - packages/client/src/__tests__/daemon-control-socket.test.ts
   - packages/client/scripts/ipc-smoke.mjs
   - packages/client/scripts/control-socket-check.mjs
   - templates/service/winsw/smoke-test.mjs
+  - templates/service/winsw/README.md
+  - docs/spec.md
   - plans/plan-20260825-0156-windows-credential-native-ci.md
   - tasks/todos.md
   - tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
@@ -169,6 +181,8 @@ exit_criteria:
   tests_pass:
     - path: packages/client/src/__tests__/device-credential-store.test.ts
     - path: packages/client/src/__tests__/device-credential-store.native.test.ts
+    - path: packages/client/src/__tests__/bin-commands.test.ts
+    - path: packages/client/src/__tests__/daemon-control-socket.test.ts
   commands_succeed:
     - bun run --filter @byok-sdk/client test -- src/__tests__/device-credential-store.test.ts src/__tests__/device-credential-store.native.test.ts
     - bun run --filter @byok-sdk/client typecheck
