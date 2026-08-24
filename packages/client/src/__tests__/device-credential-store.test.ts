@@ -96,6 +96,8 @@ describe('DeviceCredentialStore', () => {
     await expect(store.read()).resolves.toBeUndefined();
     expect(script).toContain('-OutputType ConsoleApplication');
     expect(script).toContain('public static int Main()');
+    expect(script).toContain('System.Runtime.InteropServices.ComTypes.FILETIME LastWritten');
+    expect(script).not.toContain('using System.Runtime.InteropServices.ComTypes');
     expect(script).toContain('TargetObject.ErrorNumber');
     expect(script).not.toMatch(/ErrorText|Exception\.Message|Out-String/u);
     expect(script).not.toMatch(/Environment\.Exit|::Execute|if\(\$code/u);

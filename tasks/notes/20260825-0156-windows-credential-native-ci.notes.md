@@ -150,6 +150,17 @@
   code change; `99` means the public record was unavailable and is itself a
   fail-closed result.
 
+### Exact classifier result
+
+- Subject `95b4f65060d689c3276d620b21cc1d8f16b0e1f2`, push run
+  `32775406792`, Windows IPC job `97585215791` returned
+  `stage=8,kind=3,hresult=104`, which is authoritative `CS0104`.
+- The source imported both `System.Runtime.InteropServices` and
+  `System.Runtime.InteropServices.ComTypes` while using unqualified `FILETIME`.
+  The smallest correction removes the ComTypes using directive and fully
+  qualifies only `System.Runtime.InteropServices.ComTypes.FILETIME`; no native
+  layout, credential request or provider result mapping changes.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |
