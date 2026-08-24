@@ -9,17 +9,19 @@ const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 // Version authority: the manifests, never a constant here. The expected
 // registry train is whatever packages/core ships, keys versions independently,
 // and the pi pin comes from packages/client.
-const exactVersion = /^\d+\.\d+\.\d+$/;
+const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const npmSafeDistTag = /^(?=.{1,214}$)[a-z][a-z0-9._-]*$/;
 const expectedVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
 const keysVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/keys/package.json'), 'utf8')).version;
 const piVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')).dependencies?.['@earendil-works/pi-coding-agent'];
-if (typeof expectedVersion !== 'string' || !exactVersion.test(expectedVersion)) {
-  throw new Error('packages/core/package.json: version must be an exact x.y.z release train version');
+if (typeof expectedVersion !== 'string' || !exactReleaseVersion.test(expectedVersion)) {
+  throw new Error('packages/core/package.json: version must be an exact SemVer release train version');
 }
-if (typeof keysVersion !== 'string' || !exactVersion.test(keysVersion)) {
-  throw new Error('packages/keys/package.json: version must be an exact x.y.z independent version');
+if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
+  throw new Error('packages/keys/package.json: version must be an exact SemVer independent version');
 }
-if (typeof piVersion !== 'string' || !exactVersion.test(piVersion)) {
+if (typeof piVersion !== 'string' || !exactStableVersion.test(piVersion)) {
   throw new Error('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
 }
 const packages = [
@@ -34,6 +36,11 @@ const packages = [
   'byok-sdk',
   '@byok-sdk/keys',
 ];
+// These are the stable sentinels for the beta release: a prerelease must not
+// advance npm's default channel even if every beta artifact is otherwise exact.
+const expectedLatestVersions = new Map(
+  packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? '0.3.0' : '0.7.0']),
+);
 const expectedPackageVersions = Object.fromEntries(
   packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? keysVersion : expectedVersion]),
 );
@@ -46,11 +53,48 @@ if (process.platform === 'win32' && !existsSync(npmCliPath)) {
   throw new Error(`Windows npm CLI entrypoint is missing: ${npmCliPath}`);
 }
 
-const manifestArgIndex = process.argv.indexOf('--manifest');
-const manifestPath = manifestArgIndex >= 0 ? process.argv[manifestArgIndex + 1] : undefined;
-if (!manifestPath || manifestPath.startsWith('--')) {
+function isPrereleaseVersion(version) {
+  if (typeof version !== 'string' || !exactReleaseVersion.test(version)) return false;
+  return version.slice(0, version.indexOf('+') === -1 ? version.length : version.indexOf('+')).includes('-');
+}
+
+function resolveReleaseDistTag(version, tag) {
+  if (!isPrereleaseVersion(version)) {
+    if (tag !== undefined) throw new Error(`stable release ${version} must not set --tag; omit it to retain npm's default latest behavior`);
+    return undefined;
+  }
+  if (typeof tag !== 'string' || !npmSafeDistTag.test(tag) || tag === 'latest') {
+    throw new Error(`prerelease ${version} requires a npm-safe non-latest --tag identifier`);
+  }
+  return tag;
+}
+
+function parseArguments(argv) {
+  let manifestPath;
+  let tag;
+  const seen = new Set();
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument !== '--manifest' && argument !== '--tag') {
+      if (argument.startsWith('--')) throw new Error(`unknown flag ${argument}`);
+      throw new Error(`unexpected argument ${argument}`);
+    }
+    if (seen.has(argument)) throw new Error(`${argument} may be provided only once`);
+    seen.add(argument);
+    const value = argv[index + 1];
+    if (!value || value.startsWith('--')) throw new Error(`${argument} requires a value`);
+    if (argument === '--manifest') manifestPath = value;
+    else tag = value;
+    index += 1;
+  }
+  return { manifestPath, tag };
+}
+
+const { manifestPath, tag: requestedTag } = parseArguments(process.argv.slice(2));
+if (!manifestPath) {
   throw new Error('--manifest requires the frozen release-manifest.json path');
 }
+const distTag = resolveReleaseDistTag(expectedVersion, requestedTag);
 const manifest = JSON.parse(readFileSync(path.resolve(manifestPath), 'utf8'));
 if (manifest.schemaVersion !== 2 || manifest.releaseVersion !== expectedVersion) {
   throw new Error('frozen release manifest schema/version mismatch');
@@ -88,6 +132,16 @@ for (const packageName of packages) {
   const frozen = frozenPackages.get(packageName);
   if (frozen.version !== packageVersion || typeof frozen.sha512Integrity !== 'string' || value.dist?.integrity !== frozen.sha512Integrity) {
     throw new Error(`${packageName}: registry tarball integrity differs from frozen artifact`);
+  }
+  if (distTag) {
+    const distTags = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'view', packageName, 'dist-tags', '--json']));
+    if (!distTags || typeof distTags !== 'object' || distTags[distTag] !== packageVersion) {
+      throw new Error(`${packageName}: registry dist-tag ${distTag} is ${JSON.stringify(distTags?.[distTag])}, expected ${packageVersion}`);
+    }
+    const expectedLatestVersion = expectedLatestVersions.get(packageName);
+    if (expectedLatestVersion && distTags.latest !== expectedLatestVersion) {
+      throw new Error(`${packageName}: registry latest is ${JSON.stringify(distTags.latest)}, expected stable ${expectedLatestVersion}`);
+    }
   }
   const maintainers = Array.isArray(value.maintainers) ? value.maintainers : [value.maintainers];
   if (!maintainers.some((entry) => String(typeof entry === 'string' ? entry : entry?.name).includes('ancienttwo'))) {

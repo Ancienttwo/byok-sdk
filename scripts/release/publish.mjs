@@ -18,14 +18,19 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const packagesDir = path.join(repoRoot, 'packages');
-const exactVersion = /^\d+\.\d+\.\d+$/;
+
+// Package releases accept one exact SemVer identity, including prereleases;
+// Pi is deliberately checked separately as a stable exact pin. A prerelease
+// is never allowed to inherit npm's implicit latest tag.
+export const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+export const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const npmSafeDistTag = /^(?=.{1,214}$)[a-z][a-z0-9._-]*$/;
 
 // Versions independently of the release train, so it is compared against its own
 // manifest version and never against the shared train version.
 const independentPackages = new Set(['@byok-sdk/keys']);
 
 const runtimeFields = ['dependencies', 'optionalDependencies', 'peerDependencies'];
-const knownFlags = new Set(['--execute', '--otp', '--out-dir']);
 
 const nodeBin = process.execPath;
 const npmCliPath = path.join(path.dirname(nodeBin), 'node_modules', 'npm', 'bin', 'npm-cli.js');
@@ -36,12 +41,66 @@ if (process.platform === 'win32' && !existsSync(npmCliPath)) {
   throw new Error(`Windows npm CLI entrypoint is missing: ${npmCliPath}`);
 }
 
-function flagValue(argv, flag) {
-  const index = argv.indexOf(flag);
-  if (index < 0) return undefined;
-  const value = argv[index + 1];
-  if (!value || value.startsWith('--')) throw new Error(`${flag} requires a value`);
-  return value;
+export function isPrereleaseVersion(version) {
+  if (typeof version !== 'string' || !exactReleaseVersion.test(version)) return false;
+  return version.slice(0, version.indexOf('+') === -1 ? version.length : version.indexOf('+')).includes('-');
+}
+
+export function resolveReleaseDistTag(version, tag) {
+  if (typeof version !== 'string' || !exactReleaseVersion.test(version)) {
+    throw new Error(`release version must be an exact SemVer version, got ${JSON.stringify(version)}`);
+  }
+  if (!isPrereleaseVersion(version)) {
+    if (tag !== undefined) throw new Error(`stable release ${version} must not set --tag; omit it to retain npm's default latest behavior`);
+    return undefined;
+  }
+  if (typeof tag !== 'string' || !npmSafeDistTag.test(tag) || tag === 'latest') {
+    throw new Error(`prerelease ${version} requires a npm-safe non-latest --tag identifier`);
+  }
+  return tag;
+}
+
+/** A prerelease may not resume an interrupted publish; every package must be new. */
+export function assertNoPartialPrereleaseRegistryState(entries, registryState, distTag) {
+  if (!distTag) return;
+  const published = entries.filter((entry) => registryState.get(entry.name));
+  if (published.length > 0 && published.length < entries.length) {
+    throw new Error(
+      `prerelease ${distTag} channel is partially published (${published.map((entry) => entry.name).join(', ')}); ` +
+        'refuse automatic continuation — publish a new exact prerelease version instead',
+    );
+  }
+}
+
+function parseArguments(argv) {
+  const parsed = { execute: false, otp: undefined, outDir: undefined, tag: undefined };
+  const valueFlags = new Map([
+    ['--otp', 'otp'],
+    ['--out-dir', 'outDir'],
+    ['--tag', 'tag'],
+  ]);
+  const seen = new Set();
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--execute') {
+      if (seen.has(argument)) throw new Error('--execute may be provided only once');
+      seen.add(argument);
+      parsed.execute = true;
+      continue;
+    }
+    const destination = valueFlags.get(argument);
+    if (!destination) {
+      if (argument.startsWith('--')) throw new Error(`unknown flag ${argument}`);
+      throw new Error(`unexpected argument ${argument}`);
+    }
+    if (seen.has(argument)) throw new Error(`${argument} may be provided only once`);
+    seen.add(argument);
+    const value = argv[index + 1];
+    if (!value || value.startsWith('--')) throw new Error(`${argument} requires a value`);
+    parsed[destination] = value;
+    index += 1;
+  }
+  return parsed;
 }
 
 /** Captures a command's output; a non-zero exit is a hard failure, never a signal to branch. */
@@ -68,8 +127,8 @@ export function readPublicManifests(directory) {
     if (!existsSync(manifestPath)) continue;
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     if (manifest.private === true) continue;
-    if (typeof manifest.name !== 'string' || !exactVersion.test(manifest.version ?? '')) {
-      throw new Error(`packages/${entry.name}/package.json: a public package needs a name and an exact x.y.z version`);
+    if (typeof manifest.name !== 'string' || !exactReleaseVersion.test(manifest.version ?? '')) {
+      throw new Error(`packages/${entry.name}/package.json: a public package needs a name and an exact SemVer version`);
     }
     manifests.set(manifest.name, { name: manifest.name, version: manifest.version, directory: `packages/${entry.name}`, manifest });
   }
@@ -136,16 +195,7 @@ function isPublished(name, version) {
 }
 
 async function main() {
-  const argv = process.argv.slice(2);
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (!argument.startsWith('--')) continue;
-    if (!knownFlags.has(argument)) throw new Error(`unknown flag ${argument}`);
-    if (argument !== '--execute') index += 1;
-  }
-  const execute = argv.includes('--execute');
-  const otp = flagValue(argv, '--otp');
-  const requestedOut = flagValue(argv, '--out-dir');
+  const { execute, otp, outDir: requestedOut, tag: requestedTag } = parseArguments(process.argv.slice(2));
   if (otp && !execute) throw new Error('--otp is only meaningful with --execute');
 
   // --- Step 1: version consistency + registry candidacy -------------------
@@ -160,6 +210,14 @@ async function main() {
         desynced.map((entry) => `${entry.directory} is ${entry.version}`).join(', '),
     );
   }
+  const distTag = resolveReleaseDistTag(trainVersion, requestedTag);
+  for (const entry of manifests.values()) {
+    if (isPrereleaseVersion(entry.version) !== Boolean(distTag)) {
+      throw new Error(
+        `${entry.name}@${entry.version}: every public package must match the release train's prerelease/tag channel`,
+      );
+    }
+  }
   console.log(`[release-publish] step 1/7: release train version ${trainVersion} across ${trainEntries.length} public package(s)`);
   for (const entry of manifests.values()) {
     if (independentPackages.has(entry.name)) console.log(`[release-publish] ${entry.name} versions independently at ${entry.version}`);
@@ -173,6 +231,7 @@ async function main() {
   for (const entry of manifests.values()) {
     registryState.set(entry.name, isPublished(entry.name, entry.version));
   }
+  assertNoPartialPrereleaseRegistryState([...manifests.values()], registryState, distTag);
   const trainPublished = trainEntries.filter((entry) => registryState.get(entry.name));
   if (trainPublished.length === trainEntries.length) {
     throw new Error(`release train version ${trainVersion} is already published for every public package — bump the version before releasing`);
@@ -257,6 +316,7 @@ async function main() {
         tarball,
         '--access',
         'public',
+        ...(distTag ? ['--tag', distTag] : []),
         ...(otp ? ['--otp', otp] : []),
       ]);
       console.log(`[release-publish] published ${entry.name}@${entry.version}`);
@@ -264,7 +324,12 @@ async function main() {
 
     // --- Step 7: registry readback ------------------------------------------
     console.log('[release-publish] step 7/7: registry readback');
-    stream(nodeBin, ['scripts/release/registry-readback.mjs', '--manifest', releaseManifestPath]);
+    stream(nodeBin, [
+      'scripts/release/registry-readback.mjs',
+      '--manifest',
+      releaseManifestPath,
+      ...(distTag ? ['--tag', distTag] : []),
+    ]);
     console.log(`[release-publish] OK: ${tag} tagged and ${plan.length} package(s) published and read back`);
   } finally {
     if (ephemeralRoot) rmSync(ephemeralRoot, { recursive: true, force: true });

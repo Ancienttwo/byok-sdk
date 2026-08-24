@@ -25,3 +25,21 @@ test('release pack includes keys and verifies its packed core edge', () => {
     'the pack manifest must retain keys as an independently versioned artifact',
   );
 });
+
+test('release pack accepts exact prerelease versions while Pi remains a stable pin', () => {
+  assert.match(
+    releasePackSource,
+    /const exactReleaseVersion = \/\^\(0\|\[1-9\]\\d\*\)/,
+    'SDK artifact versions must admit canonical SemVer prereleases',
+  );
+  assert.match(
+    releasePackSource,
+    /exactReleaseVersion\.test\(releaseVersion\)/,
+    'the release train must use the prerelease-aware validator',
+  );
+  assert.match(
+    releasePackSource,
+    /exactStableVersion\.test\(piVersion\)/,
+    'Pi must stay pinned to an exact stable version',
+  );
+});

@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-23 23:22
+> **Last Updated**: 2026-08-24 00:20
 > **Review File**: `tasks/reviews/20260823-2300-agent-egress-fresh-session-authority.review.md`
 > **Notes File**: `tasks/notes/20260823-2300-agent-egress-fresh-session-authority.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -32,10 +32,13 @@ the runtime-issued session against the durable canonical-home handoff.
 - In scope: protocol capability/message and golden contracts; client fresh
   admission plus exact handoff-backed reliable publishing; cloud/server
   durable capability admission and distinct enqueue/dispatch APIs; architecture
-  docs; focused/full tests; aligned source/RC package train and readback.
+  docs; focused/full tests; aligned prerelease package train; fail-closed SemVer
+  prerelease/dist-tag tooling; beta publication/readback; exact downstream
+  Salesko artifact acceptance.
 - Out of scope: changing the frozen v1 resume message; protocol v2; session
-  reservation state; downstream shadow handoffs; contentful egress; publish,
-  merge, push, deploy, production migration, secrets, or Agent-home deletion.
+  reservation state; downstream shadow handoffs; contentful egress; stable/latest
+  publication, merge, push, deploy, production migration, secrets, or Agent-home
+  deletion.
 - Taste constraints: fresh and resume are distinct wire facts; runtime owns the
   native session id; no missing/mismatched resume may become fresh execution.
 
@@ -46,7 +49,12 @@ the runtime-issued session against the durable canonical-home handoff.
 - Stop if Goal, Scope, or Exit Criteria are internally contradictory.
 - Stop if the implementation requires a cloud session table or data migration;
   revise P3 and this contract before expanding authority.
-- Stop before any npm publish, downstream dependency update, deployment,
+- Stop before any stable npm publish or `latest` mutation. Beta publication is
+  limited to the complete exact `0.8.0-beta.0` train plus keys `0.3.1-beta.0`
+  under dist-tag `beta`, after dry-run pack/install closure.
+- Stop if any beta package is partial, internal dependency edges skew, registry
+  integrity differs from the frozen manifest, or `latest` moves from 0.7.0.
+- Stop before downstream production dependency promotion, deployment,
   production mutation, secret change, or Agent-home deletion.
 
 ## Falsifier
@@ -121,6 +129,12 @@ allowed_paths:
   - packages/ui-runtime/package.json
   - packages/sdk/package.json
   - packages/keys/package.json
+  - scripts/release/check-package-graph.mjs
+  - scripts/release/pack-and-smoke.mjs
+  - scripts/release/pack-and-smoke.test.mjs
+  - scripts/release/publish.mjs
+  - scripts/release/beta-release.test.mjs
+  - scripts/release/registry-readback.mjs
 ```
 
 ## Evidence Requirements
@@ -184,6 +198,8 @@ exit_criteria:
     - bun run test
     - bun run check:release-graph
     - bun run check:release-pack
+    - npm view @byok-sdk/core@0.8.0-beta.0 version dist.integrity --json
+    - npm view @byok-sdk/keys@0.3.1-beta.0 version dist.integrity --json
     - repo-harness run check-task-workflow --strict
     - git diff --check
 ```
@@ -203,5 +219,7 @@ exit_criteria:
 
 - Commit / checkpoint: isolated branch `codex/agent-egress-fresh-session` from
   `3ff409337e6f8263934c45756ec28eebb1d66f73`.
-- Revert strategy: before publication, revert/delete only this isolated branch;
-  no persistent external state is part of the work package.
+- Revert strategy: before beta publication, revert/delete only this isolated
+  branch. After beta publication, do not promote the immutable prerelease and
+  leave `latest` unchanged; any correction uses a new beta version from a new
+  frozen subject.

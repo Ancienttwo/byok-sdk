@@ -44,11 +44,9 @@
 
 ## Open Questions
 
-- The RC is now the aligned dispatch/testkit/umbrella train `0.8.0` plus
-  independently versioned keys `0.3.1`, whose packed edge must close to core
-  `0.8.0`.  This follows the pre-1.0 MINOR rule for additive public API and a
-  tightened public client input. npm publication remains separately
-  unauthorized.
+- Stable promotion remains a separate release decision. The beta-first
+  downstream acceptance is complete; no further stable package is required to
+  validate the fresh/resume contract.
 
 ## Evidence Links
 
@@ -75,6 +73,45 @@
   fresh dispatch and makes taskId mandatory/exact before append/send. Focused
   server/client tests and both typechecks pass on the corrected tree; no
   AcceptanceReceipt was issued for the failed subject.
+- Beta-first release tooling now treats testkit as the ninth aligned manifest,
+  accepts exact SemVer prereleases while keeping Pi on an exact stable pin,
+  requires a safe non-`latest` dist-tag for prerelease publication, rejects a
+  partially published beta instead of resuming it, and checks every public
+  package's beta tag plus unchanged stable latest sentinel on readback. The
+  focused release-tool suite passes 8/8 and release graph closes nine aligned
+  manifests at 0.8.0-beta.0 plus keys 0.3.1-beta.0.
+
+## 2026-08-24 beta publication and registry closure
+
+- Frozen release source `18e9a8e2797b943cb2cb6b5ca5890208ced5305e`
+  produced the complete ten-tarball train and was tagged locally as
+  `v0.8.0-beta.0`. Nine aligned public packages were published at
+  0.8.0-beta.0 and `@byok-sdk/keys` at 0.3.1-beta.0, all under npm dist-tag
+  `beta`.
+- Registry readback verified the release-manifest integrity for every tarball,
+  exact internal dependency edges, one installed `@byok-sdk/core` version, and
+  declaration/install closure. Stable sentinels remained aligned packages
+  0.7.0 and keys 0.3.0; `latest` was not mutated.
+- Final typecheck passed. Two full-test attempts each hit a different known
+  environment-sensitive test: one Wrangler dry-run exceeded its 5 second
+  timeout by 176 ms, and one live SQLite WAL snapshot changed while the hosted
+  daemon owned it. Each exact failing file passed immediately in isolated
+  rerun (6/6 and 24/24 respectively); no product or test source was changed.
+- Registry availability is closed. This publication did not promote stable or
+  mutate `latest`; downstream acceptance is recorded separately below.
+
+## 2026-08-24 Salesko beta acceptance closure
+
+- Salesko exact-pinned the complete beta train from the public registry; no
+  `file:`, `link:` or git dependency was used and npm `latest` remained
+  unchanged.
+- The downstream source contract now dispatches a distinct fresh offer without
+  a cloud-authored session, persists the runtime-issued exact handoff before
+  started/egress facts, and keeps exact resume as a separate fail-closed path.
+- Salesko root verification, typed AcceptanceReceipt and an independent final
+  gate passed on the frozen combined subject. This closes downstream source
+  acceptance only; merge, stable promotion, deploy and production cutover are
+  still separate authorities.
 
 ## Promotion Filter
 
