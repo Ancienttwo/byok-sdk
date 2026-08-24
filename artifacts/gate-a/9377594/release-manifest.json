@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "releaseVersion": "0.8.1",
+  "sourceGitSha": "9377594ca6798e1d5726ffbef56ec45194cfca44",
+  "node": "v26.3.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "packages": [
+    {
+      "package": "@byok-sdk/core",
+      "version": "0.8.1",
+      "file": "byok-sdk-core-0.8.1.tgz",
+      "sha256": "cc0ac13027e31904d9ba5f3a699f05f335a6d3f2b86b9c4bd4c2705f479d4c34",
+      "sha512Integrity": "sha512-mMgptaL6lHBdl1PSZZuK8QP2qubhe9U5L6A9kud10572FZY/Qqi2Jxg2zAbhZakpvpkUzq0lAA6/evzCa/vKUw=="
+    },
+    {
+      "package": "@byok-sdk/protocol",
+      "version": "0.8.1",
+      "file": "byok-sdk-protocol-0.8.1.tgz",
+      "sha256": "9a2118f9a5dcacf0789de17ed180d71eb8c26bdd30143958085d8e986704bb2c",
+      "sha512Integrity": "sha512-6YnAeAptrmKdyDWtP5kyHSyklShrbpUvGusiinvKnKfCsD7g25TGVcFeh4MtOjK19GQqS7iocUlV8mXOqUnCWQ=="
+    },
+    {
+      "package": "@byok-sdk/server",
+      "version": "0.8.1",
+      "file": "byok-sdk-server-0.8.1.tgz",
+      "sha256": "c63b225f672960d64e9690d0b6d49898b282ee8dc5189f81b03ea690a3f7b9fc",
+      "sha512Integrity": "sha512-Dl3B4n48+TX7RTbrjafC7XhLAsVxB5+fmlyZV56DRfABq5h30DwqCSabT6yWpUR4EM/xyYp9xq01M8dH3/aj5w=="
+    },
+    {
+      "package": "@byok-sdk/cloud",
+      "version": "0.8.1",
+      "file": "byok-sdk-cloud-0.8.1.tgz",
+      "sha256": "20c2d6fbc4960aa1395a2f8e561dee49b15419a7939cc1f172c63b52673e7bd8",
+      "sha512Integrity": "sha512-WfB3HleJWe61CGKtu9rBJUG3EOgol1Ua1KrnUfBcxBBJLhZrvD0yjf9a9+Q9KOkFAKzmiQh/OjqIqRugddPthg=="
+    },
+    {
+      "package": "@byok-sdk/client",
+      "version": "0.8.1",
+      "file": "byok-sdk-client-0.8.1.tgz",
+      "sha256": "dbf420203d5e485c1a3fd6c3d2eeab65db06c1244bbd8b6bd64f8677f60368e6",
+      "sha512Integrity": "sha512-Wx4MAuegPqMDQzbZxGHu2upeuU0FKkLtoisntRMFkn+CMRkbk/a3eg4MJI9rAudU1uA5RKqR6gRHktNbblaICg=="
+    },
+    {
+      "package": "@byok-sdk/cloud-dataplane",
+      "version": "0.8.1",
+      "file": "byok-sdk-cloud-dataplane-0.8.1.tgz",
+      "sha256": "b1f1f6faca0b3e8f93f25908d80458be7bad89eeaf708d3dff506a2c45a84c06",
+      "sha512Integrity": "sha512-3YXnb60uobdrK6zGaYXoYkulPQN2Em6itnvt7YDUonKKZfNbc4NMc/qhrlabXu33tr4aVYRotxgtvHIVLKrH5Q=="
+    },
+    {
+      "package": "@byok-sdk/ui-runtime",
+      "version": "0.8.1",
+      "file": "byok-sdk-ui-runtime-0.8.1.tgz",
+      "sha256": "8f8d72e1ef67041fa7328e0cd13035c90592ea01607de48d233d05bf799437fd",
+      "sha512Integrity": "sha512-H49hNb/2F/hpE0AdvSpGWGVsSz0cghGcA367VQvFZS2+pPOeFbVEI4409WeHuk2dAUuxxLROD0krSbnVQiJluA=="
+    },
+    {
+      "package": "@byok-sdk/testkit",
+      "version": "0.8.1",
+      "file": "byok-sdk-testkit-0.8.1.tgz",
+      "sha256": "e9e6480c78a958f20fc4ded7a0c901de3bc4a08e7d9cf6a40b481189c99929d5",
+      "sha512Integrity": "sha512-jJB8Wig2faBu4ms7zBQswuMw6KIz2FbfWett0/kJSQuiSC/9bQlUuC69eGhQ4okGxsf6ywMXqV1RosBAodTuwg=="
+    },
+    {
+      "package": "byok-sdk",
+      "version": "0.8.1",
+      "file": "byok-sdk-0.8.1.tgz",
+      "sha256": "e17b1f87ca7f27b1af07b13068779d195751045ef5e00869cb36eab417a52771",
+      "sha512Integrity": "sha512-vMLH45BnD70aTexJHLiNQyud0yfh+N+T8C6ZeMdSNdwXFZjlTgLU0qbCi0SKtdh3hVZnVZHXIEBR/qeN+m+9OA=="
+    },
+    {
+      "package": "@byok-sdk/keys",
+      "version": "0.3.2",
+      "file": "byok-sdk-keys-0.3.2.tgz",
+      "sha256": "962842417823c721faa330875e2d28a376c93c375183e48a70d36cc86c17e1e4",
+      "sha512Integrity": "sha512-bGL9DzWNYBWOiZEFjT3LguhcczdszHyOp5NvJaYJcUAH1r7sFkgaysKionoF0wZvFaO+A2BQDYds677xR/l9EA=="
+    }
+  ]
+}

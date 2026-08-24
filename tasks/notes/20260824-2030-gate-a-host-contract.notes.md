@@ -232,3 +232,34 @@ classification. No real user credential provider was touched.
   corrected source, focused alias matrix, packed declaration/integrities and
   frozen Salesko subject. This closes relocation semantic acceptance only; the
   plan's older whole-package Gate A review row remains separate.
+
+## Whole-package independent finding and replacement RC
+
+- The first independent whole-package gate rejected the prior subject with two
+  HIGH findings. First, raw lexical `.` and `..` path segments were normalized
+  away by `path.resolve()` before relocation validation. Second, a valid OS
+  credential authority caused status/restart to hide or repair a legacy
+  secret-bearing `device.json` instead of requiring explicit re-pairing.
+- Corrected source `9377594ca6798e1d5726ffbef56ec45194cfca44`
+  rejects lexical dot segments for all four relocation inputs before
+  normalization. It validates the bounded projection before paired status and
+  lets `DeviceRecordRePairRequiredError` propagate through restart; only a
+  missing or valid-but-stale non-secret projection remains repairable.
+- Focused correction verification passed 56 tests with one intentional skip;
+  client TypeScript and `git diff --check` passed. The frozen full BYOK
+  build/typecheck/test/release-graph/strict-workflow envelope also passed.
+- Replacement unpublished RC is `artifacts/gate-a/9377594/`. Its release
+  manifest SHA-256 is
+  `c026228ab6737189a757ccf51a0b705f0cca3974e9028529a2e8de03058c3ee9`;
+  packed client SHA-256 is
+  `dbf420203d5e485c1a3fd6c3d2eeab65db06c1244bbd8b6bd64f8677f60368e6`.
+  Versions remain 0.8.1 and keys 0.3.2, so source SHA plus integrity remain the
+  artifact authority; no registry assertion is made.
+- A fresh disposable Salesko copy consumed only these exact tarballs. The
+  unchanged relocation subject `ba94b50f...0488` passed 1/1 with 7 assertions,
+  the Gate B matrix passed 45 with one intentional Postgres skip, Local Agent
+  TypeScript passed, and canonical `TMPDIR=/private/tmp bun run check` exited
+  0. No deliverable manifest or lockfile contains a `file:` dependency.
+- This evidence is ready for a fresh independent whole-package re-gate. It does
+  not self-authorize merge, push, publication, downstream pin, release, deploy,
+  migration or production cutover.

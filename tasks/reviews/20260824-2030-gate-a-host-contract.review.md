@@ -2,9 +2,9 @@
 
 > **Status**: Partial
 > **Gate B2 relocation verdict**: PASS
-> **Composite Gate A recommendation**: pending the pre-existing whole-package review row
-> **Implementation subject**: `64cd0607fd4a4e32986623eb25c513a3f81cd84a`
-> **Evidence projection**: `a270100`
+> **Composite Gate A recommendation**: pending replacement whole-package re-review
+> **Implementation subject**: `9377594ca6798e1d5726ffbef56ec45194cfca44`
+> **Evidence projection**: pending local evidence commit
 
 ## Independent Gate B2 review
 
@@ -42,3 +42,21 @@ The independent re-review returned PASS after checking:
 
 No review outcome authorizes merge, push, tag, npm publication, Salesko release,
 deployment, production migration, secret mutation or live Agent-home changes.
+
+## Whole-package review correction pending
+
+The first independent whole-package review returned FAIL on the prior subject:
+
+1. relocation accepted raw lexical `.` / `..` segments after normalization;
+2. status/restart hid or repaired a legacy secret-bearing `device.json` when a
+   valid OS credential authority existed.
+
+Replacement source `9377594ca6798e1d5726ffbef56ec45194cfca44`
+rejects raw dot segments before normalization, validates the non-secret
+projection before reporting paired status, and fails restart closed on a
+legacy/tampered projection. Full BYOK verification and exact packed-RC Salesko
+consumption passed and are recorded under `artifacts/gate-a/9377594/`.
+
+This section records the correction candidate only. Composite Gate A remains
+pending until a fresh independent reviewer returns a verdict on this exact
+source and evidence projection.
