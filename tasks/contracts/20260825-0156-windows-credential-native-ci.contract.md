@@ -37,8 +37,8 @@ behavior or changing package/release identity.
   - macOS/Linux provider semantics, Salesko source, package versions/lockfile, registry/tag/release/deploy/migration, real user credentials, and any plaintext/in-memory production fallback.
   - No new dependency or public SDK API is expected.
 - Taste constraints: no target name, enrollment field, request body, token,
-  key, or credential blob may enter diagnostics. A numeric native error code is
-  the maximum provider detail allowed.
+  key, credential blob, or exception message may enter diagnostics. A numeric
+  Win32 code or HRESULT is the maximum provider detail allowed.
 
 ## Stop Conditions
 

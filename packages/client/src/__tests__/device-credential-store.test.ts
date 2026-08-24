@@ -82,6 +82,18 @@ describe('DeviceCredentialStore', () => {
     );
   });
 
+  it('surfaces only a bounded Windows HRESULT when no native code is available', async () => {
+    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'credential operation failed (hresult=-2146233087)',
+    });
+    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    await expect(store.read()).rejects.toThrow(
+      'operating-system credential provider could not read device credentials (hresult=-2146233087)',
+    );
+  });
+
   it('does not echo unowned provider stderr into the error', async () => {
     const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
       exitCode: 1,

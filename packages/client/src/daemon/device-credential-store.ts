@@ -40,8 +40,8 @@ const ENCODED_PREFIX = 'byok-device-credential-v1:';
 const NOT_FOUND = 44;
 
 function providerDiagnostic(stderr: string): string {
-  const match = /^credential operation failed \(win32=(\d{1,10})\)$/u.exec(stderr.trim());
-  return match === null ? '' : ` (win32=${match[1]})`;
+  const match = /^credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11})\)$/u.exec(stderr.trim());
+  return match === null ? '' : ` (${match[1]})`;
 }
 
 /** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
@@ -294,5 +294,5 @@ public static class ByokDeviceCredential {
  public static bool Delete(string t) { if(D(t,1,0)) return true; if(Marshal.GetLastWin32Error()==1168) return false; throw new Win32Exception(Marshal.GetLastWin32Error()); }
 }
 "@
-try { $r=([Console]::In.ReadToEnd()|ConvertFrom-Json); if($r.operation -eq 'replace'){[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,[Convert]::FromBase64String([string]$r.secret_base64));exit 0}; if($r.operation -eq 'read'){$b=[ByokDeviceCredential]::Get([string]$r.target);if($null -eq $b){exit 44};[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b));exit 0}; if($r.operation -eq 'clear'){if([ByokDeviceCredential]::Delete([string]$r.target)){exit 0};exit 44};exit 2 } catch { $e=$_.Exception; $code=$null; while($null -ne $e){if($e -is [ComponentModel.Win32Exception]){$code=$e.NativeErrorCode;break};$e=$e.InnerException}; if($null -eq $code){[Console]::Error.Write('credential operation failed')}else{[Console]::Error.Write(('credential operation failed (win32={0})' -f $code))}; exit 1 }
+try { $r=([Console]::In.ReadToEnd()|ConvertFrom-Json); if($r.operation -eq 'replace'){[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,[Convert]::FromBase64String([string]$r.secret_base64));exit 0}; if($r.operation -eq 'read'){$b=[ByokDeviceCredential]::Get([string]$r.target);if($null -eq $b){exit 44};[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b));exit 0}; if($r.operation -eq 'clear'){if([ByokDeviceCredential]::Delete([string]$r.target)){exit 0};exit 44};exit 2 } catch { $root=$_.Exception; $e=$root; $code=$null; while($null -ne $e){if($e -is [System.ComponentModel.Win32Exception]){$code=$e.NativeErrorCode;break};$e=$e.InnerException}; if($null -ne $code){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code))}elseif($null -ne $root){[Console]::Error.Write(('credential operation failed (hresult={0})' -f $root.HResult))}else{[Console]::Error.Write('credential operation failed')}; exit 1 }
 `, 'utf16le').toString('base64');

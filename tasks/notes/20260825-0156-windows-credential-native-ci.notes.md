@@ -56,6 +56,12 @@
   failed on the missing `@byok-sdk/core` dist entry. The probe is sequenced
   after the existing build step; this is test setup evidence, not native root
   cause evidence.
+- The sequenced native probe reached `DeviceCredentialStore.read()` but still
+  emitted only the generic error. The diagnostic catch used the PowerShell type
+  literal `[ComponentModel.Win32Exception]`; that shorthand is not a stable
+  PowerShell type authority and can itself mask the nested provider exception.
+  The next probe uses `[System.ComponentModel.Win32Exception]` and falls back
+  only to the outer numeric HRESULT, never the exception message.
 
 ## Promotion Filter
 
