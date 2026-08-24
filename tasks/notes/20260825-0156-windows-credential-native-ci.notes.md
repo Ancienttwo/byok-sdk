@@ -62,13 +62,18 @@
   the primitive-return method and emits only static numeric stage/kind/HRESULT
   from C#. PowerShell exits directly on the negative sentinel instead of
   synthesizing a Win32 code.
-- Root cause is the PowerShell control flow, not Credential Manager availability:
-  the script executed `exit 44` for `ERROR_NOT_FOUND` inside its broad `try`, and
-  PowerShell surfaced that exit as the caught `COR_E_SYSTEM`. Every success and
-  absence exit had the same latent defect. The repair accumulates a provider
-  process exit code and calls `exit` exactly once after `catch`; a local static
-  guard freezes that placement while the Windows native test remains the real
-  behavioral acceptance.
+- Moving provider process exit outside the PowerShell `try/catch` was a valid
+  control-flow hardening but did not remove the hosted failure. The exact rerun
+  still returned `stage=4,kind=4,hresult=-2146233087` before the native probe
+  could observe absence. Therefore the earlier exit-catch root-cause hypothesis
+  is rejected; the static guard remains useful, but it is not acceptance.
+- The three new exact-head repair runs are exhausted. The current outer
+  classifier is insufficient because PowerShell wraps method exceptions in
+  `RuntimeException`, and the `SystemException` check precedes the more specific
+  wrapper/inner classification. The next type-specific work package must map
+  only the deepest `InnerException` and a bounded `FullyQualifiedErrorId` enum,
+  then choose one correction from that evidence. It may not print messages,
+  stack traces, target names, request fields or credential bytes.
 
 ## Deviations From Plan Or Spec
 
@@ -85,8 +90,9 @@
 
 ## Open Questions
 
-- Whether the primitive-return bridge closes the full native and cross-process
-  round trip remains owned by the next exact Windows CI run.
+- Which deepest static exception kind/FullyQualifiedErrorId sits under the
+  outer PowerShell `COR_E_SYSTEM` remains unproved. No further production
+  mutation is allowed until that bounded classifier is observed once.
 
 ## Evidence Links
 

@@ -5,7 +5,7 @@
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Notes File**: tasks/notes/20260825-0156-windows-credential-native-ci.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-25 03:36
+> **Last Updated**: 2026-08-25 03:55
 > **Recommendation**: fail
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
@@ -19,8 +19,8 @@
 - Intended files changed: Windows credential bridge, native falsifier, CI wiring and task artifacts only
 - Actual files changed: intended files only; no manifest, lockfile, Salesko or release files
 - Commands passed: focused client tests, client typecheck, workflow YAML parse, strict task workflow, `git diff --check`
-- Residual risks: hosted Windows `CredReadW` throws non-Win32 `COR_E_SYSTEM` before the absent-target contract can be observed
-- Reviewer action required: none until a new bounded native-instrumentation slice is approved
+- Residual risks: hosted Windows still reports only an outer PowerShell `COR_E_SYSTEM`; the deepest exception kind is not yet observed
+- Reviewer action required: require a new bounded deepest-inner classifier before any further production correction
 - Rollback: revert this slice to `d0940f131cac4df44be506dc9d05153f1fb58e2f`
 
 ## Mode Evidence
@@ -81,13 +81,14 @@ screenshot/artifact path, or reviewer observation.
 
 ## Failing Items
 
-- Native Windows absent-target read fails at static bridge stage 4 with bounded
-  `kind=4,hresult=-2146233087`; no round trip, IPC smoke or WinSW control-socket
-  acceptance exists.
+- Native Windows absent-target read still fails at static bridge stage 4 with
+  outer `kind=4,hresult=-2146233087`; primitive return, C# internal catches and
+  moving process exit outside the outer catch did not expose the deepest cause.
+  No round trip, IPC smoke or WinSW control-socket acceptance exists.
 
 ## Retest Steps
 
-- Re-run: only after a new approved type-specific native diagnostic/fix slice
+- Re-run: only after a bounded deepest-inner/FullyQualifiedErrorId classifier is frozen
 - Re-check: native round trip, then exact Windows IPC and WinSW jobs
 
 ## Summary
