@@ -118,6 +118,15 @@
   only the invocation's static script line/offset and numeric `ErrorCategory`,
   plus exact PowerShell source-owned method error IDs. This is the final
   classifier attempt: its location selects the production boundary to remove.
+- The final tuple is
+  `stage=4,kind=15,source=99,mode=1,line=31,offset=9,category=7,depth=0`.
+  Static script line 30 is the successful C# `Get` invocation; line 31 is the
+  PowerShell `if($code ...)` return-code mapping. The root cause is therefore
+  PowerShell interpretation of the native bridge return, not Credential
+  Manager, service/session composition or C# method invocation. The selected
+  production fix moves operation/Win32 exit mapping into C# and calls
+  `Environment.Exit` only inside the spawned PowerShell child. PowerShell keeps
+  JSON stdin parsing but no longer authors native result semantics.
 
 ## Evidence Links
 

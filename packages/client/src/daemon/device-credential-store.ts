@@ -40,7 +40,7 @@ const ENCODED_PREFIX = 'byok-device-credential-v1:';
 const NOT_FOUND = 44;
 
 function providerDiagnostic(stderr: string): string {
-  const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},source=\d{1,2},mode=\d{1,2},line=\d{1,4},offset=\d{1,3},category=\d{1,2},depth=\d{1,2},hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},source=\d{1,2},mode=\d{1,2},depth=\d{1,2},hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},source=\d{1,2},depth=\d{1,2},hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},hresult=-?\d{1,11})\)/u.exec(stderr);
+  const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},hresult=-?\d{1,11})\)/u.exec(stderr);
   return match === null ? '' : ` (${match[1]})`;
 }
 
@@ -294,49 +294,11 @@ public static class ByokDeviceCredential {
  private static int Failure(int stage,Exception e) { Console.Error.Write("credential operation failed (stage="+stage+",kind="+Kind(e)+",hresult="+e.HResult+")"); return -1; }
  public static int Get(string t) { IntPtr p=IntPtr.Zero; bool found; try { found=R(t,1,0,out p); } catch(Exception e) { return Failure(1,e); } if(!found) return Marshal.GetLastWin32Error(); int code=0; try { C c=(C)Marshal.PtrToStructure(p,typeof(C)); byte[] b=new byte[c.CredentialBlobSize]; if(b.Length>0) { Marshal.Copy(c.CredentialBlob,b,0,b.Length); using(var output=Console.OpenStandardOutput()) { output.Write(b,0,b.Length); output.Flush(); } } } catch(Exception e) { code=Failure(2,e); } try { CredFree(p); } catch(Exception e) { return Failure(3,e); } return code; }
  public static int Delete(string t) { if(D(t,1,0)) return 0; return Marshal.GetLastWin32Error(); }
+ private static int ExitFor(int code) { if(code==0)return 0;if(code==1168)return 44;if(code<0)return 1;Console.Error.Write("credential operation failed (win32="+code+")");return 1; }
+ public static void Execute(string operation,string target,string username,string secretBase64) { int stage=1;int exitCode=2;byte[] secret=null;try { if(operation=="replace") { stage=2;secret=Convert.FromBase64String(secretBase64);stage=3;exitCode=ExitFor(Set(target,username,secret)); } else if(operation=="read") { stage=4;exitCode=ExitFor(Get(target)); } else if(operation=="clear") { stage=6;exitCode=ExitFor(Delete(target)); } } catch(Exception e) { Failure(stage,e);exitCode=1; } finally { if(secret!=null)Array.Clear(secret,0,secret.Length); } Environment.Exit(exitCode); }
 }
 "@
-$stage=1
-$exitCode=2
-$mode=99
-if($ExecutionContext.SessionState.LanguageMode -eq [System.Management.Automation.PSLanguageMode]::FullLanguage){$mode=1}elseif($ExecutionContext.SessionState.LanguageMode -eq [System.Management.Automation.PSLanguageMode]::RestrictedLanguage){$mode=2}elseif($ExecutionContext.SessionState.LanguageMode -eq [System.Management.Automation.PSLanguageMode]::ConstrainedLanguage){$mode=3}elseif($ExecutionContext.SessionState.LanguageMode -eq [System.Management.Automation.PSLanguageMode]::NoLanguage){$mode=4}
-try {
- $r=([Console]::In.ReadToEnd()|ConvertFrom-Json)
- if($r.operation -eq 'replace'){
-  $stage=2
-  $secret=[Convert]::FromBase64String([string]$r.secret_base64)
-  $stage=3
-  $code=[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,$secret)
-  if($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));$exitCode=1}else{$exitCode=0}
- } elseif($r.operation -eq 'read'){
-  $stage=4
-  $code=[ByokDeviceCredential]::Get([string]$r.target)
-  if($code -eq 1168){$exitCode=44}elseif($code -lt 0){$exitCode=1}elseif($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));$exitCode=1}else{$exitCode=0}
- } elseif($r.operation -eq 'clear'){
-  $stage=6
-  $code=[ByokDeviceCredential]::Delete([string]$r.target)
-  if($code -eq 1168){$exitCode=44}elseif($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));$exitCode=1}else{$exitCode=0}
- }
-} catch {
- $root=$_.Exception
- $e=$root
- $code=$null
- while($null -ne $e){if($e -is [System.ComponentModel.Win32Exception]){$code=$e.NativeErrorCode;break};$e=$e.InnerException}
- if($null -ne $code){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code))}elseif($null -ne $root){
-  $leaf=$root
-  $depth=0
-  while($null -ne $leaf.InnerException -and $depth -lt 8){$leaf=$leaf.InnerException;$depth++}
-  $kind=99
-  if($leaf -is [System.DllNotFoundException]){$kind=1}elseif($leaf -is [System.EntryPointNotFoundException]){$kind=2}elseif($leaf -is [System.BadImageFormatException]){$kind=3}elseif($leaf -is [System.Runtime.InteropServices.MarshalDirectiveException]){$kind=4}elseif($leaf -is [System.Runtime.InteropServices.SEHException]){$kind=5}elseif($leaf -is [System.AccessViolationException]){$kind=6}elseif($leaf -is [System.TypeInitializationException]){$kind=7}elseif($leaf -is [System.TypeLoadException]){$kind=8}elseif($leaf -is [System.InvalidCastException]){$kind=9}elseif($leaf -is [System.ArgumentException]){$kind=10}elseif($leaf -is [System.InvalidOperationException]){$kind=11}elseif($leaf -is [System.ComponentModel.Win32Exception]){$kind=12}elseif($leaf -is [System.Management.Automation.MethodInvocationException]){$kind=13}elseif($leaf -is [System.Management.Automation.MethodException]){$kind=14}elseif($leaf -is [System.Management.Automation.RuntimeException]){$kind=15}elseif($leaf.GetType() -eq [System.SystemException]){$kind=16}elseif($leaf -is [System.SystemException]){$kind=17}
-  $source=99
-  $fqid=[string]$_.FullyQualifiedErrorId
-  if($fqid -eq 'MethodInvocationException'){$source=1}elseif($fqid -eq 'MethodException'){$source=2}elseif($fqid -eq 'NativeCommandError'){$source=3}elseif($fqid -eq 'RuntimeException'){$source=4}elseif($fqid -eq 'MethodInvocationNotSupportedInConstrainedLanguage'){$source=5}elseif($fqid -eq 'NoMethodInvocationInRestrictedLanguageMode'){$source=6}elseif($fqid -eq 'DotNetMethodTargetInvocation'){$source=7}elseif($fqid -eq 'DotNetMethodException'){$source=8}elseif($fqid -eq 'MethodCountCouldNotFindBest'){$source=9}elseif($fqid -eq 'MethodArgumentConversionInvalidCastArgument'){$source=10}
-  $line=[int]$_.InvocationInfo.ScriptLineNumber
-  $offset=[int]$_.InvocationInfo.OffsetInLine
-  $category=[int]$_.CategoryInfo.Category
-  [Console]::Error.Write(('credential operation failed (stage={0},kind={1},source={2},mode={3},line={4},offset={5},category={6},depth={7},hresult={8})' -f $stage,$kind,$source,$mode,$line,$offset,$category,$depth,$leaf.HResult))
- }else{[Console]::Error.Write('credential operation failed')}
- $exitCode=1
-}
-exit $exitCode
+$r=([Console]::In.ReadToEnd()|ConvertFrom-Json)
+[ByokDeviceCredential]::Execute([string]$r.operation,[string]$r.target,[string]$r.username,[string]$r.secret_base64)
+exit 2
 `, 'utf16le').toString('base64');

@@ -60,7 +60,7 @@ describe('DeviceCredentialStore', () => {
     await expect(store.read()).resolves.toEqual(credentials);
   });
 
-  it('keeps the Windows provider process exit outside its PowerShell catch', async () => {
+  it('keeps Windows return-code ownership inside the native bridge process', async () => {
     let script = '';
     const run: DeviceCommandRunner = async (_executable, args) => {
       script = Buffer.from(args.at(-1) ?? '', 'base64').toString('utf16le');
@@ -69,8 +69,9 @@ describe('DeviceCredentialStore', () => {
     const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
 
     await expect(store.read()).resolves.toBeUndefined();
-    expect(script.match(/\bexit\b/gu)).toHaveLength(1);
-    expect(script.trimEnd()).toMatch(/\}\s*exit \$exitCode$/u);
+    expect(script).toContain('Environment.Exit(exitCode)');
+    expect(script).not.toMatch(/if\(\$code|exit \$exitCode/u);
+    expect(script.trimEnd()).toMatch(/\[ByokDeviceCredential\]::Execute\([^\n]+\)\s*exit 2$/u);
   });
 
   it('does not classify a Linux provider error as a missing credential', async () => {
@@ -117,45 +118,6 @@ describe('DeviceCredentialStore', () => {
     const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
     await expect(store.read()).rejects.toThrow(
       'operating-system credential provider could not read device credentials (stage=4,kind=2,hresult=-2146233087)',
-    );
-    await expect(store.read()).rejects.not.toThrow(/unowned prefix|unowned suffix/u);
-  });
-
-  it('surfaces only bounded deepest-exception classifier fields', async () => {
-    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'unowned prefix\ncredential operation failed (stage=4,kind=13,source=1,depth=2,hresult=-2146233087)\nunowned suffix',
-    });
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-    await expect(store.read()).rejects.toThrow(
-      'operating-system credential provider could not read device credentials (stage=4,kind=13,source=1,depth=2,hresult=-2146233087)',
-    );
-    await expect(store.read()).rejects.not.toThrow(/unowned prefix|unowned suffix/u);
-  });
-
-  it('surfaces only bounded PowerShell language-mode classifier fields', async () => {
-    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'unowned prefix\ncredential operation failed (stage=4,kind=15,source=5,mode=3,depth=0,hresult=-2146233087)\nunowned suffix',
-    });
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-    await expect(store.read()).rejects.toThrow(
-      'operating-system credential provider could not read device credentials (stage=4,kind=15,source=5,mode=3,depth=0,hresult=-2146233087)',
-    );
-    await expect(store.read()).rejects.not.toThrow(/unowned prefix|unowned suffix/u);
-  });
-
-  it('surfaces only bounded static script-location classifier fields', async () => {
-    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'unowned prefix\ncredential operation failed (stage=4,kind=15,source=99,mode=1,line=29,offset=3,category=7,depth=0,hresult=-2146233087)\nunowned suffix',
-    });
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
-    await expect(store.read()).rejects.toThrow(
-      'operating-system credential provider could not read device credentials (stage=4,kind=15,source=99,mode=1,line=29,offset=3,category=7,depth=0,hresult=-2146233087)',
     );
     await expect(store.read()).rejects.not.toThrow(/unowned prefix|unowned suffix/u);
   });
