@@ -102,10 +102,12 @@ second admission authority.
 - [x] Make public client declarations credential-blind and update CLI/readback.
 - [x] Add strict local admission and server/cloud scheduling defenses.
 - [x] Add focused regression, declaration, lifecycle, and producer tests.
-- [ ] Freeze a clean source commit; pack current-version local RC and generate
+- [x] Freeze a clean source commit; pack current-version local RC and generate
   manifest/integrity/readback evidence.
-- [ ] Run disposable Phase B Salesko consumption with exact tarballs, then full
-  required verification once after source freeze.
+- [x] Run disposable Phase B Salesko consumption with exact tarballs and full
+  source verification once after source freeze.
+- [ ] Obtain independent review and resolve the pre-existing, read-only Salesko
+  root-only consumer failure before declaring composite Gate A acceptance.
 
 ## Rollback
 

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "artifactLabel": "gate-a-bdc601a",
+  "unpublishedLocalRc": true,
+  "sourceGitSha": "bdc601aeec27c6bdaae6cc84740ee1ee811cd497",
+  "versionIdentity": {
+    "releaseTrain": "0.8.1",
+    "keys": "0.3.2",
+    "authority": "sourceGitSha plus release-manifest package integrity",
+    "registryRuntimeVersionMayCollide": true,
+    "releaseAssertion": "none; this artifact is not published, tagged, or deployed"
+  },
+  "packageManifest": {
+    "file": "release-manifest.json",
+    "sha256": "93a96d6b683c3f173ad3c79886429d2ec41f4e7dd3138103432d1093474c94e2"
+  },
+  "frozenDownstreamAuthorities": {
+    "ga01DeviceCredentialSubjectSha256": "cba06056cbda569e8e8e0f99c80b9d341d8ae593638a984198d434e976c0a886",
+    "ga02StrictAdmissionSubjectSha256": "a3c498868313bfac8b3a620d4759b21060f29bdad31179030bd3aae740a75179",
+    "saleskoGateACompositeSha256": "ff8b75fe884769208190adef9705a92184ea0704c403b2ca2a92afc9d8c70635"
+  },
+  "phaseBConsumerSubject": {
+    "file": "phase-b-strict-agent-admission.consumer.test.ts",
+    "sha256": "dee410fe02786c922ec586b9f4a9689d0ba212d63dc4c2536f6d98aafea07f27",
+    "reason": "The immutable GA-02 subject intentionally remains a pre-fix red falsifier because its host composition does not set strictAgentOnly."
+  },
+  "consumerInstall": {
+    "scope": "disposable Salesko copy only",
+    "dependencyMode": "exact file tarballs temporarily written outside both deliverable worktrees",
+    "deliverableManifestOrLockContainsFileDependency": false
+  }
+}

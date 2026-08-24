@@ -40,3 +40,48 @@ clean frozen source SHA; focused tests run during development.
 - `bun run build` passed and the built client root declaration only re-exports
   `DeviceEnrollment`, status, and cold-read options; it contains none of the
   secret store, record, auth-manager, or signer names.
+
+## Frozen source and local RC evidence
+
+- Clean source commit: `bdc601aeec27c6bdaae6cc84740ee1ee811cd497`
+  (`feat(client): enforce Gate A host contract`). No package manifest or
+  `bun.lock` change was made.
+- The one post-freeze execution of `bun run build`, `bun run typecheck`, and
+  `bun run test` passed. Client: 1,403 passed / 1 skipped; cloud: 210 passed;
+  server: 263 passed; protocol: 334 passed. The intentional existing
+  cross-process SQLite scenario remains skipped only under the process-local
+  credential test double.
+- `bun run check:release-graph` passed. The clean-source pack command
+  `node scripts/release/pack-and-smoke.mjs --out-dir artifacts/gate-a/bdc601a`
+  passed its isolated install/import smoke and wrote all ten tarballs plus
+  `release-manifest.json`.
+- `artifacts/gate-a/bdc601a/gate-a-manifest.json` explicitly marks
+  `unpublishedLocalRc: true`; version identity is deliberately current
+  `0.8.1` (`keys` `0.3.2`) and authority is source SHA plus tarball integrity,
+  not a registry/runtime version assertion. Packed client declaration and
+  dependency readback found no secret internal root export and no file/link/git
+  dependency edge.
+
+## Disposable Salesko consumer evidence
+
+- A copied read-only consumer at `/tmp/byok-gate-a-salesko-RZB8ol` installed
+  only exact Gate A tarballs through temporary `file:` entries. That copy's
+  manifest/lock are not deliverables and will be removed after handoff.
+- Frozen GA-01 (`cba060…0a886`) passed: its paired `device.json` contained no
+  access token or private-key property. Runtime-session lease consumer also
+  passed 6 tests with the exact tarballs.
+- Frozen GA-02 (`a3c498…75179`) remains intentionally red: it never sets
+  `strictAgentOnly`, so both legacy variants still start the recording adapter
+  and create workspace directories. Its contents and hash were not changed.
+  The separate archived Phase B subject
+  `phase-b-strict-agent-admission.consumer.test.ts`
+  (`dee410fe…07f27`) passed both variants: exact tarballs advertised
+  `strict-agent-only`, and the producer rejected before durable task creation.
+- The unrelated frozen `root-only.falsifier.ts` failed in the untouched Salesko
+  consumer because `workspaceRoot`/`storeDir` are not both contained by its
+  supplied `SALESKO_HOME`. This is a Salesko host-root contract gap outside the
+  two authorized generic SDK changes; do not treat the composite Gate A
+  acceptance as complete until its owner resolves or re-scopes it.
+- `repo-harness run check-task-workflow --strict` passed after evidence
+  scaffolding. Independent review/semantic acceptance has not been authored by
+  this implementation worker.
