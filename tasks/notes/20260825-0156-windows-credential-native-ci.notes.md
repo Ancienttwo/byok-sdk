@@ -161,6 +161,21 @@
   qualifies only `System.Runtime.InteropServices.ComTypes.FILETIME`; no native
   layout, credential request or provider result mapping changes.
 
+### CS0104 correction result and WinSW readiness trace
+
+- Subject `ec89a32340e09a8db2daf2d2d7a04ddd0e7548d6`, exact push run
+  `32775632097`: Windows IPC job `97585953752` passed the native round trip and
+  real IPC smoke. This proves absent -> replace -> separate-process read ->
+  clear through Credential Manager.
+- WinSW job `97585953473` separately proved pair success, WinSW install/start/
+  stop/restart/uninstall and SCM `RUNNING`; it then queried status immediately
+  and observed `no control.token found`. The new executable compiler/read adds
+  bounded cold-start work before the daemon publishes its control server, so
+  SCM wrapper running is not daemon-readiness authority.
+- The smoke now polls the actual `live: pid=<number>` status for at most 15
+  seconds. It does not relax product timeouts, infer readiness from SCM state,
+  inspect logs, or change daemon/service behavior.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |

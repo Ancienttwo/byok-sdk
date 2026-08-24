@@ -135,9 +135,18 @@ try {
   console.log('PASS: service is running');
 
   console.log('==> byok-agent status --config <path> (a SEPARATE, short-lived invocation reaching the service-launched daemon)');
-  const { stdout } = await runCli(['status', '--config', configPath]);
-  console.log(stdout.trim());
-  if (!/^live: pid=\d+/m.test(stdout)) {
+  let live = false;
+  let statusStdout = '';
+  for (let attempt = 0; attempt < 15; attempt++) {
+    ({ stdout: statusStdout } = await runCli(['status', '--config', configPath]));
+    if (/^live: pid=\d+/m.test(statusStdout)) {
+      live = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  console.log(statusStdout.trim());
+  if (!live) {
     throw new Error('expected a live "live: pid=..." control-socket status line from the service-launched daemon');
   }
   console.log('PASS: control socket answered a live status request from a SERVICE-launched daemon');
