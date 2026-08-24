@@ -12,17 +12,18 @@ const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 // version is whatever packages/core ships, keys versions independently, and
 // the pi pin comes from packages/client. Every assertion below compares
 // against these derived values.
-const exactVersion = /^\d+\.\d+\.\d+$/;
+const exactStableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const exactReleaseVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const releaseVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/core/package.json'), 'utf8')).version;
 const keysVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/keys/package.json'), 'utf8')).version;
 const piVersion = JSON.parse(readFileSync(path.join(repoRoot, 'packages/client/package.json'), 'utf8')).dependencies?.['@earendil-works/pi-coding-agent'];
-if (typeof releaseVersion !== 'string' || !exactVersion.test(releaseVersion)) {
-  throw new Error('packages/core/package.json: version must be an exact x.y.z release train version');
+if (typeof releaseVersion !== 'string' || !exactReleaseVersion.test(releaseVersion)) {
+  throw new Error('packages/core/package.json: version must be an exact SemVer release train version');
 }
-if (typeof keysVersion !== 'string' || !exactVersion.test(keysVersion)) {
-  throw new Error('packages/keys/package.json: version must be an exact x.y.z independent version');
+if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
+  throw new Error('packages/keys/package.json: version must be an exact SemVer independent version');
 }
-if (typeof piVersion !== 'string' || !exactVersion.test(piVersion)) {
+if (typeof piVersion !== 'string' || !exactStableVersion.test(piVersion)) {
   throw new Error('packages/client/package.json: @earendil-works/pi-coding-agent must be pinned to an exact x.y.z version');
 }
 const packages = [

@@ -109,22 +109,22 @@ Close the published 0.7.0 fresh-Agent deadlock without weakening protocol v1: a 
 - Cloud/server enqueue fresh offers only to devices durably declaring the new capability. Older 0.7 daemons never receive the new message.
 - Public reliable egress cannot publish an invented session: it proves the supplied runtime/session against the canonical Agent-home handoff before durable append/send.
 - A real client/server test proves fresh offer -> runtime-minted session -> durable handoff -> reliable spool/ack; negative tests cover legacy capability, fake preseed, resume mismatch, restart/exact ack and no content bytes.
-- Build, typecheck, full tests, disposable dataplane where affected, pack/readback and independent frozen-subject gate pass. No npm publish, merge, push, deploy, production migration, secret change or Agent-home deletion occurs.
+- Build, typecheck, full tests, disposable dataplane where affected, pack/readback and independent frozen-subject gate pass. The complete prerelease train may publish only as `0.8.0-beta.0` plus keys `0.3.1-beta.0` under npm dist-tag `beta`; stable/latest, merge, push, deploy, production migration, secret change and Agent-home deletion remain excluded.
 
 ## Scope
 
 - Architecture/spec/protocol documentation for fresh versus resume session authority.
 - `packages/protocol`, `packages/client`, `packages/cloud`, `packages/server`, aligned package exports/manifests and directly affected tests.
 - `packages/cloud-dataplane` only if durable capability/task schema or conformance changes require it; prefer no data migration when existing device capability persistence already carries opaque flags.
-- Release-candidate version alignment and tarball/declaration/fresh-install readback, without publication.
-- Salesko plan/contract remains externally blocked until a new aligned public registry train closes.
+- Prerelease version alignment, release-tool support for exact SemVer prereleases and non-latest dist-tags, tarball/declaration/fresh-install readback, and one complete beta publication/readback.
+- Salesko consumes only the exact beta artifacts in its isolated source-acceptance worktree; production/stable consumption remains blocked.
 
 ## Non-Scope
 
 - Changing/removing the frozen v1 resume message, optionalizing its required sessionRef, or introducing protocol v2.
 - Server-generated fake runtime sessions, pre-dispatch handoff reservations, token/JWT parsing, downstream shadow stores or compatibility fallback.
 - Contentful trajectory or transfer enablement.
-- npm publish, Salesko dependency update, branch merge/push, deployment, production DDL, secrets or deletion of any Agent home.
+- Stable npm publication or moving `latest`; Salesko production dependency promotion; branch merge/push, deployment, production DDL, secrets or deletion of any Agent home.
 
 ## Constraints and Invariants
 
@@ -153,7 +153,7 @@ Close the published 0.7.0 fresh-Agent deadlock without weakening protocol v1: a 
 
 ## P3: Design Decision
 
-Use an additive fresh-only message plus capability rather than changing the frozen v1 resume message or adding reservation state. This preserves old daemon safety and makes absence-versus-presence unambiguous. Tighten the host reliable-publish seam to consume durable handoff authority. Because the public client surface and aligned protocol train change, prepare a new 0.x minor aligned RC after tests; do not pre-authorize registry publication.
+Use an additive fresh-only message plus capability rather than changing the frozen v1 resume message or adding reservation state. This preserves old daemon safety and makes absence-versus-presence unambiguous. Tighten the host reliable-publish seam to consume durable handoff authority. Because the public client surface and aligned protocol train change, freeze one exact prerelease train and publish it under `beta` only after local pack/install closure; downstream Salesko acceptance must run on those immutable beta bytes before any stable publication is considered.
 
 At 10x scale the first pressure point remains per-Agent/tenant reliable backlog, not session reservation. Reuse the existing bounded spool/ack/quota path rather than creating another cloud session table.
 
@@ -164,11 +164,14 @@ At 10x scale the first pressure point remains per-Agent/tenant reliable backlog,
 - [x] Implement protocol capability/message plus client/cloud/server composition with no compatibility fallback.
 - [x] Run focused protocol/client/cloud/server tests and affected typechecks/builds.
 - [x] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
-- [ ] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent frozen-subject gate.
+- [x] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent source gate.
+- [x] Add fail-closed prerelease/dist-tag release support and align the immutable `0.8.0-beta.0` plus keys `0.3.1-beta.0` train.
+- [x] Publish the complete train under npm dist-tag `beta`, prove exact registry integrity/dependency closure, and keep `latest` unchanged.
+- [x] Complete Salesko downstream fresh/resume acceptance against the exact beta artifacts, then independently gate the combined artifact subject.
 
 ## Failure Handling and Rollback
 
-Before publication, rollback is deletion/revert of this isolated source branch. A fresh offer rejected by missing capability never creates a legacy/resume offer. Runtime start or handoff fsync failure reports fail closed and emits no resumable/start fact. Reliable sanitizer/handoff/spool failure sends no original bytes. No persistent cloud schema change is expected; if one becomes necessary, stop and revise the contract before implementation.
+Before beta publication, rollback is deletion/revert of this isolated source branch. After beta publication, immutable prerelease versions remain historical registry artifacts; rollback means do not promote them, leave `latest` unchanged, and publish a new beta only from a newly frozen subject. A fresh offer rejected by missing capability never creates a legacy/resume offer. Runtime start or handoff fsync failure reports fail closed and emits no resumable/start fact. Reliable sanitizer/handoff/spool failure sends no original bytes. No persistent cloud schema change is expected; if one becomes necessary, stop and revise the contract before implementation.
 
 ## Verification
 
@@ -187,4 +190,7 @@ Before publication, rollback is deletion/revert of this isolated source branch. 
 - [x] Implement protocol capability/message plus client/cloud/server composition with no compatibility fallback.
 - [x] Run focused protocol/client/cloud/server tests and affected typechecks/builds.
 - [x] Align the new RC package train, pack/read back declarations and run fresh-install closure without publishing.
-- [ ] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent frozen-subject gate.
+- [x] Run full repo verification, disposable dataplane if affected, repo-harness acceptance preparation and independent source gate.
+- [x] Add fail-closed prerelease/dist-tag release support and align the immutable `0.8.0-beta.0` plus keys `0.3.1-beta.0` train.
+- [x] Publish the complete train under npm dist-tag `beta`, prove exact registry integrity/dependency closure, and keep `latest` unchanged.
+- [x] Complete Salesko downstream fresh/resume acceptance against the exact beta artifacts, then independently gate the combined artifact subject.
