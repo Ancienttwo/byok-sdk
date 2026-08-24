@@ -1,6 +1,6 @@
 # Task Contract: agent-home-idempotent-repair
 
-> **Status**: Active
+> **Status**: Ready for acceptance
 > **Plan**: plans/plan-20260824-1254-agent-home-idempotent-repair.md
 > **Task Profile**: bugfix
 > **Workflow Profile**: strict

@@ -1,6 +1,6 @@
 # Plan: Agent-home exact-replay ensure/repair
 
-> **Status**: Executing
+> **Status**: Ready for acceptance
 > **Created**: 20260824-1254
 > **Slug**: agent-home-idempotent-repair
 > **Artifact Level**: work-package
@@ -100,7 +100,7 @@
 
 - [x] Activate a strict bugfix contract and capture the real pre-fix regression.
 - [x] Freeze and implement the existing idempotent consumer as the ensure lifecycle and negatives.
-- [ ] Run focused plus full upstream verification and disposable integration gates.
-- [ ] Pack aligned 0.8.1/keys 0.3.2 RC with exact manifest/integrity readback.
-- [ ] Consume exact RC bytes in frozen Salesko and pass Phase 2 plus existing acceptance.
-- [ ] Record source/RC/downstream acceptance separately; stop before publication.
+- [x] Run focused plus full upstream verification and disposable integration gates.
+- [x] Pack aligned 0.8.1/keys 0.3.2 RC with exact manifest/integrity readback.
+- [x] Consume exact RC bytes in frozen Salesko and pass Phase 2 plus existing acceptance.
+- [x] Record source/RC/downstream acceptance separately; stop before publication.
