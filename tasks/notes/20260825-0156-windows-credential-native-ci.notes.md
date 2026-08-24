@@ -56,6 +56,12 @@
   native status integer and writes successful credential bytes directly to the
   existing stdout pipe. No file, memory store, new dependency or public API is
   introduced.
+- The primitive-return rerun still failed at the same outer invocation marker,
+  so the custom result object was not the complete cause. The second bounded
+  bridge correction catches `CredReadW`, marshal/output and `CredFree` inside
+  the primitive-return method and emits only static numeric stage/kind/HRESULT
+  from C#. PowerShell exits directly on the negative sentinel instead of
+  synthesizing a Win32 code.
 
 ## Deviations From Plan Or Spec
 
