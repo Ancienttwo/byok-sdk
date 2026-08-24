@@ -1,6 +1,6 @@
 # Plan: Windows credential native CI
 
-> **Status**: Blocked
+> **Status**: Active
 > **Created**: 20260825-0156
 > **Slug**: windows-credential-native-ci
 > **Planning Source**: user-approved-plan
@@ -157,6 +157,7 @@ Revert this slice only. Do not delete or migrate credentials, modify package ver
 
 <!-- [NOTE]: 2026-08-25 user approval resumed this blocked work package for one bounded diagnostic slice. The probe now labels each native phase, owns per-command/per-phase deadlines, and records only VaultSvc state plus numeric session facts; it does not treat a larger Vitest timeout as acceptance. -->
 <!-- [NOTE]: The three approved remote iterations are exhausted. Exact evidence is initial_read -> static bridge stage 4 -> non-Win32 SystemException/COR_E_SYSTEM while VaultSvc is running in interactive session 2. The PR stays blocked because absent/read/replace/clear never completed; no timeout relaxation or fallback is allowed. -->
+<!-- [NOTE]: The owner subsequently authorized uninterrupted work through the complete Sprint. A new bounded loop starts inside the C# bridge, where each P/Invoke/marshal/free stage maps only known exception classes to static numeric codes. -->
 
 ## Task Breakdown
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.

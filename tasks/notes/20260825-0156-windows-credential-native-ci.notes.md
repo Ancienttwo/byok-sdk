@@ -1,10 +1,10 @@
 # Implementation Notes: windows-credential-native-ci
 
-> **Status**: Blocked
+> **Status**: Active
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Review**: tasks/reviews/20260825-0156-windows-credential-native-ci.review.md
-> **Last Updated**: 2026-08-25 03:30
+> **Last Updated**: 2026-08-25 03:36
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -46,6 +46,11 @@
   `byok-agent pair` before any credential write. The three-iteration cap is now
   exhausted; further type-specific native instrumentation requires a new
   approved slice. PR #87 remains open and unmerged.
+- The owner then authorized uninterrupted execution through Sprint completion.
+  The resumed loop moves the classifier inside C#: `CredReadW` invocation,
+  credential-structure/blob marshal and `CredFree` now have distinct numeric
+  stages, and only a fixed allowlist of exception classes maps to numeric kinds.
+  No exception message, target, request or credential byte can escape.
 
 ## Deviations From Plan Or Spec
 

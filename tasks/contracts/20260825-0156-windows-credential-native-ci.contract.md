@@ -1,12 +1,12 @@
 # Task Contract: windows-credential-native-ci
 
-> **Status**: Blocked
+> **Status**: Active
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-25 03:30
+> **Last Updated**: 2026-08-25 03:36
 > **Review File**: `tasks/reviews/20260825-0156-windows-credential-native-ci.review.md`
 > **Notes File**: `tasks/notes/20260825-0156-windows-credential-native-ci.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`

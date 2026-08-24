@@ -1,11 +1,11 @@
 # Task Review: windows-credential-native-ci
 
-> **Status**: Complete
+> **Status**: Pending
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Notes File**: tasks/notes/20260825-0156-windows-credential-native-ci.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-25 03:30
+> **Last Updated**: 2026-08-25 03:36
 > **Recommendation**: fail
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
