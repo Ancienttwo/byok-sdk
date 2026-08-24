@@ -51,6 +51,11 @@
 - Local focused evidence: credential-store unit tests pass 8 with the native
   Windows test intentionally skipped on macOS; client TypeScript, workflow YAML,
   strict task workflow and `git diff --check` pass.
+- First remote probe attempt did not reach the provider: the IPC job ran the
+  source-level Vitest before workspace build, and Windows resolution correctly
+  failed on the missing `@byok-sdk/core` dist entry. The probe is sequenced
+  after the existing build step; this is test setup evidence, not native root
+  cause evidence.
 
 ## Promotion Filter
 
