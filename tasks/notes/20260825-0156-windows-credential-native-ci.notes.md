@@ -33,6 +33,11 @@
   native API failures and depended on PowerShell exception wrapping to preserve
   `NativeErrorCode`; the next iteration returns the Win32 code as a bounded
   integer across that internal boundary before PowerShell can erase it.
+- The integer-return attempt still produced generic `COR_E_SYSTEM` during
+  `initial_read`, so the last bounded iteration removes PowerShell `[ref]`
+  binding from the bridge by returning a small C# result object. If an exception
+  remains, the error projects only numeric `stage/kind/HRESULT` codes tied to
+  static source mappings; it still cannot echo arbitrary exception text.
 
 ## Deviations From Plan Or Spec
 

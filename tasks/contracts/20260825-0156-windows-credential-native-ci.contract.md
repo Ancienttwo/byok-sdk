@@ -38,7 +38,8 @@ behavior or changing package/release identity.
   - No new dependency or public SDK API is expected.
 - Taste constraints: no target name, enrollment field, request body, token,
   key, credential blob, or exception message may enter diagnostics. A numeric
-  Win32 code or HRESULT is the maximum provider detail allowed.
+  Win32 code or HRESULT is the maximum provider detail allowed. The approved
+  phase probe may attach only static numeric stage/kind codes to that HRESULT.
 
 ## Stop Conditions
 
