@@ -14,7 +14,8 @@ import { acquireDaemonOwner } from '../daemon/daemon-owner';
 const roots: string[] = [];
 
 async function makeRoot(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-local-state-relocation-'));
+  const created = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-local-state-relocation-'));
+  const root = await fs.realpath(created);
   roots.push(root);
   return root;
 }
@@ -104,7 +105,7 @@ describe('localStateRelocation', () => {
     await expect(fs.readFile(marker, 'utf8')).resolves.toBe('{broken');
   });
 
-  it('serializes reverse-order and symlink-alias requests without deadlock', async () => {
+  it('serializes reverse-order requests without deadlock', async () => {
     const root = await makeRoot();
     const leftStore = path.join(root, 'left-store');
     const rightStore = path.join(root, 'right-store');
@@ -114,13 +115,10 @@ describe('localStateRelocation', () => {
     await fs.mkdir(rightStore);
     await fs.mkdir(leftHome);
     await fs.mkdir(rightHome);
-    const alias = path.join(root, 'left-home-alias');
-    await fs.symlink(leftHome, alias, 'dir');
-
     const first = localStateRelocation.acquire({
       productId: 'product',
       sourceStoreDir: leftStore,
-      sourceHostStorageRoot: alias,
+      sourceHostStorageRoot: leftHome,
       destinationStoreDir: rightStore,
       destinationHostStorageRoot: rightHome,
     });
@@ -141,5 +139,32 @@ describe('localStateRelocation', () => {
     expect(rejected).toHaveLength(1);
     expect(rejected[0]!.reason).toBeInstanceOf(LocalStateRelocationBusyError);
     await fulfilled[0]!.value.release();
+  });
+
+  it('refuses a symlink alias in every requested root before destination effects', async () => {
+    const pathFields = [
+      'sourceStoreDir',
+      'sourceHostStorageRoot',
+      'destinationStoreDir',
+      'destinationHostStorageRoot',
+    ] as const;
+
+    for (const pathField of pathFields) {
+      const root = await makeRoot();
+      const input = relocationInput(root);
+      const realTarget = path.join(root, `${pathField}-real`);
+      const alias = path.join(root, `${pathField}-alias`);
+      await fs.mkdir(realTarget);
+      await fs.symlink(realTarget, alias, 'dir');
+
+      await expect(localStateRelocation.acquire({ ...input, [pathField]: alias }))
+        .rejects.toBeInstanceOf(LocalStateRelocationIntegrityError);
+      if (pathField !== 'destinationStoreDir') {
+        await expect(fs.lstat(input.destinationStoreDir)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+      if (pathField !== 'destinationHostStorageRoot') {
+        await expect(fs.lstat(input.destinationHostStorageRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    }
   });
 });

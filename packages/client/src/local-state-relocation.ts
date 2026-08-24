@@ -80,6 +80,20 @@ async function assertNoSymlinkComponents(input: string, label: string): Promise<
   }
 }
 
+async function assertRequestedPathsRemainCanonical(
+  requested: Omit<Required<LocalStateRelocationInput>, 'productId'>,
+  canonical: Omit<Required<LocalStateRelocationInput>, 'productId'>,
+): Promise<void> {
+  for (const label of Object.keys(requested) as Array<keyof typeof requested>) {
+    const requestedPath = requested[label];
+    await assertNoSymlinkComponents(requestedPath, label);
+    const currentCanonical = await resolvePathWithoutCreate(requestedPath);
+    if (currentCanonical !== canonical[label]) {
+      throw new LocalStateRelocationIntegrityError(`${label} changed during relocation acquisition`);
+    }
+  }
+}
+
 async function assertAgentHomeRootQuiescent(hostStorageRoot: string): Promise<void> {
   const agentsRoot = path.join(hostStorageRoot, AGENT_HOME_DIRECTORY);
   let rootStat: import('node:fs').Stats;
@@ -158,12 +172,23 @@ async function acquire(input: LocalStateRelocationInput): Promise<LocalStateRelo
     destinationStoreDir: path.resolve(input.destinationStoreDir),
     destinationHostStorageRoot: path.resolve(input.destinationHostStorageRoot),
   };
+
+  const requestedPaths = {
+    sourceStoreDir: requested.sourceStoreDir,
+    sourceHostStorageRoot: requested.sourceHostStorageRoot,
+    destinationStoreDir: requested.destinationStoreDir,
+    destinationHostStorageRoot: requested.destinationHostStorageRoot,
+  };
+  for (const [label, value] of Object.entries(requestedPaths)) {
+    await assertNoSymlinkComponents(value, label);
+  }
+
   const canonical = {
     productId: input.productId,
-    sourceStoreDir: await resolvePathWithoutCreate(input.sourceStoreDir),
-    sourceHostStorageRoot: await resolvePathWithoutCreate(input.sourceHostStorageRoot),
-    destinationStoreDir: await resolvePathWithoutCreate(input.destinationStoreDir),
-    destinationHostStorageRoot: await resolvePathWithoutCreate(input.destinationHostStorageRoot),
+    sourceStoreDir: await resolvePathWithoutCreate(requested.sourceStoreDir),
+    sourceHostStorageRoot: await resolvePathWithoutCreate(requested.sourceHostStorageRoot),
+    destinationStoreDir: await resolvePathWithoutCreate(requested.destinationStoreDir),
+    destinationHostStorageRoot: await resolvePathWithoutCreate(requested.destinationHostStorageRoot),
   };
   if (canonical.sourceStoreDir === canonical.destinationStoreDir) {
     throw new LocalStateRelocationIntegrityError('sourceStoreDir and destinationStoreDir must be distinct');
@@ -172,9 +197,13 @@ async function acquire(input: LocalStateRelocationInput): Promise<LocalStateRelo
     throw new LocalStateRelocationIntegrityError('sourceHostStorageRoot and destinationHostStorageRoot must be distinct');
   }
 
-  for (const [label, value] of Object.entries(canonical)) {
-    if (label !== 'productId') await assertNoSymlinkComponents(value, label);
-  }
+  const canonicalPaths = {
+    sourceStoreDir: canonical.sourceStoreDir,
+    sourceHostStorageRoot: canonical.sourceHostStorageRoot,
+    destinationStoreDir: canonical.destinationStoreDir,
+    destinationHostStorageRoot: canonical.destinationHostStorageRoot,
+  };
+  await assertRequestedPathsRemainCanonical(requestedPaths, canonicalPaths);
 
   let gates: readonly PathMutationGate[] | undefined;
   try {
@@ -185,9 +214,7 @@ async function acquire(input: LocalStateRelocationInput): Promise<LocalStateRelo
       { scope: 'agent-home-root', targetPath: path.join(canonical.destinationHostStorageRoot, AGENT_HOME_DIRECTORY) },
     ]);
 
-    for (const [label, value] of Object.entries(canonical)) {
-      if (label !== 'productId') await assertNoSymlinkComponents(value, label);
-    }
+    await assertRequestedPathsRemainCanonical(requestedPaths, canonicalPaths);
     await assertDaemonStoreQuiescent(canonical.sourceStoreDir);
     await assertDaemonStoreQuiescent(canonical.destinationStoreDir);
     await assertAgentHomeRootQuiescent(canonical.sourceHostStorageRoot);
