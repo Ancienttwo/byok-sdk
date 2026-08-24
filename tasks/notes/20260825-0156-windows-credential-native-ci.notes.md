@@ -110,6 +110,18 @@
   diagnostics. No exception text, credential field or request payload is
   permitted to escape.
 
+## Successor run 2
+
+- Subject: `e68e238b90d56202e8bfaf865ba25a709c4e0591`.
+- Exact push CI: `32774445530`; Windows IPC job `97582177280` failed at the
+  same `initial_read`, now with `stage=8,kind=1,hresult=0`.
+- This proves `Add-Type` threw before creating the executable. Microsoft documents
+  `ConsoleApplication` output as supported by Windows PowerShell 5.1 while
+  PowerShell 7.1+ rejects it. The production compiler invocation therefore
+  resolves the fixed `%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+  boundary and fails closed when `SystemRoot` is absent or non-absolute; it no
+  longer accepts ambient `PATH` selection of an incompatible host.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |

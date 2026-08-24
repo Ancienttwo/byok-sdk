@@ -78,6 +78,14 @@ async function scavengeStaleWindowsBridges(): Promise<void> {
   }
 }
 
+function windowsPowerShellExecutable(): string {
+  const systemRoot = process.env.SystemRoot;
+  if (systemRoot === undefined || !path.win32.isAbsolute(systemRoot)) {
+    throw new DeviceCredentialStoreError('Windows system root is unavailable');
+  }
+  return path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
 /** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
 export class DeviceCredentialStoreUnavailableError extends Error {
   constructor(message = 'no supported operating-system credential provider is available') {
@@ -286,7 +294,7 @@ export class DeviceCredentialStore {
 
     try {
       const compiler = await this.#run(
-        'powershell.exe',
+        windowsPowerShellExecutable(),
         ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', WINDOWS_CREDENTIAL_COMPILER_SCRIPT],
         executable,
       );

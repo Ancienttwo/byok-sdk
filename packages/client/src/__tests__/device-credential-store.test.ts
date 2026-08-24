@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DeviceCredentialStore,
   DeviceCredentialStoreError,
@@ -21,12 +21,20 @@ const credentials = {
 } as const;
 
 function windowsRunner(result: DeviceCommandResult): DeviceCommandRunner {
-  return async (executable) => executable === 'powershell.exe'
+  return async (executable) => path.win32.basename(executable).toLowerCase() === 'powershell.exe'
     ? { exitCode: 0, stdout: '', stderr: '' }
     : result;
 }
 
 describe('DeviceCredentialStore', () => {
+  beforeEach(() => {
+    vi.stubEnv('SystemRoot', 'C:\\Windows');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it.each(['darwin', 'linux', 'win32'] as const)('uses only the %s OS provider and never a path fallback', async (platform) => {
     const calls: Array<{ executable: string; args: readonly string[]; stdin?: string }> = [];
     const run: DeviceCommandRunner = async (executable, args, stdin) => {
@@ -51,7 +59,7 @@ describe('DeviceCredentialStore', () => {
   it('round-trips the Windows Credential Manager UTF-8 blob without a second base64 layer', async () => {
     let stored: string | undefined;
     const run: DeviceCommandRunner = async (executable, _args, stdin) => {
-      if (executable === 'powershell.exe') return { exitCode: 0, stdout: '', stderr: '' };
+      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') return { exitCode: 0, stdout: '', stderr: '' };
       const [operation, _target, _username, secretBase64] = (stdin ?? '').split('\n');
       if (operation === 'replace') {
         stored = Buffer.from(secretBase64 ?? '', 'base64').toString('utf8');
@@ -74,9 +82,10 @@ describe('DeviceCredentialStore', () => {
     let compiledExecutable = '';
     let invokedExecutable = '';
     const run: DeviceCommandRunner = async (executable, args, stdin) => {
-      if (executable === 'powershell.exe') {
+      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') {
         script = Buffer.from(args.at(-1) ?? '', 'base64').toString('utf16le');
         compiledExecutable = stdin ?? '';
+        expect(executable).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
         return { exitCode: 0, stdout: '', stderr: '' };
       }
       invokedExecutable = executable;
