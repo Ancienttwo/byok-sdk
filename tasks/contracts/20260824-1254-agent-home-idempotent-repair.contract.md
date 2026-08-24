@@ -57,8 +57,8 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 - root_cause: `packages/client/src/agent-home.ts:651-653` returns equal revision/hash as `idempotent` before invoking any product lifecycle, so durable SDK ordering state masks loss of downstream-derived files.
 - repro: `bun test packages/client/src/__tests__/agent-home-idempotent-repair.test.ts` on the unfixed 0.8.0 source.
-- regression_guard: `packages/client/src/__tests__/agent-home-idempotent-repair.test.ts`.
-- pre_fix_failure_artifact: `.ai/harness/runs/20260824-1254-agent-home-idempotent-repair/pre-fix-agent-home-idempotent-repair.txt`.
+- regression_guard: packages/client/src/__tests__/agent-home-idempotent-repair.test.ts
+- pre_fix_failure_artifact: .ai/harness/runs/20260824-1254-agent-home-idempotent-repair/pre-fix-agent-home-idempotent-repair.txt
 
 ## Workflow Inventory
 
