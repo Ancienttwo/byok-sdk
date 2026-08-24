@@ -1,6 +1,6 @@
 # Plan: Windows credential native CI
 
-> **Status**: Active
+> **Status**: Archived
 > **Created**: 20260825-0156
 > **Slug**: windows-credential-native-ci
 > **Planning Source**: user-approved-plan

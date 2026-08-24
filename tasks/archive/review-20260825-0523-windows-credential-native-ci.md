@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-25 05:23
+> **Related Plan**: plans/archive/plan-20260825-0156-windows-credential-native-ci.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260825-0523
+
 # Task Review: windows-credential-native-ci
 
 > **Status**: Passed

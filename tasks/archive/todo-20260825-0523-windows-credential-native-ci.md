@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-25 05:23
+> **Related Plan**: plans/archive/plan-20260825-0156-windows-credential-native-ci.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260825-0523
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-25 01:56
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.
