@@ -143,7 +143,7 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
 ## Task Breakdown
 
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
-- [ ] Prove the exact native error or timed phase and choose bridge versus runner-composition correction.
+- [x] Prove the exact native error or timed phase and choose bridge versus runner-composition correction.
 - [ ] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
 - [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
 - [ ] Run strict workflow/change review and re-read the exact PR merge gate.
@@ -158,10 +158,11 @@ Revert this slice only. Do not delete or migrate credentials, modify package ver
 <!-- [NOTE]: 2026-08-25 user approval resumed this blocked work package for one bounded diagnostic slice. The probe now labels each native phase, owns per-command/per-phase deadlines, and records only VaultSvc state plus numeric session facts; it does not treat a larger Vitest timeout as acceptance. -->
 <!-- [NOTE]: The three approved remote iterations are exhausted. Exact evidence is initial_read -> static bridge stage 4 -> non-Win32 SystemException/COR_E_SYSTEM while VaultSvc is running in interactive session 2. The PR stays blocked because absent/read/replace/clear never completed; no timeout relaxation or fallback is allowed. -->
 <!-- [NOTE]: The owner subsequently authorized uninterrupted work through the complete Sprint. A new bounded loop starts inside the C# bridge, where each P/Invoke/marshal/free stage maps only known exception classes to static numeric codes. -->
+<!-- [NOTE]: The inner classifier never became observable: the exact rerun still failed in the outer PowerShell stage before it could read the custom C# result fields. This selects a bridge correction, not runner composition: return only a primitive integer and let C# write successful credential bytes directly to the already-piped stdout. -->
 
 ## Task Breakdown
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
-- [ ] Prove the exact native error or timed phase and choose bridge versus runner-composition correction.
+- [x] Prove the exact native error or timed phase and choose bridge versus runner-composition correction.
 - [ ] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
 - [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
 - [ ] Run strict workflow/change review and re-read the exact PR merge gate.

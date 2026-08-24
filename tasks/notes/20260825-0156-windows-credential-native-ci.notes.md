@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Review**: tasks/reviews/20260825-0156-windows-credential-native-ci.review.md
-> **Last Updated**: 2026-08-25 03:36
+> **Last Updated**: 2026-08-25 03:44
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -38,19 +38,24 @@
   binding from the bridge by returning a small C# result object. If an exception
   remains, the error projects only numeric `stage/kind/HRESULT` codes tied to
   static source mappings; it still cannot echo arbitrary exception text.
-- The last permitted run returned in about 3.9 seconds with
-  `stage=4,kind=4,hresult=-2146233087`: the failure is inside the C# `Get`
-  invocation around `CredReadW`, and the root is a non-`Win32Exception`
-  `SystemException` (`COR_E_SYSTEM`). `VaultSvc` remained running in interactive
-  session 2. The same bounded failure stops both the native probe and real
-  `byok-agent pair` before any credential write. The three-iteration cap is now
-  exhausted; further type-specific native instrumentation requires a new
-  approved slice. PR #87 remains open and unmerged.
+- The earlier bounded run returned in about 3.9 seconds with
+  `stage=4,kind=4,hresult=-2146233087`. `VaultSvc` remained running in interactive
+  session 2, so runner composition was not selected for correction. The same
+  bounded failure stops both the native probe and real `byok-agent pair` before
+  any credential write.
 - The owner then authorized uninterrupted execution through Sprint completion.
   The resumed loop moves the classifier inside C#: `CredReadW` invocation,
   credential-structure/blob marshal and `CredFree` now have distinct numeric
   stages, and only a fixed allowlist of exception classes maps to numeric kinds.
   No exception message, target, request or credential byte can escape.
+- The exact rerun of that inner classifier still reported the outer PowerShell
+  `stage=4,kind=4` marker rather than any C# diagnostic stage. That proves the
+  PowerShell/C# custom-result boundary fails before PowerShell can inspect the
+  result fields; it does not prove `CredReadW` itself threw. The selected minimal
+  bridge correction removes the custom result object: C# returns a primitive
+  native status integer and writes successful credential bytes directly to the
+  existing stdout pipe. No file, memory store, new dependency or public API is
+  introduced.
 
 ## Deviations From Plan Or Spec
 
@@ -67,10 +72,8 @@
 
 ## Open Questions
 
-- Which exact bridge operation is still active when the hosted runner exceeds
-  ten seconds remains unproved. The next proof must bound and label each
-  `read | replace | read | clear | read` phase without printing provider stderr
-  or credential values; it may not simply raise the global test timeout.
+- Whether the primitive-return bridge closes the full native and cross-process
+  round trip remains owned by the next exact Windows CI run.
 
 ## Evidence Links
 
