@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:71cbabe71837a582a4ca79715cb98c69cf8ec74664891eec23002b09ac01bd9c
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 0b91d621fd260810f88eacddbd4e36aaa60faaa2
+> **Verification Evidence SHA256**: sha256:78b6e00fc5d3b34f93e8bdb861a4b6ad2a59f67d6a6bd2692bd1e9c763c5be81
+> **Issued At**: 2026-08-24T05:15:02.247Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Accepted bounded 0.8.1 exact-replay ensure repair source and packed RC; publication remains a separate gate
 - Findings: none
 
 ## Behavior Diff Notes
