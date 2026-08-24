@@ -105,6 +105,14 @@
 - Exactly one exact-head Windows probe is authorized for this classifier. Its
   observed tuple selects the next production correction; absence of a tuple is
   itself a fail-closed result, not permission to expand diagnostics.
+- The exact successor run at `f71b5b4` returned
+  `stage=4,kind=15,source=99,depth=0,hresult=-2146233087` during
+  `initial_read` in both native and WinSW paths. There is no nested native
+  exception to classify. PowerShell's own `MiscOps.cs` throws the same
+  depth-zero runtime shape before custom method invocation when language policy
+  rejects the receiver type. The final classifier therefore adds only a fixed
+  `PSLanguageMode` number and two exact policy FQID numbers; no raw identifier,
+  type, message or environment value can escape.
 
 ## Evidence Links
 

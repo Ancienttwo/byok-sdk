@@ -160,6 +160,7 @@ Revert this slice only. Do not delete or migrate credentials, modify package ver
 <!-- [NOTE]: The owner subsequently authorized uninterrupted work through the complete Sprint. A new bounded loop starts inside the C# bridge, where each P/Invoke/marshal/free stage maps only known exception classes to static numeric codes. -->
 <!-- [NOTE]: The inner classifier never became observable: the exact rerun still failed in the outer PowerShell stage before it could read the custom C# result fields. This selects a bridge correction, not runner composition: return only a primitive integer and let C# write successful credential bytes directly to the already-piped stdout. -->
 <!-- [NOTE]: Three new exact-head repair runs still stop at the outer stage-4 PowerShell marker. Primitive return, C# internal catches and moving process exit outside try/catch did not change the failure. The current kind=4 classifier is not type-specific because PowerShell wraps exceptions in RuntimeException/SystemException; the next bounded work package must classify only the deepest InnerException/FullyQualifiedErrorId with static codes before another production mutation. -->
+<!-- [NOTE]: The deepest classifier returned kind=15/source=99/depth=0 at stage 4. The final bounded classifier records only PSLanguageMode plus exact constrained/restricted method-policy FQIDs before replacing the dynamic custom-type invocation if confirmed. -->
 
 ## Task Breakdown
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
