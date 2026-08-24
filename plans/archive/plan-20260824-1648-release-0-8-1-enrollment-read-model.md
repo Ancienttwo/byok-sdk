@@ -1,6 +1,6 @@
 # Plan: BYOK SDK 0.8.1 Enrollment Read Model Release
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260824-1648
 > **Slug**: release-0-8-1-enrollment-read-model
 > **Artifact Level**: work-package

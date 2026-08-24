@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-24 17:03
+> **Related Plan**: plans/archive/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260824-1703
+
 # Task Review: release-0-8-1-enrollment-read-model
 
 > **Status**: Accepted

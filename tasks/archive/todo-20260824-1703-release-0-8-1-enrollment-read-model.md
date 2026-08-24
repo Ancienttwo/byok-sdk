@@ -1,7 +1,13 @@
+> **Archived**: 2026-08-24 17:03
+> **Related Plan**: plans/archive/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260824-1703
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-24 16:48
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

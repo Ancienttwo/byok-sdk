@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-21T21:10:03+0800 -->
+<!-- updated_at: 2026-08-24T17:04:00+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-21T21:10:03+0800
-> **Source Branch**: codex/pre-release-consolidation
-> **Source Commit**: 0e8dade
+> **Updated At**: 2026-08-24T17:04:00+0800
+> **Source Branch**: codex/release-0.8.1-enrollment-read-model
+> **Source Commit**: b6a641e
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,14 +31,14 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/kito/Projects/byok-sdk: stale active-plan marker -> plans/plan-20260821-1645-host-cancellation-contract.md
+- /Users/kito/Projects/byok-sdk: plans/plan-20260824-1223-release-0-8-0-docs.md
 - /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
-- /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: plans/plan-20260821-0425-hosted-integration-authority-closure.md
-- /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-hosted-integration-authority-closure
-- /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity: plans/plan-20260821-1516-local-agent-release-identity.md
-- /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-local-agent-release-identity
-- /Users/kito/Projects/byok-sdk-wt-tenant-readiness-primitives: plans/plan-20260821-1715-tenant-readiness-primitives.md
-- /Users/kito/Projects/byok-sdk-wt-tenant-readiness-primitives: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-tenant-readiness-primitives
+- /Users/kito/Projects/byok-sdk-wt-agent-egress-fresh-session: plans/plan-20260823-2300-agent-egress-fresh-session-authority.md
+- /Users/kito/Projects/byok-sdk-wt-agent-egress-fresh-session: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-agent-egress-fresh-session
+- /Users/kito/Projects/byok-sdk-wt-agent-home-idempotent-repair: plans/plan-20260824-1254-agent-home-idempotent-repair.md
+- /Users/kito/Projects/byok-sdk-wt-agent-home-idempotent-repair: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-agent-home-idempotent-repair
+- /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model: plans/plan-20260824-0248-credential-blind-enrollment-status.md
+- /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model
 ## Active Sprint
 
 - Sprint: (none)
@@ -47,7 +47,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Run focused conflict tests, real Postgres+MinIO checks, build, typecheck, full test, strict workflow and release pack gates.
+- Exact Next Step: (none)
 
 ## Checks
 
@@ -55,18 +55,19 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Git Status
 
-- Summary: 9 changed/untracked path(s)
+- Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260821-2058-pre-release-consolidation.md
- D tasks/contracts/20260821-2058-pre-release-consolidation.contract.md
- D tasks/notes/20260821-2058-pre-release-consolidation.notes.md
- D tasks/reviews/20260821-2058-pre-release-consolidation.review.md
-?? plans/archive/plan-20260821-2058-pre-release-consolidation.md
-?? tasks/archive/contract-20260821-2109-pre-release-consolidation.md
-?? tasks/archive/notes-20260821-2109-pre-release-consolidation.md
-?? tasks/archive/review-20260821-2109-pre-release-consolidation.md
-?? tasks/archive/todo-20260821-2109-pre-release-consolidation.md
+ D plans/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
+ D tasks/contracts/20260824-1648-release-0-8-1-enrollment-read-model.contract.md
+ D tasks/notes/20260824-1648-release-0-8-1-enrollment-read-model.notes.md
+ D tasks/reviews/20260824-1648-release-0-8-1-enrollment-read-model.review.md
+ M tasks/todos.md
+?? plans/archive/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
+?? tasks/archive/contract-20260824-1703-release-0-8-1-enrollment-read-model.md
+?? tasks/archive/notes-20260824-1703-release-0-8-1-enrollment-read-model.md
+?? tasks/archive/review-20260824-1703-release-0-8-1-enrollment-read-model.md
+?? tasks/archive/todo-20260824-1703-release-0-8-1-enrollment-read-model.md
 ```
 
 ## Source Artifacts

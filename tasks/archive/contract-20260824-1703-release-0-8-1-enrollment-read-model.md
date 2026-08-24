@@ -1,6 +1,12 @@
+> **Archived**: 2026-08-24 17:03
+> **Related Plan**: plans/archive/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260824-1703
+
 # Task Contract: release-0-8-1-enrollment-read-model
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
