@@ -39,6 +39,11 @@ const ENTRY_ACCOUNT = 'device-enrollment';
 const ENCODED_PREFIX = 'byok-device-credential-v1:';
 const NOT_FOUND = 44;
 
+function providerDiagnostic(stderr: string): string {
+  const match = /^credential operation failed \(win32=(\d{1,10})\)$/u.exec(stderr.trim());
+  return match === null ? '' : ` (win32=${match[1]})`;
+}
+
 /** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
 export class DeviceCredentialStoreUnavailableError extends Error {
   constructor(message = 'no supported operating-system credential provider is available') {
@@ -167,7 +172,11 @@ export class DeviceCredentialStore {
       (this.#platform === 'linux' && result.exitCode === 1 && result.stderr.trim().length === 0)
     ) return undefined;
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
-    if (result.exitCode !== 0) throw new DeviceCredentialStoreError('operating-system credential provider could not read device credentials');
+    if (result.exitCode !== 0) {
+      throw new DeviceCredentialStoreError(
+        `operating-system credential provider could not read device credentials${providerDiagnostic(result.stderr)}`,
+      );
+    }
     return decode(result.stdout.trimEnd());
   }
 
@@ -175,7 +184,11 @@ export class DeviceCredentialStore {
     const encoded = encode(record);
     const result = await this.#invoke('replace', encoded);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
-    if (result.exitCode !== 0) throw new DeviceCredentialStoreError('operating-system credential provider could not replace device credentials');
+    if (result.exitCode !== 0) {
+      throw new DeviceCredentialStoreError(
+        `operating-system credential provider could not replace device credentials${providerDiagnostic(result.stderr)}`,
+      );
+    }
   }
 
   /** Returns true only after the sole secret authority is confirmed absent. */
@@ -185,7 +198,9 @@ export class DeviceCredentialStore {
     const result = await this.#invoke('clear');
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0 && result.exitCode !== NOT_FOUND) {
-      throw new DeviceCredentialStoreError('operating-system credential provider could not clear device credentials');
+      throw new DeviceCredentialStoreError(
+        `operating-system credential provider could not clear device credentials${providerDiagnostic(result.stderr)}`,
+      );
     }
     if ((await this.read()) !== undefined) {
       throw new DeviceCredentialStoreError('operating-system credential provider reported deletion but device credentials remain');
@@ -279,5 +294,5 @@ public static class ByokDeviceCredential {
  public static bool Delete(string t) { if(D(t,1,0)) return true; if(Marshal.GetLastWin32Error()==1168) return false; throw new Win32Exception(Marshal.GetLastWin32Error()); }
 }
 "@
-try { $r=([Console]::In.ReadToEnd()|ConvertFrom-Json); if($r.operation -eq 'replace'){[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,[Convert]::FromBase64String([string]$r.secret_base64));exit 0}; if($r.operation -eq 'read'){$b=[ByokDeviceCredential]::Get([string]$r.target);if($null -eq $b){exit 44};[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b));exit 0}; if($r.operation -eq 'clear'){if([ByokDeviceCredential]::Delete([string]$r.target)){exit 0};exit 44};exit 2 } catch { [Console]::Error.Write('credential operation failed'); exit 1 }
+try { $r=([Console]::In.ReadToEnd()|ConvertFrom-Json); if($r.operation -eq 'replace'){[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,[Convert]::FromBase64String([string]$r.secret_base64));exit 0}; if($r.operation -eq 'read'){$b=[ByokDeviceCredential]::Get([string]$r.target);if($null -eq $b){exit 44};[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b));exit 0}; if($r.operation -eq 'clear'){if([ByokDeviceCredential]::Delete([string]$r.target)){exit 0};exit 44};exit 2 } catch { $e=$_.Exception; $code=$null; while($null -ne $e){if($e -is [ComponentModel.Win32Exception]){$code=$e.NativeErrorCode;break};$e=$e.InnerException}; if($null -eq $code){[Console]::Error.Write('credential operation failed')}else{[Console]::Error.Write(('credential operation failed (win32={0})' -f $code))}; exit 1 }
 `, 'utf16le').toString('base64');

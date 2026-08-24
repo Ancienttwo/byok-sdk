@@ -69,4 +69,29 @@ describe('DeviceCredentialStore', () => {
     const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'linux', commandRunner: run });
     await expect(store.read()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
   });
+
+  it('surfaces only a bounded Windows native code from provider stderr', async () => {
+    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'credential operation failed (win32=1312)',
+    });
+    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    await expect(store.read()).rejects.toThrow(
+      'operating-system credential provider could not read device credentials (win32=1312)',
+    );
+  });
+
+  it('does not echo unowned provider stderr into the error', async () => {
+    const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'credential operation failed: secret-bearing unexpected output',
+    });
+    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    await expect(store.read()).rejects.toThrow(
+      'operating-system credential provider could not read device credentials',
+    );
+    await expect(store.read()).rejects.not.toThrow(/secret-bearing/u);
+  });
 });

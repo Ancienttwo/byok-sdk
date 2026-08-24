@@ -491,6 +491,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
 
+      - name: Probe native Windows Credential Manager
+        if: runner.os == 'Windows'
+        env:
+          BYOK_NATIVE_WINDOWS_CREDENTIAL_SMOKE: '1'
+        run: bun run --filter @byok-sdk/client test -- src/__tests__/device-credential-store.native.test.ts
+
       - name: Build (needed for @byok-sdk/client + @byok-sdk/server dist/ this script drives)
         run: bun run build
 
