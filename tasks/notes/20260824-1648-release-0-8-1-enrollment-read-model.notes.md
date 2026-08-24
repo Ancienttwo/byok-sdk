@@ -35,6 +35,7 @@
 - Live npm: `ancienttwo` is authenticated; aligned 0.8.1 and keys 0.3.2 returned E404 before publication.
 - Focused combined gate: 6 tests, 0 failures across `authenticated-enrollment-status.test.ts` and `agent-home-idempotent-repair.test.ts`; client typecheck/build and adapter-entry check passed.
 - Fresh-worktree setup required `bun install --force --frozen-lockfile` and dependency-order builds for `core`, `protocol`, and `server`; manifests and `bun.lock` remained unchanged.
+- The first prepared acceptance packet passed all 15 contract checks and Change Assessment but failed the `allowed_paths` guard because the combined release contract had not enumerated the accepted repair base's changed files relative to `main`. One bounded amendment added exactly the 18 paths reported by the gate; no behavior or external scope changed.
 
 ## Promotion Filter
 

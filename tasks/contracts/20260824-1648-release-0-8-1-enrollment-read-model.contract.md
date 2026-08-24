@@ -80,13 +80,31 @@ allowed_paths:
   - packages/client/src/daemon/store.ts
   - packages/client/src/index.ts
   - packages/client/src/__tests__/authenticated-enrollment-status.test.ts
-  - packages/*/package.json
+  - packages/client/src/agent-home.ts
+  - packages/client/src/__tests__/agent-home-idempotent-repair.test.ts
+  - packages/client/src/__tests__/agent-home-projection.test.ts
+  - packages/client/package.json
+  - packages/cloud-dataplane/package.json
+  - packages/cloud/package.json
+  - packages/core/package.json
+  - packages/keys/package.json
+  - packages/protocol/package.json
+  - packages/sdk/package.json
+  - packages/server/package.json
+  - packages/testkit/package.json
+  - packages/ui-runtime/package.json
   - bun.lock
+  - docs/host-local-storage-layout.md
+  - docs/protocol.md
   - plans/plan-20260824-1648-release-0-8-1-enrollment-read-model.md
+  - plans/plan-20260824-1254-agent-home-idempotent-repair.md
   - tasks/todos.md
   - tasks/contracts/20260824-1648-release-0-8-1-enrollment-read-model.contract.md
   - tasks/reviews/20260824-1648-release-0-8-1-enrollment-read-model.review.md
   - tasks/notes/20260824-1648-release-0-8-1-enrollment-read-model.notes.md
+  - tasks/contracts/20260824-1254-agent-home-idempotent-repair.contract.md
+  - tasks/reviews/20260824-1254-agent-home-idempotent-repair.review.md
+  - tasks/notes/20260824-1254-agent-home-idempotent-repair.notes.md
   - .ai/harness/checks/latest.json
   - .ai/harness/runs/
 ```
