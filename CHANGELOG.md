@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.1 / @byok-sdk/keys 0.3.2 — 2026-08-24
+
+Agent-home exact-replay repair and credential-blind enrollment status.
+
+- Exact revision/hash replay now invokes the existing atomic/idempotent product
+  projection hook under the canonical Agent-home writer lease before returning
+  `idempotent`. Missing product-owned derived files can therefore be repaired
+  without changing ordering state or giving the SDK product path/schema
+  authority; stale and same-revision/different-hash requests remain hook-free.
+- Added `readDeviceEnrollmentStatus()` to the public client. It validates the
+  complete SDK-owned `DeviceRecord` and projects only `unpaired`,
+  `paired(deviceId)`, or `re_pair_required`; tenant, token, expiry, and key
+  material remain private, and non-record filesystem failures still throw.
+- Advanced the aligned public train to 0.8.1 and keys to 0.3.2 with its exact
+  core 0.8.1 edge. Publication proves registry artifact identity only; host
+  deployment, production migration, downstream pinning, and live-device
+  rollout remain separate authorities.
+
 ## 0.8.0 / @byok-sdk/keys 0.3.1 — 2026-08-24
 
 Task-free Agent-home projection and explicit fresh-session Agent dispatch.

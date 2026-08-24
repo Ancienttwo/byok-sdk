@@ -88,7 +88,11 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
 export interface AgentHomeProjection {
   /** Optional creation/task-time host preparation retained as a distinct lifecycle. */
   prepare?(input: AgentHomeProjectionInput): void | Promise<void>;
-  /** Task-free opaque projection consumer. Its successful return means its own bytes are durable. */
+  /**
+   * Task-free opaque desired-state consumer. It must atomically and
+   * idempotently ensure its own durable bytes because exact revision/hash
+   * requests may replay after local derived-file loss or transport failure.
+   */
   apply?(input: AgentHomeProjectionApplyInput): void | Promise<void>;
 }
 
@@ -632,8 +636,10 @@ export class AgentHomeManager {
 
   /**
    * Apply one task-free projection under the same canonical-home writer lease
-   * used by Agent execution. Only a successful host hook followed by the
-   * SDK-owned fsynced ordering record can return `applied`.
+   * used by Agent execution. The host hook owns an atomic/idempotent ensure of
+   * its opaque product bytes, so an exact desired-state replay invokes it again
+   * before returning `idempotent`. Only a successful new-state hook followed
+   * by the SDK-owned fsynced ordering record can return `applied`.
    */
   async project(input: AgentHomeProjectionPayload): Promise<AgentHomeProjectionOutcome> {
     const payload = AgentHomeProjectionPayloadSchema.parse(input);
@@ -641,6 +647,23 @@ export class AgentHomeManager {
     try {
       const { resolution, lease } = binding;
       await initializeAgentHome(resolution);
+      const applyProjection = async (): Promise<void> => {
+        const apply = this.projection?.apply;
+        if (apply === undefined) {
+          throw new AgentHomeError('task-free Agent-home projection is not configured');
+        }
+        await apply({
+          ...resolution,
+          cwd: lease.cwd,
+          requestId: payload.requestId,
+          projectionHash: payload.projectionHash,
+          projection: payload.projection,
+        });
+        if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
+          throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
+        }
+        await initializeAgentHome(resolution);
+      };
       const current = await readProjectionState(resolution);
       if (current !== undefined) {
         const order = compareProjectionRevision(
@@ -649,25 +672,13 @@ export class AgentHomeManager {
         );
         if (order < 0) return 'stale';
         if (order === 0) {
-          return payload.projectionHash === current.projectionHash ? 'idempotent' : 'conflict';
+          if (payload.projectionHash !== current.projectionHash) return 'conflict';
+          await applyProjection();
+          return 'idempotent';
         }
       }
 
-      const apply = this.projection?.apply;
-      if (apply === undefined) {
-        throw new AgentHomeError('task-free Agent-home projection is not configured');
-      }
-      await apply({
-        ...resolution,
-        cwd: lease.cwd,
-        requestId: payload.requestId,
-        projectionHash: payload.projectionHash,
-        projection: payload.projection,
-      });
-      if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
-        throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
-      }
-      await initializeAgentHome(resolution);
+      await applyProjection();
       await writeProjectionState(resolution, payload);
       return 'applied';
     } finally {
@@ -683,7 +694,11 @@ export function createAgentHomeProjection(prepare: AgentHomeProjectionFunction):
   return Object.freeze({ prepare });
 }
 
-/** Create only the task-free opaque projection consumer; no task-time fallback is inferred. */
+/**
+ * Create the task-free atomic/idempotent opaque desired-state consumer.
+ * Exact revision/hash delivery may invoke it again before an idempotent receipt;
+ * no task-time fallback is inferred.
+ */
 export function createAgentHomeProjectionConsumer(apply: AgentHomeProjectionApplyFunction): AgentHomeProjection {
   return Object.freeze({ apply });
 }

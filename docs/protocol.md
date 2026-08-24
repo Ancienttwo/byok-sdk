@@ -350,7 +350,12 @@ Cloud persists the immutable desired fact before appending the exact-device
 mailbox row. Duplicate request identity and exact body are idempotent; changed
 immutable bytes conflict. Offline delivery remains pending and is never
 rerouted. The daemon applies the local ordering contract under the canonical
-Agent-home lease and then calls:
+Agent-home lease. The host consumer is an atomic/idempotent ensure of opaque
+product-derived bytes. A new request with the exact current revision/hash runs
+that consumer again and returns `idempotent`; stale or same-revision/different-
+hash requests never invoke it. Consumer, containment or lease failure leaves
+the request pending and the cursor behind. After a successful local outcome the
+daemon calls:
 
 ```text
 PUT /byok/agent-home-projections/:requestId/completion

@@ -234,7 +234,12 @@ export type {
   CleanupExecution,
   TimerLike,
 } from './daemon/journal/storage-policy';
-export type { DeviceRecord } from './daemon/store';
+export { readDeviceEnrollmentStatus } from './daemon/store';
+export type {
+  DeviceEnrollmentStatus,
+  DeviceEnrollmentStatusOptions,
+  DeviceRecord,
+} from './daemon/store';
 export { AuthManager, DeviceRevokedError } from './daemon/auth-manager';
 export { StoredDeviceProofSigner } from './daemon/device-proof-signer';
 export type {

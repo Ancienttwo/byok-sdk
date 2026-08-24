@@ -27,6 +27,17 @@ export interface DeviceRecord {
   devicePublicKey: string;
 }
 
+export interface DeviceEnrollmentStatusOptions {
+  productId: string;
+  storeDir?: string;
+}
+
+/** Credential-blind cold read model for host setup and diagnostics. */
+export type DeviceEnrollmentStatus =
+  | { state: 'unpaired' }
+  | { state: 'paired'; deviceId: string }
+  | { state: 're_pair_required' };
+
 const MAX_DEVICE_RECORD_BYTES = 256 * 1024;
 
 const REPAIR_REQUIRED_MESSAGE =
@@ -270,5 +281,28 @@ export class DeviceStore {
       await handle.close();
       throw err;
     }
+  }
+}
+
+/**
+ * Read the canonical device store without projecting credential or tenant
+ * material. A legacy/tampered record remains distinct from an absent record so
+ * hosts can require explicit re-pair instead of silently changing semantics.
+ * Filesystem and pathname-safety failures intentionally remain errors.
+ */
+export async function readDeviceEnrollmentStatus(
+  options: DeviceEnrollmentStatusOptions,
+): Promise<DeviceEnrollmentStatus> {
+  const storeDir = DeviceStore.resolveDir(options.productId, options.storeDir);
+  try {
+    const record = await new DeviceStore(storeDir).load();
+    return record === undefined
+      ? { state: 'unpaired' }
+      : { state: 'paired', deviceId: record.deviceId };
+  } catch (error) {
+    if (error instanceof DeviceRecordRePairRequiredError) {
+      return { state: 're_pair_required' };
+    }
+    throw error;
   }
 }

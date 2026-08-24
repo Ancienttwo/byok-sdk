@@ -108,6 +108,14 @@ createDaemon({
 });
 ```
 
+For task-free desired-state projection, use
+`createAgentHomeProjectionConsumer`. Its hook must atomically and idempotently
+ensure its opaque product bytes. BYOK may invoke it again under the same
+canonical-home writer lease when a new request carries the exact current
+revision/hash; the terminal outcome remains `idempotent`. This permits repair
+of locally lost derived files without giving the SDK product path or schema
+knowledge. Stale and same-revision/different-hash requests do not invoke it.
+
 Startup materializes and write-probes the canonical root before publishing
 `agent-home-contract`. `agentHome` and `gitWorkspace` are mutually exclusive;
 strict Agent execution has one workspace authority and never falls back to a
@@ -130,6 +138,13 @@ Profile/config, deviceId, or access-token fallback. Omitting contentful mode
 keeps runtime activity metadata/status-only; enabling it is an explicit product
 decision and requires the server capability. Reliable events are fsynced under
 the canonical Agent home and retire only after an exact ack.
+
+Hosts that need cold setup or diagnostic state use
+`readDeviceEnrollmentStatus({ productId, storeDir })`. It validates the
+complete SDK-owned record but returns only `unpaired`, `paired` with
+`deviceId`, or `re_pair_required`; tenant, token, expiry and device keys are
+never projected. Only explicit pairing may replace `re_pair_required` state,
+while filesystem-safety failures remain errors.
 
 ```ts
 createDaemon({

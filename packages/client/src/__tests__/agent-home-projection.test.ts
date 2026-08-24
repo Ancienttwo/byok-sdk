@@ -61,7 +61,7 @@ describe('task-free Agent-home projection', () => {
     await fs.writeFile(path.join(home, 'MEMORY.md'), 'keep me\n', 'utf8');
 
     await expect(manager.project(desired('1'))).resolves.toBe('idempotent');
-    expect(applied).toEqual([home]);
+    expect(applied).toEqual([home, home]);
     expect(await fs.readFile(path.join(home, 'MEMORY.md'), 'utf8')).toBe('keep me\n');
     const state = JSON.parse(
       await fs.readFile(path.join(home, '.byok', AGENT_HOME_PROJECTION_STATE_FILE), 'utf8'),
@@ -69,7 +69,7 @@ describe('task-free Agent-home projection', () => {
     expect(state).toMatchObject({ agentRef: { profileRevision: '1' }, projectionHash: HASH_A });
   });
 
-  it('applies higher revisions and returns exact stale/conflict/idempotent outcomes without invoking the hook', async () => {
+  it('re-applies exact desired state but keeps stale/conflict requests out of the hook', async () => {
     const root = await makeRoot();
     const calls: string[] = [];
     const manager = new AgentHomeManager({
@@ -88,7 +88,7 @@ describe('task-free Agent-home projection', () => {
       .resolves.toBe('stale');
     await expect(manager.project(desired('8', HASH_B, '00000000-0000-4000-8000-000000000005')))
       .resolves.toBe('applied');
-    expect(calls).toEqual([HASH_A, HASH_B]);
+    expect(calls).toEqual([HASH_A, HASH_A, HASH_B]);
   });
 
   it('pre-claims one same-Agent writer while a different Agent remains independent', async () => {
@@ -210,7 +210,7 @@ describe('task-free Agent-home projection', () => {
     await vi.waitFor(async () => {
       expect(await new CursorStore(storeDir).load(real.url, record.deviceId)).toBe(2);
     });
-    expect(hookCwds).toHaveLength(1);
+    expect(hookCwds).toHaveLength(2);
     expect(hookCwds[0]).toBe(path.join(await fs.realpath(hostStorageRoot), 'agents', 'agent-one'));
     expect(adapterB.sessions).toHaveLength(0);
     expect(real.byok.tasks.list()).toHaveLength(0);
