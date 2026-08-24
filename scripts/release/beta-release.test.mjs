@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -16,7 +16,6 @@ import {
 } from './publish.mjs';
 
 const releaseDirectory = fileURLToPath(new URL('.', import.meta.url));
-const repoRoot = path.resolve(releaseDirectory, '../..');
 
 test('release tooling accepts an exact prerelease and retains Pi stable-pin semantics', () => {
   assert.equal(exactReleaseVersion.test('0.8.0-beta.0'), true);
@@ -48,20 +47,43 @@ test('beta releases reject partial registry state while stable releases retain r
 });
 
 test('publish and readback reject a missing or latest prerelease tag before registry I/O', () => {
-  const publishMissingTag = spawnSync(process.execPath, ['scripts/release/publish.mjs'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  });
-  assert.notEqual(publishMissingTag.status, 0);
-  assert.match(publishMissingTag.stderr, /requires a npm-safe non-latest --tag/);
+  // Both drivers take the release version from the repo manifests, so the
+  // missing/latest-tag rejection runs against an isolated prerelease train
+  // instead of whatever version the repo itself currently carries.
+  const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'byok-beta-tag-gate-'));
+  try {
+    const fixtureScripts = path.join(fixtureRoot, 'scripts', 'release');
+    mkdirSync(fixtureScripts, { recursive: true });
+    for (const entry of readdirSync(releaseDirectory, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith('.mjs')) {
+        copyFileSync(path.join(releaseDirectory, entry.name), path.join(fixtureScripts, entry.name));
+      }
+    }
+    for (const [name, version] of [['core', '0.8.0-beta.0'], ['keys', '0.3.0'], ['client', '0.8.0-beta.0']]) {
+      const fixturePackage = path.join(fixtureRoot, 'packages', name);
+      mkdirSync(fixturePackage, { recursive: true });
+      const manifest = { name: `@byok-sdk/${name}`, version };
+      if (name === 'client') manifest.dependencies = { '@earendil-works/pi-coding-agent': '0.84.2' };
+      writeFileSync(path.join(fixturePackage, 'package.json'), `${JSON.stringify(manifest)}\n`);
+    }
 
-  const readbackLatestTag = spawnSync(
-    process.execPath,
-    ['scripts/release/registry-readback.mjs', '--manifest', '/definitely/not/a/manifest.json', '--tag', 'latest'],
-    { cwd: repoRoot, encoding: 'utf8' },
-  );
-  assert.notEqual(readbackLatestTag.status, 0);
-  assert.match(readbackLatestTag.stderr, /requires a npm-safe non-latest --tag/);
+    const publishMissingTag = spawnSync(process.execPath, ['scripts/release/publish.mjs'], {
+      cwd: fixtureRoot,
+      encoding: 'utf8',
+    });
+    assert.notEqual(publishMissingTag.status, 0);
+    assert.match(publishMissingTag.stderr, /requires a npm-safe non-latest --tag/);
+
+    const readbackLatestTag = spawnSync(
+      process.execPath,
+      ['scripts/release/registry-readback.mjs', '--manifest', '/definitely/not/a/manifest.json', '--tag', 'latest'],
+      { cwd: fixtureRoot, encoding: 'utf8' },
+    );
+    assert.notEqual(readbackLatestTag.status, 0);
+    assert.match(readbackLatestTag.stderr, /requires a npm-safe non-latest --tag/);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test('publish manifest reader admits prerelease package identities exactly', () => {
