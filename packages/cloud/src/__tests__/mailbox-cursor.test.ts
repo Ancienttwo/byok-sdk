@@ -29,6 +29,23 @@ async function poll(
 }
 
 describe('GET /byok/events cursor semantics', () => {
+  it('refuses both explicit legacy producer variants before durable mailbox/task side effects for strict devices', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: ['strict-agent-only'],
+    });
+
+    await expect(harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('legacy') }))
+      .rejects.toMatchObject({ code: 'agent_capability_missing' });
+    await expect(harness.cloud.enqueueToolsetOffer(TENANT_A, device.deviceId, {
+      payload: { ...offerPayload('legacy tools'), requiredToolsets: ['salesko'] },
+    })).rejects.toMatchObject({ code: 'agent_capability_missing' });
+    expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toEqual([]);
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'task-never-created')).toBeUndefined();
+  });
+
   it('delivers a logical-toolset offer as its distinct fail-closed message type', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

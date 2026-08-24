@@ -717,3 +717,35 @@ byok-agent workspaces [--show-paths] [--config <path>]
 It reads the private ledger without refreshing or mutating repositories. Paths are hidden unless `--show-paths` is explicitly supplied. On Windows, private storage depends on restrictive DACL hardening and fails closed before writing if that hardening cannot be applied.
 
 Operational rollback is deliberately simple: remove `gitWorkspace` from the local configuration and restart the daemon. Existing Git directories, task files, and private ledger records are preserved for manual salvage; no cleanup or deletion command is part of this MVP.
+
+## Gate A: device credential custody and strict Agent-only admission
+
+`@byok-sdk/client` has one internal `DeviceCredentialStore` authority for the
+paired access token and device private key. It uses macOS Keychain, Windows
+Credential Manager, or Linux Secret Service; provider unavailability is typed
+and fail-closed, and there is no file, path-injection, or `@byok-sdk/keys`
+fallback. `<storeDir>/device.json` is only a bounded non-secret projection
+`{deviceId, tenantId, devicePublicKey}`. A legacy secret-bearing JSON record is
+never imported, parsed as a JWT, or dual-read: normal load/start/status reports
+`re_pair_required`, and explicit re-pair is the default recovery.
+
+The public enrollment boundary is credential-blind: `Daemon.pair()` returns
+`{deviceId}`, while the cold read model is exactly `unpaired | paired{deviceId}
+| re_pair_required`. Auth, store, record, and signer internals are not
+package-root exports. Pair and renewal replace the whole OS credential entry
+before changing the in-process cache; a signer reads the current authority for
+each signature. Unpair executes under the daemon owner/stop boundary, clears
+the OS authority first, and leaves enrollment observable and fail-closed if
+that clearance cannot be confirmed.
+
+`DaemonConfig.strictAgentOnly` is an additive local-security gate. It requires
+successful construction-time Agent-home preflight and only then advertises
+`strict-agent-only` in addition to `agent-home-contract`. The local runner is
+the final authority: after durable receive, dedup, and pre-cancel precedence,
+legacy `task.offer` and `task.offer_with_toolsets` receive only `task.decline`;
+they perform no admission/prepare/workspace/claim/start/process/terminal
+receipt work and do not enter `finishedTaskIds`. Agent offer variants remain
+normal. Server/cloud explicit dispatch rejects legacy work to a strict device
+before task/mailbox mutation, and implicit legacy selection skips strict
+devices. Those producer gates are scheduling defenses only; stale connections
+remain covered by the local gate.

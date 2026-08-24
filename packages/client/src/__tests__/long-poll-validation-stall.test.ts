@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from '../daemon/auth-manager';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { DeviceStore } from '../daemon/store';
+import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -62,7 +63,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
   beforeEach(async () => {
     const storeDir = await tmpDir('byok-lp-validation-stall-store-');
     const store = new DeviceStore(storeDir);
-    await store.save({
+    await seedDeviceEnrollment(store, {
       deviceId: 'dev-1',
       tenantId: 'tenant-long-poll',
       accessToken: 'tok-1',

@@ -1,7 +1,8 @@
 import os from 'node:os';
 import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, PairResponseSchema } from '@byok-sdk/protocol';
 import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
-import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceRecord } from './store';
+import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceMetadata, type DeviceRecord } from './store';
+import type { DeviceCredentialStore, DeviceCredentials, InMemoryDeviceCredentialStore } from './device-credential-store';
 import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys';
 import { toHttpBase } from './url';
 
@@ -32,6 +33,8 @@ const RENEW_MARGIN_MS = 60 * 1000;
 export interface AuthManagerOptions {
   serverUrl: string;
   store: DeviceStore;
+  /** Internal-only credential custody seam. Product construction uses store.credentials. */
+  credentials?: DeviceCredentialStore | InMemoryDeviceCredentialStore;
   deviceName?: string;
   /** Called once revocation is detected, so a caller (ConnectionManager) can stop retrying and surface the state instead of looping. */
   onRevoked?: () => void;
@@ -53,7 +56,11 @@ export class AuthManager {
   private pairing = false;
   private credentialMutationTail: Promise<void> = Promise.resolve();
 
-  constructor(private readonly opts: AuthManagerOptions) {}
+  private readonly credentials: DeviceCredentialStore | InMemoryDeviceCredentialStore;
+
+  constructor(private readonly opts: AuthManagerOptions) {
+    this.credentials = opts.credentials ?? opts.store.credentials;
+  }
 
   get deviceId(): string | undefined {
     return this.record?.deviceId;
@@ -63,11 +70,16 @@ export class AuthManager {
     return this.revoked;
   }
 
+  /** Internal signer read: always recompose metadata with the current OS secret authority. */
+  async readCurrent(): Promise<DeviceRecord | undefined> {
+    return this.loadRecord();
+  }
+
   /** Load a previously-paired device record from disk, if any (idempotent — a second call is a no-op once loaded). */
   async loadExisting(): Promise<DeviceRecord | undefined> {
     this.stopped = false;
     if (!this.record) {
-      this.record = await this.opts.store.load();
+      this.record = await this.loadRecord();
     }
     if (this.record) this.scheduleProactiveRenewal();
     return this.record;
@@ -84,7 +96,7 @@ export class AuthManager {
         let existing = this.record;
         if (!existing) {
           try {
-            existing = await this.opts.store.load();
+            existing = await this.loadRecord();
           } catch (error) {
             // Explicit pairing is the one authorized replacement path for a
             // legacy/tampered enrollment file. It never reads through it: a
@@ -116,15 +128,21 @@ export class AuthManager {
         // alternate tenant authority.
         const body = PairResponseSchema.parse(await res.json());
 
-        const record: DeviceRecord = {
+        const metadata: DeviceMetadata = {
           deviceId: body.deviceId,
           tenantId: body.tenantId,
+          devicePublicKey: keyPair.publicKeyBase64Url,
+        };
+        const credentials: DeviceCredentials = {
           accessToken: body.accessToken,
           expiresAt: resolvePairExpiry(body.refreshHint),
           devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
-          devicePublicKey: keyPair.publicKeyBase64Url,
         };
-        await this.opts.store.save(record);
+        // OS replace commits the sole secret authority first. Cache changes
+        // only after the secret write and metadata projection both succeed.
+        await this.credentials.replace(credentials);
+        await this.opts.store.save(metadata);
+        const record: DeviceRecord = { ...metadata, ...credentials };
         this.record = record;
         this.revoked = false;
         return record;
@@ -205,8 +223,14 @@ export class AuthManager {
       throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
     }
     const body = (await tokenRes.json()) as TokenResponse;
-    const updated: DeviceRecord = { ...record, accessToken: body.accessToken, expiresAt: body.expiresAt };
-    await this.opts.store.save(updated);
+    const updatedCredentials: DeviceCredentials = {
+      accessToken: body.accessToken,
+      expiresAt: body.expiresAt,
+      devicePrivateKeyPem: record.devicePrivateKeyPem,
+    };
+    // Renewal is one whole-credential replacement; never a token-only write.
+    await this.credentials.replace(updatedCredentials);
+    const updated: DeviceRecord = { ...record, ...updatedCredentials };
     this.record = updated;
     this.scheduleProactiveRenewal();
     return updated.accessToken;
@@ -248,6 +272,15 @@ export class AuthManager {
     } finally {
       release();
     }
+  }
+
+  /** Read the current paired authority afresh; metadata without its OS secret is re-pair required. */
+  private async loadRecord(): Promise<DeviceRecord | undefined> {
+    const metadata = await this.opts.store.load();
+    if (metadata === undefined) return undefined;
+    const credentials = await this.credentials.read();
+    if (credentials === undefined) throw new DeviceRecordRePairRequiredError();
+    return Object.freeze({ ...metadata, ...credentials });
   }
 }
 

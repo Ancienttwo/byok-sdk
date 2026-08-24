@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readDeviceEnrollmentStatus } from '../index';
-import { DeviceStore, type DeviceRecord } from '../daemon/store';
+import { DeviceStore } from '../daemon/store';
+import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 
 const roots: string[] = [];
 
@@ -23,7 +24,7 @@ describe('credential-blind authenticated enrollment status', () => {
     const options = { productId: 'status-test', storeDir };
     expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 'unpaired' });
 
-    const record: DeviceRecord = {
+    const record = {
       deviceId: 'device-status',
       tenantId: 'tenant-status',
       accessToken: 'secret-access-token',
@@ -31,13 +32,16 @@ describe('credential-blind authenticated enrollment status', () => {
       devicePrivateKeyPem: 'secret-private-key',
       devicePublicKey: 'public-key',
     };
-    await new DeviceStore(storeDir).save(record);
+    await seedDeviceEnrollment(new DeviceStore(storeDir, undefined, options.productId), record);
 
     const paired = await readDeviceEnrollmentStatus(options);
     expect(paired).toEqual({ state: 'paired', deviceId: 'device-status' });
     expect(JSON.stringify(paired)).not.toContain(record.tenantId);
     expect(JSON.stringify(paired)).not.toContain(record.accessToken);
     expect(JSON.stringify(paired)).not.toContain(record.devicePrivateKeyPem);
+
+    await new DeviceStore(storeDir, undefined, options.productId).credentials.clear();
+    expect(await readDeviceEnrollmentStatus(options)).toEqual({ state: 're_pair_required' });
 
     await fs.writeFile(path.join(storeDir, 'device.json'), JSON.stringify({
       deviceId: 'legacy-device',

@@ -26,6 +26,11 @@ export default defineConfig({
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
   },
   test: {
+    env: {
+      // Test-only in-memory credential authority. Product construction never
+      // gets this flag from public DaemonConfig and has no filesystem fallback.
+      BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1',
+    },
     testTimeout: 10_000,
   },
 });

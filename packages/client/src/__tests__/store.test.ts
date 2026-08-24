@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DeviceStore, type DeviceRecord } from '../daemon/store';
+import { DeviceStore, type DeviceMetadata } from '../daemon/store';
 import { SecureDirHardeningError } from '../util/secure-dir';
 import type { Runner } from '../lifecycle/exec-runner';
 
@@ -10,12 +10,9 @@ async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-const record: DeviceRecord = {
+const record: DeviceMetadata = {
   deviceId: 'device-1',
   tenantId: 'tenant-store',
-  accessToken: 'token-1',
-  expiresAt: '2026-01-01T00:00:00.000Z',
-  devicePrivateKeyPem: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n',
   devicePublicKey: 'pubkey-base64url',
 };
 
@@ -34,7 +31,7 @@ describe('DeviceStore (atomic write path)', () => {
     if (storeDir) await fs.rm(storeDir, { recursive: true, force: true });
   });
 
-  it('round-trips a DeviceRecord through save()/load()', async () => {
+  it('round-trips a bounded non-secret DeviceMetadata projection through save()/load()', async () => {
     storeDir = await tmpDir('byok-device-store-');
     const store = new DeviceStore(storeDir);
 
@@ -96,14 +93,14 @@ describe('DeviceStore (atomic write path)', () => {
     expect(entries).toEqual(['device.json']);
   });
 
-  it('clear() removes device.json so a subsequent load() sees undefined again', async () => {
+  it('remove() removes device.json so a subsequent load() sees undefined again', async () => {
     storeDir = await tmpDir('byok-device-store-');
     const store = new DeviceStore(storeDir);
 
     await store.save(record);
     expect(await store.load()).toEqual(record);
 
-    await store.clear();
+    await store.remove();
     expect(await store.load()).toBeUndefined();
   });
 

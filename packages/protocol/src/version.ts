@@ -112,6 +112,7 @@ export const CAPABILITY_FLAGS = [
   'dispatch-selection',
   'toolset-selection',
   'agent-home-contract',
+  'strict-agent-only',
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,

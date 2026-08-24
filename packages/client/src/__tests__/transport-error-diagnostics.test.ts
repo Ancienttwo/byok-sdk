@@ -23,6 +23,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
 import { LongPollClient, LongPollRouteError } from '../daemon/long-poll-transport';
 import { DeviceStore } from '../daemon/store';
+import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import { describeEndpoint } from '../daemon/url';
 import { WsTransport, WsUnexpectedStatusError } from '../daemon/ws-transport';
 
@@ -86,7 +87,7 @@ describe('LongPollRouteError names the failing route', () => {
   beforeEach(async () => {
     const storeDir = await tmpDir('byok-transport-diagnostics-store-');
     const store = new DeviceStore(storeDir);
-    await store.save({
+    await seedDeviceEnrollment(store, {
       deviceId: 'dev-1',
       tenantId: 'tenant-transport',
       accessToken: 'tok-1',
@@ -119,7 +120,7 @@ describe('LongPollRouteError names the failing route', () => {
     const store = new DeviceStore(storeDir);
     const keys = generateKeyPairSync('ed25519');
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
-    await store.save({
+    await seedDeviceEnrollment(store, {
       deviceId: 'dev-expired',
       tenantId: 'tenant-transport',
       accessToken: 'tok-expired',

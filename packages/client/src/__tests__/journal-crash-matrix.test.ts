@@ -312,12 +312,12 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
       }, { timeout: 10_000 });
 
       const body = await cloud.readTerminalBody(offer.taskId);
-      const stored = await new DeviceStore(storeDir).load();
+      const credentials = await new DeviceStore(storeDir, undefined, 'test-product').credentials.read();
       return {
         taskId: offer.taskId,
         storeDir,
         terminal: decodeEnvelope(body ?? ''),
-        accessToken: stored?.accessToken ?? '',
+        accessToken: credentials?.accessToken ?? '',
         cloudHandle: cloud,
         journalHandle: journal,
       };

@@ -23,8 +23,10 @@ import {
   type TruthObjectDownloads,
 } from '../../../cloud/src/index';
 import { StoredDeviceProofSigner, type DeviceProofRequest, type DeviceProofSigner } from '../daemon/device-proof-signer';
+import { AuthManager } from '../daemon/auth-manager';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
 import { DeviceStore } from '../daemon/store';
+import { seedDeviceEnrollment } from './fixtures/device-enrollment';
 import {
   TruthMemoryClient,
   TruthMemoryClientError,
@@ -467,7 +469,7 @@ describe('truth memory client', () => {
     const keys = generateKeyPairSync('ed25519');
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');
-    await store.save({
+    await seedDeviceEnrollment(store, {
       deviceId: 'device-e2e',
       tenantId: tenant,
       accessToken: 'not-used',
@@ -483,8 +485,10 @@ describe('truth memory client', () => {
       proofKeyId: 'identity',
       proofKeyEpoch: 0,
     });
+    const auth = new AuthManager({ serverUrl: 'http://local', store });
+    await auth.loadExisting();
     const signer = new StoredDeviceProofSigner({
-      store,
+      auth,
       tenantId: tenant,
       productId: 'product-e2e',
       keyId: 'identity',

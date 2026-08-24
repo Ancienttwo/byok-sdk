@@ -759,6 +759,22 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     }
   }
 
+  /**
+   * Producer-side scheduling defence for explicit legacy delivery. The daemon
+   * remains the final authority for stale connections and already-queued
+   * offers, but this durable read avoids creating a task/mailbox fact that a
+   * strict device is guaranteed to decline.
+   */
+  async function assertLegacyAdmission(tenant: TenantId, deviceId: string): Promise<void> {
+    const device = await options.cloud.devices.get(tenant, deviceId);
+    if (device?.capabilities?.includes('strict-agent-only') === true) {
+      throw new ByokCloudError(
+        'agent_capability_missing',
+        `Device ${deviceId} advertises strict-agent-only; refusing legacy offer before mailbox append.`,
+      );
+    }
+  }
+
   function contentReadCapability(surface: AgentContentReadPayload['surface']): string {
     switch (surface) {
       case 'workspace':
@@ -936,12 +952,14 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueOffer(tenant, deviceId, input) {
+      await assertLegacyAdmission(tenant, deviceId);
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
         createEnvelope('task.offer', input.payload, { id: messageId, taskId, seq }),
       );
     },
 
     async enqueueToolsetOffer(tenant, deviceId, input) {
+      await assertLegacyAdmission(tenant, deviceId);
       return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
         createEnvelope('task.offer_with_toolsets', input.payload, { id: messageId, taskId, seq }),
       );

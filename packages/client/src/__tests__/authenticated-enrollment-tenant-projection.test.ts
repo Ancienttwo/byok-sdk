@@ -121,8 +121,11 @@ describe('authenticated enrollment tenant projection', () => {
 
     await expect(daemon.start()).rejects.toThrow(/re-pair required/);
     const repaired = await daemon.pair('repair-code');
-    expect(repaired.tenantId).toBe('tenant-repaired');
-    expect(await new DeviceStore(storeDir).load()).toEqual(repaired);
+    expect(repaired).toEqual({ deviceId: expect.any(String) });
+    expect(await new DeviceStore(storeDir).load()).toMatchObject({
+      deviceId: repaired.deviceId,
+      tenantId: 'tenant-repaired',
+    });
   });
 
   it('rejects a pair response without the required authenticated tenant before writing device.json', async () => {
@@ -162,7 +165,12 @@ describe('authenticated enrollment tenant projection', () => {
 
     expect(first.tenantId).toBe('tenant-first');
     expect(replacement.tenantId).toBe('tenant-replacement');
-    expect(await store.load()).toEqual(replacement);
+    expect(await store.load()).toEqual({
+      deviceId: replacement.deviceId,
+      tenantId: replacement.tenantId,
+      devicePublicKey: replacement.devicePublicKey,
+    });
+    expect(await store.credentials.read()).toMatchObject({ accessToken: replacement.accessToken });
     await auth.stop();
   });
 
@@ -190,10 +198,10 @@ describe('authenticated enrollment tenant projection', () => {
     const first = await daemon.pair('active-first-code');
     await daemon.start();
     const replacement = await daemon.pair('active-replacement-code');
-    expect(first.tenantId).toBe('tenant-active-first');
-    expect(replacement.tenantId).toBe('tenant-active-replacement');
+    expect(first).toEqual({ deviceId: expect.any(String) });
+    expect(replacement).toEqual({ deviceId: expect.any(String) });
     expect(daemon.status().connected).toBe(false);
-    expect((await new DeviceStore(storeDir).load())?.tenantId).toBe(replacement.tenantId);
+    expect((await new DeviceStore(storeDir).load())?.tenantId).toBe('tenant-active-replacement');
     expect(server.httpRequests.filter((request) => request.pathname === '/byok/pair')).toHaveLength(2);
     await expect(daemon.publishReliableAgentEgress?.({
       agentRef: { agentId: 'active-repair-agent', profileRevision: 'r1' },
@@ -248,7 +256,7 @@ describe('authenticated enrollment tenant projection', () => {
       taskId: 'enrollment-egress-task',
       payload: { status: 'authenticated' },
     });
-    expect(appended).toMatchObject({ ok: true, record: { tenantId: record.tenantId } });
+    expect(appended).toMatchObject({ ok: true, record: { tenantId: 'tenant-daemon' } });
 
     const sequence = server.nextSeq();
     server.send(createEnvelope('task.offer', { instruction: 'journal identity', policy: { mode: 'auto' } }, {
@@ -262,7 +270,9 @@ describe('authenticated enrollment tenant projection', () => {
       deviceId: record.deviceId,
     });
     const observableEgress = JSON.stringify({ appended, journal: journal.appended, wire: server.received });
-    expect(observableEgress).not.toContain(record.accessToken);
-    expect(observableEgress).not.toContain(record.devicePrivateKeyPem);
+    const credentials = await new DeviceStore(storeDir, undefined, 'enrollment-test').credentials.read();
+    expect(credentials).toBeDefined();
+    expect(observableEgress).not.toContain(credentials!.accessToken);
+    expect(observableEgress).not.toContain(credentials!.devicePrivateKeyPem);
   });
 });

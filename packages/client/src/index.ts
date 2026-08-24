@@ -236,17 +236,10 @@ export type {
 } from './daemon/journal/storage-policy';
 export { readDeviceEnrollmentStatus } from './daemon/store';
 export type {
+  DeviceEnrollment,
   DeviceEnrollmentStatus,
   DeviceEnrollmentStatusOptions,
-  DeviceRecord,
 } from './daemon/store';
-export { AuthManager, DeviceRevokedError } from './daemon/auth-manager';
-export { StoredDeviceProofSigner } from './daemon/device-proof-signer';
-export type {
-  DeviceProofRequest,
-  DeviceProofSigner,
-  StoredDeviceProofSignerOptions,
-} from './daemon/device-proof-signer';
 /**
  * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
  * channel. The install pipeline and the two read APIs are public because the

@@ -297,6 +297,8 @@ export interface TaskRunnerDeps {
   workspaceRoot: string;
   /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
   agentHome?: AgentHomeManager;
+  /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
+  strictAgentOnly?: boolean;
   /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
   agentEgressPolicy?: Readonly<AgentEgressPolicy>;
   /** Always-present projection/sanitizer consumer; it defaults to metadata-only. */
@@ -980,6 +982,12 @@ export class TaskRunner {
    */
   private readonly finishedTaskIds = new Set<string>();
   /**
+   * Bounded local receive dedup for strict legacy declines. A decline is not a
+   * task terminal receipt, so it must never enter `finishedTaskIds`; retaining
+   * it separately keeps replay idempotent without claiming or finishing work.
+   */
+  private readonly strictDeclinedTaskIds = new Set<string>();
+  /**
    * M4 Phase 2 (daemon control socket `shutdown` RPC): set once by
    * {@link stopAcceptingOffers}, checked at the very top of `handleOffer` —
    * see that method's own doc comment for why offers must stop being
@@ -1227,7 +1235,7 @@ export class TaskRunner {
     // same offer while its first prepared operation is still in flight (or
     // well after it already succeeded) would start a SECOND adapter session
     // for the same task, orphaning the first.
-    if (this.tasks.has(taskId) || this.finishedTaskIds.has(taskId)) {
+    if (this.tasks.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) {
       return;
     }
 
@@ -1260,28 +1268,6 @@ export class TaskRunner {
       }
     }
 
-    // S3b (L-002): the pre-claim admission veto — see
-    // `TaskRunnerDeps.admissionGuard`'s own doc comment. Consulted here,
-    // AFTER the dedup check above (a redelivery of an offer this device
-    // already accepted is not a new admission, and must stay a silent no-op
-    // rather than becoming a decline) and BEFORE everything below, so a
-    // declined offer never touches an adapter, a workspace, or the wire
-    // beyond its own `task.decline`.
-    const guarded = this.deps.admissionGuard?.({ taskId, payload });
-    if (guarded !== undefined && !guarded.admit) {
-      decline(guarded.reason, guarded.retryable);
-      return;
-    }
-
-    // M4 Phase 2: the control socket's `shutdown` RPC flips this before
-    // tearing down active tasks (see `stopAcceptingOffers`'s own doc
-    // comment) — any offer arriving after that point is declined outright,
-    // never claimed.
-    if (this.stoppingOffers) {
-      decline('daemon is shutting down', true);
-      return;
-    }
-
     // Finding #5: mark this taskId as "in-flight" for the entire remainder
     // of this call — `evictPendingCancelled` must never remove a
     // `pendingCancelled` entry for a taskId in this set (see its own doc
@@ -1303,6 +1289,32 @@ export class TaskRunner {
         const reason = this.pendingCancelled.get(taskId);
         this.pendingCancelled.delete(taskId);
         decline(reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
+        return;
+      }
+
+      // Gate A strict local authority: journal receive precedes this runner,
+      // and dedup plus pre-cancel above retain their established precedence.
+      // This is deliberately before admission, adapter preparation, workspace
+      // materialization, claim, start, or any terminal receipt bookkeeping.
+      if (this.deps.strictAgentOnly === true && !strictAgentOffer) {
+        this.addStrictDeclinedTaskId(taskId);
+        decline('strict Agent-only daemon refuses legacy task offers', false);
+        return;
+      }
+
+      // S3b (L-002): the pre-claim admission veto stays after the strict
+      // receive/dedup/cancel precedence above and before every runtime or
+      // workspace side effect.
+      const guarded = this.deps.admissionGuard?.({ taskId, payload });
+      if (guarded !== undefined && !guarded.admit) {
+        decline(guarded.reason, guarded.retryable);
+        return;
+      }
+
+      // M4 Phase 2: the control socket's `shutdown` RPC flips this before
+      // tearing down active tasks — any later offer is declined outright.
+      if (this.stoppingOffers) {
+        decline('daemon is shutting down', true);
         return;
       }
 
@@ -3289,6 +3301,14 @@ export class TaskRunner {
     if (this.finishedTaskIds.size > MAX_TRACKED_TASK_IDS) {
       const oldest = this.finishedTaskIds.values().next().value;
       if (oldest !== undefined) this.finishedTaskIds.delete(oldest);
+    }
+  }
+
+  private addStrictDeclinedTaskId(taskId: string): void {
+    this.strictDeclinedTaskIds.add(taskId);
+    if (this.strictDeclinedTaskIds.size > MAX_TRACKED_TASK_IDS) {
+      const oldest = this.strictDeclinedTaskIds.values().next().value;
+      if (oldest !== undefined) this.strictDeclinedTaskIds.delete(oldest);
     }
   }
 

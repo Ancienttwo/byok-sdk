@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import type { Daemon, DaemonConfig, DeviceRecord, ServiceLifecycle } from '../index';
+import type { Daemon, DaemonConfig, DeviceEnrollment, ServiceLifecycle } from '../index';
 import { ControlError } from '../daemon/control-protocol';
 import type { ConnectControlResult, ControlClient } from '../bin/control-client';
 import { runApprovalsCommand } from '../bin/commands/approvals';
@@ -99,12 +99,9 @@ describe('bin/commands/status: runStatusCommand', () => {
 
   it('reports paired:yes + deviceId once a device.json exists on disk — even though this Daemon was never start()ed', async () => {
     const storeDir = await tmpDir('byok-cmd-status-paired-');
-    const record: DeviceRecord = {
+    const record = {
       deviceId: 'dev-123',
       tenantId: 'tenant-status',
-      accessToken: 'tok',
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-      devicePrivateKeyPem: 'pem',
       devicePublicKey: 'pub',
     };
     await new DeviceStore(storeDir).save(record);
@@ -250,7 +247,7 @@ describe('bin/commands/tasks: runTasksFollowCommand', () => {
 
 describe('bin/commands/pair: runPairCommand', () => {
   it('calls daemon.pair(code) and logs the resulting deviceId', async () => {
-    const pair = vi.fn().mockResolvedValue({ deviceId: 'dev-9', tenantId: 'tenant-pair' } as DeviceRecord);
+    const pair = vi.fn().mockResolvedValue({ deviceId: 'dev-9' } as DeviceEnrollment);
     const { log, lines } = collectLog();
     await runPairCommand(baseConfig('/unused'), 'the-code', { log, daemon: { pair } });
     expect(pair).toHaveBeenCalledWith('the-code');

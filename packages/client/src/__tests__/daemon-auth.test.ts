@@ -29,7 +29,7 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
     await server.close();
   });
 
-  it('generates a device keypair on first pair and persists device.json 0600', async () => {
+  it('generates a device keypair on first pair and persists only metadata in device.json', async () => {
     const storeDir = await tmpDir('byok-auth-store-');
     const store = new DeviceStore(storeDir);
     const auth = new AuthManager({ serverUrl: server.url, store });
@@ -44,8 +44,13 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
     if (process.platform !== 'win32') expect(stat.mode & 0o777).toBe(0o600);
 
     const onDisk = JSON.parse(await fs.readFile(filePath, 'utf8')) as Record<string, unknown>;
-    expect(onDisk.devicePrivateKeyPem).toBe(record.devicePrivateKeyPem);
+    expect(onDisk.devicePrivateKeyPem).toBeUndefined();
+    expect(onDisk.accessToken).toBeUndefined();
     expect(onDisk.devicePublicKey).toBe(record.devicePublicKey);
+    expect(await store.credentials.read()).toMatchObject({
+      accessToken: record.accessToken,
+      devicePrivateKeyPem: record.devicePrivateKeyPem,
+    });
 
     auth.stop();
   });
@@ -159,13 +164,13 @@ describe('access token renewal (protocol §6.2)', () => {
     const saveGate = new Promise<void>((resolve) => {
       releaseRenewalSave = resolve;
     });
-    const realSave = store.save.bind(store);
-    vi.spyOn(store, 'save').mockImplementation(async (next) => {
+    const realReplace = store.credentials.replace.bind(store.credentials);
+    vi.spyOn(store.credentials, 'replace').mockImplementation(async (next) => {
       if (next.accessToken !== record.accessToken) {
         renewalSaveReached();
         await saveGate;
       }
-      await realSave(next);
+      await realReplace(next);
     });
 
     const renewal = auth.handleUnauthorized();
@@ -198,10 +203,10 @@ describe('access token renewal (protocol §6.2)', () => {
     const saveGate = new Promise<void>((resolve) => {
       releaseSave = resolve;
     });
-    const realSave = store.save.bind(store);
-    const save = vi.spyOn(store, 'save').mockImplementation(async (next) => {
+    const realReplace = store.credentials.replace.bind(store.credentials);
+    const save = vi.spyOn(store.credentials, 'replace').mockImplementation(async (next) => {
       await saveGate;
-      await realSave(next);
+      await realReplace(next);
     });
     const renewal = auth.handleUnauthorized();
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
@@ -234,13 +239,13 @@ describe('access token renewal (protocol §6.2)', () => {
     const saveGate = new Promise<void>((resolve) => {
       releaseRenewalSave = resolve;
     });
-    const realSave = store.save.bind(store);
-    vi.spyOn(store, 'save').mockImplementation(async (record) => {
-      if (record.deviceId === first.deviceId && record.accessToken !== first.accessToken) {
+    const realReplace = store.credentials.replace.bind(store.credentials);
+    vi.spyOn(store.credentials, 'replace').mockImplementation(async (record) => {
+      if (record.accessToken !== first.accessToken) {
         renewalSaveReached();
         await saveGate;
       }
-      await realSave(record);
+      await realReplace(record);
     });
 
     const renewal = auth.handleUnauthorized();
@@ -256,7 +261,8 @@ describe('access token renewal (protocol §6.2)', () => {
     const renewedToken = await renewal;
     const replacement = await pairing;
     expect(replacement.accessToken).not.toBe(renewedToken);
-    expect(await store.load()).toMatchObject({ deviceId: replacement.deviceId, accessToken: replacement.accessToken });
+    expect(await store.load()).toMatchObject({ deviceId: replacement.deviceId });
+    expect(await store.credentials.read()).toMatchObject({ accessToken: replacement.accessToken });
     await auth.stop();
   });
 
@@ -317,9 +323,6 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await daemon.pair('pairing-code');
     await daemon.start();
-    const devicePath = path.join(storeDir, 'device.json');
-    const diskRecord = JSON.parse(await fs.readFile(devicePath, 'utf8')) as Record<string, unknown>;
-    await fs.writeFile(devicePath, `${JSON.stringify({ ...diskRecord, expiresAt: new Date(Date.now() + 2_000).toISOString() })}\n`);
     const before = server.httpRequests.filter((r) => r.pathname === '/byok/challenge').length;
 
     const rejected = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
@@ -329,7 +332,11 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     await rejected.stop();
   });
 
-  it.skipIf(!isSqliteAvailable())('a separate hosted daemon owns SQLite before any contender can open or quarantine it', async () => {
+  // The isolated in-memory credential double deliberately has no cross-process
+  // persistence. This process-bound SQLite-owner probe continues on a real OS
+  // credential-provider run; same-process owner rejection remains covered in
+  // this suite without touching a user's credential entry.
+  it.skipIf(!isSqliteAvailable() || process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE === '1')('a separate hosted daemon owns SQLite before any contender can open or quarantine it', async () => {
     const workspaceRoot = await tmpDir('byok-client-hosted-owner-workspace-');
     const storeDir = await tmpDir('byok-client-hosted-owner-store-');
     const config = {

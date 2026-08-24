@@ -8,7 +8,7 @@ import {
   type DeviceProofProtectedClaims,
 } from '@byok-sdk/core';
 import { importPrivateKeyPem } from './device-keys';
-import type { DeviceStore } from './store';
+import type { AuthManager } from './auth-manager';
 
 export interface DeviceProofRequest {
   readonly method: string;
@@ -29,7 +29,7 @@ export interface DeviceProofSigner {
 }
 
 export interface StoredDeviceProofSignerOptions {
-  readonly store: Pick<DeviceStore, 'load'>;
+  readonly auth: Pick<AuthManager, 'readCurrent'>;
   /** Explicit host configuration. Pairing/bearer state is never mined for tenant identity. */
   readonly tenantId: string;
   readonly productId: string;
@@ -41,8 +41,9 @@ export interface StoredDeviceProofSignerOptions {
 /**
  * Signs request-bound S6 proofs with the paired device identity key.
  *
- * The store is read for every signature rather than cached: clearing the paired
- * record immediately removes local signing authority. Canonicalization is
+ * The authenticated enrollment authority is read for every signature rather
+ * than cached: clearing the OS credential immediately removes local signing
+ * authority. Canonicalization is
  * imported from `@byok-sdk/core`, the one frozen byte authority; this module only
  * supplies the Node Ed25519 operation.
  */
@@ -61,7 +62,7 @@ export class StoredDeviceProofSigner implements DeviceProofSigner {
   }
 
   async sign(request: DeviceProofRequest): Promise<DeviceProofEnvelopeV1> {
-    const record = await this.options.store.load();
+    const record = await this.options.auth.readCurrent();
     if (record === undefined) {
       throw new Error('device is not paired; cannot sign a device proof');
     }

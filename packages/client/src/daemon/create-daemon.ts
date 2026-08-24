@@ -88,7 +88,7 @@ import { SessionWorkspaceStore } from './session-workspace-store';
 import { AgentSessionHandoffStore } from './agent-session-handoff-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
-import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceRecord } from './store';
+import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceEnrollment, type DeviceMetadata, type DeviceRecord } from './store';
 import { JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
@@ -232,6 +232,11 @@ export interface DaemonConfig {
     hostStorageRoot: string;
     projection?: AgentHomeProjection;
   };
+  /**
+   * Refuse legacy task offers locally. This is an additive capability only
+   * after the SDK-owned Agent home has passed construction-time preflight.
+   */
+  strictAgentOnly?: boolean;
   /**
    * Explicit Agent-local/cloud egress selection. Omission still enforces the
    * SDK metadata/status projection, but does not advertise or admit the new
@@ -584,7 +589,8 @@ export interface DaemonStatus {
 }
 
 export interface Daemon {
-  pair(pairingCode: string): Promise<DeviceRecord>;
+  /** Pairing result is intentionally credential-blind. */
+  pair(pairingCode: string): Promise<DeviceEnrollment>;
   start(): Promise<void>;
   stop(): Promise<void>;
   status(): DaemonStatus;
@@ -813,6 +819,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<RuntimeInfo[]
 function computeCapabilities(
   adapters: RuntimeAdapter[],
   agentHomeConfigured = false,
+  strictAgentOnly = false,
   agentHomeProjectionConfigured = false,
   agentEgressConfigured = false,
   contentReadPolicies?: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
@@ -834,6 +841,7 @@ function computeCapabilities(
     flags.push('toolset-selection');
   }
   if (agentHomeConfigured) flags.push('agent-home-contract');
+  if (strictAgentOnly) flags.push('strict-agent-only');
   if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
   if (agentEgressConfigured) {
     flags.push(
@@ -1055,6 +1063,9 @@ export function buildDaemonWithAdapters(
   if (config.agentEgress !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentEgress requires DaemonConfig.agentHome for the per-Agent local spool');
   }
+  if (config.strictAgentOnly === true && config.agentHome === undefined) {
+    throw new Error('DaemonConfig.strictAgentOnly requires DaemonConfig.agentHome');
+  }
   const egressPolicy = resolveAgentEgressPolicy(config.agentEgress?.policy);
   const egressBatcherOptions: ProgressBatcherOptions | undefined = egressPolicy.activity.mode === 'contentful-trajectory'
     ? {
@@ -1100,7 +1111,7 @@ export function buildDaemonWithAdapters(
   let shuttingDown = false;
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
-  const store = new DeviceStore(storeDir);
+  const store = new DeviceStore(storeDir, undefined, config.productId);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   let fleetJitter: FleetJitter | undefined;
   let maintenanceSequence = 0;
@@ -1116,6 +1127,9 @@ export function buildDaemonWithAdapters(
         }),
       });
   const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();
+  // Strict admission is a construction property, not a deferred start-time
+  // promise: an unusable agent home cannot advertise strict Agent-only work.
+  if (config.strictAgentOnly === true) agentHomeManager?.preflightSync();
   const agentContentReadPolicies = resolveContentReadPolicies(egressPolicy, config.agentEgress?.contentRead);
   // Before authenticated enrollment is loaded, egress is deliberately unable
   // to persist or acknowledge tenant-scoped records. startUnderLease replaces
@@ -1365,13 +1379,14 @@ export function buildDaemonWithAdapters(
     }
   }
 
-  async function pair(pairingCode: string): Promise<DeviceRecord> {
+  async function pair(pairingCode: string): Promise<DeviceEnrollment> {
     checkServerUrl();
     // Serialize every lifecycle mutation, not only pair/pair. A process-local
     // operation may borrow the daemon's retained cross-process lease, so pair,
     // start, stop, control shutdown and unpair must never decide independently
     // who releases that shared lease.
-    return runLifecycleMutation(() => pairUnderLease(pairingCode));
+    const record = await runLifecycleMutation(() => pairUnderLease(pairingCode));
+    return Object.freeze({ deviceId: record.deviceId });
   }
 
   async function pairUnderLease(pairingCode: string): Promise<DeviceRecord> {
@@ -1391,7 +1406,7 @@ export function buildDaemonWithAdapters(
     // not `start()`/`loadExisting()` ran in this process before `pair()`.
     let replacementPersisted = false;
     try {
-      let previous: DeviceRecord | undefined;
+      let previous: DeviceMetadata | undefined;
       try {
         previous = await store.load();
       } catch (error) {
@@ -1591,6 +1606,7 @@ export function buildDaemonWithAdapters(
     const capabilities = computeCapabilities(
       adapters,
       config.agentHome !== undefined,
+      config.strictAgentOnly === true,
       agentHomeManager?.supportsTaskFreeProjection() === true,
       config.agentEgress !== undefined,
       agentContentReadPolicies,
@@ -1687,6 +1703,7 @@ export function buildDaemonWithAdapters(
       permissionDefaults: config.permissionDefaults,
       workspaceRoot: config.workspaceRoot,
       ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
+      ...(config.strictAgentOnly === true ? { strictAgentOnly: true } : {}),
       ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
       deviceId: record.deviceId,
       // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
@@ -2433,10 +2450,25 @@ export function buildDaemonWithAdapters(
       // device and cursor mutations. A pair that wins stop()'s release gap is
       // therefore either wholly before this cleanup (and is fully removed) or
       // wholly after it; stale pre-lease identity can never drive cleanup.
-      const current = await store.remove();
-      if (current) {
-        await cursorStore.clear(config.serverUrl, current.deviceId);
+      const current = await store.load();
+      try {
+        await store.credentials.clear();
+      } catch {
+        // The OS credential remains the sole secret authority. Leave the
+        // metadata and in-memory auth binding observable until its deletion
+        // succeeds; never report an unpair that did not clear that authority.
+        throw new Error('device credential could not be cleared; enrollment remains paired and fail-closed');
       }
+      try {
+        await store.remove();
+      } catch (error) {
+        // Secret clearance won but metadata cleanup lost. Rebuild auth so this
+        // process cannot continue with the previous cache; the surviving
+        // projection subsequently reads as re-pair-required.
+        auth = buildAuthManager();
+        throw error;
+      }
+      if (current) await cursorStore.clear(config.serverUrl, current.deviceId);
     } finally {
       await cleanupLease.release();
     }
@@ -2737,7 +2769,7 @@ export function buildDaemonWithAdapters(
           throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
         }
         // Gate 6. Read from disk every time — never a cached record.
-        const record = await store.load();
+        const record = await auth.readCurrent();
         if (record === undefined) {
           observer.noteDeviceAssertion({ result: 'denied', reason: 'not_paired', audience: parsed.audience });
           throw new ControlError('not_paired', 'this device is not paired; nothing can be asserted about it');
@@ -2745,17 +2777,18 @@ export function buildDaemonWithAdapters(
 
         // Plan `device-assertion-broker` (codex F2): re-check the mutable
         // conditions IMMEDIATELY before signing, at the signing point itself.
-        // `store.load()` above is async, and a shutdown request or a
+        // `auth.readCurrent()` above is async, and a shutdown request or a
         // revocation can land during that `await` — after gates 4/5 already
         // passed but before the key is ever touched. The same
         // check-then-await-then-sign shape that made the result-document
         // capability re-check necessary applies here: the only checks that
         // count are the ones that still hold at the moment of signing.
         //
-        // `store.load()` returning a record is itself the fresh not-paired
-        // re-check (unpair clears `device.json` under a lease, so a record
-        // read here is a currently-paired record). Shutdown and revocation are
-        // in-memory flags, so they are re-read here explicitly.
+        // `auth.readCurrent()` returning a record is itself the fresh
+        // not-paired re-check: it composes current metadata with the sole OS
+        // credential authority, so unpair cannot leave a stale signer cache.
+        // Shutdown and revocation are in-memory flags, so they are re-read
+        // here explicitly.
         if (shuttingDown) {
           observer.noteDeviceAssertion({ result: 'denied', reason: 'shutting_down', audience: parsed.audience });
           throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');

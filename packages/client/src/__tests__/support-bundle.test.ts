@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { freezeRuntimeAdapterDescriptor, type DaemonConfig, type DeviceRecord, type RuntimeAdapter } from '../index';
+import { freezeRuntimeAdapterDescriptor, type DaemonConfig, type RuntimeAdapter } from '../index';
 import type { ConnectControlResult } from '../bin/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
@@ -47,12 +47,9 @@ function config(storeDir: string): DaemonConfig {
 describe('support bundle privacy and bounds', () => {
   it('allowlists facts and excludes config, device, audit, control and path sentinels byte-for-byte', async () => {
     const dir = await tempDir();
-    const record: DeviceRecord = {
+    const record = {
       deviceId: 'SENTINEL_DEVICE_ID',
       tenantId: 'SENTINEL_TENANT_ID',
-      accessToken: 'SENTINEL_ACCESS_TOKEN',
-      expiresAt: '2030-01-01T00:00:00.000Z',
-      devicePrivateKeyPem: 'SENTINEL_PRIVATE_KEY',
       devicePublicKey: 'SENTINEL_PUBLIC_KEY',
     };
     await new DeviceStore(dir).save(record);

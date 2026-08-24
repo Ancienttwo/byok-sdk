@@ -62,7 +62,7 @@ SDK-reserved namespace in the Agent home.
 | Egress | Own metadata-default projection, sanitizer boundary, per-Agent reliable spool, cursor/ack/retry, quota and typed drop facts | Select one exact policy revision; contentful trajectory is an explicit product decision |
 | Explicit reads | Own per-surface capability, canonical path policy, per-Agent audit journal and BlobRef receipt fidelity | Author tenant/actor authz plus narrower root/MIME/text/size policy; never infer authorization from file presence |
 | Concurrency | Enforce one mutable writer per canonical Agent home | Do not schedule around or bypass a busy decline |
-| Credentials | Never persist credential bytes in Agent home | Store secrets in Keychain or Windows Credential Manager; project references/configured state only |
+| Credentials | Never persist credential bytes in Agent home | Store secrets in SDK-owned macOS Keychain, Windows Credential Manager, or Linux Secret Service entries; project references/configured state only |
 
 The daemon tenant binding is part of authenticated enrollment, not host product
 configuration. A successful pair response projects the opaque non-secret

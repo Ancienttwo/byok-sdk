@@ -6,7 +6,9 @@ import { deviceProofSigningInput, parseDeviceProofEnvelope } from '@byok-sdk/cor
 import { afterEach, describe, expect, it } from 'vitest';
 import { StoredDeviceProofSigner } from '../daemon/device-proof-signer';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
-import { DeviceStore } from '../daemon/store';
+import { AuthManager } from '../daemon/auth-manager';
+import { DeviceStore, type DeviceRecord } from '../daemon/store';
+import { clearDeviceEnrollment, seedDeviceEnrollment } from './fixtures/device-enrollment';
 
 const temporaryDirectories: string[] = [];
 
@@ -21,7 +23,7 @@ describe('stored device proof signer', () => {
     const keys = generateKeyPairSync('ed25519');
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');
-    await store.save({
+    await seedDeviceEnrollment(store, {
       deviceId: 'device-a',
       tenantId: 'tenant-a',
       accessToken: 'not-used-by-proof',
@@ -29,8 +31,10 @@ describe('stored device proof signer', () => {
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
       devicePublicKey: publicJwk.x,
     });
+    const auth = new AuthManager({ serverUrl: 'http://example.invalid', store });
+    await auth.loadExisting();
     const signer = new StoredDeviceProofSigner({
-      store,
+      auth,
       tenantId: 'tenant-a',
       productId: 'product-a',
       keyId: 'identity',
@@ -80,7 +84,7 @@ describe('stored device proof signer', () => {
     const keys = generateKeyPairSync('ed25519');
     const publicJwk = keys.publicKey.export({ format: 'jwk' });
     if (publicJwk.x === undefined) throw new Error('test key has no public x coordinate');
-    await store.save({
+    await seedDeviceEnrollment(store, {
       deviceId: 'device-a',
       tenantId: 'tenant-a',
       accessToken: 'unused',
@@ -88,8 +92,10 @@ describe('stored device proof signer', () => {
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
       devicePublicKey: publicJwk.x,
     });
+    const auth = new AuthManager({ serverUrl: 'http://example.invalid', store });
+    await auth.loadExisting();
     const signer = new StoredDeviceProofSigner({
-      store,
+      auth,
       tenantId: 'tenant-a',
       productId: 'product-a',
       keyId: 'identity',
@@ -104,16 +110,16 @@ describe('stored device proof signer', () => {
       body: new Uint8Array(),
     } as const;
     await expect(signer.sign(request)).resolves.toMatchObject({ algorithm: 'ed25519' });
-    await store.clear();
+    await clearDeviceEnrollment(store);
     await expect(signer.sign(request)).rejects.toThrow('device is not paired');
   });
 
   it('has no implicit tenant or key epoch defaults', async () => {
-    const store = { load: async () => undefined };
+    const auth = { readCurrent: async (): Promise<DeviceRecord | undefined> => undefined };
     expect(
       () =>
         new StoredDeviceProofSigner({
-          store,
+          auth,
           tenantId: '',
           productId: 'product-a',
           keyId: 'identity',
@@ -123,7 +129,7 @@ describe('stored device proof signer', () => {
     expect(
       () =>
         new StoredDeviceProofSigner({
-          store,
+          auth,
           tenantId: 'tenant-a',
           productId: 'product-a',
           keyId: 'identity',

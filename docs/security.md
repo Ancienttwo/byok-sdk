@@ -159,8 +159,8 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 
 | Asset | Where it lives | Who touches it |
 |---|---|---|
-| Device Ed25519 private key | `<storeDir>/device.json` (PKCS8 PEM, 0600) | Daemon only — signs **domain-separated** nonces at renewal time (`byok-nonce-v1\n` + nonce, S1); never leaves the device (`packages/client/src/daemon/device-keys.ts`) |
-| JWT access token | `<storeDir>/device.json` | Daemon (wire auth); carries the identity triple `{tenantId, productId, deviceId}` (S1). Server verifies, never issues without a valid pairing code or signed nonce, and treats the claims as **lookup keys only** — the device row is the authority (`packages/server/src/auth.ts`) |
+| Device Ed25519 private key | SDK-internal OS credential entry (Keychain / Credential Manager / Secret Service) | Daemon only — signs **domain-separated** nonces at renewal time (`byok-nonce-v1\n` + nonce, S1); never leaves the device. No plaintext file fallback exists. |
+| JWT access token | The same SDK-internal OS credential entry | Daemon (wire auth); carries the identity triple `{tenantId, productId, deviceId}` (S1). Server verifies, never issues without a valid pairing code or signed nonce, and treats the claims as **lookup keys only** — the device row is the authority (`packages/server/src/auth.ts`) |
 | Pairing code | Server-side only, minted out of band by the SaaS's own auth/device-flow UI | Server mints it already bound to `{tenantId, productId}` (S1); single-use, ~10min TTL. `PairRequest` carries neither field, so a device can never choose or influence the tenant it lands in (`packages/server/src/pairing.ts`, `docs/protocol.md` §6.1) |
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
@@ -361,8 +361,8 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 - **Windows (finding F7, hardened further by finding R4)**: POSIX modes
   restrict nothing on win32 — Node's `fs.chmod` there only toggles the
   read-only attribute, never the ACL/DACL. `storeDir`'s actual
-  Windows-side secrecy (for both `device.json`'s device keypair/access
-  token and `control.token`) depends on a restrictive DACL applied via
+  Windows-side secrecy (for `device.json` metadata and `control.token`)
+  depends on a restrictive DACL applied via
   `icacls` at the one chokepoint both `DeviceStore.save()` and
   `startControlServer` funnel `storeDir` creation through
   (`util/secure-dir.ts`'s `ensureSecureDir`): inherited ACEs are stripped

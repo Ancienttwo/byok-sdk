@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { createDaemon, createServiceLifecycle, DeviceRevokedError, type ServiceLifecycle } from '../index';
+import { createDaemon, createServiceLifecycle, type ServiceLifecycle } from '../index';
+import { DeviceRevokedError } from '../daemon/auth-manager';
 import { argValue, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
 import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';

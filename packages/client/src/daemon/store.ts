@@ -12,19 +12,34 @@ import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
+import {
+  DeviceCredentialStore,
+  InMemoryDeviceCredentialStore,
+  type DeviceCredentials,
+} from './device-credential-store';
 
-export interface DeviceRecord {
+/**
+ * Non-secret projection of an authenticated device enrollment. This is the
+ * complete permitted `device.json` shape; bearer and private-key bytes live
+ * exclusively in DeviceCredentialStore.
+ *
+ * Internal only: the package root exposes DeviceEnrollment/status, never this
+ * storage record.
+ */
+export interface DeviceMetadata {
   deviceId: string;
   /** Opaque tenant binding returned by the authenticated pairing response. */
   tenantId: string;
-  /** Current access token (JWT), renewed via challenge/token without re-pairing (protocol §6.2). */
-  accessToken: string;
-  /** ISO-8601 expiry for `accessToken` (our best knowledge of it — see auth-manager.ts for how this is derived after `/byok/pair`, which reports no explicit expiry itself). */
-  expiresAt: string;
-  /** Ed25519 private key, PKCS8 PEM. Never leaves this device. Stored as a 0600 file; OS keychain integration is deferred (tracked as a future roadmap item, not promised for any specific milestone). */
-  devicePrivateKeyPem: string;
   /** Ed25519 public key, base64url — re-sent verbatim on a post-revocation re-pair (protocol §6.3). */
   devicePublicKey: string;
+}
+
+/** Internal composition used only by daemon/auth/signer modules. */
+export type DeviceRecord = DeviceMetadata & DeviceCredentials;
+
+/** Public credential-blind result of explicit pairing. */
+export interface DeviceEnrollment {
+  readonly deviceId: string;
 }
 
 export interface DeviceEnrollmentStatusOptions {
@@ -71,17 +86,21 @@ function sameContentState(left: import('node:fs').BigIntStats, right: import('no
   return sameInode(left, right) && left.size === right.size && left.mtimeNs === right.mtimeNs;
 }
 
-function assertDeviceRecord(value: unknown): asserts value is DeviceRecord {
+const LEGACY_SECRET_FIELDS = new Set(['accessToken', 'expiresAt', 'devicePrivateKeyPem']);
+
+function assertDeviceMetadata(value: unknown): asserts value is DeviceMetadata {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new DeviceRecordRePairRequiredError();
   }
-  const parsed = value as Partial<DeviceRecord>;
+  const parsed = value as Partial<DeviceMetadata>;
+  if (Object.keys(parsed).some((key) => LEGACY_SECRET_FIELDS.has(key))) {
+    // Never dual-read/import legacy file material. Its only recovery is an
+    // explicit authenticated re-pair that replaces the OS credential entry.
+    throw new DeviceRecordRePairRequiredError();
+  }
   if (
     typeof parsed.deviceId === 'string' &&
     isTenantId(parsed.tenantId) &&
-    typeof parsed.accessToken === 'string' &&
-    typeof parsed.expiresAt === 'string' &&
-    typeof parsed.devicePrivateKeyPem === 'string' &&
     typeof parsed.devicePublicKey === 'string'
   ) {
     return;
@@ -89,35 +108,32 @@ function assertDeviceRecord(value: unknown): asserts value is DeviceRecord {
   throw new DeviceRecordRePairRequiredError();
 }
 
-function parseDeviceRecord(raw: string): DeviceRecord {
+function parseDeviceMetadata(raw: string): DeviceMetadata {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     throw new DeviceRecordRePairRequiredError();
   }
-  assertDeviceRecord(parsed);
+  assertDeviceMetadata(parsed);
   return {
     deviceId: parsed.deviceId,
     tenantId: parsed.tenantId,
-    accessToken: parsed.accessToken,
-    expiresAt: parsed.expiresAt,
-    devicePrivateKeyPem: parsed.devicePrivateKeyPem,
     devicePublicKey: parsed.devicePublicKey,
   };
 }
 
 /**
- * Persists the device identity issued by `pair()` — deviceId, current
- * access token + its expiry, and the device's own Ed25519 keypair. This is
- * the ONLY credential material the daemon itself ever holds — never a
- * runtime's own credentials (see the credential-isolation rule on
- * `RuntimeAdapter`). Stored 0600 under `storeDir` (default
- * `~/.byok/<productId>/`); OS keychain storage is deferred (tracked as a
- * future roadmap item, not promised for any specific milestone).
+ * Persists only bounded non-secret enrollment projection. The paired bearer
+ * token and private key are never accepted here and are owned by the internal
+ * OS DeviceCredentialStore.
  */
 export class DeviceStore {
+  /** Process-local keyed doubles preserve restart semantics in isolated tests. */
+  private static readonly testCredentials = new Map<string, InMemoryDeviceCredentialStore>();
   private readonly filePath: string;
+  /** Internal test seam. Product construction always supplies productId and gets an OS store. */
+  readonly credentials: DeviceCredentialStore | InMemoryDeviceCredentialStore;
 
   /**
    * `secureDirOptions` is a test-only DI seam (mirrors `EnsureSecureDirOptions`'s
@@ -132,8 +148,22 @@ export class DeviceStore {
   constructor(
     storeDir: string,
     private readonly secureDirOptions?: EnsureSecureDirOptions,
+    productId?: string,
   ) {
     this.filePath = path.join(storeDir, 'device.json');
+    if (productId === undefined) {
+      this.credentials = new InMemoryDeviceCredentialStore();
+    } else if (process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE === '1') {
+      const key = `${path.resolve(storeDir)}\0${productId}`;
+      let credentials = DeviceStore.testCredentials.get(key);
+      if (credentials === undefined) {
+        credentials = new InMemoryDeviceCredentialStore();
+        DeviceStore.testCredentials.set(key, credentials);
+      }
+      this.credentials = credentials;
+    } else {
+      this.credentials = new DeviceCredentialStore({ productId });
+    }
   }
 
   static defaultDir(productId: string): string {
@@ -150,11 +180,11 @@ export class DeviceStore {
     return path.resolve(configured ?? DeviceStore.defaultDir(productId));
   }
 
-  async load(): Promise<DeviceRecord | undefined> {
+  async load(): Promise<DeviceMetadata | undefined> {
     const opened = await this.openBounded();
     if (!opened) return undefined;
     try {
-      return parseDeviceRecord(opened.raw);
+      return parseDeviceMetadata(opened.raw);
     } finally {
       await opened.handle.close();
     }
@@ -165,12 +195,12 @@ export class DeviceStore {
    * caller's mutation lease. The hard-link guard keeps the inspected inode
    * identifiable until the synchronous pathname check and unlink complete.
    */
-  async remove(): Promise<DeviceRecord | undefined> {
+  async remove(): Promise<DeviceMetadata | undefined> {
     const opened = await this.openBounded();
     if (!opened) return undefined;
     const guardPath = `${this.filePath}.${process.pid}.${randomUUID()}.remove`;
     try {
-      const record = parseDeviceRecord(opened.raw);
+      const record = parseDeviceMetadata(opened.raw);
       linkSync(this.filePath, guardPath);
       const openStat = fstatSync(opened.handle.fd, { bigint: true });
       const guarded = lstatSync(guardPath, { bigint: true });
@@ -190,10 +220,8 @@ export class DeviceStore {
     }
   }
 
-  async save(record: DeviceRecord): Promise<void> {
-    // Every writer, including test/product callers that bypass AuthManager,
-    // must persist the complete authenticated enrollment as one record.
-    assertDeviceRecord(record);
+  async save(record: DeviceMetadata): Promise<void> {
+    assertDeviceMetadata(record);
     const storeDir = path.dirname(this.filePath);
     // `mkdir`'s own `mode` only applies at CREATION time — a pre-existing
     // storeDir (predating this fix, or created by something else with a
@@ -210,17 +238,9 @@ export class DeviceStore {
     // out of `AuthManager.pair()`, since nothing here catches it), before
     // `device.json` is ever written.
     await ensureSecureDir(storeDir, this.secureDirOptions);
-    // Atomic (temp file + rename) so a concurrent reader never observes a
-    // torn/partial file and a crash mid-write never corrupts the existing
-    // one — see `util/atomic-write.ts`. This file holds the device private
-    // key, so both the atomicity and the 0600 mode are load-bearing, not
-    // cosmetic; `{ mode: 0o600 }` is re-asserted on every save (not just the
-    // one that first creates the file).
+    // Atomic metadata projection write. No secret value is present in this
+    // file; the restrictive mode still limits metadata exposure.
     await atomicWriteFile(this.filePath, JSON.stringify(record, null, 2), { mode: 0o600 });
-  }
-
-  async clear(): Promise<void> {
-    await fs.rm(this.filePath, { force: true });
   }
 
   private async openBounded(): Promise<{
@@ -295,10 +315,19 @@ export async function readDeviceEnrollmentStatus(
 ): Promise<DeviceEnrollmentStatus> {
   const storeDir = DeviceStore.resolveDir(options.productId, options.storeDir);
   try {
-    const record = await new DeviceStore(storeDir).load();
-    return record === undefined
-      ? { state: 'unpaired' }
-      : { state: 'paired', deviceId: record.deviceId };
+    const store = new DeviceStore(storeDir, undefined, options.productId);
+    const record = await store.load();
+    if (record === undefined) {
+      return { state: 'unpaired' };
+    }
+
+    // Metadata is only an enrollment projection. A paired status is valid only
+    // while the separate OS credential authority still contains the current
+    // credential record; never project that record into this public API.
+    if (await store.credentials.read() === undefined) {
+      return { state: 're_pair_required' };
+    }
+    return { state: 'paired', deviceId: record.deviceId };
   } catch (error) {
     if (error instanceof DeviceRecordRePairRequiredError) {
       return { state: 're_pair_required' };

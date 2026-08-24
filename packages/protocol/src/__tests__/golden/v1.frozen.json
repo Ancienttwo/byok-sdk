@@ -10,6 +10,7 @@
     "dispatch-selection",
     "toolset-selection",
     "agent-home-contract",
+    "strict-agent-only",
     "agent-egress-policy",
     "agent-egress-reliable-ack",
     "agent-egress-fresh-session",

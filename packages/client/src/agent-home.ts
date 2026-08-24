@@ -1,5 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import {
+  closeSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  promises as fs,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import path from 'node:path';
 import {
   AgentHomeProjectionPayloadSchema,
@@ -300,10 +309,64 @@ export class AgentHomeLayout {
     }
   }
 
+  /**
+   * Construction-time counterpart to {@link preflight}. Strict Agent-only
+   * daemons must prove this root before they can expose any daemon instance or
+   * capability. It intentionally creates no Agent identity or persistent
+   * Agent file; only the SDK-owned `agents` namespace and a removed probe.
+   */
+  preflightSync(): void {
+    let probePath: string | undefined;
+    let fd: number | undefined;
+    try {
+      const root = this.resolveRootSync();
+      const agentsRoot = path.join(root, AGENT_HOME_DIRECTORY);
+      mkdirSync(agentsRoot, { recursive: true, mode: 0o700 });
+      const agentsStat = lstatSync(agentsRoot);
+      if (!agentsStat.isDirectory() || agentsStat.isSymbolicLink()) {
+        throw new AgentHomeResolutionError(`Agent home path component is not a real directory: ${agentsRoot}`);
+      }
+      const canonicalAgentsRoot = realpathSync(agentsRoot);
+      if (!isWithin(root, canonicalAgentsRoot) || canonicalAgentsRoot !== agentsRoot) {
+        throw new AgentHomeResolutionError('Agent home changed through a symlink while being prepared');
+      }
+      probePath = path.join(canonicalAgentsRoot, `.byok-agent-home-preflight-${randomUUID()}`);
+      fd = openSync(probePath, 'wx', 0o600);
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
+      rmSync(probePath);
+      probePath = undefined;
+    } catch (error) {
+      if (fd !== undefined) {
+        try { closeSync(fd); } catch { /* best effort cleanup */ }
+      }
+      if (probePath !== undefined) {
+        try { rmSync(probePath, { force: true }); } catch { /* best effort cleanup */ }
+      }
+      throw new AgentHomeResolutionError(
+        `agentHome.hostStorageRoot preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   private async resolveRoot(): Promise<string> {
     if (this.canonicalRoot !== undefined) return this.canonicalRoot;
     try {
       this.canonicalRoot = await materializeDirectory(this.hostStorageRootInput);
+    } catch (error) {
+      throw new AgentHomeResolutionError(
+        `agentHome.hostStorageRoot is not accessible: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return this.canonicalRoot;
+  }
+
+  private resolveRootSync(): string {
+    if (this.canonicalRoot !== undefined) return this.canonicalRoot;
+    try {
+      mkdirSync(this.hostStorageRootInput, { recursive: true, mode: 0o700 });
+      this.canonicalRoot = realpathSync(this.hostStorageRootInput);
     } catch (error) {
       throw new AgentHomeResolutionError(
         `agentHome.hostStorageRoot is not accessible: ${error instanceof Error ? error.message : String(error)}`,
@@ -609,6 +672,11 @@ export class AgentHomeManager {
   /** Validate the configured root before capability publication. */
   async preflight(): Promise<void> {
     await this.layout.preflight();
+  }
+
+  /** Synchronous construction-time preflight for strict Agent-only admission. */
+  preflightSync(): void {
+    this.layout.preflightSync();
   }
 
   /** Resolve and lease without applying downstream projection side effects. */

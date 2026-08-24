@@ -1794,7 +1794,7 @@ export class ConnectionHub {
       input.requiredToolsets === undefined
         ? undefined
         : RequiredToolsetsSchema.parse(input.requiredToolsets);
-    const deviceId = input.deviceId ?? this.pickFirstConnectedDevice(requiredToolsets);
+    const deviceId = input.deviceId ?? this.pickFirstConnectedDevice(requiredToolsets, agentRef !== undefined);
     if (agentRef !== undefined && input.deviceId === undefined) {
       throw new Error('Agent-bound dispatch requires an explicit deviceId for capability admission');
     }
@@ -1808,6 +1808,18 @@ export class ConnectionHub {
         deviceId
           ? `device ${deviceId} is not connected`
           : 'no connected device to dispatch to (M0 does not queue tasks until a device connects)',
+      );
+    }
+
+    // Scheduling defence only: strict devices still refuse a stale legacy
+    // offer locally. This must happen before TaskStore/create and outbox
+    // mutation so an explicit legacy dispatch is side-effect free.
+    if (
+      agentRef === undefined &&
+      this.getDeviceCapabilities(deviceId)?.includes('strict-agent-only') === true
+    ) {
+      throw new Error(
+        `device ${deviceId} advertises strict-agent-only; legacy task dispatch is refused before enqueue`,
       );
     }
 
@@ -2217,9 +2229,13 @@ export class ConnectionHub {
     this.sendToDevice(record.deviceId, 'task.steer', { text }, { taskId });
   }
 
-  private pickFirstConnectedDevice(requiredToolsets?: readonly ToolsetId[]): string | undefined {
+  private pickFirstConnectedDevice(
+    requiredToolsets?: readonly ToolsetId[],
+    allowStrictAgentOnly = false,
+  ): string | undefined {
     for (const [deviceId, conn] of this.connections) {
       if (!conn.connected) continue;
+      if (!allowStrictAgentOnly && conn.capabilities?.includes('strict-agent-only')) continue;
       if (requiredToolsets === undefined) return deviceId;
       if (!conn.capabilities?.includes('toolset-selection')) continue;
       if (conn.configuredToolsets === undefined) continue;
