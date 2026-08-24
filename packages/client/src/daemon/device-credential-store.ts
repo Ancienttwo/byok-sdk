@@ -296,5 +296,32 @@ public static class ByokDeviceCredential {
  public static int Delete(string t) { if(D(t,1,0)) return 0; return Marshal.GetLastWin32Error(); }
 }
 "@
-$stage=1; try { $r=([Console]::In.ReadToEnd()|ConvertFrom-Json); if($r.operation -eq 'replace'){$stage=2;$secret=[Convert]::FromBase64String([string]$r.secret_base64);$stage=3;$code=[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,$secret);if($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));exit 1};exit 0}; if($r.operation -eq 'read'){$stage=4;$code=[ByokDeviceCredential]::Get([string]$r.target);if($code -eq 1168){exit 44};if($code -lt 0){exit 1};if($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));exit 1};exit 0}; if($r.operation -eq 'clear'){$stage=6;$code=[ByokDeviceCredential]::Delete([string]$r.target);if($code -eq 1168){exit 44};if($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));exit 1};exit 0};exit 2 } catch { $root=$_.Exception; $e=$root; $code=$null; while($null -ne $e){if($e -is [System.ComponentModel.Win32Exception]){$code=$e.NativeErrorCode;break};$e=$e.InnerException}; if($null -ne $code){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code))}elseif($null -ne $root){$kind=9;if($root -is [System.Management.Automation.MethodException]){$kind=2}elseif($root -is [System.Management.Automation.MethodInvocationException]){$kind=3}elseif($root -is [System.SystemException]){$kind=4}elseif($root -is [System.Management.Automation.RuntimeException]){$kind=5};[Console]::Error.Write(('credential operation failed (stage={0},kind={1},hresult={2})' -f $stage,$kind,$root.HResult))}else{[Console]::Error.Write('credential operation failed')}; exit 1 }
+$stage=1
+$exitCode=2
+try {
+ $r=([Console]::In.ReadToEnd()|ConvertFrom-Json)
+ if($r.operation -eq 'replace'){
+  $stage=2
+  $secret=[Convert]::FromBase64String([string]$r.secret_base64)
+  $stage=3
+  $code=[ByokDeviceCredential]::Set([string]$r.target,[string]$r.username,$secret)
+  if($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));$exitCode=1}else{$exitCode=0}
+ } elseif($r.operation -eq 'read'){
+  $stage=4
+  $code=[ByokDeviceCredential]::Get([string]$r.target)
+  if($code -eq 1168){$exitCode=44}elseif($code -lt 0){$exitCode=1}elseif($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));$exitCode=1}else{$exitCode=0}
+ } elseif($r.operation -eq 'clear'){
+  $stage=6
+  $code=[ByokDeviceCredential]::Delete([string]$r.target)
+  if($code -eq 1168){$exitCode=44}elseif($code -ne 0){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code));$exitCode=1}else{$exitCode=0}
+ }
+} catch {
+ $root=$_.Exception
+ $e=$root
+ $code=$null
+ while($null -ne $e){if($e -is [System.ComponentModel.Win32Exception]){$code=$e.NativeErrorCode;break};$e=$e.InnerException}
+ if($null -ne $code){[Console]::Error.Write(('credential operation failed (win32={0})' -f $code))}elseif($null -ne $root){$kind=9;if($root -is [System.Management.Automation.MethodException]){$kind=2}elseif($root -is [System.Management.Automation.MethodInvocationException]){$kind=3}elseif($root -is [System.SystemException]){$kind=4}elseif($root -is [System.Management.Automation.RuntimeException]){$kind=5};[Console]::Error.Write(('credential operation failed (stage={0},kind={1},hresult={2})' -f $stage,$kind,$root.HResult))}else{[Console]::Error.Write('credential operation failed')}
+ $exitCode=1
+}
+exit $exitCode
 `, 'utf16le').toString('base64');

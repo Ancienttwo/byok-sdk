@@ -60,6 +60,19 @@ describe('DeviceCredentialStore', () => {
     await expect(store.read()).resolves.toEqual(credentials);
   });
 
+  it('keeps the Windows provider process exit outside its PowerShell catch', async () => {
+    let script = '';
+    const run: DeviceCommandRunner = async (_executable, args) => {
+      script = Buffer.from(args.at(-1) ?? '', 'base64').toString('utf16le');
+      return { exitCode: 44, stdout: '', stderr: '' };
+    };
+    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+
+    await expect(store.read()).resolves.toBeUndefined();
+    expect(script.match(/\bexit\b/gu)).toHaveLength(1);
+    expect(script.trimEnd()).toMatch(/\}\s*exit \$exitCode$/u);
+  });
+
   it('does not classify a Linux provider error as a missing credential', async () => {
     const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({
       exitCode: 1,

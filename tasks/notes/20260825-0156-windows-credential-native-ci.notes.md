@@ -62,6 +62,13 @@
   the primitive-return method and emits only static numeric stage/kind/HRESULT
   from C#. PowerShell exits directly on the negative sentinel instead of
   synthesizing a Win32 code.
+- Root cause is the PowerShell control flow, not Credential Manager availability:
+  the script executed `exit 44` for `ERROR_NOT_FOUND` inside its broad `try`, and
+  PowerShell surfaced that exit as the caught `COR_E_SYSTEM`. Every success and
+  absence exit had the same latent defect. The repair accumulates a provider
+  process exit code and calls `exit` exactly once after `catch`; a local static
+  guard freezes that placement while the Windows native test remains the real
+  behavioral acceptance.
 
 ## Deviations From Plan Or Spec
 
