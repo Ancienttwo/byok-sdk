@@ -227,3 +227,8 @@ classification. No real user credential provider was touched.
 - The prior `7edb054` packed RC and acceptance result are superseded. Neither
   RC is published or a committed Salesko dependency. A fresh independent gate
   must review `64cd060` before composite acceptance.
+- The fresh independent Gate B2 re-review returned PASS and is projected in
+  `tasks/reviews/20260824-2030-gate-a-host-contract.review.md`. It rechecked the
+  corrected source, focused alias matrix, packed declaration/integrities and
+  frozen Salesko subject. This closes relocation semantic acceptance only; the
+  plan's older whole-package Gate A review row remains separate.
