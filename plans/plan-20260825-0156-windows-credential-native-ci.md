@@ -1,6 +1,6 @@
 # Plan: Windows credential native CI
 
-> **Status**: Blocked
+> **Status**: Active
 > **Created**: 20260825-0156
 > **Slug**: windows-credential-native-ci
 > **Planning Source**: user-approved-plan
@@ -143,7 +143,7 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
 ## Task Breakdown
 
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
-- [ ] Prove the exact native error and choose bridge versus runner-composition correction.
+- [ ] Prove the exact native error or timed phase and choose bridge versus runner-composition correction.
 - [ ] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
 - [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
 - [ ] Run strict workflow/change review and re-read the exact PR merge gate.
@@ -155,9 +155,11 @@ Revert this slice only. Do not delete or migrate credentials, modify package ver
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
+<!-- [NOTE]: 2026-08-25 user approval resumed this blocked work package for one bounded diagnostic slice. The probe now labels each native phase, owns per-command/per-phase deadlines, and records only VaultSvc state plus numeric session facts; it does not treat a larger Vitest timeout as acceptance. -->
+
 ## Task Breakdown
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
-- [ ] Prove the exact native error and choose bridge versus runner-composition correction.
+- [ ] Prove the exact native error or timed phase and choose bridge versus runner-composition correction.
 - [ ] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
 - [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
 - [ ] Run strict workflow/change review and re-read the exact PR merge gate.

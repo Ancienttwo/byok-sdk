@@ -494,6 +494,16 @@ jobs:
       - name: Build (needed for @byok-sdk/client + @byok-sdk/server dist/ this script drives)
         run: bun run build
 
+      - name: Inspect bounded Windows credential runtime facts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vault = Get-Service -Name VaultSvc -ErrorAction SilentlyContinue
+          $vaultState = if ($null -eq $vault) { "missing" } else { $vault.Status.ToString().ToLowerInvariant() }
+          $sessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+          $interactive = [Environment]::UserInteractive.ToString().ToLowerInvariant()
+          Write-Host "windows-credential-runtime vaultsvc=$vaultState session_id=$sessionId interactive=$interactive"
+
       - name: Probe native Windows Credential Manager
         if: runner.os == 'Windows'
         env:

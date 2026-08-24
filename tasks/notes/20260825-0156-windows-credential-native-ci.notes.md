@@ -1,10 +1,10 @@
 # Implementation Notes: windows-credential-native-ci
 
-> **Status**: Blocked
+> **Status**: Active
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Review**: tasks/reviews/20260825-0156-windows-credential-native-ci.review.md
-> **Last Updated**: 2026-08-25 01:56
+> **Last Updated**: 2026-08-25 02:31
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -20,6 +20,13 @@
 - The native test is opt-in and Windows-only so routine local tests never touch
   a developer's real credential authority. CI uses a unique product id and
   clears the fixture in `finally`.
+- The resumed diagnostic probe gives every PowerShell child a hard deadline and
+  labels `initial_read | replace | fresh_read | clear | final_read` separately.
+  The larger enclosing Vitest bound only accommodates the sum of those bounded
+  operations; it is not acceptance and cannot hide an unbounded provider call.
+- CI records only `VaultSvc` state, numeric process session id and the bounded
+  interactive flag. It does not print the runner account, target name, provider
+  stderr, request, or credential bytes.
 
 ## Deviations From Plan Or Spec
 
