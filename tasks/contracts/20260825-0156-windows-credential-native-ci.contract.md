@@ -46,6 +46,9 @@ behavior or changing package/release identity.
   executable is static code, is never reused as state, and must be removed
   after the child exits. Crash scavenging may select only SDK-owned prefix,
   old, real directories and must never follow a symlink.
+  A compiler diagnostic may expose only the numeric suffix of the public
+  `AddTypeCompilerError.ErrorNumber` property (`CS####`); compiler text, source
+  excerpts, target paths and exception messages remain forbidden.
 
 ## Stop Conditions
 

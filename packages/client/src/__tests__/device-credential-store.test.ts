@@ -96,6 +96,8 @@ describe('DeviceCredentialStore', () => {
     await expect(store.read()).resolves.toBeUndefined();
     expect(script).toContain('-OutputType ConsoleApplication');
     expect(script).toContain('public static int Main()');
+    expect(script).toContain('TargetObject.ErrorNumber');
+    expect(script).not.toMatch(/ErrorText|Exception\.Message|Out-String/u);
     expect(script).not.toMatch(/Environment\.Exit|::Execute|if\(\$code/u);
     expect(invokedExecutable).toBe(compiledExecutable);
     expect(path.basename(invokedExecutable)).toBe('credential-bridge.exe');

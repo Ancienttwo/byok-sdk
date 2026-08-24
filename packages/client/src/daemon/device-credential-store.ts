@@ -380,6 +380,11 @@ public static class ByokDeviceCredential {
 "@
 if(Test-Path -LiteralPath $assembly -PathType Leaf){exit 0}
 [Console]::Error.Write("credential operation failed (stage=8,kind=2,hresult=0)")
-} catch {[Console]::Error.Write("credential operation failed (stage=8,kind=1,hresult=0)")}
+} catch {
+$compilerCode=99
+$errorNumber=[string]$_.TargetObject.ErrorNumber
+if($errorNumber -match '\ACS([0-9]{4})\z'){$compilerCode=[Convert]::ToInt32($Matches[1])}
+[Console]::Error.Write("credential operation failed (stage=8,kind=3,hresult="+$compilerCode+")")
+}
 exit 1
 `, 'utf16le').toString('base64');

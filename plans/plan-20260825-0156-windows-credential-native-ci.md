@@ -165,6 +165,20 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
   prefix/age without following symlinks. Any compile, spawn or cleanup failure
   remains fail closed.
 
+## Successor compiler-error classifier
+
+- P1: Microsoft PowerShell 5.1 exposes compiler failures as public
+  `AddTypeCompilerError` records whose `ErrorNumber` is the bounded `CS####`
+  authority. `ErrorText`, source excerpts, exception messages and paths are
+  non-authoritative and forbidden from host diagnostics.
+- P2: the existing compiler catch reads only `TargetObject.ErrorNumber`,
+  accepts exactly `CS` plus four digits, and projects the numeric suffix in the
+  already bounded `stage=8,kind=3,hresult=<number>` envelope. Unknown shapes
+  project `99` and remain fail closed.
+- P3: one exact Windows probe is sufficient to choose a source correction or
+  compiler replacement. It does not change Credential Manager behavior,
+  credential transport, package identity or downstream state.
+
 ## Rollback
 
 Revert this slice only. Do not delete or migrate credentials, modify package versions, publish, release, deploy, or alter Salesko.

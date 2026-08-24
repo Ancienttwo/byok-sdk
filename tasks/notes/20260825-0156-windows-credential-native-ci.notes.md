@@ -138,6 +138,18 @@
   compiler error number (for example the numeric part of one `CS####` code) or
   otherwise prove the exact compiler contract before replacing `Add-Type`.
 
+## Bounded compiler-error classifier
+
+- Microsoft PowerShell 5.1's public `AddTypeCompilerError.ErrorNumber` is the
+  selected authority. The probe reads only that property from the caught
+  `ErrorRecord.TargetObject`, validates exactly `CS####`, and emits only the
+  numeric suffix in the existing bounded marker. It never reads `ErrorText`,
+  source lines, paths or exception messages.
+- This is a new diagnostic issue after the successor escalation, not a fourth
+  guessed compiler fix. Exactly one hosted Windows result will select the next
+  code change; `99` means the public record was unavailable and is itself a
+  fail-closed result.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |
