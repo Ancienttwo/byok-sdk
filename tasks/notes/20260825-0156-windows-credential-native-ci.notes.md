@@ -1,10 +1,10 @@
 # Implementation Notes: windows-credential-native-ci
 
-> **Status**: Active
+> **Status**: Blocked
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Review**: tasks/reviews/20260825-0156-windows-credential-native-ci.review.md
-> **Last Updated**: 2026-08-25 02:31
+> **Last Updated**: 2026-08-25 03:30
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -38,6 +38,14 @@
   binding from the bridge by returning a small C# result object. If an exception
   remains, the error projects only numeric `stage/kind/HRESULT` codes tied to
   static source mappings; it still cannot echo arbitrary exception text.
+- The last permitted run returned in about 3.9 seconds with
+  `stage=4,kind=4,hresult=-2146233087`: the failure is inside the C# `Get`
+  invocation around `CredReadW`, and the root is a non-`Win32Exception`
+  `SystemException` (`COR_E_SYSTEM`). `VaultSvc` remained running in interactive
+  session 2. The same bounded failure stops both the native probe and real
+  `byok-agent pair` before any credential write. The three-iteration cap is now
+  exhausted; further type-specific native instrumentation requires a new
+  approved slice. PR #87 remains open and unmerged.
 
 ## Deviations From Plan Or Spec
 

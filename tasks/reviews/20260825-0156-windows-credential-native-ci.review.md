@@ -1,11 +1,11 @@
 # Task Review: windows-credential-native-ci
 
-> **Status**: Pending
+> **Status**: Complete
 > **Plan**: plans/plan-20260825-0156-windows-credential-native-ci.md
 > **Contract**: tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
 > **Notes File**: tasks/notes/20260825-0156-windows-credential-native-ci.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-25 01:56
+> **Last Updated**: 2026-08-25 03:30
 > **Recommendation**: fail
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
@@ -14,28 +14,28 @@
 
 ## Human Review Card
 
-- Verdict: pending
-- Change type: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | frontend
-- Intended files changed:
-- Actual files changed:
-- Commands passed:
-- Residual risks:
-- Reviewer action required: inspect diff and card
-- Rollback:
+- Verdict: fail
+- Change type: code-change
+- Intended files changed: Windows credential bridge, native falsifier, CI wiring and task artifacts only
+- Actual files changed: intended files only; no manifest, lockfile, Salesko or release files
+- Commands passed: focused client tests, client typecheck, workflow YAML parse, strict task workflow, `git diff --check`
+- Residual risks: hosted Windows `CredReadW` throws non-Win32 `COR_E_SYSTEM` before the absent-target contract can be observed
+- Reviewer action required: none until a new bounded native-instrumentation slice is approved
+- Rollback: revert this slice to `d0940f131cac4df44be506dc9d05153f1fb58e2f`
 
 ## Mode Evidence
 
-- Selected route:
-- P1/P2/P3 evidence:
-- Root cause or plan evidence:
+- Selected route: strict code-change work package
+- P1/P2/P3 evidence: plan and implementation notes
+- Root cause or plan evidence: remote phase-bounded native probe at exact PR head
 
 ## Verification Evidence
 
 - Waza `/check` run:
-- Commands run:
-- Manual checks:
-- Supporting artifacts:
-- Implementation notes reviewed:
+- Commands run: focused tests, typecheck, YAML parse, strict workflow, diff check, exact GitHub job log readback
+- Manual checks: exact Windows IPC and WinSW jobs remain red
+- Supporting artifacts: task notes and GitHub Actions job logs
+- Implementation notes reviewed: yes
 - Run snapshot:
 
 ## Manual Check Evidence
@@ -81,13 +81,16 @@ screenshot/artifact path, or reviewer observation.
 
 ## Failing Items
 
-- ...
+- Native Windows absent-target read fails at static bridge stage 4 with bounded
+  `kind=4,hresult=-2146233087`; no round trip, IPC smoke or WinSW control-socket
+  acceptance exists.
 
 ## Retest Steps
 
-- Re-run:
-- Re-check:
+- Re-run: only after a new approved type-specific native diagnostic/fix slice
+- Re-check: native round trip, then exact Windows IPC and WinSW jobs
 
 ## Summary
 
-- ...
+- Merge recommendation: FAIL. Local static checks pass, but the only authoritative
+  Windows provider acceptance remains red and the three repair iterations are exhausted.
