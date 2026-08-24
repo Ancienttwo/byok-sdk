@@ -5,6 +5,7 @@
 > **Composite Gate A recommendation**: source-ready; unpublished packed RC accepted
 > **Implementation subject**: `9377594ca6798e1d5726ffbef56ec45194cfca44`
 > **Evidence projection**: `df1e7a92def2f18d81e7b8eccc99723e7247c6f2`
+> **Verdict projection**: `e6cf5c78b37b6cda92044a76b1d1f774f5b3e308`
 
 ## Independent Gate B2 review
 
@@ -35,8 +36,8 @@ The independent re-review returned PASS after checking:
   recorded full build, typecheck, tests, release graph and strict workflow.
 - **Packed-RC consumer acceptance**: PASS for the unpublished local artifact.
 - **Independent Gate B2 semantic acceptance**: PASS.
-- **Composite Gate A acceptance**: not asserted by this Gate B2 review; the
-  plan's older whole-package review row remains explicit.
+- **Composite Gate A acceptance**: PASS through the later independent
+  whole-package review recorded below; Gate B2 alone did not assert it.
 - **Registry / downstream exact pin / production**: not published, pinned,
   deployed, migrated or cut over.
 
