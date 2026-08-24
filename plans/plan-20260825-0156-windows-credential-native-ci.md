@@ -144,9 +144,9 @@ Freeze a Windows-only native falsifier around the real bridge before changing be
 
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
 - [x] Prove the exact native error or timed phase and choose bridge versus runner-composition correction.
-- [ ] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
-- [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
-- [ ] Run strict workflow/change review and re-read the exact PR merge gate.
+- [x] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
+- [x] Run focused tests and exact Windows IPC/WinSW CI checks.
+- [x] Run strict workflow/change review and re-read the exact PR merge gate.
 
 ## Successor service-identity boundary
 
@@ -222,6 +222,6 @@ Revert this slice only. Do not delete or migrate credentials, modify package ver
 ## Task Breakdown
 - [x] Freeze a Windows-only native Credential Manager falsifier and capture bounded pre-fix evidence.
 - [x] Prove the exact native error or timed phase and choose bridge versus runner-composition correction.
-- [ ] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
-- [ ] Run focused tests and exact Windows IPC/WinSW CI checks.
-- [ ] Run strict workflow/change review and re-read the exact PR merge gate.
+- [x] Implement the smallest fail-closed fix with no secret diagnostics or fallback.
+- [x] Run focused tests and exact Windows IPC/WinSW CI checks.
+- [x] Run strict workflow/change review and re-read the exact PR merge gate.

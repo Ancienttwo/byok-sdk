@@ -221,6 +221,24 @@
   Windows-only skip; client TypeScript, strict workflow and `git diff --check`
   pass before the replacement exact-head CI run.
 
+### Final replacement subject
+
+- Subject `337f2a0a724a30a2eaa8015b7037334ac37babf0`, exact push run
+  `32777757995` and PR run `32777762537`, both passed all `21/21` jobs. The
+  required Windows jobs passed on that exact source: native/IPC
+  `97592765072`, WinSW `97592765169`, and diagnostics/lifecycle lease
+  `97592764970`. The full build/typecheck/test job `97592765158` also passed.
+- Local code-frozen envelope passed: root build, root typecheck, root test,
+  strict task workflow and `git diff --check`. Counts include client `1424`
+  passed / `2` skipped, cloud `210`, cloud-dataplane `74` passed / `87`
+  integration-skipped, conformance `142`, core `251`, keys `373`, protocol
+  `334`, server `263`, testkit `4`, UI runtime `15`, SDK `1`, and both tested
+  examples `46`.
+- No manifest, lockfile, package version, tag, registry, release, deployment,
+  migration, Salesko source, real user credential, or Agent home changed. This
+  is source/CI acceptance only until the typed receipt and exact merge seal are
+  verified.
+
 ## Tradeoffs Considered
 
 | Option | Decision | Reason |
