@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:dd3abc1009794144e6b2d08b0322450fd1fa166867b005c2eb229800cfba2a7f
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: cdb424867e255d3024878e6fb261cd46ceff7b8f
+> **Verification Evidence SHA256**: sha256:284d269254b1688cfb36bf236c664ee2059d4a318a631a3d29972229e5618f6c
+> **Issued At**: 2026-08-26T05:27:16.201Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Approved unpublished Agent message egress packed RC only; no publish, tag, merge, push, deploy, migration, or production wiring
 - Findings: none
 
 ## Behavior Diff Notes
