@@ -103,6 +103,7 @@ allowed_paths:
   - tasks/notes/20260826-2240-agent-memory-cross-platform-secure-fs.notes.md
   - tasks/current.md
   - .ai/harness/
+  - .github/workflows/ci.yml
   - docs/architecture/sdk-architecture.md
   - docs/architecture/index.md
   - docs/architecture/requests/root.md
@@ -168,6 +169,9 @@ exit_criteria:
     - tasks/notes/20260826-1725-agent-memory-phase2.notes.md
   tests_pass:
     - path: packages/client/src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts
+    - path: packages/client/src/__tests__/agent-memory-projection-timeout-p1-regression.test.ts
+    - path: packages/client/src/__tests__/agent-memory-helper-ci-p1-regression.test.ts
+    - path: packages/cloud/src/__tests__/agent-memory-projection-body-limit-p1-regression.test.ts
     - path: packages/client/src/__tests__/agent-memory-helper-p1-regressions.test.ts
     - path: packages/client/src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts
     - path: packages/cloud/src/__tests__/agent-memory-cross-task-replay-p1-regression.test.ts

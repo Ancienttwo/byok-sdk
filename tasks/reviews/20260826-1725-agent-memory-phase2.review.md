@@ -5,22 +5,22 @@
 > **Contract**: tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
 > **Notes File**: tasks/notes/20260826-1725-agent-memory-phase2.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-27 02:18
+> **Last Updated**: 2026-08-27 03:52
 > **Recommendation**: blocked
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:454b560c2bc6fc50e9a326ab7f3018193a963120fdabd399935364ffcb9c193e
+> **Reviewed Subject SHA256**: sha256:5303cd07247bc52b6240124f612abf2635a48e5bf70f66838992404cad897c51
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
 
 ## Human Review Card
 
-- Verdict: FAIL; the third Claude external review found one new P1 blocker on the round-2 remediated frozen subject
+- Verdict: FAIL; the fresh exact-subject Claude review found three P1 blockers on the audit-concurrency-remediated frozen subject
 - Change type: code-change + migration
 - Intended files changed: client memory MCP and runtime injection, protocol/cloud projection contracts, cloud-dataplane store and migration, focused tests, architecture and task evidence
 - Actual files changed: the intended Phase 2 surfaces under `packages/client`, `packages/protocol`, `packages/cloud`, `packages/cloud-dataplane`, `deploy/sql`, `tests/sql`, and the task artifacts listed by the contract
-- Commands passed: `bun run build`; `bun run typecheck`; `bun run test`; `repo-harness run check-task-workflow --strict`; `git diff --check`; `bun run check:deploy-sql`; official focused client/cloud/protocol tests; disposable Postgres/MinIO dataplane tests
-- Residual risks: concurrent recall/save audit writes can race their read/CAS rewrite and turn a successful recall into a hard revision-conflict failure; persistent audit failure is also asymmetric between recall and save
-- Reviewer action required: stop at terminal reject; any further fix requires a new approved regression-first slice and another exact-subject review
+- Commands passed: local `verify-sprint --prepare-acceptance` 33/33; remote CI 21/21 including fixed-Node Linux full test, real Postgres, migrations, and cross-platform package checks
+- Residual risks: hosted publish can hang task finalization; the Go helper path is not CI-reproducible; projection HTTP parsing has no pre-parse request-body bound
+- Reviewer action required: stop at terminal reject; any remediation requires a new approved regression-first slice, fresh deterministic/runtime gates, and another separately authorized exact-subject review
 - Rollback: revert the reviewed Phase 2 diff to checkpoint `185cf91`; migration `0014` has not been deployed
 
 ## Mode Evidence
@@ -34,9 +34,9 @@
 - Waza `/check` run: not used; repository-native checks and independent gate were used
 - Commands run: all contract commands passed, plus deploy SQL ordering, diff check, Linux focused tests, and Postgres/MinIO integration tests
 - Manual checks: verified ordinary tasks and incomplete hosted configuration expose no Phase 2 network surface; verified unsupported platforms fail closed; verified symlink-swap race cannot escape the captured Agent-home inode on Linux
-- Supporting artifacts: `.ai/harness/runs/run-20260827T001543-22563-20260826-1725-agent-memory-phase2.json`
+- Supporting artifacts: `.ai/harness/runs/run-20260827T033004-17106-20260826-1725-agent-memory-phase2.json`; GitHub Actions run `33005608051`
 - Implementation notes reviewed: `tasks/notes/20260826-1725-agent-memory-phase2.notes.md`
-- Run snapshot: commit-bound preparation passed 15/15 contract rows and final verification accepted the typed user-waiver receipt; the later Claude review found P1 defects that keep shipment blocked
+- Run snapshot: commit-bound preparation passed 33/33 contract rows; remote CI passed 21/21; the fresh Claude review found three P1 defects that keep shipment blocked
 
 ## Manual Check Evidence
 
@@ -47,6 +47,36 @@ screenshot/artifact path, or reviewer observation.
 - No non-built-in `manual_checks` are declared by the contract.
 
 ## Claude External Review (verbatim)
+
+### Audit-concurrency remediation final review — 2026-08-27
+
+```text
+Findings, ranked.
+
+**[P1] Hosted `port.publish` has no timeout and sits on the task-terminal path.** `task-runner.ts:3694` awaits `quiesceAndSnapshotAgentMemory` before terminal evidence is persisted and the Agent-home lease is released. `snapshotAndProjectAgentMemory` → `outbox.replay` awaits the embedder's `publish` with no deadline. A hung network port stalls task finalization, terminal persistence, and lease release indefinitely — contradicting "projection never becomes a second task-terminal authority" (the `catch` only covers rejection, not a hang). Wrap `publish` in a bounded timeout, or run projection after terminal persistence/lease handoff.
+
+**[P1] Go helper has zero CI wiring and the TS↔Go integration test is skipped by default.** No `go test`/`go build` anywhere in `.github`, `package.json`, or scripts; `agent-memory-fs-helper.test.ts` is `it.skip` unless `BYOK_TEST_AGENT_MEMORY_FS_BIN` is set *and* platform is darwin. The macOS admission path (`helperPlatformSupported`, wire v2 base64, identity mismatch) is therefore unverified in any automated run. The doc section claims local acceptance for this branch; that's not reproducible from the repo.
+
+**[P1] Cloud projection route has no request-body bound.** `handlers/shared.ts:18` `readJsonBody` is `c.req.json()` with no size limit; the schema caps `redactedBytes` only *after* the full body is parsed. Any authenticated device can POST arbitrarily large JSON to `/byok/agent-memory-projections`. Other body-bearing routes check `content-length` (`truth.ts:280`); this one should too (~700 KiB + envelope).
+
+**[P2] Helper process is spawned on every strict-Agent task close even when no hosted projection is configured.** `quiesceAndSnapshotAgentMemory` calls `bindAgentMemoryFilesystem` (spawns the Go helper, does the open handshake) and then `snapshotAndProjectAgentMemory` returns immediately because `projection` is undefined. On macOS with `agentMemoryFilesystem` set, that's a wasted subprocess + 10 s timeout exposure per task. Gate on `this.deps.agentMemoryHostedProjection` first.
+
+**[P2] `AgentMemoryFilesystem.append` is dead in production.** No caller in `agent-memory.ts` (audit and outbox both use `replace`); only tests exercise it. It carries an unbounded-JSON-expansion path in the Go helper (`content` is raw, not base64, so 1 MiB of control bytes → 6 MiB line → rejected inconsistently vs `replace`). Drop it from the interface/helper or route it through the same base64 wire.
+
+**[P2] In-memory authorizer's `#highestEpochs` never decreases, but `store.erase` derives `nextWriterEpoch` from the head only.** If the host issued a grant at epoch 5 that never committed, erase returns `nextWriterEpoch: 1`/`2`; the host mints epoch 2, and `grant()` silently drops it (`writerEpoch < highestEpoch`). All subsequent commits deny with `grant_not_authorized` and no signal. Either have `revoke` reset `#highestEpochs`, or document that `nextWriterEpoch` must be max'd with the authorizer's own high-water.
+
+**[P2] Postgres idempotent replay is sensitive to UUID case.** `mutation_id` is stored as `uuid` (normalised lowercase); `sameReceiptBinding` compares `receipt.mutation_id === mutation.mutationId` as strings. A client sending an uppercase `mutationId` gets `accepted` then `replay_mismatch` on the exact retry. In-memory store doesn't have this drift. Normalise before compare.
+
+**[P2] `captureAgentMemorySnapshot` audit failure is fatal, unlike recall/save.** `audit(...)` inside `exclusiveAgentMemoryHome` throws, so a full/unwritable audit tail blocks projection entirely, while recall/save return a warning. Doc says audit is "not replay or content authority" — pick one behaviour.
+
+**[P2] Return types drop `auditWarning` on the save path.** `TaskRunner.saveAgentMemory` and `AgentMemoryMcpDeps.save` are typed `{path; revision?; deleted}` though the service returns `auditWarning`. The value still flows over IPC; the type lies to callers.
+
+**[P2] Weak/tautological tests.** `TestHelperDeathIsObservable` kills a process and asserts `Wait` errors — always true. The "parent"/"leaf" symlink swap tests in `main_test.go` mutate *before* the request, so they test the Lstat check, not the race between Lstat and `OpenRoot`/`OpenFile` that the pin/recheck sequence exists for. `agent-memory-guidance.test.ts` degrades to `expect(strictMcp).toBeUndefined()` on non-Linux, so on the macOS dev box it verifies almost nothing.
+
+**[P2] Schema/test drift.** `control_plane_invariants.sql` comment says "30 is …" but the check is `< 31` (28+3=31; comment is wrong). `agent_memory_projection_metering_receipt_readback` index duplicates the primary key exactly — redundant. The handler comment "The schema rejects non-canonical encodings" is false — `agentMemoryProjectionBase64UrlByteLength` only checks charset/length; only the Postgres store (not the in-memory one) does the canonical re-encode check.
+
+**[P2] `byok-agent-memory-mcp.ts` caches a rejected `clientPromise` forever.** One transient control-socket connect failure makes every later `memory.recall`/`memory.save` fail for the task's lifetime. Reset on rejection.
+```
 
 ### Round-2 remediation re-review — 2026-08-27
 
@@ -139,14 +169,14 @@ Findings (no P1-free pass; four blockers).
 > **Reviewer**: Claude
 > **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:454b560c2bc6fc50e9a326ab7f3018193a963120fdabd399935364ffcb9c193e
+> **Reviewed Subject SHA256**: sha256:5303cd07247bc52b6240124f612abf2635a48e5bf70f66838992404cad897c51
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
-> **Verification Evidence SHA256**: sha256:db7f5b4a445e84192c9259b9128e023d8a33767afb9ba9707d6d731c0a584e59
-> **Issued At**: 2026-08-26T18:21:28.076Z
+> **Verification Evidence SHA256**: sha256:cd9d05333b1845a425c6936a7478996bc2db8e32e0ff1099ddf09df191c8c289
+> **Issued At**: 2026-08-26T19:51:45.219Z
 
-- Summary: Round-2 Claude review rejected the frozen Agent Memory Phase 2 subject because concurrent recall/save audit CAS writes can fail a successful recall.
-- Findings: P1: Concurrent memory.recall and save audit read-CAS rewrites are not serialized, so a successful recall can fail with a spurious revision conflict; persistent audit failure is also asymmetric between recall and save.
+- Summary: Fresh exact-subject Claude review rejected the candidate with three P1 blockers: unbounded terminal-path publish, missing Go-helper CI coverage, and an unbounded projection request body.
+- Findings: P1: Hosted port.publish has no timeout on the task-terminal path, so a hung publish can block terminal persistence and Agent-home lease release indefinitely.; P1: The Go helper and TS-to-Go integration path are not wired into CI, leaving the macOS admission and wire contract without reproducible automated coverage.; P1: The cloud projection route parses the full JSON body before applying the redactedBytes schema bound, allowing an authenticated device to send an arbitrarily large request body.
 
 ## Behavior Diff Notes
 
@@ -158,23 +188,23 @@ Findings (no P1-free pass; four blockers).
 ## Residual Risks / Follow-ups
 
 - Phase 2 on macOS requires the explicit, version-matched helper proven in the cross-platform work-package. Windows remains disabled until a real runner proves its junction/reparse/rename matrix.
-- The four round-2-targeted Claude P1 findings are remediated and strict checks pass, but the latest exact-subject review found a new P1 audit-concurrency defect; the frozen subject must not merge.
-- No push, merge, package publication, deployment, or production migration evidence exists for this subject.
+- The earlier audit-concurrency P1 is remediated and strict checks pass, but the latest exact-subject review found three new P1 blockers; the frozen subject must not merge.
+- The candidate branch was pushed and CI passed; merge, package publication, deployment, and production migration remain unperformed and unauthorized.
 
 ## Scorecard
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| Functionality | fail | A new P1 audit-concurrency defect remains despite focused and full tests passing |
+| Functionality | fail | Hosted publish can indefinitely block the terminal path despite focused and full tests passing |
 | Product depth | source-pass | Local authority, hosted projection, metering, erase, and audit boundaries are covered |
 | Design quality | source-pass | One-way projection avoids dual authority; unsupported platforms fail closed |
-| Code quality | fail | Fresh Claude review found read/CAS audit concurrency can turn successful recall into a hard failure |
+| Code quality | fail | Fresh Claude review found missing helper CI coverage and an unbounded HTTP request-body path |
 
 ## Failing Items
 
-- Concurrent recall/save audit writes are not serialized and can fail a successful recall with a spurious revision conflict.
-- Persistent audit failure remains asymmetric: recall throws while save returns a warning.
-- Upstream CI freshness does not exist for this local subject.
+- Hosted `port.publish` has no timeout while awaited before terminal persistence and lease release.
+- The Go helper and TS↔Go integration path are not wired into CI.
+- The cloud projection route parses the full JSON body before enforcing the redacted payload schema bound.
 
 ## Retest Steps
 
@@ -183,5 +213,5 @@ Findings (no P1-free pass; four blockers).
 
 ## Summary
 
-- Source verdict: FAIL due to the latest Claude review's audit-concurrency P1 finding.
-- Ship / terminal acceptance: BLOCKED; the later typed Claude `reject` receipt supersedes the earlier user-waiver disposition for this frozen subject.
+- Source verdict: FAIL due to the latest Claude review's three P1 findings.
+- Ship / terminal acceptance: BLOCKED; the fresh typed Claude `reject` receipt binds the current normalized subject and supersedes the earlier stale disposition.

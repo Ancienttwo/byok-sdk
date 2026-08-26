@@ -177,6 +177,14 @@ See captured planning output.
 - [x] **一致 failure disposition**：recall 的 source read 成功后，audit failure 与 save 一样返回 `agent_memory_audit_unavailable` warning；不伪造 source failure 或 rollback。
 - [ ] **重验**：focused client guards、package typecheck/build/test 与 strict contract checks 通过后冻结新 subject。push、remote CI、fresh external review 与 merge 仍需后续独立授权。
 
+### Post-CI external-review P1 remediation — terminal/CI/ingress bounds
+
+- [x] **Regression-first evidence**：三个独立 guard 分别证明 hosted publish 可无限阻塞 quiescence/lease release、macOS Go helper 与 TS↔Go contract 未接入 CI、projection route 在 schema bound 前无界读取 chunked JSON；三个 pre-fix artifact 均保留 `PRE_FIX_EXIT=1`。
+- [x] **Bound terminal publish**：hosted projection 的每次 `port.publish` 必须在 10 秒内 settle；timeout 转为现有 observable projection failure，pending redacted outbox 保留供后续 replay，task close 可继续释放 Agent-home lease。
+- [x] **Reproducible macOS helper CI**：新增独立 macOS job，使用 module-owned Go 1.26.5 authority 执行 Go tests/build，并以 built helper 设置 `BYOK_TEST_AGENT_MEMORY_FS_BIN` 跑 TS↔Go integration；source-scan guard 防止 job 静默消失。
+- [x] **Pre-parse projection body bound**：authenticated projection route 在 JSON parse 前同时约束 declared 与 streamed bytes；超过 envelope hard ceiling 返回 413，不以 schema 422 掩盖资源上限。
+- [ ] **重验**：三个 focused guards、client/cloud package checks 与 full strict contract 全绿后冻结新 subject。本 slice 不修 P2；push、remote CI、fresh external review 与 merge 仍需后续独立授权。
+
 ## Verification
 
 - `bun run build` / `bun run typecheck` / `bun run test`

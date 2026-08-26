@@ -211,6 +211,29 @@
   `.ai/harness/runs/run-20260827T030101-99351-20260826-1725-agent-memory-phase2.json`.
   No push, remote CI, fresh external review, acceptance, or merge was
   performed.
+- The owner then approved the three-P1 regression-first slice from the fresh
+  exact-subject Claude reject. Three independent pre-fix guards proved: a
+  never-settling hosted `port.publish` survives 10 seconds and blocks task
+  quiescence/Agent-home lease release; CI has no macOS Go-helper job and the
+  TS↔Go integration therefore skips; and an authenticated 1 MiB projection
+  JSON body is fully parsed before schema validation, returning 422 instead of
+  a pre-parse 413. Exact guards and `PRE_FIX_EXIT=1` artifacts are recorded in
+  the active contract and `.ai/harness/runs/`.
+- The bounded source fix now races every projection publish against a fixed
+  10-second timer, clears the timer on settlement, and leaves a timed-out
+  mutation pending for later exact replay. A dedicated macOS CI job uses the
+  repo Node/Bun pins plus Go 1.26.5 to run Go tests, build the helper, and run
+  the real TS↔Go helper suite with `BYOK_TEST_AGENT_MEMORY_FS_BIN`; a source
+  guard prevents the job from silently disappearing. The projection HTTP
+  route now authenticates first, then bounds both declared and actual streamed
+  body bytes to 1 MiB before JSON parse; oversized input returns 413 while
+  malformed or schema-invalid bounded JSON remains 422.
+- Combined focused verification passes: client 5 files / 12 pass / 4 platform
+  skips; cloud 4 files / 13 pass; freshly built local Go helper 2/2 integration
+  tests plus `go test ./...`. Full strict verification remains pending. This
+  slice does not fix the review's P2 findings and does not authorize push,
+  remote CI, another external review, merge, publication, deployment, or
+  production migration.
 
 ## Promotion Filter
 
