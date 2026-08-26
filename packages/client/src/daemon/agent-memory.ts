@@ -356,8 +356,14 @@ async function audit(context: AgentMemoryTaskContext, kind: 'recall' | 'save' | 
 }
 
 export interface AgentMemoryAuditWarning {
-  /** Metadata-only signal: the local source mutation already succeeded. */
+  /** Metadata-only signal: the local source operation already succeeded. */
   readonly code: 'agent_memory_audit_unavailable';
+}
+export interface AgentMemoryRecallResult {
+  readonly path: string;
+  readonly revision: string;
+  readonly content: string;
+  readonly auditWarning?: AgentMemoryAuditWarning;
 }
 export interface AgentMemorySaveResult {
   readonly path: string;
@@ -366,28 +372,52 @@ export interface AgentMemorySaveResult {
   readonly auditWarning?: AgentMemoryAuditWarning;
 }
 
-async function saveAuditWarning(context: AgentMemoryTaskContext, values: Record<string, unknown>): Promise<AgentMemoryAuditWarning | undefined> {
+async function recordAuditWarning(context: AgentMemoryTaskContext, kind: 'recall' | 'save', values: Record<string, unknown>): Promise<AgentMemoryAuditWarning | undefined> {
   try {
-    await audit(context, 'save', values);
+    await audit(context, kind, values);
     return undefined;
   } catch {
-    // The source replace/delete is already fsynced. Never invent a rollback
-    // from a metadata-only observation failure; callers receive no raw error.
+    // The source read or mutation already succeeded. Never invent a rollback
+    // or source failure from a metadata-only observation failure.
     return Object.freeze({ code: 'agent_memory_audit_unavailable' as const });
   }
 }
 
+const agentMemoryHomeQueues = new Map<string, Promise<void>>();
+
+async function exclusiveAgentMemoryHome<T>(home: string, fn: () => Promise<T>): Promise<T> {
+  const previous = agentMemoryHomeQueues.get(home) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>((resolve) => { release = resolve; });
+  agentMemoryHomeQueues.set(home, next);
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (agentMemoryHomeQueues.get(home) === next) agentMemoryHomeQueues.delete(home);
+  }
+}
+
 export class AgentMemoryService {
-  private static readonly queues = new Map<string, Promise<void>>();
   constructor(private readonly input: AgentMemoryTaskContext) {}
-  async recall(input: { readonly path: unknown; readonly ifRevision?: unknown }): Promise<Readonly<{ path: string; revision: string; content: string }>> {
+  async recall(input: { readonly path: unknown; readonly ifRevision?: unknown }): Promise<Readonly<AgentMemoryRecallResult>> {
     const context = taskContext(this.input); const relativePath = validateAgentMemoryPath(input.path);
     if (input.ifRevision !== undefined && !revision(input.ifRevision)) throw new AgentMemoryError('ifRevision must be a sha256 content revision');
     const current = await readFile(context, relativePath);
     if (!current.exists) throw new AgentMemoryError('memory file does not exist');
     if (input.ifRevision !== undefined && current.revision !== input.ifRevision) throw new AgentMemoryRevisionConflictError(input.ifRevision, current.revision);
-    await audit(context, 'recall', { path: relativePath, revision: current.revision, byteCount: current.byteCount });
-    return Object.freeze({ path: relativePath, revision: current.revision, content: current.content });
+    const auditWarning = await exclusiveAgentMemoryHome(context.canonicalHome, () => recordAuditWarning(context, 'recall', {
+      path: relativePath,
+      revision: current.revision,
+      byteCount: current.byteCount,
+    }));
+    return Object.freeze({
+      path: relativePath,
+      revision: current.revision,
+      content: current.content,
+      ...(auditWarning === undefined ? {} : { auditWarning }),
+    });
   }
   async save(input: { readonly op: unknown; readonly path: unknown; readonly expectedRevision: unknown; readonly content?: unknown }): Promise<Readonly<AgentMemorySaveResult>> {
     const context = taskContext(this.input); const relativePath = validateAgentMemoryPath(input.path);
@@ -396,22 +426,17 @@ export class AgentMemoryService {
     if (input.op === 'delete' && input.content !== undefined) throw new AgentMemoryError('delete does not accept content');
     const expectedRevision = input.expectedRevision;
     const content = input.content;
-    return this.exclusive(context.canonicalHome, async () => {
+    return exclusiveAgentMemoryHome(context.canonicalHome, async () => {
       if (input.op === 'delete') {
         await remove(context, relativePath, expectedRevision);
-        const auditWarning = await saveAuditWarning(context, { path: relativePath, operation: 'delete' });
+        const auditWarning = await recordAuditWarning(context, 'save', { path: relativePath, operation: 'delete' });
         return Object.freeze({ path: relativePath, deleted: true, ...(auditWarning === undefined ? {} : { auditWarning }) });
       }
       if (typeof content !== 'string') throw new AgentMemoryError('replace requires string content');
       const current = await replace(context, relativePath, expectedRevision, content);
-      const auditWarning = await saveAuditWarning(context, { path: relativePath, operation: 'replace', revision: current.revision, byteCount: current.byteCount });
+      const auditWarning = await recordAuditWarning(context, 'save', { path: relativePath, operation: 'replace', revision: current.revision, byteCount: current.byteCount });
       return Object.freeze({ path: relativePath, revision: current.revision, deleted: false, ...(auditWarning === undefined ? {} : { auditWarning }) });
     });
-  }
-  private async exclusive<T>(home: string, fn: () => Promise<T>): Promise<T> {
-    const previous = AgentMemoryService.queues.get(home) ?? Promise.resolve(); let release!: () => void;
-    const next = new Promise<void>((resolve) => { release = resolve; }); AgentMemoryService.queues.set(home, next); await previous;
-    try { return await fn(); } finally { release(); if (AgentMemoryService.queues.get(home) === next) AgentMemoryService.queues.delete(home); }
   }
 }
 
@@ -463,7 +488,9 @@ export async function captureAgentMemorySnapshot(input: AgentMemoryTaskContext):
     files.push(Object.freeze({ path: relativePath, revision: current.revision, byteCount: current.byteCount, content: current.content }));
   }
   const snapshot = Object.freeze({ files: Object.freeze(files), totalBytes });
-  await audit(context, 'snapshot', { files: files.map((file) => ({ path: file.path, revision: file.revision, byteCount: file.byteCount })) });
+  await exclusiveAgentMemoryHome(context.canonicalHome, () => audit(context, 'snapshot', {
+    files: files.map((file) => ({ path: file.path, revision: file.revision, byteCount: file.byteCount })),
+  }));
   return snapshot;
 }
 

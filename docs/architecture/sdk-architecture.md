@@ -1495,8 +1495,11 @@ revoke grant，再删 head/receipt，
 同时保留一个无正文的 minimum-writer-epoch fence 并返回 `nextWriterEpoch`；因此
 stale local outbox 不能在空 head 上回灌被删除的 epoch，且整个 erase 不依赖
 device online。Local metadata-only audit 是 bounded atomic tail，不是 replay 或
-内容 authority；source replace/delete 已成功后，audit persistence failure 只返回
-`agent_memory_audit_unavailable` warning，不能把已落盘的 save 伪装成失败。
+内容 authority。所有同一 canonical Agent home 的 audit writers（recall、save 与
+quiescence snapshot）共用一个 process-local per-home queue；save mutation+audit
+保持同一 critical section，recall/snapshot 只串行化 audit write，不把 source reads
+整体单线程化。Source recall/replace/delete 已成功后，audit persistence failure 只返回
+`agent_memory_audit_unavailable` warning，不能把已经完成的 read/save 伪装成失败。
 
 这条轨道不复用 generic `truth.records` 作为 per-Agent working-memory
 权威，不实现双向 sync、multi-device merge、RAG/search/history 或

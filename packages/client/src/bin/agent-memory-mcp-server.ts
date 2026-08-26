@@ -4,7 +4,7 @@ export const AGENT_MEMORY_RECALL_TOOL_NAME = 'memory.recall';
 export const AGENT_MEMORY_SAVE_TOOL_NAME = 'memory.save';
 
 export interface AgentMemoryMcpDeps {
-  recall(input: { path: string; ifRevision?: string }): Promise<{ path: string; revision: string; content: string }>;
+  recall(input: { path: string; ifRevision?: string }): Promise<{ path: string; revision: string; content: string; auditWarning?: { code: 'agent_memory_audit_unavailable' } }>;
   save(input: { op: 'replace' | 'delete'; path: string; expectedRevision: string; content?: string }): Promise<{ path: string; revision?: string; deleted: boolean }>;
 }
 interface RequestLike { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }

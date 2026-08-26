@@ -83,6 +83,7 @@ import {
   AgentMemoryService,
   isAgentMemorySecureFilesystemAvailable,
   snapshotAndProjectAgentMemory,
+  type AgentMemoryAuditWarning,
   type AgentMemoryHostedProjection,
   type AgentMemoryTaskContext,
 } from './agent-memory';
@@ -1122,7 +1123,7 @@ export class TaskRunner {
   }
 
   /** Authenticated control-socket entry used only by the SDK-owned memory MCP helper. */
-  async recallAgentMemory(input: { readonly contextToken: string; readonly path: string; readonly ifRevision?: string }): Promise<{ path: string; revision: string; content: string }> {
+  async recallAgentMemory(input: { readonly contextToken: string; readonly path: string; readonly ifRevision?: string }): Promise<{ path: string; revision: string; content: string; auditWarning?: AgentMemoryAuditWarning }> {
     return this.runMemoryOperation(input.contextToken, (context) => new AgentMemoryService(context).recall(input));
   }
 

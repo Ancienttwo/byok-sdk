@@ -192,6 +192,20 @@
   failure. Push, remote Linux/Postgres CI, fresh external review, typed
   acceptance, merge, publish, deploy, and production migration were not
   performed.
+- The owner then approved the bounded audit-concurrency remediation. The
+  regression-first guard failed 4/4 before the production edit: recall/recall,
+  recall/save, and recall/snapshot reached two concurrent audit reads for the
+  same canonical home, while a persistent audit replace failure rejected an
+  already successful recall. The shared queue is now module-owned rather than
+  private to `AgentMemoryService`: save mutation+audit remains one critical
+  section, while recall and quiescence snapshot serialize only their audit
+  writer so independent source reads are not globally single-threaded. Recall
+  returns the same body-free `agent_memory_audit_unavailable` warning as save
+  after a successful source operation. The new guard passes 4/4; the focused
+  client memory suite passes 14 with 6 platform skips, and package typecheck +
+  build pass. Full strict verification remains pending before a new frozen
+  subject; no push, remote CI, fresh external review, acceptance, or merge was
+  performed.
 
 ## Promotion Filter
 
