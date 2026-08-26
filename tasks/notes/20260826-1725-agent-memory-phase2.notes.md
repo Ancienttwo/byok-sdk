@@ -94,6 +94,13 @@
   subject and final `verify-sprint` completed without rerunning the already
   frozen checks. No push, merge, publish, deploy, or production migration was
   performed.
+- A subsequently authorized Claude review of the exact frozen branch diff
+  returned FAIL with four P1 findings: Linux helper/native-backend admission
+  conflict, cross-task outbox replay/erase sequence wedging, append-only local
+  logs reaching the 16 MiB fail-closed ceiling, and an uncaught helper-stdin
+  EPIPE race. The verbatim review is recorded in the review artifact. No fix or
+  merge was authorized in that review slice; the existing user-waiver receipt
+  does not override the later failing ship review.
 
 ## Promotion Filter
 
