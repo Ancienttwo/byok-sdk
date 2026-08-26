@@ -341,7 +341,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     });
     const ctx = await makeCtx();
     ctx.mcpServers = {
-      salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] },
+      salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
     };
 
     const session = await startAdapter(adapter, baseTask, ctx);
@@ -354,7 +354,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     if (typeof configPath !== 'string') throw new Error('missing mcp config path');
     expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toEqual({
       mcpServers: {
-        salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] },
+        salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
       },
     });
 

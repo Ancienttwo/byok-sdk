@@ -18,7 +18,7 @@ import { createHmacTokenSigner, type TokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { createWebCrypto } from '../crypto/web-crypto';
 import type { CloudCrypto } from '../crypto/port';
-import { createByokCloud, type ByokCloud } from '../cloud';
+import { createByokCloud, type ByokCloud, type ByokCloudOptions } from '../cloud';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import type { BlobContentProxy, CloudStores } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
@@ -74,6 +74,7 @@ export interface InMemoryByokCloudOptions {
    */
   readonly skillPacks?: SkillPackStore;
   readonly skillPackPageLimit?: number;
+  readonly agentMessage?: ByokCloudOptions['agentMessage'];
 }
 
 export interface InMemoryByokCloud {
@@ -118,6 +119,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
       ? {}
       : { truthObjectDownloads: options.truthObjectDownloads }),
     ...(options.operatorId !== undefined ? { operatorId: options.operatorId } : {}),
+    ...(options.agentMessage === undefined ? {} : { agentMessage: options.agentMessage }),
     ...(options.maxBlobSizeBytes !== undefined ? { maxBlobSizeBytes: options.maxBlobSizeBytes } : {}),
     ...(options.longPollHoldMs !== undefined ? { longPollHoldMs: options.longPollHoldMs } : {}),
     ...(options.longPollIntervalMs !== undefined ? { longPollIntervalMs: options.longPollIntervalMs } : {}),

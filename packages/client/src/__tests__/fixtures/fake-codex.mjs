@@ -21,8 +21,8 @@
 // adapter's own e2e run in a plain scratch directory — and `-c key=value`,
 // never `-s`/`-a`) — anything else fails exactly like real codex would, so a
 // future flag regression fails a test instead of silently passing. `-c`
-// values are additionally restricted to the two keys this
-// adapter ever sets (`sandbox_mode`, `approval_policy`) — stricter than real
+// values are additionally restricted to the keys this adapter constructs:
+// `sandbox_mode`, `approval_policy`, and task-scoped `mcp_servers.*` — stricter than real
 // codex, which silently accepts (and ignores) an unrecognized `-c` key with
 // no error unless `--strict-config` is passed (empirically confirmed, and
 // itself a documented finding — see permission-mapping.ts) — specifically
@@ -166,7 +166,7 @@ const ALLOWED_CONFIG_KEYS = new Set(['sandbox_mode', 'approval_policy']);
 let prompt;
 for (let i = 0; i < rest.length; i++) {
   const arg = rest[i];
-  if (arg === '--json' || arg === '--skip-git-repo-check') continue;
+  if (arg === '--json' || arg === '--skip-git-repo-check' || arg === '--ignore-user-config') continue;
   if (arg === '--model') {
     i += 1;
     continue;
@@ -175,7 +175,7 @@ for (let i = 0; i < rest.length; i++) {
     const value = rest[++i];
     const eq = typeof value === 'string' ? value.indexOf('=') : -1;
     const key = eq !== -1 ? value.slice(0, eq) : value;
-    if (!ALLOWED_CONFIG_KEYS.has(key)) {
+    if (!ALLOWED_CONFIG_KEYS.has(key) && !key.startsWith('mcp_servers.')) {
       process.stderr.write(`error: unknown configuration field \`${key}\` in -c/--config override\n`);
       process.exit(2);
     }

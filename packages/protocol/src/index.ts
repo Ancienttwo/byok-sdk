@@ -33,6 +33,14 @@ export {
   AgentContentReadDenialReasonSchema,
   AgentEgressContentHashSchema,
   AgentEgressPolicyRevisionSchema,
+  AgentMessageContractSchema,
+  AgentMessageContentTypeSchema,
+  AgentMessageDestinationBindingSchema,
+  AgentMessageFreshnessCursorSchema,
+  AgentMessageServerContextSchema,
+  AgentMessageEgressRequirementSchema,
+  AGENT_MESSAGE_MAX_BYTES,
+  AGENT_MESSAGE_EGRESS_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
@@ -47,6 +55,9 @@ export type {
   ContentReadPolicy,
   AgentEgressLane,
   AgentEgressDropReason,
+  AgentMessageContentType,
+  AgentMessageEgressRequirement,
+  AgentMessageServerContext,
   AgentContentReadSurface,
   AgentContentActorKind,
   AgentContentActor,
@@ -70,6 +81,13 @@ export type {
   AgentHomeProjectionOutcome,
   AgentHomeProjectionValue,
 } from './agent-home-projection';
+
+export {
+  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
+  TerminalProjectionContractSchema,
+  TerminalProjectionSelectionSchema,
+} from './terminal-projection';
+export type { TerminalProjectionSelection } from './terminal-projection';
 
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
@@ -100,6 +118,8 @@ export {
   TaskOfferForAgentWithEgressFreshPayloadSchema,
   AgentEgressReliablePayloadSchema,
   AgentEgressAckPayloadSchema,
+  AgentMessagePublishPayloadSchema,
+  AgentMessageDispositionPayloadSchema,
   AgentContentReadPayloadSchema,
   AgentContentReceiptPayloadSchema,
   AgentHomeProjectionPayloadSchema,
@@ -145,6 +165,8 @@ export type {
   TaskOfferForAgentWithEgressFreshPayload,
   AgentEgressReliablePayload,
   AgentEgressAckPayload,
+  AgentMessagePublishPayload,
+  AgentMessageDispositionPayload,
   AgentContentReadPayload,
   AgentContentReceiptPayload,
   AgentHomeProjectionPayload,

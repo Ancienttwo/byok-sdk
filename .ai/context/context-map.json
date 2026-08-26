@@ -9,5 +9,36 @@
     ".ai/context/capabilities.json",
     ".ai/harness/policy.json"
   ],
-  "discoverable_contexts": []
+  "discoverable_contexts": [
+    {
+      "path": "CLAUDE.md",
+      "priority": "high",
+      "char_budget": 1000,
+      "purpose": "capability-contract",
+      "capability_id": "root",
+      "functional_block": "packages",
+      "matched_prefix": "packages",
+      "architecture_domain": "sdk",
+      "architecture_capability": "sdk-root",
+      "target_agent": "claude",
+      "lsp_profile": "typescript-lsp",
+      "doc_scope": "capability-contract",
+      "verification_hint": "record local commands here before implementation"
+    },
+    {
+      "path": "AGENTS.md",
+      "priority": "high",
+      "char_budget": 1000,
+      "purpose": "capability-contract",
+      "capability_id": "root",
+      "functional_block": "packages",
+      "matched_prefix": "packages",
+      "architecture_domain": "sdk",
+      "architecture_capability": "sdk-root",
+      "target_agent": "codex",
+      "lsp_profile": "typescript-lsp",
+      "doc_scope": "capability-contract",
+      "verification_hint": "record local commands here before implementation"
+    }
+  ]
 }

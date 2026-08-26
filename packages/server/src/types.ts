@@ -5,6 +5,9 @@ import type {
   AgentEventOrUnknown,
   AgentEgressPolicy,
   AgentEgressReliablePayload,
+  AgentMessageEgressRequirement,
+  AgentMessageServerContext,
+  AgentMessagePublishPayload,
   AgentRef,
   BlobRef,
   DispatchSelection,
@@ -16,6 +19,7 @@ import type {
   TaskArtifactPayload,
   TaskState,
   ToolsetId,
+  TerminalProjectionSelection,
 } from '@byok-sdk/protocol';
 import type { BlobStore } from './blob-store';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -99,6 +103,13 @@ export interface CreateByokServerOptions {
    * `stats()`.
    */
   healthzRoute?: boolean;
+  /** Product-owned, authenticated task destination consumer. */
+  agentMessage?: {
+    consume(input: { readonly deviceId: string; readonly taskId: string; readonly context: AgentMessageServerContext; readonly payload: AgentMessagePublishPayload }): {
+      readonly outcome: 'accepted' | 'held' | 'refused';
+      readonly reasonCode?: string;
+    };
+  };
 }
 
 /** Input to {@link ByokServer.dispatch}. */
@@ -122,6 +133,12 @@ export interface DispatchInput {
    * Agent-bound offer on the distinct egress-aware wire message.
    */
   egressPolicy?: AgentEgressPolicy;
+  /** Distinct user-visible message lane; independent of activity egress. */
+  messageEgress?: AgentMessageEgressRequirement;
+  /** Exact offer-scoped terminal projection authority. */
+  terminalProjection?: TerminalProjectionSelection;
+  /** Host-only product destination/freshness authority; never serialized to the daemon. */
+  agentMessageContext?: AgentMessageServerContext;
 }
 
 /** Input to the distinct fresh-session Agent egress dispatch surface. */
@@ -133,6 +150,9 @@ export interface FreshAgentEgressDispatchInput
   agentRef: AgentRef;
   /** Exact policy revision consumed by the fresh execution. */
   egressPolicy: AgentEgressPolicy;
+  messageEgress?: AgentMessageEgressRequirement;
+  terminalProjection?: TerminalProjectionSelection;
+  agentMessageContext?: AgentMessageServerContext;
 }
 
 /** Host control-plane input for one exact content-read request. */

@@ -45,6 +45,100 @@ describe('reference-server Agent egress contract', () => {
     server = undefined;
   });
 
+  it('keeps user-visible message delivery outside activity and acks the exact authenticated task binding', async () => {
+    const consumed: unknown[] = [];
+    const byok = createByokServer({
+      productId: PRODUCT_ID,
+      agentMessage: { consume: (input) => { consumed.push(input); return { outcome: 'accepted' }; } },
+    });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection'],
+    });
+    ws = daemon.ws;
+    await expect(byok.dispatch({
+      deviceId: daemon.deviceId, instruction: 'missing server context', agentRef: AGENT_REF,
+      sessionRef: 'session-server', egressPolicy: POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      terminalProjection: { mode: 'none' },
+    })).rejects.toBeDefined();
+    expect(byok.tasks.list()).toHaveLength(0);
+    const handle = await byok.dispatch({
+      deviceId: daemon.deviceId, instruction: 'send one message', agentRef: AGENT_REF,
+      sessionRef: 'session-server', egressPolicy: POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      terminalProjection: { mode: 'none' },
+      agentMessageContext: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' },
+    });
+    await nextEnvelope(ws);
+    const publish = createEnvelope('agent.message.publish', {
+      agentRef: AGENT_REF, sessionRef: 'session-server', contract: 'example.chat.v1',
+      messageId: '10000000-0000-4000-8000-000000000090', cursor: 1,
+      contentType: 'text/markdown', body: 'hello',
+      contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', byteCount: 5,
+    }, { taskId: handle.taskId });
+    const receipt = nextEnvelope(ws);
+    send(ws, publish);
+    expect(await receipt).toMatchObject({ type: 'agent.message.disposition', task_id: handle.taskId, payload: { outcome: 'accepted' } });
+    expect(consumed).toHaveLength(1);
+    send(ws, createEnvelope('agent.message.publish', {
+      ...publish.payload,
+      messageId: '10000000-0000-4000-8000-000000000091',
+      body: 'second',
+      byteCount: 6,
+      contentHash: 'sha256:16367aacb67a4a017c8da8ab95682ccb390863780f7114dda0a0e0c55644c7c4',
+    }, { taskId: handle.taskId }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(consumed).toHaveLength(1);
+    expect(consumed[0]).toMatchObject({ context: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' } });
+  });
+
+  it.each(['held', 'refused'] as const)('does not re-invoke the product consumer for an exact %s transport replay', async (outcome) => {
+    const consumed: unknown[] = [];
+    const byok = createByokServer({
+      productId: PRODUCT_ID,
+      agentMessage: { consume: (input) => { consumed.push(input); return { outcome }; } },
+    });
+    const started = await startServer(byok);
+    server = started.server;
+    const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+    const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
+      productId: PRODUCT_ID,
+      capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection'],
+    });
+    ws = daemon.ws;
+    const handle = await byok.dispatch({
+      deviceId: daemon.deviceId, instruction: 'send one message', agentRef: AGENT_REF,
+      sessionRef: 'session-server', egressPolicy: POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      terminalProjection: { mode: 'none' },
+      agentMessageContext: { destinationBinding: 'conversation/42/turn/7' },
+    });
+    await nextEnvelope(ws);
+    const publish = createEnvelope('agent.message.publish', {
+      agentRef: AGENT_REF, sessionRef: 'session-server', contract: 'example.chat.v1',
+      messageId: '10000000-0000-4000-8000-000000000092', cursor: 1,
+      contentType: 'text/markdown', body: 'hello',
+      contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', byteCount: 5,
+    }, { taskId: handle.taskId });
+    const first = nextEnvelope(ws);
+    send(ws, publish);
+    const firstDisposition = await first;
+    const second = nextEnvelope(ws);
+    send(ws, publish);
+    const secondDisposition = await second;
+    expect(firstDisposition).toMatchObject({ type: 'agent.message.disposition', payload: { outcome } });
+    expect(secondDisposition).toMatchObject({
+      type: 'agent.message.disposition',
+      task_id: firstDisposition.task_id,
+      payload: firstDisposition.payload,
+    });
+    expect(consumed).toHaveLength(1);
+  });
+
   it('fails closed before task enqueue for a legacy Agent-home daemon', async () => {
     const byok = createByokServer({ productId: PRODUCT_ID });
     const started = await startServer(byok);

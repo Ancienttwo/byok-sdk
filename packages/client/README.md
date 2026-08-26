@@ -4,7 +4,13 @@ The local BYOK daemon. It pairs a device, durably journals tasks, connects over
 WebSocket or long poll, dispatches to local Claude Code, Codex, or pi adapters,
 and exposes authenticated local diagnostics/control commands.
 
-The package installs `byok-agent` and `byok-approval-mcp` binaries. Provider
+The package installs `byok-agent`, `byok-approval-mcp`, and the SDK-reserved
+`byok-agent-message-mcp` task helper. The message helper exposes only bounded
+plain text/Markdown; authenticated task, Agent, session, device, tenant, and
+destination facts remain daemon/server authority and are never model input.
+The helper receives only a daemon-issued single-task sealed context token;
+it cannot select a task id or product destination.
+Provider
 credentials are not read by the dispatch plane; `@byok-sdk/keys` is a separate
 install and keeps a zero dependency edge to this package.
 

@@ -155,6 +155,15 @@ default, while contentful trajectory requires explicit opt-in. Reliable facts
 use the Agent-local `.byok/egress` spool and exact acknowledgements; latest
 activity remains replaceable and is never backfill or shared history.
 
+Required Agent messages use `.byok/messages/outbox-v1.jsonl` inside the
+canonical Agent home. The SDK owns append-before-send durability, stable
+message/cursor identity, exact accepted retirement, held/refused retention,
+authenticated-tenant restart isolation, reconnect retry, and the Agent-home
+writer lease. The host owns the bounded, server-side opaque
+`agentMessageContext`, authenticated destination lookup, freshness decision, accepted-message
+persistence, and retention/UI semantics. Message bodies are not activity,
+Profile, workspace-read, transcript-read, or artifact-upload records.
+
 Workspace, transcript and artifact reads are disabled independently unless
 the corresponding capability and local policy are configured. BYOK owns path
 containment, MIME/text/size checks, per-Agent audit persistence and transport

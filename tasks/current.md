@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-25T05:23:22+0800 -->
+<!-- updated_at: 2026-08-26T15:11:42+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-25T05:23:22+0800
-> **Source Branch**: codex/byok-gate-a-host-contract
-> **Source Commit**: 99f2560
+> **Updated At**: 2026-08-26T15:11:42+0800
+> **Source Branch**: codex/agent-message-egress-research
+> **Source Commit**: 405db77
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,8 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/kito/Projects/byok-sdk: plans/plan-20260824-1223-release-0-8-0-docs.md
-- /Users/kito/Projects/byok-sdk: active-worktree owner -> /Users/kito/Projects/byok-sdk
+- /Users/kito/Projects/byok-sdk-wt-agent-provider-profile-binding: plans/plan-20260826-1405-agent-provider-profile-binding.md
+- /Users/kito/Projects/byok-sdk-wt-agent-provider-profile-binding: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-agent-provider-profile-binding
 - /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model: plans/plan-20260824-0248-credential-blind-enrollment-status.md
 - /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model
 ## Active Sprint
@@ -54,16 +54,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260825-0156-windows-credential-native-ci.md
- D tasks/contracts/20260825-0156-windows-credential-native-ci.contract.md
- D tasks/notes/20260825-0156-windows-credential-native-ci.notes.md
- D tasks/reviews/20260825-0156-windows-credential-native-ci.review.md
+ D plans/plan-20260826-1159-agent-message-egress.md
+ D tasks/contracts/20260826-1159-agent-message-egress.contract.md
+ D tasks/notes/20260826-1159-agent-message-egress.notes.md
+ D tasks/reviews/20260826-1159-agent-message-egress.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260825-0156-windows-credential-native-ci.md
-?? tasks/archive/contract-20260825-0523-windows-credential-native-ci.md
-?? tasks/archive/notes-20260825-0523-windows-credential-native-ci.md
-?? tasks/archive/review-20260825-0523-windows-credential-native-ci.md
-?? tasks/archive/todo-20260825-0523-windows-credential-native-ci.md
+?? plans/archive/plan-20260826-1159-agent-message-egress.md
+?? tasks/archive/contract-20260826-1511-agent-message-egress.md
+?? tasks/archive/notes-20260826-1511-agent-message-egress.md
+?? tasks/archive/review-20260826-1511-agent-message-egress.md
+?? tasks/archive/todo-20260826-1511-agent-message-egress.md
 ```
 
 ## Source Artifacts

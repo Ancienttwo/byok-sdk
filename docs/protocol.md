@@ -1078,6 +1078,18 @@ just an object. Producing it is product glue: a daemon supplies
 the product's JSON, or returns `undefined` for "no structured result this
 time".
 
+Strict Agent offers may additionally carry an offer-scoped
+`terminalProjection`. `{mode:'none'}` explicitly bypasses the host extractor;
+`{mode:'result-document', contract}` requires the extractor to return one
+document and passes that opaque contract to `ResultDocumentTask`. Missing
+extractor, missing document, invalid document, or missing server capability
+fails closed. Sending this field is gated by
+`terminal-projection-selection`, so an older daemon cannot strip it and run
+under the host-global default. A `messageEgress.mode:'required'` offer with no
+second terminal selection is itself message-only authority and therefore
+bypasses the extractor; an offer can request both lanes only by explicitly
+selecting `result-document`.
+
 **A document must be PLAIN JSON DATA — equal to its own JSON round trip.**
 Not merely "a value `JSON.stringify` accepts", which is a much weaker bar
 that lets two real failures through:
@@ -1316,6 +1328,44 @@ in that mode. Each envelope in `messages` is routed through the server's
 single inbound gate (the reference implementation's `handleInbound`) — the
 exact same gate a WSS connection's messages get, not a parallel or
 lesser-validated path.
+
+#### Agent-initiated message lane
+
+`agent-message-egress` is a distinct content lane for one bounded
+user-visible Agent message. A strict fresh or resume Agent egress offer may
+declare `messageEgress: {mode:'required', contract, contentType, maxBytes}`;
+presence is capability-gated before task/mailbox allocation.
+
+The SDK-owned task MCP tool accepts only `body` and optional `contentType`.
+Its local control call carries a daemon-issued, single-task sealed context
+token rather than a caller-selected task id. Tenant, device, task, `AgentRef`,
+session, and destination identity are bound by authenticated task context and
+cannot be model-authored. The host supplies a bounded opaque
+`agentMessageContext` at enqueue/dispatch; it remains server-side, never enters
+the Agent offer or message envelope, and is revealed only to the authenticated
+product consumer after exact device/task/Agent/session matching. The daemon
+fsyncs the body under the canonical Agent home before sending
+`agent.message.publish`. The exact `agent.message.disposition` binds message
+id, cursor, hash, AgentRef and session. Any exact disposition stops transport
+replay and is cached idempotently. Only `accepted` retires local bytes and
+unblocks a required `task.complete`; `held` and `refused` retain the draft for
+a separate authenticated product action, while mismatch, disconnect, and
+restart retain it for transport retry. This lane does not authorize raw
+activity, workspace, transcript, or artifact transfer.
+
+`mode:'required'` means exactly one immutable message per task. The daemon
+revokes the sealed local context on exact acceptance, while server/cloud lock
+the first task-scoped message identity and reject a second message id/body;
+only an exact replay is idempotent. Agent-local records also bind the
+authenticated enrollment tenant, so restart recovery cannot replay content
+after a cross-tenant re-pair. Activated drafts retry after loss, reconnect, or
+process restart only while no exact disposition has resolved transport delivery.
+
+Required-message tasks are message-only at terminal projection unless the
+offer also supplies an explicit `terminalProjection.mode:'result-document'`.
+This prevents a daemon-wide structured-result extractor from interpreting
+Chat output, while preserving a typed, fail-closed path for a task that
+genuinely requires both an accepted message and a structured result.
 
 **Only daemon → server `task.*` types are accepted here.** A `type` outside
 that set — a server → daemon type (`task.offer`, `conn.ack`, etc.) arriving
