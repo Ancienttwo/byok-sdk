@@ -134,3 +134,12 @@ export const AgentMemoryProjectionReceiptSchema = z
   })
   .strict();
 export type AgentMemoryProjectionReceipt = z.infer<typeof AgentMemoryProjectionReceiptSchema>;
+
+/**
+ * Server-side erase result. The returned epoch is the minimum legal epoch for
+ * a later host-issued writer grant; erased source epochs can never re-enter.
+ */
+export const AgentMemoryProjectionEraseResultSchema = z
+  .object({ nextWriterEpoch: AgentMemoryProjectionWriterEpochSchema })
+  .strict();
+export type AgentMemoryProjectionEraseResult = z.infer<typeof AgentMemoryProjectionEraseResultSchema>;

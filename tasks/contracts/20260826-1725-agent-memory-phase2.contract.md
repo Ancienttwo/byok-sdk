@@ -2,7 +2,7 @@
 
 > **Status**: Partial
 > **Plan**: plans/plan-20260826-1725-agent-memory-phase2.md
-> **Task Profile**: code-change
+> **Task Profile**: bugfix
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
@@ -55,12 +55,12 @@ an ordinary task and for a hosted contract missing grant or redactor.
 
 ## Root Cause Evidence
 
-Required when Task Profile is `bugfix`; leave as-is otherwise.
+Required when Task Profile is `bugfix`.
 
-- root_cause: one sentence naming file:line/condition (testable, not "a state issue").
-- repro: the command or UI path that reproduces the symptom.
-- regression_guard: path to a test that fails on the unfixed code and passes after the fix (must also appear under exit_criteria.tests_pass).
-- pre_fix_failure_artifact: path to a captured run of regression_guard on the UNFIXED code. Capture with `bun test <regression_guard> > <artifact> 2>&1; echo "PRE_FIX_EXIT=$?" >> <artifact>` (no pipes — pipes swallow the exit status). The gate requires a non-zero `PRE_FIX_EXIT=` line plus the regression_guard path string in the artifact (see the Root Cause Evidence Gate section in docs/reference-configs/sprint-contracts.md).
+- root_cause: `packages/client/src/daemon/agent-memory.ts:408,428` assigns later sequences from persisted pending records but filters their exact prior task/session during replay, while append-only internal logs and post-write audit at `:271-313,435-489` can wedge projection or report a failed save after content changed; `create-daemon.ts:1090-1092` and `agent-memory-fs-helper.ts:101-110` separately admit a Linux helper configuration that the helper rejects and leave stdin EPIPE uncontained.
+- repro: `bun --cwd packages/client run test -- src/__tests__/agent-memory-outbox-p1-regression.test.ts src/__tests__/agent-memory-log-p1-regression.test.ts src/__tests__/agent-memory-helper-p1-regressions.test.ts && bun --cwd packages/cloud run test -- src/__tests__/agent-memory-erase-epoch-p1-regression.test.ts`
+- regression_guard: `packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts`
+- pre_fix_failure_artifact: `.ai/harness/checks/agent-memory-outbox-p1-pre-fix.log`
 
 ## Workflow Inventory
 
@@ -165,6 +165,10 @@ exit_criteria:
   artifacts_exist:
     - tasks/notes/20260826-1725-agent-memory-phase2.notes.md
   tests_pass:
+    - path: packages/client/src/__tests__/agent-memory-helper-p1-regressions.test.ts
+    - path: packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts
+    - path: packages/client/src/__tests__/agent-memory-log-p1-regression.test.ts
+    - path: packages/cloud/src/__tests__/agent-memory-erase-epoch-p1-regression.test.ts
     - path: packages/client/src/__tests__/agent-memory-mcp.test.ts
     - path: packages/client/src/__tests__/agent-memory-guidance.test.ts
     - path: packages/protocol/src/__tests__/agent-memory-projection.test.ts

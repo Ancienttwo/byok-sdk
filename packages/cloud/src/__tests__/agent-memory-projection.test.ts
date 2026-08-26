@@ -192,7 +192,7 @@ describe('in-memory Agent-memory hosted projection conformance', () => {
   it('revokes authorization and erases on the server without an online device', async () => {
     const { harness, device, body } = await prepareTask();
     expect((await post(harness, device.authorization, body)).status).toBe(200);
-    await harness.cloud.eraseAgentMemoryProjection(TENANT_A, AGENT_REF.agentId);
+    await expect(harness.cloud.eraseAgentMemoryProjection(TENANT_A, AGENT_REF.agentId)).resolves.toEqual({ nextWriterEpoch: 2 });
     const replayAfterRevoke = await post(harness, device.authorization, body);
     expect(replayAfterRevoke.status).toBe(409);
     expect(await replayAfterRevoke.json()).toEqual({ error: 'agent_memory_projection_authorization_denied' });

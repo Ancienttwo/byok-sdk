@@ -1466,12 +1466,22 @@ Hosted 能力 `agent.memory.projection` 是单向、可选、默认关的
 redacted full-snapshot projection，不是 remote recall/import/restore 或
 product-fact store。Local quiescence 在 runtime close 后、Agent-home writer lease
 释放前捕获 native file-tool direct writes；只有 capability、opaque grant、
-required redactor 和 transport port 四者齐备才可上传，outbox 只持久化
-redacted bytes。Cloud 再绑定 authenticated tenant/device/task/exact AgentRef/
-session/runtime/grant/writer epoch；Postgres 以 `(tenantId, agentId)` 保存
-bounded latest snapshot，用 gap-free sequence 和 immutable mutation receipt 实现
-exact replay 幂等，仅计量 accepted redacted bytes。Server-side erase 先 revoke
-grant 再删 head/receipt，不依赖 device online。
+required redactor 和 transport port 四者齐备才开始 capture/audit/network。
+Local outbox 是一个 atomic replace 的 bounded v2 state：只保存 redacted bytes、
+per-epoch high-water 与 immutable pending mutation；必须先用 pending 自身原始的
+task/session/runtime/grant binding 做 exact replay，drain 后才可为当前 task 分配
+下一 source sequence。只有 host 发出的更高 writer epoch 才能 supersede 旧 pending
+并从 sequence 1 开始；同 epoch reopen 不能重置 high-water。
+
+Cloud 再绑定 authenticated tenant/device/task/exact AgentRef/session/runtime/grant/
+writer epoch；Postgres 以 `(tenantId, agentId)` 保存 bounded latest snapshot，用
+gap-free sequence 和 immutable mutation receipt 实现 exact replay 幂等，仅计量
+accepted redacted bytes。Server-side erase 先 revoke grant，再删 head/receipt，
+同时保留一个无正文的 minimum-writer-epoch fence 并返回 `nextWriterEpoch`；因此
+stale local outbox 不能在空 head 上回灌被删除的 epoch，且整个 erase 不依赖
+device online。Local metadata-only audit 是 bounded atomic tail，不是 replay 或
+内容 authority；source replace/delete 已成功后，audit persistence failure 只返回
+`agent_memory_audit_unavailable` warning，不能把已落盘的 save 伪装成失败。
 
 这条轨道不复用 generic `truth.records` 作为 per-Agent working-memory
 权威，不实现双向 sync、multi-device merge、RAG/search/history 或

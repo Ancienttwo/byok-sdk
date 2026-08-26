@@ -114,3 +114,21 @@ CREATE TABLE agent_memory_projection_metering_receipt (
 
 CREATE INDEX agent_memory_projection_metering_receipt_readback
   ON agent_memory_projection_metering_receipt (tenant_id, agent_id, writer_epoch, source_seq);
+
+-- Server-side erase deletes the only body and all immutable receipts, but it
+-- must leave one body-free epoch fence. A stale local outbox cannot re-enter
+-- after deletion and make an empty head accept an old writer's later sequence.
+CREATE TABLE agent_memory_projection_erase_fence (
+  tenant_id         text        NOT NULL,
+  agent_id          text        NOT NULL,
+  next_writer_epoch integer     NOT NULL,
+  erased_at         timestamptz NOT NULL,
+  PRIMARY KEY (tenant_id, agent_id),
+  CONSTRAINT agent_memory_projection_erase_fence_epoch_positive
+    CHECK (next_writer_epoch > 0),
+  CONSTRAINT agent_memory_projection_erase_fence_agent_bounded
+    CHECK (
+      octet_length(agent_id) BETWEEN 1 AND 160
+      AND agent_id !~ '[[:cntrl:]]'
+    )
+);

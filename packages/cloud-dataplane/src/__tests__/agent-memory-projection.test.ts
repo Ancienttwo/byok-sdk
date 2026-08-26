@@ -183,24 +183,29 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres Agent-memory projection — ${SKIP_REA
       await store.commit(await input());
       await store.commit(await input({ tenantId: OTHER_TENANT, deviceId: 'device-memory-other' }));
 
-      await store.erase({ tenantId: TENANT, agentId: AGENT_ID });
-      const rows = await scope.pool.query<{ readonly tenant_id: string; readonly heads: string; readonly receipts: string }>(
+      await expect(store.erase({ tenantId: TENANT, agentId: AGENT_ID })).resolves.toEqual({ nextWriterEpoch: 2 });
+      const rows = await scope.pool.query<{ readonly tenant_id: string; readonly heads: string; readonly receipts: string; readonly fences: string }>(
         `SELECT tenant_id,
                 (SELECT count(*)::text FROM agent_memory_projection_head h WHERE h.tenant_id = x.tenant_id) AS heads,
-                (SELECT count(*)::text FROM agent_memory_projection_metering_receipt r WHERE r.tenant_id = x.tenant_id) AS receipts
+                (SELECT count(*)::text FROM agent_memory_projection_metering_receipt r WHERE r.tenant_id = x.tenant_id) AS receipts,
+                (SELECT count(*)::text FROM agent_memory_projection_erase_fence f WHERE f.tenant_id = x.tenant_id) AS fences
            FROM (VALUES ($1::text), ($2::text)) AS x(tenant_id)
           ORDER BY tenant_id`,
         [TENANT, OTHER_TENANT],
       );
       expect(rows.rows).toEqual([
-        { tenant_id: TENANT, heads: '0', receipts: '0' },
-        { tenant_id: OTHER_TENANT, heads: '1', receipts: '1' },
+        { tenant_id: TENANT, heads: '0', receipts: '0', fences: '1' },
+        { tenant_id: OTHER_TENANT, heads: '1', receipts: '1', fences: '0' },
       ]);
 
-      // Erasure leaves no ordering state behind; a later explicitly admitted
-      // source starts a fresh writer epoch/sequence rather than relying on the
-      // device being connected during server-side deletion.
-      expect((await store.commit(await input())).outcome).toBe('accepted');
+      // Old local epochs cannot re-inject into an erased empty head. The exact
+      // next writer epoch restarts at sourceSeq 1 without retaining a body.
+      await expect(store.commit(await input())).rejects.toMatchObject({ code: 'agent_memory_projection_erased_epoch' });
+      expect((await store.commit(await input({
+        writerEpoch: 2,
+        sourceSeq: 1,
+        mutationId: '30000000-0000-4000-8000-000000000007',
+      }))).outcome).toBe('accepted');
     } finally {
       await scope.dispose();
     }

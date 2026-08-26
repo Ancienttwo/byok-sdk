@@ -103,6 +103,19 @@ describe('Agent memory MCP local authority', () => {
     })).toThrow('reserved by the daemon');
   });
 
+  it('does zero capture, audit, or network work when projection authority is incomplete', async () => {
+    const { context, release } = await memory();
+    let networkCalls = 0;
+    try {
+      await snapshotAndProjectAgentMemory(context, {
+        capability: AGENT_MEMORY_PROJECTION_CAPABILITY,
+        port: { publish: async () => { networkCalls += 1; return { accepted: true }; } },
+      });
+      expect(networkCalls).toBe(0);
+      await expect(fs.readFile(path.join(context.canonicalHome, '.byok', 'agent-memory-audit-v1.jsonl'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally { await release(); }
+  });
+
   itWithSecureDescriptors('captures direct writes at quiescence and permits no hosted network without every authority', async () => {
     const { context, release } = await memory();
     try {
@@ -143,7 +156,8 @@ describe('Agent memory MCP local authority', () => {
       expect(networkCalls).toBe(1);
       const outbox = await AgentMemoryRedactedOutbox.open(context, { grantRef: 'grant', writerEpoch: 1, policyRevision: 'policy-1' });
       expect(outbox.pending()).toEqual([]);
-      const rawOutbox = await fs.readFile(path.join(context.canonicalHome, '.byok', 'agent-memory-redacted-outbox-v1.jsonl'), 'utf8');
+      const rawOutbox = await fs.readFile(path.join(context.canonicalHome, '.byok', 'agent-memory-redacted-outbox-v2.json'), 'utf8');
+      expect(rawOutbox).toContain('"version":2');
       expect(rawOutbox).toContain('eyJzdW1tYXJ5IjoiW3JlZGFjdGVkXSJ9');
       expect(rawOutbox).not.toContain('native file tool final value');
     } finally { await release(); }

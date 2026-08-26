@@ -104,6 +104,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
       this.stderrBytes += Buffer.byteLength(chunk);
       if (this.stderrBytes > HELPER_MAX_STDERR_BYTES) this.fail(new AgentMemoryError('Agent memory filesystem helper exceeded bounded stderr'));
     });
+    child.stdin.on('error', () => this.fail(new AgentMemoryError('Agent memory filesystem helper request could not be written')));
     child.once('error', () => this.fail(new AgentMemoryError('Agent memory filesystem helper could not be started')));
     child.once('exit', (code, signal) => {
       if (!this.closed || code !== 0) this.fail(new AgentMemoryError(`Agent memory filesystem helper exited unexpectedly (${code ?? signal ?? 'unknown'})`));

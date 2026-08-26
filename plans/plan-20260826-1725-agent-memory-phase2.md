@@ -147,6 +147,14 @@ See captured planning output.
 - [x] **Hard negatives**：不做 hosted→local import/restore、multi-device merge、RAG/search/history browser、product facts adapter、compaction hook；不解除 hosted content-read 对 `MEMORY.md` 的 deny。
 - [x] **Consumer-owned remains**：consent UI、商业定价、法务 retention policy、identity BFF 的具体实现不属于 SDK 本刀；SDK 只提供 fail-closed ports 和可验证 contract。
 
+### Phase 2 P1 remediation — Claude reject follow-up
+
+- [x] **P1 helper admission**：Linux native backend 与 macOS-only helper config 不得形成 admitted-then-runtime-fail；显式 helper config 在 unsupported platform 构造期 fail closed。
+- [x] **P1 outbox replay/erase**：证明并修复 pending record 跨 task/session 与 server erase 后的 sequence wedge，同时保留 exact task authorization、single-writer epoch、gap-free sequence 与 no merge/import 边界。
+- [x] **P1 bounded local logs**：outbox 与 audit 必须有 bounded compaction/rotation；任何日志维护失败不得在 source file 已成功 replace/delete 后把 save 伪装成失败。
+- [x] **P1 helper EPIPE**：helper stdin 的 stream-level error 必须被客户端捕获并转为 bounded operation failure，不得成为 daemon uncaught exception。
+- [ ] **重验**：每个 P1 先保留 unfixed regression evidence，再完成 focused/full strict checks；冻结新 subject 后重新 Claude review。
+
 ## Verification
 
 - `bun run build` / `bun run typecheck` / `bun run test`

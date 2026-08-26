@@ -1,0 +1,37 @@
+bun test v1.4.0 (34cbb9a40)
+
+packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts:
+86 |         delivered.push({ taskId: mutation.taskId, sessionRef: mutation.sessionRef, sourceSeq: mutation.sourceSeq });
+87 |         return { accepted: true };
+88 |       },
+89 |     });
+90 |
+91 |     expect(delivered).toEqual([
+                           ^
+error: expect(received).toEqual(expected)
+
+  [
+    {
+-     "sessionRef": "session-a",
+-     "sourceSeq": 1,
+-     "taskId": "task-a",
+-   },
+-   {
+      "sessionRef": "session-b",
+      "sourceSeq": 2,
+      "taskId": "task-b",
+    },
+  ]
+
+- Expected  - 5
++ Received  + 0
+
+      at <anonymous> (/Users/kito/Projects/byok-sdk-wt-agent-memory-phase2/packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts:91:23)
+(fail) Agent-memory projection outbox P1 regression > replays a pending prior task/session mutation before assigning a later sequence [6.22ms]
+
+ 0 pass
+ 1 fail
+ 2 expect() calls
+Ran 1 test across 1 file. [60.00ms]
+REGRESSION_GUARD=packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts
+PRE_FIX_EXIT=1

@@ -11,12 +11,14 @@ import {
   type AgentMemoryProjectionMeteringReceipt,
   type AgentMemoryProjectionMutation,
   type AgentMemoryProjectionReceipt,
+  type AgentMemoryProjectionEraseResult,
 } from '@byok-sdk/protocol';
 
 export type {
   AgentMemoryProjectionMeteringReceipt,
   AgentMemoryProjectionMutation,
   AgentMemoryProjectionReceipt,
+  AgentMemoryProjectionEraseResult,
 } from '@byok-sdk/protocol';
 
 export interface AgentMemoryProjectionAuthorizerInput {
@@ -66,6 +68,9 @@ export interface AgentMemoryProjectionCommitInput {
  */
 export interface AgentMemoryProjectionStore {
   commit(input: AgentMemoryProjectionCommitInput): Promise<AgentMemoryProjectionReceipt>;
-  /** Server-side deletion: no device connection, mailbox, or runtime may be required. */
-  erase(input: { readonly tenantId: TenantId; readonly agentId: string }): Promise<void>;
+  /**
+   * Server-side deletion leaves a body-free epoch fence. The host must mint a
+   * later writer grant from `nextWriterEpoch`; no device/runtime is required.
+   */
+  erase(input: { readonly tenantId: TenantId; readonly agentId: string }): Promise<AgentMemoryProjectionEraseResult>;
 }

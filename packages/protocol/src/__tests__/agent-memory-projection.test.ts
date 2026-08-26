@@ -3,6 +3,7 @@ import {
   AGENT_MEMORY_PROJECTION_CAPABILITY,
   AgentMemoryProjectionCommitRequestSchema,
   AgentMemoryProjectionCommitResponseSchema,
+  AgentMemoryProjectionEraseResultSchema,
   AgentMemoryProjectionMutationSchema,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
   agentMemoryProjectionBase64UrlByteLength,
@@ -92,5 +93,11 @@ describe('Agent-memory hosted projection protocol', () => {
     expect(AgentMemoryProjectionCommitResponseSchema.parse(receipt)).toEqual(receipt);
     expect(AgentMemoryProjectionCommitResponseSchema.safeParse({ ...receipt, redactedBytes: 'c2FmZQ' }).success).toBe(false);
     expect(AgentMemoryProjectionCommitResponseSchema.safeParse({ ...receipt, cwd: '/leak' }).success).toBe(false);
+  });
+
+  it('makes server erase return only a strictly positive next writer epoch', () => {
+    expect(AgentMemoryProjectionEraseResultSchema.parse({ nextWriterEpoch: 2 })).toEqual({ nextWriterEpoch: 2 });
+    expect(AgentMemoryProjectionEraseResultSchema.safeParse({ nextWriterEpoch: 0 }).success).toBe(false);
+    expect(AgentMemoryProjectionEraseResultSchema.safeParse({ nextWriterEpoch: 2, snapshot: 'forbidden' }).success).toBe(false);
   });
 });

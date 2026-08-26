@@ -8,6 +8,7 @@
  */
 import {
   type AgentMemoryProjectionCommitInput,
+  type AgentMemoryProjectionEraseResult,
   type AgentMemoryProjectionReceipt,
   type AgentMemoryProjectionStore,
   ByokCloudError,
@@ -15,7 +16,9 @@ import {
 } from '@byok-sdk/cloud';
 import {
   AgentMemoryProjectionMutationSchema,
+  AgentMemoryProjectionEraseResultSchema,
   AgentMemoryProjectionReceiptSchema,
+  AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
 } from '@byok-sdk/protocol';
 import type { Clock, TenantId } from '@byok-sdk/core';
@@ -34,6 +37,7 @@ interface ProjectionHeadRow {
   readonly writer_epoch: number;
   readonly source_seq: number;
 }
+interface EraseFenceRow { readonly next_writer_epoch: number; }
 
 interface MeteringReceiptRow {
   readonly tenant_id: string;
@@ -125,7 +129,8 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
       if (existingMutation !== undefined) throw replayMismatch();
 
       const head = await this.#readHeadForUpdate(client, input.tenantId, mutation.agentRef.agentId);
-      assertNextMutation(head, mutation.writerEpoch, mutation.sourceSeq);
+      const fence = await this.#readEraseFenceForUpdate(client, input.tenantId, mutation.agentRef.agentId);
+      assertNextMutation(head, fence, mutation.writerEpoch, mutation.sourceSeq);
 
       const now = this.#clock.now();
       const meteringReceiptId = this.#crypto.randomUuid();
@@ -229,12 +234,18 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
     }
   }
 
-  /** Delete current redacted bytes and every immutable receipt under one source lock. */
-  async erase(input: { readonly tenantId: TenantId; readonly agentId: string }): Promise<void> {
+  /** Delete body/receipts but retain a body-free epoch fence under one source lock. */
+  async erase(input: { readonly tenantId: TenantId; readonly agentId: string }): Promise<AgentMemoryProjectionEraseResult> {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
       await lockAgentMutation(client, input.tenantId, input.agentId);
+      const head = await this.#readHeadForUpdate(client, input.tenantId, input.agentId);
+      const fence = await this.#readEraseFenceForUpdate(client, input.tenantId, input.agentId);
+      const nextWriterEpoch = Math.max(fence?.next_writer_epoch ?? 1, (head?.writer_epoch ?? 0) + 1);
+      if (nextWriterEpoch > AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE) {
+        throw new ByokCloudError('agent_memory_projection_epoch_exhausted', 'The memory projection writerEpoch cannot advance after erase.');
+      }
       await client.query(
         'DELETE FROM agent_memory_projection_metering_receipt WHERE tenant_id = $1 AND agent_id = $2',
         [input.tenantId, input.agentId],
@@ -243,7 +254,16 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
         'DELETE FROM agent_memory_projection_head WHERE tenant_id = $1 AND agent_id = $2',
         [input.tenantId, input.agentId],
       );
+      await client.query(
+        `INSERT INTO agent_memory_projection_erase_fence (tenant_id, agent_id, next_writer_epoch, erased_at)
+         VALUES ($1, $2, $3::integer, $4)
+         ON CONFLICT (tenant_id, agent_id) DO UPDATE SET
+           next_writer_epoch = GREATEST(agent_memory_projection_erase_fence.next_writer_epoch, EXCLUDED.next_writer_epoch),
+           erased_at = EXCLUDED.erased_at`,
+        [input.tenantId, input.agentId, nextWriterEpoch, this.#clock.now()],
+      );
       await client.query('COMMIT');
+      return AgentMemoryProjectionEraseResultSchema.parse({ nextWriterEpoch });
     } catch (cause) {
       await rollback(client);
       throw cause;
@@ -273,6 +293,17 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
     const result = await client.query<ProjectionHeadRow>(
       `SELECT tenant_id, agent_id, writer_epoch, source_seq
          FROM agent_memory_projection_head
+        WHERE tenant_id = $1 AND agent_id = $2
+        FOR UPDATE`,
+      [tenant, agentId],
+    );
+    return result.rows[0];
+  }
+
+  async #readEraseFenceForUpdate(client: PoolClient, tenant: TenantId, agentId: string): Promise<EraseFenceRow | undefined> {
+    const result = await client.query<EraseFenceRow>(
+      `SELECT next_writer_epoch
+         FROM agent_memory_projection_erase_fence
         WHERE tenant_id = $1 AND agent_id = $2
         FOR UPDATE`,
       [tenant, agentId],
@@ -322,9 +353,13 @@ export function createPostgresAgentMemoryProjectionStore(
 
 function assertNextMutation(
   head: ProjectionHeadRow | undefined,
+  fence: EraseFenceRow | undefined,
   writerEpoch: number,
   sourceSeq: number,
 ): void {
+  if (fence !== undefined && writerEpoch < fence.next_writer_epoch) {
+    throw erasedEpoch();
+  }
   if (head === undefined) {
     if (sourceSeq !== 1) throw sequenceGap('The first memory projection mutation must use sourceSeq 1.');
     return;
@@ -403,6 +438,10 @@ function hashMismatch(message: string): ByokCloudError {
 
 function sequenceGap(message: string): ByokCloudError {
   return new ByokCloudError('agent_memory_projection_sequence_gap', message);
+}
+
+function erasedEpoch(): ByokCloudError {
+  return new ByokCloudError('agent_memory_projection_erased_epoch', 'The memory projection writerEpoch was erased and cannot be replayed.');
 }
 
 function replayMismatch(): ByokCloudError {

@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260826-1725-agent-memory-phase2.md
 > **Contract**: tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
 > **Review**: tasks/reviews/20260826-1725-agent-memory-phase2.review.md
-> **Last Updated**: 2026-08-26 17:56
+> **Last Updated**: 2026-08-27 01:10
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -22,6 +22,18 @@
 - Postgres stores one bounded redacted head per tenant/Agent and immutable
   body-free metering receipts. Sequence gaps, stale epochs, and replay
   mismatches fail closed; exact replay returns the original receipt.
+- The client outbox is one bounded atomic v2 state, not an append-only log.
+  Pending redacted mutations retain their original task/session/runtime/grant
+  binding and must replay before a later sequence is allocated. A strictly
+  newer host-issued writer epoch supersedes old pending state; same-epoch open
+  cannot reset high-water.
+- Server erase deletes the redacted body and immutable receipts but retains a
+  body-free minimum-writer-epoch fence. The returned `nextWriterEpoch` is the
+  only legal restart point, so stale local epochs cannot re-enter an empty head.
+- Metadata-only local audit is a bounded atomic tail and is not an authoring or
+  replay authority. If audit persistence fails after replace/delete has
+  succeeded, `memory.save` returns the actual mutation result plus
+  `agent_memory_audit_unavailable` instead of inventing rollback/failure.
 
 ## Deviations From Plan Or Spec
 
@@ -105,6 +117,21 @@
   expected. The previously materialized `.ai/harness/checks/latest.json` still
   projects the earlier waiver, so it must not be read as the current semantic
   disposition; the external gate receipt and review projection are current.
+- The approved P1 remediation proved all four review findings with red-first
+  guards. Pre-fix evidence is retained under `.ai/harness/checks/` and
+  `.ai/harness/runs/`: Linux helper config was admitted before the macOS-only
+  helper rejected it; helper stdin EPIPE escaped the request boundary; a
+  pending prior-task mutation was filtered while the next sequence advanced;
+  erase left no epoch fence; and append-only audit/outbox pressure could wedge
+  projection or report save failure after source content changed.
+- The remediation now rejects unsupported helper config during daemon
+  construction, contains stdin stream errors, uses atomic v2 outbox replay
+  before append, retains an erase epoch fence in both in-memory/Postgres stores,
+  and bounds audit without making it authoritative. Official focused Vitest
+  scripts passed on 2026-08-27: client 14 pass / 6 platform skips, cloud 7 pass,
+  protocol 4 pass. Dataplane and root-wide checks are intentionally recorded
+  only after the new subject is frozen; the prior Claude reject remains current
+  until a new exact-subject review and typed receipt replace it.
 
 ## Promotion Filter
 

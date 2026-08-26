@@ -42,6 +42,7 @@ export const TENANT_ERASURE_TABLES = [
   'outbox',
   'agent_memory_projection_metering_receipt',
   'agent_memory_projection_head',
+  'agent_memory_projection_erase_fence',
   'agent_egress_event',
   'device_request_receipts',
   'proof_request_receipt',

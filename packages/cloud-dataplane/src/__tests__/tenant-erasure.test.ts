@@ -295,6 +295,11 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
      )`,
     [tenant, device, hash, now],
   );
+  await pool.query(
+    `INSERT INTO agent_memory_projection_erase_fence (tenant_id, agent_id, next_writer_epoch, erased_at)
+     VALUES ($1, 'agent-memory-erased', 2, $2)`,
+    [tenant, now],
+  );
 }
 
 async function eraseToCompletion(

@@ -74,6 +74,10 @@ export const CLOUD_ERROR_CODES = {
   agent_memory_projection_replay_mismatch: 'agent_memory_projection_replay_mismatch',
   /** A hosted memory mutation came from an older writer epoch. */
   agent_memory_projection_stale_epoch: 'agent_memory_projection_stale_epoch',
+  /** A server-side erase fence prevents a deleted writer epoch from re-entering. */
+  agent_memory_projection_erased_epoch: 'agent_memory_projection_erased_epoch',
+  /** A prior erase reached the protocol writer-epoch ceiling and cannot mint a later writer. */
+  agent_memory_projection_epoch_exhausted: 'agent_memory_projection_epoch_exhausted',
   /** A hosted memory mutation skipped or reset a required source sequence. */
   agent_memory_projection_sequence_gap: 'agent_memory_projection_sequence_gap',
 } as const;

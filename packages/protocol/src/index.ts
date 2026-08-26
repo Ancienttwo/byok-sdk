@@ -94,6 +94,7 @@ export {
   AgentMemoryProjectionMeteringReceiptSchema,
   AgentMemoryProjectionMutationSchema,
   AgentMemoryProjectionReceiptSchema,
+  AgentMemoryProjectionEraseResultSchema,
   agentMemoryProjectionBase64UrlByteLength,
 } from './agent-memory-projection';
 export type {
@@ -105,6 +106,7 @@ export type {
   AgentMemoryProjectionMeteringReceipt,
   AgentMemoryProjectionMutation,
   AgentMemoryProjectionReceipt,
+  AgentMemoryProjectionEraseResult,
 } from './agent-memory-projection';
 
 export {

@@ -48,6 +48,8 @@ export function agentMemoryProjectionHandler(deps: AgentMemoryProjectionRouteDep
         isCloudError(error, 'agent_memory_projection_task_mismatch') ||
         isCloudError(error, 'agent_memory_projection_replay_mismatch') ||
         isCloudError(error, 'agent_memory_projection_stale_epoch') ||
+        isCloudError(error, 'agent_memory_projection_erased_epoch') ||
+        isCloudError(error, 'agent_memory_projection_epoch_exhausted') ||
         isCloudError(error, 'agent_memory_projection_sequence_gap')
       ) return c.json({ error: error.code }, 409);
       if (isCloudError(error, 'agent_memory_projection_hash_mismatch')) {

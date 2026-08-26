@@ -127,6 +127,7 @@ import { AgentHomeProjectionCompletionClient } from './agent-home-projection-cli
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { isAgentMemorySecureFilesystemAvailable, type AgentMemoryHostedProjection } from './agent-memory';
+import { isAgentMemoryFilesystemHelperSupported } from './agent-memory-fs-helper';
 import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
 import {
   AGENT_CONTENT_READ_CAPABILITIES,
@@ -1088,7 +1089,7 @@ export function buildDaemonWithAdapters(
     throw new Error('DaemonConfig.agentMemoryFilesystem.helperBin must be an explicit absolute executable path');
   }
   const externalAgentMemoryFilesystem = config.agentMemoryFilesystem !== undefined;
-  if (externalAgentMemoryFilesystem && !isAgentMemorySecureFilesystemAvailable(true)) {
+  if (externalAgentMemoryFilesystem && !isAgentMemoryFilesystemHelperSupported()) {
     throw new Error('DaemonConfig.agentMemoryFilesystem is not admitted on this platform without its native race proof');
   }
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {

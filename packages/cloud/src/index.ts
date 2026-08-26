@@ -71,6 +71,7 @@ export {
 } from './stores/in-memory/agent-memory-projection';
 export type {
   AgentMemoryProjectionAuthorization,
+  AgentMemoryProjectionEraseResult,
   AgentMemoryProjectionAuthorizer,
   AgentMemoryProjectionAuthorizerInput,
   AgentMemoryProjectionCommitInput,

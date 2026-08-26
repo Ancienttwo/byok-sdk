@@ -58,7 +58,8 @@
 -- wrong". 30 is 0001's seven plus 0002's eleven plus 0003's three plus
 -- 0004's one plus 0005's two plus 0007's one plus 0008's one plus 0010's
 -- package/operator erasure receipt; 0013 adds one immutable reliable Agent
--- egress table; 0014 adds the projection head and metering receipt tables;
+-- egress table; 0014 adds the projection head, metering receipt, and erase
+-- epoch-fence tables;
 -- 0009 alters the existing task table and is
 -- checked explicitly in section 0.1. A later migration may only raise this count.
 DO $$
@@ -72,9 +73,9 @@ BEGIN
      AND t.relkind = 'r'
      AND t.relname <> 'byok_schema_migration';
 
-  IF port_tables < 30 THEN
+  IF port_tables < 31 THEN
     RAISE EXCEPTION
-      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 30 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql + 0013_agent_egress_contract.sql + 0014_agent_memory_projection.sql; 0009_task_cancellation.sql, 0010_tenant_readiness.sql, and 0012_agent_home_contract.sql are checked separately)',
+      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 31 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql + 0013_agent_egress_contract.sql + 0014_agent_memory_projection.sql; 0009_task_cancellation.sql, 0010_tenant_readiness.sql, and 0012_agent_home_contract.sql are checked separately)',
       current_database(), current_schema(), port_tables;
   END IF;
 END $$;
@@ -159,6 +160,7 @@ DO $$
 DECLARE
   missing_columns text;
   head_primary_key_columns text[];
+  fence_primary_key_columns text[];
   receipt_primary_key_columns text[];
   receipt_mutation_unique_columns text[];
   receipt_mutation_unique_count integer;
@@ -184,6 +186,10 @@ BEGIN
         ('agent_memory_projection_head'::text, 'redacted_snapshot'::text, 'bytea'::regtype),
         ('agent_memory_projection_head'::text, 'redacted_byte_count'::text, 'integer'::regtype),
         ('agent_memory_projection_head'::text, 'committed_at'::text, 'timestamp with time zone'::regtype),
+        ('agent_memory_projection_erase_fence'::text, 'tenant_id'::text, 'text'::regtype),
+        ('agent_memory_projection_erase_fence'::text, 'agent_id'::text, 'text'::regtype),
+        ('agent_memory_projection_erase_fence'::text, 'next_writer_epoch'::text, 'integer'::regtype),
+        ('agent_memory_projection_erase_fence'::text, 'erased_at'::text, 'timestamp with time zone'::regtype),
         ('agent_memory_projection_metering_receipt'::text, 'tenant_id'::text, 'text'::regtype),
         ('agent_memory_projection_metering_receipt'::text, 'agent_id'::text, 'text'::regtype),
         ('agent_memory_projection_metering_receipt'::text, 'writer_epoch'::text, 'integer'::regtype),
@@ -235,6 +241,23 @@ BEGIN
     RAISE EXCEPTION
       'agent_memory_projection_head primary key must be (tenant_id, agent_id), found %',
       head_primary_key_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO fence_primary_key_columns
+    FROM pg_constraint constraint_row
+    JOIN pg_class t ON t.oid = constraint_row.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_memory_projection_erase_fence'
+     AND constraint_row.contype = 'p';
+
+  IF fence_primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'agent_id']::text[] THEN
+    RAISE EXCEPTION
+      'agent_memory_projection_erase_fence primary key must be (tenant_id, agent_id), found %',
+      fence_primary_key_columns;
   END IF;
 
   SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
@@ -298,7 +321,7 @@ BEGIN
     JOIN pg_namespace n ON n.oid = t.relnamespace
     JOIN pg_attribute a ON a.attrelid = t.oid
    WHERE n.nspname = current_schema()
-     AND t.relname IN ('agent_memory_projection_head', 'agent_memory_projection_metering_receipt')
+     AND t.relname IN ('agent_memory_projection_head', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_erase_fence')
      AND a.attnum > 0
      AND NOT a.attisdropped
      AND (

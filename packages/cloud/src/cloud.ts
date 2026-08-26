@@ -93,6 +93,7 @@ import {
   type AgentHomeProjectionReadback,
   type AgentMemoryProjectionCommitRequest,
   type AgentMemoryProjectionCommitResponse,
+  type AgentMemoryProjectionEraseResult,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
@@ -405,7 +406,7 @@ export interface ByokCloud {
    * Server-side consent revocation and hosted projection erasure. It does not
    * depend on a device being online and never imports anything back locally.
    */
-  eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<void>;
+  eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult>;
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
@@ -961,7 +962,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return store.commit({ tenantId: stores.tenant, deviceId, mutation, redactedBytes });
   }
 
-  async function eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<void> {
+  async function eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult> {
     const authorizer = options.agentMemoryProjectionAuthorizer;
     const store = options.agentMemoryProjectionStore;
     if (authorizer === undefined || store === undefined) {
@@ -973,7 +974,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     // Consent revocation first ensures every later device replay is denied,
     // even when a subsequent external erase has to be retried by the caller.
     await authorizer.revoke({ tenantId: tenant, agentId });
-    await store.erase({ tenantId: tenant, agentId });
+    return store.erase({ tenantId: tenant, agentId });
   }
 
   async function enqueueReliableEgressAck(stores: TenantStores, record: AgentEgressRecord): Promise<void> {

@@ -2,7 +2,10 @@
 import type { Clock, TenantId } from '@byok-sdk/core';
 import {
   AgentMemoryProjectionMutationSchema,
+  AgentMemoryProjectionEraseResultSchema,
   AgentMemoryProjectionReceiptSchema,
+  AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
+  type AgentMemoryProjectionEraseResult,
   type AgentMemoryProjectionMeteringReceipt,
   type AgentMemoryProjectionReceipt,
 } from '@byok-sdk/protocol';
@@ -67,6 +70,8 @@ export class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjection
   readonly #heads = new Map<string, ProjectionHead>();
   readonly #snapshots = new Map<string, StoredSnapshot>();
   readonly #receipts = new Map<string, AgentMemoryProjectionReceipt>();
+  /** Minimum legal future epoch after server-side erasure; contains no body. */
+  readonly #eraseFences = new Map<string, number>();
   readonly #mutationTails = new Map<string, Promise<void>>();
 
   constructor(clock: Clock, crypto: CloudCrypto) {
@@ -104,6 +109,10 @@ export class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjection
         return AgentMemoryProjectionReceiptSchema.parse({ ...prior, outcome: 'idempotent' });
       }
 
+      const fence = this.#eraseFences.get(key);
+      if (fence !== undefined && mutation.writerEpoch < fence) {
+        throw new ByokCloudError('agent_memory_projection_erased_epoch', 'The memory projection writerEpoch was erased and cannot be replayed.');
+      }
       const head = this.#heads.get(key);
       if (head === undefined) {
         if (mutation.sourceSeq !== 1) {
@@ -163,15 +172,22 @@ export class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjection
     });
   }
 
-  async erase(input: { readonly tenantId: TenantId; readonly agentId: string }): Promise<void> {
+  async erase(input: { readonly tenantId: TenantId; readonly agentId: string }): Promise<AgentMemoryProjectionEraseResult> {
     const key = agentKey(input.tenantId, input.agentId);
-    await this.#mutate(key, () => {
+    return this.#mutate(key, () => {
+      const priorHeadEpoch = this.#heads.get(key)?.writerEpoch ?? 0;
+      const nextWriterEpoch = Math.max(this.#eraseFences.get(key) ?? 1, priorHeadEpoch + 1);
+      if (nextWriterEpoch > AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE) {
+        throw new ByokCloudError('agent_memory_projection_epoch_exhausted', 'The memory projection writerEpoch cannot advance after erase.');
+      }
       this.#heads.delete(key);
       this.#snapshots.delete(key);
       const prefix = `${key}\u0000`;
       for (const receiptKeyValue of this.#receipts.keys()) {
         if (receiptKeyValue.startsWith(prefix)) this.#receipts.delete(receiptKeyValue);
       }
+      this.#eraseFences.set(key, nextWriterEpoch);
+      return AgentMemoryProjectionEraseResultSchema.parse({ nextWriterEpoch });
     });
   }
 

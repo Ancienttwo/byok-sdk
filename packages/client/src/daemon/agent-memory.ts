@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import {
   AGENT_MEMORY_PROJECTION_CAPABILITY,
+  AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
   AgentMemoryProjectionMutationSchema,
   type AgentMemoryProjectionMutation,
@@ -12,12 +13,13 @@ import { AGENT_HOME_INTERNAL_DIRECTORY, type AgentHomeLease, type AgentRef } fro
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 
 export const AGENT_MEMORY_AUDIT_FILENAME = 'agent-memory-audit-v1.jsonl';
-export const AGENT_MEMORY_OUTBOX_FILENAME = 'agent-memory-redacted-outbox-v1.jsonl';
+/** v2 is one atomically replaced state file, never an append-only log. */
+export const AGENT_MEMORY_OUTBOX_FILENAME = 'agent-memory-redacted-outbox-v2.json';
 export const AGENT_MEMORY_MAX_FILE_BYTES = 256 * 1024;
 export const AGENT_MEMORY_MAX_SNAPSHOT_BYTES = 1024 * 1024;
 export const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 export const AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES = 512;
-const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES = AGENT_MEMORY_MAX_SNAPSHOT_BYTES * 16;
+export const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES = AGENT_MEMORY_MAX_SNAPSHOT_BYTES * 16;
 
 const REVISION = /^sha256:[a-f0-9]{64}$/u;
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
@@ -64,7 +66,7 @@ export interface AgentMemoryProjectionGrant {
   readonly policyRevision: AgentMemoryProjectionMutation['policyRevision'];
 }
 export interface AgentMemoryRedactedOutboxRecord {
-  readonly version: 1;
+  readonly version: 2;
   readonly mutation: AgentMemoryProjectionMutation;
   readonly createdAt: string;
 }
@@ -268,21 +270,91 @@ async function remove(context: AgentMemoryTaskContext, relativePath: string, exp
   return removeNative(context, relativePath, expected);
 }
 
-async function audit(context: AgentMemoryTaskContext, kind: 'recall' | 'save' | 'snapshot', values: Record<string, unknown>): Promise<void> {
-  const entry = `${JSON.stringify({ version: 1, kind, taskId: context.taskId, tenantId: context.tenantId, deviceId: context.deviceId, agentRef: context.agentRef, sessionRef: context.sessionRef, runtimeId: context.runtimeId, ...values, recordedAt: new Date().toISOString() })}\n`;
-  if (context.filesystem !== undefined) {
-    await context.filesystem.append(`${AGENT_HOME_INTERNAL_DIRECTORY}/${AGENT_MEMORY_AUDIT_FILENAME}`, entry, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
-    return;
-  }
-  await withPinnedDirectory(context.canonicalHome, [AGENT_HOME_INTERNAL_DIRECTORY], async (directory) => {
+/** Read one SDK-internal bounded state file through the same pinned home authority. */
+async function readInternalFile(context: AgentMemoryTaskContext, fileName: string): Promise<FileState> {
+  const relativePath = `${AGENT_HOME_INTERNAL_DIRECTORY}/${fileName}`;
+  if (context.filesystem !== undefined) return context.filesystem.read(relativePath, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
+  return withPinnedDirectory(
+    context.canonicalHome,
+    [AGENT_HOME_INTERNAL_DIRECTORY],
+    (directory) => readPinnedFile(directory, fileName, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES),
+    context.homeIdentity,
+  );
+}
+
+/**
+ * Atomically replace one SDK-internal bounded state file. Internal state never
+ * uses append as an authority: a successful rename contains the whole next
+ * state, and an interrupted write leaves the old state readable.
+ */
+async function replaceInternalFile(context: AgentMemoryTaskContext, fileName: string, expectedRevision: string, content: string): Promise<FileState> {
+  const byteCount = encoder.encode(content).byteLength;
+  if (byteCount > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemoryError('Agent memory internal state exceeds its bounded size');
+  const relativePath = `${AGENT_HOME_INTERNAL_DIRECTORY}/${fileName}`;
+  if (context.filesystem !== undefined) return context.filesystem.replace(relativePath, expectedRevision, content, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
+  return withPinnedDirectory(context.canonicalHome, [AGENT_HOME_INTERNAL_DIRECTORY], async (directory) => {
+    const before = await readPinnedFile(directory, fileName, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
+    if (before.revision !== expectedRevision) throw new AgentMemoryRevisionConflictError(expectedRevision, before.revision);
+    const parent = descriptorPath(directory);
+    const temporary = `${parent}/.byok-agent-memory-${randomUUID()}.tmp`;
     let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
     try {
-      handle = await fs.open(`${descriptorPath(directory)}/${AGENT_MEMORY_AUDIT_FILENAME}`, noFollowFlags(fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT), 0o600);
-      // Only metadata/hashes/lengths are written; content is intentionally not a field.
-      await handle.writeFile(entry, 'utf8');
-      await handle.sync();
-    } finally { await handle?.close().catch(() => {}); }
+      handle = await fs.open(temporary, noFollowFlags(fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL), 0o600);
+      await handle.writeFile(content, 'utf8'); await handle.sync(); await handle.close(); handle = undefined;
+      const check = await readPinnedFile(directory, fileName, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
+      if (check.revision !== expectedRevision || check.exists !== before.exists) throw new AgentMemoryRevisionConflictError(expectedRevision, check.revision);
+      await fs.rename(temporary, `${parent}/${fileName}`); await syncDirectory(directory);
+      return Object.freeze({ exists: true, content, revision: digest(content), byteCount });
+    } catch (error) {
+      await handle?.close().catch(() => {}); await fs.rm(temporary, { force: true }).catch(() => {});
+      if (error instanceof AgentMemoryError) throw error;
+      throw new AgentMemoryError('could not atomically replace Agent memory internal state');
+    }
   }, context.homeIdentity);
+}
+
+function boundedAuditTail(previous: string, entry: string): string {
+  if (encoder.encode(entry).byteLength > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemoryError('Agent memory audit entry exceeds its bounded size');
+  // Audit is intentionally metadata-only and is not a replay authority. Keep
+  // complete newest lines only; a malformed old tail cannot wedge a local save.
+  const lines = previous.split('\n').filter((line) => line.length > 0);
+  const kept = [entry];
+  let byteCount = encoder.encode(entry).byteLength;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const candidate = `${lines[index]}\n`;
+    const candidateBytes = encoder.encode(candidate).byteLength;
+    if (byteCount + candidateBytes > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) break;
+    kept.unshift(candidate); byteCount += candidateBytes;
+  }
+  return kept.join('');
+}
+
+async function audit(context: AgentMemoryTaskContext, kind: 'recall' | 'save' | 'snapshot', values: Record<string, unknown>): Promise<void> {
+  const entry = `${JSON.stringify({ version: 1, kind, taskId: context.taskId, tenantId: context.tenantId, deviceId: context.deviceId, agentRef: context.agentRef, sessionRef: context.sessionRef, runtimeId: context.runtimeId, ...values, recordedAt: new Date().toISOString() })}\n`;
+  const current = await readInternalFile(context, AGENT_MEMORY_AUDIT_FILENAME);
+  await replaceInternalFile(context, AGENT_MEMORY_AUDIT_FILENAME, current.revision, boundedAuditTail(current.content, entry));
+}
+
+export interface AgentMemoryAuditWarning {
+  /** Metadata-only signal: the local source mutation already succeeded. */
+  readonly code: 'agent_memory_audit_unavailable';
+}
+export interface AgentMemorySaveResult {
+  readonly path: string;
+  readonly revision?: string;
+  readonly deleted: boolean;
+  readonly auditWarning?: AgentMemoryAuditWarning;
+}
+
+async function saveAuditWarning(context: AgentMemoryTaskContext, values: Record<string, unknown>): Promise<AgentMemoryAuditWarning | undefined> {
+  try {
+    await audit(context, 'save', values);
+    return undefined;
+  } catch {
+    // The source replace/delete is already fsynced. Never invent a rollback
+    // from a metadata-only observation failure; callers receive no raw error.
+    return Object.freeze({ code: 'agent_memory_audit_unavailable' as const });
+  }
 }
 
 export class AgentMemoryService {
@@ -297,7 +369,7 @@ export class AgentMemoryService {
     await audit(context, 'recall', { path: relativePath, revision: current.revision, byteCount: current.byteCount });
     return Object.freeze({ path: relativePath, revision: current.revision, content: current.content });
   }
-  async save(input: { readonly op: unknown; readonly path: unknown; readonly expectedRevision: unknown; readonly content?: unknown }): Promise<Readonly<{ path: string; revision?: string; deleted: boolean }>> {
+  async save(input: { readonly op: unknown; readonly path: unknown; readonly expectedRevision: unknown; readonly content?: unknown }): Promise<Readonly<AgentMemorySaveResult>> {
     const context = taskContext(this.input); const relativePath = validateAgentMemoryPath(input.path);
     if ((input.op !== 'replace' && input.op !== 'delete') || !revision(input.expectedRevision)) throw new AgentMemoryError('memory save requires op and sha256 expectedRevision');
     if (input.op === 'replace' && typeof input.content !== 'string') throw new AgentMemoryError('replace requires string content');
@@ -305,11 +377,15 @@ export class AgentMemoryService {
     const expectedRevision = input.expectedRevision;
     const content = input.content;
     return this.exclusive(context.canonicalHome, async () => {
-      if (input.op === 'delete') { await remove(context, relativePath, expectedRevision); await audit(context, 'save', { path: relativePath, operation: 'delete' }); return Object.freeze({ path: relativePath, deleted: true }); }
+      if (input.op === 'delete') {
+        await remove(context, relativePath, expectedRevision);
+        const auditWarning = await saveAuditWarning(context, { path: relativePath, operation: 'delete' });
+        return Object.freeze({ path: relativePath, deleted: true, ...(auditWarning === undefined ? {} : { auditWarning }) });
+      }
       if (typeof content !== 'string') throw new AgentMemoryError('replace requires string content');
       const current = await replace(context, relativePath, expectedRevision, content);
-      await audit(context, 'save', { path: relativePath, operation: 'replace', revision: current.revision, byteCount: current.byteCount });
-      return Object.freeze({ path: relativePath, revision: current.revision, deleted: false });
+      const auditWarning = await saveAuditWarning(context, { path: relativePath, operation: 'replace', revision: current.revision, byteCount: current.byteCount });
+      return Object.freeze({ path: relativePath, revision: current.revision, deleted: false, ...(auditWarning === undefined ? {} : { auditWarning }) });
     });
   }
   private async exclusive<T>(home: string, fn: () => Promise<T>): Promise<T> {
@@ -391,110 +467,135 @@ function redactedBytes(raw: AgentMemorySnapshot, candidate: Uint8Array): Uint8Ar
   return bytes;
 }
 
-type OutboxEntry = { version: 1; kind: 'append'; record: AgentMemoryRedactedOutboxRecord } | { version: 1; kind: 'accepted'; mutationId: string };
+interface OutboxHighWater { readonly writerEpoch: number; readonly sourceSeq: number; }
+interface OutboxState {
+  readonly version: 2;
+  readonly currentWriterEpoch: number;
+  /** Retained after compaction so a restart can never reset an old epoch. */
+  readonly highWater: readonly OutboxHighWater[];
+  /** Redacted immutable mutations only, in source-sequence order. */
+  readonly pending: readonly AgentMemoryRedactedOutboxRecord[];
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort(); const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+function validOrderingValue(value: unknown, allowZero = false): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= (allowZero ? 0 : 1) && value <= AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE;
+}
+function freezeOutboxRecord(value: unknown): AgentMemoryRedactedOutboxRecord {
+  if (!isPlainRecord(value) || !exactKeys(value, ['version', 'mutation', 'createdAt']) || value.version !== 2 || typeof value.createdAt !== 'string' || value.createdAt.length === 0 || /[\u0000\r\n]/u.test(value.createdAt)) throw new AgentMemoryError('Agent memory outbox state is invalid');
+  const mutation = AgentMemoryProjectionMutationSchema.safeParse(value.mutation);
+  if (!mutation.success) throw new AgentMemoryError('Agent memory outbox state is invalid');
+  return Object.freeze({ version: 2 as const, mutation: Object.freeze(mutation.data), createdAt: value.createdAt });
+}
+function freezeOutboxState(value: unknown): OutboxState {
+  if (!isPlainRecord(value) || !exactKeys(value, ['version', 'currentWriterEpoch', 'highWater', 'pending']) || value.version !== 2 || !validOrderingValue(value.currentWriterEpoch) || !Array.isArray(value.highWater) || !Array.isArray(value.pending)) throw new AgentMemoryError('Agent memory outbox state is invalid');
+  const highWater = value.highWater.map((entry): OutboxHighWater => {
+    if (!isPlainRecord(entry) || !exactKeys(entry, ['writerEpoch', 'sourceSeq']) || !validOrderingValue(entry.writerEpoch) || !validOrderingValue(entry.sourceSeq, true)) throw new AgentMemoryError('Agent memory outbox state is invalid');
+    return Object.freeze({ writerEpoch: entry.writerEpoch, sourceSeq: entry.sourceSeq });
+  }).sort((left, right) => left.writerEpoch - right.writerEpoch);
+  const pending = value.pending.map(freezeOutboxRecord).sort((left, right) => left.mutation.sourceSeq - right.mutation.sourceSeq);
+  const seenEpochs = new Set<number>(); const highWaterByEpoch = new Map<number, number>();
+  for (const entry of highWater) {
+    if (seenEpochs.has(entry.writerEpoch)) throw new AgentMemoryError('Agent memory outbox state is invalid');
+    seenEpochs.add(entry.writerEpoch); highWaterByEpoch.set(entry.writerEpoch, entry.sourceSeq);
+  }
+  const mutationIds = new Set<string>(); const sourceSeqs = new Set<number>();
+  for (const record of pending) {
+    if (record.mutation.writerEpoch !== value.currentWriterEpoch || mutationIds.has(record.mutation.mutationId) || sourceSeqs.has(record.mutation.sourceSeq) || record.mutation.sourceSeq > (highWaterByEpoch.get(record.mutation.writerEpoch) ?? 0)) throw new AgentMemoryError('Agent memory outbox state is invalid');
+    mutationIds.add(record.mutation.mutationId); sourceSeqs.add(record.mutation.sourceSeq);
+  }
+  return Object.freeze({ version: 2 as const, currentWriterEpoch: value.currentWriterEpoch, highWater: Object.freeze(highWater), pending: Object.freeze(pending) });
+}
+function outboxStateJson(state: OutboxState): string {
+  return JSON.stringify({ version: state.version, currentWriterEpoch: state.currentWriterEpoch, highWater: state.highWater, pending: state.pending });
+}
+function initialOutboxState(writerEpoch: number): OutboxState { return freezeOutboxState({ version: 2, currentWriterEpoch: writerEpoch, highWater: [], pending: [] }); }
+function stateWithHighWater(state: OutboxState, writerEpoch: number, sourceSeq: number, pending: readonly AgentMemoryRedactedOutboxRecord[]): OutboxState {
+  const highWater = state.highWater.filter((entry) => entry.writerEpoch !== writerEpoch);
+  highWater.push(Object.freeze({ writerEpoch, sourceSeq }));
+  return freezeOutboxState({ version: 2, currentWriterEpoch: state.currentWriterEpoch, highWater, pending });
+}
+
 export class AgentMemoryRedactedOutbox {
-  private readonly pendingById = new Map<string, AgentMemoryRedactedOutboxRecord>();
-  private readonly highestSourceSeqByEpoch = new Map<number, number>();
+  private state!: OutboxState;
+  private fileRevision!: string;
   private writeTail: Promise<void> = Promise.resolve();
   private constructor(private readonly context: AgentMemoryTaskContext, private readonly grant: AgentMemoryProjectionGrant, readonly filePath: string) {}
   static async open(input: AgentMemoryTaskContext, grant: AgentMemoryProjectionGrant): Promise<AgentMemoryRedactedOutbox> {
     const context = taskContext(input);
     const outbox = new AgentMemoryRedactedOutbox(context, grant, path.join(context.canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY, AGENT_MEMORY_OUTBOX_FILENAME));
-    await outbox.load();
+    await outbox.load(); await outbox.admitGrant();
     return outbox;
   }
-  pending(): readonly AgentMemoryRedactedOutboxRecord[] { return Object.freeze([...this.pendingById.values()].sort((a, b) => a.mutation.sourceSeq - b.mutation.sourceSeq)); }
+  pending(): readonly AgentMemoryRedactedOutboxRecord[] { return this.state.pending; }
   async append(bytes: Uint8Array): Promise<AgentMemoryRedactedOutboxRecord> { return this.exclusive(async () => {
-    const sourceSeq = (this.highestSourceSeqByEpoch.get(this.grant.writerEpoch) ?? 0) + 1;
+    if (this.state.currentWriterEpoch !== this.grant.writerEpoch) throw new AgentMemoryError('Agent memory outbox writer epoch is stale');
+    if (this.state.pending.length > 0) throw new AgentMemoryError('Agent memory outbox has pending projection mutations');
+    const currentHighWater = this.state.highWater.find((entry) => entry.writerEpoch === this.grant.writerEpoch)?.sourceSeq ?? 0;
+    if (currentHighWater >= AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE) throw new AgentMemoryError('Agent memory outbox source sequence is exhausted');
+    const sourceSeq = currentHighWater + 1;
     const mutation = AgentMemoryProjectionMutationSchema.parse({
-      taskId: this.context.taskId,
-      agentRef: this.context.agentRef,
-      sessionRef: this.context.sessionRef,
-      runtimeId: this.context.runtimeId,
-      grantRef: this.grant.grantRef,
-      writerEpoch: this.grant.writerEpoch,
-      sourceSeq,
-      mutationId: randomUUID(),
-      policyRevision: this.grant.policyRevision,
+      taskId: this.context.taskId, agentRef: this.context.agentRef, sessionRef: this.context.sessionRef, runtimeId: this.context.runtimeId,
+      grantRef: this.grant.grantRef, writerEpoch: this.grant.writerEpoch, sourceSeq, mutationId: randomUUID(), policyRevision: this.grant.policyRevision,
       snapshot: { redactedHash: digestBytes(bytes), redactedByteCount: bytes.byteLength, redactedBytes: Buffer.from(bytes).toString('base64url') },
     });
-    const record: AgentMemoryRedactedOutboxRecord = Object.freeze({ version: 1, mutation: Object.freeze(mutation), createdAt: new Date().toISOString() });
-    await this.entry({ version: 1, kind: 'append', record }); this.pendingById.set(mutation.mutationId, record);
-    this.highestSourceSeqByEpoch.set(mutation.writerEpoch, mutation.sourceSeq);
+    const record: AgentMemoryRedactedOutboxRecord = Object.freeze({ version: 2, mutation: Object.freeze(mutation), createdAt: new Date().toISOString() });
+    await this.persist(stateWithHighWater(this.state, mutation.writerEpoch, mutation.sourceSeq, [record]));
     return record;
   }); }
   async replay(port: AgentMemoryProjectionPort): Promise<void> { await this.exclusive(async () => {
     for (const record of this.pending()) {
-      if (!this.matchesActiveBinding(record.mutation)) continue;
       if (!(await port.publish(Object.freeze({ mutation: record.mutation }))).accepted) return;
-      await this.entry({ version: 1, kind: 'accepted', mutationId: record.mutation.mutationId }); this.pendingById.delete(record.mutation.mutationId);
+      // An accepted mutation is compacted atomically, while the epoch's
+      // high-water remains durable across restart.
+      await this.persist(freezeOutboxState({
+        version: 2, currentWriterEpoch: this.state.currentWriterEpoch, highWater: this.state.highWater,
+        pending: this.state.pending.filter((candidate) => candidate.mutation.mutationId !== record.mutation.mutationId),
+      }));
     }
   }); }
   private async load(): Promise<void> {
-    if (this.context.filesystem !== undefined) {
-      const state = await readFile(this.context, `${AGENT_HOME_INTERNAL_DIRECTORY}/${AGENT_MEMORY_OUTBOX_FILENAME}`, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
-      if (!state.exists) return;
-      await this.loadBody(state.content);
-      return;
-    }
-    const body = await withPinnedDirectory(this.context.canonicalHome, [AGENT_HOME_INTERNAL_DIRECTORY], async (directory) => {
-      let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-      try {
-        handle = await fs.open(`${descriptorPath(directory)}/${AGENT_MEMORY_OUTBOX_FILENAME}`, noFollowFlags(fsConstants.O_RDONLY));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-        throw new AgentMemoryError('Agent memory outbox is unavailable or unsafe');
-      }
-      try {
-        const stat = await handle.stat({ bigint: true });
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > BigInt(AGENT_MEMORY_MAX_LOCAL_LOG_BYTES)) throw new AgentMemoryError('Agent memory outbox is invalid');
-        return await handle.readFile({ encoding: 'utf8' });
-      } finally { await handle.close().catch(() => {}); }
-    }, this.context.homeIdentity);
-    if (body === undefined) return;
-    await this.loadBody(body);
+    const current = await readInternalFile(this.context, AGENT_MEMORY_OUTBOX_FILENAME);
+    this.fileRevision = current.revision;
+    this.state = current.exists ? this.loadBody(current.content) : initialOutboxState(this.grant.writerEpoch);
   }
-  private async loadBody(body: string): Promise<void> {
-    for (const line of body.split('\n')) {
-      if (!line) continue;
-      let item: OutboxEntry;
-      try { item = JSON.parse(line) as OutboxEntry; } catch { throw new AgentMemoryError('Agent memory outbox entry is invalid'); }
-      if (item.version !== 1 || (item.kind !== 'append' && item.kind !== 'accepted')) throw new AgentMemoryError('Agent memory outbox entry is invalid');
-      if (item.kind === 'append') {
-        const parsed = AgentMemoryProjectionMutationSchema.safeParse(item.record?.mutation);
-        if (!parsed.success || typeof item.record.createdAt !== 'string') throw new AgentMemoryError('Agent memory outbox entry is invalid');
-        const record = Object.freeze({ version: 1 as const, mutation: Object.freeze(parsed.data), createdAt: item.record.createdAt });
-        this.pendingById.set(record.mutation.mutationId, record);
-        this.highestSourceSeqByEpoch.set(record.mutation.writerEpoch, Math.max(this.highestSourceSeqByEpoch.get(record.mutation.writerEpoch) ?? 0, record.mutation.sourceSeq));
-      } else if (typeof item.mutationId === 'string') this.pendingById.delete(item.mutationId);
-      else throw new AgentMemoryError('Agent memory outbox entry is invalid');
-    }
+  private loadBody(body: string): OutboxState {
+    try { return freezeOutboxState(JSON.parse(body) as unknown); }
+    catch { throw new AgentMemoryError('Agent memory outbox state is invalid'); }
   }
-  private async entry(entry: OutboxEntry): Promise<void> {
-    const line = `${JSON.stringify(entry)}\n`;
-    if (this.context.filesystem !== undefined) {
-      await this.context.filesystem.append(`${AGENT_HOME_INTERNAL_DIRECTORY}/${AGENT_MEMORY_OUTBOX_FILENAME}`, line, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
-      return;
-    }
-    await withPinnedDirectory(this.context.canonicalHome, [AGENT_HOME_INTERNAL_DIRECTORY], async (directory) => {
-      let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-      try {
-        handle = await fs.open(`${descriptorPath(directory)}/${AGENT_MEMORY_OUTBOX_FILENAME}`, noFollowFlags(fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT), 0o600);
-        await handle.writeFile(line, 'utf8'); await handle.sync();
-      } finally { await handle?.close().catch(() => {}); }
-    }, this.context.homeIdentity);
+  private async admitGrant(): Promise<void> {
+    if (this.grant.writerEpoch < this.state.currentWriterEpoch) throw new AgentMemoryError('Agent memory outbox writer epoch is stale');
+    if (this.grant.writerEpoch === this.state.currentWriterEpoch) return;
+    // A newer host-issued writer epoch explicitly supersedes an undelivered
+    // prior epoch. Its first source sequence is one; same-epoch opens cannot
+    // reset either pending state or high-water.
+    await this.persist(freezeOutboxState({ version: 2, currentWriterEpoch: this.grant.writerEpoch, highWater: this.state.highWater, pending: [] }));
   }
-  private async exclusive<T>(fn: () => Promise<T>): Promise<T> { const previous = this.writeTail; let release!: () => void; this.writeTail = new Promise<void>((resolve) => { release = resolve; }); await previous; try { return await fn(); } finally { release(); } }
-  private matchesActiveBinding(mutation: AgentMemoryProjectionMutation): boolean {
-    return mutation.taskId === this.context.taskId && mutation.agentRef.agentId === this.context.agentRef.agentId && mutation.agentRef.profileRevision === this.context.agentRef.profileRevision && mutation.sessionRef === this.context.sessionRef && mutation.runtimeId === this.context.runtimeId && mutation.grantRef === this.grant.grantRef && mutation.writerEpoch === this.grant.writerEpoch && mutation.policyRevision === this.grant.policyRevision;
+  private async persist(next: OutboxState): Promise<void> {
+    const replaced = await replaceInternalFile(this.context, AGENT_MEMORY_OUTBOX_FILENAME, this.fileRevision, outboxStateJson(next));
+    this.fileRevision = replaced.revision; this.state = next;
+  }
+  private async exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.writeTail; let release!: () => void;
+    this.writeTail = new Promise<void>((resolve) => { release = resolve; }); await previous;
+    try { return await fn(); } finally { release(); }
   }
 }
 
 /** Missing capability, grant, redactor, or port has exactly zero network side effects. */
 export async function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined): Promise<void> {
-  const context = taskContext(input); const snapshot = await captureAgentMemorySnapshot(context);
   if (projection?.capability !== AGENT_MEMORY_PROJECTION_CAPABILITY || !projection.grant || !projection.redactor || !projection.port) return;
+  const context = taskContext(input);
   const outbox = await AgentMemoryRedactedOutbox.open(context, projection.grant);
+  // Pending redacted mutations retain their original task/session/runtime/grant
+  // binding. Drain them before touching local source files or minting a newer
+  // sequence, so an offline replay cannot create a source-sequence gap.
+  await outbox.replay(projection.port);
+  const snapshot = await captureAgentMemorySnapshot(context);
   await outbox.append(redactedBytes(snapshot, await projection.redactor.redact(snapshot)));
   await outbox.replay(projection.port);
 }
