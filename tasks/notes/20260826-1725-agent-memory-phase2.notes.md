@@ -162,6 +162,18 @@
   audit failure is also harder for recall than save. The review is preserved
   verbatim in the review artifact. This is a new blocker, not authority to
   extend the current remediation slice; record a typed reject and stop.
+- The owner then selected a narrower pre-regate remediation: fix the reviewed
+  Darwin `st_dev` mismatch locally, defer the optional tool-name change, and do
+  not push. The red guard constructs `syscall.Stat_t{Dev: -1}` and observed the
+  old helper wire emit `"-1"`, which `validDecimal` rejects. libuv defines
+  `uv_stat_t.st_dev` as `uint64_t` and assigns Darwin's signed `dev_t` into that
+  field before Node exposes bigint Stats, so the helper now formats
+  `uint64(stat.Dev)` (and the already-unsigned inode) as the sole decimal wire
+  shape. Targeted/full Go tests passed, and a freshly built real helper passed
+  the TypeScript helper/MCP integration: 2 files, 6 pass, 4 platform skips.
+  Tool names remain unchanged because aliases or dual shapes would violate the
+  no-steady-state-compatibility rule without an approved migration contract.
+  The audit-concurrency typed reject remains current until the owner's re-gate.
 
 ## Promotion Filter
 

@@ -163,6 +163,13 @@ See captured planning output.
 - [x] **P1 historical grant authority**：同 writer epoch 下 prior task/session 的 exact permits 可共存；更高 epoch retire 旧 permits，stale lower grant 不复活，tenant/device/task/AgentRef/session/runtime/policy binding 不放宽。
 - [ ] **Round 2 重验**：四个 P1 各有 pre-fix red guard；完成 focused、真实 macOS helper、Linux CI-equivalent、disposable dataplane 与 full strict checks；冻结新 normalized subject 后只做一次 Claude review。
 
+### Post-review medium remediation — Darwin `st_dev`
+
+- [x] **Darwin `st_dev` wire parity**：red guard 以 synthetic negative `syscall.Stat_t.Dev` 证明 helper 原先输出负十进制、与 libuv/Node 的 unsigned 64-bit bigint 不一致；Unix helper 现在对 dev/ino 显式做 `uint64` normalization，保持单一 decimal identity shape。
+- [x] **真实 helper focused verification**：Go targeted/full tests 通过；使用本机 freshly built helper 的 TypeScript integration 2 files / 6 pass、4 platform skips。
+- [x] **可选 LOW tool-name 变更暂缓**：`memory.recall` / `memory.save` 是 public MCP surface；没有 approved one-shot migration contract 时不重命名、不加 alias/fallback。
+- [ ] **Owner re-gate / push authority**：本 slice 只交付 local source candidate；现有 audit-concurrency typed reject 仍有效，re-gate、push、CI、fresh external review 与 merge 分属后续 authority。
+
 ## Verification
 
 - `bun run build` / `bun run typecheck` / `bun run test`

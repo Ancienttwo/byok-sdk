@@ -163,6 +163,7 @@ exit_criteria:
     - plans/plan-20260826-1725-agent-memory-phase2.md
     - tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
     - packages/client/native/agent-memory-fs/round2_p1_regression_test.go
+    - packages/client/native/agent-memory-fs/identity_darwin_test.go
   artifacts_exist:
     - tasks/notes/20260826-1725-agent-memory-phase2.notes.md
   tests_pass:

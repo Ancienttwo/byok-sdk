@@ -1462,6 +1462,11 @@ response、identity mismatch 或 unsafe path 一律 fail closed。Windows source
 junction/reparse/rename matrix。Phase 1 的本地文件 + startup guidance baseline
 不受该 secure-fs gate 影响。
 
+Unix root identity 的 dev/ino decimal wire 与 Node `fs.Stat` bigint 对齐：先按
+libuv `uv_stat_t` 的 unsigned 64-bit field 归一化，再编码十进制。该转换覆盖
+Darwin `dev_t` 在 Go `syscall.Stat_t` 中为 signed 32-bit、但经 libuv 写入
+`uint64_t st_dev` 后由 Node 读出的高位值；helper 不接受负号或另一个 identity shape。
+
 Hosted 能力 `agent.memory.projection` 是单向、可选、默认关的
 redacted full-snapshot projection，不是 remote recall/import/restore 或
 product-fact store。Local quiescence 在 runtime close 后、Agent-home writer lease

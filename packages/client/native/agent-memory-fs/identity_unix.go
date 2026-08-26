@@ -10,7 +10,8 @@ import (
 )
 
 // identityForRoot uses the decimal dev/ino representation produced by Node's
-// fs.Stat bigint fields on Unix. The tagged shape is part of protocol v1.
+// fs.Stat bigint fields on Unix. libuv widens both fields into uint64_t before
+// Node exposes them, including Darwin's signed 32-bit dev_t.
 func identityForRoot(_ *os.Root, info fs.FileInfo) (rootIdentity, error) {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
@@ -18,7 +19,7 @@ func identityForRoot(_ *os.Root, info fs.FileInfo) (rootIdentity, error) {
 	}
 	return rootIdentity{
 		Kind: "unix",
-		Dev:  fmt.Sprintf("%d", stat.Dev),
-		Ino:  fmt.Sprintf("%d", stat.Ino),
+		Dev:  fmt.Sprintf("%d", uint64(stat.Dev)),
+		Ino:  fmt.Sprintf("%d", uint64(stat.Ino)),
 	}, nil
 }
