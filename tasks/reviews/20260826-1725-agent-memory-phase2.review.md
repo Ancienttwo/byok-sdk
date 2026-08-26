@@ -5,22 +5,22 @@
 > **Contract**: tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
 > **Notes File**: tasks/notes/20260826-1725-agent-memory-phase2.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-27 00:30
+> **Last Updated**: 2026-08-27 01:20
 > **Recommendation**: blocked
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:e86f43b17c51e25a8186fb929e85092b7ab34e11af31870ff4c02e8e84fd41f3
+> **Reviewed Subject SHA256**: sha256:2d60d9a05688cc976de88192b735939a9ea45db6b35a01f66c9bcf4df71e5b7c
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
 
 ## Human Review Card
 
-- Verdict: FAIL; Claude external review found four P1 blockers on the frozen subject
+- Verdict: FAIL; the second Claude external review found four P1 blockers on the remediated frozen subject
 - Change type: code-change + migration
 - Intended files changed: client memory MCP and runtime injection, protocol/cloud projection contracts, cloud-dataplane store and migration, focused tests, architecture and task evidence
 - Actual files changed: the intended Phase 2 surfaces under `packages/client`, `packages/protocol`, `packages/cloud`, `packages/cloud-dataplane`, `deploy/sql`, `tests/sql`, and the task artifacts listed by the contract
-- Commands passed: `bun run build`; `bun run typecheck`; `bun run test`; `repo-harness run check-task-workflow --strict`; `git diff --check`; `repo-harness run check-deploy-sql-order`; disposable Linux focused client tests; disposable Postgres/MinIO dataplane tests
-- Residual risks: Linux helper/native-backend admission conflict, unreplayable cross-task outbox records, bounded logs without compaction, and helper stdin EPIPE can break or crash live memory flows
-- Reviewer action required: fix all four P1 findings, add regression coverage, re-freeze checks, and obtain a fresh external review on the new normalized subject
+- Commands passed: `bun run build`; `bun run typecheck`; `bun run test`; `repo-harness run check-task-workflow --strict`; `git diff --check`; `bun run check:deploy-sql`; official focused client/cloud/protocol tests; disposable Postgres/MinIO dataplane tests
+- Residual risks: macOS helper cannot carry the new internal-state bounds; the EPIPE guard is not portable to Linux CI; rejected trailing replay is not observable; and the shipped authorizer cannot preserve prior-task grants for historical replay
+- Reviewer action required: stop at terminal reject; any further fix requires a new approved regression-first slice and another exact-subject review
 - Rollback: revert the reviewed Phase 2 diff to checkpoint `185cf91`; migration `0014` has not been deployed
 
 ## Mode Evidence
@@ -47,6 +47,39 @@ screenshot/artifact path, or reviewer observation.
 - No non-built-in `manual_checks` are declared by the contract.
 
 ## Claude External Review (verbatim)
+
+### Remediation re-review — 2026-08-27
+
+```text
+**Verdict: not mergeable.** Four P1s, several P2s.
+
+## P1
+
+1. **macOS helper backend caps internal-state writes at 256 KiB, so audit/outbox break on the helper path.** `agent-memory.ts` `replaceInternalFile` sends the whole audit tail / outbox state (up to `AGENT_MEMORY_MAX_LOCAL_LOG_BYTES` = 16 MiB) through `filesystem.replace(...)`, but `main.go` `replace` rejects `len(req.Content) > maxFileBytes` (256 KiB) with `invalid_request`, and `serve()` caps the request line at 2 MiB (scanner error → helper exits → `exited unexpectedly`). Consequences on macOS: (a) an outbox state carrying one ≤512 KiB redacted snapshot (~700 KB base64) can never be persisted → `snapshotAndProjectAgentMemory` always fails; (b) once the audit tail passes 256 KiB (~600 entries), `recall()` throws forever because `audit()` is not wrapped for recall (only `saveAuditWarning` is), and `save()` returns a permanent `agent_memory_audit_unavailable`. The helper integration test exercises `filesystem.append` for the 400 KiB log, a path no product code uses anymore (v2 replaced append with replace), so this is untested. Either raise the helper's replace/request bounds to the local-log limit or make the TS side bound internal state to what the helper accepts.
+
+2. **`agent-memory-helper-p1-regressions.test.ts` EPIPE case fails on Linux CI.** The second test calls `openAgentMemoryFilesystemHelper` without a platform override; `helperPlatformSupported()` is `process.platform === 'darwin'`, so on `build-test` (`ubuntu-latest`, `.github/workflows/ci.yml:37`) it rejects with `not admitted on this platform` before any EPIPE is simulated. The regression guard only passed on the darwin dev box. Wrap it in `withPlatform('darwin', …)`.
+
+3. **Second `replay()` result is swallowed; rejected publish never surfaces.** `AgentMemoryRedactedOutbox.replay` returns silently on `accepted:false`. In `snapshotAndProjectAgentMemory` the trailing `replay` after `append` resolves successfully even when the mutation stayed pending, so `quiesceAndSnapshotAgentMemory` logs nothing. The failure only appears at the *next* task's close as a thrown `pending projection mutations` — after `captureAgentMemorySnapshot` has already walked notes and written an audit entry. Return/throw a typed outcome from replay and check pending before capturing.
+
+4. **Cross-task replay is unreachable with the shipped authorizer contract.** A pending record keeps task A's `taskId/sessionRef`; the cloud route (`cloud.ts` `commitAgentMemoryProjectionFromStores`) requires the authorizer to accept that exact binding. `InMemoryAgentMemoryProjectionAuthorizer.grant` is keyed on `(tenant, grantRef, writerEpoch)` and stores one `taskId`, so granting task B in the same epoch overwrites task A's grant → replay of A's record is `authorization_denied` → same-epoch wedge until the host mints a new epoch (which discards the pending snapshot). No test exercises replay of a prior-task mutation through the cloud authorizer; the outbox regression uses a fake port. Either key grants per task/session, or document and test that the host must keep prior-task grants alive within an epoch.
+
+## P2
+
+- `agent-memory-fs-helper.ts` / `identity_unix.go`: darwin `st_dev` is `int32`; Node's bigint `dev` is libuv's unsigned widening, Go prints signed `%d`, `validDecimal` rejects `-`. A negative `st_dev` volume gets `root_identity_mismatch` unconditionally. Raised in the prior review, still unaddressed.
+- `task-runner.ts` `withAgentMemoryMcp` injects `mcpServers` into every strict Agent task on Linux with `agentHome` configured (no `agentMemory` opt-in), without checking `adapterSupportsMcpToolsets`; existing strict-Agent deployments change behavior on upgrade, and adapters with `mcpToolsets: false` now receive an MCP config.
+- `quiesceAndSnapshotAgentMemory` calls `bindAgentMemoryFilesystem` (spawns the helper process) before `snapshotAndProjectAgentMemory` early-returns for unconfigured projection — one helper spawn per Agent task close for nothing on macOS.
+- `agent-memory.ts` `audit()`: every recall/save reads, splits, re-encodes and atomically rewrites the whole audit tail (up to 16 MiB) — O(file) I/O per tool call.
+- Go `walkPinned` fails the whole walk on a non-regular entry (`unsafe_path`); the Linux native walk skips them (`if (!entry.isFile()) continue`). Snapshot semantics differ by platform.
+- Corrupt/oversize outbox file → `Agent memory outbox state is invalid` on every open with no operator recovery path; fail-closed is fine but it needs at least a distinct error/log so it isn't mistaken for the pending-wedge case.
+- `byok-agent-memory-mcp.ts` caches a rejected `connectControlClient` promise for the task lifetime; `serveAgentMemoryMcpOverStdio` drops unparseable lines instead of `-32700`. Both from the prior review, unchanged.
+- `AgentHomeLease.homeIdentity` is a new required member on an exported interface — external implementers/fixtures break at typecheck.
+- `tests/sql/control_plane_invariants.sql`: comment says "30 is …" but the check is `< 31`.
+- `0014_agent_memory_projection.sql`: `agent_memory_projection_metering_receipt_readback` index duplicates the primary key.
+- `.ai/harness/checks/change-assessment.debug.json` is an untracked debug artifact; don't commit it.
+- Contract `Status: Partial`, plan item **重验** unchecked, review `Terminal Blocked` — the branch self-declares as not ready; consistent with the above.
+```
+
+### Initial review — 2026-08-27
 
 ```text
 Findings (no P1-free pass; four blockers).
