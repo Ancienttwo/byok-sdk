@@ -139,14 +139,14 @@ Findings (no P1-free pass; four blockers).
 > **Reviewer**: Claude
 > **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:2d60d9a05688cc976de88192b735939a9ea45db6b35a01f66c9bcf4df71e5b7c
+> **Reviewed Subject SHA256**: sha256:454b560c2bc6fc50e9a326ab7f3018193a963120fdabd399935364ffcb9c193e
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
-> **Verification Evidence SHA256**: sha256:c9fe98e4e8a89972cc7619464e9463298115e94eafa93e03493334dd1f86bfbd
-> **Issued At**: 2026-08-26T17:25:52.017Z
+> **Verification Evidence SHA256**: sha256:db7f5b4a445e84192c9259b9128e023d8a33767afb9ba9707d6d731c0a584e59
+> **Issued At**: 2026-08-26T18:21:28.076Z
 
-- Summary: Second Claude review rejected the remediated Agent Memory Phase 2 subject with four P1 blockers; do not merge.
-- Findings: P1: macOS helper replace/request bounds cannot persist the bounded v2 outbox or audit state; P1: helper EPIPE regression guard is not admitted on Linux CI; P1: a rejected trailing outbox replay is swallowed and only wedges a later task; P1: the shipped authorizer overwrites prior-task grants so historical replay is unreachable
+- Summary: Round-2 Claude review rejected the frozen Agent Memory Phase 2 subject because concurrent recall/save audit CAS writes can fail a successful recall.
+- Findings: P1: Concurrent memory.recall and save audit read-CAS rewrites are not serialized, so a successful recall can fail with a spurious revision conflict; persistent audit failure is also asymmetric between recall and save.
 
 ## Behavior Diff Notes
 
