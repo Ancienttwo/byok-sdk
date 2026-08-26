@@ -75,6 +75,11 @@
   previously executed real macOS helper plus disposable Postgres/MinIO
   readbacks as required oracles; deployment/source tests are not allowed to
   stand in for those runtime observations.
+- The frozen subject is diffed from `origin/main` and therefore includes the
+  directly related Phase 1 decision packet and context-fold PoC plan already
+  present before the Phase 2 implementation.  They are exact-path allowlisted
+  in the parent contract so the scope gate describes the whole commit-bound
+  subject without broadening authority to either containing directory.
 - Linux disposable Node 22 + pnpm test: 2 files / 10 tests passed, including
   parent-directory symlink race and Pi/Claude/Codex strict injection.
 - Disposable Postgres/MinIO: invariants + projection 2 files / 5 tests passed;

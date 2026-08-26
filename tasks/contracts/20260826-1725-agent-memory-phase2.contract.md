@@ -89,6 +89,8 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 
 ```yaml
 allowed_paths:
+  - docs/researches/2026-08-26_long-term-agent-memory-decision-packet.md
+  - plans/plan-20260826-1542-context-fold-compaction-poc.md
   - plans/plan-20260826-1645-long-term-agent-memory.md
   - plans/plan-20260826-1725-agent-memory-phase2.md
   - plans/plan-20260826-2240-agent-memory-cross-platform-secure-fs.md
