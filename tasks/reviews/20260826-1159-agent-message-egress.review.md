@@ -48,13 +48,13 @@
 > **Reviewer**: User
 > **Source**: user-waiver
 > **Actor**: kito
-> **Reviewed Subject SHA256**: sha256:dd3abc1009794144e6b2d08b0322450fd1fa166867b005c2eb229800cfba2a7f
+> **Reviewed Subject SHA256**: sha256:4cf950ab8bbc2040fffbf08173318c778a220dce34b6c0b82a2e9431a3447c5f
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: cdb424867e255d3024878e6fb261cd46ceff7b8f
-> **Verification Evidence SHA256**: sha256:284d269254b1688cfb36bf236c664ee2059d4a318a631a3d29972229e5618f6c
-> **Issued At**: 2026-08-26T05:27:16.201Z
+> **Verification Evidence SHA256**: sha256:04753836e609a6e5f8ddb97d47b4737fcde0e94023f1babc3e13a87113c744d6
+> **Issued At**: 2026-08-26T07:11:06.452Z
 
-- Summary: Approved unpublished Agent message egress packed RC only; no publish, tag, merge, push, deploy, migration, or production wiring
+- Summary: Approve PR, push, and merge for the accepted Agent message RC source together with the existing root architecture context WIP; package publish, tag, deploy, migration, and production wiring remain unauthorized.
 - Findings: none
 
 ## Behavior Diff Notes
