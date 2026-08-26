@@ -50,6 +50,16 @@
 - `repo-harness run check-task-workflow --strict` PASS.
 - `node scripts/release/check-package-graph.mjs` PASS: 9 aligned manifests at `0.9.0-rc.0`, keys `0.3.2`.
 - Independent gate PASS after three concrete blockers were fixed: host-only server context, caller-selected local task authority, and exact-disposition restart replay. Focused protocol/client/cloud/server gates pass; held/refused settlement survives restart and exact transport duplicates do not re-invoke the product consumer.
+
+## Packed RC and downstream readback
+
+- Frozen source commit: `1f5ae35a7e1cb626dd704e504711bcfcfd74694b` (tree `5c9ea5b5b401f5dd0cfe01e609b422bd3f58ea02`).
+- `bun run check:release-pack -- --out-dir artifacts/release` PASS from a clean source commit. It packed and isolated-installed 10 packages; all nine aligned packages are `0.9.0-rc.0`, keys remains `0.3.2`, internal edges close exactly, and cloud-dataplane contains all 13 migrations.
+- Frozen manifest: `artifacts/release/release-manifest.json`; its `sourceGitSha` exactly equals the source commit above.
+- Public surface: protocol exports `AGENT_MESSAGE_EGRESS_CAPABILITY`, strict `AgentMessageEgressRequirement`, publish/disposition schemas and host-only `AgentMessageServerContext`; cloud/server accept host-only `agentMessageContext` and expose the authenticated consumer input; client adds the `byok-agent-message-mcp` binary and task-scoped daemon lifecycle.
+- Frozen Salesko commit `299728a0e08741c2521c59ab8f56b350782ef089` was recovered from Git object storage after its worktree had been cleaned. Its falsifier hash remained exact: `fe586f1b52daaea74d03471fbf8b87ca84f963b6c672bf7c6d65a6d69729403c`.
+- Exact protocol tarball overlay resolved to `@byok-sdk/protocol@0.9.0-rc.0`; `bun test ./apps/local-agent/src/private-agent-chat-message-egress.falsifier.ts` PASS 2/2 and `bun test ./apps/local-agent/src/private-agent-chat-summary-egress.test.ts` PASS 1/1. The original Salesko source file was unchanged.
+- Registry state: unpublished. No tag, merge, push, deploy, migration, production wiring, or secret operation was performed.
 - Superseded untracked `1141 terminal-egress` artifacts were moved out of the worktree to `/tmp/byok-superseded-1141-20260826/`; they are recoverable and are not part of this subject.
 
 ## Promotion Filter

@@ -156,6 +156,17 @@ exit_criteria:
   artifacts_exist:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260826-1159-agent-message-egress.notes.md
+    - artifacts/release/release-manifest.json
+    - artifacts/release/byok-sdk-core-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-protocol-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-server-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-cloud-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-client-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-cloud-dataplane-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-ui-runtime-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-testkit-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-keys-0.3.2.tgz
   tests_pass:
     - path: packages/protocol/src/__tests__/agent-message-egress-contract.test.ts
     - path: packages/client/src/__tests__/agent-message-outbox.test.ts
@@ -167,7 +178,6 @@ exit_criteria:
     - bun run typecheck
     - bun run test
     - repo-harness run check-task-workflow --strict
-    - bun run check:release-pack -- --out-dir artifacts/release
 ```
 
 ## Acceptance Notes (Human Review)

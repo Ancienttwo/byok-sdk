@@ -6,7 +6,7 @@
 > **Notes File**: tasks/notes/20260826-1159-agent-message-egress.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-08-26 12:05
-> **Recommendation**: accept source and proceed to unpublished packed-RC acceptance
+> **Recommendation**: accept unpublished packed RC; formal publication remains a separate gate
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: sha256:dd3abc1009794144e6b2d08b0322450fd1fa166867b005c2eb229800cfba2a7f
 > **Reviewed Subject Scope**: normalized-final-content
@@ -19,8 +19,8 @@
 - Intended files changed: protocol/client/cloud/server plus aligned package manifests, tests, docs, and task artifacts within the contract allowlist
 - Actual files changed: exact set in `.ai/harness/runs/20260826-1300-agent-message-egress-change-assessment.json`
 - Commands passed: focused protocol/client/cloud/server tests; `bun run build`; `bun run typecheck`; `bun run test`; `repo-harness run check-task-workflow --strict`; `git diff --check`
-- Residual risks: packed tarball and frozen Salesko consumer readback remain separate from source acceptance
-- Reviewer action required: none for source; pack and consumer acceptance still required
+- Residual risks: formal registry publication and live Salesko wiring remain separate and unauthorized
+- Reviewer action required: none for unpublished RC
 - Rollback: discard unpublished branch/tarballs; no registry or production state changed
 
 ## Mode Evidence
@@ -70,7 +70,7 @@ screenshot/artifact path, or reviewer observation.
 
 ## Residual Risks / Follow-ups
 
-- Formal registry publication and downstream production wiring are intentionally not authorized.
+- Formal registry publication and downstream production wiring are intentionally not authorized. Frozen Salesko falsifier and summary-egress readback pass against exact RC bytes.
 
 ## Scorecard
 
@@ -92,4 +92,4 @@ screenshot/artifact path, or reviewer observation.
 
 ## Summary
 
-- Source acceptance passed. Proceed only to clean-commit pack-and-smoke and frozen Salesko packed-RC readback.
+- Source acceptance, clean-commit pack-and-smoke, and frozen Salesko packed-RC readback passed. Registry remains unpublished.

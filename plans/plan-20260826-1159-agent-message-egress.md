@@ -283,5 +283,5 @@ The downstream message-lane consumer is frozen by composite SHA-256 `5b1bde061de
 - [x] Add an SDK-reserved task-scoped sender tool with content-only input. Implement truthful Pi/Claude/Codex adapter injection or fail capability admission; prohibit argv content and stdout-derived messages.
 - [x] Add the server/cloud authenticated exact-device route and host destination consumer port without a BYOK conversation database or target parser.
 - [x] Verify focused protocol/client/cloud/server negatives, full repository gates, and disposable restart/race coverage.
-- [ ] Run clean-commit pack-and-smoke and record the frozen artifact manifest.
-- [ ] Produce an unpublished aligned packed RC with declarations, manifest, tarball paths, sha256 and npm integrity, then run the exact Salesko packed-RC acceptance commands.
+- [x] Run clean-commit pack-and-smoke and record the frozen artifact manifest.
+- [x] Produce an unpublished aligned packed RC with declarations, manifest, tarball paths, sha256 and npm integrity, then run the exact Salesko packed-RC acceptance commands.
