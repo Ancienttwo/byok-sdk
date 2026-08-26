@@ -2,10 +2,10 @@
 
 > **Status**: Pending
 > **Detected**: 2026-08-21T22:04:26+0800
-> **Updated**: 2026-08-26T15:23:16+0800
+> **Updated**: 2026-08-26T15:29:46+0800
 > **Severity**: high
 > **Change Type**: source-change
-> **File**: `packages/client/src/__tests__/agent-message-outbox.test.ts`
+> **File**: `packages/client/src/__tests__/fixtures/fake-codex.mjs`
 > **Functional Block**: `packages`
 > **Capability ID**: `root`
 > **Matched Prefix**: `packages`
@@ -16,7 +16,7 @@
 > **Contract Files**: `AGENTS.md`, `CLAUDE.md`
 > **Contract Sync Required**: false
 > **Spawn Recommended**: true
-> **Open Edits**: 62
+> **Open Edits**: 63
 
 ## Required Follow-up
 
@@ -33,6 +33,7 @@
 
 | Last Event | Severity | Change Type | File | Event Key |
 | --- | --- | --- | --- | --- |
+| 2026-08-26T15:29:46+0800 | low | source-change | `packages/client/src/__tests__/fixtures/fake-codex.mjs` | `sha256:71251e744ad0f822d2c3bb09cb9a354f08a42842e56cbfcff178bfd62fba0fc6` |
 | 2026-08-26T15:23:16+0800 | low | source-change | `packages/client/src/__tests__/agent-message-outbox.test.ts` | `sha256:a252eea6360ff43a75e5f197a8683ae1e8be3ee4eb164e914dfee9dfe05bd3b6` |
 | 2026-08-26T15:23:14+0800 | low | source-change | `packages/client/src/__tests__/agent-message-completion-gate.test.ts` | `sha256:55b1ef50724e98419c21d14c4f2a08d347c346395bcac9b3149af49453667bcc` |
 | 2026-08-26T15:17:40+0800 | low | source-change | `packages/client/src/__tests__/fixtures/fake-claude.mjs` | `sha256:413dbcda3d871b8e175d0a22d09343c6032606eba9f51d46015a4d4072640505` |
@@ -100,8 +101,8 @@
 
 ```json
 {
-  "ts": "2026-08-26T15:23:16+0800",
-  "file_path": "packages/client/src/__tests__/agent-message-outbox.test.ts",
+  "ts": "2026-08-26T15:29:46+0800",
+  "file_path": "packages/client/src/__tests__/fixtures/fake-codex.mjs",
   "severity": "low",
   "functional_block": "packages",
   "capability_id": "root",
@@ -116,7 +117,7 @@
   "request_file": "docs/architecture/requests/root.md",
   "spawn_recommended": false,
   "contract_sync_required": false,
-  "event_key": "sha256:a252eea6360ff43a75e5f197a8683ae1e8be3ee4eb164e914dfee9dfe05bd3b6"
+  "event_key": "sha256:71251e744ad0f822d2c3bb09cb9a354f08a42842e56cbfcff178bfd62fba0fc6"
 }
 ```
 
@@ -124,6 +125,25 @@
 
 ```json
 [
+  {
+    "ts": "2026-08-26T15:29:46+0800",
+    "file_path": "packages/client/src/__tests__/fixtures/fake-codex.mjs",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "AGENTS.md",
+    "contract_claude": "CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:71251e744ad0f822d2c3bb09cb9a354f08a42842e56cbfcff178bfd62fba0fc6"
+  },
   {
     "ts": "2026-08-26T15:23:16+0800",
     "file_path": "packages/client/src/__tests__/agent-message-outbox.test.ts",
