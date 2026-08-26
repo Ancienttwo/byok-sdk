@@ -10,6 +10,9 @@ import {
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   type AgentEvent,
+  type AgentMessageContentType,
+  type AgentMessageDispositionPayload,
+  type AgentMessageEgressRequirement,
   type AgentEgressPolicy,
   type BlobRef,
   type Envelope,
@@ -18,6 +21,7 @@ import {
   type ResultDocumentCheck,
   type RuntimeId,
   type TerminalInferenceUsage,
+  type TerminalProjectionSelection,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
@@ -70,6 +74,9 @@ import type { GitWorkspaceManager, GitWorkspaceLease, GitWorkspaceObservation, G
 import { prependGitWorkspaceGuidance } from './git-workspace';
 import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
+import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
+import { AGENT_MESSAGE_MCP_SERVER_NAME } from './toolset-registry';
+import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -217,13 +224,16 @@ export const RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX = 'result document unde
 export interface ResultDocumentTask {
   readonly taskId: string;
   readonly sessionRef: string;
+  /** Exact offer-scoped second projection; absent for legacy and message-only offers. */
+  readonly terminalProjection?: Readonly<TerminalProjectionSelection>;
 }
 
 /**
  * Host-supplied glue that turns a finished task's final output into the
  * product's structured terminal result (`task.complete.document`). Returning
- * `undefined` means "this task has no structured result" and completes the
- * task exactly as it would have without an extractor configured at all.
+ * `undefined` means "this task has no structured result" for legacy offers.
+ * An explicit `terminalProjection.mode: 'result-document'` instead treats
+ * `undefined` as a fail-closed missing required document.
  *
  * SYNCHRONOUS by contract, like every other single-purpose callback on
  * `TaskRunnerDeps`, and the runtime ENFORCES that rather than trusting it:
@@ -360,6 +370,8 @@ export interface TaskRunnerDeps {
   approvalRegistry: ApprovalRegistry;
   storeDir: string;
   productId: string;
+  /** Authenticated enrollment tenant projection; required by Agent message durability/recovery. */
+  tenantId?: string;
   /**
    * The already-resolved, process-immutable U4a Local Agent release identity.
    * `TaskRunner` only consumes this value; it never creates, normalizes, or
@@ -456,6 +468,8 @@ export interface TaskRunnerDeps {
    * `task.complete` carries exactly the fields it always did.
    */
   resultDocument?: { readonly extract: ResultDocumentExtractor };
+  /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
+  agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
 }
 
 /** See {@link TaskRunnerDeps.admissionGuard}. */
@@ -542,6 +556,19 @@ interface ActiveTask {
   resolveSemanticTerminalSettled?: (disposed: boolean) => void;
   /** Shared receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
   disposalAttempt?: Promise<void>;
+  messageRequirement?: Readonly<AgentMessageEgressRequirement>;
+  terminalProjection?: Readonly<TerminalProjectionSelection>;
+  messageOutbox?: AgentMessageOutbox;
+  messageAccepted?: boolean;
+  pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown };
+  messageRetryTimer?: ReturnType<typeof setTimeout>;
+}
+
+interface PendingMessageTask {
+  readonly taskId: string;
+  readonly agentRef: AgentRef;
+  readonly requirement: Readonly<AgentMessageEgressRequirement>;
+  readonly outbox: AgentMessageOutbox;
 }
 
 interface ClaimedAgentFailureContext {
@@ -648,11 +675,12 @@ type AcceptedOfferPayload =
   | TaskOfferForAgentWithEgressFreshPayload;
 
 function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
-  const { requiredToolsets, egressPolicy, ...offer } = payload as TaskOfferWithToolsetsPayload
+  const { requiredToolsets, egressPolicy, messageEgress, ...offer } = payload as TaskOfferWithToolsetsPayload
     & Partial<TaskOfferForAgentWithEgressPayload>
     & Partial<TaskOfferForAgentWithEgressFreshPayload>;
   void requiredToolsets;
   void egressPolicy;
+  void messageEgress;
   return offer as TaskOfferPayload;
 }
 
@@ -887,6 +915,11 @@ async function openArtifact(workspaceDir: string, name: string): Promise<OpenArt
  */
 export class TaskRunner {
   private readonly tasks = new Map<string, ActiveTask>();
+  private readonly pendingMessageTasks = new Map<string, PendingMessageTask>();
+  private readonly messageContextByToken = new Map<string, string>();
+  private readonly messageContextByTask = new Map<string, string>();
+  private readonly recoveredMessageOutboxes = new Map<string, AgentMessageOutbox>();
+  private readonly recoveredMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
    * Finding F4 (cancel lost during the offer-processing window): a
    * `task.cancel` for a taskId that hasn't finished `handleOffer` yet (still
@@ -1031,6 +1064,131 @@ export class TaskRunner {
       progressBatcherPending: active.batcher.pendingCount,
       pendingApprovals: (active.pendingApprovalId !== undefined ? 1 : 0) + active.approvalQueue.length,
     }));
+  }
+
+  /** Authenticated control-socket entry used only by the SDK-owned task MCP helper. */
+  async publishAgentMessage(input: {
+    readonly contextToken: string;
+    readonly contentType: AgentMessageContentType;
+    readonly body: string;
+  }): Promise<{ messageId: string; state: 'staged' | 'pending' }> {
+    const taskId = this.messageContextByToken.get(input.contextToken);
+    if (taskId === undefined || this.messageContextByTask.get(taskId) !== input.contextToken) {
+      throw new Error('invalid or expired Agent message task context');
+    }
+    const pending = this.pendingMessageTasks.get(taskId);
+    const active = this.tasks.get(taskId);
+    const context = pending ?? (active?.messageRequirement && active.agentRef && active.messageOutbox
+      ? { taskId, agentRef: active.agentRef, requirement: active.messageRequirement, outbox: active.messageOutbox }
+      : undefined);
+    if (context === undefined) throw new Error('task has no active required Agent message contract');
+    const record = await context.outbox.appendDraft({
+      taskId,
+      tenantId: this.deps.tenantId!,
+      agentRef: context.agentRef,
+      requirement: context.requirement,
+      contentType: input.contentType,
+      body: input.body,
+      maxPendingEvents: 64,
+      maxPendingBytes: 4 * 1024 * 1024,
+    });
+    if (active === undefined) return { messageId: record.messageId, state: 'staged' };
+    const activated = await context.outbox.activate(taskId, active.session.sessionRef);
+    if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
+    this.sendAgentMessageRecord(context.outbox, activated);
+    return { messageId: activated.messageId, state: 'pending' };
+  }
+
+  /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
+  async recoverAgentMessageOutboxes(agentsRoot: string): Promise<void> {
+    if (this.deps.tenantId === undefined) throw new Error('Agent message recovery requires authenticated tenant enrollment');
+    for (const outbox of await AgentMessageOutbox.recover(agentsRoot, this.deps.tenantId)) {
+      for (const record of outbox.retryableRecords()) {
+        if (record.sessionRef === undefined) continue;
+        const existing = this.recoveredMessageOutboxes.get(record.taskId);
+        if (existing !== undefined && existing !== outbox) throw new Error(`multiple Agent message outboxes claim task ${record.taskId}`);
+        this.recoveredMessageOutboxes.set(record.taskId, outbox);
+      }
+    }
+  }
+
+  /** Retry stable recovered records after a transport handshake/re-handshake. */
+  retryRecoveredAgentMessages(): void {
+    for (const [taskId, outbox] of this.recoveredMessageOutboxes) {
+      const record = outbox.get(taskId);
+      if (record?.sessionRef !== undefined) this.sendAgentMessageRecord(outbox, record);
+    }
+  }
+
+  private sendAgentMessageRecord(outbox: AgentMessageOutbox, record: AgentMessageOutboxRecord): void {
+    this.deps.send(createEnvelope('agent.message.publish', outbox.publishPayload(record), {
+      taskId: record.taskId,
+      sessionRef: record.sessionRef,
+    }));
+    const active = this.tasks.get(record.taskId);
+    if (active?.messageOutbox === outbox) {
+      if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
+      active.messageRetryTimer = setTimeout(() => {
+        active.messageRetryTimer = undefined;
+        if (this.tasks.get(record.taskId) !== active) return;
+        const pending = outbox.get(record.taskId);
+        if (pending !== undefined) this.sendAgentMessageRecord(outbox, pending);
+      }, 1_000);
+      active.messageRetryTimer.unref?.();
+      return;
+    }
+    if (this.recoveredMessageOutboxes.get(record.taskId) === outbox) {
+      const prior = this.recoveredMessageRetryTimers.get(record.taskId);
+      if (prior !== undefined) clearTimeout(prior);
+      const timer = setTimeout(() => {
+        this.recoveredMessageRetryTimers.delete(record.taskId);
+        const pending = outbox.get(record.taskId);
+        if (pending !== undefined && this.recoveredMessageOutboxes.get(record.taskId) === outbox) {
+          this.sendAgentMessageRecord(outbox, pending);
+        }
+      }, 1_000);
+      timer.unref?.();
+      this.recoveredMessageRetryTimers.set(record.taskId, timer);
+    }
+  }
+
+  private async handleAgentMessageDisposition(taskId: string, disposition: AgentMessageDispositionPayload): Promise<void> {
+    const active = this.tasks.get(taskId);
+    const outbox = active?.messageOutbox ?? this.recoveredMessageOutboxes.get(taskId);
+    if (outbox === undefined) return;
+    const outcome = await outbox.applyDisposition(taskId, disposition);
+    if (active === undefined) {
+      if (outcome === 'accepted' || outcome === 'held' || outcome === 'refused') {
+        const timer = this.recoveredMessageRetryTimers.get(taskId);
+        if (timer !== undefined) clearTimeout(timer);
+        this.recoveredMessageRetryTimers.delete(taskId);
+      }
+      if (outcome === 'accepted') this.recoveredMessageOutboxes.delete(taskId);
+      return;
+    }
+    if (outcome === 'held') {
+      if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
+      active.messageRetryTimer = undefined;
+      return;
+    }
+    if (outcome === 'refused') {
+      if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
+      active.messageRetryTimer = undefined;
+      this.revokeAgentMessageContext(taskId);
+      return;
+    }
+    if (outcome !== 'accepted') return;
+    if (active.messageRetryTimer !== undefined) {
+      clearTimeout(active.messageRetryTimer);
+      active.messageRetryTimer = undefined;
+    }
+    active.messageAccepted = true;
+    this.revokeAgentMessageContext(taskId);
+    if (active.pendingMessageCompletion !== undefined) {
+      const completion = active.pendingMessageCompletion;
+      active.pendingMessageCompletion = undefined;
+      await this.publishSuccessfulCompletion(active, completion.finalOutput, completion.document);
+    }
   }
 
   /** M4 Phase 2: stop claiming any FUTURE `task.offer` — see `stoppingOffers`'s own doc comment. Idempotent. */
@@ -1216,6 +1374,9 @@ export class TaskRunner {
       case 'task.reject':
         await this.handleReject(envelope.task_id, envelope.payload.reason, envelope.payload.approvalId);
         return;
+      case 'agent.message.disposition':
+        await this.handleAgentMessageDisposition(envelope.task_id, envelope.payload);
+        return;
       default:
         return; // conn.* and daemon->server-only types are handled elsewhere / not applicable
     }
@@ -1261,11 +1422,21 @@ export class TaskRunner {
       this.decline(taskId, reason, retryable, agentRef);
     };
     const sessionRef = offeredSessionRef(payload);
+    const messageRequirement = 'messageEgress' in payload ? payload.messageEgress : undefined;
+    const terminalProjection = 'terminalProjection' in payload ? payload.terminalProjection : undefined;
     if ('egressPolicy' in payload) {
       if (this.deps.agentEgressPolicy === undefined || !sameEgressPolicy(this.deps.agentEgressPolicy, payload.egressPolicy)) {
         decline('Agent egress offer policy is not exactly enabled by this daemon', false);
         return;
       }
+    }
+    if (messageRequirement !== undefined && (agentRef === undefined || this.deps.agentMessageMcpBin === undefined || this.deps.tenantId === undefined)) {
+      decline('required Agent message egress is unavailable on this daemon', false);
+      return;
+    }
+    if (terminalProjection?.mode === 'result-document' && this.deps.resultDocument === undefined) {
+      decline('offer requires a result document but this daemon has no resultDocument extractor', false);
+      return;
     }
 
     // Finding #5: mark this taskId as "in-flight" for the entire remainder
@@ -1394,11 +1565,16 @@ export class TaskRunner {
 
       const offered = withoutRequiredToolsets(payload);
       const requestedRuntime = payload.dispatchSelection?.runtimeId ?? payload.runtime;
-      const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode, requiredToolsets !== undefined);
+      const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode, requiredToolsets !== undefined || messageRequirement !== undefined);
       if (!pick.ok) {
         decline(pick.reason, pick.retryable);
         return;
       }
+      const taskMcpServers = this.withAgentMessageMcp(
+        resolvedMcp?.ok ? resolvedMcp.servers : undefined,
+        taskId,
+        messageRequirement,
+      );
       let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
       try {
         prepared = await pick.adapter.prepare({
@@ -1406,7 +1582,7 @@ export class TaskRunner {
           policy: decision.policy,
           descriptor: pick.descriptor,
           requiredToolsetIds: requiredToolsets ?? [],
-          ...(resolvedMcp?.ok ? { mcpServers: resolvedMcp.servers } : {}),
+          ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         });
       } catch (error) {
         decline(`runtime preparation failed: ${errorMessage(error)}`, true);
@@ -1460,6 +1636,22 @@ export class TaskRunner {
           agentBinding = undefined;
           decline(`Agent home initialization failed: ${errorMessage(error)}`, false);
           return;
+        }
+        if (messageRequirement !== undefined) {
+          try {
+            const outbox = await AgentMessageOutbox.open(agentBinding.resolution.canonicalHome);
+            this.pendingMessageTasks.set(taskId, {
+              taskId,
+              agentRef: agentBinding.resolution.agentRef,
+              requirement: messageRequirement,
+              outbox,
+            });
+          } catch (error) {
+            await agentBinding.lease.release().catch(() => {});
+            agentBinding = undefined;
+            decline(`Agent message outbox initialization failed: ${errorMessage(error)}`, true);
+            return;
+          }
         }
       } else if (this.deps.gitWorkspaceManager && this.deps.gitWorkspaceStore) {
         known = sessionRef ? await this.deps.sessionWorkspaces.get(sessionRef) : undefined;
@@ -1660,7 +1852,7 @@ export class TaskRunner {
         manifest,
         instruction: gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction,
         env,
-        ...(resolvedMcp?.ok ? { mcpServers: resolvedMcp.servers } : {}),
+        ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,
@@ -1742,6 +1934,11 @@ export class TaskRunner {
         approvalQueue: [],
         outputBytesSoFar: 0,
         startedAtMs: Date.now(),
+        ...(messageRequirement === undefined ? {} : {
+          messageRequirement,
+          messageOutbox: this.pendingMessageTasks.get(taskId)!.outbox,
+        }),
+        ...(terminalProjection === undefined ? {} : { terminalProjection }),
       };
 
       // A strict Agent handoff is the local restart authority. It is
@@ -1773,6 +1970,9 @@ export class TaskRunner {
           return;
         }
       }
+      const activatedMessageRecord = active.messageOutbox === undefined
+        ? undefined
+        : await active.messageOutbox.activate(taskId, session.sessionRef);
 
       // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
       // task.cancel arrived while prepared-operation start() was in flight — i.e. AFTER
@@ -1822,6 +2022,10 @@ export class TaskRunner {
       // `task.cancelled` entirely.
       agentLeaseTransferred = agentBinding !== undefined;
       this.tasks.set(taskId, active);
+      this.pendingMessageTasks.delete(taskId);
+      if (active.messageOutbox !== undefined && activatedMessageRecord !== undefined) {
+        this.sendAgentMessageRecord(active.messageOutbox, activatedMessageRecord);
+      }
       // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
       // comment — still inside the synchronous construct -> register -> arm
       // -> pump handoff described just below (no `await` yet).
@@ -1850,11 +2054,46 @@ export class TaskRunner {
         void this.deps.gitWorkspaceStore.attachSession(gitWorkspaceId, session.sessionRef).catch(() => {});
       }
     } finally {
+      if (!agentLeaseTransferred) {
+        this.pendingMessageTasks.delete(taskId);
+        this.revokeAgentMessageContext(taskId);
+      }
       if (agentBinding !== undefined && !agentLeaseTransferred) {
         await agentBinding.lease.release().catch(() => {});
       }
       this.inFlightOffers.delete(taskId);
     }
+  }
+
+  private withAgentMessageMcp(
+    existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
+    taskId: string,
+    requirement: Readonly<AgentMessageEgressRequirement> | undefined,
+  ): Readonly<Record<string, McpStdioServerConfig>> | undefined {
+    if (requirement === undefined) return existing;
+    const bin = this.deps.agentMessageMcpBin!;
+    const contextToken = `${randomUUID()}.${randomUUID()}`;
+    this.revokeAgentMessageContext(taskId);
+    this.messageContextByToken.set(contextToken, taskId);
+    this.messageContextByTask.set(taskId, contextToken);
+    return Object.freeze({
+      ...(existing ?? {}),
+      [AGENT_MESSAGE_MCP_SERVER_NAME]: Object.freeze({
+        command: bin.command,
+        args: Object.freeze([...bin.args]),
+        env: Object.freeze({
+          BYOK_STORE_DIR: this.deps.storeDir,
+          BYOK_PRODUCT_ID: this.deps.productId,
+          BYOK_AGENT_MESSAGE_CONTEXT: contextToken,
+        }),
+      }),
+    });
+  }
+
+  private revokeAgentMessageContext(taskId: string): void {
+    const token = this.messageContextByTask.get(taskId);
+    if (token !== undefined) this.messageContextByToken.delete(token);
+    this.messageContextByTask.delete(taskId);
   }
 
   /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
@@ -2039,54 +2278,13 @@ export class TaskRunner {
           if (!outcome.deliver) return; // already reported task.fail and finished
           await this.observeGit(active, 'completed');
           if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-          // F3 (codex adversarial review, P1): the capability was checked
-          // inside `resolveResultDocument` — but `observeGit` above is an
-          // await, and a reconnect landing in that window can replace the
-          // connection with one whose current transport never advertised
-          // `result-document` (`ConnectionManager` clears learned capabilities
-          // across transport boundaries, and only a fresh WS ack or poll
-          // response repopulates them). The queued envelope would
-          // then drain to a server that strips the document silently — the
-          // exact loss this whole gate exists to prevent. So the flag is
-          // re-read here, after the last await, immediately before the
-          // envelope is handed to `send`. See `resolveResultDocument`'s own
-          // doc comment for the residual window this still cannot close.
-          if (outcome.document !== undefined && !this.hasResultDocumentCapability()) {
-            await this.fail(
-              active.taskId,
-              `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the connected server stopped advertising the result-document capability before this completion could be sent (a reconnect to an older server), so it would silently discard this document`,
-              false,
-            );
+          if (active.messageRequirement !== undefined && active.messageAccepted !== true) {
+            active.pendingMessageCompletion = { finalOutput, ...(outcome.document === undefined ? {} : { document: outcome.document }) };
+            const record = active.messageOutbox?.get(active.taskId);
+            if (record !== undefined) this.sendAgentMessageRecord(active.messageOutbox!, record);
             return;
           }
-          if (!this.reserveSemanticTerminal(active)) return;
-          await this.persistAgentTerminalEvidence(active, 'complete');
-          this.deps.send(
-            createEnvelope(
-              'task.complete',
-              {
-                summary: finalOutput,
-                sessionRef: active.session.sessionRef,
-                // Spread rather than `document: outcome.document`, so a
-                // completion with no document is the exact same payload it
-                // was before this field existed — not one carrying an
-                // explicit `document: undefined` key.
-                //
-                // `outcome.document` is the protocol's CANONICAL SNAPSHOT
-                // (`checkResultDocument`), never the object the extractor
-                // returned: pure data serializes identically at the root
-                // (where it was measured) and nested inside this payload
-                // (where the codec actually serializes it), so a contextual
-                // `toJSON(key)` or an unstable getter cannot make the wire
-                // bytes differ from what the cap gate approved.
-                ...(outcome.document !== undefined ? { document: outcome.document } : {}),
-                ...this.terminalInferenceUsagePayload(active),
-                ...this.agentTerminalPayload(active),
-              },
-              { taskId: active.taskId, sessionRef: active.session.sessionRef },
-            ),
-          );
-          await this.finish(active.taskId);
+          await this.publishSuccessfulCompletion(active, finalOutput, outcome.document);
           return;
         }
         if (event.type === 'progress') {
@@ -2142,6 +2340,27 @@ export class TaskRunner {
       }
       await this.fail(active.taskId, failure.reason, failure.retryable);
     }
+  }
+
+  private async publishSuccessfulCompletion(active: ActiveTask, finalOutput: string, document?: unknown): Promise<void> {
+    if (document !== undefined && !this.hasResultDocumentCapability()) {
+      await this.fail(
+        active.taskId,
+        `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the connected server stopped advertising the result-document capability before this completion could be sent (a reconnect to an older server), so it would silently discard this document`,
+        false,
+      );
+      return;
+    }
+    if (!this.reserveSemanticTerminal(active)) return;
+    await this.persistAgentTerminalEvidence(active, 'complete');
+    this.deps.send(createEnvelope('task.complete', {
+      summary: finalOutput,
+      sessionRef: active.session.sessionRef,
+      ...(document !== undefined ? { document } : {}),
+      ...this.terminalInferenceUsagePayload(active),
+      ...this.agentTerminalPayload(active),
+    }, { taskId: active.taskId, sessionRef: active.session.sessionRef }));
+    await this.finish(active.taskId);
   }
 
   /**
@@ -2982,12 +3201,33 @@ export class TaskRunner {
     active: ActiveTask,
     finalOutput: string,
   ): Promise<{ deliver: true; document?: unknown } | { deliver: false }> {
+    // The established required-message offer is itself exact message-only
+    // terminal authority unless the offer explicitly opts into a result
+    // document as a second terminal projection lane.
+    if (
+      active.terminalProjection?.mode === 'none' ||
+      (active.messageRequirement !== undefined && active.terminalProjection === undefined)
+    ) return { deliver: true };
     const extract = this.deps.resultDocument?.extract;
-    if (!extract) return { deliver: true };
+    if (!extract) {
+      if (active.terminalProjection?.mode === 'result-document') {
+        await this.fail(
+          active.taskId,
+          `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the offer requires result contract ${active.terminalProjection.contract} but this daemon has no extractor`,
+          false,
+        );
+        return { deliver: false };
+      }
+      return { deliver: true };
+    }
 
     let document: unknown;
     try {
-      document = extract(finalOutput, { taskId: active.taskId, sessionRef: active.session.sessionRef });
+      document = extract(finalOutput, {
+        taskId: active.taskId,
+        sessionRef: active.session.sessionRef,
+        ...(active.terminalProjection === undefined ? {} : { terminalProjection: active.terminalProjection }),
+      });
     } catch (err) {
       await this.fail(
         active.taskId,
@@ -3016,7 +3256,17 @@ export class TaskRunner {
 
     // "This task has no structured result" — indistinguishable, on the wire
     // and to the server, from no extractor being configured at all.
-    if (document === undefined) return { deliver: true };
+    if (document === undefined) {
+      if (active.terminalProjection?.mode === 'result-document') {
+        await this.fail(
+          active.taskId,
+          `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the required result contract ${active.terminalProjection.contract} produced no document`,
+          false,
+        );
+        return { deliver: false };
+      }
+      return { deliver: true };
+    }
 
     const check = checkResultDocument(document);
     if (!check.ok) {
@@ -3177,6 +3427,10 @@ export class TaskRunner {
         clearTimeout(active.maxDurationTimer);
         active.maxDurationTimer = undefined;
       }
+      if (active.messageRetryTimer) {
+        clearTimeout(active.messageRetryTimer);
+        active.messageRetryTimer = undefined;
+      }
       active.batcher.stop();
       this.addFinishedTaskId(taskId); // semantic terminal is authoritative even while disposal ownership is retained
 
@@ -3276,11 +3530,13 @@ export class TaskRunner {
       }
       active.gitLease?.release();
       this.tasks.delete(taskId);
+      this.revokeAgentMessageContext(taskId);
       active.resolveSemanticTerminalSettled?.(leaseReleased);
       return leaseReleased;
     }
     active.gitLease?.release();
     this.tasks.delete(taskId);
+    this.revokeAgentMessageContext(taskId);
     active.resolveSemanticTerminalSettled?.(true);
     return true;
   }

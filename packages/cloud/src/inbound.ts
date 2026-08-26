@@ -33,6 +33,7 @@ import {
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
+  AGENT_MESSAGE_EGRESS_CAPABILITY,
   AgentContentReadPayloadSchema,
   DAEMON_TO_SERVER_TYPES,
   encodeEnvelope,
@@ -41,6 +42,9 @@ import {
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
   type AgentEgressReliablePayload,
+  type AgentMessageDispositionPayload,
+  type AgentMessagePublishPayload,
+  type AgentMessageServerContext,
   type Envelope,
   type MessageType,
 } from '@byok-sdk/protocol';
@@ -59,6 +63,71 @@ import { projectTerminalToReview } from './board-projection';
 import type { TenantStores } from './tenant-stores';
 
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
+
+export async function handleAgentMessagePublish(
+  stores: TenantStores,
+  deviceId: string,
+  taskId: string,
+  payload: AgentMessagePublishPayload,
+  consume: ((input: {
+    readonly tenant: TenantStores['tenant'];
+    readonly deviceId: string;
+    readonly taskId: string;
+    readonly context: AgentMessageServerContext;
+    readonly payload: AgentMessagePublishPayload;
+  }) => Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>) | undefined,
+): Promise<{ readonly outcome: InboundOutcome; readonly disposition?: AgentMessageDispositionPayload }> {
+  const device = await stores.devices.get(deviceId);
+  const attempt = await stores.tasks.get(taskId);
+  const binding = await stores.receipts.get(`agent-message-offer:${deviceId}:${taskId}`);
+  if (
+    device === undefined || device.revoked ||
+    !hasCapabilities(device.capabilities, [AGENT_MESSAGE_EGRESS_CAPABILITY]) ||
+    attempt === undefined || attempt.deviceId !== deviceId || binding === undefined ||
+    !sameAgentRef(attempt.agentRef!, payload.agentRef)
+  ) return { outcome: 'rejected' };
+
+  let frozen: { agentRef?: AgentRef; sessionRef?: string; requirement?: { contract?: string; contentType?: string; maxBytes?: number }; context?: AgentMessageServerContext };
+  try { frozen = JSON.parse(binding.body) as typeof frozen; } catch { return { outcome: 'rejected' }; }
+  if (
+    !sameAgentRef(frozen.agentRef!, payload.agentRef) ||
+    frozen.context === undefined ||
+    frozen.requirement?.contract !== payload.contract ||
+    (frozen.sessionRef !== undefined && frozen.sessionRef !== payload.sessionRef) ||
+    frozen.requirement.contentType !== payload.contentType ||
+    typeof frozen.requirement.maxBytes !== 'number' || payload.byteCount > frozen.requirement.maxBytes
+  ) return { outcome: 'rejected' };
+
+  const taskMessageKey = `agent-message-task:${deviceId}:${taskId}`;
+  const taskMessageBody = JSON.stringify(payload);
+  const lockedTaskMessage = await stores.receipts.record({ key: taskMessageKey, body: taskMessageBody });
+  if (!lockedTaskMessage.created && lockedTaskMessage.receipt.body !== taskMessageBody) return { outcome: 'rejected' };
+  const receiptKey = `agent-message:${deviceId}:${payload.messageId}`;
+  const previous = await stores.receipts.get(receiptKey);
+  if (previous !== undefined) {
+    const decoded = JSON.parse(previous.body) as { payload: AgentMessagePublishPayload; disposition: AgentMessageDispositionPayload };
+    if (JSON.stringify(decoded.payload) !== JSON.stringify(payload)) return { outcome: 'rejected' };
+    return { outcome: 'duplicate', disposition: decoded.disposition };
+  }
+
+  const decision = consume === undefined
+    ? { outcome: 'held' as const, reasonCode: 'consumer_unavailable' }
+    : await consume({ tenant: stores.tenant, deviceId, taskId, context: frozen.context, payload });
+  const disposition: AgentMessageDispositionPayload = {
+    agentRef: payload.agentRef,
+    sessionRef: payload.sessionRef,
+    contract: payload.contract,
+    messageId: payload.messageId,
+    cursor: payload.cursor,
+    contentHash: payload.contentHash,
+    outcome: decision.outcome,
+    receiptId: crypto.randomUUID(),
+    ...(decision.reasonCode === undefined ? {} : { reasonCode: decision.reasonCode }),
+  };
+  const recorded = await stores.receipts.record({ key: receiptKey, body: JSON.stringify({ payload, disposition }) });
+  if (!recorded.created && recorded.receipt.body !== JSON.stringify({ payload, disposition })) return { outcome: 'rejected' };
+  return { outcome: 'accepted', disposition };
+}
 
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
 export function terminalReceiptKey(taskId: string): string {

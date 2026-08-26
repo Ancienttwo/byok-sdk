@@ -538,6 +538,25 @@ export interface ApprovalsRequestResult {
   reason?: string;
 }
 
+export interface AgentMessagePublishParams {
+  contextToken: string;
+  contentType: 'text/plain' | 'text/markdown';
+  body: string;
+}
+
+export function parseAgentMessagePublishParams(value: unknown): AgentMessagePublishParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'contextToken' && key !== 'contentType' && key !== 'body')) return undefined;
+  if (typeof value.contextToken !== 'string' || value.contextToken.length < 32 || value.contextToken.length > 160) return undefined;
+  if (value.contentType !== 'text/plain' && value.contentType !== 'text/markdown') return undefined;
+  if (typeof value.body !== 'string' || value.body.length === 0) return undefined;
+  return { contextToken: value.contextToken, contentType: value.contentType, body: value.body };
+}
+
+export interface AgentMessagePublishResult {
+  messageId: string;
+  state: 'staged' | 'pending';
+}
+
 // ---------------------------------------------------------------------------
 // `assertion.issue` (plan device-assertion-broker)
 // ---------------------------------------------------------------------------

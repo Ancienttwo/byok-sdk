@@ -13,7 +13,9 @@ import {
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+  AGENT_MESSAGE_EGRESS_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
+  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   AgentContentReceiptPayloadSchema,
 } from '@byok-sdk/protocol';
 import type {
@@ -68,6 +70,7 @@ import {
   ControlError,
   ENROLLMENT_PAIRING_CODE_MAX_BYTES,
   parseApprovalsRequestParams,
+  parseAgentMessagePublishParams,
   parseApprovalsResolveParams,
   parseAssertionIssueParams,
   parseEnrollmentPairParams,
@@ -119,6 +122,7 @@ import { sanitizeEgressEnvelope, type AgentEgressSanitizer } from './agent-egres
 import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRecord } from './agent-egress-spool';
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
+import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import {
   AGENT_CONTENT_READ_CAPABILITIES,
   AgentContentReadPolicyEngine,
@@ -840,6 +844,7 @@ function computeCapabilities(
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
   flags.push('approval-targeting');
+  flags.push(TERMINAL_PROJECTION_SELECTION_CAPABILITY);
   const selectionAdapters = adapters.filter((adapter) =>
     ALL_RUNTIME_IDS.includes(adapter.descriptor.id as RuntimeId),
   );
@@ -861,6 +866,9 @@ function computeCapabilities(
       AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
       AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
     );
+    if (agentHomeConfigured && adapters.some((adapter) => adapter.descriptor.capabilities.mcpToolsets === true)) {
+      flags.push(AGENT_MESSAGE_EGRESS_CAPABILITY);
+    }
   }
   if (contentReadPolicies !== undefined) {
     for (const surface of Object.keys(AGENT_CONTENT_READ_CAPABILITIES) as AgentContentReadSurface[]) {
@@ -1794,6 +1802,7 @@ export function buildDaemonWithAdapters(
       approvalRegistry,
       storeDir,
       productId: config.productId,
+      tenantId: record.tenantId,
       // U2 terminal inference usage consumes the one U4a-resolved,
       // process-immutable identity captured above. This is composition-only:
       // TaskRunner receives no config, manifest, or second identity resolver.
@@ -1808,6 +1817,9 @@ export function buildDaemonWithAdapters(
       // doc comment. Spread rather than assigned so an unconfigured daemon
       // builds the exact `deps` object it did before this seam existed.
       ...(config.resultDocument ? { resultDocument: config.resultDocument } : {}),
+      ...(config.agentHome !== undefined && config.agentEgress !== undefined
+        ? { agentMessageMcpBin: resolveAgentMessageMcpBin() }
+        : {}),
       // M4 Phase 3 hardening: bridges TaskRunner's stale-approval-race
       // finding out to the SAME local observability seam every other
       // daemon-local event already uses (see observer.ts's own module doc
@@ -1838,6 +1850,9 @@ export function buildDaemonWithAdapters(
       ...(activePressureEngine ? { admissionGuard: () => activePressureEngine.admissionGuard() } : {}),
     };
     runner = new TaskRunner(deps);
+    if (config.agentHome !== undefined && config.agentEgress !== undefined) {
+      await runner.recoverAgentMessageOutboxes(path.join(config.agentHome.hostStorageRoot, 'agents'));
+    }
     const handleAgentHomeProjectionEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'agent.home.projection') return false;
       if (agentHomeManager === undefined || agentHomeProjectionCompletion === undefined) {
@@ -2053,6 +2068,7 @@ export function buildDaemonWithAdapters(
               observer.handleInboundEnvelope(envelope);
               if (envelope.type === 'agent.home.projection') return handleAgentHomeProjectionEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
+              if (envelope.type === 'agent.message.disposition') return runner?.handleEnvelope(envelope) ?? Promise.resolve();
               if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);
               return runner?.handleEnvelope(envelope) ?? Promise.resolve();
             },
@@ -2067,6 +2083,7 @@ export function buildDaemonWithAdapters(
         const wasSettled = connectionState === 'open' || connectionState === 'degraded';
         connectionState = state;
         observer.noteConnectionState(state);
+        if (!wasSettled && (state === 'open' || state === 'degraded')) runner?.retryRecoveredAgentMessages();
         if (!wasSettled && (state === 'open' || state === 'degraded')) runPresenceDiscovery();
       },
       backoff: overrides.backoff,
@@ -2087,6 +2104,7 @@ export function buildDaemonWithAdapters(
     });
     await connection.start();
     await connection.waitForAck();
+    runner.retryRecoveredAgentMessages();
     for (const record of agentEgress.retryableReliableRecords(connection.getServerCapabilities())) {
       dispatchReliableRecord(record);
     }
@@ -2783,6 +2801,12 @@ export function buildDaemonWithAdapters(
         if (!parsed) throw new ControlError('bad_request', 'approvals.request requires {taskId, summary}');
         if (!runner) throw new ControlError('not_found', 'daemon is not started');
         return runner.requestApproval(parsed.taskId, parsed.summary);
+      },
+      'agent_messages.publish': (params) => {
+        const parsed = parseAgentMessagePublishParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'agent_messages.publish requires exactly {contextToken,contentType,body}');
+        if (!runner) throw new ControlError('not_found', 'daemon is not started');
+        return runner.publishAgentMessage(parsed);
       },
       /**
        * Plan `device-assertion-broker`: mint one short-lived, audience-scoped

@@ -121,6 +121,8 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.offer_for_agent_with_egress_fresh': { taskId: 'required', seq: 'required' },
     'agent.egress.reliable': { taskId: 'optional', seq: 'optional' },
     'agent.egress.ack': { taskId: 'optional', seq: 'required' },
+    'agent.message.publish': { taskId: 'required', seq: 'optional' },
+    'agent.message.disposition': { taskId: 'required', seq: 'required' },
     'agent.content.read': { taskId: 'optional', seq: 'required' },
     'agent.content.receipt': { taskId: 'optional', seq: 'optional' },
     'agent.home.projection': { taskId: 'optional', seq: 'required' },
@@ -188,6 +190,14 @@ type CodecRequirednessMatrix = {
   'agent.egress.ack': {
     taskId: FieldRequiredness<'agent.egress.ack', 'taskId'>;
     seq: FieldRequiredness<'agent.egress.ack', 'seq'>;
+  };
+  'agent.message.publish': {
+    taskId: FieldRequiredness<'agent.message.publish', 'taskId'>;
+    seq: FieldRequiredness<'agent.message.publish', 'seq'>;
+  };
+  'agent.message.disposition': {
+    taskId: FieldRequiredness<'agent.message.disposition', 'taskId'>;
+    seq: FieldRequiredness<'agent.message.disposition', 'seq'>;
   };
   'agent.content.read': {
     taskId: FieldRequiredness<'agent.content.read', 'taskId'>;
@@ -542,6 +552,29 @@ function minimalPayloadForProbe(type: MessageType): unknown {
         eventId: '00000000-0000-4000-8000-000000000021',
         cursor: 1,
         receiptId: '00000000-0000-4000-8000-000000000022',
+      };
+    case 'agent.message.publish':
+      return {
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        contract: 'chat.v1',
+        messageId: '00000000-0000-4000-8000-000000000025',
+        cursor: 1,
+        contentType: 'text/plain',
+        body: 'hello',
+        contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        byteCount: 5,
+      };
+    case 'agent.message.disposition':
+      return {
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        contract: 'chat.v1',
+        messageId: '00000000-0000-4000-8000-000000000025',
+        cursor: 1,
+        contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        outcome: 'accepted',
+        receiptId: '00000000-0000-4000-8000-000000000026',
       };
     case 'agent.content.read':
       return {

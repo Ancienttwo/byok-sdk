@@ -202,7 +202,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const rateLimiter = new RateLimiter(opts.rateLimit);
 
   const taskStore = opts.taskStore ?? new InMemoryTaskStore();
-  const hub = new ConnectionHub(taskStore, devices, taskLeaseMs, rateLimiter);
+  const hub = new ConnectionHub(taskStore, devices, taskLeaseMs, rateLimiter, opts.agentMessage);
   const hono = buildHonoApp({
     pairing,
     devices,

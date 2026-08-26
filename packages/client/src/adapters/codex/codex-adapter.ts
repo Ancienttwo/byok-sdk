@@ -87,6 +87,7 @@ export class CodexAdapter implements RuntimeAdapter {
       steer: false,
       resume: true,
       approvalInteractive: false,
+      mcpToolsets: true,
       permissionModes: ['auto', 'readonly'],
     },
     environmentRequirements: { credentialNames: [] },
@@ -234,7 +235,7 @@ export class CodexAdapter implements RuntimeAdapter {
       resumeRef: startInput.manifest.sessionRef,
       instruction: startInput.instruction,
       modelId: manifestModelId,
-      policyArgs: [...policyArgs],
+      policyArgs: [...policyArgs, ...codexMcpConfigArgs(startInput.mcpServers)],
       cwd: manifestCwd,
       env: runtimeEnv,
       spawnFn: this.options.spawnFn,
@@ -265,6 +266,19 @@ export class CodexAdapter implements RuntimeAdapter {
   private resolveBin(): ResolvedBin {
     return (this.options.resolveBin ?? resolveCodexBin)();
   }
+}
+
+function codexMcpConfigArgs(servers: RuntimeOperationStartInput['mcpServers']): string[] {
+  if (servers === undefined || Object.keys(servers).length === 0) return [];
+  const args = ['--ignore-user-config'];
+  for (const [name, server] of Object.entries(servers).sort(([left], [right]) => left.localeCompare(right))) {
+    args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`);
+    if (server.args !== undefined) args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...server.args])}`);
+    for (const [key, value] of Object.entries(server.env ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+      args.push('-c', `mcp_servers.${name}.env.${key}=${JSON.stringify(value)}`);
+    }
+  }
+  return args;
 }
 
 /**

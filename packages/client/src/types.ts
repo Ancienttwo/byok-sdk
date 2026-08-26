@@ -55,6 +55,8 @@ export interface RuntimeCapabilities {
 export interface McpStdioServerConfig {
   command: string;
   args?: readonly string[];
+  /** SDK-reserved task-scoped servers may receive child-only context. Host toolset configuration rejects this field. */
+  env?: Readonly<Record<string, string>>;
 }
 
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */

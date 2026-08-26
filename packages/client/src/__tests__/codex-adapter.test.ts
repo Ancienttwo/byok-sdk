@@ -99,6 +99,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       // S0/H-002: codex exec never emits a needs_approval-equivalent event,
       // so resolveApproval() throws and this is honestly false.
       approvalInteractive: false,
+      mcpToolsets: true,
       permissionModes: ['auto', 'readonly'],
     });
   });
@@ -155,6 +156,35 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       'sandbox_mode=workspace-write',
       '-c',
       'approval_policy=never',
+      'say hi',
+    ]);
+  });
+
+  it('projects task-scoped MCP command, args, and sealed env through Codex config overrides', async () => {
+    const captured: string[][] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    const ctx = await makeCtx();
+    ctx.mcpServers = {
+      byokagentmessage: {
+        command: '/opt/byok-agent-message-mcp',
+        args: ['--stdio'],
+        env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' },
+      },
+    };
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    await takeEvents(session, 7);
+    expect(captured[0]).toEqual([
+      'exec', '--json', '--skip-git-repo-check',
+      '-c', 'sandbox_mode=workspace-write',
+      '-c', 'approval_policy=never',
+      '--ignore-user-config',
+      '-c', 'mcp_servers.byokagentmessage.command="/opt/byok-agent-message-mcp"',
+      '-c', 'mcp_servers.byokagentmessage.args=["--stdio"]',
+      '-c', 'mcp_servers.byokagentmessage.env.BYOK_AGENT_MESSAGE_CONTEXT="sealed-context"',
       'say hi',
     ]);
   });

@@ -5,6 +5,8 @@ export const AGENT_EGRESS_POLICY_CAPABILITY = 'agent-egress-policy' as const;
 export const AGENT_EGRESS_RELIABLE_ACK_CAPABILITY = 'agent-egress-reliable-ack' as const;
 /** Admits the distinct offer whose runtime mints its session only after start. */
 export const AGENT_EGRESS_FRESH_SESSION_CAPABILITY = 'agent-egress-fresh-session' as const;
+/** Admits the distinct Agent-authored message lane; activity policy remains independent. */
+export const AGENT_MESSAGE_EGRESS_CAPABILITY = 'agent-message-egress' as const;
 export const AGENT_CONTENT_WORKSPACE_READ_CAPABILITY = 'agent-content-workspace-read' as const;
 export const AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY = 'agent-content-transcript-read' as const;
 export const AGENT_CONTENT_ARTIFACT_READ_CAPABILITY = 'agent-content-artifact-read' as const;
@@ -23,6 +25,41 @@ const POLICY_REVISION = z
   .regex(/^[^\u0000-\u001f\u007f\r\n]+$/u, 'policyRevision must not contain control characters');
 
 const POSITIVE_LIMIT = z.number().int().positive().max(2_147_483_647);
+export const AGENT_MESSAGE_MAX_BYTES = 256 * 1024;
+export const AgentMessageContractSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u, 'message contract must be an opaque portable identifier');
+export const AgentMessageContentTypeSchema = z.enum(['text/plain', 'text/markdown']);
+export const AgentMessageDestinationBindingSchema = z
+  .string()
+  .min(1)
+  .max(2048)
+  .regex(/^[^\u0000-\u001f\u007f\r\n]+$/u, 'destination binding must not contain control characters');
+export const AgentMessageFreshnessCursorSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(/^[^\u0000-\u001f\u007f\r\n]+$/u, 'freshness cursor must not contain control characters');
+/** Host-only product authority. It is never serialized into an Agent offer or message envelope. */
+export const AgentMessageServerContextSchema = z
+  .object({
+    destinationBinding: AgentMessageDestinationBindingSchema,
+    freshnessCursor: AgentMessageFreshnessCursorSchema.optional(),
+  })
+  .strict();
+export const AgentMessageEgressRequirementSchema = z
+  .object({
+    mode: z.literal('required'),
+    contract: AgentMessageContractSchema,
+    contentType: AgentMessageContentTypeSchema,
+    maxBytes: z.number().int().positive().max(AGENT_MESSAGE_MAX_BYTES),
+  })
+  .strict();
+export type AgentMessageEgressRequirement = z.infer<typeof AgentMessageEgressRequirementSchema>;
+export type AgentMessageContentType = z.infer<typeof AgentMessageContentTypeSchema>;
+export type AgentMessageServerContext = z.infer<typeof AgentMessageServerContextSchema>;
 export const AgentContentMimeTypeSchema = z
   .string()
   .min(3)
