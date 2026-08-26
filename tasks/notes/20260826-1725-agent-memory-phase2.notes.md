@@ -89,9 +89,11 @@
   `3faeba4`. `verify-sprint --prepare-acceptance` passed all 15 contract rows
   plus Change Assessment; run snapshot:
   `.ai/harness/runs/run-20260827T001543-22563-20260826-1725-agent-memory-phase2.json`.
-  The semantic AcceptanceReceipt remains pending under the frozen Claude-or-
-  explicit-user-waiver policy. No push, merge, publish, deploy, or production
-  migration was performed.
+  The user subsequently gave explicit approval at the semantic-disposition
+  checkpoint. A typed `user_waiver` AcceptanceReceipt now validates the frozen
+  subject and final `verify-sprint` completed without rerunning the already
+  frozen checks. No push, merge, publish, deploy, or production migration was
+  performed.
 
 ## Promotion Filter
 

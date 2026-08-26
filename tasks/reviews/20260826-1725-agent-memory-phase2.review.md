@@ -48,17 +48,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
-> **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Disposition**: user_waiver
+> **Reviewer**: User
+> **Source**: user-waiver
+> **Actor**: kito
+> **Reviewed Subject SHA256**: sha256:e86f43b17c51e25a8186fb929e85092b7ab34e11af31870ff4c02e8e84fd41f3
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
+> **Verification Evidence SHA256**: sha256:d9a6d8b67079b48be9886ff5c3599f0d526428d9ee1971a607e1277a9f6a04cc
+> **Issued At**: 2026-08-26T16:21:08.226Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: User explicitly approved semantic disposition after being told the remaining choice was Claude review or user waiver; this waiver accepts the frozen Agent Memory Phase 2 source subject only and does not authorize push, merge, publish, deploy, or production migration.
 - Findings: none
 
 ## Behavior Diff Notes
