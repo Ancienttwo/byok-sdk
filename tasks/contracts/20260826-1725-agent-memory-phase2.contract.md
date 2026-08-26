@@ -161,7 +161,6 @@ exit_criteria:
     - plans/plan-20260826-1725-agent-memory-phase2.md
     - tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
   artifacts_exist:
-    - .ai/harness/checks/latest.json
     - tasks/notes/20260826-1725-agent-memory-phase2.notes.md
   tests_pass:
     - path: packages/client/src/__tests__/agent-memory-mcp.test.ts
@@ -169,8 +168,8 @@ exit_criteria:
     - path: packages/protocol/src/__tests__/agent-memory-projection.test.ts
     - path: packages/cloud/src/__tests__/agent-memory-projection.test.ts
     - path: packages/cloud-dataplane/src/__tests__/agent-memory-projection.test.ts
-    - path: tests/sql/control_plane_invariants.sql
   commands_succeed:
+    - bun run check:deploy-sql
     - bun run build
     - bun run typecheck
     - bun run test

@@ -31,6 +31,11 @@
   obvious byte-for-byte pass-through and otherwise treats its output as opaque.
 - Redacted snapshots use bounded Postgres `bytea` in this slice; R2 history,
   delta chains, and remote restore remain out of scope.
+- The acceptance contract runs `bun run check:deploy-sql` for the SQL ordering
+  and invariant-file binding. Listing the raw `.sql` path under `tests_pass`
+  incorrectly routed it through the workspace Vitest command; requiring
+  `.ai/harness/checks/latest.json` as a pre-existing artifact was likewise
+  circular because `verify-sprint --prepare-acceptance` creates that evidence.
 - Node lacks a cross-platform descriptor-relative filesystem API. Linux keeps
   `/proc/self/fd` + `O_NOFOLLOW`; macOS can use the separately verified,
   product-owned absolute-path Go helper with exact protocol/root identity.
