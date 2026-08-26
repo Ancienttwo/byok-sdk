@@ -76,7 +76,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"agent-memory-contract-suite","kind":"deterministic_test","paths":["*"]},{"id":"agent-memory-native-and-dataplane-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy

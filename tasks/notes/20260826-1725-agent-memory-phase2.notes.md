@@ -71,6 +71,10 @@
 - Cross-platform secure-fs contract: 13/13 strict checks passed; macOS helper
   Go/integration tests and Windows test cross-compiles passed. Windows runtime
   admission remains disabled.
+- Change Assessment declares both the deterministic contract suite and the
+  previously executed real macOS helper plus disposable Postgres/MinIO
+  readbacks as required oracles; deployment/source tests are not allowed to
+  stand in for those runtime observations.
 - Linux disposable Node 22 + pnpm test: 2 files / 10 tests passed, including
   parent-directory symlink race and Pi/Claude/Codex strict injection.
 - Disposable Postgres/MinIO: invariants + projection 2 files / 5 tests passed;
