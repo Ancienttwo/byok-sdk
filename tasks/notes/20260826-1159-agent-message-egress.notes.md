@@ -37,6 +37,22 @@
 
 - None.
 
+## 0.9.0-rc.1 reconciliation slice
+
+- Downstream subject `apps/local-agent/src/private-agent-chat-summary-egress.test.ts`
+  (`sha256:4e217393a3e3be37dcbe1cd2f304f5b38a76431c5bfaca82eaa74dcf63323f9e`)
+  proved the message body and exact accepted disposition were durable before
+  the task failed. The remaining failure was the daemon-wide Research
+  `resultDocument.extract` being invoked for the message-only Chat task.
+- The generic repair adds additive `terminalProjection` selection and the
+  `terminal-projection-selection` capability. Required-message tasks are
+  message-only when no second projection is selected; explicit
+  `result-document` carries an opaque contract into `ResultDocumentTask` and
+  requires a document. This preserves the frozen consumer unchanged and
+  avoids task-id/output heuristics or a downstream task registry.
+- Pre-fix artifact authority is the frozen Salesko artifact
+  `sha256:baac15146c5ad5aeaac8f2dbc660e3de390477fafc79d9a9a5d58d5b2535ffbe`.
+
 ## Evidence Links
 
 - Checks: `.ai/harness/checks/latest.json`

@@ -22,6 +22,7 @@ import {
   AgentHomeProjectionProfileRevisionSchema,
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
+import { TerminalProjectionSelectionSchema } from './terminal-projection';
 
 /** Max size of an inlined artifact payload, per the delivery-model spec (<=64KB). */
 const MAX_INLINE_BYTES = 64 * 1024;
@@ -315,6 +316,7 @@ export const TaskOfferForAgentPayloadSchema = z
     requiredToolsets: RequiredToolsetsSchema.optional(),
     runtime: RuntimeIdSchema.optional(),
     dispatchSelection: DispatchSelectionSchema.optional(),
+    terminalProjection: TerminalProjectionSelectionSchema.optional(),
     sessionRef: z.string().optional(),
     limits: z
       .object({

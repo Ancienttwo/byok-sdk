@@ -1078,6 +1078,18 @@ just an object. Producing it is product glue: a daemon supplies
 the product's JSON, or returns `undefined` for "no structured result this
 time".
 
+Strict Agent offers may additionally carry an offer-scoped
+`terminalProjection`. `{mode:'none'}` explicitly bypasses the host extractor;
+`{mode:'result-document', contract}` requires the extractor to return one
+document and passes that opaque contract to `ResultDocumentTask`. Missing
+extractor, missing document, invalid document, or missing server capability
+fails closed. Sending this field is gated by
+`terminal-projection-selection`, so an older daemon cannot strip it and run
+under the host-global default. A `messageEgress.mode:'required'` offer with no
+second terminal selection is itself message-only authority and therefore
+bypasses the extractor; an offer can request both lanes only by explicitly
+selecting `result-document`.
+
 **A document must be PLAIN JSON DATA — equal to its own JSON round trip.**
 Not merely "a value `JSON.stringify` accepts", which is a much weaker bar
 that lets two real failures through:
@@ -1348,6 +1360,12 @@ only an exact replay is idempotent. Agent-local records also bind the
 authenticated enrollment tenant, so restart recovery cannot replay content
 after a cross-tenant re-pair. Activated drafts retry after loss, reconnect, or
 process restart only while no exact disposition has resolved transport delivery.
+
+Required-message tasks are message-only at terminal projection unless the
+offer also supplies an explicit `terminalProjection.mode:'result-document'`.
+This prevents a daemon-wide structured-result extractor from interpreting
+Chat output, while preserving a typed, fail-closed path for a task that
+genuinely requires both an accepted message and a structured result.
 
 **Only daemon → server `task.*` types are accepted here.** A `type` outside
 that set — a server → daemon type (`task.offer`, `conn.ack`, etc.) arriving

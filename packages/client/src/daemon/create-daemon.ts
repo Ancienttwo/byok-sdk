@@ -15,6 +15,7 @@ import {
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
+  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   AgentContentReceiptPayloadSchema,
 } from '@byok-sdk/protocol';
 import type {
@@ -843,6 +844,7 @@ function computeCapabilities(
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
   flags.push('blob-upload');
   flags.push('approval-targeting');
+  flags.push(TERMINAL_PROJECTION_SELECTION_CAPABILITY);
   const selectionAdapters = adapters.filter((adapter) =>
     ALL_RUNTIME_IDS.includes(adapter.descriptor.id as RuntimeId),
   );

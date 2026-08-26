@@ -68,6 +68,7 @@ async function admitFullEgress(harness: CloudHarness, deviceId: string): Promise
       'agent-egress-reliable-ack',
       'agent-content-workspace-read',
       'agent-message-egress',
+      'terminal-projection-selection',
     ],
   });
 }
@@ -83,6 +84,7 @@ describe('hosted Agent egress contract', () => {
       payload: {
         ...egressOfferPayload(),
         messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+        terminalProjection: { mode: 'none' },
       },
     })).rejects.toBeDefined();
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-message-missing-context')).toBeUndefined();
@@ -91,6 +93,7 @@ describe('hosted Agent egress contract', () => {
       payload: {
         ...egressOfferPayload(),
         messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+        terminalProjection: { mode: 'none' },
       },
       agentMessageContext: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' },
     });
@@ -143,6 +146,7 @@ describe('hosted Agent egress contract', () => {
       payload: {
         ...egressOfferPayload(),
         messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+        terminalProjection: { mode: 'none' },
       },
       agentMessageContext: { destinationBinding: 'conversation/42/turn/7' },
     });

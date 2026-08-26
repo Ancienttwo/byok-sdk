@@ -24,6 +24,8 @@ import {
   encodeEnvelope,
   PROTOCOL_VERSION,
   STRICT_AGENT_ONLY_CAPABILITY,
+  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
+  TerminalProjectionSelectionSchema,
   TASK_STATES,
   type CreateEnvelopeOptions,
   type ConnHelloPayload,
@@ -1840,6 +1842,7 @@ export class ConnectionHub {
     const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
     const egressPolicy = input.egressPolicy === undefined ? undefined : AgentEgressPolicySchema.parse(input.egressPolicy);
     const messageEgress = input.messageEgress === undefined ? undefined : AgentMessageEgressRequirementSchema.parse(input.messageEgress);
+    const terminalProjection = input.terminalProjection === undefined ? undefined : TerminalProjectionSelectionSchema.parse(input.terminalProjection);
     if (messageEgress === undefined && input.agentMessageContext !== undefined) {
       throw new Error('agentMessageContext requires messageEgress');
     }
@@ -1908,6 +1911,9 @@ export class ConnectionHub {
     }
     if (messageEgress !== undefined && !this.hasDeviceCapabilities(deviceId, [AGENT_MESSAGE_EGRESS_CAPABILITY])) {
       throw new Error(`device ${deviceId} did not advertise Agent message egress capability; refusing before enqueue`);
+    }
+    if (terminalProjection !== undefined && !this.hasDeviceCapabilities(deviceId, [TERMINAL_PROJECTION_SELECTION_CAPABILITY])) {
+      throw new Error(`device ${deviceId} did not advertise terminal projection selection capability; refusing before enqueue`);
     }
 
     if (
@@ -1995,6 +2001,7 @@ export class ConnectionHub {
         dispatchSelection,
         agentRef,
         egressPolicy,
+        terminalProjection,
         ...(messageEgress === undefined ? {} : { messageEgress }),
         ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
       };
@@ -2013,6 +2020,7 @@ export class ConnectionHub {
           sessionRef: sessionRef!,
           agentRef,
           egressPolicy,
+          terminalProjection,
           ...(messageEgress === undefined ? {} : { messageEgress }),
           ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
         },
@@ -2022,7 +2030,12 @@ export class ConnectionHub {
       this.sendToDevice(
         deviceId,
         'task.offer_for_agent',
-        { ...commonOffer, agentRef, ...(requiredToolsets === undefined ? {} : { requiredToolsets }) },
+        {
+          ...commonOffer,
+          agentRef,
+          ...(terminalProjection === undefined ? {} : { terminalProjection }),
+          ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+        },
         { taskId, sessionRef },
       );
     } else if (requiredToolsets === undefined) {

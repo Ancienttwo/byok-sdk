@@ -1,6 +1,6 @@
 # Task Contract: agent-message-egress
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260826-1159-agent-message-egress.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
@@ -50,6 +50,13 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 - repro: run the frozen Salesko command `bun test ./apps/local-agent/src/private-agent-chat-message-egress.falsifier.ts` against released BYOK 0.8.1; it reports 0 pass / 2 fail because the capability is undefined and both strict schemas reject `messageEgress`.
 - regression_guard: packages/protocol/src/__tests__/agent-message-egress-contract.test.ts
 - pre_fix_failure_artifact: .ai/harness/runs/20260826-1205-agent-message-egress-pre-fix.txt
+
+Post-RC reconciliation evidence:
+
+- root_cause: `packages/client/src/daemon/task-runner.ts` invoked the host-global `resultDocument.extract` for every `turn_end`, including an exact accepted required-message task whose offer carried no structured-result authority.
+- repro: `bun test apps/local-agent/src/private-agent-chat-summary-egress.test.ts` in the frozen Salesko consumer worktree; the message consumer and exact disposition succeed before the extractor causes `task.fail`.
+- regression_guard: packages/client/src/__tests__/agent-message-completion-gate.test.ts
+- pre_fix_failure_artifact: .ai/harness/runs/20260826-agent-message-terminal-projection-pre-fix.txt
 
 ## Workflow Inventory
 
@@ -157,20 +164,21 @@ exit_criteria:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260826-1159-agent-message-egress.notes.md
     - artifacts/release/release-manifest.json
-    - artifacts/release/byok-sdk-core-0.9.0-rc.0.tgz
-    - artifacts/release/byok-sdk-protocol-0.9.0-rc.0.tgz
-    - artifacts/release/byok-sdk-server-0.9.0-rc.0.tgz
-    - artifacts/release/byok-sdk-cloud-0.9.0-rc.0.tgz
-    - artifacts/release/byok-sdk-client-0.9.0-rc.0.tgz
-    - artifacts/release/byok-sdk-cloud-dataplane-0.9.0-rc.0.tgz
-    - artifacts/release/byok-sdk-ui-runtime-0.9.0-rc.0.tgz
-    - artifacts/release/byok-sdk-testkit-0.9.0-rc.0.tgz
-    - artifacts/release/byok-sdk-0.9.0-rc.0.tgz
+    - artifacts/release/byok-sdk-core-0.9.0-rc.1.tgz
+    - artifacts/release/byok-sdk-protocol-0.9.0-rc.1.tgz
+    - artifacts/release/byok-sdk-server-0.9.0-rc.1.tgz
+    - artifacts/release/byok-sdk-cloud-0.9.0-rc.1.tgz
+    - artifacts/release/byok-sdk-client-0.9.0-rc.1.tgz
+    - artifacts/release/byok-sdk-cloud-dataplane-0.9.0-rc.1.tgz
+    - artifacts/release/byok-sdk-ui-runtime-0.9.0-rc.1.tgz
+    - artifacts/release/byok-sdk-testkit-0.9.0-rc.1.tgz
+    - artifacts/release/byok-sdk-0.9.0-rc.1.tgz
     - artifacts/release/byok-sdk-keys-0.3.2.tgz
   tests_pass:
     - path: packages/protocol/src/__tests__/agent-message-egress-contract.test.ts
     - path: packages/client/src/__tests__/agent-message-outbox.test.ts
     - path: packages/client/src/__tests__/agent-message-completion-gate.test.ts
+    - path: packages/client/src/__tests__/terminal-projection-selection.test.ts
     - path: packages/cloud/src/__tests__/agent-egress-contract.test.ts
     - path: packages/server/src/__tests__/agent-egress-contract.test.ts
   commands_succeed:

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   AGENT_MESSAGE_EGRESS_CAPABILITY,
+  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   AgentMessageDispositionPayloadSchema,
   AgentMessagePublishPayloadSchema,
   AgentMessageServerContextSchema,
@@ -32,9 +33,31 @@ describe('Agent-initiated message egress protocol', () => {
       runtime: 'codex',
       egressPolicy,
       messageEgress,
+      terminalProjection: { mode: 'none' },
     } as const;
     expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse(shared).success).toBe(true);
     expect(TaskOfferForAgentWithEgressPayloadSchema.safeParse({ ...shared, sessionRef: 'native-session-1' }).success).toBe(true);
+  });
+
+  test('treats required-message offers as message-only unless a second terminal projection is explicit', () => {
+    expect(TERMINAL_PROJECTION_SELECTION_CAPABILITY).toBe('terminal-projection-selection');
+    const shared = {
+      instruction: 'send one message',
+      policy: { mode: 'readonly', allowTools: [] },
+      agentRef,
+      runtime: 'codex',
+      egressPolicy,
+      messageEgress,
+    } as const;
+    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse(shared).success).toBe(true);
+    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
+      ...shared,
+      terminalProjection: { mode: 'none' },
+    }).success).toBe(true);
+    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
+      ...shared,
+      terminalProjection: { mode: 'result-document', contract: 'example.research.v1' },
+    }).success).toBe(true);
   });
 
   test('keeps model-authored routing and unknown message contracts out of the strict declaration', () => {

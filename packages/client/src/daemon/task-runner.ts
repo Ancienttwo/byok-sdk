@@ -21,6 +21,7 @@ import {
   type ResultDocumentCheck,
   type RuntimeId,
   type TerminalInferenceUsage,
+  type TerminalProjectionSelection,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
@@ -223,6 +224,8 @@ export const RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX = 'result document unde
 export interface ResultDocumentTask {
   readonly taskId: string;
   readonly sessionRef: string;
+  /** Exact offer-scoped projection authority; absent only for legacy offers. */
+  readonly terminalProjection?: Readonly<TerminalProjectionSelection>;
 }
 
 /**
@@ -553,6 +556,7 @@ interface ActiveTask {
   /** Shared receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
   disposalAttempt?: Promise<void>;
   messageRequirement?: Readonly<AgentMessageEgressRequirement>;
+  terminalProjection?: Readonly<TerminalProjectionSelection>;
   messageOutbox?: AgentMessageOutbox;
   messageAccepted?: boolean;
   pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown };
@@ -1418,6 +1422,7 @@ export class TaskRunner {
     };
     const sessionRef = offeredSessionRef(payload);
     const messageRequirement = 'messageEgress' in payload ? payload.messageEgress : undefined;
+    const terminalProjection = 'terminalProjection' in payload ? payload.terminalProjection : undefined;
     if ('egressPolicy' in payload) {
       if (this.deps.agentEgressPolicy === undefined || !sameEgressPolicy(this.deps.agentEgressPolicy, payload.egressPolicy)) {
         decline('Agent egress offer policy is not exactly enabled by this daemon', false);
@@ -1426,6 +1431,10 @@ export class TaskRunner {
     }
     if (messageRequirement !== undefined && (agentRef === undefined || this.deps.agentMessageMcpBin === undefined || this.deps.tenantId === undefined)) {
       decline('required Agent message egress is unavailable on this daemon', false);
+      return;
+    }
+    if (terminalProjection?.mode === 'result-document' && this.deps.resultDocument === undefined) {
+      decline('offer requires a result document but this daemon has no resultDocument extractor', false);
       return;
     }
 
@@ -1928,6 +1937,7 @@ export class TaskRunner {
           messageRequirement,
           messageOutbox: this.pendingMessageTasks.get(taskId)!.outbox,
         }),
+        ...(terminalProjection === undefined ? {} : { terminalProjection }),
       };
 
       // A strict Agent handoff is the local restart authority. It is
@@ -3190,12 +3200,33 @@ export class TaskRunner {
     active: ActiveTask,
     finalOutput: string,
   ): Promise<{ deliver: true; document?: unknown } | { deliver: false }> {
+    // The established required-message offer is itself exact message-only
+    // terminal authority unless the offer explicitly opts into a result
+    // document as a second terminal projection lane.
+    if (
+      active.terminalProjection?.mode === 'none' ||
+      (active.messageRequirement !== undefined && active.terminalProjection === undefined)
+    ) return { deliver: true };
     const extract = this.deps.resultDocument?.extract;
-    if (!extract) return { deliver: true };
+    if (!extract) {
+      if (active.terminalProjection?.mode === 'result-document') {
+        await this.fail(
+          active.taskId,
+          `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the offer requires result contract ${active.terminalProjection.contract} but this daemon has no extractor`,
+          false,
+        );
+        return { deliver: false };
+      }
+      return { deliver: true };
+    }
 
     let document: unknown;
     try {
-      document = extract(finalOutput, { taskId: active.taskId, sessionRef: active.session.sessionRef });
+      document = extract(finalOutput, {
+        taskId: active.taskId,
+        sessionRef: active.session.sessionRef,
+        ...(active.terminalProjection === undefined ? {} : { terminalProjection: active.terminalProjection }),
+      });
     } catch (err) {
       await this.fail(
         active.taskId,
@@ -3224,7 +3255,17 @@ export class TaskRunner {
 
     // "This task has no structured result" — indistinguishable, on the wire
     // and to the server, from no extractor being configured at all.
-    if (document === undefined) return { deliver: true };
+    if (document === undefined) {
+      if (active.terminalProjection?.mode === 'result-document') {
+        await this.fail(
+          active.taskId,
+          `${RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX}: the required result contract ${active.terminalProjection.contract} produced no document`,
+          false,
+        );
+        return { deliver: false };
+      }
+      return { deliver: true };
+    }
 
     const check = checkResultDocument(document);
     if (!check.ok) {

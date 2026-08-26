@@ -19,6 +19,7 @@ import type {
   TaskArtifactPayload,
   TaskState,
   ToolsetId,
+  TerminalProjectionSelection,
 } from '@byok-sdk/protocol';
 import type { BlobStore } from './blob-store';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -134,6 +135,8 @@ export interface DispatchInput {
   egressPolicy?: AgentEgressPolicy;
   /** Distinct user-visible message lane; independent of activity egress. */
   messageEgress?: AgentMessageEgressRequirement;
+  /** Exact offer-scoped terminal projection authority. */
+  terminalProjection?: TerminalProjectionSelection;
   /** Host-only product destination/freshness authority; never serialized to the daemon. */
   agentMessageContext?: AgentMessageServerContext;
 }
@@ -148,6 +151,7 @@ export interface FreshAgentEgressDispatchInput
   /** Exact policy revision consumed by the fresh execution. */
   egressPolicy: AgentEgressPolicy;
   messageEgress?: AgentMessageEgressRequirement;
+  terminalProjection?: TerminalProjectionSelection;
   agentMessageContext?: AgentMessageServerContext;
 }
 

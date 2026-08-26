@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/protocol",
-  "version": "0.9.0-rc.0",
+  "version": "0.9.0-rc.1",
   "description": "BYOK SDK wire protocol: envelope schema, message types, and codec helpers",
   "type": "module",
   "license": "MIT",

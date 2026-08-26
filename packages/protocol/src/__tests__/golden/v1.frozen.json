@@ -18,7 +18,8 @@
     "agent-content-workspace-read",
     "agent-content-transcript-read",
     "agent-content-artifact-read",
-    "agent-home-projection"
+    "agent-home-projection",
+    "terminal-projection-selection"
   ],
   "permissionModes": [
     "auto",
@@ -977,6 +978,43 @@
             }
           ]
         },
+        "terminalProjection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "none"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "result-document"
+                },
+                "contract": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                }
+              },
+              "required": [
+                "mode",
+                "contract"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "sessionRef": {
           "type": "string"
         },
@@ -1201,6 +1239,43 @@
                 "runtimeId",
                 "providerId",
                 "modelId"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "terminalProjection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "none"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "result-document"
+                },
+                "contract": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                }
+              },
+              "required": [
+                "mode",
+                "contract"
               ],
               "additionalProperties": false
             }
@@ -1677,6 +1752,43 @@
                 "runtimeId",
                 "providerId",
                 "modelId"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "terminalProjection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "none"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "result-document"
+                },
+                "contract": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                }
+              },
+              "required": [
+                "mode",
+                "contract"
               ],
               "additionalProperties": false
             }
@@ -4693,6 +4805,43 @@
                   }
                 ]
               },
+              "terminalProjection": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "none"
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "result-document"
+                      },
+                      "contract": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "contract"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
               "sessionRef": {
                 "type": "string"
               },
@@ -4962,6 +5111,43 @@
                       "runtimeId",
                       "providerId",
                       "modelId"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "terminalProjection": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "none"
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "result-document"
+                      },
+                      "contract": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "contract"
                     ],
                     "additionalProperties": false
                   }
@@ -5483,6 +5669,43 @@
                       "runtimeId",
                       "providerId",
                       "modelId"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "terminalProjection": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "none"
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "result-document"
+                      },
+                      "contract": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "contract"
                     ],
                     "additionalProperties": false
                   }
@@ -10132,6 +10355,43 @@
                           }
                         ]
                       },
+                      "terminalProjection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "result-document"
+                              },
+                              "contract": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "contract"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
                       "sessionRef": {
                         "type": "string"
                       },
@@ -10401,6 +10661,43 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "terminalProjection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "result-document"
+                              },
+                              "contract": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "contract"
                             ],
                             "additionalProperties": false
                           }
@@ -10922,6 +11219,43 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "terminalProjection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "result-document"
+                              },
+                              "contract": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "contract"
                             ],
                             "additionalProperties": false
                           }
@@ -14900,6 +15234,43 @@
                           }
                         ]
                       },
+                      "terminalProjection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "result-document"
+                              },
+                              "contract": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "contract"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
                       "sessionRef": {
                         "type": "string"
                       },
@@ -15169,6 +15540,43 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "terminalProjection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "result-document"
+                              },
+                              "contract": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "contract"
                             ],
                             "additionalProperties": false
                           }
@@ -15690,6 +16098,43 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "terminalProjection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "result-document"
+                              },
+                              "contract": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "contract"
                             ],
                             "additionalProperties": false
                           }

@@ -1,12 +1,12 @@
 # Task Review: agent-message-egress
 
-> **Status**: Pass
+> **Status**: Pending
 > **Plan**: plans/plan-20260826-1159-agent-message-egress.md
 > **Contract**: tasks/contracts/20260826-1159-agent-message-egress.contract.md
 > **Notes File**: tasks/notes/20260826-1159-agent-message-egress.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-08-26 12:05
-> **Recommendation**: accept unpublished packed RC; formal publication remains a separate gate
+> **Recommendation**: pending 0.9.0-rc.1 packed consumer readback
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: sha256:dd3abc1009794144e6b2d08b0322450fd1fa166867b005c2eb229800cfba2a7f
 > **Reviewed Subject Scope**: normalized-final-content

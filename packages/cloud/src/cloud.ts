@@ -64,6 +64,7 @@ import {
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   STRICT_AGENT_ONLY_CAPABILITY,
+  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -1015,7 +1016,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueAgentOffer(tenant, deviceId, input) {
-      await assertAgentCapabilities(tenant, deviceId, [AGENT_HOME_CONTRACT_CAPABILITY]);
+      await assertAgentCapabilities(tenant, deviceId, [
+        AGENT_HOME_CONTRACT_CAPABILITY,
+        ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
+      ]);
       // Parse the strict control payload before reserving a mailbox sequence.
       // A malformed/oversized AgentRef therefore cannot leave a durable
       // delivery row behind.
@@ -1031,6 +1035,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         AGENT_EGRESS_POLICY_CAPABILITY,
         AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
         ...(input.payload.messageEgress === undefined ? [] : [AGENT_MESSAGE_EGRESS_CAPABILITY]),
+        ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
       ]);
       const payload = TaskOfferForAgentWithEgressPayloadSchema.parse(input.payload);
       if (payload.messageEgress === undefined && input.agentMessageContext !== undefined) {
@@ -1063,6 +1068,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
         AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
         ...(input.payload.messageEgress === undefined ? [] : [AGENT_MESSAGE_EGRESS_CAPABILITY]),
+        ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
       ]);
       const payload = TaskOfferForAgentWithEgressFreshPayloadSchema.parse(input.payload);
       if (payload.messageEgress === undefined && input.agentMessageContext !== undefined) {

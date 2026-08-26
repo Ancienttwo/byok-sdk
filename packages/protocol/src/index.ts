@@ -82,6 +82,13 @@ export type {
   AgentHomeProjectionValue,
 } from './agent-home-projection';
 
+export {
+  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
+  TerminalProjectionContractSchema,
+  TerminalProjectionSelectionSchema,
+} from './terminal-projection';
+export type { TerminalProjectionSelection } from './terminal-projection';
+
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
 

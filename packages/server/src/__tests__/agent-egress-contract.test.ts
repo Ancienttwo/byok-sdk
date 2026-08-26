@@ -56,19 +56,21 @@ describe('reference-server Agent egress contract', () => {
     const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
       productId: PRODUCT_ID,
-      capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress'],
+      capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection'],
     });
     ws = daemon.ws;
     await expect(byok.dispatch({
       deviceId: daemon.deviceId, instruction: 'missing server context', agentRef: AGENT_REF,
       sessionRef: 'session-server', egressPolicy: POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      terminalProjection: { mode: 'none' },
     })).rejects.toBeDefined();
     expect(byok.tasks.list()).toHaveLength(0);
     const handle = await byok.dispatch({
       deviceId: daemon.deviceId, instruction: 'send one message', agentRef: AGENT_REF,
       sessionRef: 'session-server', egressPolicy: POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      terminalProjection: { mode: 'none' },
       agentMessageContext: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' },
     });
     await nextEnvelope(ws);
@@ -105,13 +107,14 @@ describe('reference-server Agent egress contract', () => {
     const { code } = byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await connectFakeDaemon(started.baseUrl, started.port, code, {
       productId: PRODUCT_ID,
-      capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress'],
+      capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection'],
     });
     ws = daemon.ws;
     const handle = await byok.dispatch({
       deviceId: daemon.deviceId, instruction: 'send one message', agentRef: AGENT_REF,
       sessionRef: 'session-server', egressPolicy: POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      terminalProjection: { mode: 'none' },
       agentMessageContext: { destinationBinding: 'conversation/42/turn/7' },
     });
     await nextEnvelope(ws);

@@ -29,6 +29,9 @@ describe('required Agent message completion gate', () => {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       permissionModes: ['auto'],
     });
+    const researchExtractor = vi.fn(() => {
+      throw new Error('message-only output is not a research document');
+    });
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary('byok-message-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -39,6 +42,7 @@ describe('required Agent message completion gate', () => {
       sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
+      resultDocument: { extract: researchExtractor },
     });
     const taskId = 'message-task';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
@@ -88,6 +92,7 @@ describe('required Agent message completion gate', () => {
       ...exact, outcome: 'accepted', receiptId: '10000000-0000-4000-8000-000000000002',
     }, { taskId, seq: 3 }));
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
+    expect(researchExtractor).not.toHaveBeenCalled();
     await expect(runner.publishAgentMessage({ contextToken: contextToken!, contentType: 'text/markdown', body: '**hello**' }))
       .rejects.toThrow(/invalid or expired/);
 
