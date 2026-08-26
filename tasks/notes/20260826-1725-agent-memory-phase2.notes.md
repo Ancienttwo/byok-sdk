@@ -99,8 +99,12 @@
   conflict, cross-task outbox replay/erase sequence wedging, append-only local
   logs reaching the 16 MiB fail-closed ceiling, and an uncaught helper-stdin
   EPIPE race. The verbatim review is recorded in the review artifact. No fix or
-  merge was authorized in that review slice; the existing user-waiver receipt
-  does not override the later failing ship review.
+  merge was authorized in that review slice. A typed Claude `reject` receipt
+  now supersedes the earlier user-waiver disposition for the same frozen
+  subject. `acceptance-receipt verify` and final `verify-sprint` fail closed as
+  expected. The previously materialized `.ai/harness/checks/latest.json` still
+  projects the earlier waiver, so it must not be read as the current semantic
+  disposition; the external gate receipt and review projection are current.
 
 ## Promotion Filter
 

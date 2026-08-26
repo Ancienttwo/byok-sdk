@@ -76,18 +76,18 @@ Findings (no P1-free pass; four blockers).
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: user_waiver
-> **Reviewer**: User
-> **Source**: user-waiver
-> **Actor**: kito
+> **Disposition**: reject
+> **Reviewer**: Claude
+> **Source**: claude-review
+> **Actor**: not-applicable
 > **Reviewed Subject SHA256**: sha256:e86f43b17c51e25a8186fb929e85092b7ab34e11af31870ff4c02e8e84fd41f3
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
 > **Verification Evidence SHA256**: sha256:d9a6d8b67079b48be9886ff5c3599f0d526428d9ee1971a607e1277a9f6a04cc
-> **Issued At**: 2026-08-26T16:21:08.226Z
+> **Issued At**: 2026-08-26T16:32:56.281Z
 
-- Summary: User explicitly approved semantic disposition after being told the remaining choice was Claude review or user waiver; this waiver accepts the frozen Agent Memory Phase 2 source subject only and does not authorize push, merge, publish, deploy, or production migration.
-- Findings: none
+- Summary: Claude external review rejected the frozen Agent Memory Phase 2 subject with four P1 blockers; do not merge until all are fixed and the new subject is reverified and rereviewed.
+- Findings: P1: Linux with a configured helper routes the native-admitted backend into a helper path that rejects Linux, breaking every memory operation.; P1: Outbox records are task/session-bound and cannot replay across tasks; rejected/offline records and server erase can permanently wedge source sequence progress.; P1: Append-only outbox and audit logs have no compaction path before the 16 MiB fail-closed ceiling, including post-write audit failure semantics.; P1: Helper stdin EPIPE lacks a stream error listener and can crash the daemon with an uncaught exception.
 
 ## Behavior Diff Notes
 
@@ -127,4 +127,4 @@ Findings (no P1-free pass; four blockers).
 ## Summary
 
 - Source verdict: FAIL due to four Claude P1 findings.
-- Ship / terminal acceptance: BLOCKED; the existing user-waiver receipt remains a record of the earlier semantic disposition but does not override the later failing review.
+- Ship / terminal acceptance: BLOCKED; the later typed Claude `reject` receipt supersedes the earlier user-waiver disposition for this frozen subject.
