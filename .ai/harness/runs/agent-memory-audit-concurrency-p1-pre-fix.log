@@ -1,6 +1,8 @@
 COMMAND: bun run --cwd packages/client test -- src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts
+REGRESSION_GUARD: packages/client/src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts
 SUBJECT: 9bde10a (production source still pre-fix; regression guard added only)
 EXIT: 1
+PRE_FIX_EXIT=1
 
 $ vitest run "src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts"
 
