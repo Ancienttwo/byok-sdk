@@ -1,6 +1,6 @@
 # Plan: Agent-initiated message egress
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260826-1159
 > **Slug**: agent-message-egress
 > **Planning Source**: repo-harness-plan

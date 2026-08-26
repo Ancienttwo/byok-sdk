@@ -1,3 +1,9 @@
+> **Archived**: 2026-08-26 15:11
+> **Related Plan**: plans/archive/plan-20260826-1159-agent-message-egress.md
+> **Outcome**: Completed
+> **Lifecycle**: notes
+> **Parent Run ID**: run-20260826-1511
+
 # Implementation Notes: agent-message-egress
 
 > **Status**: Verifying
