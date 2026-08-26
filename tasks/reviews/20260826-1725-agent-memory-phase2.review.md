@@ -113,14 +113,14 @@ Findings (no P1-free pass; four blockers).
 > **Reviewer**: Claude
 > **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:e86f43b17c51e25a8186fb929e85092b7ab34e11af31870ff4c02e8e84fd41f3
+> **Reviewed Subject SHA256**: sha256:2d60d9a05688cc976de88192b735939a9ea45db6b35a01f66c9bcf4df71e5b7c
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
-> **Verification Evidence SHA256**: sha256:d9a6d8b67079b48be9886ff5c3599f0d526428d9ee1971a607e1277a9f6a04cc
-> **Issued At**: 2026-08-26T16:32:56.281Z
+> **Verification Evidence SHA256**: sha256:c9fe98e4e8a89972cc7619464e9463298115e94eafa93e03493334dd1f86bfbd
+> **Issued At**: 2026-08-26T17:25:52.017Z
 
-- Summary: Claude external review rejected the frozen Agent Memory Phase 2 subject with four P1 blockers; do not merge until all are fixed and the new subject is reverified and rereviewed.
-- Findings: P1: Linux with a configured helper routes the native-admitted backend into a helper path that rejects Linux, breaking every memory operation.; P1: Outbox records are task/session-bound and cannot replay across tasks; rejected/offline records and server erase can permanently wedge source sequence progress.; P1: Append-only outbox and audit logs have no compaction path before the 16 MiB fail-closed ceiling, including post-write audit failure semantics.; P1: Helper stdin EPIPE lacks a stream error listener and can crash the daemon with an uncaught exception.
+- Summary: Second Claude review rejected the remediated Agent Memory Phase 2 subject with four P1 blockers; do not merge.
+- Findings: P1: macOS helper replace/request bounds cannot persist the bounded v2 outbox or audit state; P1: helper EPIPE regression guard is not admitted on Linux CI; P1: a rejected trailing outbox replay is swallowed and only wedges a later task; P1: the shipped authorizer overwrites prior-task grants so historical replay is unreachable
 
 ## Behavior Diff Notes
 
