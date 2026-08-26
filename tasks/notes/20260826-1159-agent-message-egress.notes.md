@@ -69,6 +69,20 @@
 
 ## Packed RC and downstream readback
 
+### 0.9.0-rc.1 reconciliation candidate
+
+- Final RC source commit: `96b93002a38af5d943478998f75d1090ca9f80df`.
+- Manifest: `artifacts/release/release-manifest.json`, SHA-256
+  `b25da4a6a473d8347a678f9a61a7565eda9f43c476284885fb9e6457f203a1a8`.
+- The unchanged Salesko consumer advanced past the original extractor failure:
+  both fresh/resume completion results became available with redacted summary
+  and no document. It then failed its own line-300 assertion requiring raw
+  progress text inside metadata/status activity. That assertion contradicts
+  the same frozen privacy boundary and is not an upstream acceptance oracle;
+  downstream must refresh only that assertion/hash before final RC acceptance.
+- Registry remains unpublished. No tag, merge, push, deploy, migration, or
+  production wiring occurred.
+
 - Frozen source commit: `1f5ae35a7e1cb626dd704e504711bcfcfd74694b` (tree `5c9ea5b5b401f5dd0cfe01e609b422bd3f58ea02`).
 - `bun run check:release-pack -- --out-dir artifacts/release` PASS from a clean source commit. It packed and isolated-installed 10 packages; all nine aligned packages are `0.9.0-rc.0`, keys remains `0.3.2`, internal edges close exactly, and cloud-dataplane contains all 13 migrations.
 - Frozen manifest: `artifacts/release/release-manifest.json`; its `sourceGitSha` exactly equals the source commit above.
