@@ -67,11 +67,105 @@ async function admitFullEgress(harness: CloudHarness, deviceId: string): Promise
       'agent-egress-policy',
       'agent-egress-reliable-ack',
       'agent-content-workspace-read',
+      'agent-message-egress',
     ],
   });
 }
 
 describe('hosted Agent egress contract', () => {
+  it('binds an Agent message to the exact task/device/AgentRef and returns a durable exact disposition', async () => {
+    const consumed: unknown[] = [];
+    const harness = createHarness({ agentMessage: { consume: async (input) => { consumed.push(input); return { outcome: 'accepted' }; } } });
+    const device = await harness.pairDevice(TENANT_A);
+    await admitFullEgress(harness, device.deviceId);
+    await expect(harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, {
+      taskId: 'agent-message-missing-context',
+      payload: {
+        ...egressOfferPayload(),
+        messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      },
+    })).rejects.toBeDefined();
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-message-missing-context')).toBeUndefined();
+    const offered = await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, {
+      taskId: 'agent-message-task',
+      payload: {
+        ...egressOfferPayload(),
+        messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      },
+      agentMessageContext: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' },
+    });
+    const message = createEnvelope('agent.message.publish', {
+      agentRef: AGENT_REF, sessionRef: 'session-egress', contract: 'example.chat.v1',
+      messageId: '10000000-0000-4000-8000-000000000099', cursor: 1,
+      contentType: 'text/markdown', body: 'hello',
+      contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', byteCount: 5,
+    }, { taskId: offered.taskId });
+    const first = await harness.request('/byok/messages', {
+      method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [message] }),
+    });
+    expect(await first.json()).toEqual({ accepted: 1 });
+    expect(consumed).toHaveLength(1);
+    expect(consumed[0]).toMatchObject({ context: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' } });
+    expect(offered.envelope.payload).not.toHaveProperty('agentMessageContext');
+    const replay = await harness.request('/byok/messages', {
+      method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [message] }),
+    });
+    expect(await replay.json()).toEqual({ accepted: 1 });
+    expect(consumed).toHaveLength(1);
+    const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
+    const dispositions = page.messages.map((row) => decodeEnvelope(row.body)).filter((item) => item.type === 'agent.message.disposition');
+    expect(dispositions).toHaveLength(1);
+    expect(dispositions[0]).toMatchObject({ task_id: offered.taskId, payload: { outcome: 'accepted', messageId: message.payload.messageId } });
+    const second = createEnvelope('agent.message.publish', {
+      ...message.payload,
+      messageId: '10000000-0000-4000-8000-000000000098',
+      body: 'second',
+      byteCount: 6,
+      contentHash: 'sha256:16367aacb67a4a017c8da8ab95682ccb390863780f7114dda0a0e0c55644c7c4',
+    }, { taskId: offered.taskId });
+    const refusedSecond = await harness.request('/byok/messages', {
+      method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [second] }),
+    });
+    expect(await refusedSecond.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(consumed).toHaveLength(1);
+  });
+
+  it.each(['held', 'refused'] as const)('does not re-invoke the product consumer for an exact %s transport replay', async (outcome) => {
+    const consumed: unknown[] = [];
+    const harness = createHarness({ agentMessage: { consume: async (input) => { consumed.push(input); return { outcome }; } } });
+    const device = await harness.pairDevice(TENANT_A);
+    await admitFullEgress(harness, device.deviceId);
+    const offered = await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, {
+      taskId: `agent-message-${outcome}`,
+      payload: {
+        ...egressOfferPayload(),
+        messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+      },
+      agentMessageContext: { destinationBinding: 'conversation/42/turn/7' },
+    });
+    const message = createEnvelope('agent.message.publish', {
+      agentRef: AGENT_REF, sessionRef: 'session-egress', contract: 'example.chat.v1',
+      messageId: '10000000-0000-4000-8000-000000000097', cursor: 1,
+      contentType: 'text/markdown', body: 'hello',
+      contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', byteCount: 5,
+    }, { taskId: offered.taskId });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await harness.request('/byok/messages', {
+        method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [message] }),
+      });
+      expect(await response.json()).toEqual({ accepted: 1 });
+    }
+    expect(consumed).toHaveLength(1);
+    const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
+    const dispositions = page.messages.map((row) => decodeEnvelope(row.body)).filter((item) => item.type === 'agent.message.disposition');
+    expect(dispositions).toHaveLength(1);
+    expect(dispositions[0]).toMatchObject({ payload: { outcome } });
+  });
+
   it('fails closed before allocation when the durable egress capabilities are absent', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);

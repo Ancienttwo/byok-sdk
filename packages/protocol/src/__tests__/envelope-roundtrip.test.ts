@@ -523,6 +523,30 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('agent.message.publish', () => {
+    const type = 'agent.message.publish' as const;
+    testedTypes.push(type);
+    roundTrip(type, createEnvelope(type, {
+      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+      sessionRef: 'session-1', contract: 'example.message.v1',
+      messageId: '10000000-0000-4000-8000-000000000001', cursor: 1,
+      contentType: 'text/markdown', body: 'hello',
+      contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824', byteCount: 5,
+    }, { taskId: 'task-1' }));
+  });
+
+  it('agent.message.disposition', () => {
+    const type = 'agent.message.disposition' as const;
+    testedTypes.push(type);
+    roundTrip(type, createEnvelope(type, {
+      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+      sessionRef: 'session-1', contract: 'example.message.v1',
+      messageId: '10000000-0000-4000-8000-000000000001', cursor: 1,
+      contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+      outcome: 'accepted', receiptId: '10000000-0000-4000-8000-000000000002',
+    }, { taskId: 'task-1', seq: 1 }));
+  });
+
   it('covers every declared message type', () => {
     expect([...new Set(testedTypes)].sort()).toEqual([...MESSAGE_TYPES].sort());
   });

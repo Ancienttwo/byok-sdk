@@ -1317,6 +1317,38 @@ single inbound gate (the reference implementation's `handleInbound`) — the
 exact same gate a WSS connection's messages get, not a parallel or
 lesser-validated path.
 
+#### Agent-initiated message lane
+
+`agent-message-egress` is a distinct content lane for one bounded
+user-visible Agent message. A strict fresh or resume Agent egress offer may
+declare `messageEgress: {mode:'required', contract, contentType, maxBytes}`;
+presence is capability-gated before task/mailbox allocation.
+
+The SDK-owned task MCP tool accepts only `body` and optional `contentType`.
+Its local control call carries a daemon-issued, single-task sealed context
+token rather than a caller-selected task id. Tenant, device, task, `AgentRef`,
+session, and destination identity are bound by authenticated task context and
+cannot be model-authored. The host supplies a bounded opaque
+`agentMessageContext` at enqueue/dispatch; it remains server-side, never enters
+the Agent offer or message envelope, and is revealed only to the authenticated
+product consumer after exact device/task/Agent/session matching. The daemon
+fsyncs the body under the canonical Agent home before sending
+`agent.message.publish`. The exact `agent.message.disposition` binds message
+id, cursor, hash, AgentRef and session. Any exact disposition stops transport
+replay and is cached idempotently. Only `accepted` retires local bytes and
+unblocks a required `task.complete`; `held` and `refused` retain the draft for
+a separate authenticated product action, while mismatch, disconnect, and
+restart retain it for transport retry. This lane does not authorize raw
+activity, workspace, transcript, or artifact transfer.
+
+`mode:'required'` means exactly one immutable message per task. The daemon
+revokes the sealed local context on exact acceptance, while server/cloud lock
+the first task-scoped message identity and reject a second message id/body;
+only an exact replay is idempotent. Agent-local records also bind the
+authenticated enrollment tenant, so restart recovery cannot replay content
+after a cross-tenant re-pair. Activated drafts retry after loss, reconnect, or
+process restart only while no exact disposition has resolved transport delivery.
+
 **Only daemon → server `task.*` types are accepted here.** A `type` outside
 that set — a server → daemon type (`task.offer`, `conn.ack`, etc.) arriving
 inbound, or anything unrecognized — is rejected per-envelope: not dispatched

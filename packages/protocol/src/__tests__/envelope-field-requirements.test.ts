@@ -91,6 +91,29 @@ function minimalPayload(type: MessageType): unknown {
         cursor: 1,
         receiptId: '00000000-0000-4000-8000-000000000022',
       };
+    case 'agent.message.publish':
+      return {
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        contract: 'chat.v1',
+        messageId: '00000000-0000-4000-8000-000000000025',
+        cursor: 1,
+        contentType: 'text/plain',
+        body: 'hello',
+        contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        byteCount: 5,
+      };
+    case 'agent.message.disposition':
+      return {
+        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+        sessionRef: 'session-1',
+        contract: 'chat.v1',
+        messageId: '00000000-0000-4000-8000-000000000025',
+        cursor: 1,
+        contentHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        outcome: 'accepted',
+        receiptId: '00000000-0000-4000-8000-000000000026',
+      };
     case 'agent.content.read':
       return {
         requestId: '00000000-0000-4000-8000-000000000023',
@@ -170,7 +193,7 @@ function minimalPayload(type: MessageType): unknown {
 /** Build `createEnvelope` opts that satisfy every OTHER requirement for `type`, so a test can isolate one field at a time. */
 function baseOpts(type: MessageType): { taskId?: string; seq?: number } {
   const opts: { taskId?: string; seq?: number } = {};
-  if (type.startsWith('task.')) opts.taskId = 'task-1';
+  if (type.startsWith('task.') || type.startsWith('agent.message.')) opts.taskId = 'task-1';
   if (isServerToDaemonType(type)) opts.seq = 1;
   return opts;
 }

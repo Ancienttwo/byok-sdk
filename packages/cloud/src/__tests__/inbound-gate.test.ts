@@ -362,5 +362,17 @@ function envelopeOfType(type: (typeof DAEMON_TO_SERVER_TYPES)[number], taskId: s
           contentType: 'text/plain',
         },
       });
+    case 'agent.message.publish':
+      return createEnvelope('agent.message.publish', {
+        agentRef: { agentId: 'agent-inbound', profileRevision: 'profile-inbound' },
+        sessionRef: 'session-inbound',
+        contract: 'example.message.v1',
+        messageId: '10000000-0000-4000-8000-000000000003',
+        cursor: 1,
+        contentType: 'text/markdown',
+        body: 'hello',
+        contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+        byteCount: 5,
+      }, { taskId });
   }
 }

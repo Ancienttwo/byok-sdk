@@ -15,6 +15,8 @@ import type {
 } from '../types';
 import { APPROVAL_MCP_SERVER_NAME } from '../adapters/claude/claude-adapter';
 
+export const AGENT_MESSAGE_MCP_SERVER_NAME = 'byokagentmessage';
+
 const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
 const MAX_LOCAL_MCP_ARGS = 64;
 const MAX_LOCAL_MCP_TOKEN_CHARS = 4096;
@@ -127,7 +129,7 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
           `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers contains invalid server name ${JSON.stringify(serverName)}`,
         );
       }
-      if (serverName === APPROVAL_MCP_SERVER_NAME) {
+      if (serverName === APPROVAL_MCP_SERVER_NAME || serverName === AGENT_MESSAGE_MCP_SERVER_NAME) {
         throw new Error(
           `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} uses a server name reserved by the daemon`,
         );

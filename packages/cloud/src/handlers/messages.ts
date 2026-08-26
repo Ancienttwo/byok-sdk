@@ -23,9 +23,11 @@ import type { Context } from 'hono';
 import {
   MessagesSendRequestSchema,
   type AgentContentReceiptPayload,
+  type AgentMessageDispositionPayload,
+  type AgentMessagePublishPayload,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
-import { handleInboundEnvelope } from '../inbound';
+import { handleAgentMessagePublish, handleInboundEnvelope } from '../inbound';
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
@@ -45,6 +47,21 @@ export interface MessagesRouteDeps extends DeviceRouteDeps {
     deviceId: string,
     payload: AgentContentReceiptPayload,
   ) => Promise<void>;
+  readonly agentMessage?: {
+    consume(input: {
+      readonly tenant: TenantStores['tenant'];
+      readonly deviceId: string;
+      readonly taskId: string;
+      readonly context: import('@byok-sdk/protocol').AgentMessageServerContext;
+      readonly payload: AgentMessagePublishPayload;
+    }): Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>;
+  };
+  readonly appendAgentMessageDisposition: (
+    stores: TenantStores,
+    deviceId: string,
+    taskId: string,
+    payload: AgentMessageDispositionPayload,
+  ) => Promise<void>;
 }
 
 export function messagesHandler(deps: MessagesRouteDeps) {
@@ -59,13 +76,22 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     let accepted = 0;
     let rejected = 0;
     for (const envelope of parsed.data.messages) {
-      const outcome = await handleInboundEnvelope(
-        stores,
-        device.deviceId,
-        envelope,
-        deps.activityBounds,
+      const messageResult = envelope.type === 'agent.message.publish'
+        ? await handleAgentMessagePublish(
+            stores,
+            device.deviceId,
+            envelope.task_id,
+            envelope.payload,
+            deps.agentMessage?.consume,
+          )
+        : undefined;
+      const outcome = messageResult?.outcome ?? await handleInboundEnvelope(
+        stores, device.deviceId, envelope, deps.activityBounds,
       );
       if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);
+      if (envelope.type === 'agent.message.publish' && messageResult?.disposition !== undefined) {
+        await deps.appendAgentMessageDisposition(stores, device.deviceId, envelope.task_id, messageResult.disposition);
+      }
       if (envelope.type === 'agent.egress.reliable' && (outcome === 'accepted' || outcome === 'duplicate')) {
         const record = await stores.egress.get(device.deviceId, envelope.payload.eventId);
         if (record === undefined) {

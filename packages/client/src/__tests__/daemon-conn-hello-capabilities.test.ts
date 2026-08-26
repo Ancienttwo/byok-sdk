@@ -123,6 +123,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       steer: false,
       resume: true,
       approvalInteractive: false,
+      mcpToolsets: true,
       permissionModes: ['auto', 'readonly'],
     });
 

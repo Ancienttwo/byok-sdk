@@ -11,6 +11,10 @@ import {
   AgentEgressContentHashSchema,
   AgentEgressPolicyRevisionSchema,
   AgentEgressPolicySchema,
+  AgentMessageContractSchema,
+  AgentMessageContentTypeSchema,
+  AgentMessageEgressRequirementSchema,
+  AGENT_MESSAGE_MAX_BYTES,
   ContentReadPolicySchema,
 } from './agent-egress';
 import {
@@ -330,6 +334,7 @@ export type TaskOfferForAgentPayload = z.infer<typeof TaskOfferForAgentPayloadSc
 export const TaskOfferForAgentWithEgressPayloadSchema = TaskOfferForAgentPayloadSchema.extend({
   sessionRef: z.string().min(1).max(512),
   egressPolicy: AgentEgressPolicySchema,
+  messageEgress: AgentMessageEgressRequirementSchema.optional(),
 }).strict();
 export type TaskOfferForAgentWithEgressPayload = z.infer<typeof TaskOfferForAgentWithEgressPayloadSchema>;
 
@@ -342,7 +347,10 @@ export type TaskOfferForAgentWithEgressPayload = z.infer<typeof TaskOfferForAgen
 export const TaskOfferForAgentWithEgressFreshPayloadSchema = TaskOfferForAgentPayloadSchema.omit({
   sessionRef: true,
 })
-  .extend({ egressPolicy: AgentEgressPolicySchema })
+  .extend({
+    egressPolicy: AgentEgressPolicySchema,
+    messageEgress: AgentMessageEgressRequirementSchema.optional(),
+  })
   .strict();
 export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshPayloadSchema>;
 
@@ -381,6 +389,48 @@ export const AgentEgressAckPayloadSchema = z
   })
   .strict();
 export type AgentEgressAckPayload = z.infer<typeof AgentEgressAckPayloadSchema>;
+
+const AGENT_MESSAGE_BODY = z.string().min(1).refine(
+  (value) => new TextEncoder().encode(value).byteLength <= AGENT_MESSAGE_MAX_BYTES,
+  `Agent message body exceeds ${AGENT_MESSAGE_MAX_BYTES} bytes`,
+);
+
+/** Daemon -> server: one Agent-authored message, independent from task activity. */
+export const AgentMessagePublishPayloadSchema = z
+  .object({
+    agentRef: AgentRefSchema,
+    sessionRef: EGRESS_SESSION_REF,
+    contract: AgentMessageContractSchema,
+    messageId: z.uuid(),
+    cursor: z.number().int().positive(),
+    contentType: AgentMessageContentTypeSchema,
+    body: AGENT_MESSAGE_BODY,
+    contentHash: AgentEgressContentHashSchema,
+    byteCount: z.number().int().positive().max(AGENT_MESSAGE_MAX_BYTES),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const actual = new TextEncoder().encode(value.body).byteLength;
+    if (actual !== value.byteCount) {
+      context.addIssue({ code: 'custom', path: ['byteCount'], message: 'byteCount must equal UTF-8 body bytes' });
+    }
+  });
+export type AgentMessagePublishPayload = z.infer<typeof AgentMessagePublishPayloadSchema>;
+
+export const AgentMessageDispositionPayloadSchema = z
+  .object({
+    agentRef: AgentRefSchema,
+    sessionRef: EGRESS_SESSION_REF,
+    contract: AgentMessageContractSchema,
+    messageId: z.uuid(),
+    cursor: z.number().int().positive(),
+    contentHash: AgentEgressContentHashSchema,
+    outcome: z.enum(['accepted', 'held', 'refused']),
+    receiptId: z.uuid(),
+    reasonCode: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional(),
+  })
+  .strict();
+export type AgentMessageDispositionPayload = z.infer<typeof AgentMessageDispositionPayloadSchema>;
 
 const AGENT_CONTENT_TARGET = z
   .string()
@@ -1073,6 +1123,8 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema,
   'agent.egress.reliable': AgentEgressReliablePayloadSchema,
   'agent.egress.ack': AgentEgressAckPayloadSchema,
+  'agent.message.publish': AgentMessagePublishPayloadSchema,
+  'agent.message.disposition': AgentMessageDispositionPayloadSchema,
   'agent.content.read': AgentContentReadPayloadSchema,
   'agent.content.receipt': AgentContentReceiptPayloadSchema,
   'agent.home.projection': AgentHomeProjectionPayloadSchema,
@@ -1109,6 +1161,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.offer_for_agent_with_egress',
   'task.offer_for_agent_with_egress_fresh',
   'agent.egress.ack',
+  'agent.message.disposition',
   'agent.content.read',
   'agent.home.projection',
   'task.approve',
@@ -1141,5 +1194,6 @@ export const DAEMON_TO_SERVER_TYPES = [
   'task.cancelled',
   'task.approval_resolved',
   'agent.egress.reliable',
+  'agent.message.publish',
   'agent.content.receipt',
 ] as const satisfies readonly MessageType[];

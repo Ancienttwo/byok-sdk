@@ -9,6 +9,7 @@ import {
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+  AGENT_MESSAGE_EGRESS_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
   AgentRefSchema,
   AgentHomeProjectionCompletionRequestSchema,
@@ -16,6 +17,8 @@ import {
   AgentHomeProjectionReadbackSchema,
   AgentContentReadPayloadSchema,
   AgentEgressPolicySchema,
+  AgentMessageEgressRequirementSchema,
+  AgentMessageServerContextSchema,
   DispatchSelectionSchema,
   RequiredToolsetsSchema,
   encodeEnvelope,
@@ -29,6 +32,10 @@ import {
   type AgentContentReceiptPayload,
   type AgentContentReadPayload,
   type AgentEgressReliablePayload,
+  type AgentMessageDispositionPayload,
+  type AgentMessageEgressRequirement,
+  type AgentMessagePublishPayload,
+  type AgentMessageServerContext,
   type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionPayload,
   type AgentHomeProjectionReadback,
@@ -489,6 +496,9 @@ export class ConnectionHub {
   private readonly serverEvents = new AsyncEventQueue<ByokServerEvent>();
   /** First-write-wins reliable facts; the reference composition's bounded in-memory readback. */
   private readonly agentEgressReceipts = new Map<string, AgentEgressReceipt>();
+  private readonly agentMessageRequirements = new Map<string, { readonly deviceId: string; readonly agentRef: AgentRef; readonly sessionRef?: string; readonly requirement: AgentMessageEgressRequirement; readonly context: AgentMessageServerContext }>();
+  private readonly agentMessageReceipts = new Map<string, { readonly payload: AgentMessagePublishPayload; readonly disposition: AgentMessageDispositionPayload }>();
+  private readonly agentMessageTaskPayloads = new Map<string, AgentMessagePublishPayload>();
   /** Accepted requests are the authority that later receipts/transfers must echo exactly. */
   private readonly agentContentReadRequests = new Map<string, AgentContentReadPayload>();
   /** Content-free explicit-read audit facts keyed by exact authenticated device/request identity. */
@@ -542,6 +552,7 @@ export class ConnectionHub {
      * working unchanged.
      */
     private readonly rateLimiter: RateLimiter = new RateLimiter(),
+    private readonly agentMessage?: { consume(input: { readonly deviceId: string; readonly taskId: string; readonly context: AgentMessageServerContext; readonly payload: AgentMessagePublishPayload }): { readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string } },
   ) {
     // A short (e.g. test-injected) taskLeaseMs sweeps at its own
     // granularity so a short lease is still caught promptly; a realistic
@@ -834,6 +845,10 @@ export class ConnectionHub {
       return this.handleAgentEgressReliable(deviceId, envelope.payload);
     }
 
+    if (envelope.type === 'agent.message.publish') {
+      return this.handleAgentMessagePublish(deviceId, envelope.task_id, envelope.payload);
+    }
+
     if (envelope.type === 'agent.content.receipt') {
       return this.handleAgentContentReceipt(deviceId, envelope.payload);
     }
@@ -883,6 +898,43 @@ export class ConnectionHub {
     this.agentEgressReceipts.set(key, receipt);
     this.sendAgentEgressAck(deviceId, receipt);
     return 'accepted';
+  }
+
+  private handleAgentMessagePublish(deviceId: string, taskId: string, payload: AgentMessagePublishPayload): 'accepted' | 'duplicate' | 'rejected' {
+    if (!this.hasDeviceCapabilities(deviceId, [AGENT_MESSAGE_EGRESS_CAPABILITY])) return 'rejected';
+    const binding = this.agentMessageRequirements.get(taskId);
+    const record = this.taskStore.get(taskId);
+    if (
+      binding === undefined || record === undefined || record.deviceId !== deviceId || binding.deviceId !== deviceId ||
+      !sameAgentRef(binding.agentRef, payload.agentRef) ||
+      (binding.sessionRef !== undefined && binding.sessionRef !== payload.sessionRef) ||
+      binding.requirement.contract !== payload.contract || binding.requirement.contentType !== payload.contentType ||
+      payload.byteCount > binding.requirement.maxBytes
+    ) return 'rejected';
+    const taskPayload = this.agentMessageTaskPayloads.get(taskId);
+    if (taskPayload !== undefined && JSON.stringify(taskPayload) !== JSON.stringify(payload)) return 'rejected';
+    if (taskPayload === undefined) this.agentMessageTaskPayloads.set(taskId, payload);
+    const key = `${deviceId}\u0000${payload.messageId}`;
+    const previous = this.agentMessageReceipts.get(key);
+    if (previous !== undefined) {
+      if (JSON.stringify(previous.payload) !== JSON.stringify(payload)) return 'rejected';
+      this.sendAgentMessageDisposition(deviceId, taskId, previous.disposition);
+      return 'duplicate';
+    }
+    const decision = this.agentMessage?.consume({ deviceId, taskId, context: binding.context, payload }) ?? { outcome: 'held' as const, reasonCode: 'consumer_unavailable' };
+    const disposition: AgentMessageDispositionPayload = {
+      agentRef: payload.agentRef, sessionRef: payload.sessionRef, contract: payload.contract,
+      messageId: payload.messageId, cursor: payload.cursor, contentHash: payload.contentHash,
+      outcome: decision.outcome, receiptId: crypto.randomUUID(),
+      ...(decision.reasonCode === undefined ? {} : { reasonCode: decision.reasonCode }),
+    };
+    this.agentMessageReceipts.set(key, { payload, disposition });
+    this.sendAgentMessageDisposition(deviceId, taskId, disposition);
+    return 'accepted';
+  }
+
+  private sendAgentMessageDisposition(deviceId: string, taskId: string, payload: AgentMessageDispositionPayload): void {
+    this.sendToDevice(deviceId, 'agent.message.disposition', payload, { taskId });
   }
 
   private handleAgentContentReceipt(deviceId: string, payload: AgentContentReceiptPayload): 'accepted' | 'duplicate' | 'rejected' {
@@ -1787,6 +1839,13 @@ export class ConnectionHub {
     const sessionRef = 'sessionRef' in input ? input.sessionRef : undefined;
     const agentRef = input.agentRef === undefined ? undefined : AgentRefSchema.parse(input.agentRef);
     const egressPolicy = input.egressPolicy === undefined ? undefined : AgentEgressPolicySchema.parse(input.egressPolicy);
+    const messageEgress = input.messageEgress === undefined ? undefined : AgentMessageEgressRequirementSchema.parse(input.messageEgress);
+    if (messageEgress === undefined && input.agentMessageContext !== undefined) {
+      throw new Error('agentMessageContext requires messageEgress');
+    }
+    const agentMessageContext = messageEgress === undefined
+      ? undefined
+      : AgentMessageServerContextSchema.parse(input.agentMessageContext);
     const dispatchSelection =
       input.dispatchSelection === undefined
         ? undefined
@@ -1801,6 +1860,9 @@ export class ConnectionHub {
     }
     if (egressPolicy !== undefined && agentRef === undefined) {
       throw new Error('Agent egress policy requires an explicit AgentRef; legacy task dispatch cannot consume it');
+    }
+    if (messageEgress !== undefined && egressPolicy === undefined) {
+      throw new Error('Agent message egress requires the typed Agent egress offer path');
     }
     // M0 routing has no queue-until-connect: reject clearly instead of
     // silently queuing a task nothing will ever claim.
@@ -1843,6 +1905,9 @@ export class ConnectionHub {
           ? `device ${deviceId} did not advertise Agent egress policy, reliable acknowledgement, and fresh-session capabilities; refusing before enqueue`
           : `device ${deviceId} did not advertise Agent egress policy and reliable acknowledgement capabilities; refusing before enqueue`,
       );
+    }
+    if (messageEgress !== undefined && !this.hasDeviceCapabilities(deviceId, [AGENT_MESSAGE_EGRESS_CAPABILITY])) {
+      throw new Error(`device ${deviceId} did not advertise Agent message egress capability; refusing before enqueue`);
     }
 
     if (
@@ -1909,6 +1974,9 @@ export class ConnectionHub {
       resolveResult = resolve;
     });
     this.runtimes.set(taskId, { queue, resolveResult, result });
+    if (messageEgress !== undefined && agentRef !== undefined) {
+      this.agentMessageRequirements.set(taskId, { deviceId, agentRef, sessionRef, requirement: messageEgress, context: agentMessageContext! });
+    }
     queue.push({ kind: 'state', state: record.state, at: record.createdAt });
     this.serverEvents.push({ kind: 'task.created', taskId, at: record.createdAt });
 
@@ -1927,6 +1995,7 @@ export class ConnectionHub {
         dispatchSelection,
         agentRef,
         egressPolicy,
+        ...(messageEgress === undefined ? {} : { messageEgress }),
         ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
       };
       this.sendToDevice(
@@ -1944,6 +2013,7 @@ export class ConnectionHub {
           sessionRef: sessionRef!,
           agentRef,
           egressPolicy,
+          ...(messageEgress === undefined ? {} : { messageEgress }),
           ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
         },
         { taskId, sessionRef },
@@ -2262,7 +2332,7 @@ export class ConnectionHub {
    * (everything except `conn.ack`), same as calling `createEnvelope`
    * directly would require.
    */
-  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.offer_for_agent' | 'task.offer_for_agent_with_egress' | 'task.offer_for_agent_with_egress_fresh' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer' | 'agent.egress.ack' | 'agent.content.read' | 'agent.home.projection'>(
+  private sendToDevice<T extends 'conn.ack' | 'task.offer' | 'task.offer_with_toolsets' | 'task.offer_for_agent' | 'task.offer_for_agent_with_egress' | 'task.offer_for_agent_with_egress_fresh' | 'task.approve' | 'task.reject' | 'task.cancel' | 'task.steer' | 'agent.egress.ack' | 'agent.content.read' | 'agent.home.projection' | 'agent.message.disposition'>(
     deviceId: string,
     type: T,
     payload: Parameters<typeof createEnvelope<T>>[1],
@@ -2289,7 +2359,7 @@ export class ConnectionHub {
     // omitted — for them.
     const redeliverThroughTerminal = type === 'task.cancel' || type === 'task.reject';
     const redeliverWithoutTask =
-      type === 'agent.egress.ack' || type === 'agent.content.read' || type === 'agent.home.projection';
+      type === 'agent.egress.ack' || type === 'agent.content.read' || type === 'agent.home.projection' || type === 'agent.message.disposition';
     outbox.ring.push({ seq, taskId, envelope, redeliverThroughTerminal, redeliverWithoutTask });
     if (outbox.ring.length > OUTBOX_RING_CAPACITY) outbox.ring.shift();
     this.deliverToDevice(deviceId, envelope);

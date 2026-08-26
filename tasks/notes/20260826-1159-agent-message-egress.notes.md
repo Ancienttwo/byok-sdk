@@ -1,0 +1,63 @@
+# Implementation Notes: agent-message-egress
+
+> **Status**: Verifying
+> **Plan**: plans/plan-20260826-1159-agent-message-egress.md
+> **Contract**: tasks/contracts/20260826-1159-agent-message-egress.contract.md
+> **Review**: tasks/reviews/20260826-1159-agent-message-egress.review.md
+> **Last Updated**: 2026-08-26 12:49
+> **Lifecycle**: notes
+
+## Design Decisions
+
+- `agent.message.publish` / `agent.message.disposition` are distinct from Agent activity and terminal-document envelopes.
+- `messageEgress` remains the frozen Salesko shape: required mode, opaque contract discriminator, text content type, and byte ceiling.
+- Product destination lookup is server-side authenticated task context. No target, tenant, device, AgentRef, task, or session field is accepted by the model-visible MCP tool.
+- The bounded opaque `AgentMessageServerContext` is persisted after exact task reservation and before the offer mailbox becomes visible; it never enters an offer/message envelope and is passed only to the host consumer after exact matching.
+- Local MCP publication uses a daemon-issued two-UUID sealed context token. The control RPC does not accept a task id, and decline/finish revoke the token.
+- Exact acceptance revokes the token immediately; cloud/server lock the first immutable message payload per task so a second message id/body is rejected while exact replay remains idempotent.
+- Activated outbox records bind authenticated tenant identity and are recovered from canonical Agent homes on daemon restart; active and recovered sends retry while no exact disposition exists, and cross-tenant recovery fails closed.
+- Fresh-runtime calls may append a staged draft before session handoff; send activation occurs only after the exact handoff is fsynced.
+- Any exact disposition stops transport replay. Only exact `accepted` retires bytes and releases `task.complete`; `held`/`refused` retain bytes and require a separate authenticated product action, while mismatches remain unacknowledged.
+- Codex task MCP uses `--ignore-user-config` plus task-only `-c mcp_servers.*` overrides; local `codex exec --help` confirms both flags exist and auth remains under `CODEX_HOME`.
+
+## Deviations From Plan Or Spec
+
+- The draft design showed a destination binding on the daemon wire. Final implementation keeps the destination entirely server-side and keys the host consumer from authenticated task context, which is stricter and matches the frozen no-model/no-retarget semantics.
+- The aligned unpublished RC is `0.9.0-rc.0` because this adds a new capability/message family; independently versioned keys remains `0.3.2`.
+
+## Tradeoffs Considered
+
+| Option | Decision | Reason |
+|--------|----------|--------|
+| Reuse `task.complete.document` | Rejected | It would widen or conflate activity/terminal privacy semantics. |
+| Reuse reliable activity payload | Rejected | Message content needs separate authorization, storage, ack, and completion dependency. |
+| SDK-reserved task MCP | Selected | Pi/Claude already project task MCP; Codex now truthfully does so with task-only config. |
+
+## Open Questions
+
+- None.
+
+## Evidence Links
+
+- Checks: `.ai/harness/checks/latest.json`
+- Run snapshots: `.ai/harness/runs/`
+- Frozen downstream composite: `sha256:5b1bde061de45995b74b5cc72f0e18a113db17cb01dc094d4659832ab85a6f80`
+- Pre-fix artifact: `.ai/harness/runs/20260826-1205-agent-message-egress-pre-fix.txt` (`PRE_FIX_EXIT=1`, 0/2).
+- `bun run build` PASS.
+- `bun run typecheck` PASS.
+- Final frozen-source `bun run test` PASS: client 1429, cloud 213, cloud-dataplane 74, protocol 344, server 266, remaining workspaces all green.
+- Pi/Claude/Codex task-scoped injection canary PASS: 5 files / 91 tests; each adapter projects the sealed context env through its native MCP configuration path.
+- `repo-harness run check-task-workflow --strict` PASS.
+- `node scripts/release/check-package-graph.mjs` PASS: 9 aligned manifests at `0.9.0-rc.0`, keys `0.3.2`.
+- Independent gate PASS after three concrete blockers were fixed: host-only server context, caller-selected local task authority, and exact-disposition restart replay. Focused protocol/client/cloud/server gates pass; held/refused settlement survives restart and exact transport duplicates do not re-invoke the product consumer.
+- Superseded untracked `1141 terminal-egress` artifacts were moved out of the worktree to `/tmp/byok-superseded-1141-20260826/`; they are recoverable and are not part of this subject.
+
+## Promotion Filter
+
+Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset files only when all three hold: hard to reverse, surprising without local context, and a real trade-off existed. If any one is missing, keep it in this notes file instead.
+
+## Promotion Candidates
+
+- Promote to `tasks/lessons.md` only after a repeated correction or failure pattern.
+- Promote to `docs/researches/` only when it is durable repo knowledge with evidence.
+- Promote to harness asset files only after verification across more than one task or fixture.

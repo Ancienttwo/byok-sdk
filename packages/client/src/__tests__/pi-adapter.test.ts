@@ -428,7 +428,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     });
     const ctx = await makeCtx();
     ctx.mcpServers = {
-      docs: { command: '/opt/docs-mcp', args: ['--readonly'] },
+      docs: { command: '/opt/docs-mcp', args: ['--readonly'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
     };
 
     const session = await startAdapter(adapter, baseTask, ctx);
@@ -447,7 +447,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(typeof configPath).toBe('string');
     expect(JSON.parse(await fs.readFile(configPath as string, 'utf8'))).toEqual({
       mcpServers: {
-        docs: { command: '/opt/docs-mcp', args: ['--readonly'] },
+        docs: { command: '/opt/docs-mcp', args: ['--readonly'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
       },
     });
 

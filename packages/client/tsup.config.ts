@@ -11,6 +11,7 @@ export default defineConfig({
     'src/adapters/pi/mcp-extension.ts',
     'src/bin/byok-agent.ts',
     'src/bin/byok-approval-mcp.ts',
+    'src/bin/byok-agent-message-mcp.ts',
   ],
   format: ['esm'],
   target: 'es2022',

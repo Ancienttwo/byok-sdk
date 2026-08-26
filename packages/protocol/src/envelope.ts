@@ -66,6 +66,7 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('task.offer_for_agent_with_egress', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_for_agent_with_egress_fresh', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.egress.ack', OPTIONAL_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('agent.message.disposition', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.content.read', OPTIONAL_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.home.projection', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.approve', REQUIRED_TASK_ID, REQUIRED_SEQ),
@@ -87,6 +88,7 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('task.cancelled', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('task.approval_resolved', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.egress.reliable', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
+  envelopeShape('agent.message.publish', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.content.receipt', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
 ]);
 
