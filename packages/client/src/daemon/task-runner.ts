@@ -77,6 +77,7 @@ import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
 import { AGENT_MESSAGE_MCP_SERVER_NAME } from './toolset-registry';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
+import { prependAgentMemoryGuidance } from './memory-guidance';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -1850,7 +1851,9 @@ export class TaskRunner {
 
       const startInput: RuntimeOperationStartInput = {
         manifest,
-        instruction: gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction,
+        instruction: agentBinding === undefined
+          ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
+          : prependAgentMemoryGuidance(resolvedInstruction),
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         approvalChannel: {
