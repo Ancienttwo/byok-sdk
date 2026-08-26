@@ -26,8 +26,8 @@ This is the root routing contract for Claude Code and Codex. Load this before ta
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-08-25T12:50:05+0800
-- Last changed path: `packages/client/src/__tests__/device-credential-store.native.test.ts`
+- Last architecture event: 2026-08-26T15:17:40+0800
+- Last changed path: `packages/client/src/__tests__/fixtures/fake-claude.mjs`
 - Severity: low
 - Change type: source-change
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.

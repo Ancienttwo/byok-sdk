@@ -11,5 +11,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- [ ] 2026-08-25T12:50:05+0800 [high] `packages/client/src/__tests__/device-credential-store.native.test.ts` -> [root](requests/root.md)
+- [ ] 2026-08-26T15:17:40+0800 [high] `packages/client/src/__tests__/fixtures/fake-claude.mjs` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
