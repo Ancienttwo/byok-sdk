@@ -154,6 +154,14 @@
   lower permits and stale lower grants cannot revive. Focused round-2 checks
   passed: client 17 pass / 8 platform skips, cloud 10 pass, and all Go helper
   tests. Full strict checks and the one fresh Claude review remain pending.
+- The frozen round-2 subject `fe37ac2` passed `verify-sprint
+  --prepare-acceptance` 31/31 and disposable Postgres/MinIO readback 5/5, but
+  the single approved exact-diff Claude review returned FAIL with one new P1:
+  concurrent recall/save audit read-CAS rewrites are not serialized, so a
+  successful `memory.recall` can surface a spurious revision conflict; durable
+  audit failure is also harder for recall than save. The review is preserved
+  verbatim in the review artifact. This is a new blocker, not authority to
+  extend the current remediation slice; record a typed reject and stop.
 
 ## Promotion Filter
 

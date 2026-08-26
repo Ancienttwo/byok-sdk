@@ -5,21 +5,21 @@
 > **Contract**: tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
 > **Notes File**: tasks/notes/20260826-1725-agent-memory-phase2.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-27 01:20
+> **Last Updated**: 2026-08-27 02:18
 > **Recommendation**: blocked
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:2d60d9a05688cc976de88192b735939a9ea45db6b35a01f66c9bcf4df71e5b7c
+> **Reviewed Subject SHA256**: sha256:454b560c2bc6fc50e9a326ab7f3018193a963120fdabd399935364ffcb9c193e
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
 
 ## Human Review Card
 
-- Verdict: FAIL; the second Claude external review found four P1 blockers on the remediated frozen subject
+- Verdict: FAIL; the third Claude external review found one new P1 blocker on the round-2 remediated frozen subject
 - Change type: code-change + migration
 - Intended files changed: client memory MCP and runtime injection, protocol/cloud projection contracts, cloud-dataplane store and migration, focused tests, architecture and task evidence
 - Actual files changed: the intended Phase 2 surfaces under `packages/client`, `packages/protocol`, `packages/cloud`, `packages/cloud-dataplane`, `deploy/sql`, `tests/sql`, and the task artifacts listed by the contract
 - Commands passed: `bun run build`; `bun run typecheck`; `bun run test`; `repo-harness run check-task-workflow --strict`; `git diff --check`; `bun run check:deploy-sql`; official focused client/cloud/protocol tests; disposable Postgres/MinIO dataplane tests
-- Residual risks: macOS helper cannot carry the new internal-state bounds; the EPIPE guard is not portable to Linux CI; rejected trailing replay is not observable; and the shipped authorizer cannot preserve prior-task grants for historical replay
+- Residual risks: concurrent recall/save audit writes can race their read/CAS rewrite and turn a successful recall into a hard revision-conflict failure; persistent audit failure is also asymmetric between recall and save
 - Reviewer action required: stop at terminal reject; any further fix requires a new approved regression-first slice and another exact-subject review
 - Rollback: revert the reviewed Phase 2 diff to checkpoint `185cf91`; migration `0014` has not been deployed
 
@@ -47,6 +47,32 @@ screenshot/artifact path, or reviewer observation.
 - No non-built-in `manual_checks` are declared by the contract.
 
 ## Claude External Review (verbatim)
+
+### Round-2 remediation re-review — 2026-08-27
+
+```text
+**Verdict: not mergeable — 1 new P1, plus several P2s (some carried over from the prior review unaddressed).**
+
+## P1
+
+1. **Concurrent `memory.recall` calls fail with a spurious revision conflict on the audit file.** `AgentMemoryService.recall` (`packages/client/src/daemon/agent-memory.ts`) is not serialized through `exclusive()`, yet `audit()` does read→CAS-`replaceInternalFile` on `agent-memory-audit-v1.jsonl`. Two overlapping recalls (parallel tool calls from the runtime, or a recall overlapping a save's audit write) race on `expectedRevision`; the loser throws `AgentMemoryRevisionConflictError` out of `audit()`, and `recall` has no `saveAuditWarning`-style wrapper, so the model sees a hard failure for a read that succeeded. Same asymmetry: any persistent audit failure (oversized/corrupt tail on the helper path) makes `recall` throw forever while `save` merely warns. Serialize recall's audit under the per-home queue, or downgrade recall audit failure to the same metadata-only warning.
+
+## P2
+
+- **Helper spawned on every strict-task close even with projection off.** `quiesceAndSnapshotAgentMemory` (`task-runner.ts`) calls `bindAgentMemoryFilesystem` before `snapshotAndProjectAgentMemory` early-returns for an unconfigured projection — one Go process per task close on macOS for nothing. Check the four projection guards first.
+- **`port.publish` has no timeout inside task finalization.** `quiesceAndSnapshotAgentMemory` is awaited before terminal evidence is persisted and the Agent-home lease is released; a hung embedder transport wedges finalization indefinitely. Helper requests have a 10s bound, the port has none.
+- **Walk semantics differ by platform.** Go `walkPinned` fails the whole walk (`unsafe_path`) on any non-regular entry or invalid segment; Linux native `memoryNotePaths` skips them (`if (!entry.isFile()) continue`). A stray socket/fifo in `notes/` breaks every macOS snapshot but none on Linux.
+- **macOS `st_dev` sign mismatch (unaddressed from prior review).** `identity_unix.go` prints `%d` of a signed `int32` dev; Node's bigint `dev` is libuv's unsigned widening; `validDecimal` rejects `-`. Negative-dev volumes → unconditional `root_identity_mismatch`.
+- **Memory MCP injected into every strict Agent task on Linux with only `agentHome` configured** (`create-daemon.ts` resolves `agentMemoryMcpBin` regardless of `agentMemory`), without checking the adapter's `mcpToolsets` support (`withAgentMemoryMcp`). Existing deployments change behavior on upgrade; adapters declaring `mcpToolsets: false` receive an MCP config.
+- **`byok-agent-memory-mcp.ts` caches a rejected `connectControlClient` promise for the task lifetime**; `serveAgentMemoryMcpOverStdio` silently drops unparseable lines instead of `-32700`. Both unchanged from prior review.
+- **`AgentMemoryProjectionReplayPendingError` is not exported from `packages/client/src/index.ts`**, so embedders cannot `instanceof` the typed pending outcome the docs advertise.
+- **`AgentHomeLease.homeIdentity` is a new required member on an exported interface** — external implementers/fixtures break at typecheck.
+- **`audit()` rewrites the entire bounded tail (up to 1 MiB) on every recall/save** — O(file) I/O per tool call.
+- **`tests/sql/control_plane_invariants.sql`**: comment says "30 is …" but the check is `< 31`; **`0014`** index `agent_memory_projection_metering_receipt_readback` duplicates the primary key.
+- **Test coverage gaps**: `agent-memory-fs-helper.test.ts` skips without `BYOK_TEST_AGENT_MEMORY_FS_BIN` and CI never builds the Go helper; `agent-memory-mcp.test.ts` gates on `process.platform === 'linux'` rather than `isAgentMemorySecureFilesystemAvailable()`; the outbox regression's `InMemoryFilesystem.replace` ignores `expectedRevision`, so CAS is not exercised there.
+- **`.ai/harness/checks/change-assessment.debug.json`** is an untracked debug artifact; don't commit it.
+- **Branch self-declares incomplete**: contract `Status: Partial`, plan **Round 2 重验** unchecked, review `Terminal Blocked` with a typed Claude `reject` receipt still current.
+```
 
 ### Remediation re-review — 2026-08-27
 
@@ -132,24 +158,22 @@ Findings (no P1-free pass; four blockers).
 ## Residual Risks / Follow-ups
 
 - Phase 2 on macOS requires the explicit, version-matched helper proven in the cross-platform work-package. Windows remains disabled until a real runner proves its junction/reparse/rename matrix.
-- Four Claude P1 findings remain unresolved; the frozen subject must not merge.
+- The four round-2-targeted Claude P1 findings are remediated and strict checks pass, but the latest exact-subject review found a new P1 audit-concurrency defect; the frozen subject must not merge.
 - No push, merge, package publication, deployment, or production migration evidence exists for this subject.
 
 ## Scorecard
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| Functionality | fail | Four P1 runtime/lifecycle defects remain despite focused and full tests passing |
+| Functionality | fail | A new P1 audit-concurrency defect remains despite focused and full tests passing |
 | Product depth | source-pass | Local authority, hosted projection, metering, erase, and audit boundaries are covered |
 | Design quality | source-pass | One-way projection avoids dual authority; unsupported platforms fail closed |
-| Code quality | fail | Fresh Claude review found uncaught EPIPE and unbounded-log lifecycle defects |
+| Code quality | fail | Fresh Claude review found read/CAS audit concurrency can turn successful recall into a hard failure |
 
 ## Failing Items
 
-- Linux helper configuration can disable all memory operations.
-- Pending outbox records cannot replay across task/session bindings and can permanently wedge sequence progress.
-- Outbox/helper audit logs have no compaction path before the 16 MiB fail-closed ceiling.
-- Helper stdin EPIPE can become an uncaught daemon exception.
+- Concurrent recall/save audit writes are not serialized and can fail a successful recall with a spurious revision conflict.
+- Persistent audit failure remains asymmetric: recall throws while save returns a warning.
 - Upstream CI freshness does not exist for this local subject.
 
 ## Retest Steps
@@ -159,5 +183,5 @@ Findings (no P1-free pass; four blockers).
 
 ## Summary
 
-- Source verdict: FAIL due to four Claude P1 findings.
+- Source verdict: FAIL due to the latest Claude review's audit-concurrency P1 finding.
 - Ship / terminal acceptance: BLOCKED; the later typed Claude `reject` receipt supersedes the earlier user-waiver disposition for this frozen subject.
