@@ -84,11 +84,14 @@
   parent-directory symlink race and Pi/Claude/Codex strict injection.
 - Disposable Postgres/MinIO: invariants + projection 2 files / 5 tests passed;
   compose substrate was removed afterward.
-- `verify-sprint --prepare-acceptance` reran all contract rows successfully
-  except the expected commit-bound `.ai/harness/checks/latest.json` artifact;
-  the active contract is intentionally uncommitted because this task has no
-  commit/push authority. Run snapshot:
-  `.ai/harness/runs/run-20260826T183152-57581-20260826-1725-agent-memory-phase2.json`.
+- Commit-bound source and acceptance metadata are frozen on
+  `codex/agent-memory-phase2` at `5ffeb3b`, `7cbf3bc`, `c1adbcd`, and
+  `3faeba4`. `verify-sprint --prepare-acceptance` passed all 15 contract rows
+  plus Change Assessment; run snapshot:
+  `.ai/harness/runs/run-20260827T001543-22563-20260826-1725-agent-memory-phase2.json`.
+  The semantic AcceptanceReceipt remains pending under the frozen Claude-or-
+  explicit-user-waiver policy. No push, merge, publish, deploy, or production
+  migration was performed.
 
 ## Promotion Filter
 
