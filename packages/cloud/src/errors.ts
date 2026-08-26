@@ -64,6 +64,18 @@ export const CLOUD_ERROR_CODES = {
   agent_home_projection_receipt_mismatch: 'agent_home_projection_receipt_mismatch',
   /** A receipt-store row at the projection namespace violated the frozen projection schema. */
   agent_home_projection_receipt_invalid: 'agent_home_projection_receipt_invalid',
+  /** A hosted Agent-memory mutation did not match the durable task/device/AgentRef binding. */
+  agent_memory_projection_task_mismatch: 'agent_memory_projection_task_mismatch',
+  /** The embedder-owned grant/consent authority denied a hosted memory mutation. */
+  agent_memory_projection_authorization_denied: 'agent_memory_projection_authorization_denied',
+  /** A redacted snapshot's decoded bytes did not match its declared hash or byte count. */
+  agent_memory_projection_hash_mismatch: 'agent_memory_projection_hash_mismatch',
+  /** A writer epoch/source sequence already names a different immutable projection mutation. */
+  agent_memory_projection_replay_mismatch: 'agent_memory_projection_replay_mismatch',
+  /** A hosted memory mutation came from an older writer epoch. */
+  agent_memory_projection_stale_epoch: 'agent_memory_projection_stale_epoch',
+  /** A hosted memory mutation skipped or reset a required source sequence. */
+  agent_memory_projection_sequence_gap: 'agent_memory_projection_sequence_gap',
 } as const;
 
 export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR_CODES];

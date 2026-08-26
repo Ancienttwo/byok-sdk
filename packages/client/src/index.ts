@@ -114,6 +114,22 @@ export type {
   AgentContentReadSurfaceConfig,
   AgentReliableEgressInput,
 } from './daemon/create-daemon';
+export {
+  AgentMemoryError,
+  AgentMemoryRevisionConflictError,
+  isAgentMemorySecureFilesystemAvailable,
+  AGENT_MEMORY_AUDIT_FILENAME,
+  AGENT_MEMORY_OUTBOX_FILENAME,
+} from './daemon/agent-memory';
+export type { AgentMemoryFilesystemHelperConfig } from './daemon/agent-memory-filesystem';
+export type {
+  AgentMemoryFile,
+  AgentMemorySnapshot,
+  AgentMemoryRedactor,
+  AgentMemoryProjectionGrant,
+  AgentMemoryProjectionPort,
+  AgentMemoryHostedProjection,
+} from './daemon/agent-memory';
 export type {
   AgentEgressDropReceipt,
   AgentEgressLaneStatus,

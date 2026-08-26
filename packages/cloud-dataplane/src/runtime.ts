@@ -42,12 +42,15 @@ export {
   PostgresActivityStore,
   PostgresApprovalTimelineStore,
   PostgresDeviceAssertionReplayAuthority,
+  PostgresAgentMemoryProjectionStore,
+  createPostgresAgentMemoryProjectionStore,
   createPostgresCloudStores,
 } from './stores/index';
 export type {
   PostgresCloudStoreOptions,
   PostgresCloudStores,
   PostgresObjectStorageOptions,
+  PostgresAgentMemoryProjectionStoreOptions,
 } from './stores/index';
 
 // The object-storage half of blobs. Grants only: this composition supplies no

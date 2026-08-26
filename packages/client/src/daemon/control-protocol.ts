@@ -557,6 +557,38 @@ export interface AgentMessagePublishResult {
   state: 'staged' | 'pending';
 }
 
+export interface AgentMemoryRecallParams {
+  contextToken: string;
+  path: string;
+  ifRevision?: string;
+}
+
+export interface AgentMemorySaveParams {
+  contextToken: string;
+  op: 'replace' | 'delete';
+  path: string;
+  expectedRevision: string;
+  content?: string;
+}
+
+function validAgentMemoryContextToken(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 32 && value.length <= 160 && !/[\u0000\r\n]/u.test(value);
+}
+
+/** Parser only validates the local IPC shape. Agent identity and memory root stay daemon-owned. */
+export function parseAgentMemoryRecallParams(value: unknown): AgentMemoryRecallParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'contextToken' && key !== 'path' && key !== 'ifRevision')) return undefined;
+  if (!validAgentMemoryContextToken(value.contextToken) || typeof value.path !== 'string' || (value.ifRevision !== undefined && typeof value.ifRevision !== 'string')) return undefined;
+  return { contextToken: value.contextToken, path: value.path, ...(value.ifRevision === undefined ? {} : { ifRevision: value.ifRevision }) };
+}
+
+export function parseAgentMemorySaveParams(value: unknown): AgentMemorySaveParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'contextToken' && key !== 'op' && key !== 'path' && key !== 'expectedRevision' && key !== 'content')) return undefined;
+  if (!validAgentMemoryContextToken(value.contextToken) || (value.op !== 'replace' && value.op !== 'delete') || typeof value.path !== 'string' || typeof value.expectedRevision !== 'string' || (value.op === 'replace' && typeof value.content !== 'string') || (value.op === 'delete' && value.content !== undefined)) return undefined;
+  const content = value.content;
+  return { contextToken: value.contextToken, op: value.op, path: value.path, expectedRevision: value.expectedRevision, ...(typeof content === 'string' ? { content } : {}) };
+}
+
 // ---------------------------------------------------------------------------
 // `assertion.issue` (plan device-assertion-broker)
 // ---------------------------------------------------------------------------

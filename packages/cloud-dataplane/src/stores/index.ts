@@ -48,6 +48,11 @@ export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
 export { PostgresApprovalTimelineStore } from './approval-timeline';
 export { PostgresAgentEgressStore } from './agent-egress';
+export {
+  PostgresAgentMemoryProjectionStore,
+  createPostgresAgentMemoryProjectionStore,
+} from './agent-memory-projection';
+export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection';
 export { PostgresDeviceAssertionReplayAuthority } from './device-assertion-replay';
 export {
   DEFAULT_MAX_ATTEMPTS,

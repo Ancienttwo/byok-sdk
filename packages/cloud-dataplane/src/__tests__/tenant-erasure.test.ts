@@ -267,6 +267,34 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
      )`,
     [tenant, device, hash, now],
   );
+  await pool.query(
+    `INSERT INTO agent_memory_projection_head (
+       tenant_id, agent_id, writer_epoch, source_seq, mutation_id,
+       device_id, task_id, agent_profile_revision, session_ref, runtime_id,
+       grant_ref, policy_revision, redacted_hash, redacted_snapshot,
+       redacted_byte_count, committed_at
+     ) VALUES (
+       $1, 'agent-memory', 1, 1, '10000000-0000-4000-8000-000000000003',
+       $2, 'memory-task', 'memory-profile', 'memory-session', 'codex',
+       'memory-grant', 'memory-policy', $3, ''::bytea,
+       0, $4
+     )`,
+    [tenant, device, hash, now],
+  );
+  await pool.query(
+    `INSERT INTO agent_memory_projection_metering_receipt (
+       tenant_id, agent_id, writer_epoch, source_seq, mutation_id,
+       device_id, task_id, agent_profile_revision, session_ref, runtime_id,
+       grant_ref, policy_revision, redacted_hash, redacted_byte_count,
+       metering_receipt_id, recorded_at
+     ) VALUES (
+       $1, 'agent-memory', 1, 1, '10000000-0000-4000-8000-000000000003',
+       $2, 'memory-task', 'memory-profile', 'memory-session', 'codex',
+       'memory-grant', 'memory-policy', $3, 0,
+       '10000000-0000-4000-8000-000000000004', $4
+     )`,
+    [tenant, device, hash, now],
+  );
 }
 
 async function eraseToCompletion(
@@ -355,7 +383,7 @@ describe.skipIf(SKIP_DATAPLANE)('PostgresTenantErasure [postgres + minio]', () =
     } finally {
       await database.dispose();
     }
-  });
+  }, 15_000);
 
   it('lists the exact canonical keyPrefix against MinIO', async () => {
     const storage = await createObjectStorageScope();

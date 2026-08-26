@@ -71,6 +71,8 @@ import {
   ENROLLMENT_PAIRING_CODE_MAX_BYTES,
   parseApprovalsRequestParams,
   parseAgentMessagePublishParams,
+  parseAgentMemoryRecallParams,
+  parseAgentMemorySaveParams,
   parseApprovalsResolveParams,
   parseAssertionIssueParams,
   parseEnrollmentPairParams,
@@ -123,6 +125,9 @@ import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRec
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
+import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+import { isAgentMemorySecureFilesystemAvailable, type AgentMemoryHostedProjection } from './agent-memory';
+import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
 import {
   AGENT_CONTENT_READ_CAPABILITIES,
   AgentContentReadPolicyEngine,
@@ -239,6 +244,14 @@ export interface DaemonConfig {
     hostStorageRoot: string;
     projection?: AgentHomeProjection;
   };
+  /** Optional, one-way hosted projection. Without all guards it has zero network activity. */
+  agentMemory?: AgentMemoryHostedProjection;
+  /**
+   * Product-owned external secure-filesystem helper. The path must be absolute;
+   * the SDK never searches PATH or bundles a native addon. Required for Phase
+   * 2 on macOS. Windows remains fail-closed pending its native race proof.
+   */
+  agentMemoryFilesystem?: AgentMemoryFilesystemHelperConfig;
   /**
    * Refuse legacy task offers locally. This is an additive capability only
    * after the SDK-owned Agent home has passed construction-time preflight.
@@ -1065,6 +1078,23 @@ export function buildDaemonWithAdapters(
       'DaemonConfig.agentHome and DaemonConfig.gitWorkspace are mutually exclusive; Agent home is the only workspace authority for Agent offers',
     );
   }
+  if (config.agentMemory !== undefined && config.agentHome === undefined) {
+    throw new Error('DaemonConfig.agentMemory requires DaemonConfig.agentHome for the exact Agent memory authority');
+  }
+  if (config.agentMemoryFilesystem !== undefined && config.agentHome === undefined) {
+    throw new Error('DaemonConfig.agentMemoryFilesystem requires DaemonConfig.agentHome for the exact Agent memory authority');
+  }
+  if (config.agentMemoryFilesystem !== undefined && (!path.isAbsolute(config.agentMemoryFilesystem.helperBin) || /[\u0000\r\n]/u.test(config.agentMemoryFilesystem.helperBin))) {
+    throw new Error('DaemonConfig.agentMemoryFilesystem.helperBin must be an explicit absolute executable path');
+  }
+  const externalAgentMemoryFilesystem = config.agentMemoryFilesystem !== undefined;
+  if (externalAgentMemoryFilesystem && !isAgentMemorySecureFilesystemAvailable(true)) {
+    throw new Error('DaemonConfig.agentMemoryFilesystem is not admitted on this platform without its native race proof');
+  }
+  if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
+    throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
+  }
+  const agentMemoryMcpBin = config.agentHome === undefined ? undefined : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
@@ -1817,9 +1847,10 @@ export function buildDaemonWithAdapters(
       // doc comment. Spread rather than assigned so an unconfigured daemon
       // builds the exact `deps` object it did before this seam existed.
       ...(config.resultDocument ? { resultDocument: config.resultDocument } : {}),
-      ...(config.agentHome !== undefined && config.agentEgress !== undefined
-        ? { agentMessageMcpBin: resolveAgentMessageMcpBin() }
-        : {}),
+      ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
+      ...(config.agentMemoryFilesystem === undefined ? {} : { agentMemoryFilesystemHelperBin: path.resolve(config.agentMemoryFilesystem.helperBin) }),
+      ...(config.agentHome !== undefined && config.agentEgress !== undefined ? { agentMessageMcpBin: resolveAgentMessageMcpBin() } : {}),
+      ...(config.agentMemory === undefined ? {} : { agentMemoryHostedProjection: config.agentMemory }),
       // M4 Phase 3 hardening: bridges TaskRunner's stale-approval-race
       // finding out to the SAME local observability seam every other
       // daemon-local event already uses (see observer.ts's own module doc
@@ -2807,6 +2838,18 @@ export function buildDaemonWithAdapters(
         if (!parsed) throw new ControlError('bad_request', 'agent_messages.publish requires exactly {contextToken,contentType,body}');
         if (!runner) throw new ControlError('not_found', 'daemon is not started');
         return runner.publishAgentMessage(parsed);
+      },
+      'agent_memory.recall': (params) => {
+        const parsed = parseAgentMemoryRecallParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'agent_memory.recall requires exactly {contextToken,path,ifRevision?}');
+        if (!runner) throw new ControlError('not_found', 'daemon is not started');
+        return runner.recallAgentMemory(parsed);
+      },
+      'agent_memory.save': (params) => {
+        const parsed = parseAgentMemorySaveParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'agent_memory.save requires exactly {contextToken,op,path,expectedRevision,content?}');
+        if (!runner) throw new ControlError('not_found', 'daemon is not started');
+        return runner.saveAgentMemory(parsed);
       },
       /**
        * Plan `device-assertion-broker`: mint one short-lived, audience-scoped

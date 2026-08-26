@@ -22,6 +22,10 @@ import { createByokCloud, type ByokCloud, type ByokCloudOptions } from '../cloud
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import type { BlobContentProxy, CloudStores } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
+import type {
+  AgentMemoryProjectionAuthorizer,
+  AgentMemoryProjectionStore,
+} from '../agent-memory-projection';
 
 const TOKEN_SECRET_BYTES = 32;
 
@@ -75,6 +79,8 @@ export interface InMemoryByokCloudOptions {
   readonly skillPacks?: SkillPackStore;
   readonly skillPackPageLimit?: number;
   readonly agentMessage?: ByokCloudOptions['agentMessage'];
+  readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
+  readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
 }
 
 export interface InMemoryByokCloud {
@@ -113,13 +119,22 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     crypto,
     tokenSigner,
     clock,
-    capabilities: options.capabilities ?? fullCapabilityDeclaration(),
+    capabilities: options.capabilities ?? fullCapabilityDeclaration(undefined, {
+      includeAgentMemoryProjection:
+        options.agentMemoryProjectionAuthorizer !== undefined && options.agentMemoryProjectionStore !== undefined,
+    }),
     ...(options.truthCommitter === undefined ? {} : { truthCommitter: options.truthCommitter }),
     ...(options.truthObjectDownloads === undefined
       ? {}
       : { truthObjectDownloads: options.truthObjectDownloads }),
     ...(options.operatorId !== undefined ? { operatorId: options.operatorId } : {}),
     ...(options.agentMessage === undefined ? {} : { agentMessage: options.agentMessage }),
+    ...(options.agentMemoryProjectionAuthorizer === undefined
+      ? {}
+      : { agentMemoryProjectionAuthorizer: options.agentMemoryProjectionAuthorizer }),
+    ...(options.agentMemoryProjectionStore === undefined
+      ? {}
+      : { agentMemoryProjectionStore: options.agentMemoryProjectionStore }),
     ...(options.maxBlobSizeBytes !== undefined ? { maxBlobSizeBytes: options.maxBlobSizeBytes } : {}),
     ...(options.longPollHoldMs !== undefined ? { longPollHoldMs: options.longPollHoldMs } : {}),
     ...(options.longPollIntervalMs !== undefined ? { longPollIntervalMs: options.longPollIntervalMs } : {}),

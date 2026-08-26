@@ -1436,6 +1436,48 @@ table，10x 压力仍首先落在 per-Agent/tenant reliable backlog。
 Rollback 仍限于隔离 branch 的 revert/delete；不包含 publish、merge、push、deploy、
 production migration、secret change 或 Agent-home deletion。
 
+#### 12.6.9 Per-Agent working memory 与 hosted redacted projection
+
+Agent 长期 working memory 的唯一 authoring authority 是 canonical Agent home
+内的 `MEMORY.md` 与 `notes/**/*.md`；路径只按 `agentId` 持久，
+`profileRevision` 参与每次 task 授权精确匹配但不切换 home。SDK 不
+摘要、merge、semantic-rank 或 auto-inject 这些文件；startup
+guidance 只约束 runtime 自行 recall/save，不成为第二份内容权威。
+
+Strict Agent task 可获得 SDK-owned reserved stdio MCP：
+`memory.recall` 与 `memory.save`。Daemon 从 active task 重建
+tenant/device/task/session/runtime/exact `AgentRef` 与 canonical home，model 不能
+传这些 identity/root。文件面仅允许 `MEMORY.md` 和经校验的
+`notes/**/*.md`，用 sha256 revision CAS、atomic replace/delete、fsync
+与 metadata-only local audit；路径逃逸、symlink、`.byok`、secret-like
+名称与 stale revision 全部 fail closed。Ordinary task 和 Git-only task 不
+注入该 MCP，hosted content-read 对 `MEMORY.md` 的 deny 保持不变。
+Linux 保留 `/proc/self/fd` + `O_NOFOLLOW` 的 native descriptor backend。
+macOS 可由 product host 显式提供 absolute-path、exact-version 的外部 Go
+helper；daemon 以 bounded stdio protocol 绑定 leased Agent-home 的 dev/ino，
+helper 用 `os.Root` 并逐层 pin/recheck directory/file identity。SDK 不搜 PATH、
+不捆 binary、也不引入 `.node`/install script；helper timeout、death、malformed
+response、identity mismatch 或 unsafe path 一律 fail closed。Windows source
+虽可 cross-build，仍不 admission，必须先在真实 Windows runner 通过
+junction/reparse/rename matrix。Phase 1 的本地文件 + startup guidance baseline
+不受该 secure-fs gate 影响。
+
+Hosted 能力 `agent.memory.projection` 是单向、可选、默认关的
+redacted full-snapshot projection，不是 remote recall/import/restore 或
+product-fact store。Local quiescence 在 runtime close 后、Agent-home writer lease
+释放前捕获 native file-tool direct writes；只有 capability、opaque grant、
+required redactor 和 transport port 四者齐备才可上传，outbox 只持久化
+redacted bytes。Cloud 再绑定 authenticated tenant/device/task/exact AgentRef/
+session/runtime/grant/writer epoch；Postgres 以 `(tenantId, agentId)` 保存
+bounded latest snapshot，用 gap-free sequence 和 immutable mutation receipt 实现
+exact replay 幂等，仅计量 accepted redacted bytes。Server-side erase 先 revoke
+grant 再删 head/receipt，不依赖 device online。
+
+这条轨道不复用 generic `truth.records` 作为 per-Agent working-memory
+权威，不实现双向 sync、multi-device merge、RAG/search/history 或
+compaction hook。本节只陈述 `codex/agent-memory-phase2` 的 source 与本地
+验收状态；不代表 merge、publish、deploy 或 production migration 已完成。
+
 ### 12.7 数据与存储架构（云端面为目标设计；本机 journal 面已实现）
 
 主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 持有按 daemon 声明的 canonical hash 命名、且由 cloud 观测 size/content-type 的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok-sdk/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
