@@ -1,0 +1,23 @@
+COMMAND: bun run --cwd packages/client test -- src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts
+SUBJECT: 9bde10a (production source still pre-fix; regression guard added only)
+EXIT: 1
+
+$ vitest run "src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts"
+
+FAIL src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts
+  Agent memory metadata-only audit concurrency P1 regression
+    x serializes concurrent recalls through the per-home audit writer
+      AssertionError: expected maxConcurrentAuditReads 2 to be 1
+    x serializes recall audit with save mutation and audit for the same Agent home
+      AssertionError: expected maxConcurrentAuditReads 2 to be 1
+    x serializes recall audit with quiescence snapshot audit for the same Agent home
+      AssertionError: expected maxConcurrentAuditReads 2 to be 1
+    x returns recalled source content with a metadata-only warning when audit persistence fails
+      AssertionError: promise rejected "AgentMemoryError: audit persistence rejected" instead of resolving
+
+Test Files  1 failed (1)
+Tests       4 failed (4)
+
+The first three failures prove that recall audit reads overlap recall, save,
+and snapshot audit writers for the same canonical Agent home. The fourth proves that a
+metadata-only audit failure still hard-fails an already successful recall.

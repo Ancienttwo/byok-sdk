@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-26 17:25
+> **Last Updated**: 2026-08-27 02:57
 > **Review File**: `tasks/reviews/20260826-1725-agent-memory-phase2.review.md`
 > **Notes File**: `tasks/notes/20260826-1725-agent-memory-phase2.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -57,10 +57,10 @@ an ordinary task and for a hosted contract missing grant or redactor.
 
 Required when Task Profile is `bugfix`.
 
-- root_cause: `packages/client/src/daemon/agent-memory.ts:550-600` silently treats a rejected trailing publish as success, while `packages/cloud/src/stores/in-memory/agent-memory-projection.ts:208-238` keys grants only by tenant/grantRef/epoch and overwrites the prior exact task permit; independently `packages/client/native/agent-memory-fs/main.go:33-40,208-209,370-376` caps helper replace at 256 KiB and its raw JSON frame at 2 MiB although the TypeScript internal-state contract is 16 MiB, and the EPIPE guard did not simulate darwin admission on Linux CI.
-- repro: `cd packages/client/native/agent-memory-fs && GOTOOLCHAIN=go1.26.5 go test ./... && bun run --cwd packages/client test -- src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts src/__tests__/agent-memory-helper-p1-regressions.test.ts && bun run --cwd packages/cloud test -- src/__tests__/agent-memory-cross-task-replay-p1-regression.test.ts`
-- regression_guard: packages/client/src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts
-- pre_fix_failure_artifact: .ai/harness/runs/agent-memory-replay-outcome-p1-pre-fix.log
+- root_cause: `packages/client/src/daemon/agent-memory.ts:352-399,454-467` has three writers for the same bounded audit CAS file, but only save enters the per-home queue. Concurrent recall/recall, recall/save, or recall/snapshot audit reads can overlap; recall also propagates metadata-only audit persistence failure after its source read already succeeded, unlike save's explicit warning disposition.
+- repro: `bun run --cwd packages/client test -- src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts`
+- regression_guard: packages/client/src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts
+- pre_fix_failure_artifact: .ai/harness/runs/agent-memory-audit-concurrency-p1-pre-fix.log
 
 ## Workflow Inventory
 
@@ -167,6 +167,7 @@ exit_criteria:
   artifacts_exist:
     - tasks/notes/20260826-1725-agent-memory-phase2.notes.md
   tests_pass:
+    - path: packages/client/src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts
     - path: packages/client/src/__tests__/agent-memory-helper-p1-regressions.test.ts
     - path: packages/client/src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts
     - path: packages/cloud/src/__tests__/agent-memory-cross-task-replay-p1-regression.test.ts

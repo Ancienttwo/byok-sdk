@@ -170,6 +170,13 @@ See captured planning output.
 - [x] **可选 LOW tool-name 变更暂缓**：`memory.recall` / `memory.save` 是 public MCP surface；没有 approved one-shot migration contract 时不重命名、不加 alias/fallback。
 - [ ] **Owner re-gate / push authority**：本 slice 只交付 local source candidate；现有 audit-concurrency typed reject 仍有效，re-gate、push、CI、fresh external review 与 merge 分属后续 authority。
 
+### Post-regate P1 remediation — metadata-only audit concurrency
+
+- [x] **Regression-first evidence**：同一 canonical Agent home 的 recall/recall、recall/save 与 recall/snapshot 均可并发读取相同 audit CAS revision；另证明 recall 已成功读取 source 后仍会因 metadata-only audit 持久化失败而 hard fail。red guard 与 pre-fix artifact 均已保留。
+- [ ] **单一 per-home writer queue**：把现有 save queue 提升为 module-owned home queue；save mutation+audit 继续作为一个临界区，recall 与 snapshot 只串行化 audit writer，不把 source reads 全部单线程化。
+- [ ] **一致 failure disposition**：recall 的 source read 成功后，audit failure 与 save 一样返回 `agent_memory_audit_unavailable` warning；不伪造 source failure 或 rollback。
+- [ ] **重验**：focused client guards、package typecheck/build/test 与 strict contract checks 通过后冻结新 subject。push、remote CI、fresh external review 与 merge 仍需后续独立授权。
+
 ## Verification
 
 - `bun run build` / `bun run typecheck` / `bun run test`
