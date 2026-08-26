@@ -203,8 +203,13 @@
   returns the same body-free `agent_memory_audit_unavailable` warning as save
   after a successful source operation. The new guard passes 4/4; the focused
   client memory suite passes 14 with 6 platform skips, and package typecheck +
-  build pass. Full strict verification remains pending before a new frozen
-  subject; no push, remote CI, fresh external review, acceptance, or merge was
+  build pass. The first strict run then passed every product/runtime check but
+  rejected the pre-fix artifact's machine format; adding only the required
+  `PRE_FIX_EXIT=1` and exact guard path closed that evidence defect. The single
+  final strict retry passed 33/33 with root build, typecheck, full tests,
+  deploy-SQL checks, Go tests, and strict workflow green. Run snapshot:
+  `.ai/harness/runs/run-20260827T030101-99351-20260826-1725-agent-memory-phase2.json`.
+  No push, remote CI, fresh external review, acceptance, or merge was
   performed.
 
 ## Promotion Filter
