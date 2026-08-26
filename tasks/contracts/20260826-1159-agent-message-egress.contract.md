@@ -29,7 +29,8 @@ Produce an unpublished packed RC that exposes a distinct Agent-initiated message
   - Gate required-message `task.complete` on exact message acceptance and reject missing, stale-task, wrong-session, wrong-Agent and mismatched dispositions.
   - Add in-memory and durable cloud/server persistence/readback tests plus packed-RC Salesko consumption.
 - Out of scope:
-  - Salesko schemas, conversation storage, target parsing, model-authored routing fields, stdout/session-file parsers, terminal-document authorization, contentful activity, attachments, workspace/transcript/artifact transfer, publish/tag/merge/push/deploy/migration/secrets.
+  - Salesko schemas, conversation storage, target parsing, model-authored routing fields, stdout/session-file parsers, terminal-document authorization, contentful activity, attachments, workspace/transcript/artifact transfer, publish/tag/deploy/migration/secrets.
+  - PR, push, and merge are authorized only for this accepted source plus the pre-existing root architecture/context projection WIP; they do not authorize package publication.
 - Taste constraints: <!-- advisory only, no run gate; default style/taste lives in AGENTS.md and the minimal-change policy, use this to record a per-task override -->
 
 ## Stop Conditions
@@ -85,6 +86,11 @@ Post-RC reconciliation evidence:
 
 ```yaml
 allowed_paths:
+  - .ai/context/context-map.json
+  - AGENTS.md
+  - CLAUDE.md
+  - docs/architecture/index.md
+  - docs/architecture/requests/root.md
   - docs/researches/2026-08-26_agent-initiated-message-egress-contract.md
   - docs/protocol.md
   - docs/architecture/sdk-architecture.md

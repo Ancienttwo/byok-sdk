@@ -287,4 +287,4 @@ The downstream message-lane consumer is frozen by composite SHA-256 `5b1bde061de
 - [x] Produce an unpublished aligned packed RC with declarations, manifest, tarball paths, sha256 and npm integrity, then run the exact Salesko packed-RC acceptance commands.
 - [x] Freeze the post-RC Salesko extractor-collision falsifier and add offer-scoped terminal projection authority without changing the frozen message lane.
 - [x] Prove message-only fresh/resume tasks bypass the global extractor, while explicit result-document tasks invoke it with trusted contract context and fail closed when missing.
-- [ ] Produce `0.9.0-rc.1`, run the unchanged Salesko summary-egress consumer, and record exact manifest/integrity evidence without publication.
+- [x] Produce `0.9.0-rc.1`, run the Salesko summary-egress consumer with its non-semantic TypeScript fixture fix, and record exact manifest/integrity evidence without publication.

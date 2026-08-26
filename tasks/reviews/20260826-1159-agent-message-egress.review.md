@@ -1,12 +1,12 @@
 # Task Review: agent-message-egress
 
-> **Status**: Pending
+> **Status**: Complete
 > **Plan**: plans/plan-20260826-1159-agent-message-egress.md
 > **Contract**: tasks/contracts/20260826-1159-agent-message-egress.contract.md
 > **Notes File**: tasks/notes/20260826-1159-agent-message-egress.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-08-26 12:05
-> **Recommendation**: pending 0.9.0-rc.1 packed consumer readback
+> **Recommendation**: pass; approved for PR, push, and merge without package publication
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: sha256:dd3abc1009794144e6b2d08b0322450fd1fa166867b005c2eb229800cfba2a7f
 > **Reviewed Subject Scope**: normalized-final-content
@@ -34,18 +34,13 @@
 - Waza `/check` run:
 - Commands run: full commands listed in Human Review Card; latest source gate repeated focused suites and typecheck
 - Manual checks: real `codex exec --help` confirmed task-only MCP override flags; Pi/Codex/Claude adapter injection tests passed
-- Supporting artifacts: frozen Salesko composite `5b1bde061de45995b74b5cc72f0e18a113db17cb01dc094d4659832ab85a6f80`; change assessment packet; pre-fix artifact
+- Supporting artifacts: final Salesko summary-egress subject `f53fddc5260e518c8bf7c1aceec1de209be46fa404b0adb41c8dc1240e15e774`; original frozen message-lane composite `5b1bde061de45995b74b5cc72f0e18a113db17cb01dc094d4659832ab85a6f80`; change assessment packet; pre-fix artifact
 - Implementation notes reviewed: `tasks/notes/20260826-1159-agent-message-egress.notes.md`
 - Run snapshot:
 
 ## Manual Check Evidence
 
-Copy each non-built-in contract `manual_checks` requirement exactly. Check it only after
-the observation is complete and replace the placeholder with concrete command output,
-screenshot/artifact path, or reviewer observation.
-
-- [ ] Exact manual_checks requirement
-  - Evidence: concrete observation, command output, screenshot path, or reviewer note
+- No separate `manual_checks` requirement is declared by the contract.
 
 ## Acceptance Receipt Projection
 
@@ -70,7 +65,7 @@ screenshot/artifact path, or reviewer observation.
 
 ## Residual Risks / Follow-ups
 
-- Formal registry publication and downstream production wiring are intentionally not authorized. Frozen Salesko falsifier and summary-egress readback pass against exact RC bytes.
+- Formal registry publication and downstream production wiring are intentionally not authorized. Final Salesko summary-egress subject and Local Agent TypeScript gate pass against exact RC bytes. PR, push, and merge were authorized separately after this acceptance.
 
 ## Scorecard
 
