@@ -230,8 +230,13 @@
   malformed or schema-invalid bounded JSON remains 422.
 - Combined focused verification passes: client 5 files / 12 pass / 4 platform
   skips; cloud 4 files / 13 pass; freshly built local Go helper 2/2 integration
-  tests plus `go test ./...`. Full strict verification remains pending. This
-  slice does not fix the review's P2 findings and does not authorize push,
+  tests plus `go test ./...`. The first strict run passed 35/36 rows; its only
+  product-command failure was the known unrelated Wrangler 5-second dry-run
+  timeout, and the package-owned rerun immediately passed 6/6. After committing
+  the contract authority, the full retry passed 36/36 with root build,
+  typecheck, full tests, deploy-SQL, Go tests, and strict workflow green. Run
+  snapshot: `.ai/harness/runs/run-20260827T042332-34978-20260826-1725-agent-memory-phase2.json`.
+  This slice does not fix the review's P2 findings and does not authorize push,
   remote CI, another external review, merge, publication, deployment, or
   production migration.
 

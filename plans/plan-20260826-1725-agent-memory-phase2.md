@@ -183,7 +183,7 @@ See captured planning output.
 - [x] **Bound terminal publish**：hosted projection 的每次 `port.publish` 必须在 10 秒内 settle；timeout 转为现有 observable projection failure，pending redacted outbox 保留供后续 replay，task close 可继续释放 Agent-home lease。
 - [x] **Reproducible macOS helper CI**：新增独立 macOS job，使用 module-owned Go 1.26.5 authority 执行 Go tests/build，并以 built helper 设置 `BYOK_TEST_AGENT_MEMORY_FS_BIN` 跑 TS↔Go integration；source-scan guard 防止 job 静默消失。
 - [x] **Pre-parse projection body bound**：authenticated projection route 在 JSON parse 前同时约束 declared 与 streamed bytes；超过 envelope hard ceiling 返回 413，不以 schema 422 掩盖资源上限。
-- [ ] **重验**：三个 focused guards、client/cloud package checks 与 full strict contract 全绿后冻结新 subject。本 slice 不修 P2；push、remote CI、fresh external review 与 merge 仍需后续独立授权。
+- [x] **本地重验**：三个 focused guards、真实本机 Go helper integration、client/cloud package checks 与 full strict contract 全绿，new subject 已冻结。本 slice 不修 P2；push、remote CI、fresh external review 与 merge 仍需后续独立授权。
 
 ## Verification
 
