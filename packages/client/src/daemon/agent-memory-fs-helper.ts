@@ -5,22 +5,23 @@ import type { AgentHomeLease } from '../agent-home';
 import { AgentMemoryError, AgentMemoryRevisionConflictError } from './agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 
-export const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 1;
-export const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = '1';
+export const AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL = 2;
+export const AGENT_MEMORY_FILESYSTEM_HELPER_VERSION = '2';
 const HELPER_REQUEST_TIMEOUT_MS = 10_000;
-const HELPER_MAX_STDOUT_LINE_BYTES = 24 * 1024 * 1024;
+const HELPER_MAX_JSON_LINE_BYTES = 2 * 1024 * 1024;
+const HELPER_MAX_CONTENT_BYTES = 1 * 1024 * 1024;
 const HELPER_MAX_STDERR_BYTES = 4 * 1024;
 
 interface HelperSuccess {
   readonly id: string;
   readonly ok: true;
-  readonly protocol: 1;
+  readonly protocol: 2;
   readonly result: Record<string, unknown>;
 }
 interface HelperFailure {
   readonly id: string;
   readonly ok: false;
-  readonly protocol: 1;
+  readonly protocol: 2;
   readonly error: { readonly code: string; readonly message: string; readonly actualRevision?: string };
 }
 type HelperResponse = HelperSuccess | HelperFailure;
@@ -90,6 +91,19 @@ function boundedFileState(result: Record<string, unknown>, maxBytes: number): Ag
   return Object.freeze({ exists: result.exists, content, revision: result.revision, byteCount: result.byteCount });
 }
 
+function encodeReplaceContent(content: string, maxBytes: number): string {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > HELPER_MAX_CONTENT_BYTES) {
+    throw new AgentMemoryError('Agent memory filesystem helper requested an invalid byte limit');
+  }
+  const bytes = Buffer.from(content, 'utf8');
+  if (bytes.byteLength > maxBytes) {
+    throw new AgentMemoryError('Agent memory filesystem helper replacement exceeds its requested byte limit');
+  }
+  // The private v2 protocol intentionally uses unpadded standard base64. It
+  // keeps arbitrary UTF-8 bytes below the bounded JSON-lines transport limit.
+  return bytes.toString('base64').replace(/=+$/u, '');
+}
+
 class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   private readonly pending = new Map<string, Pending>();
   private stdoutBuffer = Buffer.alloc(0);
@@ -145,7 +159,8 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
 
   async replace(relativePath: string, expectedRevision: string, content: string, maxBytes: number): Promise<AgentMemoryFilesystemFileState> {
     try {
-      return boundedFileState(await this.request('replace', { path: relativePath, expectedRevision, content, maxBytes }), maxBytes);
+      const contentBase64 = encodeReplaceContent(content, maxBytes);
+      return boundedFileState(await this.request('replace', { path: relativePath, expectedRevision, contentBase64, maxBytes }), maxBytes);
     } catch (error) {
       if (error instanceof HelperRevisionConflict) throw new AgentMemoryRevisionConflictError(expectedRevision, error.actualRevision);
       throw error;
@@ -197,6 +212,15 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
   private requestInternal(op: string, fields: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
     if (this.fatalError !== undefined) return Promise.reject(this.fatalError);
     const id = `m${++this.sequence}`;
+    let line: string;
+    try {
+      line = `${JSON.stringify({ id, protocol: AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL, op, ...fields })}\n`;
+    } catch {
+      return Promise.reject(new AgentMemoryError('Agent memory filesystem helper request could not be encoded'));
+    }
+    if (Buffer.byteLength(line, 'utf8') > HELPER_MAX_JSON_LINE_BYTES) {
+      return Promise.reject(new AgentMemoryError('Agent memory filesystem helper request exceeded bounded stdin'));
+    }
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -206,7 +230,6 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
       }, HELPER_REQUEST_TIMEOUT_MS);
       timer.unref?.();
       this.pending.set(id, { resolve: (response) => resolve(response.result), reject, timer });
-      const line = `${JSON.stringify({ id, protocol: AGENT_MEMORY_FILESYSTEM_HELPER_PROTOCOL, op, ...fields })}\n`;
       this.child.stdin.write(line, (error) => {
         if (!error) return;
         const item = this.pending.get(id);
@@ -224,7 +247,7 @@ class AgentMemoryFilesystemHelperClient implements AgentMemoryFilesystem {
       const newline = chunk.indexOf(0x0a, offset);
       const end = newline === -1 ? chunk.length : newline;
       const segment = chunk.subarray(offset, end);
-      if (this.stdoutBuffer.length + segment.length > HELPER_MAX_STDOUT_LINE_BYTES) {
+      if (this.stdoutBuffer.length + segment.length > HELPER_MAX_JSON_LINE_BYTES) {
         this.fail(new AgentMemoryError('Agent memory filesystem helper exceeded bounded stdout'));
         return;
       }

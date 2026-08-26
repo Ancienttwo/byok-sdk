@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AgentHomeManager } from '../agent-home';
 import {
   AGENT_MEMORY_AUDIT_FILENAME,
-  AGENT_MEMORY_MAX_SNAPSHOT_BYTES,
+  AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AGENT_MEMORY_OUTBOX_FILENAME,
   AgentMemoryError,
   AgentMemoryRedactedOutbox,
@@ -19,7 +19,7 @@ import {
 } from '../daemon/agent-memory';
 import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem';
 
-const MAX_LOCAL_LOG_BYTES = AGENT_MEMORY_MAX_SNAPSHOT_BYTES * 16;
+const MAX_LOCAL_LOG_BYTES = AGENT_MEMORY_MAX_LOCAL_LOG_BYTES;
 const roots: string[] = [];
 const itWithNativeDescriptors = isAgentMemorySecureFilesystemAvailable() ? it : it.skip;
 
@@ -85,9 +85,10 @@ async function memory(filesystem?: AgentMemoryFilesystem): Promise<{ context: Ag
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
 
 describe('Agent memory local log P1 regressions', () => {
-  itWithNativeDescriptors('atomically rotates the native metadata-only audit tail at the 16 MiB local-log limit', async () => {
+  itWithNativeDescriptors('atomically rotates the native metadata-only audit tail at the 1 MiB local-log limit', async () => {
     const { context, release } = await memory();
     try {
+      expect(AGENT_MEMORY_MAX_LOCAL_LOG_BYTES).toBe(1024 * 1024);
       await fs.writeFile(path.join(context.canonicalHome, '.byok', AGENT_MEMORY_AUDIT_FILENAME), 'x'.repeat(MAX_LOCAL_LOG_BYTES), { mode: 0o600 });
       await expect(new AgentMemoryService(context).recall({ path: 'MEMORY.md' })).resolves.toMatchObject({ path: 'MEMORY.md' });
       const audit = await fs.readFile(path.join(context.canonicalHome, '.byok', AGENT_MEMORY_AUDIT_FILENAME), 'utf8');

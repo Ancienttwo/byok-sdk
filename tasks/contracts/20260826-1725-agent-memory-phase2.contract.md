@@ -57,10 +57,10 @@ an ordinary task and for a hosted contract missing grant or redactor.
 
 Required when Task Profile is `bugfix`.
 
-- root_cause: `packages/client/src/daemon/agent-memory.ts:408,428` assigns later sequences from persisted pending records but filters their exact prior task/session during replay, while append-only internal logs and post-write audit at `:271-313,435-489` can wedge projection or report a failed save after content changed; `create-daemon.ts:1090-1092` and `agent-memory-fs-helper.ts:101-110` separately admit a Linux helper configuration that the helper rejects and leave stdin EPIPE uncontained.
-- repro: `bun --cwd packages/client run test -- src/__tests__/agent-memory-outbox-p1-regression.test.ts src/__tests__/agent-memory-log-p1-regression.test.ts src/__tests__/agent-memory-helper-p1-regressions.test.ts && bun --cwd packages/cloud run test -- src/__tests__/agent-memory-erase-epoch-p1-regression.test.ts`
-- regression_guard: packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts
-- pre_fix_failure_artifact: .ai/harness/checks/agent-memory-outbox-p1-pre-fix.log
+- root_cause: `packages/client/src/daemon/agent-memory.ts:550-600` silently treats a rejected trailing publish as success, while `packages/cloud/src/stores/in-memory/agent-memory-projection.ts:208-238` keys grants only by tenant/grantRef/epoch and overwrites the prior exact task permit; independently `packages/client/native/agent-memory-fs/main.go:33-40,208-209,370-376` caps helper replace at 256 KiB and its raw JSON frame at 2 MiB although the TypeScript internal-state contract is 16 MiB, and the EPIPE guard did not simulate darwin admission on Linux CI.
+- repro: `cd packages/client/native/agent-memory-fs && GOTOOLCHAIN=go1.26.5 go test ./... && bun run --cwd packages/client test -- src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts src/__tests__/agent-memory-helper-p1-regressions.test.ts && bun run --cwd packages/cloud test -- src/__tests__/agent-memory-cross-task-replay-p1-regression.test.ts`
+- regression_guard: packages/client/src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts
+- pre_fix_failure_artifact: .ai/harness/runs/agent-memory-replay-outcome-p1-pre-fix.log
 
 ## Workflow Inventory
 
@@ -162,10 +162,13 @@ exit_criteria:
   files_exist:
     - plans/plan-20260826-1725-agent-memory-phase2.md
     - tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
+    - packages/client/native/agent-memory-fs/round2_p1_regression_test.go
   artifacts_exist:
     - tasks/notes/20260826-1725-agent-memory-phase2.notes.md
   tests_pass:
     - path: packages/client/src/__tests__/agent-memory-helper-p1-regressions.test.ts
+    - path: packages/client/src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts
+    - path: packages/cloud/src/__tests__/agent-memory-cross-task-replay-p1-regression.test.ts
     - path: packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts
     - path: packages/client/src/__tests__/agent-memory-log-p1-regression.test.ts
     - path: packages/cloud/src/__tests__/agent-memory-erase-epoch-p1-regression.test.ts
@@ -175,6 +178,7 @@ exit_criteria:
     - path: packages/cloud/src/__tests__/agent-memory-projection.test.ts
     - path: packages/cloud-dataplane/src/__tests__/agent-memory-projection.test.ts
   commands_succeed:
+    - cd packages/client/native/agent-memory-fs && GOTOOLCHAIN=go1.26.5 go test ./...
     - bun run check:deploy-sql
     - bun run build
     - bun run typecheck

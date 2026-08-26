@@ -69,9 +69,9 @@ describe('Agent memory external filesystem helper', () => {
       expect(audit).not.toContain('local durable value');
 
       const chunk = 'x'.repeat(200 * 1024);
-      await filesystem.append('.byok/helper-log.jsonl', chunk, 16 * 1024 * 1024);
-      await filesystem.append('.byok/helper-log.jsonl', chunk, 16 * 1024 * 1024);
-      const log = await filesystem.read('.byok/helper-log.jsonl', 16 * 1024 * 1024);
+      await filesystem.append('.byok/helper-log.jsonl', chunk, 1024 * 1024);
+      await filesystem.append('.byok/helper-log.jsonl', chunk, 1024 * 1024);
+      const log = await filesystem.read('.byok/helper-log.jsonl', 1024 * 1024);
       expect(log.byteCount).toBe(400 * 1024);
       expect(log.content).toBe(chunk + chunk);
 

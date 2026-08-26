@@ -144,7 +144,7 @@ func TestReplaceCASAndAtomicDelete(t *testing.T) {
 		"op":               "replace",
 		"path":             "notes/entry.md",
 		"expectedRevision": emptyFileState().Revision,
-		"content":          "replacement",
+		"contentBase64":    base64.RawStdEncoding.EncodeToString([]byte("replacement")),
 		"maxBytes":         maxFileBytes,
 	})
 	requireFailure(t, wrong, "revision_conflict")
@@ -158,7 +158,7 @@ func TestReplaceCASAndAtomicDelete(t *testing.T) {
 		"op":               "replace",
 		"path":             "notes/entry.md",
 		"expectedRevision": initial.Revision,
-		"content":          "replacement",
+		"contentBase64":    base64.RawStdEncoding.EncodeToString([]byte("replacement")),
 		"maxBytes":         maxFileBytes,
 	})
 	requireSuccess(t, replaced)
@@ -182,6 +182,39 @@ func TestReplaceCASAndAtomicDelete(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("delete did not remove entry: %v", err)
 	}
+	helper.close()
+}
+
+func TestReplaceRequiresV2Base64Wire(t *testing.T) {
+	home := newMemoryHome(t)
+	helper := startOpenedHelper(t, home)
+	before := helper.read("MEMORY.md", maxFileBytes)
+	requireSuccess(t, before)
+	var initial fileState
+	decodeResult(t, before, &initial)
+
+	legacy := helper.request(map[string]any{
+		"id":               helper.id("legacy-raw-content"),
+		"protocol":         protocolVersion,
+		"op":               "replace",
+		"path":             "MEMORY.md",
+		"expectedRevision": initial.Revision,
+		"content":          "must-not-be-accepted",
+		"maxBytes":         maxFileBytes,
+	})
+	requireFailure(t, legacy, "malformed_request")
+
+	malformedBase64 := helper.request(map[string]any{
+		"id":               helper.id("malformed-base64"),
+		"protocol":         protocolVersion,
+		"op":               "replace",
+		"path":             "MEMORY.md",
+		"expectedRevision": initial.Revision,
+		"contentBase64":    "%%%",
+		"maxBytes":         maxFileBytes,
+	})
+	requireFailure(t, malformedBase64, "invalid_request")
+
 	helper.close()
 }
 
@@ -310,7 +343,7 @@ func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
 			"op":               "replace",
 			"path":             "notes/entry.md",
 			"expectedRevision": emptyFileState().Revision,
-			"content":          "must-not-write-outside",
+			"contentBase64":    base64.RawStdEncoding.EncodeToString([]byte("must-not-write-outside")),
 			"maxBytes":         maxFileBytes,
 		})
 		requireFailure(t, response, "unsafe_path")
@@ -349,7 +382,7 @@ func TestRootParentAndLeafSymlinkSwapsCannotTouchOutsideSentinel(t *testing.T) {
 			"op":               "replace",
 			"path":             "notes/entry.md",
 			"expectedRevision": before.Revision,
-			"content":          "must-not-write-outside",
+			"contentBase64":    base64.RawStdEncoding.EncodeToString([]byte("must-not-write-outside")),
 			"maxBytes":         maxFileBytes,
 		})
 		requireFailure(t, response, "unsafe_path")

@@ -41,7 +41,10 @@ export type AgentMemoryProjectionAuthorization =
 /**
  * Embedder-owned consent and grant authority. A model never provides a
  * consent flag: it presents only an opaque grantRef, which this port binds to
- * the authenticated tenant/device/task/session/runtime/writer-epoch identity.
+ * the authenticated tenant/device/task/AgentRef/session/runtime/grant/policy
+ * identity. The host must retain an exact historical permit until its
+ * mutation is accepted, explicitly revoked, or superseded by a higher writer
+ * epoch; reaching task terminal state alone must not implicitly delete it.
  */
 export interface AgentMemoryProjectionAuthorizer {
   authorize(input: AgentMemoryProjectionAuthorizerInput): Promise<AgentMemoryProjectionAuthorization>;

@@ -155,6 +155,14 @@ See captured planning output.
 - [x] **P1 helper EPIPE**：helper stdin 的 stream-level error 必须被客户端捕获并转为 bounded operation failure，不得成为 daemon uncaught exception。
 - [ ] **重验**：每个 P1 先保留 unfixed regression evidence，再完成 focused/full strict checks；冻结新 subject 后重新 Claude review。
 
+### Phase 2 P1 remediation round 2 — second Claude reject follow-up
+
+- [x] **P1 helper internal-state bounds**：统一为 1 MiB bounded v2 state + base64-only helper v2 wire + 2 MiB request/response line；真实 helper stdio guard 覆盖上限成功、+1 byte 与 user-file 256 KiB negative，无 unbounded transport。
+- [x] **P1 portable EPIPE guard**：EPIPE regression 在 Linux CI 显式模拟 darwin helper admission 后触发 stream error，不再依赖本机 macOS 偶然可达。
+- [x] **P1 observable replay outcome**：initial drain 与 trailing publish 的 `accepted:false` 都产生 typed、body-free projection pending failure；pending 未清空时不 capture/audit，也不分配新 sequence。
+- [x] **P1 historical grant authority**：同 writer epoch 下 prior task/session 的 exact permits 可共存；更高 epoch retire 旧 permits，stale lower grant 不复活，tenant/device/task/AgentRef/session/runtime/policy binding 不放宽。
+- [ ] **Round 2 重验**：四个 P1 各有 pre-fix red guard；完成 focused、真实 macOS helper、Linux CI-equivalent、disposable dataplane 与 full strict checks；冻结新 normalized subject 后只做一次 Claude review。
+
 ## Verification
 
 - `bun run build` / `bun run typecheck` / `bun run test`

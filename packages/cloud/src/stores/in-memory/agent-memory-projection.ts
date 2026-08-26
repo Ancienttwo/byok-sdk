@@ -23,6 +23,24 @@ function agentKey(tenantId: TenantId, agentId: string): string {
   return `${tenantId}\u0000${agentId}`;
 }
 
+function permitKey(input: AgentMemoryProjectionAuthorizerInput): string {
+  // Keep every authenticated/granted identity component in the permit key.
+  // In particular, task/session permits sharing a grantRef and writerEpoch
+  // are distinct historical authorities and must coexist.
+  return JSON.stringify([
+    input.tenantId,
+    input.deviceId,
+    input.taskId,
+    input.agentRef.agentId,
+    input.agentRef.profileRevision,
+    input.sessionRef,
+    input.runtimeId,
+    input.grantRef,
+    input.writerEpoch,
+    input.policyRevision,
+  ]);
+}
+
 function receiptKey(input: AgentMemoryProjectionCommitInput): string {
   const { mutation } = input;
   return `${agentKey(input.tenantId, mutation.agentRef.agentId)}\u0000${mutation.writerEpoch}\u0000${mutation.sourceSeq}`;
@@ -207,28 +225,36 @@ export class InMemoryAgentMemoryProjectionStore implements AgentMemoryProjection
 /** Test/reference authorizer whose grant registry demonstrates revocation without model booleans. */
 export class InMemoryAgentMemoryProjectionAuthorizer implements AgentMemoryProjectionAuthorizer {
   readonly #grants = new Map<string, AgentMemoryProjectionAuthorizerInput>();
+  /** Highest host-issued epoch observed for each tenant/Agent authority. */
+  readonly #highestEpochs = new Map<string, number>();
 
   grant(input: AgentMemoryProjectionAuthorizerInput): void {
-    this.#grants.set(
-      `${input.tenantId}\u0000${input.grantRef}\u0000${input.writerEpoch}`,
-      { ...input, agentRef: { ...input.agentRef } },
-    );
+    const key = agentKey(input.tenantId, input.agentRef.agentId);
+    const highestEpoch = this.#highestEpochs.get(key);
+    if (highestEpoch !== undefined && input.writerEpoch < highestEpoch) return;
+
+    if (highestEpoch === undefined || input.writerEpoch > highestEpoch) {
+      // An explicit writer handoff retires every older permit for this
+      // tenant/Agent, including permits issued to another device or task.
+      for (const [grantKey, grant] of this.#grants) {
+        if (
+          grant.tenantId === input.tenantId &&
+          grant.agentRef.agentId === input.agentRef.agentId &&
+          grant.writerEpoch < input.writerEpoch
+        ) this.#grants.delete(grantKey);
+      }
+      this.#highestEpochs.set(key, input.writerEpoch);
+    }
+
+    // Equal-epoch permits are intentionally additive: historical task/session
+    // replays retain their own exact authorization until accepted/revoked.
+    this.#grants.set(permitKey(input), { ...input, agentRef: { ...input.agentRef } });
   }
 
   async authorize(input: AgentMemoryProjectionAuthorizerInput): Promise<AgentMemoryProjectionAuthorization> {
-    const grant = this.#grants.get(`${input.tenantId}\u0000${input.grantRef}\u0000${input.writerEpoch}`);
-    if (
-      grant === undefined ||
-      grant.deviceId !== input.deviceId ||
-      grant.taskId !== input.taskId ||
-      grant.agentRef.agentId !== input.agentRef.agentId ||
-      grant.agentRef.profileRevision !== input.agentRef.profileRevision ||
-      grant.sessionRef !== input.sessionRef ||
-      grant.runtimeId !== input.runtimeId ||
-      grant.writerEpoch !== input.writerEpoch ||
-      grant.policyRevision !== input.policyRevision
-    ) return { outcome: 'denied', reasonCode: 'grant_not_authorized' };
-    return { outcome: 'authorized' };
+    return this.#grants.has(permitKey(input))
+      ? { outcome: 'authorized' }
+      : { outcome: 'denied', reasonCode: 'grant_not_authorized' };
   }
 
   async revoke(input: { readonly tenantId: TenantId; readonly agentId: string }): Promise<void> {

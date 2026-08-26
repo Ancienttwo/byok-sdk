@@ -132,6 +132,28 @@
   protocol 4 pass. Dataplane and root-wide checks are intentionally recorded
   only after the new subject is frozen; the prior Claude reject remains current
   until a new exact-subject review and typed receipt replace it.
+- The second exact-subject Claude review rejected that remediation with four
+  additional P1s. The approved round-2 slice is regression-first and bounded to
+  helper/internal-state wire limits, Linux-reachable EPIPE coverage, an
+  observable replay outcome before capture/sequence allocation, and exact
+  coexistence of historical per-task grant permits within one writer epoch.
+  The prior typed `reject` remains terminal authority until a newly frozen
+  subject passes both strict verification and a fresh Claude review.
+- Round 2 implementation now uses a 1 MiB atomic v2 local-state ceiling and a
+  private base64-only helper v2 wire with 2 MiB request/response lines. The
+  real helper accepts one full bounded state, rejects +1 byte and preserves the
+  separate 256 KiB user-memory-file cap; Linux CI explicitly simulates darwin
+  admission before exercising the contained EPIPE path.
+- Projection replay now returns a body-free `drained | pending` result and
+  raises a typed pending error for both initial and trailing `accepted:false`.
+  It retains the immutable pending mutation and cannot capture, audit, or
+  allocate a new sequence until drain succeeds. Local state retains only one
+  current-epoch high-water plus one pending and clears both on a higher epoch.
+- The reference authorizer keys the complete authenticated permit tuple.
+  Equal-epoch historical task/session permits coexist; higher epochs retire
+  lower permits and stale lower grants cannot revive. Focused round-2 checks
+  passed: client 17 pass / 8 platform skips, cloud 10 pass, and all Go helper
+  tests. Full strict checks and the one fresh Claude review remain pending.
 
 ## Promotion Filter
 

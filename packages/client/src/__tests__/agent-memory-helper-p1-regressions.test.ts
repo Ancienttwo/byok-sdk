@@ -35,6 +35,7 @@ const helperHarness = vi.hoisted(() => {
   }
 
   let lastChild: { exitCode: number | null } | undefined;
+  const requests: Array<Record<string, unknown>> = [];
   const spawn = vi.fn(() => {
     const stdout = new Emitter();
     const stderr = new Emitter();
@@ -52,13 +53,14 @@ const helperHarness = vi.hoisted(() => {
     });
     stdin.write = (line, callback) => {
       const request = JSON.parse(line) as { id: string; op: string; expectedIdentity?: unknown };
+      requests.push(request);
       queueMicrotask(() => {
         if (request.op === 'open') {
           stdout.emit('data', Buffer.from(`${JSON.stringify({
             id: request.id,
             ok: true,
-            protocol: 1,
-            result: { helperVersion: '1', identity: request.expectedIdentity },
+            protocol: 2,
+            result: { helperVersion: '2', identity: request.expectedIdentity },
           })}\n`));
           return;
         }
@@ -73,7 +75,7 @@ const helperHarness = vi.hoisted(() => {
     return child;
   });
 
-  return { spawn, lastChild: () => lastChild };
+  return { spawn, lastChild: () => lastChild, requests: () => requests };
 });
 
 vi.mock('node:child_process', async (importOriginal) => ({
@@ -127,18 +129,32 @@ describe('Agent memory helper P1 regressions', () => {
     const onUncaught = (error: Error) => { uncaught.push(error); };
     process.on('uncaughtException', onUncaught);
     try {
-      const filesystem = await openAgentMemoryFilesystemHelper({
-        helperBin: '/opt/byok-agent-memory-fs',
-        canonicalHome: '/tmp/byok-agent-memory-helper-epipe',
-        homeIdentity: { dev: 1n, ino: 2n },
+      // CI runs this suite on Linux, but the helper is intentionally admitted
+      // only on macOS. Override only admission so the mocked stdin reaches the
+      // EPIPE branch on every runner.
+      await withPlatform('darwin', async () => {
+        const filesystem = await openAgentMemoryFilesystemHelper({
+          helperBin: '/opt/byok-agent-memory-fs',
+          canonicalHome: '/tmp/byok-agent-memory-helper-epipe',
+          homeIdentity: { dev: 1n, ino: 2n },
+        });
+        const expectedRevision = `sha256:${'0'.repeat(64)}`;
+        const requestCount = helperHarness.requests().length;
+        await expect(filesystem.replace('MEMORY.md', expectedRevision, 'x'.repeat(1025), 1024)).rejects.toThrow('exceeds its requested byte limit');
+        expect(helperHarness.requests()).toHaveLength(requestCount);
+
+        await expect(filesystem.replace('MEMORY.md', expectedRevision, '\u0000', 1024)).rejects.toThrow('could not be written');
+        const requests = helperHarness.requests();
+        const request = requests[requests.length - 1];
+        expect(request).toMatchObject({ op: 'replace', contentBase64: 'AA', maxBytes: 1024 });
+        expect(request).not.toHaveProperty('content');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(uncaught).toEqual([]);
+        const child = helperHarness.lastChild();
+        if (child === undefined) throw new Error('helper spawn was not observed');
+        child.exitCode = 0;
+        await filesystem.close();
       });
-      await expect(filesystem.read('MEMORY.md', 1024)).rejects.toThrow('could not be written');
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(uncaught).toEqual([]);
-      const child = helperHarness.lastChild();
-      if (child === undefined) throw new Error('helper spawn was not observed');
-      child.exitCode = 0;
-      await filesystem.close();
     } finally {
       process.off('uncaughtException', onUncaught);
     }

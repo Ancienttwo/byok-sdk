@@ -96,6 +96,41 @@ async function post(
 }
 
 describe('Agent-memory erase epoch P1 regression', () => {
+  it('revokes every exact task permit for the Agent, including same-epoch history', async () => {
+    const { authorizer, device, harness } = await setup();
+    const taskB = 'agent-memory-erase-p1-task-b';
+    await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+      taskId: taskB,
+      payload: {
+        instruction: 'run the second historical Agent memory task',
+        policy: { mode: 'auto' },
+        agentRef: AGENT_REF,
+      },
+    });
+    const grantA = grant(device.deviceId, 1);
+    const grantB = {
+      ...grantA,
+      taskId: taskB,
+      sessionRef: 'session-memory-erase-p1-b',
+    };
+    authorizer.grant(grantA);
+    authorizer.grant(grantB);
+    await expect(authorizer.authorize(grantA)).resolves.toEqual({ outcome: 'authorized' });
+    await expect(authorizer.authorize(grantB)).resolves.toEqual({ outcome: 'authorized' });
+
+    await expect(harness.cloud.eraseAgentMemoryProjection(TENANT_A, AGENT_REF.agentId)).resolves.toEqual({
+      nextWriterEpoch: 1,
+    });
+    await expect(authorizer.authorize(grantA)).resolves.toEqual({
+      outcome: 'denied',
+      reasonCode: 'grant_not_authorized',
+    });
+    await expect(authorizer.authorize(grantB)).resolves.toEqual({
+      outcome: 'denied',
+      reasonCode: 'grant_not_authorized',
+    });
+  });
+
   it('starts a newly granted writer epoch at sourceSeq 1 after erase', async () => {
     const { authorizer, crypto, device, harness } = await setup();
     authorizer.grant(grant(device.deviceId, 1));

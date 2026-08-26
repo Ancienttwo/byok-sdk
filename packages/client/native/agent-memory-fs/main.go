@@ -27,18 +27,19 @@ import (
 )
 
 const (
-	protocolVersion = 1
-	helperVersion   = "1"
+	protocolVersion = 2
+	helperVersion   = "2"
 
 	maxFileBytes      = 256 * 1024
-	maxLocalLogBytes  = 16 * 1024 * 1024
+	maxLocalLogBytes  = 1 * 1024 * 1024
 	maxWalkEntries    = 512
 	maxPathBytes      = 1024
 	maxRequestIDBytes = 128
-	// UTF-8 control bytes may expand to six JSON bytes. This bound still lets a
-	// maximum-size regular file cross the stdio protocol as one bounded line.
+	// Replace content crosses the protocol as raw base64, so one complete
+	// maxLocalLogBytes internal-state request and response remain bounded below
+	// two MiB without accepting an unbounded JSON expansion of control bytes.
 	maxRequestJSONLineBytes  = 2 * 1024 * 1024
-	maxResponseJSONLineBytes = 24 * 1024 * 1024
+	maxResponseJSONLineBytes = 2 * 1024 * 1024
 )
 
 type rootIdentity struct {
@@ -77,7 +78,7 @@ type replaceRequest struct {
 	Op               string `json:"op"`
 	Path             string `json:"path"`
 	ExpectedRevision string `json:"expectedRevision"`
-	Content          string `json:"content"`
+	ContentBase64    string `json:"contentBase64"`
 	MaxBytes         int    `json:"maxBytes"`
 }
 
@@ -371,7 +372,8 @@ func (s *session) replace(req replaceRequest) (fileState, *protocolError) {
 	if err := validatePathAndLimit(req.ID, req.Protocol, req.Op, req.Path, req.MaxBytes); err != nil {
 		return fileState{}, err
 	}
-	if !validRevision(req.ExpectedRevision) || len(req.Content) > maxFileBytes || len([]byte(req.Content)) > req.MaxBytes {
+	content, decodeErr := base64.RawStdEncoding.Strict().DecodeString(req.ContentBase64)
+	if decodeErr != nil || !utf8.Valid(content) || !validRevision(req.ExpectedRevision) || len(content) > req.MaxBytes {
 		return fileState{}, failure("invalid_request", "request is invalid")
 	}
 	parent, leaf, err := s.openParent(req.Path)
@@ -401,7 +403,7 @@ func (s *session) replace(req replaceRequest) (fileState, *protocolError) {
 			_ = parent.root.Remove(temporary)
 		}
 	}()
-	if _, writeErr := temp.Write([]byte(req.Content)); writeErr != nil {
+	if _, writeErr := temp.Write(content); writeErr != nil {
 		return fileState{}, failure("io_failure", "filesystem operation failed")
 	}
 	if syncErr := temp.Sync(); syncErr != nil || temp.Close() != nil {
@@ -867,7 +869,7 @@ func decodeRequest(line []byte) (request, *protocolError) {
 		requestValue.read = &typed
 	case "replace":
 		var typed replaceRequest
-		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "path", "expectedRevision", "content", "maxBytes") {
+		if err := strictJSON(line, &typed); err != nil || !hasRequiredJSONFields(line, "id", "protocol", "op", "path", "expectedRevision", "contentBase64", "maxBytes") {
 			return requestValue, failure("malformed_request", "request is malformed")
 		}
 		requestValue.replace = &typed

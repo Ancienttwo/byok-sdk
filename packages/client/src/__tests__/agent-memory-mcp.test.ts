@@ -160,6 +160,11 @@ describe('Agent memory MCP local authority', () => {
       expect(rawOutbox).toContain('"version":2');
       expect(rawOutbox).toContain('eyJzdW1tYXJ5IjoiW3JlZGFjdGVkXSJ9');
       expect(rawOutbox).not.toContain('native file tool final value');
+      expect(JSON.parse(rawOutbox)).toMatchObject({
+        currentWriterEpoch: 1,
+        highWater: [{ writerEpoch: 1, sourceSeq: 1 }],
+        pending: [],
+      });
     } finally { await release(); }
   });
 

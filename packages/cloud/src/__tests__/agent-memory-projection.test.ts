@@ -140,7 +140,7 @@ describe('in-memory Agent-memory hosted projection conformance', () => {
     });
   });
 
-  it('fails closed for device, AgentRef, session/runtime/grant epoch, and redacted-hash mismatches', async () => {
+  it('fails closed for device, AgentRef, session/runtime/policy/grant epoch, and redacted-hash mismatches', async () => {
     const { harness, device, body } = await prepareTask();
     const other = await harness.pairDevice(TENANT_A);
     expect((await post(harness, other.authorization, body)).status).toBe(409);
@@ -149,6 +149,10 @@ describe('in-memory Agent-memory hosted projection conformance', () => {
       agentRef: { ...body.agentRef, profileRevision: 'profile-r2' },
     })).status).toBe(409);
     expect((await post(harness, device.authorization, { ...body, sessionRef: 'different-session' })).status).toBe(409);
+    expect((await post(harness, device.authorization, { ...body, runtimeId: 'pi' })).status).toBe(409);
+    expect((await post(harness, device.authorization, {
+      ...body, policyRevision: 'policy-memory-r2',
+    })).status).toBe(409);
     const wrongEpoch = await post(harness, device.authorization, {
       ...body, writerEpoch: body.writerEpoch + 1,
     });
@@ -158,6 +162,52 @@ describe('in-memory Agent-memory hosted projection conformance', () => {
       ...body,
       snapshot: { ...body.snapshot, redactedHash: `sha256:${'b'.repeat(64)}` },
     })).status).toBe(422);
+  });
+
+  it('retires lower-epoch permits for one Agent while preserving exact same-epoch permits', async () => {
+    const { authorizer, device, body } = await prepareTask();
+    const taskB = {
+      ...body,
+      taskId: 'agent-memory-task-b',
+      sessionRef: 'session-memory-b',
+    };
+    const grantA = {
+      tenantId: TENANT_A,
+      deviceId: device.deviceId,
+      taskId: body.taskId,
+      agentRef: body.agentRef,
+      sessionRef: body.sessionRef,
+      runtimeId: body.runtimeId,
+      grantRef: body.grantRef,
+      writerEpoch: 1,
+      policyRevision: body.policyRevision,
+    };
+    const grantB = { ...grantA, taskId: taskB.taskId, sessionRef: taskB.sessionRef };
+    const authorize = (input: typeof grantA) => authorizer.authorize(input);
+
+    authorizer.grant(grantA);
+    authorizer.grant(grantB);
+    await expect(authorize(grantA)).resolves.toEqual({ outcome: 'authorized' });
+    await expect(authorize(grantB)).resolves.toEqual({ outcome: 'authorized' });
+
+    const newerGrant = { ...grantA, writerEpoch: 2 };
+    authorizer.grant(newerGrant);
+    await expect(authorize(grantA)).resolves.toEqual({
+      outcome: 'denied',
+      reasonCode: 'grant_not_authorized',
+    });
+    await expect(authorize(grantB)).resolves.toEqual({
+      outcome: 'denied',
+      reasonCode: 'grant_not_authorized',
+    });
+    await expect(authorize(newerGrant)).resolves.toEqual({ outcome: 'authorized' });
+
+    // A delayed lower-epoch host grant cannot revive the retired permit.
+    authorizer.grant(grantA);
+    await expect(authorize(grantA)).resolves.toEqual({
+      outcome: 'denied',
+      reasonCode: 'grant_not_authorized',
+    });
   });
 
   it('rejects gaps, stale epochs, and same epoch/sequence replay mismatches without double-metering', async () => {

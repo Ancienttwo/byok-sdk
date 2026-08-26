@@ -1470,13 +1470,23 @@ required redactor 和 transport port 四者齐备才开始 capture/audit/network
 Local outbox 是一个 atomic replace 的 bounded v2 state：只保存 redacted bytes、
 per-epoch high-water 与 immutable pending mutation；必须先用 pending 自身原始的
 task/session/runtime/grant binding 做 exact replay，drain 后才可为当前 task 分配
-下一 source sequence。只有 host 发出的更高 writer epoch 才能 supersede 旧 pending
-并从 sequence 1 开始；同 epoch reopen 不能重置 high-water。
+下一 source sequence。v2 state 的完整 JSON 上限是 1 MiB，只保留一个 current-epoch
+high-water 与至多一个 pending；更高 writer epoch 会原子清除旧 pending 和旧 epoch
+high-water，并从 sequence 1 开始，同 epoch reopen 不能重置 high-water。macOS helper
+private wire 同步升为 v2：`replace` 只接受 strict raw-base64 `contentBase64`，decoded
+content 仍受调用方上限约束，request/response JSON line 各有 2 MiB hard bound；旧 raw
+`content` wire 不兼容且明确拒绝。Replay 返回 body-free `drained | pending` outcome；
+initial drain 或 trailing publish 得到 `accepted:false` 时抛 typed pending error，保留
+原 mutation，且不得继续 capture/audit 或分配下一 source sequence。
 
 Cloud 再绑定 authenticated tenant/device/task/exact AgentRef/session/runtime/grant/
 writer epoch；Postgres 以 `(tenantId, agentId)` 保存 bounded latest snapshot，用
 gap-free sequence 和 immutable mutation receipt 实现 exact replay 幂等，仅计量
-accepted redacted bytes。Server-side erase 先 revoke grant，再删 head/receipt，
+accepted redacted bytes。Authorizer 的 permit key 包含 tenant/device/task/exact
+AgentRef/session/runtime/grant/writer epoch/policy revision：同 epoch 的历史 task/session
+permit 必须共存，直到 mutation accepted、显式 revoke 或更高 epoch handoff；发放更高
+epoch 会 retire 旧 epoch permits，较低 epoch grant 不得复活。Server-side erase 先
+revoke grant，再删 head/receipt，
 同时保留一个无正文的 minimum-writer-epoch fence 并返回 `nextWriterEpoch`；因此
 stale local outbox 不能在空 head 上回灌被删除的 epoch，且整个 erase 不依赖
 device online。Local metadata-only audit 是 bounded atomic tail，不是 replay 或
