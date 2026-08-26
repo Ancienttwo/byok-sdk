@@ -26,6 +26,7 @@ const REVISION = /^sha256:[a-f0-9]{64}$/u;
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const SECRET_LIKE = /(?:^|[-_.])(secret|token|credential|password|passwd|api[-_]?key|private[-_]?key|cookie)(?:$|[-_.])/iu;
 const encoder = new TextEncoder();
+const AGENT_MEMORY_PROJECTION_PUBLISH_TIMEOUT_MS = 10_000;
 
 export class AgentMemoryError extends Error {
   constructor(message: string) { super(message); this.name = 'AgentMemoryError'; }
@@ -568,6 +569,25 @@ function stateWithHighWater(state: OutboxState, writerEpoch: number, sourceSeq: 
   return freezeOutboxState({ version: 2, currentWriterEpoch: state.currentWriterEpoch, highWater: [Object.freeze({ writerEpoch, sourceSeq })], pending });
 }
 
+async function publishAgentMemoryProjection(port: AgentMemoryProjectionPort, mutation: AgentMemoryProjectionMutation): Promise<{ readonly accepted: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await new Promise<{ readonly accepted: boolean }>((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new AgentMemoryError('Agent memory projection publish timed out')),
+        AGENT_MEMORY_PROJECTION_PUBLISH_TIMEOUT_MS,
+      );
+      try {
+        Promise.resolve(port.publish(Object.freeze({ mutation }))).then(resolve, reject);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export class AgentMemoryRedactedOutbox {
   private state!: OutboxState;
   private fileRevision!: string;
@@ -597,7 +617,7 @@ export class AgentMemoryRedactedOutbox {
   }); }
   async replay(port: AgentMemoryProjectionPort): Promise<AgentMemoryProjectionReplayOutcome> { return this.exclusive(async () => {
     for (const record of this.pending()) {
-      if (!(await port.publish(Object.freeze({ mutation: record.mutation }))).accepted) {
+      if (!(await publishAgentMemoryProjection(port, record.mutation)).accepted) {
         return Object.freeze({
           status: 'pending' as const,
           writerEpoch: record.mutation.writerEpoch,
