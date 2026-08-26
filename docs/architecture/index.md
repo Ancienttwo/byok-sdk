@@ -11,5 +11,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- [ ] 2026-08-21T22:04:26+0800 [high] `.ai/harness/policy.json` -> [root](requests/root.md)
+- [ ] 2026-08-26T15:17:40+0800 [high] `packages/client/src/__tests__/fixtures/fake-claude.mjs` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
