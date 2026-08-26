@@ -224,15 +224,16 @@ export const RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX = 'result document unde
 export interface ResultDocumentTask {
   readonly taskId: string;
   readonly sessionRef: string;
-  /** Exact offer-scoped projection authority; absent only for legacy offers. */
+  /** Exact offer-scoped second projection; absent for legacy and message-only offers. */
   readonly terminalProjection?: Readonly<TerminalProjectionSelection>;
 }
 
 /**
  * Host-supplied glue that turns a finished task's final output into the
  * product's structured terminal result (`task.complete.document`). Returning
- * `undefined` means "this task has no structured result" and completes the
- * task exactly as it would have without an extractor configured at all.
+ * `undefined` means "this task has no structured result" for legacy offers.
+ * An explicit `terminalProjection.mode: 'result-document'` instead treats
+ * `undefined` as a fail-closed missing required document.
  *
  * SYNCHRONOUS by contract, like every other single-purpose callback on
  * `TaskRunnerDeps`, and the runtime ENFORCES that rather than trusting it:
