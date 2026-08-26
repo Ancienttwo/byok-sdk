@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260826-1725-agent-memory-phase2.md
 > **Contract**: tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
 > **Review**: tasks/reviews/20260826-1725-agent-memory-phase2.review.md
-> **Last Updated**: 2026-08-27 01:10
+> **Last Updated**: 2026-08-27 11:00
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -174,6 +174,24 @@
   Tool names remain unchanged because aliases or dual shapes would violate the
   no-steady-state-compatibility rule without an approved migration contract.
   The audit-concurrency typed reject remains current until the owner's re-gate.
+- The owner-approved local re-gate on `5e56e50` is complete. A fresh disposable
+  Postgres/MinIO runtime readback passed invariants + projection (2 files / 5
+  tests) and removed its compose substrate afterward. The first full
+  `verify-sprint --prepare-acceptance` run had one isolated 5-second Wrangler
+  dry-run timeout in `worker-packaging.test.ts`; the focused package-owned rerun
+  passed 1 file / 6 tests, and the single allowed full retry passed 32/32
+  contract rows with root build, typecheck, full tests, deploy-SQL checks, Go
+  tests, and strict workflow green. Run snapshot:
+  `.ai/harness/runs/run-20260827T024723-45342-20260826-1725-agent-memory-phase2.json`.
+  This closes the deterministic and runtime portions of the local re-gate, but
+  not the semantic gate: `AgentMemoryService.recall()` still calls the
+  metadata-only audit read-CAS rewrite outside the per-home `exclusive()` queue,
+  while `save()` is serialized and converts post-mutation audit failure into a
+  warning. The previously reviewed recall/recall and recall/save revision race
+  therefore remains reachable and can still turn a successful read into a hard
+  failure. Push, remote Linux/Postgres CI, fresh external review, typed
+  acceptance, merge, publish, deploy, and production migration were not
+  performed.
 
 ## Promotion Filter
 
