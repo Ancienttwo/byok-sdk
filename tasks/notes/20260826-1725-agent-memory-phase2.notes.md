@@ -262,6 +262,15 @@
   They must be regenerated after source freeze and transferred to a separate
   reconciliation branch; they are not to be silently discarded or folded into
   the Phase 2 product subject.
+- The regenerated projection patch was copied byte-for-byte to local branch
+  `codex/agent-memory-projection-reconciliation` (source and staged patch both
+  `sha256:fdbb7eb1e84d707659375887ed77fd77673ce098cdfea0d4da0a196d7ff2091b`)
+  and committed as `b8863b0`. The same branch then archived the accumulated
+  root architecture request as Resolved in `67d0408`, using the already-current
+  `docs/architecture/sdk-architecture.md` Agent memory section as the durable
+  artifact. Its architecture queue is now empty and the strict architecture
+  gate passes. Neither reconciliation commit was pushed or merged into the
+  Phase 2 product branch.
 
 ## Promotion Filter
 
