@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DeviceCredentialStore,
   DeviceCredentialStoreError,
@@ -20,6 +20,9 @@ const credentials = {
   devicePrivateKeyPem: 'test-private-key',
 } as const;
 
+const nativeTemporaryRoot = os.tmpdir();
+let suiteTemporaryRoot = '';
+
 function windowsRunner(result: DeviceCommandResult): DeviceCommandRunner {
   return async (executable) => path.win32.basename(executable).toLowerCase() === 'powershell.exe'
     ? { exitCode: 0, stdout: '', stderr: '' }
@@ -27,12 +30,23 @@ function windowsRunner(result: DeviceCommandResult): DeviceCommandRunner {
 }
 
 describe('DeviceCredentialStore', () => {
+  beforeAll(async () => {
+    suiteTemporaryRoot = await fs.mkdtemp(path.join(nativeTemporaryRoot, 'byok-device-credential-suite-'));
+  });
+
   beforeEach(() => {
     vi.stubEnv('SystemRoot', 'C:\\Windows');
+    vi.stubEnv('TMPDIR', suiteTemporaryRoot);
+    vi.stubEnv('TMP', suiteTemporaryRoot);
+    vi.stubEnv('TEMP', suiteTemporaryRoot);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  afterAll(async () => {
+    await fs.rm(suiteTemporaryRoot, { recursive: true, force: true });
   });
 
   it.each(['darwin', 'linux', 'win32'] as const)('uses only the %s OS provider and never a path fallback', async (platform) => {
