@@ -299,6 +299,19 @@
   12/12, and root test/build/typecheck plus strict workflow pass. No production
   credential code, push, review, merge, publication, deployment, or migration
   was included.
+- Owner then separately authorized reconciliation integration. Product branch
+  preserved its pre-integration recovery point `0a71fb8` and cherry-picked only
+  the two projection-owned commits in their original order: `b8863b0` became
+  `03f3191`, and `67d0408` became `ed4b941`. No duplicated workflow commits from
+  the sibling branch were imported. The integrated delta is limited to the
+  deterministic context map, root/package context contracts, architecture
+  index, and the resolved request archive; it contains no product runtime or
+  test source.
+- After integration, architecture queue status is `pending=0, blocking=0`,
+  strict architecture sync passes, and context scan is safe. The contract now
+  names every generated/archive path explicitly instead of relying on a broad
+  compatibility allowance. Push, remote CI, fresh external review, merge to
+  main, publication, deployment, and migration remain separately gated.
 
 ## Promotion Filter
 

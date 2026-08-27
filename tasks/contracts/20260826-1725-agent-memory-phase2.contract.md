@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-27 22:56
+> **Last Updated**: 2026-08-27 23:08
 > **Review File**: `tasks/reviews/20260826-1725-agent-memory-phase2.review.md`
 > **Notes File**: `tasks/notes/20260826-1725-agent-memory-phase2.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -89,6 +89,9 @@ Required when Task Profile is `bugfix`.
 
 ```yaml
 allowed_paths:
+  - .ai/context/context-map.json
+  - AGENTS.md
+  - CLAUDE.md
   - docs/researches/2026-08-26_long-term-agent-memory-decision-packet.md
   - plans/plan-20260826-1542-context-fold-compaction-poc.md
   - plans/plan-20260826-1645-long-term-agent-memory.md
@@ -107,6 +110,9 @@ allowed_paths:
   - docs/architecture/sdk-architecture.md
   - docs/architecture/index.md
   - docs/architecture/requests/root.md
+  - docs/architecture/requests/archive/2026/20260827-092816-root.md
+  - packages/AGENTS.md
+  - packages/CLAUDE.md
   - packages/client/
   - packages/protocol/
   - packages/cloud/
