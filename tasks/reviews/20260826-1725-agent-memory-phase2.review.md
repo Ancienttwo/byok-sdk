@@ -1,26 +1,26 @@
 # Task Review: agent-memory-phase2
 
-> **Status**: Review Failed / Terminal Blocked
+> **Status**: Review Passed / External Acceptance Recorded
 > **Plan**: plans/plan-20260826-1725-agent-memory-phase2.md
 > **Contract**: tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
 > **Notes File**: tasks/notes/20260826-1725-agent-memory-phase2.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-27 03:52
-> **Recommendation**: blocked
+> **Last Updated**: 2026-08-27 09:00
+> **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:5303cd07247bc52b6240124f612abf2635a48e5bf70f66838992404cad897c51
+> **Reviewed Subject SHA256**: sha256:263e48ac26ffd3bd9d3edf1d131863f9e415408c7b8c7082060b906f89965e3f
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
 
 ## Human Review Card
 
-- Verdict: FAIL; the fresh exact-subject Claude review found three P1 blockers on the audit-concurrency-remediated frozen subject
+- Verdict: PASS; the fresh exact-subject Claude review confirmed the three prior P1 remediations and found no P0/P1
 - Change type: code-change + migration
 - Intended files changed: client memory MCP and runtime injection, protocol/cloud projection contracts, cloud-dataplane store and migration, focused tests, architecture and task evidence
 - Actual files changed: the intended Phase 2 surfaces under `packages/client`, `packages/protocol`, `packages/cloud`, `packages/cloud-dataplane`, `deploy/sql`, `tests/sql`, and the task artifacts listed by the contract
-- Commands passed: local `verify-sprint --prepare-acceptance` 33/33; remote CI 21/21 including fixed-Node Linux full test, real Postgres, migrations, and cross-platform package checks
-- Residual risks: hosted publish can hang task finalization; the Go helper path is not CI-reproducible; projection HTTP parsing has no pre-parse request-body bound
-- Reviewer action required: stop at terminal reject; any remediation requires a new approved regression-first slice, fresh deterministic/runtime gates, and another separately authorized exact-subject review
+- Commands passed: local final strict gate 36/36; remote CI 22/22 including the new macOS Go-helper test/build/TS integration job, fixed-Node full test, real Postgres, migrations, and cross-platform package checks
+- Residual risks: fourteen advisory P2 findings remain, led by unconditional Agent-memory MCP injection without consulting adapter `mcpToolsets`; workflow plan/contract projections still require a separately authorized reconciliation before merge
+- Reviewer action required: no P0/P1 remediation is required by this review; any P2 fix, workflow reconciliation, or merge remains a separate owner decision
 - Rollback: revert the reviewed Phase 2 diff to checkpoint `185cf91`; migration `0014` has not been deployed
 
 ## Mode Evidence
@@ -34,9 +34,9 @@
 - Waza `/check` run: not used; repository-native checks and independent gate were used
 - Commands run: all contract commands passed, plus deploy SQL ordering, diff check, Linux focused tests, and Postgres/MinIO integration tests
 - Manual checks: verified ordinary tasks and incomplete hosted configuration expose no Phase 2 network surface; verified unsupported platforms fail closed; verified symlink-swap race cannot escape the captured Agent-home inode on Linux
-- Supporting artifacts: `.ai/harness/runs/run-20260827T033004-17106-20260826-1725-agent-memory-phase2.json`; GitHub Actions run `33005608051`
+- Supporting artifacts: `.ai/harness/runs/run-20260827T042504-42153-20260826-1725-agent-memory-phase2.json`; GitHub Actions run `33010461695`
 - Implementation notes reviewed: `tasks/notes/20260826-1725-agent-memory-phase2.notes.md`
-- Run snapshot: commit-bound preparation passed 33/33 contract rows; remote CI passed 21/21; the fresh Claude review found three P1 defects that keep shipment blocked
+- Run snapshot: commit-bound final strict gate passed 36/36 contract rows; remote CI passed 22/22; the fresh Claude review found no P0/P1 and produced a valid typed `external_pass` receipt
 
 ## Manual Check Evidence
 
@@ -47,6 +47,49 @@ screenshot/artifact path, or reviewer observation.
 - No non-built-in `manual_checks` are declared by the contract.
 
 ## Claude External Review (verbatim)
+
+### Terminal-boundary remediation final review — 2026-08-27
+
+```text
+**Verdict: no new P1 on the three remediated surfaces (publish timeout, pre-parse body bound, macOS helper CI). Several carried-over and new P2s remain; the branch also still self-declares incomplete.**
+
+Verified in-repo: `adapterSupportsMcpToolsets` exists (`task-runner.ts:684`) but `withAgentMemoryMcp` never consults it; `withAgentMessageMcp` (`:2112`) has the same shape, so the omission is consistent with the existing seam. `bun ci` is already used by every other job.
+
+## [P1]
+None found on the remediated surfaces.
+
+## [P2]
+
+1. **Memory MCP injected without checking adapter `mcpToolsets` capability** — `task-runner.ts` `withAgentMemoryMcp` runs for every strict Agent task whenever `agentMemoryMcpBin` resolves (Linux + `agentHome`, no `agentMemory` opt-in). An adapter declaring `mcpToolsets: false` still receives `mcpServers`; codex would pass it through `codexMcpConfigArgs` unconditionally. Third review cycle this is unaddressed; it is the closest thing to a behavior-drift blocker for existing Linux deployments.
+
+2. **Publish timeout is fixed and indistinguishable from a rejected publish** — `AGENT_MEMORY_PROJECTION_PUBLISH_TIMEOUT_MS = 10_000` is not configurable; a 512 KiB upload on a slow link times out every task close → initial replay throws before capture forever, surfaced only as `console.error`. Timeout raises generic `AgentMemoryError`, not `AgentMemoryProjectionReplayPendingError`, so callers cannot tell "pending, retry later" from "transport broken". No backoff.
+
+3. **CI regression guard is a text scan, and `bun run --filter … -- <file>` arg forwarding is unverified** — `agent-memory-helper-ci-p1-regression.test.ts` asserts YAML substrings, not that the helper test executed. If bun does not forward the trailing file arg through `--filter`, the step runs the full client suite (helper test still runs, so not a blocker, but the first remote run must confirm the helper test is not skipped).
+
+4. **Helper spawned on every strict-task close even with projection off** — `quiesceAndSnapshotAgentMemory` calls `bindAgentMemoryFilesystem` before `snapshotAndProjectAgentMemory` short-circuits. Carried over.
+
+5. **`captureAgentMemorySnapshot` audit failure is still fatal** while recall/save now warn — inconsistent disposition, blocks projection on an unwritable audit tail. Carried over.
+
+6. **Postgres idempotent replay is UUID-case-sensitive** — `sameReceiptBinding` compares pg-normalized lowercase `mutation_id` against the client string; `z.uuid()` accepts uppercase → `accepted` then `replay_mismatch` on exact retry. Carried over.
+
+7. **In-memory authorizer `#highestEpochs` never lowers; `erase` derives `nextWriterEpoch` from head only** — an uncommitted higher-epoch grant makes every post-erase grant silently dropped. Carried over.
+
+8. **`AgentMemoryFilesystem.append` is dead in production and uses a raw (non-base64) wire** — control-byte expansion path inconsistent with `replace`. Carried over.
+
+9. **Public surface gaps** — `AgentMemoryProjectionReplayPendingError` not exported from `packages/client/src/index.ts`; `TaskRunner.saveAgentMemory` / `AgentMemoryMcpDeps.save` types drop `auditWarning` that actually flows; `AgentHomeLease.homeIdentity` is a new required member on an exported interface. Carried over.
+
+10. **`byok-agent-memory-mcp.ts` caches a rejected `clientPromise` for the task lifetime**; `serveAgentMemoryMcpOverStdio` drops unparseable lines instead of `-32700`. Carried over.
+
+11. **Walk semantics differ by platform** — Go `walkPinned` fails the whole walk on a non-regular entry; Linux native skips. Carried over.
+
+12. **`readBoundedJsonBody` maps stream read errors to `body: undefined` → 422**, conflating a transport failure with invalid JSON. Minor.
+
+13. **Schema/test drift still present** — `0014` readback index duplicates the PK; `control_plane_invariants.sql` comment says "30" while the check is `< 31`; `agent-memory-mcp.test.ts` gates on `process.platform === 'linux'` rather than `isAgentMemorySecureFilesystemAvailable()`; outbox regression's `InMemoryFilesystem.replace` ignores `expectedRevision` so CAS is not exercised there.
+
+14. **Branch self-declares not ready** — contract `Status: Partial`, plan "Round 2 重验" and "重验" items unchecked, review `Terminal Blocked` with a typed `reject` receipt current, and `.ai/harness/checks/latest.json` projects a stale disposition. These artifacts must be reconciled before any merge decision.
+
+**Recap:** the three P1s from the prior review are fixed and adequately guarded; nothing new rises to P1. Remaining blockers are process-state reconciliation (#14) plus the #1 adapter-capability gap if the owner treats unconditional Linux MCP injection as drift. Everything else is advisory.
+```
 
 ### Audit-concurrency remediation final review — 2026-08-27
 
@@ -165,18 +208,18 @@ Findings (no P1-free pass; four blockers).
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: reject
+> **Disposition**: external_pass
 > **Reviewer**: Claude
 > **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:5303cd07247bc52b6240124f612abf2635a48e5bf70f66838992404cad897c51
+> **Reviewed Subject SHA256**: sha256:263e48ac26ffd3bd9d3edf1d131863f9e415408c7b8c7082060b906f89965e3f
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
-> **Verification Evidence SHA256**: sha256:cd9d05333b1845a425c6936a7478996bc2db8e32e0ff1099ddf09df191c8c289
-> **Issued At**: 2026-08-26T19:51:45.219Z
+> **Verification Evidence SHA256**: sha256:2c03044537bd724f239237588ef6d9ef89ad3a592d722c68b6b4e77d4938d7e5
+> **Issued At**: 2026-08-27T00:59:20.604Z
 
-- Summary: Fresh exact-subject Claude review rejected the candidate with three P1 blockers: unbounded terminal-path publish, missing Go-helper CI coverage, and an unbounded projection request body.
-- Findings: P1: Hosted port.publish has no timeout on the task-terminal path, so a hung publish can block terminal persistence and Agent-home lease release indefinitely.; P1: The Go helper and TS-to-Go integration path are not wired into CI, leaving the macOS admission and wire contract without reproducible automated coverage.; P1: The cloud projection route parses the full JSON body before applying the redactedBytes schema bound, allowing an authenticated device to send an arbitrarily large request body.
+- Summary: Fresh exact-subject Claude review of 6343ef0 confirmed the three prior P1 remediations and found no P0/P1; fourteen P2 advisory findings remain.
+- Findings: P2: Memory MCP injection does not consult the adapter mcpToolsets capability; existing seam behavior is consistent but may be Linux upgrade drift.; P2: Projection publish timeout is fixed at 10 seconds, uses a generic AgentMemoryError, and has no backoff.; P2: The helper CI regression guard is a YAML text scan; argument forwarding depends on the actual CI run.; P2: The filesystem helper can still be spawned at strict-task close when hosted projection is off.; P2: Snapshot audit failure remains fatal while recall and save return audit warnings.; P2: Postgres idempotent replay compares a normalized UUID to the client string case-sensitively.; P2: The in-memory authorizer high epoch can outlive erase while erase derives nextWriterEpoch from the head only.; P2: AgentMemoryFilesystem.append is unused in production and uses a raw non-base64 helper wire.; P2: Public surface gaps remain around replay-pending export, auditWarning return types, and required AgentHomeLease.homeIdentity.; P2: The MCP client caches a rejected connection promise and drops malformed JSON-RPC lines.; P2: Filesystem walk semantics differ between Go and Linux native backends for non-regular entries.; P2: Bounded JSON stream read errors are mapped to 422 invalid input.; P2: Schema and test drift remains in the duplicate readback index, invariant comment, platform gating, and one CAS test double.; P2: Workflow projections still contain stale incomplete and reject state and must be reconciled before merge.
 
 ## Behavior Diff Notes
 
@@ -188,30 +231,31 @@ Findings (no P1-free pass; four blockers).
 ## Residual Risks / Follow-ups
 
 - Phase 2 on macOS requires the explicit, version-matched helper proven in the cross-platform work-package. Windows remains disabled until a real runner proves its junction/reparse/rename matrix.
-- The earlier audit-concurrency P1 is remediated and strict checks pass, but the latest exact-subject review found three new P1 blockers; the frozen subject must not merge.
+- The prior three P1 findings are remediated and the latest exact-subject review found no P0/P1. Fourteen P2 findings remain advisory; the adapter `mcpToolsets` capability gap is the most consequential product decision.
+- Plan/contract/current-state projections still contain historical incomplete state. They must be reconciled and revalidated before any merge decision without changing the reviewed normalized subject.
 - The candidate branch was pushed and CI passed; merge, package publication, deployment, and production migration remain unperformed and unauthorized.
 
 ## Scorecard
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| Functionality | fail | Hosted publish can indefinitely block the terminal path despite focused and full tests passing |
+| Functionality | pass | The three prior P1 runtime boundaries are fixed and covered locally and in remote CI |
 | Product depth | source-pass | Local authority, hosted projection, metering, erase, and audit boundaries are covered |
 | Design quality | source-pass | One-way projection avoids dual authority; unsupported platforms fail closed |
-| Code quality | fail | Fresh Claude review found missing helper CI coverage and an unbounded HTTP request-body path |
+| Code quality | pass-with-advisories | Fresh Claude review found no P0/P1 and recorded fourteen P2 findings |
 
-## Failing Items
+## Advisory Items
 
-- Hosted `port.publish` has no timeout while awaited before terminal persistence and lease release.
-- The Go helper and TS↔Go integration path are not wired into CI.
-- The cloud projection route parses the full JSON body before enforcing the redacted payload schema bound.
+- Adapter `mcpToolsets` capability is not consulted before Agent-memory MCP injection.
+- Timeout/error typing, projection-off helper spawn, audit disposition, UUID normalization, erase epoch, public surface, helper wire, JSON-RPC recovery, cross-platform walk semantics, stream-read status mapping, schema/test drift, and workflow projection reconciliation remain P2 advisories.
 
 ## Retest Steps
 
-- Re-run: add one regression guard per P1, apply the bounded fixes, then run the focused suites and full strict contract.
-- Re-check: freeze the new subject, repeat Claude review, and confirm its exact subject/target fingerprint before considering merge.
+- No P0/P1 remediation is required by this review.
+- Before merge, reconcile workflow projections, verify the typed receipt against the unchanged normalized subject, and run the repository's terminal merge gate under separate authorization.
 
 ## Summary
 
-- Source verdict: FAIL due to the latest Claude review's three P1 findings.
-- Ship / terminal acceptance: BLOCKED; the fresh typed Claude `reject` receipt binds the current normalized subject and supersedes the earlier stale disposition.
+- Source verdict: PASS; fresh exact-subject Claude review found no P0/P1.
+- External acceptance: PASS; typed `external_pass` receipt binds normalized subject `sha256:263e48ac26ffd3bd9d3edf1d131863f9e415408c7b8c7082060b906f89965e3f`.
+- Merge remains a separate authority and is not granted by this review.
