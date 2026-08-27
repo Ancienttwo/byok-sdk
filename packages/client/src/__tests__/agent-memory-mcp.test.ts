@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AGENT_MEMORY_PROJECTION_CAPABILITY } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_PROJECTION_CAPABILITY, createEnvelope, type Envelope } from '@byok-sdk/protocol';
 
 import { AgentHomeManager } from '../agent-home';
 import {
@@ -16,11 +16,18 @@ import {
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
 import { handleAgentMemoryMcpRequest } from '../bin/agent-memory-mcp-server';
+import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
+import { ApprovalRegistry } from '../daemon/approvals';
+import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
+import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
+import { TaskRunner } from '../daemon/task-runner';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
+import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const roots: string[] = [];
 const sha256 = (value: string): string => `sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}`;
 const itWithSecureDescriptors = process.platform === 'linux' ? it : it.skip;
+const itWithMemoryMcp = isAgentMemorySecureFilesystemAvailable(true) ? it : it.skip;
 
 async function root(): Promise<string> {
   const value = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-agent-memory-mcp-'));
@@ -101,6 +108,115 @@ describe('Agent memory MCP local authority', () => {
     expect(() => new McpToolsetRegistry({
       host: { mcpServers: { byokagentmemory: { command: 'attacker' } } },
     })).toThrow('reserved by the daemon');
+  });
+
+  itWithMemoryMcp('declines a named strict Agent runtime that cannot project required memory MCP before claim', async () => {
+    const hostStorageRoot = await root();
+    const workspaceRoot = await root();
+    const storeDir = await root();
+    const sent: Envelope[] = [];
+    const adapter = new StubRuntimeAdapter('codex', { present: true }, {
+      steer: true,
+      resume: true,
+      approvalInteractive: true,
+      mcpToolsets: false,
+      permissionModes: ['auto'],
+    });
+    const runner = new TaskRunner({
+      adapters: [adapter],
+      workspaceRoot,
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentSessionHandoffs: new AgentSessionHandoffStore(),
+      deviceId: 'device-memory-mcp-toolsets',
+      send: (envelope) => sent.push(envelope),
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'memory-mcp-toolsets',
+      tenantId: 'tenant-memory-mcp-toolsets',
+      agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
+      ...(process.platform === 'darwin' ? { agentMemoryFilesystemHelperBin: '/opt/byok-agent-memory-fs' } : {}),
+    });
+
+    await runner.handleEnvelope(createEnvelope(
+      'task.offer_for_agent',
+      {
+        instruction: 'strict Agent task must not receive an unsupported MCP surface',
+        policy: { mode: 'auto' },
+        runtime: 'codex',
+        agentRef: { agentId: 'agent-memory-mcp-toolsets', profileRevision: 'profile-1' },
+      },
+      { taskId: 'task-memory-mcp-toolsets', seq: 1 },
+    ));
+
+    const decline = sent.find((envelope) => envelope.type === 'task.decline');
+    expect(decline?.payload).toMatchObject({ retryable: false });
+    expect(JSON.stringify(decline)).toContain('required MCP toolsets');
+    expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  itWithMemoryMcp('skips an unsupported runtime during automatic strict Agent selection and injects required memory MCP into the selected runtime', async () => {
+    const hostStorageRoot = await root();
+    const workspaceRoot = await root();
+    const storeDir = await root();
+    const unsupported = new StubRuntimeAdapter('unsupported-memory-runtime', { present: true }, {
+      steer: true,
+      resume: true,
+      approvalInteractive: true,
+      mcpToolsets: false,
+      permissionModes: ['auto'],
+    });
+    const supported = new StubRuntimeAdapter('supported-memory-runtime', { present: true }, {
+      steer: true,
+      resume: true,
+      approvalInteractive: true,
+      mcpToolsets: true,
+      permissionModes: ['auto'],
+    });
+    const runner = new TaskRunner({
+      adapters: [unsupported, supported],
+      workspaceRoot,
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentSessionHandoffs: new AgentSessionHandoffStore(),
+      deviceId: 'device-memory-mcp-selection',
+      send: () => {},
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'memory-mcp-selection',
+      tenantId: 'tenant-memory-mcp-selection',
+      agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
+      ...(process.platform === 'darwin' ? { agentMemoryFilesystemHelperBin: '/opt/byok-agent-memory-fs' } : {}),
+    });
+
+    await runner.handleEnvelope(createEnvelope(
+      'task.offer_for_agent',
+      {
+        instruction: 'automatic strict Agent selection must skip MCP-incompatible runtimes',
+        policy: { mode: 'auto' },
+        agentRef: { agentId: 'agent-memory-mcp-selection', profileRevision: 'profile-1' },
+      },
+      { taskId: 'task-memory-mcp-selection', seq: 1 },
+    ));
+
+    expect(unsupported.startCalls).toHaveLength(0);
+    expect(supported.startCalls).toHaveLength(1);
+    expect(supported.startCalls[0]?.ctx.mcpServers?.byokagentmemory).toMatchObject({
+      command: 'node',
+      args: ['memory-mcp.js'],
+    });
+
+    supported.sessions[0]?.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
   });
 
   it('does zero capture, audit, or network work when projection authority is incomplete', async () => {

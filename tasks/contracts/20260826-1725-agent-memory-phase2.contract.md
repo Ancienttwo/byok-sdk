@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-27 02:57
+> **Last Updated**: 2026-08-27 09:20
 > **Review File**: `tasks/reviews/20260826-1725-agent-memory-phase2.review.md`
 > **Notes File**: `tasks/notes/20260826-1725-agent-memory-phase2.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -57,10 +57,10 @@ an ordinary task and for a hosted contract missing grant or redactor.
 
 Required when Task Profile is `bugfix`.
 
-- root_cause: `packages/client/src/daemon/agent-memory.ts:352-399,454-467` has three writers for the same bounded audit CAS file, but only save enters the per-home queue. Concurrent recall/recall, recall/save, or recall/snapshot audit reads can overlap; recall also propagates metadata-only audit persistence failure after its source read already succeeded, unlike save's explicit warning disposition.
-- repro: `bun run --cwd packages/client test -- src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts`
-- regression_guard: packages/client/src/__tests__/agent-memory-audit-concurrency-p1-regression.test.ts
-- pre_fix_failure_artifact: .ai/harness/runs/agent-memory-audit-concurrency-p1-pre-fix.log
+- root_cause: `packages/client/src/daemon/task-runner.ts:1598-1617` treated Agent-memory MCP injection as independent from the adapter's frozen `mcpToolsets` capability. A strict Agent task could therefore select and claim a runtime that declared `mcpToolsets:false`, then receive the reserved local MCP server anyway; silently omitting the server would also violate the strict Agent memory contract.
+- repro: `bun run --cwd packages/client test -- src/__tests__/agent-memory-mcp.test.ts`
+- regression_guard: packages/client/src/__tests__/agent-memory-mcp.test.ts
+- pre_fix_failure_artifact: .ai/harness/runs/agent-memory-mcp-toolsets-p2-pre-fix.log
 
 ## Workflow Inventory
 

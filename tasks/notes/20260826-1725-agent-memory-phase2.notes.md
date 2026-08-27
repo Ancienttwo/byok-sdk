@@ -239,6 +239,29 @@
   This slice does not fix the review's P2 findings and does not authorize push,
   remote CI, another external review, merge, publication, deployment, or
   production migration.
+- Owner later authorized the fresh exact-subject review. Claude confirmed the
+  three P1 remediations and found no new P0/P1, so a typed `external_pass`
+  receipt was recorded for normalized subject
+  `sha256:263e48ac26ffd3bd9d3edf1d131863f9e415408c7b8c7082060b906f89965e3f`.
+  Fourteen P2 advisories remained. The most consequential one was promoted by
+  owner-authorized follow-up: `withAgentMemoryMcp` injected a local MCP server
+  after adapter selection without making `mcpToolsets:true` a selection
+  requirement. A red-first strict Agent guard proved an adapter declaring
+  `mcpToolsets:false` still received `byokagentmemory`; the artifact records
+  `PRE_FIX_EXIT=1`.
+- The remediation reuses the existing adapter capability authority rather than
+  adding a second flag or fallback: one `requiresAgentMemoryMcp` predicate
+  participates in `pickAdapter` and controls injection. Named unsupported
+  runtimes decline before claim; automatic selection skips them and chooses an
+  MCP-capable runtime. Local memory MCP remains independent from optional hosted
+  projection configuration.
+- Five repo-harness-generated capability/architecture projection files were
+  materialized concurrently and made the prior receipt stale even though they
+  were outside its frozen subject. Provenance tracing identified them as
+  deterministic projections with one pending strict architecture request.
+  They must be regenerated after source freeze and transferred to a separate
+  reconciliation branch; they are not to be silently discarded or folded into
+  the Phase 2 product subject.
 
 ## Promotion Filter
 

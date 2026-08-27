@@ -1598,7 +1598,14 @@ export class TaskRunner {
 
       const offered = withoutRequiredToolsets(payload);
       const requestedRuntime = payload.dispatchSelection?.runtimeId ?? payload.runtime;
-      const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode, requiredToolsets !== undefined || messageRequirement !== undefined);
+      const requiresAgentMemoryMcp = agentRef !== undefined
+        && this.deps.agentMemoryMcpBin !== undefined
+        && isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined);
+      const pick = await this.pickAdapter(
+        requestedRuntime,
+        payload.policy.mode,
+        requiredToolsets !== undefined || messageRequirement !== undefined || requiresAgentMemoryMcp,
+      );
       if (!pick.ok) {
         decline(pick.reason, pick.retryable);
         return;
@@ -1608,7 +1615,7 @@ export class TaskRunner {
         taskId,
         messageRequirement,
       );
-      if (agentRef !== undefined && this.deps.agentMemoryMcpBin !== undefined && isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
+      if (requiresAgentMemoryMcp && agentRef !== undefined) {
         try {
           taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef);
         } catch (error) {

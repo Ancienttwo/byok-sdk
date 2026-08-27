@@ -153,7 +153,7 @@ See captured planning output.
 - [x] **P1 outbox replay/erase**：证明并修复 pending record 跨 task/session 与 server erase 后的 sequence wedge，同时保留 exact task authorization、single-writer epoch、gap-free sequence 与 no merge/import 边界。
 - [x] **P1 bounded local logs**：outbox 与 audit 必须有 bounded compaction/rotation；任何日志维护失败不得在 source file 已成功 replace/delete 后把 save 伪装成失败。
 - [x] **P1 helper EPIPE**：helper stdin 的 stream-level error 必须被客户端捕获并转为 bounded operation failure，不得成为 daemon uncaught exception。
-- [ ] **重验**：每个 P1 先保留 unfixed regression evidence，再完成 focused/full strict checks；冻结新 subject 后重新 Claude review。
+- [x] **重验**：每个 P1 均保留 unfixed regression evidence；focused/full strict checks、remote CI 与后续 exact-subject review 已完成，历史 reject 已由更晚的 typed receipt 取代。
 
 ### Phase 2 P1 remediation round 2 — second Claude reject follow-up
 
@@ -161,21 +161,21 @@ See captured planning output.
 - [x] **P1 portable EPIPE guard**：EPIPE regression 在 Linux CI 显式模拟 darwin helper admission 后触发 stream error，不再依赖本机 macOS 偶然可达。
 - [x] **P1 observable replay outcome**：initial drain 与 trailing publish 的 `accepted:false` 都产生 typed、body-free projection pending failure；pending 未清空时不 capture/audit，也不分配新 sequence。
 - [x] **P1 historical grant authority**：同 writer epoch 下 prior task/session 的 exact permits 可共存；更高 epoch retire 旧 permits，stale lower grant 不复活，tenant/device/task/AgentRef/session/runtime/policy binding 不放宽。
-- [ ] **Round 2 重验**：四个 P1 各有 pre-fix red guard；完成 focused、真实 macOS helper、Linux CI-equivalent、disposable dataplane 与 full strict checks；冻结新 normalized subject 后只做一次 Claude review。
+- [x] **Round 2 重验**：四个 P1 各有 pre-fix red guard；focused、真实 macOS helper、Linux CI-equivalent、disposable dataplane、full strict checks 与该轮 Claude review 均已完成。
 
 ### Post-review medium remediation — Darwin `st_dev`
 
 - [x] **Darwin `st_dev` wire parity**：red guard 以 synthetic negative `syscall.Stat_t.Dev` 证明 helper 原先输出负十进制、与 libuv/Node 的 unsigned 64-bit bigint 不一致；Unix helper 现在对 dev/ino 显式做 `uint64` normalization，保持单一 decimal identity shape。
 - [x] **真实 helper focused verification**：Go targeted/full tests 通过；使用本机 freshly built helper 的 TypeScript integration 2 files / 6 pass、4 platform skips。
 - [x] **可选 LOW tool-name 变更暂缓**：`memory.recall` / `memory.save` 是 public MCP surface；没有 approved one-shot migration contract 时不重命名、不加 alias/fallback。
-- [ ] **Owner re-gate / push authority**：本 slice 只交付 local source candidate；现有 audit-concurrency typed reject 仍有效，re-gate、push、CI、fresh external review 与 merge 分属后续 authority。
+- [x] **Owner re-gate / push authority**：owner 后续分别授权并完成 local re-gate、push、CI 与 fresh external review；merge 仍是独立 authority，未获授权。
 
 ### Post-regate P1 remediation — metadata-only audit concurrency
 
 - [x] **Regression-first evidence**：同一 canonical Agent home 的 recall/recall、recall/save 与 recall/snapshot 均可并发读取相同 audit CAS revision；另证明 recall 已成功读取 source 后仍会因 metadata-only audit 持久化失败而 hard fail。red guard 与 pre-fix artifact 均已保留。
 - [x] **单一 per-home writer queue**：把现有 save queue 提升为 module-owned home queue；save mutation+audit 继续作为一个临界区，recall 与 snapshot 只串行化 audit writer，不把 source reads 全部单线程化。
 - [x] **一致 failure disposition**：recall 的 source read 成功后，audit failure 与 save 一样返回 `agent_memory_audit_unavailable` warning；不伪造 source failure 或 rollback。
-- [ ] **重验**：focused client guards、package typecheck/build/test 与 strict contract checks 通过后冻结新 subject。push、remote CI、fresh external review 与 merge 仍需后续独立授权。
+- [x] **重验**：focused client guards、package typecheck/build/test 与 strict contract checks 已通过；后续 push、remote CI 与 fresh external review 已按独立授权完成，merge 仍未授权。
 
 ### Post-CI external-review P1 remediation — terminal/CI/ingress bounds
 
@@ -184,6 +184,13 @@ See captured planning output.
 - [x] **Reproducible macOS helper CI**：新增独立 macOS job，使用 module-owned Go 1.26.5 authority 执行 Go tests/build，并以 built helper 设置 `BYOK_TEST_AGENT_MEMORY_FS_BIN` 跑 TS↔Go integration；source-scan guard 防止 job 静默消失。
 - [x] **Pre-parse projection body bound**：authenticated projection route 在 JSON parse 前同时约束 declared 与 streamed bytes；超过 envelope hard ceiling 返回 413，不以 schema 422 掩盖资源上限。
 - [x] **本地重验**：三个 focused guards、真实本机 Go helper integration、client/cloud package checks 与 full strict contract 全绿，new subject 已冻结。本 slice 不修 P2；push、remote CI、fresh external review 与 merge 仍需后续独立授权。
+
+### Post-external-pass blocker promotion — adapter MCP capability + projection reconciliation
+
+- [x] **Regression-first evidence**：strict Agent task 在 `mcpToolsets:false` adapter 上仍收到 reserved `byokagentmemory` server；focused guard 先红并在 `.ai/harness/runs/agent-memory-mcp-toolsets-p2-pre-fix.log` 保留 `PRE_FIX_EXIT=1`。
+- [x] **Capability fail-closed**：Agent-memory MCP requirement 进入既有 `pickAdapter` capability gate；显式不支持 runtime 在 claim 前 non-retryable decline，自动选择跳过不支持 adapter，并以同一 predicate 控制 reserved MCP 注入，不允许 silent downgrade。
+- [ ] **Projection reconciliation isolation**：冻结 source 后重新生成 capability/architecture projections；将 `.ai/context/context-map.json`、`docs/architecture/index.md`、`docs/architecture/requests/root.md`、`packages/AGENTS.md`、`packages/CLAUDE.md` 转移到独立 `codex/agent-memory-projection-reconciliation` branch，Phase 2 subject 不混入 generated authority WIP。
+- [ ] **新 subject 重验**：focused guard、client build/typecheck/test 与 full strict contract 通过后冻结新 normalized subject。旧 `external_pass` 因 production source 变化转 stale；push、remote CI、fresh external review 与 merge 继续需要独立授权。
 
 ## Verification
 
