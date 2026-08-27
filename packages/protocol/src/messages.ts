@@ -22,6 +22,7 @@ import {
   AgentHomeProjectionProfileRevisionSchema,
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
+import { ProviderProfileBindingSchema } from './provider-profile-binding';
 import { TerminalProjectionSelectionSchema } from './terminal-projection';
 
 /** Max size of an inlined artifact payload, per the delivery-model spec (<=64KB). */
@@ -256,6 +257,13 @@ export const DispatchSelectionSchema = z.discriminatedUnion('lane', [
       runtimeId: z.literal('pi'),
       providerId: DispatchTargetIdSchema,
       modelId: DispatchTargetIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      lane: z.literal('byok-profile'),
+      runtimeId: z.literal('pi'),
+      providerProfile: ProviderProfileBindingSchema,
     })
     .strict(),
 ]);
