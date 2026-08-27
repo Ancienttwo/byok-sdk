@@ -271,6 +271,18 @@
   artifact. Its architecture queue is now empty and the strict architecture
   gate passes. Neither reconciliation commit was pushed or merged into the
   Phase 2 product branch.
+- Product verification after source freeze passed the focused Agent-memory MCP
+  guard (`6 passed`, `4 platform skips`), client and root build/typecheck, the
+  complete client suite once (`1457 passed`, `10 skipped`), and strict workflow.
+  Two root aggregate runs nevertheless timed out in the same unrelated
+  `device-credential-store.test.ts` win32 parameter case at 10 seconds; that
+  file passed `12/12` when rerun alone. The three-round loop cap was reached, so
+  no out-of-scope test change was made and the full-test criterion remains open.
+- A read-only gatekeeper passed both bounded slices: product capability
+  semantics/tests and projection provenance/queue resolution. The resolved
+  effective state records review, checks, external acceptance, handoff, and
+  current snapshot as stale for the new product subject; no push, fresh review,
+  merge, publication, deployment, or migration occurred.
 
 ## Promotion Filter
 

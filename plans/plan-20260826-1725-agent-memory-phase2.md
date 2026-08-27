@@ -190,7 +190,7 @@ See captured planning output.
 - [x] **Regression-first evidence**：strict Agent task 在 `mcpToolsets:false` adapter 上仍收到 reserved `byokagentmemory` server；focused guard 先红并在 `.ai/harness/runs/agent-memory-mcp-toolsets-p2-pre-fix.log` 保留 `PRE_FIX_EXIT=1`。
 - [x] **Capability fail-closed**：Agent-memory MCP requirement 进入既有 `pickAdapter` capability gate；显式不支持 runtime 在 claim 前 non-retryable decline，自动选择跳过不支持 adapter，并以同一 predicate 控制 reserved MCP 注入，不允许 silent downgrade。
 - [x] **Projection reconciliation isolation**：冻结 source 后重新生成 capability/architecture projections；exact patch 已转移到独立 `codex/agent-memory-projection-reconciliation` branch，并在该分支将累计 root request 以现有 `docs/architecture/sdk-architecture.md` 为 artifact 做 resolved archive。Phase 2 product branch 不混入 generated authority WIP。
-- [ ] **新 subject 重验**：focused guard、client build/typecheck/test 与 full strict contract 通过后冻结新 normalized subject。旧 `external_pass` 因 production source 变化转 stale；push、remote CI、fresh external review 与 merge 继续需要独立授权。
+- [ ] **新 subject 重验**：focused guard、client/root build/typecheck 与 client test 已通过；root aggregate test 仍被既有 `device-credential-store` win32 case 的 suite-only 10s timeout 阻断，product branch 的 strict architecture gate 也要等独立 reconciliation branch 集成后才能清零。旧 `external_pass` 因 production source 变化转 stale；push、remote CI、fresh external review 与 merge 继续需要独立授权。
 
 ## Verification
 
