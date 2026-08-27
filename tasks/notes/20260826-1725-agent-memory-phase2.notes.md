@@ -342,6 +342,21 @@
   `sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b`.
   This slice recorded evidence only; it did not fix source, push, merge,
   publish, deploy, or migrate.
+- Owner subsequently authorized the FIFO P1 fix. A Linux Node 22 bounded
+  regression created an accepted `notes/blocked.md` FIFO with no writer; before
+  the fix the focused process exceeded 8 seconds and was terminated with exit
+  124. The root cause was the native leaf sequence: blocking
+  `O_RDONLY|O_NOFOLLOW` open ran before descriptor `stat()` could reject the
+  non-regular file.
+- The fix keeps the existing descriptor-relative parent traversal and
+  `O_NOFOLLOW`, adds `O_NONBLOCK` to the Linux leaf open, and continues to make
+  descriptor `stat()` the file-type authority. Regular files retain the same
+  read path; FIFO/device leaves now settle quickly and fail closed even if a
+  leaf changes type in the validation/open race. The focused Linux file passed
+  11/11, client passed 1457 with 11 platform skips, root build/typecheck/test
+  passed, and the commit-bound terminal contract passed 42/42 with fresh
+  checks. The previous typed reject is stale for the source-changed subject;
+  no push, fresh external review, merge, publish, deploy, or migration occurred.
 
 ## Promotion Filter
 

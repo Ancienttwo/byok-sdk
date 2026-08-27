@@ -1,6 +1,6 @@
 # Plan: Agent Memory Phase 2
 
-> **Status**: Remediation / Re-review Pending
+> **Status**: Re-gated / External Re-review Pending
 > **Created**: 20260826-1725
 > **Slug**: agent-memory-phase2
 > **Planning Source**: codex-plan-or-waza-think
@@ -199,7 +199,7 @@ See captured planning output.
 
 - [x] **Regression-first evidence**：Linux Node 22 bounded guard 在 `notes/blocked.md` 为无 writer FIFO 时超过 8 秒并以 exit 124 被外部 timeout 终止；artifact 为 `.ai/harness/runs/agent-memory-fifo-p1-pre-fix.log`。
 - [x] **Nonblocking descriptor admission**：native Linux leaf open 保留 descriptor-relative parent 与 `O_NOFOLLOW`，同时加 `O_NONBLOCK`；open 后继续以 descriptor `stat()` 只接受 bounded regular file，因此 FIFO/device 即使在 validation/open race 中出现也不能阻塞或被读取。
-- [ ] **重验**：Linux focused guard 已从 timeout 转为 11/11；client/root build、typecheck、test、strict workflow 与 fresh checks 待本 slice 收口。旧 typed `reject` 对 source-changed subject 保持 stale；push、fresh external review 与 merge 均未授权。
+- [x] **重验**：Linux focused guard 已从 timeout 转为 11/11；client 1457 pass / 11 platform skips，root build/typecheck/test 与 strict workflow 通过；commit-bound `verify-sprint --prepare-acceptance` 42/42 并生成 fresh checks。旧 typed `reject` 对 source-changed subject 保持 stale；push、fresh external review 与 merge 均未授权。
 
 ## Verification
 

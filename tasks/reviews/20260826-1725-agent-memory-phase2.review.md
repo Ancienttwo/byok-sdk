@@ -1,11 +1,11 @@
 # Task Review: agent-memory-phase2
 
-> **Status**: Review Failed / External Rejection Recorded
+> **Status**: FIFO P1 Remediated / External Re-review Required
 > **Plan**: plans/plan-20260826-1725-agent-memory-phase2.md
 > **Contract**: tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
 > **Notes File**: tasks/notes/20260826-1725-agent-memory-phase2.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-28 01:22
+> **Last Updated**: 2026-08-28 17:39
 > **Recommendation**: reject
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b
@@ -14,13 +14,13 @@
 
 ## Human Review Card
 
-- Verdict: FAIL; the fresh exact-subject Claude review found one P1 in Linux native Agent-memory file handling: opening a FIFO before validating its type can block recall/save and terminal quiescence indefinitely
+- Verdict: SOURCE REMEDIATED; the prior exact-subject Claude verdict remains FAIL for its reviewed subject, while the source-changed candidate has not received a fresh external review
 - Change type: code-change + migration
 - Intended files changed: client memory MCP and runtime injection, protocol/cloud projection contracts, cloud-dataplane store and migration, focused tests, architecture and task evidence
 - Actual files changed: the intended Phase 2 surfaces under `packages/client`, `packages/protocol`, `packages/cloud`, `packages/cloud-dataplane`, `deploy/sql`, `tests/sql`, and the task artifacts listed by the contract
-- Commands passed: local final strict gate 42/42; remote CI run `33096039651` passed 22/22 at exact candidate `9099ae71706f91d1f9e0a4ee25ad115e13fce6a7`
-- Residual risks: one P1 FIFO blocking path and thirteen P2 findings remain; the semantic acceptance gate is rejected despite green local and remote verification
-- Reviewer action required: no remediation is authorized by this review-only slice; any regression guard, source fix, re-gate, push, or merge requires separate owner authority
+- Commands passed: Linux FIFO pre-fix guard timed out at 8 seconds and post-fix Agent-memory MCP passed 11/11; client passed 1457 with 11 platform skips; root build/typecheck/test and commit-bound strict gate passed 42/42
+- Residual risks: the FIFO P1 is closed by local deterministic/runtime evidence, but thirteen prior P2 findings remain and the source-changed subject has no fresh external acceptance
+- Reviewer action required: run one fresh exact-subject external review under separate owner authority before any push/merge decision
 - Rollback: revert the reviewed Phase 2 diff to checkpoint `185cf91`; migration `0014` has not been deployed
 
 ## Mode Evidence
@@ -34,9 +34,9 @@
 - Waza `/check` run: not used; repository-native checks and independent gate were used
 - Commands run: all contract commands passed, plus deploy SQL ordering, diff check, Linux focused tests, and Postgres/MinIO integration tests
 - Manual checks: verified ordinary tasks and incomplete hosted configuration expose no Phase 2 network surface; verified unsupported platforms fail closed; verified symlink-swap race cannot escape the captured Agent-home inode on Linux
-- Supporting artifacts: `.ai/harness/checks/latest.json`; GitHub Actions run `33096039651`
+- Supporting artifacts: `.ai/harness/runs/agent-memory-fifo-p1-pre-fix.log`; `.ai/harness/runs/run-20260828T013858-60665-20260826-1725-agent-memory-phase2.json`; `.ai/harness/checks/latest.json`
 - Implementation notes reviewed: `tasks/notes/20260826-1725-agent-memory-phase2.notes.md`
-- Run snapshot: commit-bound final strict gate passed 42/42 contract rows; remote CI run `33096039651` passed 22/22 at `9099ae7`; the fresh Claude review found one P1 and produced a typed `reject` receipt
+- Run snapshot: source-changed commit-bound strict gate passed 42/42; the prior Claude `reject` and receipt remain historical evidence for the older reviewed subject and are stale for the current candidate
 
 ## Manual Check Evidence
 
@@ -45,6 +45,15 @@ the observation is complete and replace the placeholder with concrete command ou
 screenshot/artifact path, or reviewer observation.
 
 - No non-built-in `manual_checks` are declared by the contract.
+
+## Post-review FIFO P1 remediation — 2026-08-28
+
+- P1 map: the affected authority is the Linux native Agent-memory leaf open in `packages/client/src/daemon/agent-memory.ts`; the macOS Go helper already rejects non-regular leaves before a blocking open.
+- P2 trace: `validateAgentMemoryPath` accepted `notes/blocked.md`, `withMemoryParent` pinned its parent descriptor, and `readPinnedFile` performed a blocking leaf open before descriptor `stat()`. With a FIFO and no writer, the promise never settled, so any terminal wait for in-flight memory work could retain the Agent-home lease indefinitely.
+- P3 decision: add `O_NONBLOCK` to the descriptor-relative `O_RDONLY|O_NOFOLLOW` leaf open and retain descriptor `stat()` as the regular-file authority. An `lstat`-only fix was insufficient because a leaf could change from regular file to FIFO between validation and open.
+- Regression: the Linux focused process changed from bounded timeout exit 124 to 11/11 pass; recall, replace, and delete all reject the FIFO as a non-regular memory file without blocking.
+- Verification: client build/typecheck/test passed; root build/typecheck/test and strict workflow passed; commit-bound terminal contract passed 42/42 and generated fresh checks.
+- Authority boundary: no push, fresh external review, acceptance replacement, merge, publication, deployment, or production migration was performed.
 
 ## Claude External Review (verbatim)
 
