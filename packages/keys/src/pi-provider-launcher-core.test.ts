@@ -24,11 +24,13 @@ function profile(authMode: 'bearer' | 'none') {
     adapter: 'openai_compatible',
     auth_mode: authMode,
     base_url: 'http://127.0.0.1:11434/v1',
+    capabilities: [],
     display_name: 'Local model',
     enabled: true,
     kind: 'model',
     model: 'local-model',
-    provider_id: 'custom',
+    profile_ref: 'custom',
+    provider_kind: 'custom',
   });
 }
 
@@ -56,9 +58,27 @@ describe('Pi provider launcher core', () => {
     ])).toMatchObject({
       profileDbPath,
       sessionDir,
-      providerId: 'custom',
+      profileRef: 'custom',
       macosKeychainPath,
     });
+
+    expect(parsePiProviderLauncherOptions([
+      '--pi-bin', '/opt/pi',
+      '--profile-db', profileDbPath,
+      '--session-dir', sessionDir,
+      '--provider', 'openrouter-primary',
+      '--model', 'anthropic/claude-sonnet-4',
+      '--', '--mode', 'rpc',
+    ])).toMatchObject({ profileRef: 'openrouter-primary' });
+
+    expect(() => parsePiProviderLauncherOptions([
+      '--pi-bin', '/opt/pi',
+      '--profile-db', profileDbPath,
+      '--session-dir', sessionDir,
+      '--provider', '../escape',
+      '--model', 'local-model',
+      '--', '--mode', 'rpc',
+    ])).toThrow(/not a valid @byok-sdk\/keys identifier/);
 
     expect(() => parsePiProviderLauncherOptions([
       '--pi-bin', '/opt/pi',

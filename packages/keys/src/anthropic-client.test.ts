@@ -16,12 +16,14 @@ const profile = (
   adapter: 'anthropic',
   auth_mode: 'x_api_key',
   base_url: 'https://api.anthropic.com/v1',
+  capabilities: [],
   created_at: '2026-08-05T00:00:00.000Z',
   display_name: 'Anthropic',
   enabled: true,
   kind: 'model',
   model: 'claude-sonnet-4-5',
-  provider_id: 'anthropic',
+  profile_ref: 'anthropic',
+  provider_kind: 'anthropic',
   updated_at: '2026-08-05T00:00:00.000Z',
   ...overrides,
 });
@@ -164,7 +166,8 @@ describe('AnthropicMessagesClient', () => {
         profile: profile({
           adapter: 'openai_compatible',
           auth_mode: 'bearer',
-          provider_id: 'openai',
+          profile_ref: 'openai',
+          provider_kind: 'openai',
         }),
       }),
     ).toThrowError(

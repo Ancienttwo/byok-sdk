@@ -1,5 +1,8 @@
 import { ByokKeysError } from './errors';
-import type { ModelProviderId } from './provider-profile';
+import {
+  ProviderProfileRefSchema,
+  type ProviderProfileRef,
+} from './provider-profile';
 import { assertSecretName, assertSecretNamespace } from './secret-name';
 
 /**
@@ -47,26 +50,35 @@ export interface SecretStore<TName extends string = string> {
 export const DEFAULT_SECRET_SERVICE_PREFIX = 'com.byok.keys';
 
 /**
- * Credential-store entry name per model provider, ported verbatim from
- * `providers.ts:1624-1632`. The names carry no vendor branding — the branding
- * lives in the service prefix — so they travel unchanged and K4 needs no
- * migration.
+ * Credential-store entry name for one provider profile.
+ *
+ * The former fixed `MODEL_PROVIDER_SECRET_NAMES` table could name exactly one
+ * entry per provider kind, so two independent `custom` endpoints would have
+ * shared — and overwritten — a single credential. The name is now derived from
+ * the profile's own {@link ProviderProfileRef}, keeping the shape
+ * `providers.ts:1624-1632` established (`model-<id>-api-key`, no vendor
+ * branding; the branding lives in the service prefix).
  */
-export const MODEL_PROVIDER_SECRET_NAMES = {
-  anthropic: 'model-anthropic-api-key',
-  custom: 'model-custom-api-key',
-  deepseek: 'model-deepseek-api-key',
-  openai: 'model-openai-api-key',
-} as const satisfies Record<ModelProviderId, string>;
+export type ModelProviderSecretName = `model-${string}-api-key`;
 
-export type ModelProviderSecretName =
-  (typeof MODEL_PROVIDER_SECRET_NAMES)[keyof typeof MODEL_PROVIDER_SECRET_NAMES];
-
-/** Resolve a provider id to the credential-store entry holding its API key. */
+/**
+ * Resolve a provider profile ref to the credential-store entry holding its API
+ * key. The ref is validated here as well as by the profile schema: this
+ * function composes a storage address, so an unvalidated ref would be an
+ * address-injection surface rather than merely an invalid record.
+ */
 export function modelProviderSecretName(
-  providerId: ModelProviderId,
+  profileRef: ProviderProfileRef,
 ): ModelProviderSecretName {
-  return MODEL_PROVIDER_SECRET_NAMES[providerId];
+  const parsed = ProviderProfileRefSchema.safeParse(profileRef);
+  if (!parsed.success) {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      'Provider profile ref must be a lowercase portable identifier',
+      { cause: parsed.error },
+    );
+  }
+  return assertSecretName(`model-${parsed.data}-api-key` as const);
 }
 
 /**

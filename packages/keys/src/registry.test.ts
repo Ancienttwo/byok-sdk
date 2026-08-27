@@ -15,18 +15,22 @@ const OPENAI: ProviderConfiguration = {
   adapter: 'openai_compatible',
   auth_mode: 'bearer',
   base_url: 'https://api.openai.com/v1',
+  capabilities: [],
   display_name: 'OpenAI',
   model: 'gpt-5.2',
-  provider_id: 'openai',
+  profile_ref: 'openai',
+  provider_kind: 'openai',
 };
 
 const ANTHROPIC: ProviderConfiguration = {
   adapter: 'anthropic',
   auth_mode: 'x_api_key',
   base_url: 'https://api.anthropic.com',
+  capabilities: [],
   display_name: 'Anthropic',
   model: 'claude-sonnet-5',
-  provider_id: 'anthropic',
+  profile_ref: 'anthropic',
+  provider_kind: 'anthropic',
 };
 
 let secrets: InMemorySecretStore<ModelProviderSecretName>;
@@ -52,7 +56,7 @@ describe('ProviderRegistry.configure', () => {
     expect(status).toMatchObject({
       enabled: true,
       model: 'gpt-5.2',
-      provider_id: 'openai',
+      profile_ref: 'openai',
       secret_configured: true,
     });
     expect((await profiles.get('openai'))?.model).toBe('gpt-5.2');
@@ -150,14 +154,14 @@ describe('ProviderRegistry.configure', () => {
     await registry().configure(OPENAI, CANARY);
     const rejectingProfiles: ProviderProfileStore = {
       close: () => profiles.close(),
-      delete: (providerId) => profiles.delete(providerId),
-      get: (providerId) => profiles.get(providerId),
+      delete: (profileRef) => profiles.delete(profileRef),
+      get: (profileRef) => profiles.get(profileRef),
       getEnabled: () => profiles.getEnabled(),
       list: () => profiles.list(),
       save: async () => {
         throw new ByokKeysError('PROVIDER_PROFILE_CONFLICT', 'stale profile revision');
       },
-      setEnabled: (providerId) => profiles.setEnabled(providerId),
+      setEnabled: (profileRef) => profiles.setEnabled(profileRef),
     };
     const subject = new ProviderRegistry({
       profileStore: rejectingProfiles,
@@ -176,7 +180,7 @@ describe('ProviderRegistry.configure', () => {
     await subject.configure(ANTHROPIC, 'sk-ant-canary');
     const statuses = await subject.list();
     expect(statuses.filter((entry) => entry.enabled)).toHaveLength(1);
-    expect(statuses.find((entry) => entry.enabled)?.provider_id).toBe(
+    expect(statuses.find((entry) => entry.enabled)?.profile_ref).toBe(
       'anthropic',
     );
   });
@@ -187,6 +191,45 @@ describe('ProviderRegistry.configure', () => {
     await subject.configure({ ...ANTHROPIC, enabled: false }, 'sk-ant-canary');
     expect((await subject.get('openai'))?.enabled).toBe(true);
     expect((await subject.get('anthropic'))?.enabled).toBe(false);
+  });
+});
+
+describe('ProviderRegistry multi-profile custody', () => {
+  it('gives two custom profiles of one kind their own profile and credential', async () => {
+    const subject = registry();
+    const primary: ProviderConfiguration = {
+      adapter: 'openai_compatible',
+      auth_mode: 'bearer',
+      base_url: 'https://openrouter.ai/api/v1',
+      capabilities: ['image-input'],
+      display_name: 'OpenRouter primary',
+      model: 'anthropic/claude-sonnet-4',
+      profile_ref: 'openrouter-primary',
+      provider_kind: 'custom',
+    };
+    const backup: ProviderConfiguration = {
+      ...primary,
+      display_name: 'OpenRouter backup',
+      enabled: false,
+      profile_ref: 'openrouter-backup',
+    };
+
+    await subject.configure(primary, 'sk-primary-canary');
+    await subject.configure(backup, 'sk-backup-canary');
+
+    await expect(secrets.get('model-openrouter-primary-api-key')).resolves.toBe(
+      'sk-primary-canary',
+    );
+    await expect(secrets.get('model-openrouter-backup-api-key')).resolves.toBe(
+      'sk-backup-canary',
+    );
+    expect((await subject.get('openrouter-primary'))?.capabilities).toEqual([
+      'image-input',
+    ]);
+    expect((await subject.list()).map((entry) => entry.profile_ref)).toEqual([
+      'openrouter-backup',
+      'openrouter-primary',
+    ]);
   });
 });
 
@@ -255,7 +298,7 @@ describe('ProviderRegistry lifecycle', () => {
     await subject.configure(OPENAI, CANARY);
     await subject.configure(ANTHROPIC, 'sk-ant-canary');
     const status = await subject.setDefaultModelProvider('openai');
-    expect(status.provider_id).toBe('openai');
+    expect(status.profile_ref).toBe('openai');
     expect((await subject.resolveDefaultModelProvider())?.model).toBe('gpt-5.2');
   });
 
@@ -286,7 +329,7 @@ describe('ProviderRegistry lifecycle', () => {
     await secrets.delete('model-anthropic-api-key');
     const statuses = await subject.list();
     expect(
-      statuses.map((entry) => [entry.provider_id, entry.secret_configured]),
+      statuses.map((entry) => [entry.profile_ref, entry.secret_configured]),
     ).toEqual([
       ['anthropic', false],
       ['openai', true],

@@ -4,17 +4,63 @@ import { ByokKeysError } from './errors';
 import { normalizeProviderUrl } from './url';
 
 /**
- * Model providers this package knows how to address. Ported from
- * `aip-main-open@c6a5385` `providers.ts:30-36` (`LOCAL_MODEL_PROVIDER_IDS`).
+ * Opaque, portable identity of one locally configured provider profile.
+ *
+ * This is the profile's primary key: it is a local logical id, never a path,
+ * and several profiles may share one {@link MODEL_PROVIDER_KINDS} kind (two
+ * independent `custom` endpoints, for example). It replaces the former
+ * `MODEL_PROVIDER_IDS` primary key, which conflated instance identity with
+ * provider kind and therefore allowed exactly one profile per kind.
+ *
+ * `@byok-sdk/protocol` declares the same lexical rule for the wire form in
+ * `provider-profile-binding.ts`. The two definitions are deliberately parallel
+ * rather than shared: the release graph (`scripts/release/check-package-graph.mjs`)
+ * forbids `@byok-sdk/keys` from depending on any dispatch package, so the
+ * device-local authority cannot import the wire authority. This mirrors how
+ * `packages/protocol/src/blob.ts`'s `CONTENT_HASH_RE` restates
+ * `packages/core/src/blob.ts`'s content-hash format across the same boundary.
  */
-export const MODEL_PROVIDER_IDS = [
+export const PROVIDER_PROFILE_REF_PATTERN =
+  /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/u;
+
+export const ProviderProfileRefSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(
+    PROVIDER_PROFILE_REF_PATTERN,
+    'provider profile refs must be lowercase portable identifiers',
+  );
+
+export type ProviderProfileRef = z.infer<typeof ProviderProfileRefSchema>;
+
+/**
+ * Provider kinds this package knows how to address — the surviving half of the
+ * former `MODEL_PROVIDER_IDS`. A kind says *what dialect family and vendor
+ * shape* a profile is; {@link ProviderProfileRefSchema} says *which* profile.
+ * Ported from `aip-main-open@c6a5385` `providers.ts:30-36`
+ * (`LOCAL_MODEL_PROVIDER_IDS`).
+ */
+export const MODEL_PROVIDER_KINDS = [
   'openai',
   'deepseek',
   'anthropic',
   'custom',
 ] as const;
 
-export type ModelProviderId = (typeof MODEL_PROVIDER_IDS)[number];
+export type ModelProviderKind = (typeof MODEL_PROVIDER_KINDS)[number];
+
+/**
+ * Bounded model capabilities a profile may declare. A capability is explicit
+ * local configuration, never inferred from the model name or the base URL.
+ */
+export const PROVIDER_MODEL_CAPABILITIES = ['image-input'] as const;
+
+export const ProviderModelCapabilitySchema = z.enum(PROVIDER_MODEL_CAPABILITIES);
+
+export type ProviderModelCapability = z.infer<
+  typeof ProviderModelCapabilitySchema
+>;
 
 /** Auth modes a provider profile can request (`providers.ts:29`). */
 export const PROVIDER_AUTH_MODES = ['bearer', 'x_api_key', 'none'] as const;
@@ -100,15 +146,24 @@ export const ModelProviderProfileSchema = z
     adapter: z.enum(MODEL_PROVIDER_ADAPTERS),
     auth_mode: z.enum(PROVIDER_AUTH_MODES),
     base_url: providerBaseUrl,
+    capabilities: z.array(ProviderModelCapabilitySchema).max(8),
     created_at: isoTimestamp('created_at'),
     display_name: boundedString('display_name', 100),
     enabled: z.boolean(),
     kind: z.literal('model'),
     model: boundedString('model', 160),
-    provider_id: z.enum(MODEL_PROVIDER_IDS),
+    profile_ref: ProviderProfileRefSchema,
+    provider_kind: z.enum(MODEL_PROVIDER_KINDS),
     updated_at: isoTimestamp('updated_at'),
   })
   .superRefine((profile, ctx) => {
+    if (new Set(profile.capabilities).size !== profile.capabilities.length) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Provider capabilities cannot repeat',
+        path: ['capabilities'],
+      });
+    }
     if (profile.adapter === 'anthropic' && profile.auth_mode !== 'x_api_key') {
       ctx.addIssue({
         code: 'custom',

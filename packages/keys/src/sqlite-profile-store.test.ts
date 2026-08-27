@@ -24,19 +24,21 @@ const sqliteReady = isSqliteAvailable();
  * nothing is left on the machine.
  */
 const profile = (
-  provider_id: 'anthropic' | 'custom' | 'deepseek' | 'openai',
+  profile_ref: 'anthropic' | 'custom' | 'deepseek' | 'openai',
   overrides: Partial<ModelProviderProfile> = {},
 ): ModelProviderProfile =>
   ({
     adapter: 'openai_compatible',
     auth_mode: 'bearer',
     base_url: 'https://api.openai.com/v1',
+    capabilities: [],
     created_at: '2026-08-05T00:00:00.000Z',
     display_name: 'OpenAI',
     enabled: true,
     kind: 'model',
     model: 'gpt-5.2',
-    provider_id,
+    profile_ref,
+    provider_kind: profile_ref,
     updated_at: '2026-08-05T00:00:00.000Z',
     ...overrides,
   }) as ModelProviderProfile;
@@ -74,7 +76,7 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     const second = new SqliteProviderProfileStore({ path: databasePath });
     await expect(second.get('openai')).resolves.toMatchObject({
       model: 'gpt-5.2',
-      provider_id: 'openai',
+      profile_ref: 'openai',
     });
     await second.close();
   });
@@ -115,6 +117,31 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     await reopened.close();
   });
 
+  it('keeps two custom profiles as separate rows on disk', async () => {
+    const store = new SqliteProviderProfileStore({ path: databasePath });
+    await store.save(
+      profile('custom', {
+        base_url: 'https://openrouter.ai/api/v1',
+        profile_ref: 'openrouter-primary',
+      } as Partial<ModelProviderProfile>),
+    );
+    await store.save(
+      profile('custom', {
+        base_url: 'https://openrouter.ai/api/v1',
+        enabled: false,
+        profile_ref: 'openrouter-backup',
+      } as Partial<ModelProviderProfile>),
+    );
+    await store.close();
+
+    const reopened = new SqliteProviderProfileStore({ path: databasePath });
+    expect((await reopened.list()).map((entry) => entry.profile_ref)).toEqual([
+      'openrouter-backup',
+      'openrouter-primary',
+    ]);
+    await reopened.close();
+  });
+
   it('rolls back a failed save rather than leaving a partial row', async () => {
     const store = new SqliteProviderProfileStore({ path: databasePath });
     await store.save(profile('openai'));
@@ -147,12 +174,14 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
       'adapter',
       'auth_mode',
       'base_url',
+      'capabilities',
       'created_at',
       'display_name',
       'enabled',
       'kind',
       'model',
-      'provider_id',
+      'profile_ref',
+      'provider_kind',
       'updated_at',
     ]);
   });

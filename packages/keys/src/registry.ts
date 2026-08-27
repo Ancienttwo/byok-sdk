@@ -5,9 +5,11 @@ import { OpenAiCompatibleChatClient } from './openai-client';
 import type { ProviderProfileStore } from './profile-store';
 import {
   type ModelProviderAdapter,
-  type ModelProviderId,
+  type ModelProviderKind,
   type ModelProviderProfile,
   type ProviderAuthMode,
+  type ProviderModelCapability,
+  type ProviderProfileRef,
   parseModelProviderProfile,
 } from './provider-profile';
 import {
@@ -31,11 +33,18 @@ export interface ProviderConfiguration {
   adapter: ModelProviderAdapter;
   auth_mode: ProviderAuthMode;
   base_url: string;
+  /**
+   * Bounded model capabilities this exact profile supports. Declared, never
+   * inferred: an omitted capability means the endpoint does not offer it.
+   */
+  capabilities: readonly ProviderModelCapability[];
   display_name: string;
   /** Defaults to `true`: configuring a provider makes it the default. */
   enabled?: boolean;
   model: string;
-  provider_id: ModelProviderId;
+  /** This profile's own local identity; several profiles may share one kind. */
+  profile_ref: ProviderProfileRef;
+  provider_kind: ModelProviderKind;
 }
 
 /**
@@ -50,12 +59,14 @@ export interface ProviderStatus {
   adapter: ModelProviderAdapter;
   auth_mode: ProviderAuthMode;
   base_url: string;
+  capabilities: readonly ProviderModelCapability[];
   created_at: string;
   display_name: string;
   enabled: boolean;
   model: string;
-  provider_id: ModelProviderId;
-  /** Whether the credential store currently holds this provider's key. */
+  profile_ref: ProviderProfileRef;
+  provider_kind: ModelProviderKind;
+  /** Whether the credential store currently holds this profile's key. */
   secret_configured: boolean;
   updated_at: string;
 }
@@ -121,15 +132,16 @@ export class ProviderRegistry {
     secret?: string,
   ): Promise<ProviderStatus> {
     const timestamp = this.#now().toISOString();
-    const previous = await this.#profiles.get(configuration.provider_id);
+    const previous = await this.#profiles.get(configuration.profile_ref);
     const profile = parseModelProviderProfile({
       ...configuration,
+      capabilities: [...configuration.capabilities],
       created_at: previous?.created_at ?? timestamp,
       enabled: configuration.enabled ?? true,
       kind: 'model',
       updated_at: timestamp,
     });
-    const secretName = modelProviderSecretName(configuration.provider_id);
+    const secretName = modelProviderSecretName(configuration.profile_ref);
     let previousSecret: string | undefined;
     let secretWritten = false;
 
@@ -187,15 +199,15 @@ export class ProviderRegistry {
     return this.#status(saved);
   }
 
-  /** Remove a provider's profile and its secret together. */
-  async delete(providerId: ModelProviderId): Promise<boolean> {
-    const removed = await this.#profiles.delete(providerId);
-    await this.#secrets.delete(modelProviderSecretName(providerId));
+  /** Remove a profile and its secret together. */
+  async delete(profileRef: ProviderProfileRef): Promise<boolean> {
+    const removed = await this.#profiles.delete(profileRef);
+    await this.#secrets.delete(modelProviderSecretName(profileRef));
     return removed;
   }
 
-  async get(providerId: ModelProviderId): Promise<ProviderStatus | undefined> {
-    const profile = await this.#profiles.get(providerId);
+  async get(profileRef: ProviderProfileRef): Promise<ProviderStatus | undefined> {
+    const profile = await this.#profiles.get(profileRef);
     return profile === undefined ? undefined : this.#status(profile);
   }
 
@@ -216,7 +228,7 @@ export class ProviderRegistry {
     const profile = await this.#profiles.getEnabled();
     if (profile === undefined) return undefined;
     const secret = await this.#secrets.get(
-      modelProviderSecretName(profile.provider_id),
+      modelProviderSecretName(profile.profile_ref),
     );
     const options = { fetchImpl: this.#fetch, profile, secret };
     return profile.adapter === 'anthropic'
@@ -224,11 +236,11 @@ export class ProviderRegistry {
       : new OpenAiCompatibleChatClient(options);
   }
 
-  /** Switch which configured provider is the default. */
+  /** Switch which configured profile is the default. */
   async setDefaultModelProvider(
-    providerId: ModelProviderId,
+    profileRef: ProviderProfileRef,
   ): Promise<ProviderStatus> {
-    return this.#status(await this.#profiles.setEnabled(providerId));
+    return this.#status(await this.#profiles.setEnabled(profileRef));
   }
 
   async #status(profile: ModelProviderProfile): Promise<ProviderStatus> {
@@ -236,13 +248,15 @@ export class ProviderRegistry {
       adapter: profile.adapter,
       auth_mode: profile.auth_mode,
       base_url: profile.base_url,
+      capabilities: profile.capabilities,
       created_at: profile.created_at,
       display_name: profile.display_name,
       enabled: profile.enabled,
       model: profile.model,
-      provider_id: profile.provider_id,
+      profile_ref: profile.profile_ref,
+      provider_kind: profile.provider_kind,
       secret_configured: await this.#secrets.has(
-        modelProviderSecretName(profile.provider_id),
+        modelProviderSecretName(profile.profile_ref),
       ),
       updated_at: profile.updated_at,
     };

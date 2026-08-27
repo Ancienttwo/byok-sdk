@@ -6,7 +6,11 @@ import type { ProviderProfileStore } from './profile-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 import { TruthStoreProviderProfileStore } from './truth-profile-store';
-import type { ModelProviderId, ModelProviderProfile } from './provider-profile';
+import type {
+  ModelProviderKind,
+  ModelProviderProfile,
+  ProviderProfileRef,
+} from './provider-profile';
 
 // node:sqlite requires Node 22.5+, and shipped behind --experimental-sqlite
 // until later in the 22.x line — so "Node >= 22.5" alone doesn't mean the
@@ -22,6 +26,7 @@ const BASE = {
   adapter: 'openai_compatible',
   auth_mode: 'bearer',
   base_url: 'https://api.openai.com/v1',
+  capabilities: [],
   created_at: '2026-08-05T00:00:00.000Z',
   display_name: 'OpenAI',
   enabled: true,
@@ -31,10 +36,15 @@ const BASE = {
 } as const;
 
 const profile = (
-  provider_id: ModelProviderId,
+  profile_ref: ProviderProfileRef,
   overrides: Partial<ModelProviderProfile> = {},
 ): ModelProviderProfile =>
-  ({ ...BASE, provider_id, ...overrides }) as ModelProviderProfile;
+  ({
+    ...BASE,
+    profile_ref,
+    provider_kind: profile_ref as ModelProviderKind,
+    ...overrides,
+  }) as ModelProviderProfile;
 
 /**
  * Both implementations answer to one contract, so the suite runs twice — the
@@ -90,11 +100,11 @@ for (const { factory, label, ready } of implementations) {
 
     it('saves and reads a profile back', async () => {
       const saved = await open().save(profile('openai'));
-      expect(saved).toMatchObject({ provider_id: 'openai', model: 'gpt-5.2' });
-      await expect(store.get('openai')).resolves.toMatchObject({ provider_id: 'openai' });
+      expect(saved).toMatchObject({ profile_ref: 'openai', model: 'gpt-5.2' });
+      await expect(store.get('openai')).resolves.toMatchObject({ profile_ref: 'openai' });
     });
 
-    it('lists profiles in a stable provider-id order', async () => {
+    it('lists profiles in a stable profile-ref order', async () => {
       open();
       await store.save(profile('openai'));
       await store.save(profile('anthropic', {
@@ -103,7 +113,7 @@ for (const { factory, label, ready } of implementations) {
         base_url: 'https://api.anthropic.com',
         enabled: false,
       }));
-      expect((await store.list()).map((entry) => entry.provider_id)).toEqual([
+      expect((await store.list()).map((entry) => entry.profile_ref)).toEqual([
         'anthropic',
         'openai',
       ]);
@@ -142,7 +152,7 @@ for (const { factory, label, ready } of implementations) {
       await store.save(profile('openai', { enabled: false }));
       await expect(store.getEnabled()).resolves.toBeUndefined();
       await store.save(profile('deepseek', { base_url: 'https://api.deepseek.com' }));
-      expect((await store.getEnabled())?.provider_id).toBe('deepseek');
+      expect((await store.getEnabled())?.profile_ref).toBe('deepseek');
     });
 
     it('switches the enabled profile through setEnabled', async () => {
@@ -151,7 +161,7 @@ for (const { factory, label, ready } of implementations) {
       await store.save(profile('deepseek', { base_url: 'https://api.deepseek.com' }));
       const switched = await store.setEnabled('openai');
       expect(switched.enabled).toBe(true);
-      expect((await store.getEnabled())?.provider_id).toBe('openai');
+      expect((await store.getEnabled())?.profile_ref).toBe('openai');
       expect((await store.get('deepseek'))?.enabled).toBe(false);
     });
 
@@ -193,6 +203,28 @@ for (const { factory, label, ready } of implementations) {
         adapter: 'anthropic',
         auth_mode: 'x_api_key',
       });
+    });
+
+    it('holds two independent custom profiles side by side', async () => {
+      open();
+      await store.save(
+        profile('openrouter-primary', {
+          base_url: 'https://openrouter.ai/api/v1',
+          provider_kind: 'custom',
+        }),
+      );
+      await store.save(
+        profile('openrouter-backup', {
+          base_url: 'https://openrouter.ai/api/v1',
+          enabled: false,
+          provider_kind: 'custom',
+        }),
+      );
+      expect((await store.list()).map((entry) => entry.profile_ref)).toEqual([
+        'openrouter-backup',
+        'openrouter-primary',
+      ]);
+      expect((await store.getEnabled())?.profile_ref).toBe('openrouter-primary');
     });
 
     it('never persists a secret-shaped field', async () => {

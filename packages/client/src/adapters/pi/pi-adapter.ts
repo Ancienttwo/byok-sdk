@@ -357,11 +357,37 @@ export class PiAdapter implements RuntimeAdapter {
   }
 }
 
+/**
+ * Compare two dispatch selections field-for-field within their own lane.
+ *
+ * The lanes do not share an identity shape: `subscription` and `byok` pin a
+ * flat `providerId`/`modelId` pair, while `byok-profile` pins an exact local
+ * provider profile (ref, revision, hash, model, and the capabilities the task
+ * requires). Comparing only the fields one lane happens to expose would let a
+ * manifest carrying a *different* profile pass the start-time authority check,
+ * so each lane is compared on everything that lane seals — including
+ * `requiredCapabilities` in order, since the sealed array is the exact value
+ * the manifest froze rather than a set.
+ */
 function sameDispatchSelection(
   left: TaskOfferPayload['dispatchSelection'],
   right: TaskOfferPayload['dispatchSelection'],
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
+  if (left.lane === 'byok-profile' || right.lane === 'byok-profile') {
+    if (left.lane !== 'byok-profile' || right.lane !== 'byok-profile') return false;
+    if (left.runtimeId !== right.runtimeId) return false;
+    const leftProfile = left.providerProfile;
+    const rightProfile = right.providerProfile;
+    return leftProfile.profileRef === rightProfile.profileRef &&
+      leftProfile.profileRevision === rightProfile.profileRevision &&
+      leftProfile.profileHash === rightProfile.profileHash &&
+      leftProfile.modelId === rightProfile.modelId &&
+      leftProfile.requiredCapabilities.length === rightProfile.requiredCapabilities.length &&
+      leftProfile.requiredCapabilities.every(
+        (capability, index) => capability === rightProfile.requiredCapabilities[index],
+      );
+  }
   return left.lane === right.lane &&
     left.runtimeId === right.runtimeId &&
     left.providerId === right.providerId &&

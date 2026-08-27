@@ -60,9 +60,9 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
   });
   let projectionDir: string | undefined;
   try {
-    const profile = await profiles.get(options.providerId);
+    const profile = await profiles.get(options.profileRef);
     if (profile === undefined) {
-      throw new Error(`provider ${options.providerId} is not configured`);
+      throw new Error(`provider profile ${options.profileRef} is not configured`);
     }
     if (profile.model !== options.modelId) {
       throw new Error(

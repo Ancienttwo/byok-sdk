@@ -4,9 +4,9 @@ import { promises as fs } from 'node:fs';
 import { ByokKeysError } from './errors';
 import { PI_PROJECTED_KEY_ENV } from './pi-provider-projection';
 import {
-  MODEL_PROVIDER_IDS,
-  type ModelProviderId,
+  ProviderProfileRefSchema,
   type ModelProviderProfile,
+  type ProviderProfileRef,
 } from './provider-profile';
 import { type SecretStore, modelProviderSecretName } from './secret-store';
 
@@ -45,7 +45,8 @@ const PI_CHILD_WINDOWS_ENV_NAMES = [
 export interface PiProviderLauncherOptions {
   piBin: string;
   profileDbPath: string;
-  providerId: ModelProviderId;
+  /** Carried by the `--provider` flag: the exact local profile to launch. */
+  profileRef: ProviderProfileRef;
   modelId: string;
   sessionDir: string;
   secretServicePrefix?: string;
@@ -92,9 +93,10 @@ export function parsePiProviderLauncherOptions(
     return value;
   };
 
-  const rawProviderId = required('--provider');
-  if (!MODEL_PROVIDER_IDS.includes(rawProviderId as ModelProviderId)) {
-    throw new Error(`provider ${rawProviderId} is not configured by @byok-sdk/keys`);
+  const rawProfileRef = required('--provider');
+  const profileRef = ProviderProfileRefSchema.safeParse(rawProfileRef);
+  if (!profileRef.success) {
+    throw new Error(`provider profile ref ${rawProfileRef} is not a valid @byok-sdk/keys identifier`);
   }
 
   const modelId = required('--model');
@@ -114,7 +116,7 @@ export function parsePiProviderLauncherOptions(
   return {
     piBin: required('--pi-bin'),
     profileDbPath,
-    providerId: rawProviderId as ModelProviderId,
+    profileRef: profileRef.data,
     modelId,
     sessionDir,
     ...(secretServicePrefix ? { secretServicePrefix } : {}),
@@ -142,11 +144,11 @@ export async function resolvePiProviderSecret(
       `${secrets.providerLabel} is unavailable`,
     );
   }
-  const secret = await secrets.get(modelProviderSecretName(profile.provider_id));
+  const secret = await secrets.get(modelProviderSecretName(profile.profile_ref));
   if (!secret) {
     throw new ByokKeysError(
       'PROVIDER_SECRET_MISSING',
-      `${profile.provider_id} provider requires a secret in ${secrets.providerLabel}`,
+      `${profile.profile_ref} provider profile requires a secret in ${secrets.providerLabel}`,
     );
   }
   return secret;

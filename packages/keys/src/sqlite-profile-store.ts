@@ -1,13 +1,14 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+import { ByokKeysError } from './errors';
 import {
   type ProviderProfileStore,
   providerNotConfigured,
 } from './profile-store';
 import {
-  MODEL_PROVIDER_IDS,
-  type ModelProviderId,
+  MODEL_PROVIDER_KINDS,
   type ModelProviderProfile,
+  type ProviderProfileRef,
   parseModelProviderProfile,
 } from './provider-profile';
 import {
@@ -36,16 +37,18 @@ export interface SqliteProviderProfileStoreOptions {
  */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS provider_profile (
-  provider_id  TEXT PRIMARY KEY CHECK (provider_id IN ('openai', 'deepseek', 'anthropic', 'custom')),
-  kind         TEXT NOT NULL CHECK (kind = 'model'),
-  adapter      TEXT NOT NULL CHECK (adapter IN ('openai_compatible', 'anthropic')),
-  display_name TEXT NOT NULL,
-  base_url     TEXT NOT NULL,
-  auth_mode    TEXT NOT NULL CHECK (auth_mode IN ('bearer', 'x_api_key', 'none')),
-  model        TEXT NOT NULL,
-  enabled      INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-  created_at   TEXT NOT NULL,
-  updated_at   TEXT NOT NULL
+  profile_ref   TEXT PRIMARY KEY,
+  provider_kind TEXT NOT NULL CHECK (provider_kind IN ('openai', 'deepseek', 'anthropic', 'custom')),
+  kind          TEXT NOT NULL CHECK (kind = 'model'),
+  adapter       TEXT NOT NULL CHECK (adapter IN ('openai_compatible', 'anthropic')),
+  display_name  TEXT NOT NULL,
+  base_url      TEXT NOT NULL,
+  auth_mode     TEXT NOT NULL CHECK (auth_mode IN ('bearer', 'x_api_key', 'none')),
+  model         TEXT NOT NULL,
+  capabilities  TEXT NOT NULL,
+  enabled       INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
 );
 `;
 
@@ -66,12 +69,14 @@ interface ProfileRow {
   adapter: string;
   auth_mode: string;
   base_url: string;
+  capabilities: string;
   created_at: string;
   display_name: string;
   enabled: number;
   kind: string;
   model: string;
-  provider_id: string;
+  profile_ref: string;
+  provider_kind: string;
   updated_at: string;
 }
 
@@ -116,17 +121,17 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
     this.#database.close();
   }
 
-  async delete(providerId: ModelProviderId): Promise<boolean> {
+  async delete(profileRef: ProviderProfileRef): Promise<boolean> {
     const result = this.#database
-      .prepare('DELETE FROM provider_profile WHERE provider_id = ?')
-      .run(providerId);
+      .prepare('DELETE FROM provider_profile WHERE profile_ref = ?')
+      .run(profileRef);
     return Number(result.changes) === 1;
   }
 
-  async get(providerId: ModelProviderId): Promise<ModelProviderProfile | undefined> {
+  async get(profileRef: ProviderProfileRef): Promise<ModelProviderProfile | undefined> {
     const row = this.#database
-      .prepare('SELECT * FROM provider_profile WHERE provider_id = ?')
-      .get(providerId) as ProfileRow | undefined;
+      .prepare('SELECT * FROM provider_profile WHERE profile_ref = ?')
+      .get(profileRef) as ProfileRow | undefined;
     return row === undefined ? undefined : parseRow(row);
   }
 
@@ -139,13 +144,13 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
 
   async list(): Promise<ModelProviderProfile[]> {
     const rows = this.#database
-      .prepare('SELECT * FROM provider_profile ORDER BY provider_id ASC')
+      .prepare('SELECT * FROM provider_profile ORDER BY profile_ref ASC')
       .all() as unknown as ProfileRow[];
     return rows.map(parseRow);
   }
 
   async save(profile: ModelProviderProfile): Promise<ModelProviderProfile> {
-    const existing = await this.get(profile.provider_id);
+    const existing = await this.get(profile.profile_ref);
     const validated = parseModelProviderProfile({
       ...profile,
       created_at: existing?.created_at ?? profile.created_at,
@@ -154,44 +159,48 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
       if (validated.enabled) {
         this.#database
           .prepare(
-            'UPDATE provider_profile SET enabled = 0 WHERE provider_id <> ?',
+            'UPDATE provider_profile SET enabled = 0 WHERE profile_ref <> ?',
           )
-          .run(validated.provider_id);
+          .run(validated.profile_ref);
       }
       this.#database
         .prepare(
           `INSERT INTO provider_profile (
-             provider_id, kind, adapter, display_name, base_url,
-             auth_mode, model, enabled, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(provider_id) DO UPDATE SET
+             profile_ref, provider_kind, kind, adapter, display_name, base_url,
+             auth_mode, model, capabilities, enabled, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(profile_ref) DO UPDATE SET
+             provider_kind = excluded.provider_kind,
              adapter = excluded.adapter,
              display_name = excluded.display_name,
              base_url = excluded.base_url,
              auth_mode = excluded.auth_mode,
              model = excluded.model,
+             capabilities = excluded.capabilities,
              enabled = excluded.enabled,
              updated_at = excluded.updated_at`,
         )
         .run(
-          validated.provider_id,
+          validated.profile_ref,
+          validated.provider_kind,
           validated.kind,
           validated.adapter,
           validated.display_name,
           validated.base_url,
           validated.auth_mode,
           validated.model,
+          JSON.stringify(validated.capabilities),
           validated.enabled ? 1 : 0,
           validated.created_at,
           validated.updated_at,
         );
     });
-    return (await this.get(validated.provider_id)) as ModelProviderProfile;
+    return (await this.get(validated.profile_ref)) as ModelProviderProfile;
   }
 
-  async setEnabled(providerId: ModelProviderId): Promise<ModelProviderProfile> {
-    const existing = await this.get(providerId);
-    if (existing === undefined) throw providerNotConfigured(providerId);
+  async setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile> {
+    const existing = await this.get(profileRef);
+    if (existing === undefined) throw providerNotConfigured(profileRef);
     return this.save({ ...existing, enabled: true });
   }
 
@@ -212,14 +221,27 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
  * Rows go back through the same zod schema the write path used, so a row that
  * a different process wrote — or an older schema left behind — is rejected
  * rather than trusted. `enabled` is an INTEGER in SQLite and a real boolean in
- * the schema, so it is converted rather than coerced loosely.
+ * the schema, and `capabilities` is a JSON array in a TEXT column, so both are
+ * decoded explicitly and a row that fails to decode is refused rather than
+ * quietly downgraded to an empty capability set.
  */
 function parseRow(row: ProfileRow): ModelProviderProfile {
+  let capabilities: unknown;
+  try {
+    capabilities = JSON.parse(row.capabilities);
+  } catch (cause) {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      'Provider profile capabilities column is not valid JSON',
+      { cause },
+    );
+  }
   return parseModelProviderProfile({
     ...row,
+    capabilities,
     enabled: row.enabled === 1,
   });
 }
 
-/** Exported for the store's own tests to enumerate the CHECK-constrained ids. */
-export const SQLITE_PROFILE_PROVIDER_IDS = MODEL_PROVIDER_IDS;
+/** Exported for the store's own tests to enumerate the CHECK-constrained kinds. */
+export const SQLITE_PROFILE_PROVIDER_KINDS = MODEL_PROVIDER_KINDS;

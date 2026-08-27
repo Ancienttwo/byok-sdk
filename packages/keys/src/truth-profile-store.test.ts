@@ -9,7 +9,11 @@ import {
 } from '@byok-sdk/core';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ModelProviderId, ModelProviderProfile } from './provider-profile';
+import type {
+  ModelProviderKind,
+  ModelProviderProfile,
+  ProviderProfileRef,
+} from './provider-profile';
 import { ProviderRegistry } from './registry';
 import { InMemorySecretStore } from './secret-store';
 import {
@@ -26,6 +30,7 @@ const BASE = {
   adapter: 'openai_compatible',
   auth_mode: 'bearer',
   base_url: 'https://api.openai.com/v1',
+  capabilities: [],
   created_at: '2026-08-17T00:00:00.000Z',
   display_name: 'OpenAI',
   enabled: true,
@@ -35,10 +40,15 @@ const BASE = {
 } as const;
 
 function profile(
-  provider_id: ModelProviderId,
+  profile_ref: ProviderProfileRef,
   overrides: Partial<ModelProviderProfile> = {},
 ): ModelProviderProfile {
-  return { ...BASE, provider_id, ...overrides } as ModelProviderProfile;
+  return {
+    ...BASE,
+    profile_ref,
+    provider_kind: profile_ref as ModelProviderKind,
+    ...overrides,
+  } as ModelProviderProfile;
 }
 
 function store(truthStore: TruthStore, tenant = TENANT) {
@@ -103,7 +113,7 @@ describe('TruthStoreProviderProfileStore authority', () => {
     expect(record.rev).toBe(2);
     expect(record.body.kind).toBe('inline');
     const body = record.body.kind === 'inline' ? record.body.body : '';
-    expect(JSON.parse(body).profiles.map((entry: { provider_id: string }) => entry.provider_id)).toEqual([
+    expect(JSON.parse(body).profiles.map((entry: { profile_ref: string }) => entry.profile_ref)).toEqual([
       'anthropic',
       'openai',
     ]);
@@ -118,8 +128,8 @@ describe('TruthStoreProviderProfileStore authority', () => {
       profile('deepseek', { base_url: 'https://api.deepseek.com' }),
     );
 
-    expect((await store(truth).list()).map((entry) => entry.provider_id)).toEqual(['openai']);
-    expect((await store(truth, OTHER_TENANT).list()).map((entry) => entry.provider_id)).toEqual([
+    expect((await store(truth).list()).map((entry) => entry.profile_ref)).toEqual(['openai']);
+    expect((await store(truth, OTHER_TENANT).list()).map((entry) => entry.profile_ref)).toEqual([
       'deepseek',
     ]);
   });
@@ -153,9 +163,11 @@ describe('TruthStoreProviderProfileStore authority', () => {
         adapter: 'openai_compatible',
         auth_mode: 'bearer',
         base_url: 'https://api.openai.com/v1',
+        capabilities: [],
         display_name: 'OpenAI',
         model: 'gpt-5.2',
-        provider_id: 'openai',
+        profile_ref: 'openai',
+        provider_kind: 'openai',
       },
       CANARY,
     );
@@ -182,7 +194,7 @@ describe('TruthStoreProviderProfileStore authority', () => {
     }
   });
 
-  it('rejects duplicate providers and secret-shaped fields even with matching hash and size', async () => {
+  it('rejects duplicate profiles and secret-shaped fields even with matching hash and size', async () => {
     const record = await validRecord();
     const parsed = JSON.parse(record.body.kind === 'inline' ? record.body.body : '');
     const duplicate = JSON.stringify({
