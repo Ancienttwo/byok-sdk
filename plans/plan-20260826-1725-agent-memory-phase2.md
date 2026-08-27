@@ -1,6 +1,6 @@
 # Plan: Agent Memory Phase 2
 
-> **Status**: Review
+> **Status**: Review Failed
 > **Created**: 20260826-1725
 > **Slug**: agent-memory-phase2
 > **Planning Source**: codex-plan-or-waza-think
@@ -193,6 +193,7 @@ See captured planning output.
 - [x] **Aggregate test oracle isolation**：`device-credential-store` win32 simulation 改用 suite-local `TMPDIR/TMP/TEMP`，不再扫描约 78.6 万 entries 的真实 host temp root；500ms reproducer 从 timeout 转 3ms，文件 12/12 与 root aggregate test 通过，production credential/scavenger code 未改。
 - [x] **新 subject 重验**：focused guard、client/root build/typecheck/test、strict workflow、context scan 与 strict architecture gate 均通过；最终 `verify-sprint --prepare-acceptance` 在 integrated product candidate 上生成 fresh checks。旧 `external_pass` 因 production source 变化转 stale；push、remote CI、fresh external review 与 merge 继续需要独立授权。
 - [x] **Remote Linux CI fixture reconciliation**：run `33090344663` 证明 Linux secure-fs 会把 Agent-memory MCP 纳入 adapter capability gate；四个 positive-admission tests 使用的默认 `StubRuntimeAdapter` 自称 permissive 却遗漏 `mcpToolsets:true`，因此在 claim 前按 production contract 正确 fail closed。只补默认 test-double capability，并同步其唯一 exact capability snapshot；显式 `mcpToolsets:false` negative guards、production admission 与 bundled adapters 均不变。
+- [x] **Exact-candidate external review**：candidate `9099ae7` 的 local strict gate 42/42 与 remote CI run `33096039651` 22/22 均通过，但 fresh Claude review 发现 Linux native `readPinnedFile` 在 file-type validation 前打开 FIFO、可无限阻塞 task quiescence 与 Agent-home lease release 的 P1；typed `reject` receipt 已绑定 normalized subject `sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b`。本 review-only slice 不修复、不 push、不 merge。
 
 ## Verification
 

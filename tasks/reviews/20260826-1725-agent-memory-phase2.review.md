@@ -1,26 +1,26 @@
 # Task Review: agent-memory-phase2
 
-> **Status**: Review Passed / External Acceptance Recorded
+> **Status**: Review Failed / External Rejection Recorded
 > **Plan**: plans/plan-20260826-1725-agent-memory-phase2.md
 > **Contract**: tasks/contracts/20260826-1725-agent-memory-phase2.contract.md
 > **Notes File**: tasks/notes/20260826-1725-agent-memory-phase2.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-27 09:00
-> **Recommendation**: pass
+> **Last Updated**: 2026-08-28 01:22
+> **Recommendation**: reject
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:263e48ac26ffd3bd9d3edf1d131863f9e415408c7b8c7082060b906f89965e3f
+> **Reviewed Subject SHA256**: sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
+> **Reviewed Target Revision**: bb81ae81127bf8f9345f627435135abb92226c7b
 
 ## Human Review Card
 
-- Verdict: PASS; the fresh exact-subject Claude review confirmed the three prior P1 remediations and found no P0/P1
+- Verdict: FAIL; the fresh exact-subject Claude review found one P1 in Linux native Agent-memory file handling: opening a FIFO before validating its type can block recall/save and terminal quiescence indefinitely
 - Change type: code-change + migration
 - Intended files changed: client memory MCP and runtime injection, protocol/cloud projection contracts, cloud-dataplane store and migration, focused tests, architecture and task evidence
 - Actual files changed: the intended Phase 2 surfaces under `packages/client`, `packages/protocol`, `packages/cloud`, `packages/cloud-dataplane`, `deploy/sql`, `tests/sql`, and the task artifacts listed by the contract
-- Commands passed: local final strict gate 36/36; remote CI 22/22 including the new macOS Go-helper test/build/TS integration job, fixed-Node full test, real Postgres, migrations, and cross-platform package checks
-- Residual risks: fourteen advisory P2 findings remain, led by unconditional Agent-memory MCP injection without consulting adapter `mcpToolsets`; workflow plan/contract projections still require a separately authorized reconciliation before merge
-- Reviewer action required: no P0/P1 remediation is required by this review; any P2 fix, workflow reconciliation, or merge remains a separate owner decision
+- Commands passed: local final strict gate 42/42; remote CI run `33096039651` passed 22/22 at exact candidate `9099ae71706f91d1f9e0a4ee25ad115e13fce6a7`
+- Residual risks: one P1 FIFO blocking path and thirteen P2 findings remain; the semantic acceptance gate is rejected despite green local and remote verification
+- Reviewer action required: no remediation is authorized by this review-only slice; any regression guard, source fix, re-gate, push, or merge requires separate owner authority
 - Rollback: revert the reviewed Phase 2 diff to checkpoint `185cf91`; migration `0014` has not been deployed
 
 ## Mode Evidence
@@ -34,9 +34,9 @@
 - Waza `/check` run: not used; repository-native checks and independent gate were used
 - Commands run: all contract commands passed, plus deploy SQL ordering, diff check, Linux focused tests, and Postgres/MinIO integration tests
 - Manual checks: verified ordinary tasks and incomplete hosted configuration expose no Phase 2 network surface; verified unsupported platforms fail closed; verified symlink-swap race cannot escape the captured Agent-home inode on Linux
-- Supporting artifacts: `.ai/harness/runs/run-20260827T042504-42153-20260826-1725-agent-memory-phase2.json`; GitHub Actions run `33010461695`
+- Supporting artifacts: `.ai/harness/checks/latest.json`; GitHub Actions run `33096039651`
 - Implementation notes reviewed: `tasks/notes/20260826-1725-agent-memory-phase2.notes.md`
-- Run snapshot: commit-bound final strict gate passed 36/36 contract rows; remote CI passed 22/22; the fresh Claude review found no P0/P1 and produced a valid typed `external_pass` receipt
+- Run snapshot: commit-bound final strict gate passed 42/42 contract rows; remote CI run `33096039651` passed 22/22 at `9099ae7`; the fresh Claude review found one P1 and produced a typed `reject` receipt
 
 ## Manual Check Evidence
 
@@ -47,6 +47,44 @@ screenshot/artifact path, or reviewer observation.
 - No non-built-in `manual_checks` are declared by the contract.
 
 ## Claude External Review (verbatim)
+
+### Exact-candidate review — 2026-08-28
+
+```text
+**Verdict: 1 P1, several P2s (a few carried from prior reviews and still unfixed).**
+
+## [P1]
+
+1. **Linux native `readPinnedFile` opens before it stats — a FIFO in `notes/` hangs the daemon forever.** `packages/client/src/daemon/agent-memory.ts` `readPinnedFile` does `fs.open(…, O_RDONLY|O_NOFOLLOW)` *then* `handle.stat()`; `validateAgentMemoryPath` accepts any `notes/*.md` name regardless of file type. A runtime file tool (or prompt-injected model) can `mkfifo notes/x.md`, call `memory.recall`/`memory.save` on it, and the open blocks with no writer and no timeout. That in-flight promise sits in `memoryInFlightByTask`, so `quiesceAndSnapshotAgentMemory`'s `Promise.allSettled` never resolves → task never finalizes, Agent-home writer lease never releases, every later offer for that agent fails until daemon restart. The Go helper is safe here (`openExisting` Lstats and rejects non-regular before open) — the native backend needs the same lstat-first check (or `O_NONBLOCK` + type check). `replaceNative`/`removeNative` share the same path via their first `readPinnedFile`.
+
+## [P2]
+
+2. **Behavior drift for existing Linux strict-Agent deployments.** `create-daemon.ts` resolves `agentMemoryMcpBin` whenever `agentHome` is set (no `agentMemory` opt-in), and `task-runner.ts` now feeds `requiresAgentMemoryMcp` into `pickAdapter`. Adapters declaring `mcpToolsets:false` that previously ran strict Agent tasks now get a non-retryable `task.decline` on upgrade. Intended per plan, but it's an undocumented breaking change for embedders — call it out in the changelog/architecture doc, which currently says only "Ordinary task 不注入".
+
+3. **Dead helper is cached for the task lifetime.** `bindAgentMemoryFilesystem` caches the resolved client; after one fatal (e.g. a single 10 s request timeout kills the child), every later `memory.*` call and the quiescent snapshot fail with "helper is closed" — no respawn, only the terminal `console.error`.
+
+4. **Snapshot audit failure is still fatal** (`captureAgentMemorySnapshot` runs `audit` unwrapped) while recall/save warn. Contradicts §12.6.9 "audit … 不是 replay 或内容 authority" and blocks projection permanently on an unwritable audit tail. Carried.
+
+5. **Postgres idempotent replay is UUID-case-sensitive.** `sameReceiptBinding` compares pg-normalised lowercase `mutation_id` to the raw client string; `z.uuid()` accepts uppercase → `accepted` then `replay_mismatch` on exact retry. In-memory store doesn't have this drift. Carried.
+
+6. **In-memory authorizer `#highestEpochs` never lowers on `revoke`/erase**, so a never-committed higher-epoch grant silently drops every post-erase grant (`grant()` returns early) → permanent `grant_not_authorized` with no signal. Carried.
+
+7. **Walk semantics diverge by backend.** Go `walkPinned` fails the whole walk (`unsafe_path`) on any non-regular entry; Linux native skips it. Same `notes/` tree → snapshot succeeds on Linux, fails on macOS. Carried.
+
+8. **Tool names `memory.recall`/`memory.save` use dots**; Anthropic's tool-name grammar is `^[a-zA-Z0-9_-]+$` and no test exercises a real runtime seeing them. If the claude adapter rejects/sanitises them, strict Agent tasks lose memory tools silently. Deferred by owner, but still unverified.
+
+9. **Weak tests.** `agent-memory-helper-ci-p1-regression.test.ts` is a YAML substring scan (asserts text, not that the helper test executed). Go symlink-swap tests mutate *before* the request, so they test the Lstat check, not the pin/recheck race. `agent-memory-outbox-p1-regression`'s `InMemoryFilesystem.replace` ignores `expectedRevision`, so CAS is not exercised there. `TestHelperDeathIsObservable` is tautological.
+
+10. **`readBoundedJsonBody` maps stream read errors to `body: undefined` → 422**, conflating transport failure with invalid JSON. Handler comment "The schema rejects non-canonical encodings" is false — only the Postgres store canonical-re-encodes.
+
+11. **Public surface gaps.** `AgentMemoryProjectionReplayPendingError` not exported from `packages/client/src/index.ts`; `TaskRunner.saveAgentMemory`/`AgentMemoryMcpDeps.save` types drop `auditWarning` that actually flows; `AgentHomeLease.homeIdentity` is a new required member on an exported interface.
+
+12. **`byok-agent-memory-mcp.ts` caches a rejected `clientPromise` forever**; `serveAgentMemoryMcpOverStdio` drops unparseable lines instead of `-32700`. Carried.
+
+13. **Schema/comment drift still present.** `tests/sql/control_plane_invariants.sql` comment says "30 is …" while the check is `< 31` (this was flagged last round and the diff still shows "30"); `0014` `…_readback` index duplicates the PK exactly.
+
+14. **Archive card metadata** still points `request_file` at the now-renamed `docs/architecture/requests/root.md`.
+```
 
 ### Terminal-boundary remediation final review — 2026-08-27
 
@@ -208,18 +246,18 @@ Findings (no P1-free pass; four blockers).
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: external_pass
+> **Disposition**: reject
 > **Reviewer**: Claude
 > **Source**: claude-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: sha256:263e48ac26ffd3bd9d3edf1d131863f9e415408c7b8c7082060b906f89965e3f
+> **Reviewed Subject SHA256**: sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 5e28dc88ff4d511c1ffe24cd7d51af63025e81c7
-> **Verification Evidence SHA256**: sha256:2c03044537bd724f239237588ef6d9ef89ad3a592d722c68b6b4e77d4938d7e5
-> **Issued At**: 2026-08-27T00:59:20.604Z
+> **Reviewed Target Revision**: bb81ae81127bf8f9345f627435135abb92226c7b
+> **Verification Evidence SHA256**: sha256:17492da3ee78586a430b98d157e64502415e5287eec63f4ae6227631ad85586e
+> **Issued At**: 2026-08-27T17:22:07.824Z
 
-- Summary: Fresh exact-subject Claude review of 6343ef0 confirmed the three prior P1 remediations and found no P0/P1; fourteen P2 advisory findings remain.
-- Findings: P2: Memory MCP injection does not consult the adapter mcpToolsets capability; existing seam behavior is consistent but may be Linux upgrade drift.; P2: Projection publish timeout is fixed at 10 seconds, uses a generic AgentMemoryError, and has no backoff.; P2: The helper CI regression guard is a YAML text scan; argument forwarding depends on the actual CI run.; P2: The filesystem helper can still be spawned at strict-task close when hosted projection is off.; P2: Snapshot audit failure remains fatal while recall and save return audit warnings.; P2: Postgres idempotent replay compares a normalized UUID to the client string case-sensitively.; P2: The in-memory authorizer high epoch can outlive erase while erase derives nextWriterEpoch from the head only.; P2: AgentMemoryFilesystem.append is unused in production and uses a raw non-base64 helper wire.; P2: Public surface gaps remain around replay-pending export, auditWarning return types, and required AgentHomeLease.homeIdentity.; P2: The MCP client caches a rejected connection promise and drops malformed JSON-RPC lines.; P2: Filesystem walk semantics differ between Go and Linux native backends for non-regular entries.; P2: Bounded JSON stream read errors are mapped to 422 invalid input.; P2: Schema and test drift remains in the duplicate readback index, invariant comment, platform gating, and one CAS test double.; P2: Workflow projections still contain stale incomplete and reject state and must be reconciled before merge.
+- Summary: Fresh exact-subject Claude review of 9099ae7 found one P1: Linux native Agent-memory file reads can block indefinitely on a FIFO before type validation; thirteen P2 advisories remain.
+- Findings: P1: Linux native readPinnedFile opens a notes path before stat; an accepted FIFO can block memory recall/save and terminal quiescence indefinitely, wedging the Agent-home lease.; P2: Linux strict-Agent deployments with mcpToolsets:false now decline because Agent-memory MCP is automatically required; breaking behavior needs explicit documentation.; P2: A fatal macOS helper failure is cached for the task lifetime with no respawn.; P2: Snapshot audit failure remains fatal while recall/save downgrade metadata-only audit failure to warnings.; P2: Postgres idempotent replay compares UUID strings case-sensitively after PostgreSQL normalizes stored UUIDs.; P2: The in-memory authorizer highest epoch never lowers on revoke or erase and can silently reject later valid grants.; P2: Snapshot walk semantics diverge: Go rejects non-regular entries while Linux skips them.; P2: memory.recall and memory.save tool names contain dots and lack real Claude-runtime verification against the provider grammar.; P2: Several regression tests are source scans, pre-request symlink mutations, missing CAS behavior, or tautological helper-death assertions.; P2: readBoundedJsonBody maps stream errors to schema-invalid 422 responses.; P2: Public surfaces omit a replay-pending error export, drop auditWarning from types, and add a required AgentHomeLease member.; P2: The memory MCP process caches a rejected connection promise and silently drops parse errors.; P2: SQL comments and indexes retain schema drift, including a redundant readback index.; P2: The archived architecture card request_file points at a renamed live request path.
 
 ## Behavior Diff Notes
 
@@ -231,31 +269,31 @@ Findings (no P1-free pass; four blockers).
 ## Residual Risks / Follow-ups
 
 - Phase 2 on macOS requires the explicit, version-matched helper proven in the cross-platform work-package. Windows remains disabled until a real runner proves its junction/reparse/rename matrix.
-- The prior three P1 findings are remediated and the latest exact-subject review found no P0/P1. Fourteen P2 findings remain advisory; the adapter `mcpToolsets` capability gap is the most consequential product decision.
-- Plan/contract/current-state projections still contain historical incomplete state. They must be reconciled and revalidated before any merge decision without changing the reviewed normalized subject.
-- The candidate branch was pushed and CI passed; merge, package publication, deployment, and production migration remain unperformed and unauthorized.
+- Exact candidate `9099ae7` passes local strict verification and remote CI, but the fresh semantic review found one P1: Linux native `readPinnedFile` can block indefinitely on a FIFO before file-type validation.
+- Thirteen P2 findings remain. They are recorded verbatim above and are not remediation authority.
+- The typed `reject` receipt is current for normalized subject `sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b`; merge, package publication, deployment, and production migration remain unperformed and unauthorized.
 
 ## Scorecard
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| Functionality | pass | The three prior P1 runtime boundaries are fixed and covered locally and in remote CI |
+| Functionality | fail | Linux native memory file reads can block task finalization and Agent-home lease release on a FIFO |
 | Product depth | source-pass | Local authority, hosted projection, metering, erase, and audit boundaries are covered |
 | Design quality | source-pass | One-way projection avoids dual authority; unsupported platforms fail closed |
-| Code quality | pass-with-advisories | Fresh Claude review found no P0/P1 and recorded fourteen P2 findings |
+| Code quality | fail-with-advisories | Fresh Claude review found one P1 and thirteen P2 findings |
 
 ## Advisory Items
 
-- Adapter `mcpToolsets` capability is not consulted before Agent-memory MCP injection.
-- Timeout/error typing, projection-off helper spawn, audit disposition, UUID normalization, erase epoch, public surface, helper wire, JSON-RPC recovery, cross-platform walk semantics, stream-read status mapping, schema/test drift, and workflow projection reconciliation remain P2 advisories.
+- Linux native FIFO blocking is a P1 and prevents acceptance.
+- Adapter behavior drift, helper recovery, audit disposition, UUID normalization, erase epoch, cross-platform walk semantics, tool naming, weak tests, stream-read status mapping, public surface, JSON-RPC recovery, schema drift, and archive metadata remain P2 advisories.
 
 ## Retest Steps
 
-- No P0/P1 remediation is required by this review.
-- Before merge, reconcile workflow projections, verify the typed receipt against the unchanged normalized subject, and run the repository's terminal merge gate under separate authorization.
+- Under separate owner authority, first add a bounded regression that creates a FIFO at an accepted `notes/*.md` path and proves native recall/save plus terminal quiescence do not hang.
+- Fix the native file-open sequence without weakening descriptor pinning or symlink-race protection, then run focused/full strict checks, remote Linux/Postgres CI, and one new exact-subject external review.
 
 ## Summary
 
-- Source verdict: PASS; fresh exact-subject Claude review found no P0/P1.
-- External acceptance: PASS; typed `external_pass` receipt binds normalized subject `sha256:263e48ac26ffd3bd9d3edf1d131863f9e415408c7b8c7082060b906f89965e3f`.
-- Merge remains a separate authority and is not granted by this review.
+- Source verification: PASS; local strict gate and remote CI are green for exact candidate `9099ae7`.
+- External acceptance: FAIL; typed `reject` receipt binds normalized subject `sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b`.
+- No fix, push, merge, publication, deployment, or migration is authorized by this review-only slice.

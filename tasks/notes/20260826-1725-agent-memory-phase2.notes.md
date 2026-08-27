@@ -331,6 +331,17 @@
   immediately as a package-owned 6/6 rerun, and the single allowed root-test
   retry completed green. Production admission, MCP naming, hosted semantics,
   merge, publication, deployment, and migration were not changed.
+- Owner then authorized exactly one fresh external review of candidate
+  `9099ae71706f91d1f9e0a4ee25ad115e13fce6a7`. Local strict verification was
+  green at 42/42 and GitHub Actions run `33096039651` was green at 22/22, but
+  Claude found one P1: Linux native `readPinnedFile` opens an accepted
+  `notes/*.md` path before validating the file type, so a FIFO can block
+  recall/save and terminal quiescence indefinitely and retain the Agent-home
+  writer lease. Thirteen P2 findings were also recorded verbatim in the review
+  artifact. A typed `reject` receipt now binds normalized subject
+  `sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b`.
+  This slice recorded evidence only; it did not fix source, push, merge,
+  publish, deploy, or migrate.
 
 ## Promotion Filter
 
