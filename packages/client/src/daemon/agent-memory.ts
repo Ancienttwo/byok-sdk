@@ -149,6 +149,7 @@ export function isAgentMemorySecureFilesystemAvailable(externalHelperConfigured 
   const nativeLinux = process.platform === 'linux'
     && typeof fsConstants.O_NOFOLLOW === 'number'
     && typeof fsConstants.O_DIRECTORY === 'number'
+    && typeof fsConstants.O_NONBLOCK === 'number'
     && existsSync(SECURE_DIRECTORY_DESCRIPTOR_ROOT);
   // Windows remains fail-closed until its real reparse/junction proof exists.
   return nativeLinux || (externalHelperConfigured && process.platform === 'darwin');
@@ -211,7 +212,12 @@ type FileState = AgentMemoryFilesystemFileState;
 async function readPinnedFile(directory: Awaited<ReturnType<typeof fs.open>>, fileName: string, maxBytes = AGENT_MEMORY_MAX_FILE_BYTES): Promise<FileState> {
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
-    handle = await fs.open(`${descriptorPath(directory)}/${fileName}`, noFollowFlags(fsConstants.O_RDONLY));
+    // O_NONBLOCK prevents a leaf swapped to a FIFO/device from wedging before
+    // descriptor stat can reject it. It has no effect on regular-file reads.
+    handle = await fs.open(
+      `${descriptorPath(directory)}/${fileName}`,
+      noFollowFlags(fsConstants.O_RDONLY | fsConstants.O_NONBLOCK),
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Object.freeze({ exists: false, content: '', revision: digest(''), byteCount: 0 });
     throw new AgentMemoryError('could not open memory file');

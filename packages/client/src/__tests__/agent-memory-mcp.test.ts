@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -69,6 +70,29 @@ describe('Agent memory MCP local authority', () => {
       const audit = await fs.readFile(path.join(context.canonicalHome, '.byok', 'agent-memory-audit-v1.jsonl'), 'utf8');
       expect(audit).toContain('"kind":"save"');
       expect(audit).not.toContain('durable secret-looking value stays local');
+    } finally { await release(); }
+  });
+
+  itWithSecureDescriptors('rejects FIFO memory paths without blocking recall, replace, or delete', async () => {
+    const { context, release } = await memory();
+    const fifoPath = path.join(context.canonicalHome, 'notes', 'blocked.md');
+    execFileSync('mkfifo', [fifoPath]);
+    const service = new AgentMemoryService(context);
+    const startedAt = Date.now();
+    try {
+      await expect(service.recall({ path: 'notes/blocked.md' })).rejects.toThrow('bounded regular file');
+      await expect(service.save({
+        op: 'replace',
+        path: 'notes/blocked.md',
+        expectedRevision: sha256(''),
+        content: 'replacement',
+      })).rejects.toThrow('bounded regular file');
+      await expect(service.save({
+        op: 'delete',
+        path: 'notes/blocked.md',
+        expectedRevision: sha256(''),
+      })).rejects.toThrow('bounded regular file');
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
     } finally { await release(); }
   });
 

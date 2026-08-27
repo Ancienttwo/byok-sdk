@@ -1,6 +1,6 @@
 # Plan: Agent Memory Phase 2
 
-> **Status**: Review Failed
+> **Status**: Remediation / Re-review Pending
 > **Created**: 20260826-1725
 > **Slug**: agent-memory-phase2
 > **Planning Source**: codex-plan-or-waza-think
@@ -194,6 +194,12 @@ See captured planning output.
 - [x] **新 subject 重验**：focused guard、client/root build/typecheck/test、strict workflow、context scan 与 strict architecture gate 均通过；最终 `verify-sprint --prepare-acceptance` 在 integrated product candidate 上生成 fresh checks。旧 `external_pass` 因 production source 变化转 stale；push、remote CI、fresh external review 与 merge 继续需要独立授权。
 - [x] **Remote Linux CI fixture reconciliation**：run `33090344663` 证明 Linux secure-fs 会把 Agent-memory MCP 纳入 adapter capability gate；四个 positive-admission tests 使用的默认 `StubRuntimeAdapter` 自称 permissive 却遗漏 `mcpToolsets:true`，因此在 claim 前按 production contract 正确 fail closed。只补默认 test-double capability，并同步其唯一 exact capability snapshot；显式 `mcpToolsets:false` negative guards、production admission 与 bundled adapters 均不变。
 - [x] **Exact-candidate external review**：candidate `9099ae7` 的 local strict gate 42/42 与 remote CI run `33096039651` 22/22 均通过，但 fresh Claude review 发现 Linux native `readPinnedFile` 在 file-type validation 前打开 FIFO、可无限阻塞 task quiescence 与 Agent-home lease release 的 P1；typed `reject` receipt 已绑定 normalized subject `sha256:e94c762a6b9a989546c70f4e2a39d4f85f68015b9b1372254f5644aceff2b89b`。本 review-only slice 不修复、不 push、不 merge。
+
+### Post-reject FIFO P1 remediation
+
+- [x] **Regression-first evidence**：Linux Node 22 bounded guard 在 `notes/blocked.md` 为无 writer FIFO 时超过 8 秒并以 exit 124 被外部 timeout 终止；artifact 为 `.ai/harness/runs/agent-memory-fifo-p1-pre-fix.log`。
+- [x] **Nonblocking descriptor admission**：native Linux leaf open 保留 descriptor-relative parent 与 `O_NOFOLLOW`，同时加 `O_NONBLOCK`；open 后继续以 descriptor `stat()` 只接受 bounded regular file，因此 FIFO/device 即使在 validation/open race 中出现也不能阻塞或被读取。
+- [ ] **重验**：Linux focused guard 已从 timeout 转为 11/11；client/root build、typecheck、test、strict workflow 与 fresh checks 待本 slice 收口。旧 typed `reject` 对 source-changed subject 保持 stale；push、fresh external review 与 merge 均未授权。
 
 ## Verification
 
