@@ -35,6 +35,7 @@ import type { ApprovalTimelineTail } from './approval-timeline';
 import {
   BYOK_ACTIVITY_PATH,
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
+  BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
   BYOK_BLOB_CONTENT_ROUTE,
   BYOK_BLOB_FINALIZE_ROUTE,
   BYOK_BLOB_URL_ROUTE,
@@ -73,6 +74,7 @@ import {
   AgentContentReceiptPayloadSchema,
   AgentHomeProjectionCompletionRequestSchema,
   AgentHomeProjectionPayloadSchema,
+  AgentMemoryProjectionCommitRequestSchema,
   AgentEgressAckPayloadSchema,
   AgentMessageServerContextSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
@@ -89,6 +91,9 @@ import {
   type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionPayload,
   type AgentHomeProjectionReadback,
+  type AgentMemoryProjectionCommitRequest,
+  type AgentMemoryProjectionCommitResponse,
+  type AgentMemoryProjectionEraseResult,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
@@ -125,6 +130,7 @@ import { challengeHandler, pairHandler, tokenHandler } from './handlers/auth';
 import { eventsHandler } from './handlers/events';
 import { messagesHandler } from './handlers/messages';
 import { agentHomeProjectionCompletionHandler } from './handlers/agent-home-projections';
+import { agentMemoryProjectionHandler } from './handlers/agent-memory-projections';
 import {
   boardClaimHandler,
   boardListHandler,
@@ -157,6 +163,10 @@ import {
   sameAgentHomeProjectionRequest,
   type AgentHomeProjectionReceiptInput,
 } from './agent-home-projections';
+import type {
+  AgentMemoryProjectionAuthorizer,
+  AgentMemoryProjectionStore,
+} from './agent-memory-projection';
 import type {
   BlobContentProxy,
   CloudStores,
@@ -226,6 +236,10 @@ export interface ByokCloudOptions {
       readonly payload: AgentMessagePublishPayload;
     }): Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>;
   };
+  /** Embedder-owned grant and consent authority for optional hosted Agent-memory projection. */
+  readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
+  /** Durable snapshot + immutable metering receipt authority for optional hosted Agent-memory projection. */
+  readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
   readonly longPollIntervalMs?: number;
@@ -388,6 +402,11 @@ export interface ByokCloud {
     deviceId: string,
     receipt: AgentHomeProjectionCompletionRequest,
   ): Promise<AgentHomeProjectionReadback>;
+  /**
+   * Server-side consent revocation and hosted projection erasure. It does not
+   * depend on a device being online and never imports anything back locally.
+   */
+  eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult>;
   /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
   cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
@@ -436,6 +455,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     options.truthCommitter,
     options.truthObjectDownloads,
     options.skillPacks,
+    options.agentMemoryProjectionAuthorizer,
+    options.agentMemoryProjectionStore,
   );
   const root: CloudRootStores = { core: options.core, cloud: options.cloud };
   const auth: AuthPlane = createAuthPlane({
@@ -472,6 +493,17 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     { method: 'GET', path: BYOK_CAPABILITIES_PATH, class: 'public' },
     capabilitiesHandler({ declaration }),
   );
+
+  if (declares(declaration, CLOUD_CAPABILITIES.agentMemoryProjection)) {
+    registry.register(
+      { method: 'POST', path: BYOK_AGENT_MEMORY_PROJECTIONS_PATH, class: 'device' },
+      agentMemoryProjectionHandler({
+        ...deviceRouteDeps,
+        commit: (stores, deviceId, mutation, redactedBytes) =>
+          commitAgentMemoryProjectionFromStores(stores, deviceId, mutation, redactedBytes),
+      }),
+    );
+  }
 
   if (declares(declaration, CLOUD_CAPABILITIES.eventsLongPoll)) {
     registry.register(
@@ -884,6 +916,67 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     );
   }
 
+  async function commitAgentMemoryProjectionFromStores(
+    stores: TenantStores,
+    deviceId: string,
+    mutationInput: AgentMemoryProjectionCommitRequest,
+    redactedBytes: Uint8Array,
+  ): Promise<AgentMemoryProjectionCommitResponse> {
+    const mutation = AgentMemoryProjectionCommitRequestSchema.parse(mutationInput);
+    const attempt = await stores.tasks.get(mutation.taskId);
+    if (
+      attempt === undefined ||
+      attempt.deviceId !== deviceId ||
+      !sameAgentRef(mutation.agentRef, attempt.agentRef)
+    ) {
+      throw new ByokCloudError(
+        'agent_memory_projection_task_mismatch',
+        'The Agent-memory projection does not match an exact task/device/AgentRef binding.',
+      );
+    }
+    const authorizer = options.agentMemoryProjectionAuthorizer;
+    const store = options.agentMemoryProjectionStore;
+    if (authorizer === undefined || store === undefined) {
+      throw new ByokCloudError(
+        'agent_capability_missing',
+        'Hosted Agent-memory projection requires both an authorizer and a projection store.',
+      );
+    }
+    const authorization = await authorizer.authorize({
+      tenantId: stores.tenant,
+      deviceId,
+      taskId: mutation.taskId,
+      agentRef: mutation.agentRef,
+      sessionRef: mutation.sessionRef,
+      runtimeId: mutation.runtimeId,
+      grantRef: mutation.grantRef,
+      writerEpoch: mutation.writerEpoch,
+      policyRevision: mutation.policyRevision,
+    });
+    if (authorization.outcome !== 'authorized') {
+      throw new ByokCloudError(
+        'agent_memory_projection_authorization_denied',
+        `The Agent-memory projection grant was denied: ${authorization.reasonCode}`,
+      );
+    }
+    return store.commit({ tenantId: stores.tenant, deviceId, mutation, redactedBytes });
+  }
+
+  async function eraseAgentMemoryProjection(tenant: TenantId, agentId: string): Promise<AgentMemoryProjectionEraseResult> {
+    const authorizer = options.agentMemoryProjectionAuthorizer;
+    const store = options.agentMemoryProjectionStore;
+    if (authorizer === undefined || store === undefined) {
+      throw new ByokCloudError(
+        'agent_capability_missing',
+        'Hosted Agent-memory projection is not configured for this deployment.',
+      );
+    }
+    // Consent revocation first ensures every later device replay is denied,
+    // even when a subsequent external erase has to be retried by the caller.
+    await authorizer.revoke({ tenantId: tenant, agentId });
+    return store.erase({ tenantId: tenant, agentId });
+  }
+
   async function enqueueReliableEgressAck(stores: TenantStores, record: AgentEgressRecord): Promise<void> {
     const payload: AgentEgressAckPayload = AgentEgressAckPayloadSchema.parse({
       agentRef: record.payload.agentRef,
@@ -1179,6 +1272,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     getAgentHomeProjectionStatus,
 
     completeAgentHomeProjection,
+    eraseAgentMemoryProjection,
 
     async cancelTask(tenant, taskId, reason) {
       const stores = tenantStoresFor(controlPlane(tenant), root);
@@ -1315,6 +1409,8 @@ function assertNoOverDeclaration(
   truthCommitter: TruthCommitter | undefined,
   truthObjectDownloads: TruthObjectDownloads | undefined,
   skillPacks: SkillPackStore | undefined,
+  agentMemoryProjectionAuthorizer: AgentMemoryProjectionAuthorizer | undefined,
+  agentMemoryProjectionStore: AgentMemoryProjectionStore | undefined,
 ): void {
   if (
     declares(declaration, CLOUD_CAPABILITIES.boardSse) &&
@@ -1347,6 +1443,15 @@ function assertNoOverDeclaration(
     throw new ByokCloudError(
       'capability_over_declared',
       `This deployment declares ${CLOUD_CAPABILITIES.skillPacks} but was given no SkillPackStore, so both /byok/skill-packs routes would be published and unserved.`,
+    );
+  }
+  if (
+    declares(declaration, CLOUD_CAPABILITIES.agentMemoryProjection) &&
+    (agentMemoryProjectionAuthorizer === undefined || agentMemoryProjectionStore === undefined)
+  ) {
+    throw new ByokCloudError(
+      'capability_over_declared',
+      `This deployment declares ${CLOUD_CAPABILITIES.agentMemoryProjection} but was given no complete AgentMemoryProjectionAuthorizer/AgentMemoryProjectionStore pair.`,
     );
   }
 }

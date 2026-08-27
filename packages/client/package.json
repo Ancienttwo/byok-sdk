@@ -23,7 +23,8 @@
   "bin": {
     "byok-agent": "./dist/bin/byok-agent.js",
     "byok-approval-mcp": "./dist/bin/byok-approval-mcp.js",
-    "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js"
+    "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
+    "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js"
   },
   "exports": {
     ".": {

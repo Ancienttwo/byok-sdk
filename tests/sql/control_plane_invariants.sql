@@ -15,6 +15,7 @@
 --   deploy/sql/0011_tenant_erasure.sql (package/operator erasure receipt, not product data)
 --   deploy/sql/0012_agent_home_contract.sql (durable capability + exact AgentRef task identity)
 --   deploy/sql/0013_agent_egress_contract.sql (immutable reliable Agent egress receipt facts)
+--   deploy/sql/0014_agent_memory_projection.sql (bounded redacted head + body-free metering receipts)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -54,10 +55,12 @@
 --
 -- Without this block the checks below pass trivially against an empty schema, and
 -- a green result would mean "nothing was checked" rather than "nothing is
--- wrong". 28 is 0001's seven plus 0002's eleven plus 0003's three plus
+-- wrong". 30 is 0001's seven plus 0002's eleven plus 0003's three plus
 -- 0004's one plus 0005's two plus 0007's one plus 0008's one plus 0010's
 -- package/operator erasure receipt; 0013 adds one immutable reliable Agent
--- egress table; 0009 alters the existing task table and is
+-- egress table; 0014 adds the projection head, metering receipt, and erase
+-- epoch-fence tables;
+-- 0009 alters the existing task table and is
 -- checked explicitly in section 0.1. A later migration may only raise this count.
 DO $$
 DECLARE
@@ -70,9 +73,9 @@ BEGIN
      AND t.relkind = 'r'
      AND t.relname <> 'byok_schema_migration';
 
-  IF port_tables < 28 THEN
+  IF port_tables < 31 THEN
     RAISE EXCEPTION
-      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 28 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql + 0013_agent_egress_contract.sql; 0009_task_cancellation.sql, 0010_tenant_readiness.sql, and 0012_agent_home_contract.sql are checked separately)',
+      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 31 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql + 0013_agent_egress_contract.sql + 0014_agent_memory_projection.sql; 0009_task_cancellation.sql, 0010_tenant_readiness.sql, and 0012_agent_home_contract.sql are checked separately)',
       current_database(), current_schema(), port_tables;
   END IF;
 END $$;
@@ -142,6 +145,197 @@ BEGIN
     RAISE EXCEPTION
       'agent_egress_event primary key must be (tenant_id, device_id, event_id), found %',
       primary_key_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.6 Hosted Agent-memory projection has exact tenant-first replay authority
+-- ---------------------------------------------------------------------------
+--
+-- The head is the only durable content authority: it contains one bounded
+-- redacted bytea snapshot for the current (tenant, agent) state. The immutable
+-- receipt retains exact non-body replay bindings and metering facts, but must
+-- not grow a second snapshot/body store or an audit payload.
+DO $$
+DECLARE
+  missing_columns text;
+  head_primary_key_columns text[];
+  fence_primary_key_columns text[];
+  receipt_primary_key_columns text[];
+  receipt_mutation_unique_columns text[];
+  receipt_mutation_unique_count integer;
+  body_columns_outside_head text;
+BEGIN
+  SELECT string_agg(required.table_name || '.' || required.column_name, ', ' ORDER BY required.table_name, required.column_name)
+    INTO missing_columns
+    FROM (
+      VALUES
+        ('agent_memory_projection_head'::text, 'tenant_id'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'agent_id'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'writer_epoch'::text, 'integer'::regtype),
+        ('agent_memory_projection_head'::text, 'source_seq'::text, 'integer'::regtype),
+        ('agent_memory_projection_head'::text, 'mutation_id'::text, 'uuid'::regtype),
+        ('agent_memory_projection_head'::text, 'device_id'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'task_id'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'agent_profile_revision'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'session_ref'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'runtime_id'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'grant_ref'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'policy_revision'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'redacted_hash'::text, 'text'::regtype),
+        ('agent_memory_projection_head'::text, 'redacted_snapshot'::text, 'bytea'::regtype),
+        ('agent_memory_projection_head'::text, 'redacted_byte_count'::text, 'integer'::regtype),
+        ('agent_memory_projection_head'::text, 'committed_at'::text, 'timestamp with time zone'::regtype),
+        ('agent_memory_projection_erase_fence'::text, 'tenant_id'::text, 'text'::regtype),
+        ('agent_memory_projection_erase_fence'::text, 'agent_id'::text, 'text'::regtype),
+        ('agent_memory_projection_erase_fence'::text, 'next_writer_epoch'::text, 'integer'::regtype),
+        ('agent_memory_projection_erase_fence'::text, 'erased_at'::text, 'timestamp with time zone'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'tenant_id'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'agent_id'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'writer_epoch'::text, 'integer'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'source_seq'::text, 'integer'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'mutation_id'::text, 'uuid'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'device_id'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'task_id'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'agent_profile_revision'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'session_ref'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'runtime_id'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'grant_ref'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'policy_revision'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'redacted_hash'::text, 'text'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'redacted_byte_count'::text, 'integer'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'metering_receipt_id'::text, 'uuid'::regtype),
+        ('agent_memory_projection_metering_receipt'::text, 'recorded_at'::text, 'timestamp with time zone'::regtype)
+    ) AS required(table_name, column_name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = required.table_name
+         AND a.attname = required.column_name
+         AND a.atttypid = required.type_oid
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without complete 0014_agent_memory_projection.sql: missing column(s): %',
+      missing_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO head_primary_key_columns
+    FROM pg_constraint constraint_row
+    JOIN pg_class t ON t.oid = constraint_row.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_memory_projection_head'
+     AND constraint_row.contype = 'p';
+
+  IF head_primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'agent_id']::text[] THEN
+    RAISE EXCEPTION
+      'agent_memory_projection_head primary key must be (tenant_id, agent_id), found %',
+      head_primary_key_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO fence_primary_key_columns
+    FROM pg_constraint constraint_row
+    JOIN pg_class t ON t.oid = constraint_row.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_memory_projection_erase_fence'
+     AND constraint_row.contype = 'p';
+
+  IF fence_primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'agent_id']::text[] THEN
+    RAISE EXCEPTION
+      'agent_memory_projection_erase_fence primary key must be (tenant_id, agent_id), found %',
+      fence_primary_key_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO receipt_primary_key_columns
+    FROM pg_constraint constraint_row
+    JOIN pg_class t ON t.oid = constraint_row.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_memory_projection_metering_receipt'
+     AND constraint_row.contype = 'p';
+
+  IF receipt_primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'agent_id', 'writer_epoch', 'source_seq']::text[] THEN
+    RAISE EXCEPTION
+      'agent_memory_projection_metering_receipt primary key must be (tenant_id, agent_id, writer_epoch, source_seq), found %',
+      receipt_primary_key_columns;
+  END IF;
+
+  SELECT count(*)
+    INTO receipt_mutation_unique_count
+    FROM (
+      SELECT array_agg(a.attname ORDER BY key_columns.ordinality) AS columns
+        FROM pg_constraint constraint_row
+        JOIN pg_class t ON t.oid = constraint_row.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'agent_memory_projection_metering_receipt'
+         AND constraint_row.contype = 'u'
+       GROUP BY constraint_row.oid
+    ) AS unique_columns;
+
+  SELECT unique_columns.columns
+    INTO receipt_mutation_unique_columns
+    FROM (
+      SELECT array_agg(a.attname ORDER BY key_columns.ordinality) AS columns
+        FROM pg_constraint constraint_row
+        JOIN pg_class t ON t.oid = constraint_row.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'agent_memory_projection_metering_receipt'
+         AND constraint_row.contype = 'u'
+       GROUP BY constraint_row.oid
+       LIMIT 1
+    ) AS unique_columns;
+
+  IF receipt_mutation_unique_count <> 1
+     OR receipt_mutation_unique_columns IS DISTINCT FROM ARRAY['tenant_id', 'agent_id', 'writer_epoch', 'mutation_id']::text[] THEN
+    RAISE EXCEPTION
+      'agent_memory_projection_metering_receipt must have exactly one tenant-first replay unique key (tenant_id, agent_id, writer_epoch, mutation_id), found % unique key(s) with columns %',
+      receipt_mutation_unique_count, receipt_mutation_unique_columns;
+  END IF;
+
+  SELECT string_agg(t.relname || '.' || a.attname, ', ' ORDER BY t.relname, a.attname)
+    INTO body_columns_outside_head
+    FROM pg_class t
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_attribute a ON a.attrelid = t.oid
+   WHERE n.nspname = current_schema()
+     AND t.relname IN ('agent_memory_projection_head', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_erase_fence')
+     AND a.attnum > 0
+     AND NOT a.attisdropped
+     AND (
+       a.atttypid = 'bytea'::regtype
+       OR a.attname ILIKE '%snapshot%'
+       OR a.attname ILIKE '%body%'
+       OR a.attname ILIKE '%payload%'
+     )
+     AND NOT (t.relname = 'agent_memory_projection_head' AND a.attname = 'redacted_snapshot' AND a.atttypid = 'bytea'::regtype);
+
+  IF body_columns_outside_head IS NOT NULL THEN
+    RAISE EXCEPTION
+      'agent-memory projection body may exist only as agent_memory_projection_head.redacted_snapshot; forbidden body column(s): %',
+      body_columns_outside_head;
   END IF;
 END $$;
 

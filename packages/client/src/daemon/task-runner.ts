@@ -75,8 +75,20 @@ import { prependGitWorkspaceGuidance } from './git-workspace';
 import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
-import { AGENT_MESSAGE_MCP_SERVER_NAME } from './toolset-registry';
+import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME } from './toolset-registry';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
+import { prependAgentMemoryGuidance } from './memory-guidance';
+import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+import {
+  AgentMemoryService,
+  isAgentMemorySecureFilesystemAvailable,
+  snapshotAndProjectAgentMemory,
+  type AgentMemoryAuditWarning,
+  type AgentMemoryHostedProjection,
+  type AgentMemoryTaskContext,
+} from './agent-memory';
+import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -470,6 +482,12 @@ export interface TaskRunnerDeps {
   resultDocument?: { readonly extract: ResultDocumentExtractor };
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
+  /** SDK-owned MCP helper injected only into strict Agent tasks. */
+  agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
+  /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
+  agentMemoryFilesystemHelperBin?: string;
+  /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
+  agentMemoryHostedProjection?: AgentMemoryHostedProjection;
 }
 
 /** See {@link TaskRunnerDeps.admissionGuard}. */
@@ -918,6 +936,11 @@ export class TaskRunner {
   private readonly pendingMessageTasks = new Map<string, PendingMessageTask>();
   private readonly messageContextByToken = new Map<string, string>();
   private readonly messageContextByTask = new Map<string, string>();
+  private readonly memoryContextByToken = new Map<string, { readonly taskId: string; readonly agentRef: AgentRef }>();
+  private readonly memoryContextByTask = new Map<string, string>();
+  private readonly memoryInFlightByTask = new Map<string, Set<Promise<unknown>>>();
+  private readonly memoryClosingTasks = new Set<string>();
+  private readonly memoryFilesystemByTask = new Map<string, Promise<AgentMemoryFilesystem>>();
   private readonly recoveredMessageOutboxes = new Map<string, AgentMessageOutbox>();
   private readonly recoveredMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
@@ -1097,6 +1120,16 @@ export class TaskRunner {
     if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
     this.sendAgentMessageRecord(context.outbox, activated);
     return { messageId: activated.messageId, state: 'pending' };
+  }
+
+  /** Authenticated control-socket entry used only by the SDK-owned memory MCP helper. */
+  async recallAgentMemory(input: { readonly contextToken: string; readonly path: string; readonly ifRevision?: string }): Promise<{ path: string; revision: string; content: string; auditWarning?: AgentMemoryAuditWarning }> {
+    return this.runMemoryOperation(input.contextToken, (context) => new AgentMemoryService(context).recall(input));
+  }
+
+  /** Authenticated control-socket entry used only by the SDK-owned memory MCP helper. */
+  async saveAgentMemory(input: { readonly contextToken: string; readonly op: 'replace' | 'delete'; readonly path: string; readonly expectedRevision: string; readonly content?: string }): Promise<{ path: string; revision?: string; deleted: boolean }> {
+    return this.runMemoryOperation(input.contextToken, (context) => new AgentMemoryService(context).save(input));
   }
 
   /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
@@ -1565,16 +1598,31 @@ export class TaskRunner {
 
       const offered = withoutRequiredToolsets(payload);
       const requestedRuntime = payload.dispatchSelection?.runtimeId ?? payload.runtime;
-      const pick = await this.pickAdapter(requestedRuntime, payload.policy.mode, requiredToolsets !== undefined || messageRequirement !== undefined);
+      const requiresAgentMemoryMcp = agentRef !== undefined
+        && this.deps.agentMemoryMcpBin !== undefined
+        && isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined);
+      const pick = await this.pickAdapter(
+        requestedRuntime,
+        payload.policy.mode,
+        requiredToolsets !== undefined || messageRequirement !== undefined || requiresAgentMemoryMcp,
+      );
       if (!pick.ok) {
         decline(pick.reason, pick.retryable);
         return;
       }
-      const taskMcpServers = this.withAgentMessageMcp(
+      let taskMcpServers = this.withAgentMessageMcp(
         resolvedMcp?.ok ? resolvedMcp.servers : undefined,
         taskId,
         messageRequirement,
       );
+      if (requiresAgentMemoryMcp && agentRef !== undefined) {
+        try {
+          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef);
+        } catch (error) {
+          decline(`Agent memory MCP configuration failed: ${errorMessage(error)}`, false);
+          return;
+        }
+      }
       let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
       try {
         prepared = await pick.adapter.prepare({
@@ -1850,7 +1898,9 @@ export class TaskRunner {
 
       const startInput: RuntimeOperationStartInput = {
         manifest,
-        instruction: gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction,
+        instruction: agentBinding === undefined
+          ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
+          : prependAgentMemoryGuidance(resolvedInstruction),
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         approvalChannel: {
@@ -2057,6 +2107,7 @@ export class TaskRunner {
       if (!agentLeaseTransferred) {
         this.pendingMessageTasks.delete(taskId);
         this.revokeAgentMessageContext(taskId);
+        this.revokeAgentMemoryContext(taskId);
       }
       if (agentBinding !== undefined && !agentLeaseTransferred) {
         await agentBinding.lease.release().catch(() => {});
@@ -2094,6 +2145,158 @@ export class TaskRunner {
     const token = this.messageContextByTask.get(taskId);
     if (token !== undefined) this.messageContextByToken.delete(token);
     this.messageContextByTask.delete(taskId);
+  }
+
+  /** Injected only after strict Agent admission; a host registry may never replace this reserved name. */
+  private withAgentMemoryMcp(
+    existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
+    taskId: string,
+    agentRef: AgentRef,
+  ): Readonly<Record<string, McpStdioServerConfig>> {
+    if (existing !== undefined && Object.prototype.hasOwnProperty.call(existing, AGENT_MEMORY_MCP_SERVER_NAME)) {
+      throw new Error(`MCP server name "${AGENT_MEMORY_MCP_SERVER_NAME}" is reserved by the daemon`);
+    }
+    const bin = this.deps.agentMemoryMcpBin!;
+    const contextToken = `${randomUUID()}.${randomUUID()}`;
+    this.revokeAgentMemoryContext(taskId);
+    this.memoryContextByToken.set(contextToken, Object.freeze({ taskId, agentRef: Object.freeze({ ...agentRef }) }));
+    this.memoryContextByTask.set(taskId, contextToken);
+    return Object.freeze({
+      ...(existing ?? {}),
+      [AGENT_MEMORY_MCP_SERVER_NAME]: Object.freeze({
+        command: bin.command,
+        args: Object.freeze([...bin.args]),
+        env: Object.freeze({
+          BYOK_STORE_DIR: this.deps.storeDir,
+          BYOK_PRODUCT_ID: this.deps.productId,
+          BYOK_AGENT_MEMORY_CONTEXT: contextToken,
+        }),
+      }),
+    });
+  }
+
+  /** Reconstruct all sensitive context from the active sealed task, never from MCP/model arguments. */
+  private activeMemoryContext(contextToken: string): AgentMemoryTaskContext {
+    const registered = this.memoryContextByToken.get(contextToken);
+    if (registered === undefined || this.memoryContextByTask.get(registered.taskId) !== contextToken || this.memoryClosingTasks.has(registered.taskId)) {
+      throw new Error('invalid, expired, or quiescing Agent memory task context');
+    }
+    const active = this.tasks.get(registered.taskId);
+    if (
+      active === undefined ||
+      active.finalizationStarted ||
+      active.agentBinding === undefined ||
+      active.agentRef === undefined ||
+      active.agentHandoff === undefined ||
+      this.deps.tenantId === undefined ||
+      active.agentRef.agentId !== registered.agentRef.agentId ||
+      active.agentRef.profileRevision !== registered.agentRef.profileRevision ||
+      active.agentBinding.resolution.agentRef.agentId !== registered.agentRef.agentId ||
+      active.agentBinding.resolution.agentRef.profileRevision !== registered.agentRef.profileRevision ||
+      active.agentHandoff.sessionRef !== active.session.sessionRef ||
+      active.agentHandoff.runtimeId !== active.adapter.descriptor.id ||
+      active.agentHandoff.cwd !== active.agentBinding.lease.cwd ||
+      active.agentBinding.lease.canonicalHome !== active.agentBinding.resolution.canonicalHome
+    ) {
+      throw new Error('Agent memory context no longer matches its exact active task identity');
+    }
+    return Object.freeze({
+      taskId: registered.taskId,
+      tenantId: this.deps.tenantId,
+      deviceId: this.deps.deviceId,
+      agentRef: Object.freeze({ ...active.agentRef }),
+      sessionRef: active.session.sessionRef,
+      runtimeId: active.adapter.descriptor.id,
+      canonicalHome: active.agentBinding.resolution.canonicalHome,
+      leaseId: active.agentBinding.lease.leaseId,
+      homeIdentity: active.agentBinding.lease.homeIdentity,
+    });
+  }
+
+  private async runMemoryOperation<T>(contextToken: string, operation: (context: AgentMemoryTaskContext) => Promise<T>): Promise<T> {
+    let context = this.activeMemoryContext(contextToken);
+    context = await this.bindAgentMemoryFilesystem(context);
+    // The helper handshake is asynchronous. Reconstruct the authority again so
+    // a task that began closing during it cannot retain a stale context.
+    const current = this.activeMemoryContext(contextToken);
+    if (current.taskId !== context.taskId || current.leaseId !== context.leaseId) throw new Error('Agent memory context changed during secure filesystem handshake');
+    context = Object.freeze({ ...current, ...(context.filesystem === undefined ? {} : { filesystem: context.filesystem }) });
+    const pending = this.memoryInFlightByTask.get(context.taskId) ?? new Set<Promise<unknown>>();
+    this.memoryInFlightByTask.set(context.taskId, pending);
+    const result = operation(context);
+    pending.add(result);
+    try {
+      return await result;
+    } finally {
+      pending.delete(result);
+      if (pending.size === 0) this.memoryInFlightByTask.delete(context.taskId);
+    }
+  }
+
+  private async quiesceAndSnapshotAgentMemory(active: ActiveTask): Promise<void> {
+    if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) return;
+    if (!isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) return;
+    if (this.deps.tenantId === undefined) {
+      console.error(`[byok/client] Agent memory quiescent snapshot skipped for ${active.taskId}: exact tenant context is unavailable`);
+      return;
+    }
+    this.memoryClosingTasks.add(active.taskId);
+    try {
+      await Promise.allSettled([...this.memoryInFlightByTask.get(active.taskId) ?? []]);
+      const context = await this.bindAgentMemoryFilesystem({
+        taskId: active.taskId,
+        tenantId: this.deps.tenantId,
+        deviceId: this.deps.deviceId,
+        agentRef: active.agentRef,
+        sessionRef: active.agentHandoff.sessionRef,
+        runtimeId: active.agentHandoff.runtimeId,
+        canonicalHome: active.agentBinding.resolution.canonicalHome,
+        leaseId: active.agentBinding.lease.leaseId,
+        homeIdentity: active.agentBinding.lease.homeIdentity,
+      });
+      await snapshotAndProjectAgentMemory(context, this.deps.agentMemoryHostedProjection);
+    } catch (error) {
+      // Projection never becomes a second task-terminal authority. A failed
+      // snapshot/upload is observable locally and preserves the raw home plus
+      // any already-appended redacted outbox record for later replay.
+      console.error(`[byok/client] Agent memory quiescent snapshot failed for ${active.taskId}: ${errorMessage(error)}`);
+    } finally {
+      await this.closeAgentMemoryFilesystem(active.taskId);
+    }
+  }
+
+  private async bindAgentMemoryFilesystem(context: AgentMemoryTaskContext): Promise<AgentMemoryTaskContext> {
+    const helperBin = this.deps.agentMemoryFilesystemHelperBin;
+    if (helperBin === undefined) return context;
+    let filesystem = this.memoryFilesystemByTask.get(context.taskId);
+    if (filesystem === undefined) {
+      filesystem = openAgentMemoryFilesystemHelper({
+        helperBin,
+        canonicalHome: context.canonicalHome,
+        homeIdentity: context.homeIdentity,
+      });
+      this.memoryFilesystemByTask.set(context.taskId, filesystem);
+      void filesystem.catch(() => {
+        if (this.memoryFilesystemByTask.get(context.taskId) === filesystem) this.memoryFilesystemByTask.delete(context.taskId);
+      });
+    }
+    return Object.freeze({ ...context, filesystem: await filesystem });
+  }
+
+  private async closeAgentMemoryFilesystem(taskId: string): Promise<void> {
+    const filesystem = this.memoryFilesystemByTask.get(taskId);
+    this.memoryFilesystemByTask.delete(taskId);
+    if (filesystem === undefined) return;
+    await filesystem.then((authority) => authority.close()).catch(() => {});
+  }
+
+  private revokeAgentMemoryContext(taskId: string): void {
+    const token = this.memoryContextByTask.get(taskId);
+    if (token !== undefined) this.memoryContextByToken.delete(token);
+    this.memoryContextByTask.delete(taskId);
+    this.memoryInFlightByTask.delete(taskId);
+    this.memoryClosingTasks.delete(taskId);
+    void this.closeAgentMemoryFilesystem(taskId);
   }
 
   /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
@@ -3492,6 +3695,10 @@ export class TaskRunner {
     if (active.agentBinding !== undefined && active.agentRef !== undefined && active.agentHandoff !== undefined) {
       const agentRef = active.agentRef;
       const handoff = active.agentHandoff;
+      // Session.close() is the adapter quiescence receipt. Capture only after
+      // it, while this exact Agent-home writer lease is still held, so direct
+      // runtime file-tool writes cannot escape the deterministic snapshot.
+      await this.quiesceAndSnapshotAgentMemory(active);
       if (!active.agentTerminalPersisted) {
         const cause = active.terminalCause ?? 'failed';
         const result = await this.retryAgentTerminalEvidence(() =>
@@ -3531,12 +3738,14 @@ export class TaskRunner {
       active.gitLease?.release();
       this.tasks.delete(taskId);
       this.revokeAgentMessageContext(taskId);
+      this.revokeAgentMemoryContext(taskId);
       active.resolveSemanticTerminalSettled?.(leaseReleased);
       return leaseReleased;
     }
     active.gitLease?.release();
     this.tasks.delete(taskId);
     this.revokeAgentMessageContext(taskId);
+    this.revokeAgentMemoryContext(taskId);
     active.resolveSemanticTerminalSettled?.(true);
     return true;
   }

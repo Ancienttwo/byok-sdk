@@ -109,6 +109,8 @@ export interface AgentHomeLease {
   readonly agentRef: AgentRef;
   readonly canonicalHome: string;
   readonly cwd: string;
+  /** Filesystem identity captured under the writer lease; task-scoped memory rechecks it before pinning a descriptor. */
+  readonly homeIdentity: Readonly<{ dev: bigint; ino: bigint }>;
   release(): Promise<void>;
 }
 
@@ -413,12 +415,16 @@ export class AgentHomeLeaseManager {
     let handle: fs.FileHandle | undefined;
     let rootGate: PathMutationGate | undefined;
     let ownsMarker = false;
+    let homeIdentity: Readonly<{ dev: bigint; ino: bigint }> | undefined;
     try {
       rootGate = await acquirePathMutationGate({
         scope: 'agent-home-root',
         targetPath: resolution.agentsRoot,
       }, { waitMs: 1_000 });
       await ensureDirectoryNoSymlink(resolution.agentsRoot, canonicalHome);
+      const homeStat = await fs.stat(canonicalHome, { bigint: true });
+      if (!homeStat.isDirectory()) throw new AgentHomeResolutionError(`Agent home ${canonicalHome} is not a directory`);
+      homeIdentity = Object.freeze({ dev: homeStat.dev, ino: homeStat.ino });
       const internalDir = await ensureDirectoryNoSymlink(
         canonicalHome,
         path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY),
@@ -454,6 +460,7 @@ export class AgentHomeLeaseManager {
     }
     const acquiredLockPath = lockPath;
     if (acquiredLockPath === undefined) throw new AgentHomeError('Agent home lease marker path was not established');
+    if (homeIdentity === undefined) throw new AgentHomeError('Agent home lease identity was not established');
     let released = false;
     let releaseAttempt: Promise<void> | undefined;
     return {
@@ -461,6 +468,7 @@ export class AgentHomeLeaseManager {
       agentRef,
       canonicalHome,
       cwd: canonicalHome,
+      homeIdentity,
       release: () => {
         if (released) return Promise.resolve();
         if (releaseAttempt !== undefined) return releaseAttempt;

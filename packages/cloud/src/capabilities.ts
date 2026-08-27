@@ -62,6 +62,8 @@ export const CLOUD_CAPABILITIES = {
    * routes it would then 404.
    */
   skillPacks: 'skills.pack',
+  /** Optional, one-way redacted Agent-memory snapshot mutation route. */
+  agentMemoryProjection: 'agent.memory.projection',
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
@@ -83,6 +85,12 @@ export interface FullCapabilityDeclarationOptions {
    * existing deployment refuse to construct.
    */
   readonly includeSkillPacks?: boolean;
+  /**
+   * Hosted Agent memory is default-off: a composition needs both an embedder
+   * grant authorizer and a durable projection store before it may declare the
+   * mutation route.
+   */
+  readonly includeAgentMemoryProjection?: boolean;
 }
 
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
@@ -96,6 +104,9 @@ export function fullCapabilityDeclaration(
     capabilities: Object.values(CLOUD_CAPABILITIES).filter((capability) => {
       if (capability === CLOUD_CAPABILITIES.truthRecords) return options.includeTruthRecords === true;
       if (capability === CLOUD_CAPABILITIES.skillPacks) return options.includeSkillPacks === true;
+      if (capability === CLOUD_CAPABILITIES.agentMemoryProjection) {
+        return options.includeAgentMemoryProjection === true;
+      }
       return true;
     }),
   };

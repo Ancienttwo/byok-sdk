@@ -11,6 +11,10 @@ import {
   AgentHomeProjectionHashSchema,
   AgentHomeProjectionOutcomeSchema,
 } from './agent-home-projection';
+import {
+  AgentMemoryProjectionMutationSchema,
+  AgentMemoryProjectionReceiptSchema,
+} from './agent-memory-projection';
 
 /**
  * HTTP-side request/response shapes for the reference server's auth and blob
@@ -278,6 +282,17 @@ export const AgentHomeProjectionReadbackSchema = z
 export type AgentHomeProjectionReadback = z.infer<typeof AgentHomeProjectionReadbackSchema>;
 
 // ---------------------------------------------------------------------------
+// POST /byok/agent-memory-projections — optional hosted, redacted, one-way
+// snapshots. Tenant and device identity come only from bearer authentication.
+// ---------------------------------------------------------------------------
+
+export const AgentMemoryProjectionCommitRequestSchema = AgentMemoryProjectionMutationSchema;
+export type AgentMemoryProjectionCommitRequest = z.infer<typeof AgentMemoryProjectionCommitRequestSchema>;
+
+export const AgentMemoryProjectionCommitResponseSchema = AgentMemoryProjectionReceiptSchema;
+export type AgentMemoryProjectionCommitResponse = z.infer<typeof AgentMemoryProjectionCommitResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Route paths — the single source of truth for the `/byok/*` HTTP surface.
 //
 // These literals were previously hand-copied across client, cloud, server, and
@@ -319,6 +334,9 @@ export const BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE =
 export function byokAgentHomeProjectionCompletionPath(requestId: string): string {
   return `${BYOK_AGENT_HOME_PROJECTIONS_PATH}/${encodeURIComponent(requestId)}/completion`;
 }
+
+/** `POST /byok/agent-memory-projections` — optional local-to-hosted redacted snapshot commit. */
+export const BYOK_AGENT_MEMORY_PROJECTIONS_PATH = '/byok/agent-memory-projections';
 
 /** `PUT /byok/presence` — presence heartbeat. */
 export const BYOK_PRESENCE_PATH = '/byok/presence';

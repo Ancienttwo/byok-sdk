@@ -65,6 +65,22 @@ export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/
 export { ByokCloudError, CLOUD_ERROR_CODES, isCloudError } from './errors';
 export type { CloudErrorCode } from './errors';
 
+export {
+  InMemoryAgentMemoryProjectionAuthorizer,
+  InMemoryAgentMemoryProjectionStore,
+} from './stores/in-memory/agent-memory-projection';
+export type {
+  AgentMemoryProjectionAuthorization,
+  AgentMemoryProjectionEraseResult,
+  AgentMemoryProjectionAuthorizer,
+  AgentMemoryProjectionAuthorizerInput,
+  AgentMemoryProjectionCommitInput,
+  AgentMemoryProjectionMeteringReceipt,
+  AgentMemoryProjectionMutation,
+  AgentMemoryProjectionReceipt,
+  AgentMemoryProjectionStore,
+} from './agent-memory-projection';
+
 // Capability declaration (ADR-010)
 export {
   CLOUD_CAPABILITIES,

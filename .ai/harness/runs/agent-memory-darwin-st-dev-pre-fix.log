@@ -1,0 +1,8 @@
+$ GOTOOLCHAIN=go1.26.5 go test -run TestDarwinRootIdentityMatchesLibuvUnsignedDeviceWidening -count=1 ./...
+--- FAIL: TestDarwinRootIdentityMatchesLibuvUnsignedDeviceWidening (0.00s)
+    identity_darwin_test.go:34: Darwin root identity = main.rootIdentity{Kind:"unix", Dev:"-1", Ino:"42", VolumeSerial:"", FileIndex:""}
+FAIL
+FAIL github.com/byok-sdk/agent-memory-fs 1.187s
+FAIL
+REGRESSION_GUARD=packages/client/native/agent-memory-fs/identity_darwin_test.go
+PRE_FIX_EXIT=1

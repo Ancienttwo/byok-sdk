@@ -83,6 +83,33 @@ export type {
 } from './agent-home-projection';
 
 export {
+  AGENT_MEMORY_PROJECTION_CAPABILITY,
+  AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
+  AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
+  AgentMemoryProjectionGrantRefSchema,
+  AgentMemoryProjectionSessionRefSchema,
+  AgentMemoryProjectionWriterEpochSchema,
+  AgentMemoryProjectionSourceSeqSchema,
+  AgentMemoryProjectionSnapshotSchema,
+  AgentMemoryProjectionMeteringReceiptSchema,
+  AgentMemoryProjectionMutationSchema,
+  AgentMemoryProjectionReceiptSchema,
+  AgentMemoryProjectionEraseResultSchema,
+  agentMemoryProjectionBase64UrlByteLength,
+} from './agent-memory-projection';
+export type {
+  AgentMemoryProjectionGrantRef,
+  AgentMemoryProjectionSessionRef,
+  AgentMemoryProjectionWriterEpoch,
+  AgentMemoryProjectionSourceSeq,
+  AgentMemoryProjectionSnapshot,
+  AgentMemoryProjectionMeteringReceipt,
+  AgentMemoryProjectionMutation,
+  AgentMemoryProjectionReceipt,
+  AgentMemoryProjectionEraseResult,
+} from './agent-memory-projection';
+
+export {
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   TerminalProjectionContractSchema,
   TerminalProjectionSelectionSchema,
@@ -220,6 +247,8 @@ export {
   AgentHomeProjectionCompletionRequestSchema,
   AgentHomeProjectionStatusSchema,
   AgentHomeProjectionReadbackSchema,
+  AgentMemoryProjectionCommitRequestSchema,
+  AgentMemoryProjectionCommitResponseSchema,
   MAX_MESSAGES_PER_BATCH,
   BYOK_WS_PATH,
   BYOK_PAIR_PATH,
@@ -231,6 +260,7 @@ export {
   BYOK_AGENT_HOME_PROJECTIONS_PATH,
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
   byokAgentHomeProjectionCompletionPath,
+  BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
   BYOK_PRESENCE_PATH,
   BYOK_ACTIVITY_PATH,
   BYOK_BOARD_PATH,
@@ -270,4 +300,6 @@ export type {
   AgentHomeProjectionCompletionRequest,
   AgentHomeProjectionStatus,
   AgentHomeProjectionReadback,
+  AgentMemoryProjectionCommitRequest,
+  AgentMemoryProjectionCommitResponse,
 } from './http-api';
