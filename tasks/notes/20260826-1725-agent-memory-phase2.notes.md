@@ -312,6 +312,25 @@
   names every generated/archive path explicitly instead of relying on a broad
   compatibility allowance. Push, remote CI, fresh external review, merge to
   main, publication, deployment, and migration remain separately gated.
+- Owner-authorized non-force push froze remote branch
+  `codex/agent-memory-phase2` at exact SHA `eebba755125e4a6a021ac0a6c8dada9c5717ee50`.
+  GitHub Actions run `33090344663` completed with 21/22 jobs green; build,
+  typecheck, macOS helper, real Postgres, Windows security, and all three-platform
+  package/install jobs passed. The sole Linux full-test job failed four strict
+  Agent positive-admission fixtures. Linux native secure-fs makes
+  `resolveAgentMemoryMcpBin()` available, so the existing
+  `requiresAgentMemoryMcp` predicate correctly requires `mcpToolsets:true` before
+  claim. The shared default `StubRuntimeAdapter` claimed to be maximally
+  permissive but omitted that capability, while all bundled pi/codex/claude
+  adapters already declare it. The approved test-only reconciliation adds the
+  missing default capability and updates the one exact claim-capability snapshot;
+  explicit unsupported-runtime guards continue to pass their own
+  `mcpToolsets:false` descriptor. Focused verification passed 6 files / 20 tests
+  with 4 platform skips; root build and typecheck passed; client full test passed
+  1457 with 10 skips. One unrelated Wrangler 5-second dry-run timeout passed
+  immediately as a package-owned 6/6 rerun, and the single allowed root-test
+  retry completed green. Production admission, MCP naming, hosted semantics,
+  merge, publication, deployment, and migration were not changed.
 
 ## Promotion Filter
 

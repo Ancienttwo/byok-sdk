@@ -1,6 +1,6 @@
 # Task Contract: agent-memory-phase2
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260826-1725-agent-memory-phase2.md
 > **Task Profile**: bugfix
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
@@ -182,6 +182,11 @@ exit_criteria:
     - path: packages/client/src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts
     - path: packages/cloud/src/__tests__/agent-memory-cross-task-replay-p1-regression.test.ts
     - path: packages/client/src/__tests__/device-credential-store.test.ts
+    - path: packages/client/src/__tests__/agent-egress-fresh-session.test.ts
+    - path: packages/client/src/__tests__/strict-agent-only.test.ts
+    - path: packages/client/src/__tests__/real-cloud-longpoll.test.ts
+    - path: packages/client/src/__tests__/real-server-longpoll-only.test.ts
+    - path: packages/client/src/__tests__/real-server-longpoll-steer.test.ts
     - path: packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts
     - path: packages/client/src/__tests__/agent-memory-log-p1-regression.test.ts
     - path: packages/cloud/src/__tests__/agent-memory-erase-epoch-p1-regression.test.ts

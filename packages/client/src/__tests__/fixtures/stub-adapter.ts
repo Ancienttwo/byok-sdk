@@ -172,6 +172,7 @@ const DEFAULT_STUB_CAPABILITIES: RuntimeCapabilities = {
   steer: true,
   resume: true,
   approvalInteractive: true,
+  mcpToolsets: true,
   permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
 };
 

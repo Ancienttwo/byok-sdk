@@ -192,6 +192,7 @@ See captured planning output.
 - [x] **Projection reconciliation integration**：冻结 source 后生成的 exact capability/architecture projection 已先在独立 branch 验证，再由 owner 单独授权按原顺序集成到 product candidate；累计 root request 以现有 `docs/architecture/sdk-architecture.md` 为 artifact 做 resolved archive，product branch 的 queue 与 strict architecture gate 均清零。
 - [x] **Aggregate test oracle isolation**：`device-credential-store` win32 simulation 改用 suite-local `TMPDIR/TMP/TEMP`，不再扫描约 78.6 万 entries 的真实 host temp root；500ms reproducer 从 timeout 转 3ms，文件 12/12 与 root aggregate test 通过，production credential/scavenger code 未改。
 - [x] **新 subject 重验**：focused guard、client/root build/typecheck/test、strict workflow、context scan 与 strict architecture gate 均通过；最终 `verify-sprint --prepare-acceptance` 在 integrated product candidate 上生成 fresh checks。旧 `external_pass` 因 production source 变化转 stale；push、remote CI、fresh external review 与 merge 继续需要独立授权。
+- [x] **Remote Linux CI fixture reconciliation**：run `33090344663` 证明 Linux secure-fs 会把 Agent-memory MCP 纳入 adapter capability gate；四个 positive-admission tests 使用的默认 `StubRuntimeAdapter` 自称 permissive 却遗漏 `mcpToolsets:true`，因此在 claim 前按 production contract 正确 fail closed。只补默认 test-double capability，并同步其唯一 exact capability snapshot；显式 `mcpToolsets:false` negative guards、production admission 与 bundled adapters 均不变。
 
 ## Verification
 
@@ -226,3 +227,4 @@ See captured planning output.
 - [x] **Durable projection**：Postgres bounded `bytea` latest snapshot，key=`(tenantId, agentId)`，单 writer epoch + gap-free source sequence，exact replay 返同 receipt 且不双计量；accepted redacted bytes 与 immutable meter receipt 同事务写入；server-side erase 不依赖 device online。
 - [x] **Hard negatives**：不做 hosted→local import/restore、multi-device merge、RAG/search/history browser、product facts adapter、compaction hook；不解除 hosted content-read 对 `MEMORY.md` 的 deny。
 - [x] **Consumer-owned remains**：consent UI、商业定价、法务 retention policy、identity BFF 的具体实现不属于 SDK 本刀；SDK 只提供 fail-closed ports 和可验证 contract。
+- [x] **Remote Linux CI fixture reconciliation**：默认 permissive stub 补齐 `mcpToolsets:true`，同步 exact capability snapshot；focused 6 files / 20 pass、client 1457 pass、root build/typecheck/test 与 strict workflow 通过。

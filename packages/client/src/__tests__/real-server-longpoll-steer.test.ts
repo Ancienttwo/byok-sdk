@@ -85,6 +85,7 @@ describe('S0/H-010: task.steer over a pure long-poll transport (no WebSocket, re
       steer: true,
       resume: true,
       approvalInteractive: true,
+      mcpToolsets: true,
       permissionModes: adapter.descriptor.capabilities.permissionModes,
     });
 
