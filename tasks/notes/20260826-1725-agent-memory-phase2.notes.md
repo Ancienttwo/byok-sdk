@@ -283,6 +283,22 @@
   effective state records review, checks, external acceptance, handoff, and
   current snapshot as stale for the new product subject; no push, fresh review,
   merge, publication, deployment, or migration occurred.
+- Owner approved a test-only fix for the aggregate-only credential-store
+  timeout. The observable pressure point was `scavengeStaleWindowsBridges()`:
+  every simulated win32 operation called `os.tmpdir()` and enumerated the real
+  host temporary root, which contained about 786,630 entries. Even with a
+  zero-I/O command runner, the first win32 case took about 3.2 seconds alone
+  and exceeded its 10-second timeout under full-suite contention. A 500ms
+  focused reproducer failed before the fix.
+- Commit `cd265aa` changes only
+  `packages/client/src/__tests__/device-credential-store.test.ts`. The suite
+  creates one isolated temporary root and projects it through `TMPDIR`, `TMP`,
+  and `TEMP`, so production scavenging, stale-directory removal, and symlink
+  sentinels still execute against a real filesystem without inheriting ambient
+  host volume. The 500ms reproducer now completes in about 3ms, the file passes
+  12/12, and root test/build/typecheck plus strict workflow pass. No production
+  credential code, push, review, merge, publication, deployment, or migration
+  was included.
 
 ## Promotion Filter
 

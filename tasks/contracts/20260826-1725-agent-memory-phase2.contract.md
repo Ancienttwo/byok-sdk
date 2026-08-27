@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-27 09:20
+> **Last Updated**: 2026-08-27 22:56
 > **Review File**: `tasks/reviews/20260826-1725-agent-memory-phase2.review.md`
 > **Notes File**: `tasks/notes/20260826-1725-agent-memory-phase2.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -175,6 +175,7 @@ exit_criteria:
     - path: packages/client/src/__tests__/agent-memory-helper-p1-regressions.test.ts
     - path: packages/client/src/__tests__/agent-memory-replay-outcome-p1-regression.test.ts
     - path: packages/cloud/src/__tests__/agent-memory-cross-task-replay-p1-regression.test.ts
+    - path: packages/client/src/__tests__/device-credential-store.test.ts
     - path: packages/client/src/__tests__/agent-memory-outbox-p1-regression.test.ts
     - path: packages/client/src/__tests__/agent-memory-log-p1-regression.test.ts
     - path: packages/cloud/src/__tests__/agent-memory-erase-epoch-p1-regression.test.ts
