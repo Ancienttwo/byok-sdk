@@ -52,12 +52,12 @@ The aligned dispatch train uses one version. Before 1.0, PATCH is limited to
 corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
-independently versioned. A version bump does not authorize publish. The
-next aligned dispatch candidate is `0.9.0-rc.1`; publish still requires a separate
-release authorization and registry readback. The independent keys candidate is
-`0.3.3-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact
-current dispatch candidate, `0.9.0-rc.1`, proven from an isolated standard npm
-install rather than the workspace graph.
+independently versioned. A version bump does not authorize publish. The current
+aligned dispatch release is `0.9.0`; publication requires separate release
+authorization and registry readback. The current independent keys release is
+`0.3.3`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.9.0`, proven from an isolated standard npm install rather
+than the workspace graph.
 
 ## Local Agent application release authority
 
