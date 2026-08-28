@@ -35,6 +35,10 @@
       "types": "./dist/adapters/index.d.ts",
       "import": "./dist/adapters/index.js"
     },
+    "./agent-memory": {
+      "types": "./dist/agent-memory/index.d.ts",
+      "import": "./dist/agent-memory/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -46,7 +50,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs",
+    "build": "tsup && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",

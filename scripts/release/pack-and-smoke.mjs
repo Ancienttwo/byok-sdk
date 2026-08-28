@@ -406,7 +406,17 @@ try {
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
+        // The embedded-host memory subpath is the one entry whose VALUE is what
+        // it does not carry: an embedded product imports it precisely to avoid
+        // the daemon composition and the WebSocket transport the root entry
+        // pulls in. Proving that from the installed tarball is the only place
+        // the guarantee is real for a downstream consumer.
+        `const agentMemory = await import('@byok-sdk/client/agent-memory');\n` +
+        `assert.equal(typeof agentMemory.AgentMemoryService, 'function');\n` +
+        `assert.equal(typeof agentMemory.serveAgentMemoryMcpOverStdio, 'function');\n` +
+        `assert.equal('connectControlClient' in agentMemory, false);\n` +
+        `assert.equal('createDaemon' in agentMemory, false);\n` +
         `for (const [name, version] of [['byok-sdk','${releaseVersion}'],['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/testkit','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +
