@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Added the `@byok-sdk/client/agent-memory` subpath so a product that embeds the
+  SDK without running the daemon can compose the Agent-memory service directly:
+  `AgentMemoryService`, `captureAgentMemorySnapshot`,
+  `serveAgentMemoryMcpOverStdio`, external-helper admission, the platform gate,
+  and the prompt guidance. Platform semantics are unchanged — native Linux,
+  macOS only with a host-provided signed helper, Windows fail-closed. The entry
+  reaches no transport, daemon composition, or control socket, and exposes no
+  hosted projection; a source module-graph constraint test and a built-bundle
+  check pin both properties.
+
 ## 0.9.0 / @byok-sdk/keys 0.3.3 — 2026-08-28
 
 Agent-initiated message egress and long-term Agent memory.
