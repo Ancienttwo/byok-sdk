@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.9.0-rc.1 / @byok-sdk/keys 0.3.3-rc.1 — 2026-08-28
+## 0.9.0 / @byok-sdk/keys 0.3.3 — 2026-08-28
 
-Agent-initiated message egress and long-term Agent memory release candidate.
+Agent-initiated message egress and long-term Agent memory.
 
 - Added a distinct Agent-authored message lane with content-only runtime tools,
   exact tenant/device/task/Agent/session binding, durable local replay, hosted
@@ -14,10 +14,10 @@ Agent-initiated message egress and long-term Agent memory release candidate.
   admission, and optional one-way redacted hosted projection. Migration `0014`
   adds the bounded projection head, replay sequence, metering receipt, and
   server-side erase authority.
-- Advanced the nine-package aligned dispatch train to `0.9.0-rc.1` and keys to
-  `0.3.3-rc.1` with its exact core prerelease edge. This prerelease is a registry
-  artifact candidate only; it does not authorize deployment, production
-  migration, downstream pinning, secret changes, or live rollout.
+- Published the nine-package aligned dispatch train at `0.9.0` and keys at
+  `0.3.3` with its exact core edge. Registry publication proves artifact
+  identity only; it does not authorize deployment, production migration,
+  downstream pinning, secret changes, or live rollout.
 
 ## 0.8.1 / @byok-sdk/keys 0.3.2 — 2026-08-24
 
