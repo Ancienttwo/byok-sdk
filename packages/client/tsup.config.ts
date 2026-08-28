@@ -8,6 +8,7 @@ export default defineConfig({
   entry: [
     'src/index.ts',
     'src/adapters/index.ts',
+    'src/agent-memory/index.ts',
     'src/adapters/pi/mcp-extension.ts',
     'src/bin/byok-agent.ts',
     'src/bin/byok-approval-mcp.ts',
