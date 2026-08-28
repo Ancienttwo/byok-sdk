@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 / @byok-sdk/keys 0.3.4 — 2026-08-29
+
+Embedded-host Agent-memory composition.
 
 - Added the `@byok-sdk/client/agent-memory` subpath so a product that embeds the
   SDK without running the daemon can compose the Agent-memory service directly:
@@ -11,6 +13,10 @@
   reaches no transport, daemon composition, or control socket, and exposes no
   hosted projection; a source module-graph constraint test and a built-bundle
   check pin both properties.
+- Advanced the nine-package aligned dispatch train to `0.9.1` and keys to
+  `0.3.4` with its exact core `0.9.1` edge. Registry publication proves artifact
+  identity only; it does not authorize deployment, production migration,
+  downstream pinning, secret changes, or live rollout.
 
 ## 0.9.0 / @byok-sdk/keys 0.3.3 — 2026-08-28
 
