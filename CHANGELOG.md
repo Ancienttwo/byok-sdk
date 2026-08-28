@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0-rc.1 / @byok-sdk/keys 0.3.3-rc.1 — 2026-08-28
+
+Agent-initiated message egress and long-term Agent memory release candidate.
+
+- Added a distinct Agent-authored message lane with content-only runtime tools,
+  exact tenant/device/task/Agent/session binding, durable local replay, hosted
+  product-consumer disposition, and required-message completion gating. Message
+  content does not become activity or terminal-result authority.
+- Added SDK-owned `memory.recall` / `memory.save` MCP tools over the canonical
+  Agent-home `MEMORY.md` and `notes/` authority, with revision CAS, atomic
+  mutation, bounded audit/outbox state, secure native/helper filesystem
+  admission, and optional one-way redacted hosted projection. Migration `0014`
+  adds the bounded projection head, replay sequence, metering receipt, and
+  server-side erase authority.
+- Advanced the nine-package aligned dispatch train to `0.9.0-rc.1` and keys to
+  `0.3.3-rc.1` with its exact core prerelease edge. This prerelease is a registry
+  artifact candidate only; it does not authorize deployment, production
+  migration, downstream pinning, secret changes, or live rollout.
+
 ## 0.8.1 / @byok-sdk/keys 0.3.2 — 2026-08-24
 
 Agent-home exact-replay repair and credential-blind enrollment status.
