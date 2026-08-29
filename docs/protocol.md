@@ -1088,7 +1088,12 @@ fails closed. Sending this field is gated by
 under the host-global default. A `messageEgress.mode:'required'` offer with no
 second terminal selection is itself message-only authority and therefore
 bypasses the extractor; an offer can request both lanes only by explicitly
-selecting `result-document`.
+selecting `result-document`. Delivery of that one required message is the
+daemon's obligation, not the model's: when the runtime never publishes
+through the SDK-owned tool, the daemon sends on the message lane exactly the
+prose the task's `summary` carries — every assistant text block of the run
+(`progress` text) concatenated, then trimmed; it never includes tool calls,
+tool results or thinking. An empty trimmed body fails the task.
 
 **A document must be PLAIN JSON DATA — equal to its own JSON round trip.**
 Not merely "a value `JSON.stringify` accepts", which is a much weaker bar
@@ -1335,6 +1340,14 @@ lesser-validated path.
 user-visible Agent message. A strict fresh or resume Agent egress offer may
 declare `messageEgress: {mode:'required', contract, contentType, maxBytes}`;
 presence is capability-gated before task/mailbox allocation.
+
+The daemon, not the model, is responsible for delivering that message: if the
+runtime's turn ends without a publish through the SDK-owned tool, the daemon
+authors the one immutable draft from exactly the prose the task's `summary`
+carries — every assistant text block of the run (`progress` text)
+concatenated, then trimmed, never tool calls, tool results or thinking — and
+sends it on this lane; an empty trimmed body fails the task instead of
+waiting.
 
 The SDK-owned task MCP tool accepts only `body` and optional `contentType`.
 Its local control call carries a daemon-issued, single-task sealed context
