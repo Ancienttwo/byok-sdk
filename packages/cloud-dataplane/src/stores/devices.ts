@@ -8,6 +8,14 @@
  * tenant, so the caller never compares a tenant it was handed against one it
  * guessed. One row, two access paths, never two copies to keep in sync — a
  * stale pre-tenant index would be a revoked device that can still get a token.
+ *
+ * Revocation DELETES. The `revoked` column and {@link DeviceRecord.revoked}
+ * survive because every auth path reads them, but nothing in this module ever
+ * writes `true` any more: `revoke` and machine supersession remove the row and
+ * its device-scoped state, so a revoked device is byte-for-byte a device that
+ * was never registered. `device_active_machine_key` (0015) is still the
+ * invariant — its `NOT revoked` predicate simply never has a false row left to
+ * exclude.
  */
 import {
   type Clock,
@@ -57,6 +65,52 @@ function toRecord(row: DeviceRow): DeviceRecord {
 const SELECT_COLUMNS =
   'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked, machine_id, capabilities';
 
+/**
+ * The device-scoped state a device row is the only reason to keep, deleted
+ * alongside it. Every entry is keyed by `(tenant_id, device_id, …)`, so the
+ * delete addresses the same key space the row itself lived in.
+ *
+ * Deliberately NOT here:
+ *
+ * - `task`, `agent_egress_event`, `proof_request_receipt` — history keyed by a
+ *   device_id STRING, with no foreign key. What a device did stays true after
+ *   the grant that let it is gone.
+ * - `outbox` and `device_stream` — core's mailbox, whose rows carry message
+ *   bodies and are retired through `collectRetired`/tenant erasure. A device
+ *   directory that deleted them would be a second authority over core state,
+ *   and an unbounded body delete on the pairing path is an availability risk.
+ * - `agent_memory_projection_head` / `…_metering_receipt` — keyed by
+ *   `(tenant_id, agent_id)`; `device_id` is provenance, not identity. Erasing
+ *   a head has its OWN protocol (0014's epoch fence), and bypassing it would
+ *   let a stale writer re-enter under a lower epoch.
+ *
+ * Every statement below is index-covered by its table's primary key, except
+ * `device_assertion_replay`, whose PK leads with `tenant_id` and is swept by
+ * expiry — a tenant-prefixed scan over live assertions, so no new index.
+ */
+const DEVICE_STATE_DELETES = [
+  'DELETE FROM device_presence WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+  'DELETE FROM auth_nonce WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+  'DELETE FROM inbound_dedup WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+  'DELETE FROM device_assertion_replay WHERE tenant_id = $1 AND device_id = ANY($2::text[])',
+] as const;
+
+/**
+ * Removes the device-scoped state for ids whose rows have already been deleted
+ * in this transaction. Callers pass the ids `DELETE … RETURNING device_id`
+ * actually removed, so a no-op revoke deletes nothing at all.
+ */
+async function deleteDeviceState(
+  client: PoolClient,
+  tenant: TenantId,
+  deviceIds: readonly string[],
+): Promise<void> {
+  if (deviceIds.length === 0) return;
+  for (const statement of DEVICE_STATE_DELETES) {
+    await client.query(statement, [tenant, [...deviceIds]]);
+  }
+}
+
 /** Best-effort unwind — the original failure is what the caller must see, not a rollback that also failed. */
 async function rollback(client: PoolClient): Promise<void> {
   try {
@@ -78,27 +132,40 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
     // than creating a second row, matching the in-memory reference. `revoked`
     // resets because a fresh pairing IS a new grant.
     //
-    // With a machine identity present this is TWO statements — supersede this
-    // tenant/product's prior active rows for the same machine, then insert —
-    // and they must commit or fail together: a partial apply is either a
-    // machine holding two active rows or a machine holding none. The
-    // supersession runs FIRST because `device_active_machine_key` (0015) is a
-    // partial unique index over the active rows, so inserting before revoking
-    // would collide with the row this call is replacing.
+    // With a machine identity present this is SEVERAL statements — delete this
+    // tenant/product's prior rows for the same machine, delete the state those
+    // rows were the only reason to keep, then insert — and they must commit or
+    // fail together: a partial apply is either a machine holding two rows or a
+    // machine holding none. The supersession runs FIRST because
+    // `device_active_machine_key` (0015) is a partial unique index, so
+    // inserting before deleting would collide with the row this call replaces.
+    //
+    // The predecessor row is REMOVED rather than flagged: a superseded grant
+    // that lingers is a credential every read path has to remember to exclude,
+    // and the history of what that device did lives in the audit tables keyed
+    // by its device_id string, which this deliberately does not touch.
+    //
+    // `device_id <> $4` skips the device being registered: re-pairing the SAME
+    // id is the ON CONFLICT replacement below, not a supersession of itself.
     //
     // Deliberately not one multi-CTE statement: a data-modifying CTE sees the
     // snapshot from the start of the statement, so the INSERT could not
-    // observe the UPDATE's effect and the unique index would reject exactly
+    // observe the DELETE's effect and the unique index would reject exactly
     // the supersession this exists to perform.
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
       if (input.machineId !== undefined) {
-        await client.query(
-          `UPDATE device
-              SET revoked = true
-            WHERE tenant_id = $1 AND product_id = $2 AND machine_id = $3 AND NOT revoked`,
-          [tenant, input.productId, input.machineId],
+        const superseded = await client.query<{ device_id: string }>(
+          `DELETE FROM device
+            WHERE tenant_id = $1 AND product_id = $2 AND machine_id = $3 AND device_id <> $4
+          RETURNING device_id`,
+          [tenant, input.productId, input.machineId, input.deviceId],
+        );
+        await deleteDeviceState(
+          client,
+          tenant,
+          superseded.rows.map((row) => row.device_id),
         );
       }
       const result = await client.query<DeviceRow>(
@@ -147,13 +214,35 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
     return row === undefined ? undefined : toRecord(row);
   }
 
+  /**
+   * Revocation removes the registration and the device-scoped state that only
+   * existed to serve it, in one transaction: a half-applied revoke that left
+   * live presence or an unspent challenge nonce behind would be state for a
+   * device the directory can no longer name.
+   *
+   * A no-op for a device this tenant does not own: revoking what you cannot
+   * address deletes nothing and reports nothing back.
+   */
   async revoke(tenant: TenantId, deviceId: string): Promise<void> {
-    // A no-op for a device this tenant does not own: revoking what you cannot
-    // address changes nothing and reports nothing back.
-    await this.#pool.query('UPDATE device SET revoked = true WHERE tenant_id = $1 AND device_id = $2', [
-      tenant,
-      deviceId,
-    ]);
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const removed = await client.query<{ device_id: string }>(
+        'DELETE FROM device WHERE tenant_id = $1 AND device_id = $2 RETURNING device_id',
+        [tenant, deviceId],
+      );
+      await deleteDeviceState(
+        client,
+        tenant,
+        removed.rows.map((row) => row.device_id),
+      );
+      await client.query('COMMIT');
+    } catch (cause) {
+      await rollback(client);
+      throw cause;
+    } finally {
+      client.release();
+    }
   }
 
   async recordCapabilities(

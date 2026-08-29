@@ -874,10 +874,12 @@ Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint? }
 - `machineId`: OPTIONAL client-hashed machine identity — lowercase hex SHA-256
   of the product id and an OS-provided machine identifier (macOS
   `IOPlatformUUID`, Linux `/etc/machine-id`, Windows `MachineGuid`), never the
-  raw identifier. When a pairing carries it, the server revokes every prior
-  non-revoked device row of the same `(tenantId, productId, machineId)` before
-  registering the new one, so one physical machine holds one active device row
-  per product. It carries no tenant or product of its own — those still come
+  raw identifier. When a pairing carries it, the server DELETES every prior
+  device row of the same `(tenantId, productId, machineId)` before registering
+  the new one, so one physical machine holds one device row per product. The
+  superseded device is gone, not flagged: its next `/byok/challenge` gets the
+  same `401` an id that was never registered gets. It carries no tenant or
+  product of its own — those still come
   only from the redeemed pairing code's claims — and a client that cannot
   resolve one omits the field, in which case no supersession happens at all.
 - `accessToken`: JWT, ~1h lifetime.
@@ -982,17 +984,32 @@ device's next `/byok/challenge`, `/byok/token`, or WSS connect attempt gets a
 fresh device keypair is not required, but re-registering the existing public
 key is the simplest implementation and is an acceptable choice for M1).
 
+**Revocation DELETES the device registration (changed 2026-08-29).** It does
+not mark the row revoked and leave it in place. Afterwards the device id is
+byte-for-byte an id that was never registered: it is absent from the device
+listing and from the tenant readiness projection, it resolves to nothing on
+the pre-tenant `/byok/challenge` and `/byok/token` paths, and the
+device-scoped state it owned — its presence hint, its outstanding challenge
+nonces, its inbound-dedup entries, its assertion-replay entries — is deleted
+in the same transaction. What the device DID is not revocation's business and
+survives untouched: the task, egress, and proof-receipt records keyed by its
+device id are history, not credentials. Nothing observable on the wire
+changes, because `401` was already the answer for both a revoked device and
+an unknown one (§12.6, no existence oracle); what changes is that there is no
+longer a stored row whose `revoked` flag every read path has to remember to
+exclude. The daemon's contract is unchanged: it sees the `401`, surfaces
+`revoked`, and must re-pair.
+
 The revocation surface is tenant-first (S1): the reference server's public
 action is `devices.revoke(tenantId, deviceId)`, and the tenant is part of the
 lookup rather than a check applied afterward — a caller holding one tenant's
 credentials cannot revoke, or even confirm the existence of, another tenant's
-device. Revoking a device that the named tenant does not own is silently
-indistinguishable from revoking one that does not exist at all. Pairing is
-the one other path that revokes: per §6.1, a `POST /byok/pair` carrying
-`machineId` supersedes — that is, revokes — that same machine's prior
-non-revoked rows within the tenant and product the redeemed pairing code
-chose, and the caller still cannot name, or otherwise learn of, the rows it
-revokes.
+device. Revoking a device that the named tenant does not own deletes nothing
+and is silently indistinguishable from revoking one that does not exist at
+all. Pairing is the one other path that revokes: per §6.1, a `POST /byok/pair`
+carrying `machineId` supersedes — that is, deletes — that same machine's prior
+rows within the tenant and product the redeemed pairing code chose, and the
+caller still cannot name, or otherwise learn of, the rows it removes.
 
 ## 7. Blob flows
 

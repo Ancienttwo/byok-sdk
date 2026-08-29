@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+Revocation deletes the device registration.
+
+- **Breaking (stored state, not the wire):** `devices.revoke(tenant, deviceId)`
+  and `machineId` supersession inside `register` now DELETE the device row
+  instead of setting `revoked = true`. Both device directories — the in-memory
+  reference and the Postgres dataplane — leave no row behind, so a revoked
+  device is indistinguishable from one that was never registered on every read
+  path: `get`, `list`, `resolveByDeviceId`, and the tenant readiness projection
+  (whose `revokedDeviceCount` is now structurally `0`).
+- The Postgres directory deletes the device-scoped state the row was the only
+  reason to keep — `device_presence`, `auth_nonce`, `inbound_dedup`,
+  `device_assertion_replay` — in the same transaction as the row. History keyed
+  by the device_id string is deliberately untouched: `task`,
+  `agent_egress_event`, and `proof_request_receipt` are facts about what a
+  device did, not credentials. `outbox`/`device_stream` stay with core's
+  mailbox retention, and `agent_memory_projection_*` stays with 0014's own
+  erase-fence protocol.
+- No new migration and no schema change. The `revoked` column and
+  `DeviceRecord.revoked` remain because every auth path reads them, but nothing
+  writes `true` any more; `device_active_machine_key` (0015) is still the
+  concurrency invariant, with no false row left for its `NOT revoked`
+  predicate to exclude. Every dependent delete is covered by its table's
+  primary key.
+- HTTP behavior is unchanged. `/byok/challenge`, `/byok/token`, bearer routes,
+  device proof, and hosted device-assertion exchange already answered `401` /
+  `undefined` identically for an unknown and a revoked device (§12.6, no
+  existence oracle), and a missing row now takes that same path. Daemons still
+  observe the `401`, surface `revoked`, and re-pair. Documented in
+  `docs/protocol.md` §6.1 and §6.3.
+
 ## 0.10.1 / @byok-sdk/keys 0.3.6 — 2026-08-30
 
 Only the final assistant text run reaches the user.
