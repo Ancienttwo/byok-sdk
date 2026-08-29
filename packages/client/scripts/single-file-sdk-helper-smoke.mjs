@@ -13,7 +13,7 @@ if (artifactsArg >= 0) {
   const manifest = JSON.parse(readFileSync(path.join(artifactsRoot, 'release-manifest.json'), 'utf8'));
   installRoot = mkdtempSync(path.join(os.tmpdir(), 'byok-packed-helper-install-'));
   writeFileSync(path.join(installRoot, 'package.json'), JSON.stringify({ private: true }, null, 2));
-  const tarballs = manifest.packages.map((entry) => path.join(artifactsRoot, entry.tarball));
+  const tarballs = manifest.packages.map((entry) => path.join(artifactsRoot, entry.file));
   const installed = spawnSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs], {
     cwd: installRoot,
     encoding: 'utf8',
