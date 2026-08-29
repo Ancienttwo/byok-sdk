@@ -24,9 +24,11 @@ import { mapPermissionPolicyToClaudeArgs } from './permission-mapping';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
 import { APPROVAL_TOOL_NAME } from '../../bin/approval-mcp-server';
+import { grantFingerprint, resolveMcpToolsetGrants, type McpToolsetGrant } from '../mcp-tool-grants';
+import { APPROVAL_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 
-/** The MCP server NAME this adapter registers `byok-approval-mcp` under in the generated `--mcp-config` (arbitrary, local to this file) — combined with {@link APPROVAL_TOOL_NAME} (imported, single-sourced from `bin/approval-mcp-server.ts` so the two can never independently drift) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. */
-export const APPROVAL_MCP_SERVER_NAME = 'byokapproval';
+/** The MCP server NAME this adapter registers `byok-approval-mcp` under in the generated `--mcp-config` — combined with {@link APPROVAL_TOOL_NAME} (single-sourced from `bin/approval-mcp-server.ts` so the two can never independently drift) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. Defined in `sdk-reserved-mcp.ts` beside the other SDK-owned server names, and re-exported from here, its original home, so the host-config rejection and the toolset-grant rule read one list. */
+export { APPROVAL_MCP_SERVER_NAME };
 
 const execFileAsync = promisify(execFile);
 
@@ -191,7 +193,14 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    const mapping = mapPermissionPolicyToClaudeArgs(input.policy);
+    // Fail closed BEFORE the mapping: a projected toolset server whose tools
+    // were never observed cannot be granted, and an ungranted MCP tool is
+    // auto-denied by claude at call time (see permission-mapping.ts) — a
+    // pre-claim rejection is strictly better than a claimed task that
+    // discovers mid-turn that its only tools are unusable.
+    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
+    if (!toolsetGrants.ok) return { kind: 'reject', reason: `claude adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
+    const mapping = mapPermissionPolicyToClaudeArgs(input.policy, toolsetGrants.grants);
     if (!mapping.ok) return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by claude adapter', retryable: false };
     let modelId: string | undefined;
     try {
@@ -219,7 +228,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping, modelId, bin, approvalMcpBin),
+        start: (startInput) => this.startPrepared(startInput, mapping, modelId, bin, approvalMcpBin, toolsetGrants.grants),
       },
     };
   }
@@ -230,6 +239,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     modelId: string | undefined,
     bin: ResolvedBin,
     approvalMcpBin: ResolvedApprovalMcpBin | undefined,
+    preparedGrants: readonly McpToolsetGrant[],
   ): Promise<Session> {
     if (!initialMapping.ok) throw new RuntimeExecutionFailure({
       phase: 'start',
@@ -243,6 +253,21 @@ export class ClaudeAdapter implements RuntimeAdapter {
         category: 'authority',
         retry: 'non-retryable',
         reason: 'prepared claude operation requires a resolved string instruction',
+      });
+    }
+    // The `--allowedTools` grant baked into `initialMapping.args` was computed
+    // from the ADMISSION input; the resources handed to start() are a
+    // separate object. Comparing the two here keeps a caller from swapping in
+    // different MCP authority (or a different tool observation) after the
+    // grant that names it was already frozen — the same fail-closed
+    // re-check the model selection below gets.
+    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools);
+    if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(preparedGrants)) {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared claude operation received different MCP toolset tool authority than it was admitted with',
       });
     }
     const mapping = { ...initialMapping, args: [...initialMapping.args] };

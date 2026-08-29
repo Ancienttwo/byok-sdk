@@ -151,10 +151,25 @@ if (process.env.FAKE_CLAUDE_PROCESS_TREE_FILE && argv.includes('-p')) {
   });
 }
 
+// Real claude 2.1.251 auto-denies an MCP tool that is not named in
+// --allowedTools, under --permission-mode default AND under acceptEdits
+// (live-confirmed against a one-tool stdio echo server — see
+// adapters/claude/permission-mapping.ts). The grant check below mirrors that
+// exactly, so an adapter regression that stops emitting the grant fails a
+// test here instead of silently passing against a permissive fixture.
+function isMcpToolGranted(serverName, toolName) {
+  const index = argv.indexOf('--allowedTools');
+  if (index === -1 || argv[index + 1] === undefined) return false;
+  return argv[index + 1].split(',').includes(`mcp__${serverName}__${toolName}`);
+}
+
 async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
   const configIndex = argv.indexOf('--mcp-config');
   if (configIndex === -1 || !argv[configIndex + 1]) {
     throw new Error('fake claude was asked to call MCP without --mcp-config');
+  }
+  if (!isMcpToolGranted(serverName, toolName)) {
+    throw new Error(`Claude requested permissions to use mcp__${serverName}__${toolName}, but you haven't granted it yet.`);
   }
   const config = JSON.parse(readFileSync(argv[configIndex + 1], 'utf8'));
   const server = config.mcpServers?.[serverName];
@@ -304,6 +319,9 @@ function runProbeOrTurnFlow() {
     '--resume': true,
     '--permission-mode': true,
     '--tools': true,
+    // The projected-MCP-toolset permission pre-grant — never a built-in
+    // restriction (see adapters/claude/permission-mapping.ts).
+    '--allowedTools': true,
     '--permission-prompt-tool': true,
     '--mcp-config': true,
     '--strict-mcp-config': false,

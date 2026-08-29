@@ -204,7 +204,22 @@ export interface RuntimeAdapterPrepareInput {
   requiredToolsetIds: readonly string[];
   /** Locally resolved MCP authority; available for pure admission validation only. */
   mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+  /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
+  mcpToolsetTools?: McpToolsetToolObservation;
 }
+
+/**
+ * Tool names observed by starting each projected toolset MCP server and
+ * reading its own `tools/list` answer (`daemon/mcp-tools-probe.ts`), keyed by
+ * the projected server name. SDK-reserved servers are never keyed here — they
+ * carry their own fixed, single-tool grants inside the adapters.
+ *
+ * This is the ONLY set of names an adapter may pre-grant to a runtime. Device
+ * toolset configuration carries `command`/`args` only, so a configured value
+ * could never be an authority on what a server exposes; a name absent from
+ * this observation is a name the runtime is never told to allow.
+ */
+export type McpToolsetToolObservation = Readonly<Record<string, readonly string[]>>;
 
 /** A permanent or currently-unavailable pre-claim admission rejection. */
 export interface RuntimeAdapterRejectedOperation {
@@ -261,6 +276,8 @@ export interface RuntimeOperationStartInput {
   readonly env: NodeJS.ProcessEnv;
   /** Local MCP authority resolved from logical wire ids. */
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+  /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
+  readonly mcpToolsetTools?: McpToolsetToolObservation;
   /** Optional, adapter-agnostic out-of-band approval channel. */
   readonly approvalChannel?: ApprovalChannel;
 }

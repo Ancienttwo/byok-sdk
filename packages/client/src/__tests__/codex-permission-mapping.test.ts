@@ -61,6 +61,20 @@ describe('mapPermissionPolicyToCodexArgs', () => {
     });
   });
 
+  // The projected-MCP-toolset grant is composed in codex-adapter.ts's
+  // `codexMcpConfigArgs` (it needs the resolved servers, which this pure
+  // mapping never sees). What matters here is that the grant never leaks into
+  // the POLICY args: the global dials stay exactly as pinned, and per-tool
+  // approval is never expressed as a global relaxation.
+  it.each(['auto', 'readonly'] as const)('mode "%s" emits only the two global policy dials — no mcp_servers/approval-mode keys', (mode) => {
+    const result = mapPermissionPolicyToCodexArgs({ mode });
+    expect(result.args).toHaveLength(4);
+    expect(result.args.some((arg) => arg.includes('mcp_servers.'))).toBe(false);
+    expect(result.args.some((arg) => arg.includes('approval_mode'))).toBe(false);
+    expect(result.args.some((arg) => arg.includes('enabled_tools'))).toBe(false);
+    expect(result.args).toContain('approval_policy=never');
+  });
+
   it('never uses -s/--sandbox or -a/--ask-for-approval — only -c config overrides (the only mechanism confirmed to work identically on both a fresh `codex exec` and `codex exec resume`)', () => {
     for (const mode of ['auto', 'readonly'] as const) {
       const result = mapPermissionPolicyToCodexArgs({ mode });

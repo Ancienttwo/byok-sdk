@@ -56,6 +56,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "smoke:adapters": "node scripts/adapter-task-smoke.mjs",
+    "smoke:claude-toolset-permission": "node scripts/claude-toolset-permission-smoke.mjs",
+    "smoke:codex-toolset-permission": "node scripts/codex-toolset-permission-smoke.mjs",
     "audit:adapter-task-smoke": "node scripts/adapter-task-smoke.mjs",
     "audit:credentials": "node scripts/linux-credential-audit.mjs",
     "clean": "rm -rf dist"

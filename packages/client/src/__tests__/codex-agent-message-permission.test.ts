@@ -50,6 +50,7 @@ describe('Codex reserved Agent-message permission composition', () => {
         },
         productdocs: { command: '/opt/product-docs-mcp' },
       },
+      mcpToolsetTools: { productdocs: ['search_docs'] },
     };
     const task: TaskOfferPayload = { instruction: 'publish one message', policy: { mode: 'auto' } };
     const session = await startPreparedOperation(adapter, task, resources);
@@ -60,8 +61,13 @@ describe('Codex reserved Agent-message permission composition', () => {
     expect(argv).toContain('approval_policy=never');
     expect(argv).toContain('mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]');
     expect(argv).toContain('mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"');
-    expect(argv.some((arg) => arg.includes('productdocs') && arg.includes('approval_mode'))).toBe(false);
-    expect(argv.some((arg) => arg.includes('productdocs') && arg.includes('enabled_tools'))).toBe(false);
+    // The reserved grant stays exactly one tool: a second server on the same
+    // invocation gets its OWN observed tools and never widens the reserved
+    // helper's allowlist (nor the global approval policy above).
+    expect(argv).toContain('mcp_servers.productdocs.enabled_tools=["search_docs"]');
+    expect(argv).toContain('mcp_servers.productdocs.tools.search_docs.approval_mode="approve"');
+    expect(argv.some((arg) => arg.startsWith('mcp_servers.byokagentmessage.tools.') && !arg.startsWith('mcp_servers.byokagentmessage.tools.send_agent_message.'))).toBe(false);
+    expect(argv.some((arg) => arg.startsWith('mcp_servers.productdocs.tools.') && !arg.startsWith('mcp_servers.productdocs.tools.search_docs.'))).toBe(false);
   });
 
   it('rejects before runtime spawn when the installed Codex lacks the native per-tool approval contract', async () => {

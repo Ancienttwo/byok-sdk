@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Projected MCP toolset tools are now callable, not just listable.
+
+- A task carrying `requiredToolsets` now has each projected MCP server started
+  and asked for its own `tools/list` before adapter admission; those observed
+  names are the only tools an adapter may pre-grant. Claude receives
+  `--allowedTools mcp__<server>__<tool>` under `readonly` and `auto` with
+  `--tools` unchanged (so `readonly` with `allowTools: []` still disables every
+  built-in), and Codex receives `enabled_tools` plus per-tool
+  `approval_mode="approve"` with `approval_policy=never` and `sandbox_mode`
+  untouched. `confirm` and `plan` deliberately never pre-grant, no wildcard or
+  unobserved name is ever granted, Codex older than 0.149 is rejected before
+  spawn, and a projected server that cannot be observed is declined pre-claim
+  and retryably. Previously such a toolset was visible to the model and refused
+  by each runtime's own approval layer at call time.
 ## 0.10.2 / @byok-sdk/keys 0.3.7 — 2026-08-30
 
 Revocation deletes the device registration.

@@ -25,6 +25,7 @@ import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
 import { isRoutineCodexEvent, mapCodexEventToAgentEvents, unmappedFrameKey } from './events';
 import { CodexProcessRunner, type CodexRawEvent, type SpawnFn } from './process-runner';
 import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_MESSAGE_TOOL_NAME } from '../../sdk-reserved-mcp';
+import { grantFingerprint, resolveMcpToolsetGrants, type McpToolsetGrant } from '../mcp-tool-grants';
 
 const execFileAsync = promisify(execFile);
 
@@ -161,13 +162,28 @@ export class CodexAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
     }
-    if (Object.prototype.hasOwnProperty.call(input.mcpServers ?? {}, AGENT_MESSAGE_MCP_SERVER_NAME)) {
+    // Every MCP server this task projects needs the same 0.149 per-tool
+    // approval contract — the reserved message helper for its one protocol
+    // tool, a host toolset server for exactly the tools the daemon observed
+    // on it. One version gate, then one read-back per server.
+    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
+    if (!toolsetGrants.ok) {
+      return { kind: 'reject', reason: `codex adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
+    }
+    const reservedMessageServer = input.mcpServers?.[AGENT_MESSAGE_MCP_SERVER_NAME];
+    if (reservedMessageServer !== undefined || toolsetGrants.grants.length > 0) {
       try {
-        await probeCodexReservedAgentMessageApproval(command, input.mcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!);
+        await requireCodexPerToolApprovalSupport(command);
+        if (reservedMessageServer !== undefined) {
+          await probeCodexMcpToolApproval(command, AGENT_MESSAGE_MCP_SERVER_NAME, reservedMessageServer, [AGENT_MESSAGE_TOOL_NAME]);
+        }
+        for (const grant of toolsetGrants.grants) {
+          await probeCodexMcpToolApproval(command, grant.server, input.mcpServers![grant.server]!, grant.tools);
+        }
       } catch (error) {
         return {
           kind: 'reject',
-          reason: `codex reserved Agent-message approval preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+          reason: `codex MCP tool approval preflight failed: ${error instanceof Error ? error.message : String(error)}`,
           retryable: false,
         };
       }
@@ -175,7 +191,7 @@ export class CodexAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command),
+        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command, toolsetGrants.grants),
       },
     };
   }
@@ -185,7 +201,20 @@ export class CodexAdapter implements RuntimeAdapter {
     policyArgs: readonly string[],
     modelId: string | undefined,
     command: string,
+    preparedGrants: readonly McpToolsetGrant[],
   ): Promise<Session> {
+    // Same fail-closed re-check the model selection below gets: the grants
+    // were probed against the ADMISSION input, so start() may not arrive with
+    // different MCP authority or a different tool observation.
+    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools);
+    if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(preparedGrants)) {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared codex operation received different MCP toolset tool authority than it was admitted with',
+      });
+    }
     if (typeof startInput.instruction !== 'string') {
       throw new RuntimeExecutionFailure({
         phase: 'start',
@@ -249,7 +278,7 @@ export class CodexAdapter implements RuntimeAdapter {
       resumeRef: startInput.manifest.sessionRef,
       instruction: startInput.instruction,
       modelId: manifestModelId,
-      policyArgs: [...policyArgs, ...codexMcpConfigArgs(startInput.mcpServers)],
+      policyArgs: [...policyArgs, ...codexMcpConfigArgs(startInput.mcpServers, preparedGrants)],
       cwd: manifestCwd,
       env: runtimeEnv,
       spawnFn: this.options.spawnFn,
@@ -282,10 +311,24 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 }
 
-async function probeCodexReservedAgentMessageApproval(
-  command: string,
-  server: NonNullable<RuntimeAdapterPrepareInput['mcpServers']>[string],
-): Promise<void> {
+/**
+ * `approval_policy=never` (pinned on every invocation, see
+ * `permission-mapping.ts`) makes codex refuse EVERY MCP tool call outright —
+ * "MCP tool call requires approval, but approval policy is never" — no matter
+ * which sandbox mode is in effect. Codex 0.149's per-tool
+ * `mcp_servers.<name>.tools.<tool>.approval_mode="approve"`, paired with an
+ * exact `enabled_tools` allowlist, is the one narrow control that lifts that
+ * refusal for named tools while leaving the global policy alone
+ * (`mcp_servers.<name>.default_tools_approval_mode="auto"` is read back by
+ * `codex mcp get` but was empirically ineffective under
+ * `approval_policy=never`, so it is never used).
+ *
+ * Both the version gate and the read-back below apply identically to the
+ * SDK-reserved message server and to a projected host toolset server; the
+ * only difference is which tool names go in, and those come from the
+ * daemon's own `tools/list` observation for a toolset server.
+ */
+async function requireCodexPerToolApprovalSupport(command: string): Promise<void> {
   const versionResult = await execFileAsync(command, ['--version'], { timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS });
   const versionText = `${versionResult.stdout}\n${versionResult.stderr}`.trim();
   const versionMatch = /codex-cli\s+(\d+)\.(\d+)\.(\d+)/u.exec(versionText);
@@ -297,27 +340,49 @@ async function probeCodexReservedAgentMessageApproval(
       throw new Error(`Codex ${version.slice(0, 3).join('.')} lacks the required per-MCP-tool approval contract`);
     }
   }
+}
+
+/** Prove this codex reads back the exact per-tool allowlist this adapter is about to pass for one server. */
+async function probeCodexMcpToolApproval(
+  command: string,
+  name: string,
+  server: NonNullable<RuntimeAdapterPrepareInput['mcpServers']>[string],
+  tools: readonly string[],
+): Promise<void> {
   const probeArgs = [
-    'mcp', 'get', AGENT_MESSAGE_MCP_SERVER_NAME, '--json',
-    '-c', `mcp_servers.${AGENT_MESSAGE_MCP_SERVER_NAME}.command=${JSON.stringify(server.command)}`,
-    '-c', `mcp_servers.${AGENT_MESSAGE_MCP_SERVER_NAME}.enabled_tools=${JSON.stringify([AGENT_MESSAGE_TOOL_NAME])}`,
-    '-c', `mcp_servers.${AGENT_MESSAGE_MCP_SERVER_NAME}.tools.${AGENT_MESSAGE_TOOL_NAME}.approval_mode="approve"`,
+    'mcp', 'get', name, '--json',
+    '-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`,
+    ...codexMcpToolApprovalArgs(name, tools),
   ];
   const result = await execFileAsync(command, probeArgs, { timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS });
   const parsed = JSON.parse(result.stdout) as { name?: unknown; enabled?: unknown; enabled_tools?: unknown };
+  const readBack = Array.isArray(parsed.enabled_tools) ? parsed.enabled_tools : undefined;
   if (
-    parsed.name !== AGENT_MESSAGE_MCP_SERVER_NAME
+    parsed.name !== name
     || parsed.enabled !== true
-    || !Array.isArray(parsed.enabled_tools)
-    || parsed.enabled_tools.length !== 1
-    || parsed.enabled_tools[0] !== AGENT_MESSAGE_TOOL_NAME
+    || readBack === undefined
+    || readBack.length !== tools.length
+    || readBack.some((tool, index) => tool !== tools[index])
   ) {
-    throw new Error('Codex did not read back the exact reserved Agent-message tool allowlist');
+    throw new Error(`Codex did not read back the exact tool allowlist for MCP server "${name}"`);
   }
 }
 
-function codexMcpConfigArgs(servers: RuntimeOperationStartInput['mcpServers']): string[] {
+/** The one-server grant pair: an exact tool allowlist, and per-tool approval for exactly those tools. */
+function codexMcpToolApprovalArgs(name: string, tools: readonly string[]): string[] {
+  const args = ['-c', `mcp_servers.${name}.enabled_tools=${JSON.stringify([...tools])}`];
+  for (const tool of tools) {
+    args.push('-c', `mcp_servers.${name}.tools.${tool}.approval_mode="approve"`);
+  }
+  return args;
+}
+
+function codexMcpConfigArgs(
+  servers: RuntimeOperationStartInput['mcpServers'],
+  toolsetGrants: readonly McpToolsetGrant[] = [],
+): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
+  const grantedTools = new Map(toolsetGrants.map((grant) => [grant.server, grant.tools] as const));
   const args = ['--ignore-user-config'];
   for (const [name, server] of Object.entries(servers).sort(([left], [right]) => left.localeCompare(right))) {
     args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`);
@@ -326,9 +391,10 @@ function codexMcpConfigArgs(servers: RuntimeOperationStartInput['mcpServers']): 
       args.push('-c', `mcp_servers.${name}.env.${key}=${JSON.stringify(value)}`);
     }
     if (name === AGENT_MESSAGE_MCP_SERVER_NAME) {
-      args.push('-c', `mcp_servers.${name}.enabled_tools=${JSON.stringify([AGENT_MESSAGE_TOOL_NAME])}`);
-      args.push('-c', `mcp_servers.${name}.tools.${AGENT_MESSAGE_TOOL_NAME}.approval_mode="approve"`);
+      args.push(...codexMcpToolApprovalArgs(name, [AGENT_MESSAGE_TOOL_NAME]));
     }
+    const observed = grantedTools.get(name);
+    if (observed !== undefined) args.push(...codexMcpToolApprovalArgs(name, observed));
   }
   return args;
 }

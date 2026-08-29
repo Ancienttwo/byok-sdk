@@ -150,7 +150,12 @@ if (argv[0] === 'login' && argv[1] === 'status') {
   process.exit(0);
 }
 
-if (argv[0] === 'mcp' && argv[1] === 'get' && argv[2] === 'byokagentmessage' && argv[3] === '--json') {
+// `codex mcp get <server> --json` policy read-back. Real codex 0.149 answers
+// for whatever server the -c overrides define, so this accepts any name: the
+// SDK-reserved message helper and a projected host toolset server take the
+// identical path, differing only in which tool names the adapter passes.
+if (argv[0] === 'mcp' && argv[1] === 'get' && argv[3] === '--json') {
+  const serverName = argv[2];
   const overrides = [];
   for (let index = 4; index < argv.length; index += 1) {
     if (argv[index] !== '-c' || argv[index + 1] === undefined) {
@@ -160,13 +165,27 @@ if (argv[0] === 'mcp' && argv[1] === 'get' && argv[2] === 'byokagentmessage' && 
     overrides.push(argv[index + 1]);
     index += 1;
   }
-  const enabled = 'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]';
-  const approval = 'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"';
-  if (!overrides.includes(enabled) || !overrides.includes(approval)) {
-    process.stderr.write('fake-codex: reserved message policy is incomplete\n');
+  const enabledPrefix = `mcp_servers.${serverName}.enabled_tools=`;
+  const enabled = overrides.find((override) => override.startsWith(enabledPrefix));
+  let tools;
+  try {
+    tools = enabled === undefined ? undefined : JSON.parse(enabled.slice(enabledPrefix.length));
+  } catch {
+    tools = undefined;
+  }
+  if (!Array.isArray(tools) || tools.length === 0) {
+    process.stderr.write(`fake-codex: no enabled_tools allowlist for ${serverName}\n`);
     process.exit(2);
   }
-  process.stdout.write(`${JSON.stringify({ name: 'byokagentmessage', enabled: true, enabled_tools: ['send_agent_message'] })}\n`);
+  // Every allowlisted tool must ALSO carry its own approval_mode: the
+  // allowlist alone leaves the call refused under approval_policy=never.
+  for (const tool of tools) {
+    if (!overrides.includes(`mcp_servers.${serverName}.tools.${tool}.approval_mode="approve"`)) {
+      process.stderr.write(`fake-codex: ${serverName} tool policy is incomplete for ${tool}\n`);
+      process.exit(2);
+    }
+  }
+  process.stdout.write(`${JSON.stringify({ name: serverName, enabled: true, enabled_tools: tools })}\n`);
   process.exit(0);
 }
 

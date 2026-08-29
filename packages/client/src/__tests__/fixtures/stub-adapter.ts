@@ -186,6 +186,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       policy: TaskOfferPayload['policy'];
       env: NodeJS.ProcessEnv;
       mcpServers?: RuntimeOperationStartInput['mcpServers'];
+      mcpToolsetTools?: RuntimeOperationStartInput['mcpToolsetTools'];
       gitWorkspace?: { workspaceId: string; baseline?: string };
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
     };
@@ -262,6 +263,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
         policy: startInput.manifest.policy,
         env: startInput.env,
         ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
+        ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
         ...(startInput.manifest.workspace.workspaceId === undefined
           ? {}
           : { gitWorkspace: { workspaceId: startInput.manifest.workspace.workspaceId, baseline: startInput.manifest.workspace.baseline } }),

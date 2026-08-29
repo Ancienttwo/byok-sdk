@@ -40,13 +40,23 @@ async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
+/**
+ * Stand in for the real `tools/list` handshake against a projected server.
+ * These cases pin projection/freezing semantics with fixture command paths
+ * that never exist on disk, so the observation is injected rather than
+ * spawned — `salesko-mcp-e2e.test.ts` covers the real handshake end to end.
+ */
+const stubToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = async () => ['find_leads'];
+
 async function makeRunner(
   adapter: StubRuntimeAdapter,
   sent: Envelope[],
   mcpToolsets?: ReadonlyMap<string, McpToolsetConfig>,
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>,
+  mcpToolsetToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = stubToolsProbe,
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = {
+    mcpToolsetToolsProbe,
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-mcp-toolsets-workspace-'),
     deviceId: 'device-1',
@@ -98,6 +108,9 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({
       salesko: { command: '/opt/salesko/bin/mcp', args: ['--stdio'] },
     });
+    // The observed tool names travel beside the server definition; they are
+    // the only names an adapter may pre-grant to a runtime.
+    expect(adapter.startCalls[0]?.ctx.mcpToolsetTools).toEqual({ salesko: ['find_leads'] });
     expect('requiredToolsets' in (adapter.startCalls[0]?.task ?? {})).toBe(false);
     expect(JSON.stringify(sent)).not.toContain('/opt/salesko/bin/mcp');
 
@@ -178,6 +191,35 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     expect(adapter.startCalls).toHaveLength(0);
   });
 
+  it('declines pre-claim, retryably, when a projected toolset server cannot be observed', async () => {
+    for (const probe of [
+      async () => { throw new Error('server exited before handshake'); },
+      async () => [],
+    ] satisfies Array<NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']>>) {
+      const adapter = new StubRuntimeAdapter('claude', { present: true }, MCP_CAPABLE);
+      const sent: Envelope[] = [];
+      const runner = await makeRunner(
+        adapter,
+        sent,
+        new Map([['salesko', { mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } } }]]),
+        undefined,
+        probe,
+      );
+      await runner.handleEnvelope(
+        createEnvelope(
+          'task.offer_with_toolsets',
+          { instruction: 'x', policy: { mode: 'auto' }, runtime: 'claude', requiredToolsets: ['salesko'] },
+          { taskId: 'task-unobservable', seq: 1 },
+        ),
+      );
+      const decline = sent.find((envelope) => envelope.type === 'task.decline');
+      expect(decline?.payload).toMatchObject({ retryable: true });
+      expect(JSON.stringify(decline)).toMatch(/could not be observed/);
+      expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
+      expect(adapter.startCalls).toHaveLength(0);
+    }
+  });
+
   it('freezes the resolved projection per offer while later offers read a reloaded snapshot', async () => {
     const registry = new McpToolsetRegistry({
       salesko: { mcpServers: { salesko: { command: '/opt/salesko/mcp-v1' } } },
@@ -208,6 +250,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 
     expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/mcp-v1' } });
     expect(adapter.startCalls[1]?.ctx.mcpServers).toEqual({ salesko: { command: '/opt/salesko/mcp-v2' } });
+    expect(adapter.startCalls[1]?.ctx.mcpToolsetTools).toEqual({ salesko: ['find_leads'] });
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-before-reload', seq: 3 }));
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-after-reload', seq: 4 }));

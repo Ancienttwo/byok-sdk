@@ -134,4 +134,65 @@ describe('mapPermissionPolicyToClaudeArgs', () => {
     const result = mapPermissionPolicyToClaudeArgs({ mode: 'plan', allowTools: ['Read'] });
     expect(result).toEqual({ ok: true, args: ['--permission-mode', 'plan', '--tools', 'Read'] });
   });
+
+  // Projected MCP toolset grant. Live-confirmed against claude 2.1.251: an
+  // `mcp__<server>__<tool>` call is auto-denied under BOTH `default` and
+  // `acceptEdits` unless the identifier is in --allowedTools, and adding it
+  // leaves `--tools ""` (no built-ins) intact. See the module doc comment.
+  const ECHO_GRANT = [{ server: 'saleskoprobe', tools: ['echo'] }];
+
+  it('readonly + allowTools:[] grants exactly the observed toolset tools while --tools stays empty', () => {
+    const result = mapPermissionPolicyToClaudeArgs({ mode: 'readonly', allowTools: [] }, ECHO_GRANT);
+    expect(result).toEqual({
+      ok: true,
+      args: ['--permission-mode', 'default', '--tools', '', '--allowedTools', 'mcp__saleskoprobe__echo'],
+    });
+  });
+
+  it('readonly with no projected toolset grants nothing at all (no --allowedTools flag)', () => {
+    expect(mapPermissionPolicyToClaudeArgs({ mode: 'readonly', allowTools: [] }, [])).toEqual({
+      ok: true,
+      args: ['--permission-mode', 'default', '--tools', ''],
+    });
+    expect(mapPermissionPolicyToClaudeArgs({ mode: 'readonly', allowTools: [] })).toEqual({
+      ok: true,
+      args: ['--permission-mode', 'default', '--tools', ''],
+    });
+  });
+
+  it('grants every observed tool of every projected server, deterministically ordered, and nothing else', () => {
+    const result = mapPermissionPolicyToClaudeArgs({ mode: 'readonly', allowTools: [] }, [
+      { server: 'mail', tools: ['send', 'list'] },
+      { server: 'crm', tools: ['find_leads'] },
+    ]);
+    expect(result.args[result.args.indexOf('--allowedTools') + 1]).toBe(
+      'mcp__crm__find_leads,mcp__mail__list,mcp__mail__send',
+    );
+    // Never a server-scoped wildcard: that form was never verified and would
+    // silently grant tools the server adds later.
+    expect(result.args).not.toContain('mcp__crm');
+    expect(result.args).not.toContain('mcp__mail');
+  });
+
+  it('auto takes the same grant (acceptEdits does NOT imply MCP permission — live-confirmed)', () => {
+    expect(mapPermissionPolicyToClaudeArgs({ mode: 'auto' }, ECHO_GRANT)).toEqual({
+      ok: true,
+      args: ['--permission-mode', 'acceptEdits', '--allowedTools', 'mcp__saleskoprobe__echo'],
+    });
+  });
+
+  it('confirm never pre-grants a projected toolset tool — the approval channel must see every call', () => {
+    expect(mapPermissionPolicyToClaudeArgs({ mode: 'confirm' }, ECHO_GRANT)).toEqual({
+      ok: true,
+      args: ['--permission-mode', 'default'],
+      needsApprovalMcp: true,
+    });
+  });
+
+  it('plan never pre-grants a projected toolset tool — an opaque MCP tool may mutate, which plan mode promises not to do', () => {
+    expect(mapPermissionPolicyToClaudeArgs({ mode: 'plan' }, ECHO_GRANT)).toEqual({
+      ok: true,
+      args: ['--permission-mode', 'plan'],
+    });
+  });
 });

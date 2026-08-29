@@ -89,9 +89,29 @@ createDaemon({
 ```
 
 The map accepts only `command` and `args`; put OAuth tokens, cookies, and other
-secrets behind the local MCP process's own credential broker. Toolset offers
-for Pi or Codex are declined because those adapters do not yet expose a strict
-task-scoped MCP configuration boundary.
+secrets behind the local MCP process's own credential broker.
+
+A projected toolset must also be *callable*, and neither runtime grants an MCP
+tool implicitly: Claude auto-denies an ungranted `mcp__<server>__<tool>` call
+under `--permission-mode default` and under `acceptEdits`, and Codex refuses
+every MCP tool call under its pinned `approval_policy=never`. So before an
+adapter is asked to admit a toolset offer, the daemon starts each projected
+server and reads that server's own `tools/list` answer. Those observed names —
+never a configured value, never a wildcard — are what each adapter grants:
+
+- Claude: `--allowedTools mcp__<server>__<tool>,…` under `readonly` and
+  `auto`, alongside the unchanged `--tools` (so `readonly` with
+  `allowTools: []` still runs with every built-in disabled). `confirm` and
+  `plan` never pre-grant: `confirm`'s approval channel must see each call, and
+  `plan` promises not to execute one.
+- Codex: `mcp_servers.<server>.enabled_tools` plus
+  `mcp_servers.<server>.tools.<tool>.approval_mode="approve"` for exactly
+  those tools. Global `approval_policy=never` and the mode's `sandbox_mode`
+  stay untouched, and Codex older than 0.149 is rejected before spawn.
+
+A projected server that cannot start, or that lists no tools, is declined
+pre-claim and retryably, rather than claimed and handed a toolset the model can
+list but never call.
 
 The daemon derives one sorted `configuredToolsets` snapshot from this
 validated registry. Only those logical IDs are advertised in `conn.hello`

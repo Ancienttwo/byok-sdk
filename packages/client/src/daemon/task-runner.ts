@@ -76,6 +76,7 @@ import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } f
 import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
 import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
+import { probeMcpServerTools, type McpToolsProbeOptions } from './mcp-tools-probe';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { prependAgentMemoryGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
@@ -484,6 +485,18 @@ export interface TaskRunnerDeps {
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
   /** Production pre-runtime executability/handshake gate for the exact message helper config. */
   agentMessageMcpPreflight?: (server: Readonly<McpStdioServerConfig>) => Promise<void>;
+  /**
+   * Override the `tools/list` observation of a projected toolset MCP server.
+   * Defaults to the real handshake (`mcp-tools-probe.ts`); tests substitute a
+   * stub. It is deliberately NOT optional-with-no-default the way
+   * `agentMessageMcpPreflight` is: an adapter may only grant tool names that
+   * were observed, so a runner with no observation at all would silently
+   * project toolsets the model can list and never call.
+   */
+  mcpToolsetToolsProbe?: (
+    server: Readonly<McpStdioServerConfig>,
+    options: McpToolsProbeOptions,
+  ) => Promise<readonly string[]>;
   /** SDK-owned MCP helper injected only into strict Agent tasks. */
   agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
@@ -1650,6 +1663,28 @@ export class TaskRunner {
           return;
         }
       }
+      // Observe each projected toolset server's OWN tool list before the
+      // adapter is asked to admit the task. Both bundled runtimes refuse an
+      // MCP tool they were not told to allow, and the only honest source for
+      // those names is the server itself — device toolset configuration
+      // carries `command`/`args` and nothing more. Retryable: a server that
+      // cannot start or list right now may well start later, exactly like the
+      // workspace-busy declines above.
+      let mcpToolsetTools: Record<string, readonly string[]> | undefined;
+      if (resolvedMcp?.ok) {
+        mcpToolsetTools = {};
+        for (const [serverName, server] of Object.entries(resolvedMcp.servers)) {
+          try {
+            const tools = await (this.deps.mcpToolsetToolsProbe ?? probeMcpServerTools)(server, { label: `MCP toolset server "${serverName}"` });
+            if (tools.length === 0) throw new Error('tools/list reported no tools');
+            mcpToolsetTools[serverName] = Object.freeze([...tools]);
+          } catch (error) {
+            decline(`required MCP toolset server "${serverName}" could not be observed: ${errorMessage(error)}`, true);
+            return;
+          }
+        }
+        mcpToolsetTools = Object.freeze(mcpToolsetTools);
+      }
       let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
       try {
         prepared = await pick.adapter.prepare({
@@ -1658,6 +1693,7 @@ export class TaskRunner {
           descriptor: pick.descriptor,
           requiredToolsetIds: requiredToolsets ?? [],
           ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
+          ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
         });
       } catch (error) {
         decline(`runtime preparation failed: ${errorMessage(error)}`, true);
@@ -1930,6 +1966,7 @@ export class TaskRunner {
           : prependAgentMemoryGuidance(resolvedInstruction),
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
+        ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,
