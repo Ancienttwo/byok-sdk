@@ -43,6 +43,7 @@ export interface TenantReadinessDevice {
   readonly deviceId: string;
   readonly productId: string;
   readonly deviceName: string;
+  /** Retained but invariant: revocation deletes the row, so this is never `true`. */
   readonly revoked: boolean;
   /** Omitted when absent/expired or when the durable device is revoked. */
   readonly presence?: TenantReadinessPresence;
@@ -52,6 +53,7 @@ export interface TenantReadinessDevice {
 export interface TenantReadiness {
   readonly tenantId: TenantId;
   readonly activePairedDeviceCount: number;
+  /** Retained but invariant: always 0, since a revoked device leaves no row to count. */
   readonly revokedDeviceCount: number;
   readonly observedPresenceCount: number;
   readonly observedPresenceByLevel: Readonly<Record<PresenceLevel, number>>;

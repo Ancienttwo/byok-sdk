@@ -115,6 +115,16 @@ export interface DeviceDirectory {
    * history keyed by the device_id string. A no-op for a device this tenant
    * cannot address. Afterwards every read answers exactly as it does for a
    * device that was never registered.
+   *
+   * How far the deletion physically reaches is driver-scoped. The durable
+   * (Postgres) driver deletes the registration and every dependent
+   * device-scoped row in the same transaction, so the state is gone the moment
+   * `revoke` resolves. The in-memory reference directory deletes only the
+   * registration: its sibling stores are separate maps it does not own, so a
+   * presence hint expires on its own `expiresAt` TTL and, until then, is
+   * excluded from every projection by the readiness active-device filter
+   * (`activeDeviceIds`, built from the surviving rows). The observable contract
+   * above holds either way — no read path can see a revoked device.
    */
   revoke(tenant: TenantId, deviceId: string): Promise<void>;
   list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
