@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.2 / @byok-sdk/keys 0.3.7 — 2026-08-30
 
 Revocation deletes the device registration.
 
@@ -31,6 +31,11 @@ Revocation deletes the device registration.
   existence oracle), and a missing row now takes that same path. Daemons still
   observe the `401`, surface `revoked`, and re-pair. Documented in
   `docs/protocol.md` §6.1 and §6.3.
+- `@byok-sdk/server`: the standalone reference server's `DeviceRegistry` is
+  aligned with the same rule — `revoke` removes the record, its challenge
+  nonces, and the hub's per-device presence, outbox, and dedup state, and
+  closes any live socket, so the bundled server and the cloud directories
+  answer identically.
 
 ## 0.10.1 / @byok-sdk/keys 0.3.6 — 2026-08-30
 

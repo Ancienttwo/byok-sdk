@@ -53,10 +53,10 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.10.1`; publication requires separate release
+aligned dispatch release is `0.10.2`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.3.6`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.10.1`, proven from an isolated standard npm install rather
+`0.3.7`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.10.2`, proven from an isolated standard npm install rather
 than the workspace graph.
 
 ## Local Agent application release authority
