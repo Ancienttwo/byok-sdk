@@ -1104,10 +1104,16 @@ second terminal selection is itself message-only authority and therefore
 bypasses the extractor; an offer can request both lanes only by explicitly
 selecting `result-document`. Delivery of that one required message is the
 daemon's obligation, not the model's: when the runtime never publishes
-through the SDK-owned tool, the daemon sends on the message lane exactly the
-prose the task's `summary` carries — every assistant text block of the run
-(`progress` text) concatenated, then trimmed; it never includes tool calls,
-tool results or thinking. An empty trimmed body fails the task.
+through the SDK-owned tool, the daemon sends on the message lane the
+assistant text after the last tool interaction (falling back to the whole
+run's text) — the `progress` text emitted after the last `tool_use`,
+`tool_result` or `needs_approval` event, concatenated and trimmed, so
+intermediate narration about work still to be done never reaches the user;
+when that run is empty (the turn ends on a tool call with no closing text)
+the whole run's concatenated text — the same prose `summary` carries — is
+sent instead. It never includes tool calls, tool results or thinking, and
+`summary` itself remains the whole run either way. An empty trimmed body
+fails the task.
 
 **A document must be PLAIN JSON DATA — equal to its own JSON round trip.**
 Not merely "a value `JSON.stringify` accepts", which is a much weaker bar
@@ -1357,11 +1363,14 @@ presence is capability-gated before task/mailbox allocation.
 
 The daemon, not the model, is responsible for delivering that message: if the
 runtime's turn ends without a publish through the SDK-owned tool, the daemon
-authors the one immutable draft from exactly the prose the task's `summary`
-carries — every assistant text block of the run (`progress` text)
-concatenated, then trimmed, never tool calls, tool results or thinking — and
-sends it on this lane; an empty trimmed body fails the task instead of
-waiting.
+authors the one immutable draft from the assistant text after the last tool
+interaction (falling back to the whole run's text) — the `progress` text
+emitted after the last `tool_use`, `tool_result` or `needs_approval` event,
+concatenated and trimmed, or, when that run is empty, the whole run's text
+(the prose the task's `summary` carries), never tool calls, tool results or
+thinking — and sends it on this lane; an empty trimmed body fails the task
+instead of waiting. `summary` is unaffected: it always carries the whole
+run.
 
 The SDK-owned task MCP tool accepts only `body` and optional `contentType`.
 Its local control call carries a daemon-issued, single-task sealed context

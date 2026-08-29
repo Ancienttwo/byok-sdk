@@ -519,6 +519,23 @@ interface ActiveTask {
   batcher: ProgressBatcher;
   summaryParts: string[];
   /**
+   * The FINAL text run only: every `progress` text emitted after the last
+   * tool interaction (`tool_use` / `tool_result` / `needs_approval`), which
+   * reset it. `summaryParts` above stays the whole run's concatenation and
+   * remains what `task.complete.summary` carries; this narrower slice is
+   * what the DAEMON-authored required Agent message publishes, so the
+   * user-visible reply is the model's closing answer rather than its
+   * intermediate narration ("let me read X first…") glued in front of it.
+   *
+   * `turn_end` deliberately does not reset (it is what reads this), and
+   * neither does `usage`: bundled adapters emit terminal usage IMMEDIATELY
+   * BEFORE `turn_end` (see `claude/events.ts` — "Ordering is load-bearing"),
+   * so resetting on it would discard every closing reply. `artifact` does
+   * not reset either — it is a content side effect, not a tool interaction
+   * the model narrates around.
+   */
+  finalTextParts: string[];
+  /**
    * M4 Phase 3: the `ApprovalRegistry` id of the single out-of-band approval
    * currently DISPATCHED (registered + `task.await_approval` sent) for this
    * task, if any — set by `requestApproval`/`dispatchApproval`, cleared once
@@ -1967,6 +1984,7 @@ export class TaskRunner {
         gitLease,
         gitBaseline,
         summaryParts: [],
+        finalTextParts: [],
         batcher: new ProgressBatcher(
           (seq, events) => {
             const projected = active.egressEnabled
@@ -2384,6 +2402,14 @@ export class TaskRunner {
           active.lastUsage = event;
         }
 
+        if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
+          // A tool interaction ends the current text run: whatever the model
+          // said before it was narration about what it was ABOUT to do, not
+          // its answer. See `ActiveTask.finalTextParts` for why `usage`,
+          // `artifact` and `turn_end` deliberately do not reset here.
+          active.finalTextParts.length = 0;
+        }
+
         if (event.type === 'needs_approval') {
           active.batcher.flush();
           // Acceptance finding 1 (dormant branch bypassing the approval
@@ -2494,8 +2520,11 @@ export class TaskRunner {
             // and waiting for one that can no longer arrive (the turn has
             // ended) used to hang the task until `maxDurationMs`. Instead the
             // daemon authors the message itself from the runtime's own final
-            // reply text — the same text that becomes `summary` — through the
-            // exact same outbox path `publishAgentMessage` uses, so the wire
+            // reply text — the assistant text emitted after the last tool
+            // interaction (`active.finalTextParts`), falling back to the whole
+            // run's text (`finalOutput`, which is also what `summary` carries)
+            // when the run ends on a tool call with no closing text — through
+            // the exact same outbox path `publishAgentMessage` uses, so the wire
             // contract (immutable draft, session binding, byte cap, replay)
             // is identical regardless of who authored it.
             //
@@ -2509,7 +2538,8 @@ export class TaskRunner {
               this.sendAgentMessageRecord(outbox!, record);
               return;
             }
-            const body = finalOutput.trim();
+            const finalTextRun = active.finalTextParts.join('').trim();
+            const body = finalTextRun !== '' ? finalTextRun : finalOutput.trim();
             if (outbox === undefined || active.agentRef === undefined) {
               // Invariant violation, not a runtime shortfall: a
               // `messageEgress.mode:'required'` task cannot be admitted
@@ -2566,6 +2596,7 @@ export class TaskRunner {
         }
         if (event.type === 'progress') {
           active.summaryParts.push(event.text);
+          active.finalTextParts.push(event.text);
         }
         if (event.type === 'artifact') {
           if (active.agentRef !== undefined && this.deps.agentEgress !== undefined) {
