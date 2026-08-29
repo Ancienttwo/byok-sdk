@@ -14,9 +14,7 @@ import type {
   McpToolsetStatus,
 } from '../types';
 import { APPROVAL_MCP_SERVER_NAME } from '../adapters/claude/claude-adapter';
-
-export const AGENT_MESSAGE_MCP_SERVER_NAME = 'byokagentmessage';
-export const AGENT_MEMORY_MCP_SERVER_NAME = 'byokagentmemory';
+import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 
 const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
 const MAX_LOCAL_MCP_ARGS = 64;

@@ -71,7 +71,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const adapter = fakeCodexAdapter();
     const result = await adapter.detect();
     expect(result.present).toBe(true);
-    expect(result.version).toBe('codex-cli 0.0.0-fake');
+    expect(result.version).toBe('codex-cli 0.149.0-fake');
     expect(result.authPresent).toBe(true);
   });
 
@@ -185,6 +185,8 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       '-c', 'mcp_servers.byokagentmessage.command="/opt/byok-agent-message-mcp"',
       '-c', 'mcp_servers.byokagentmessage.args=["--stdio"]',
       '-c', 'mcp_servers.byokagentmessage.env.BYOK_AGENT_MESSAGE_CONTEXT="sealed-context"',
+      '-c', 'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]',
+      '-c', 'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"',
       'say hi',
     ]);
   });

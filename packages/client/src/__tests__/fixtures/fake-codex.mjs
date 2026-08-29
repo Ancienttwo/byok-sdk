@@ -136,7 +136,7 @@ function send(obj) {
 }
 
 if (argv[0] === '--version') {
-  process.stdout.write(`${process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.0.0-fake'}\n`);
+  process.stdout.write(`${process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.149.0-fake'}\n`);
   process.exit(0);
 }
 
@@ -147,6 +147,26 @@ if (argv[0] === 'login' && argv[1] === 'status') {
   }
   // Real codex prints this on STDERR, not stdout — confirmed live.
   process.stderr.write('Logged in using ChatGPT\n');
+  process.exit(0);
+}
+
+if (argv[0] === 'mcp' && argv[1] === 'get' && argv[2] === 'byokagentmessage' && argv[3] === '--json') {
+  const overrides = [];
+  for (let index = 4; index < argv.length; index += 1) {
+    if (argv[index] !== '-c' || argv[index + 1] === undefined) {
+      process.stderr.write(`fake-codex: invalid mcp policy probe argv: ${JSON.stringify(argv)}\n`);
+      process.exit(2);
+    }
+    overrides.push(argv[index + 1]);
+    index += 1;
+  }
+  const enabled = 'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]';
+  const approval = 'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"';
+  if (!overrides.includes(enabled) || !overrides.includes(approval)) {
+    process.stderr.write('fake-codex: reserved message policy is incomplete\n');
+    process.exit(2);
+  }
+  process.stdout.write(`${JSON.stringify({ name: 'byokagentmessage', enabled: true, enabled_tools: ['send_agent_message'] })}\n`);
   process.exit(0);
 }
 

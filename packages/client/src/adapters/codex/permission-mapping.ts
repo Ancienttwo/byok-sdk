@@ -105,6 +105,11 @@ export interface CodexPermissionMapping {
  *   `~/.codex/config.toml` default is more permissive than anything this
  *   adapter should ever grant implicitly. Every invocation pins both keys
  *   explicitly so behavior never depends on the end user's own codex config.
+ *   Codex 0.149's per-MCP-tool approval setting is a separate, narrower
+ *   control: `codex-adapter.ts` uses it only for the SDK-reserved
+ *   `byokagentmessage/send_agent_message` terminal protocol tool, together
+ *   with an exact one-tool `enabled_tools` allowlist. Global approval remains
+ *   `never`; no host-configured or arbitrary MCP server receives this grant.
  */
 export function mapPermissionPolicyToCodexArgs(policy: PermissionPolicy): CodexPermissionMapping {
   if (policy.mode === 'confirm' || policy.mode === 'plan') {

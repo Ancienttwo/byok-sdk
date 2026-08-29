@@ -33,6 +33,11 @@ Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
 package's installed helper scripts. A required-message offer performs an exact
 stdio MCP initialize/tools-list handshake before adapter preparation; an
 unwired or unstartable single-file helper is declined before runtime execution.
+For Codex 0.149+, the adapter additionally proves the native per-MCP-tool
+approval contract before claim, then approves only the SDK-reserved
+`byokagentmessage/send_agent_message` tool. The global Codex
+`approval_policy=never` remains pinned and every other MCP/tool retains the
+normal non-interactive fail-closed posture.
 
 Pi is a required exact npm dependency and runs as an external Node subprocess.
 For an authoritative BYOK `dispatchSelection`, configure `piByokLauncher` with

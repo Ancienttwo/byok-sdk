@@ -24,11 +24,14 @@ import { withoutProviderCredentials } from '../provider-credential-environment';
 import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
 import { isRoutineCodexEvent, mapCodexEventToAgentEvents, unmappedFrameKey } from './events';
 import { CodexProcessRunner, type CodexRawEvent, type SpawnFn } from './process-runner';
+import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_MESSAGE_TOOL_NAME } from '../../sdk-reserved-mcp';
 
 const execFileAsync = promisify(execFile);
 
 /** Applied to both `detect()` probe calls — both are local-only and empirically fast (~50-80ms each), but detect() runs on every allowlist-narrowed task offer (see task-runner.ts's `pickAdapter`), so a small ceiling is cheap insurance against either ever unexpectedly hanging. */
 const DETECT_TIMEOUT_MS = 5000;
+const RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS = 5000;
+const MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION = [0, 149, 0] as const;
 
 export interface CodexAdapterOptions {
   /** Override bin resolution — tests substitute the fake-codex fixture script. */
@@ -158,6 +161,17 @@ export class CodexAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
     }
+    if (Object.prototype.hasOwnProperty.call(input.mcpServers ?? {}, AGENT_MESSAGE_MCP_SERVER_NAME)) {
+      try {
+        await probeCodexReservedAgentMessageApproval(command, input.mcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!);
+      } catch (error) {
+        return {
+          kind: 'reject',
+          reason: `codex reserved Agent-message approval preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+          retryable: false,
+        };
+      }
+    }
     return {
       kind: 'prepared',
       operation: {
@@ -268,6 +282,40 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 }
 
+async function probeCodexReservedAgentMessageApproval(
+  command: string,
+  server: NonNullable<RuntimeAdapterPrepareInput['mcpServers']>[string],
+): Promise<void> {
+  const versionResult = await execFileAsync(command, ['--version'], { timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS });
+  const versionText = `${versionResult.stdout}\n${versionResult.stderr}`.trim();
+  const versionMatch = /codex-cli\s+(\d+)\.(\d+)\.(\d+)/u.exec(versionText);
+  if (versionMatch === null) throw new Error(`unrecognized Codex version: ${versionText || '(empty)'}`);
+  const version = versionMatch.slice(1, 4).map(Number);
+  for (let index = 0; index < MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION.length; index += 1) {
+    if (version[index]! > MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION[index]!) break;
+    if (version[index]! < MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION[index]!) {
+      throw new Error(`Codex ${version.slice(0, 3).join('.')} lacks the required per-MCP-tool approval contract`);
+    }
+  }
+  const probeArgs = [
+    'mcp', 'get', AGENT_MESSAGE_MCP_SERVER_NAME, '--json',
+    '-c', `mcp_servers.${AGENT_MESSAGE_MCP_SERVER_NAME}.command=${JSON.stringify(server.command)}`,
+    '-c', `mcp_servers.${AGENT_MESSAGE_MCP_SERVER_NAME}.enabled_tools=${JSON.stringify([AGENT_MESSAGE_TOOL_NAME])}`,
+    '-c', `mcp_servers.${AGENT_MESSAGE_MCP_SERVER_NAME}.tools.${AGENT_MESSAGE_TOOL_NAME}.approval_mode="approve"`,
+  ];
+  const result = await execFileAsync(command, probeArgs, { timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS });
+  const parsed = JSON.parse(result.stdout) as { name?: unknown; enabled?: unknown; enabled_tools?: unknown };
+  if (
+    parsed.name !== AGENT_MESSAGE_MCP_SERVER_NAME
+    || parsed.enabled !== true
+    || !Array.isArray(parsed.enabled_tools)
+    || parsed.enabled_tools.length !== 1
+    || parsed.enabled_tools[0] !== AGENT_MESSAGE_TOOL_NAME
+  ) {
+    throw new Error('Codex did not read back the exact reserved Agent-message tool allowlist');
+  }
+}
+
 function codexMcpConfigArgs(servers: RuntimeOperationStartInput['mcpServers']): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
   const args = ['--ignore-user-config'];
@@ -276,6 +324,10 @@ function codexMcpConfigArgs(servers: RuntimeOperationStartInput['mcpServers']): 
     if (server.args !== undefined) args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...server.args])}`);
     for (const [key, value] of Object.entries(server.env ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
       args.push('-c', `mcp_servers.${name}.env.${key}=${JSON.stringify(value)}`);
+    }
+    if (name === AGENT_MESSAGE_MCP_SERVER_NAME) {
+      args.push('-c', `mcp_servers.${name}.enabled_tools=${JSON.stringify([AGENT_MESSAGE_TOOL_NAME])}`);
+      args.push('-c', `mcp_servers.${name}.tools.${AGENT_MESSAGE_TOOL_NAME}.approval_mode="approve"`);
     }
   }
   return args;
