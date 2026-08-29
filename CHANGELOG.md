@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.0 / @byok-sdk/keys 0.3.5 — 2026-08-29
+
+One physical machine, one active device row.
+
+- Added an optional client-hashed `machineId` to `PairRequest`: the lowercase
+  hex SHA-256 of the product id and an OS-provided machine identifier, never
+  the raw identifier and never a tenant or product claim. Both device
+  directories revoke the prior non-revoked rows of the same
+  `(tenant, product, machineId)` inside the registration transaction, so one
+  physical machine holds one active device row per tenant and product.
+  Migration `0015_device_machine_identity` adds the nullable column, its shape
+  CHECK, and the tenant-first partial unique index over active rows, which is
+  where two concurrent pairings from the same machine actually race. Devices
+  paired before the migration — and any device that cannot identify its
+  machine — keep a NULL and are unaffected. The client probe is bounded and
+  never blocks or fails pairing.
+- Advanced the nine-package aligned dispatch train to `0.10.0` and keys to
+  `0.3.5` with its exact core `0.10.0` edge. Registry publication proves artifact
+  identity only; it does not authorize deployment, production migration,
+  downstream pinning, secret changes, or live rollout.
+
 ## 0.9.1 / @byok-sdk/keys 0.3.4 — 2026-08-29
 
 Embedded-host Agent-memory composition.
@@ -13,6 +34,10 @@ Embedded-host Agent-memory composition.
   reaches no transport, daemon composition, or control socket, and exposes no
   hosted projection; a source module-graph constraint test and a built-bundle
   check pin both properties.
+- `@byok-sdk/client`: the daemon now delivers the required Agent message from
+  the run's final assistant text when the runtime did not publish one via the
+  task message tool; empty output fails the task instead of hanging (shipped in
+  `0.9.1`).
 - Advanced the nine-package aligned dispatch train to `0.9.1` and keys to
   `0.3.4` with its exact core `0.9.1` edge. Registry publication proves artifact
   identity only; it does not authorize deployment, production migration,

@@ -50,6 +50,8 @@ export class TestServer {
   readonly received: Envelope[] = [];
   /** Every HTTP request this server has handled, in order — lets tests assert e.g. "a /byok/token call happened" without caring about response bodies. */
   readonly httpRequests: Array<{ method: string; pathname: string }> = [];
+  /** Every `/byok/pair` body received, verbatim — the only place a test can assert what the client actually PUT ON THE WIRE (e.g. an optional field omitted rather than sent as undefined). */
+  readonly pairRequests: Array<Record<string, unknown>> = [];
   /** Count of WS upgrade attempts (regardless of accept/reject) — used to assert "no retry loop" after revocation: this must stop growing. */
   wsUpgradeAttempts = 0;
   private waiters: Waiter[] = [];
@@ -373,7 +375,13 @@ export class TestServer {
   }
 
   private async handlePair(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const body = (await readJsonBody(req)) as { pairingCode: string; deviceName: string; devicePublicKey: string };
+    const body = (await readJsonBody(req)) as {
+      pairingCode: string;
+      deviceName: string;
+      devicePublicKey: string;
+      machineId?: string;
+    };
+    this.pairRequests.push({ ...body });
     const tenantId = this.pairingTenantIds.get(body.pairingCode) ?? 'tenant-test';
     // Test hook (see `blockNextPair`): hold this handler open until released so
     // a test can keep `daemon.pair()` in flight, occupying the lifecycle queue.

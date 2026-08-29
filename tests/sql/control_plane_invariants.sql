@@ -16,6 +16,7 @@
 --   deploy/sql/0012_agent_home_contract.sql (durable capability + exact AgentRef task identity)
 --   deploy/sql/0013_agent_egress_contract.sql (immutable reliable Agent egress receipt facts)
 --   deploy/sql/0014_agent_memory_projection.sql (bounded redacted head + body-free metering receipts)
+--   deploy/sql/0015_device_machine_identity.sql (nullable client-hashed machine identity + partial active-machine uniqueness)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -376,6 +377,69 @@ BEGIN
     RAISE EXCEPTION
       'control-plane invariants ran without 0012_agent_home_contract.sql: missing column(s): %',
       missing_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.5 Device machine identity is installed, nullable, and uniquely active
+-- ---------------------------------------------------------------------------
+--
+-- 0015 creates no table and changes no tenant-first key shape, so the
+-- invariant is an explicit catalog check. Two facts are asserted rather than
+-- trusted: the column is NULLABLE (a device that cannot identify its machine
+-- must still pair) and the uniqueness is PARTIAL (a plain unique key over a
+-- mostly-NULL column would be uniqueness that never fires, and one that also
+-- covered revoked rows would make superseding a machine impossible).
+DO $$
+DECLARE
+  column_ok boolean;
+  index_predicate text;
+BEGIN
+  SELECT NOT a.attnotnull INTO column_ok
+    FROM pg_class t
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_attribute a ON a.attrelid = t.oid
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'device'
+     AND a.attname = 'machine_id'
+     AND a.atttypid = 'text'::regtype
+     AND a.attnum > 0
+     AND NOT a.attisdropped;
+
+  IF column_ok IS NULL THEN
+    RAISE EXCEPTION 'control-plane invariants ran without 0015_device_machine_identity.sql: device.machine_id is missing';
+  END IF;
+  IF NOT column_ok THEN
+    RAISE EXCEPTION 'device.machine_id must stay nullable: a device that cannot identify its machine must still be able to pair';
+  END IF;
+
+  SELECT pg_get_expr(x.indpred, x.indrelid) INTO index_predicate
+    FROM pg_index x
+    JOIN pg_class i     ON i.oid = x.indexrelid
+    JOIN pg_class t     ON t.oid = x.indrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'device'
+     AND i.relname = 'device_active_machine_key'
+     AND x.indisunique;
+
+  IF index_predicate IS NULL THEN
+    RAISE EXCEPTION
+      'device_active_machine_key must exist as a PARTIAL unique index over the active rows only; found no such index (or a total one)';
+  END IF;
+  -- Mutation-proof: a predicate of only `machine_id IS NOT NULL` still passes
+  -- the NULL check above while making supersession impossible (a revoked row
+  -- would keep occupying the key), and a predicate of only `NOT revoked` turns
+  -- every unidentified device into one shared machine. Both halves are named.
+  IF index_predicate NOT LIKE '%machine_id IS NOT NULL%' THEN
+    RAISE EXCEPTION
+      'device_active_machine_key must be partial on machine_id IS NOT NULL so NULL machine ids never collide; predicate is: %',
+      index_predicate;
+  END IF;
+  IF index_predicate NOT LIKE '%NOT revoked%' THEN
+    RAISE EXCEPTION
+      'device_active_machine_key must be partial on NOT revoked so a superseded machine can re-pair; predicate is: %',
+      index_predicate;
   END IF;
 END $$;
 

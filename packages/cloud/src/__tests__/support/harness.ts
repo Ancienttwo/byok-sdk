@@ -57,7 +57,8 @@ export interface CloudHarness extends InMemoryByokCloud {
   readonly clock: Clock;
   request(path: string, init?: RequestInit): Promise<Response>;
   json(path: string, init?: RequestInit): Promise<{ readonly status: number; readonly body: unknown }>;
-  pairDevice(tenant: TenantId, productId?: string): Promise<PairedDevice>;
+  /** `machineId` is the optional client-hashed physical machine identity (protocol §6.1) — omitted from the body entirely when not supplied. */
+  pairDevice(tenant: TenantId, productId?: string, machineId?: string): Promise<PairedDevice>;
 }
 
 export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarness {
@@ -74,7 +75,7 @@ export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarn
       const text = await response.text();
       return { status: response.status, body: text.length > 0 ? JSON.parse(text) : undefined };
     },
-    async pairDevice(tenant, productId = PRODUCT_ID) {
+    async pairDevice(tenant, productId = PRODUCT_ID, machineId?: string) {
       if ((await composition.core.quota.readEntitlement(tenant)) === undefined) {
         await composition.core.quota.writeEntitlement(tenant, {
           version: 1n,
@@ -94,6 +95,7 @@ export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarn
           pairingCode: pairing.code,
           deviceName: 'test-device',
           devicePublicKey: keys.publicKeyBase64Url,
+          ...(machineId === undefined ? {} : { machineId }),
         }),
       });
       if (response.status !== 200) throw new Error(`pairing failed: HTTP ${response.status}`);
