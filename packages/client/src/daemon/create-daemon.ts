@@ -49,6 +49,7 @@ import {
 } from '../release-identity';
 import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { resolveApprovalMcpBin } from '../adapters/claude/resolve-approval-mcp-bin';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
@@ -126,7 +127,9 @@ import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRec
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
+import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { isAgentMemorySecureFilesystemAvailable, type AgentMemoryHostedProjection } from './agent-memory';
 import { isAgentMemoryFilesystemHelperSupported } from './agent-memory-fs-helper';
 import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
@@ -262,6 +265,12 @@ export interface DaemonConfig {
    * 2 on macOS. Windows remains fail-closed pending its native race proof.
    */
   agentMemoryFilesystem?: AgentMemoryFilesystemHelperConfig;
+  /**
+   * Explicit composition for SDK-reserved MCP helpers when this daemon is
+   * embedded in a single-file/SEA product executable. The product entrypoint
+   * must also call `runSdkReservedHelperCommand()` before its own CLI parser.
+   */
+  sdkHelperHost?: SdkHelperHostConfig;
   /**
    * Refuse legacy task offers locally. This is an additive capability only
    * after the SDK-owned Agent home has passed construction-time preflight.
@@ -986,7 +995,9 @@ function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
     case 'pi':
       return new PiAdapter({ byokLauncher: config.piByokLauncher });
     case 'claude':
-      return new ClaudeAdapter();
+      return new ClaudeAdapter({
+        resolveApprovalMcpBin: () => resolveApprovalMcpBin(config.sdkHelperHost),
+      });
     case 'codex':
       return new CodexAdapter();
   }
@@ -1097,6 +1108,9 @@ export function buildDaemonWithAdapters(
   if (config.agentMemoryFilesystem !== undefined && (!path.isAbsolute(config.agentMemoryFilesystem.helperBin) || /[\u0000\r\n]/u.test(config.agentMemoryFilesystem.helperBin))) {
     throw new Error('DaemonConfig.agentMemoryFilesystem.helperBin must be an explicit absolute executable path');
   }
+  if (config.sdkHelperHost !== undefined) {
+    resolveSdkReservedHelperBin('agent-message-mcp', config.sdkHelperHost);
+  }
   const externalAgentMemoryFilesystem = config.agentMemoryFilesystem !== undefined;
   if (externalAgentMemoryFilesystem && !isAgentMemoryFilesystemHelperSupported()) {
     throw new Error('DaemonConfig.agentMemoryFilesystem is not admitted on this platform without its native race proof');
@@ -1104,7 +1118,9 @@ export function buildDaemonWithAdapters(
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
   }
-  const agentMemoryMcpBin = config.agentHome === undefined ? undefined : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem);
+  const agentMemoryMcpBin = config.agentHome === undefined
+    ? undefined
+    : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
@@ -1860,7 +1876,10 @@ export function buildDaemonWithAdapters(
       ...(config.resultDocument ? { resultDocument: config.resultDocument } : {}),
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
       ...(config.agentMemoryFilesystem === undefined ? {} : { agentMemoryFilesystemHelperBin: path.resolve(config.agentMemoryFilesystem.helperBin) }),
-      ...(config.agentHome !== undefined && config.agentEgress !== undefined ? { agentMessageMcpBin: resolveAgentMessageMcpBin() } : {}),
+      ...(config.agentHome !== undefined && config.agentEgress !== undefined ? {
+        agentMessageMcpBin: resolveAgentMessageMcpBin(config.sdkHelperHost),
+        agentMessageMcpPreflight: preflightAgentMessageMcp,
+      } : {}),
       ...(config.agentMemory === undefined ? {} : { agentMemoryHostedProjection: config.agentMemory }),
       // M4 Phase 3 hardening: bridges TaskRunner's stale-approval-race
       // finding out to the SAME local observability seam every other

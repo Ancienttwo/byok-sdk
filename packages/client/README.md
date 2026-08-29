@@ -14,6 +14,26 @@ Provider
 credentials are not read by the dispatch plane; `@byok-sdk/keys` is a separate
 install and keeps a zero dependency edge to this package.
 
+Single-file Bun/SEA products must explicitly re-enter SDK-reserved helpers
+before their own CLI parser. The SDK owns the reserved subcommand and helper
+implementation; the product does not resolve `dist/bin` paths:
+
+```ts
+import { createDaemon, runSdkReservedHelperCommand } from '@byok-sdk/client';
+
+if (await runSdkReservedHelperCommand()) process.exit(0);
+
+const daemon = createDaemon({
+  // ...normal device, Agent-home, and egress configuration
+  sdkHelperHost: { mode: 'self-executable' },
+});
+```
+
+Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
+package's installed helper scripts. A required-message offer performs an exact
+stdio MCP initialize/tools-list handshake before adapter preparation; an
+unwired or unstartable single-file helper is declined before runtime execution.
+
 Pi is a required exact npm dependency and runs as an external Node subprocess.
 For an authoritative BYOK `dispatchSelection`, configure `piByokLauncher` with
 the separately installed `byok-pi-provider-launcher`, the local non-secret

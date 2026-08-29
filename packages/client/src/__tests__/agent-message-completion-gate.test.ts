@@ -21,6 +21,39 @@ async function temporary(prefix: string): Promise<string> {
 }
 
 describe('required Agent message completion gate', () => {
+  it('declines before adapter preparation when the exact helper handshake fails', async () => {
+    const sent: Envelope[] = [];
+    const storeDir = await temporary('byok-message-preflight-store-');
+    const hostStorageRoot = await temporary('byok-message-preflight-home-');
+    const adapter = new StubRuntimeAdapter('codex', { present: true }, {
+      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
+      permissionModes: ['auto'],
+    });
+    const runner = new TaskRunner({
+      adapters: [adapter], workspaceRoot: await temporary('byok-message-preflight-workspace-'),
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
+      send: (envelope) => sent.push(envelope),
+      blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
+      agentMessageMcpBin: { command: '/compiled/salesko-agent', args: ['__byok_sdk_helper', 'agent-message-mcp'] },
+      agentMessageMcpPreflight: async () => { throw new Error('unknown command'); },
+    });
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'codex',
+      agentRef: { agentId: 'agent-message', profileRevision: 'profile-r1' },
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+    }, { taskId: 'message-preflight-failure', seq: 1 }));
+
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(sent.find((envelope) => envelope.type === 'task.decline')).toMatchObject({
+      payload: { retryable: false, reason: expect.stringContaining('helper preflight failed: unknown command') },
+    });
+  });
+
   it('injects only the bounded body tool, retains held drafts, and completes only after exact accepted disposition', async () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-store-');
@@ -32,6 +65,7 @@ describe('required Agent message completion gate', () => {
     const researchExtractor = vi.fn(() => {
       throw new Error('message-only output is not a research document');
     });
+    const helperPreflight = vi.fn(async () => {});
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary('byok-message-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -42,6 +76,7 @@ describe('required Agent message completion gate', () => {
       sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
+      agentMessageMcpPreflight: helperPreflight,
       resultDocument: { extract: researchExtractor },
     });
     const taskId = 'message-task';
@@ -53,6 +88,8 @@ describe('required Agent message completion gate', () => {
     }, { taskId, seq: 1 }));
 
     const messageMcp = adapter.startCalls[0]?.ctx.mcpServers?.byokagentmessage;
+    expect(helperPreflight).toHaveBeenCalledOnce();
+    expect(helperPreflight).toHaveBeenCalledWith(messageMcp);
     expect(messageMcp).toMatchObject({
       command: process.execPath,
       args: ['/sdk/byok-agent-message-mcp.js'],

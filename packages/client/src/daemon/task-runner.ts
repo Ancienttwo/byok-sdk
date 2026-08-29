@@ -482,6 +482,8 @@ export interface TaskRunnerDeps {
   resultDocument?: { readonly extract: ResultDocumentExtractor };
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
+  /** Production pre-runtime executability/handshake gate for the exact message helper config. */
+  agentMessageMcpPreflight?: (server: Readonly<McpStdioServerConfig>) => Promise<void>;
   /** SDK-owned MCP helper injected only into strict Agent tasks. */
   agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
@@ -1632,6 +1634,14 @@ export class TaskRunner {
         taskId,
         messageRequirement,
       );
+      if (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
+        try {
+          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!);
+        } catch (error) {
+          decline(`required Agent message helper preflight failed: ${errorMessage(error)}`, false);
+          return;
+        }
+      }
       if (requiresAgentMemoryMcp && agentRef !== undefined) {
         try {
           taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef);

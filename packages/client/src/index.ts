@@ -76,6 +76,16 @@ export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
 export {
+  BYOK_SDK_HELPER_SUBCOMMAND,
+  resolveSdkReservedHelperBin,
+  runSdkReservedHelperCommand,
+} from './sdk-reserved-helper-host';
+export type {
+  SdkHelperHostConfig,
+  SdkReservedHelperKind,
+  ResolvedSdkReservedHelperBin,
+} from './sdk-reserved-helper-host';
+export {
   RuntimeExecutionFailure,
   RuntimeDisposalFailure,
   RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON,
