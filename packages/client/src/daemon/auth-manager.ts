@@ -36,6 +36,14 @@ export interface AuthManagerOptions {
   /** Internal-only credential custody seam. Product construction uses store.credentials. */
   credentials?: DeviceCredentialStore | InMemoryDeviceCredentialStore;
   deviceName?: string;
+  /**
+   * Optional resolver for the client-hashed physical machine identity sent
+   * with `POST /byok/pair` (protocol §6.1). Resolved once per pair attempt; a
+   * resolver that yields `undefined` omits the field entirely rather than
+   * sending a placeholder, because the server treats its presence as
+   * permission to supersede this machine's prior active device rows.
+   */
+  machineId?: () => Promise<string | undefined>;
   /** Called once revocation is detected, so a caller (ConnectionManager) can stop retrying and surface the state instead of looping. */
   onRevoked?: () => void;
 }
@@ -110,6 +118,11 @@ export class AuthManager {
           : generateDeviceKeyPair();
 
         const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
+        // Best-effort and optional: an unresolvable machine identity omits the
+        // field, which is the documented "no supersession" case — it never
+        // becomes an empty string or any other placeholder the server would
+        // then treat as a real machine shared by every unidentifiable device.
+        const machineId = await this.opts.machineId?.();
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -117,6 +130,7 @@ export class AuthManager {
             pairingCode,
             deviceName: this.opts.deviceName ?? os.hostname(),
             devicePublicKey: keyPair.publicKeyBase64Url,
+            ...(machineId === undefined ? {} : { machineId }),
           }),
         });
         if (!res.ok) {

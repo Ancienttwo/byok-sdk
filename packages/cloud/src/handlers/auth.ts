@@ -32,7 +32,13 @@ export function pairHandler(deps: AuthRouteDeps) {
   return async (c: Context): Promise<Response> => {
     const parsed = PairRequestSchema.safeParse(await readJsonBody(c));
     if (!parsed.success) {
-      return c.json({ error: 'pairingCode, deviceName, and devicePublicKey are required strings' }, 400);
+      return c.json(
+        {
+          error:
+            'pairingCode, deviceName, and devicePublicKey are required strings; optional machineId must be 64 lowercase hex characters',
+        },
+        400,
+      );
     }
 
     const device = await deps.auth.redeemAndRegister(parsed.data);

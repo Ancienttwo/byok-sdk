@@ -35,6 +35,8 @@ export interface PairInput {
   readonly pairingCode: string;
   readonly deviceName: string;
   readonly devicePublicKey: string;
+  /** Optional client-hashed machine identity (protocol §6.1). Carried into registration verbatim; it is never a tenant or product authority. */
+  readonly machineId?: string;
 }
 
 export interface MintedAccessToken {
@@ -91,6 +93,10 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
       // The redeemed code's claims are the ONLY source of the device's
       // tenant/product — `PairRequest` carries neither, so a device can never
       // choose where it lands.
+      // `machineId` rides along as an ordinary registration fact. It cannot
+      // widen where the device lands: the store supersedes only rows already
+      // under `claims.tenantId` and `claims.productId`, which the request
+      // never chose.
       return stores.devices.register(claims.tenantId, {
         productId: claims.productId,
         deviceId: `dev_${crypto.randomUuid()}`,
@@ -98,6 +104,7 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
         devicePublicKey: input.devicePublicKey,
         proofKeyId: DEVICE_IDENTITY_PROOF_KEY_ID,
         proofKeyEpoch: DEVICE_IDENTITY_PROOF_KEY_EPOCH,
+        ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
       });
     },
 

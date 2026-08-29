@@ -53,6 +53,7 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
+import { resolveMachineId } from './machine-id';
 import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
 import {
   assertPresenceHeartbeatCadence,
@@ -234,6 +235,14 @@ export interface DaemonConfig {
   productId: string;
   serverUrl: string;
   deviceName?: string;
+  /**
+   * Optional override for the client-hashed physical machine identity sent
+   * with `POST /byok/pair` (protocol §6.1). Defaults to `resolveMachineId`
+   * over this product id, which probes one OS identifier and hashes it; a
+   * host that has its own machine authority can supply it here, and one that
+   * wants no supersession at all supplies `async () => undefined`.
+   */
+  machineId?: () => Promise<string | undefined>;
   workspaceRoot: string;
   /**
    * Strict Agent execution boundary. The host selects one absolute branded
@@ -1366,6 +1375,7 @@ export function buildDaemonWithAdapters(
       serverUrl: config.serverUrl,
       store,
       deviceName: config.deviceName,
+      machineId: config.machineId ?? (() => resolveMachineId({ productId: config.productId })),
       onRevoked: () => {
         connectionState = 'revoked';
       },

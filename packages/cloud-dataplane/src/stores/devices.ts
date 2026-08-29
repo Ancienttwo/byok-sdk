@@ -18,7 +18,7 @@ import {
   type TenantReadiness,
 } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 interface DeviceRow {
   readonly tenant_id: string;
@@ -29,6 +29,7 @@ interface DeviceRow {
   readonly proof_key_id: string;
   readonly proof_key_epoch: number;
   readonly revoked: boolean;
+  readonly machine_id: string | null;
   readonly capabilities: readonly string[] | null;
 }
 
@@ -48,12 +49,20 @@ function toRecord(row: DeviceRow): DeviceRecord {
     proofKeyId: row.proof_key_id,
     proofKeyEpoch: row.proof_key_epoch,
     revoked: row.revoked,
+    ...(row.machine_id == null ? {} : { machineId: row.machine_id }),
     ...(row.capabilities == null ? {} : { capabilities: Object.freeze([...row.capabilities]) }),
   };
 }
 
 const SELECT_COLUMNS =
-  'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked, capabilities';
+  'tenant_id, device_id, product_id, device_name, device_public_key, proof_key_id, proof_key_epoch, revoked, machine_id, capabilities';
+
+/** Best-effort unwind — the original failure is what the caller must see, not a rollback that also failed. */
+async function rollback(client: PoolClient): Promise<void> {
+  try {
+    await client.query('ROLLBACK');
+  } catch {}
+}
 
 export class PostgresDeviceDirectory implements DeviceDirectory {
   readonly #pool: Pool;
@@ -68,32 +77,65 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
     // Re-pairing an existing device replaces its registration in place rather
     // than creating a second row, matching the in-memory reference. `revoked`
     // resets because a fresh pairing IS a new grant.
-    const result = await this.#pool.query<DeviceRow>(
-      `INSERT INTO device (
-         tenant_id, device_id, product_id, device_name, device_public_key,
-         proof_key_id, proof_key_epoch, revoked
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, false)
-       ON CONFLICT (tenant_id, device_id) DO UPDATE
-         SET product_id = EXCLUDED.product_id,
-             device_name = EXCLUDED.device_name,
-             device_public_key = EXCLUDED.device_public_key,
-             proof_key_id = EXCLUDED.proof_key_id,
-             proof_key_epoch = EXCLUDED.proof_key_epoch,
-             revoked = false,
-             capabilities = NULL
-       RETURNING ${SELECT_COLUMNS}`,
-      [
-        tenant,
-        input.deviceId,
-        input.productId,
-        input.deviceName,
-        input.devicePublicKey,
-        input.proofKeyId,
-        input.proofKeyEpoch,
-      ],
-    );
-    return toRecord(result.rows[0]!);
+    //
+    // With a machine identity present this is TWO statements — supersede this
+    // tenant/product's prior active rows for the same machine, then insert —
+    // and they must commit or fail together: a partial apply is either a
+    // machine holding two active rows or a machine holding none. The
+    // supersession runs FIRST because `device_active_machine_key` (0015) is a
+    // partial unique index over the active rows, so inserting before revoking
+    // would collide with the row this call is replacing.
+    //
+    // Deliberately not one multi-CTE statement: a data-modifying CTE sees the
+    // snapshot from the start of the statement, so the INSERT could not
+    // observe the UPDATE's effect and the unique index would reject exactly
+    // the supersession this exists to perform.
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (input.machineId !== undefined) {
+        await client.query(
+          `UPDATE device
+              SET revoked = true
+            WHERE tenant_id = $1 AND product_id = $2 AND machine_id = $3 AND NOT revoked`,
+          [tenant, input.productId, input.machineId],
+        );
+      }
+      const result = await client.query<DeviceRow>(
+        `INSERT INTO device (
+           tenant_id, device_id, product_id, device_name, device_public_key,
+           proof_key_id, proof_key_epoch, revoked, machine_id
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)
+         ON CONFLICT (tenant_id, device_id) DO UPDATE
+           SET product_id = EXCLUDED.product_id,
+               device_name = EXCLUDED.device_name,
+               device_public_key = EXCLUDED.device_public_key,
+               proof_key_id = EXCLUDED.proof_key_id,
+               proof_key_epoch = EXCLUDED.proof_key_epoch,
+               revoked = false,
+               machine_id = EXCLUDED.machine_id,
+               capabilities = NULL
+         RETURNING ${SELECT_COLUMNS}`,
+        [
+          tenant,
+          input.deviceId,
+          input.productId,
+          input.deviceName,
+          input.devicePublicKey,
+          input.proofKeyId,
+          input.proofKeyEpoch,
+          input.machineId ?? null,
+        ],
+      );
+      await client.query('COMMIT');
+      return toRecord(result.rows[0]!);
+    } catch (cause) {
+      await rollback(client);
+      throw cause;
+    } finally {
+      client.release();
+    }
   }
 
   async get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined> {

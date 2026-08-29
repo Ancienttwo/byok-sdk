@@ -866,11 +866,20 @@ auth/device-flow UI, outside this protocol's concern) plus a freshly
 generated device keypair register the device and mint its first token.
 
 ```
-Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey }
+Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId? }
 Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint? }
 ```
 
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
+- `machineId`: OPTIONAL client-hashed machine identity — lowercase hex SHA-256
+  of the product id and an OS-provided machine identifier (macOS
+  `IOPlatformUUID`, Linux `/etc/machine-id`, Windows `MachineGuid`), never the
+  raw identifier. When a pairing carries it, the server revokes every prior
+  non-revoked device row of the same `(tenantId, productId, machineId)` before
+  registering the new one, so one physical machine holds one active device row
+  per product. It carries no tenant or product of its own — those still come
+  only from the redeemed pairing code's claims — and a client that cannot
+  resolve one omits the field, in which case no supersession happens at all.
 - `accessToken`: JWT, ~1h lifetime.
 - `tenantId`: required opaque, non-secret tenant binding copied exactly from
   the authenticated redeemed pairing-code/device row. It is bounded to 1–200
@@ -978,7 +987,12 @@ action is `devices.revoke(tenantId, deviceId)`, and the tenant is part of the
 lookup rather than a check applied afterward — a caller holding one tenant's
 credentials cannot revoke, or even confirm the existence of, another tenant's
 device. Revoking a device that the named tenant does not own is silently
-indistinguishable from revoking one that does not exist at all.
+indistinguishable from revoking one that does not exist at all. Pairing is
+the one other path that revokes: per §6.1, a `POST /byok/pair` carrying
+`machineId` supersedes — that is, revokes — that same machine's prior
+non-revoked rows within the tenant and product the redeemed pairing code
+chose, and the caller still cannot name, or otherwise learn of, the rows it
+revokes.
 
 ## 7. Blob flows
 

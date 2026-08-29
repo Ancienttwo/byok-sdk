@@ -40,6 +40,15 @@ export const PairRequestSchema = z.object({
   deviceName: z.string(),
   /** Ed25519 public key, base64url-encoded. Private key stays device-local (OS keychain or 0600 file). */
   devicePublicKey: z.string(),
+  /**
+   * Optional client-hashed physical machine identity: lowercase hex SHA-256 of
+   * the product id and an OS-provided machine identifier, never the raw
+   * identifier itself. It names no tenant and no product — those still come
+   * only from the redeemed pairing code's claims — so it can only ever
+   * supersede the SAME tenant/product's prior active device rows carrying this
+   * exact digest. A client that cannot resolve one omits the field entirely.
+   */
+  machineId: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
 });
 export type PairRequest = z.infer<typeof PairRequestSchema>;
 

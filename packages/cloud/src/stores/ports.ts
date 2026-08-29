@@ -64,6 +64,13 @@ export interface DeviceRecord {
   readonly proofKeyEpoch: number;
   readonly revoked: boolean;
   /**
+   * Client-hashed physical machine identity (lowercase hex SHA-256), when the
+   * pairing carried one. Absent for every device paired without it — an
+   * absent value supersedes nothing, so it is never a filter that silently
+   * groups unidentified machines together.
+   */
+  readonly machineId?: string;
+  /**
    * The latest capability snapshot written by an authenticated device
    * handshake. This is deliberately separate from core presence: presence is
    * lossy/TTL-bounded and cannot authorize Agent dispatch.
@@ -79,9 +86,19 @@ export interface DeviceRegistration {
   readonly devicePublicKey: string;
   readonly proofKeyId: string;
   readonly proofKeyEpoch: number;
+  /**
+   * Optional client-hashed physical machine identity from `PairRequest`. When
+   * present, `register` revokes this tenant/product's prior non-revoked rows
+   * carrying the same value before inserting, so one physical machine holds
+   * one active device row per product. It names no tenant and no product of
+   * its own — both still come from the redeemed pairing code's claims — so it
+   * can only ever supersede rows the caller already addressed.
+   */
+  readonly machineId?: string;
 }
 
 export interface DeviceDirectory {
+  /** Registers the device. With `input.machineId` set this ALSO revokes this tenant/product's prior non-revoked rows carrying that same machine identity — one physical machine, one active row. */
   register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
   /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;

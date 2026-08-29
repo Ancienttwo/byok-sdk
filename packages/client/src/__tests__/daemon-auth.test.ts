@@ -81,6 +81,45 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
     auth.stop();
   });
 
+  it('sends the resolved machineId in the pair body, and OMITS the field when the probe resolves nothing', async () => {
+    // The optional wire field is what lets the server collapse one physical
+    // machine's stale device rows (protocol §6.1). Its ABSENCE is the load
+    // bearing half: a client that cannot identify its machine must send no
+    // field at all — an empty string or a `null` would be a single fake
+    // "machine" every unidentifiable device on the fleet shares, and the
+    // server would supersede them against each other.
+    const machineId = 'a'.repeat(64);
+    const withProbe = new AuthManager({
+      serverUrl: server.url,
+      store: new DeviceStore(await tmpDir('byok-auth-machine-')),
+      machineId: async () => machineId,
+    });
+    await withProbe.pair('pairing-code');
+    withProbe.stop();
+
+    expect(server.pairRequests.at(-1)).toMatchObject({ machineId });
+
+    const withoutProbe = new AuthManager({
+      serverUrl: server.url,
+      store: new DeviceStore(await tmpDir('byok-auth-machine-none-')),
+      machineId: async () => undefined,
+    });
+    await withoutProbe.pair('pairing-code-2');
+    withoutProbe.stop();
+
+    expect('machineId' in server.pairRequests.at(-1)!).toBe(false);
+
+    // No option at all behaves exactly like an unresolved probe.
+    const noOption = new AuthManager({
+      serverUrl: server.url,
+      store: new DeviceStore(await tmpDir('byok-auth-machine-absent-')),
+    });
+    await noOption.pair('pairing-code-3');
+    noOption.stop();
+
+    expect('machineId' in server.pairRequests.at(-1)!).toBe(false);
+  });
+
   it('reuses the existing keypair (does not regenerate) across a second pair() call', async () => {
     const storeDir = await tmpDir('byok-auth-store-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });

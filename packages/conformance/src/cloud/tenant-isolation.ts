@@ -68,6 +68,26 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
       });
     });
 
+    it('never supersedes another tenant\'s device for an identical machine identity', async () => {
+      // `DeviceRegistration.machineId` is the one registration fact that makes
+      // `register` mutate rows the caller did not name. It carries no tenant of
+      // its own, so the same physical machine legitimately holds an active row
+      // in every tenant it pairs into — and a composition that scoped the
+      // supersession by machine alone would silently revoke a stranger's
+      // device. Asserted here rather than in one composition's own suite
+      // because it is a property of the port, not of an implementation.
+      const machineId = 'a'.repeat(64);
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.devices.register(TENANT_A, registration('device-1', { machineId }));
+        await stores.devices.register(TENANT_B, registration('device-2', { machineId }));
+        await stores.devices.register(TENANT_B, registration('device-3', { machineId }));
+
+        expect((await stores.devices.get(TENANT_A, 'device-1'))?.revoked).toBe(false);
+        expect((await stores.devices.get(TENANT_B, 'device-2'))?.revoked).toBe(true);
+        expect((await stores.devices.get(TENANT_B, 'device-3'))?.revoked).toBe(false);
+      });
+    });
+
     it('resolves a device id to a record that carries its own tenant', async () => {
       // The pre-tenant exception, asserted rather than trusted: a single-step
       // resolve whose result names the tenant is safe; a two-step "look up by

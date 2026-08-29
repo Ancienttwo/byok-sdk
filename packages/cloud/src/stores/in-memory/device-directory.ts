@@ -31,7 +31,25 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
       proofKeyId: input.proofKeyId,
       proofKeyEpoch: input.proofKeyEpoch,
       revoked: false,
+      ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
     };
+    // One physical machine, one active device row per product. The scan is
+    // deliberately narrowed by tenant AND product AND a present machineId:
+    // an absent machineId matches nothing, so devices that could not identify
+    // their machine never supersede each other. Prior rows are revoked rather
+    // than deleted — a revoked row is still the audit fact that this machine
+    // held that grant, and revocation is already the state every read path
+    // (`resolveDevice`, readiness, presence) knows how to exclude.
+    if (input.machineId !== undefined) {
+      for (const [key, existing] of this.#byTenant) {
+        if (existing.revoked) continue;
+        if (existing.deviceId === record.deviceId) continue;
+        if (existing.tenantId !== tenant) continue;
+        if (existing.productId !== input.productId) continue;
+        if (existing.machineId !== input.machineId) continue;
+        this.#byTenant.set(key, { ...existing, revoked: true });
+      }
+    }
     const key = tenantKey(tenant, record.deviceId);
     this.#byTenant.set(key, record);
     this.#byDeviceId.set(record.deviceId, key);
