@@ -2482,9 +2482,83 @@ export class TaskRunner {
           await this.observeGit(active, 'completed');
           if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
           if (active.messageRequirement !== undefined && active.messageAccepted !== true) {
+            // A `messageEgress.mode:'required'` task completes only after an
+            // exact `accepted` disposition, so the completion is parked here
+            // and replayed by `handleAgentMessageDisposition`.
+            //
+            // Delivering the message is the DAEMON's obligation, not the
+            // model's. When the runtime called the injected
+            // `send_agent_message` MCP tool, that tool-authored draft is
+            // already the task's one immutable message and is sent
+            // unchanged. When it never called the tool there is no record,
+            // and waiting for one that can no longer arrive (the turn has
+            // ended) used to hang the task until `maxDurationMs`. Instead the
+            // daemon authors the message itself from the runtime's own final
+            // reply text — the same text that becomes `summary` — through the
+            // exact same outbox path `publishAgentMessage` uses, so the wire
+            // contract (immutable draft, session binding, byte cap, replay)
+            // is identical regardless of who authored it.
+            //
+            // Fail closed, never hang: an empty final output or a rejected
+            // draft (byte cap, quota, session mismatch) fails the task with a
+            // stated reason rather than silently waiting.
             active.pendingMessageCompletion = { finalOutput, ...(outcome.document === undefined ? {} : { document: outcome.document }) };
-            const record = active.messageOutbox?.get(active.taskId);
-            if (record !== undefined) this.sendAgentMessageRecord(active.messageOutbox!, record);
+            const outbox = active.messageOutbox;
+            const record = outbox?.get(active.taskId);
+            if (record !== undefined) {
+              this.sendAgentMessageRecord(outbox!, record);
+              return;
+            }
+            const body = finalOutput.trim();
+            if (outbox === undefined || active.agentRef === undefined) {
+              // Invariant violation, not a runtime shortfall: a
+              // `messageEgress.mode:'required'` task cannot be admitted
+              // without both an outbox and a bound agent ref, so reaching
+              // here means the lane was torn down or never wired.
+              active.pendingMessageCompletion = undefined;
+              await this.fail(active.taskId, 'required Agent message lane is unavailable for this task', false);
+              return;
+            }
+            if (body === '') {
+              active.pendingMessageCompletion = undefined;
+              await this.fail(active.taskId, 'runtime produced no reply text for the required Agent message', false);
+              return;
+            }
+            try {
+              await outbox.appendDraft({
+                taskId: active.taskId,
+                tenantId: this.deps.tenantId!,
+                agentRef: active.agentRef,
+                requirement: active.messageRequirement,
+                contentType: active.messageRequirement.contentType,
+                body,
+                maxPendingEvents: 64,
+                maxPendingBytes: 4 * 1024 * 1024,
+              });
+              // A cancel/teardown landing during `appendDraft` must not be
+              // followed by an `activate`: an activated record is what
+              // restart recovery republishes, so the draft is left inert
+              // instead.
+              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+              const activated = await outbox.activate(active.taskId, active.session.sessionRef);
+              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+              if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
+              this.sendAgentMessageRecord(outbox, activated);
+            } catch (err) {
+              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+              // A concurrent tool-authored `publishAgentMessage` can win the
+              // outbox lock while the daemon-authored draft is in flight —
+              // the append then rejects because the task already has its one
+              // immutable message. That is the contract working, not a
+              // delivery failure: send the record that won.
+              const raced = outbox.get(active.taskId);
+              if (raced !== undefined && raced.sessionRef !== undefined) {
+                this.sendAgentMessageRecord(outbox, raced);
+                return;
+              }
+              active.pendingMessageCompletion = undefined;
+              await this.fail(active.taskId, `failed to deliver the required Agent message: ${errorMessage(err)}`, false);
+            }
             return;
           }
           await this.publishSuccessfulCompletion(active, finalOutput, outcome.document);
