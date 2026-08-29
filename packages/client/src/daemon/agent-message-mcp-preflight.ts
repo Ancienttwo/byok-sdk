@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import type { McpStdioServerConfig } from '../types';
 import { AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp';
 
-export const AGENT_MESSAGE_MCP_PREFLIGHT_TIMEOUT_MS = 3_000;
+export const AGENT_MESSAGE_MCP_PREFLIGHT_TIMEOUT_MS = 10_000;
 
 /**
  * Prove the exact configured helper can start and expose the reserved message

@@ -1,0 +1,22 @@
+REGRESSION_GUARD=packages/client/src/__tests__/sdk-reserved-helper-host.test.ts
+COMMAND=bun test packages/client/src/__tests__/sdk-reserved-helper-host.test.ts
+
+bun test v1.4.0 (34cbb9a40)
+
+packages/client/src/__tests__/sdk-reserved-helper-host.test.ts:
+(pass) SDK-reserved helper host composition > keeps normal product argv untouched and resolves one explicit self-executable shape for all helpers
+(fail) SDK-reserved helper host composition > handshakes the exact message helper command before runtime admission [3013.20ms]
+error: expect(received).resolves.toBeUndefined()
+Expected promise that resolves
+Received promise that rejected
+(fail) SDK-reserved helper host composition > admits an exact helper whose single-file startup exceeds the former three-second bound [3005.43ms]
+error: expect(received).resolves.toBeUndefined()
+Expected promise that resolves
+Received promise that rejected
+
+1 pass
+2 fail
+6 expect() calls
+Ran 3 tests across 1 file.
+
+PRE_FIX_EXIT=1

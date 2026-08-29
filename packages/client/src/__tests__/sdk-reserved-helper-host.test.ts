@@ -57,4 +57,21 @@ describe('SDK-reserved helper host composition', () => {
     await expect(preflightAgentMessageMcp({ command: process.execPath, args: [broken] }))
       .rejects.toThrow(/exited before handshake.*unknown command/);
   });
+
+  it('admits an exact helper whose single-file startup exceeds the former three-second bound', async () => {
+    const delayedHelper = await fixture('delayed-helper.mjs', `
+      import { createInterface } from 'node:readline';
+      const reader = createInterface({ input: process.stdin, terminal: false });
+      reader.on('line', (line) => {
+        const request = JSON.parse(line);
+        if (request.id === 1) setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} })), 3250);
+        if (request.id === 2) setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'send_agent_message' }] } })), 3250);
+      });
+    `);
+
+    await expect(preflightAgentMessageMcp({
+      command: process.execPath,
+      args: [delayedHelper],
+    })).resolves.toBeUndefined();
+  });
 });
