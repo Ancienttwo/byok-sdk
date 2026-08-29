@@ -13,7 +13,7 @@ import type {
   McpToolsetReloadReceipt,
   McpToolsetStatus,
 } from '../types';
-import { RESERVED_MCP_SERVER_NAMES } from '../sdk-reserved-mcp';
+import { isReservedMcpServerName } from '../sdk-reserved-mcp';
 
 const MAX_LOCAL_MCP_SERVERS_PER_TOOLSET = 16;
 const MAX_LOCAL_MCP_ARGS = 64;
@@ -127,7 +127,7 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
           `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers contains invalid server name ${JSON.stringify(serverName)}`,
         );
       }
-      if (RESERVED_MCP_SERVER_NAMES.has(serverName)) {
+      if (isReservedMcpServerName(serverName)) {
         throw new Error(
           `DaemonConfig.mcpToolsets.${toolsetId}.mcpServers.${serverName} uses a server name reserved by the daemon`,
         );

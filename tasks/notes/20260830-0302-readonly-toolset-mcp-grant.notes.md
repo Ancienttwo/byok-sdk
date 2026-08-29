@@ -146,6 +146,87 @@ Three consequences worth carrying into the release decision:
    unpaid suite is 4 pass / 5 skip on the published 0.10.1 client and on this
    overlaid build alike; only the live `F4` tests separate them.
 
+## Gate round 1 fixes
+
+Gatekeeper findings against `304bc9f`, and what each one turned into.
+
+| # | Finding | Resolution |
+|---|---------|------------|
+| 1 | HIGH — the probe spawned a host command with `{...process.env, ...server.env}` | `McpToolsProbeOptions.env` is now required and carries `buildRuntimeEnv`'s output; `handleOffer` computes that env once, before admission, and reuses it for the runtime child. `server.env` is still layered on top, matching the runtime path. Probe `cwd` is the resolved Agent home when the task is Agent-bound. |
+| 2 | MEDIUM — doc/code contradiction, and an ungrantable name declined retryably forever | Hard rejection kept and documented as such. `McpToolsProbeAuthorityError` marks server-answer failures (ungrantable name, malformed entry, oversized stream); the runner declines those `retryable: false`, naming the server and the tool. Spawn errors, early exits, and timeouts stay `retryable: true`. |
+| 3 | MEDIUM — serial probes block the connection FIFO | All servers probe concurrently under one shared `MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS` (10s), so admission latency no longer scales with server count. Every probe kills its own child at the deadline. |
+| 4 | MEDIUM — pi paid for a probe it never consumes | New `RuntimeAdapterDescriptor.requiresMcpToolsetToolObservation` (claude/codex `true`, pi absent). The runner gates the probe on it — a descriptor flag, not a runtime-id check. Omission stays fail-closed: no observation means an adapter that needs one rejects. |
+| 5 | MEDIUM — test gap | New `src/__tests__/mcp-tools-probe.test.ts` (17 cases) plus a configurable `fixtures/probe-mcp-server.mjs`; grant-drift and server-name cases added per adapter in `toolset-mcp-grant.test.ts`; probe-gating, permanent-decline and shared-deadline cases in `mcp-toolsets.test.ts`. |
+| 6 | LOW | Incremental line parsing with a 1 MiB stdout cap; `RESERVED_MCP_SERVER_NAMES` is a frozen tuple behind `isReservedMcpServerName` (a frozen `Set` still accepts `add`/`delete`); the byte-identical-errors claim in `agent-message-mcp-preflight.ts` corrected; `GRANTABLE_MCP_SERVER_NAME` added and enforced at grant resolution. **The `codex mcp get --ignore-user-config` item is not fixed** — see below. |
+
+### Not fixed: `--ignore-user-config` on the `codex mcp get` read-back
+
+The flag does not exist on that subcommand. Against the installed CLI:
+
+```
+$ codex --version
+codex-cli 0.149.0
+$ codex --ignore-user-config mcp get foo --json -c 'mcp_servers.foo.command="/bin/echo"'
+error: unexpected argument '--ignore-user-config' found
+$ codex mcp get foo --json --ignore-user-config -c 'mcp_servers.foo.command="/bin/echo"'
+error: unexpected argument '--ignore-user-config' found
+$ codex mcp get --help
+Usage: codex mcp get [OPTIONS] <NAME>
+Options:
+  -c, --config <key=value>   ...
+      --json                 ...
+      --enable <FEATURE>     ...
+      --disable <FEATURE>    ...
+```
+
+The read-back therefore still resolves `~/.codex/config.toml` under its `-c`
+overrides. The overrides pin every key the grant depends on (command,
+`enabled_tools`, per-tool `approval_mode`), so user config cannot weaken the
+assertion — it can only add keys the real (`--ignore-user-config`) run drops.
+Closing that last gap needs an isolated `CODEX_HOME` for the probe, which
+`CODEX_HOME=<empty dir> codex mcp get …` was confirmed to satisfy, but that
+introduces a filesystem side effect inside `prepare()` and is left as a
+decision rather than taken here. The reasoning is recorded in
+`probeCodexMcpToolApproval`'s own comment.
+
+### Verification (this worktree)
+
+`bun run build && bun run typecheck && bun run test`:
+
+```
+@byok-sdk/client build: ESM ⚡️ Build success in 858ms
+@byok-sdk/client build: {"adapterEntryBytes":131418,"packageRoot":".../packages/client/","status":"passed"}
+byok-sdk build: ESM ⚡️ Build success in 16ms
+
+@byok-sdk/client:typecheck                           | Done in 807ms
+@byok-sdk/protocol:typecheck                         | Done in 267ms
+@byok-sdk/server:typecheck                           | Done in 491ms
+(15 packages, all Done)
+
+@byok-sdk/client:test        |  Test Files  156 passed | 2 skipped (158)
+@byok-sdk/client:test        |       Tests  1505 passed | 11 skipped (1516)
+@byok-sdk/cloud:test         |       Tests  226 passed (226)
+@byok-sdk/cloud-dataplane:test |     Tests  74 passed | 90 skipped (164)
+@byok-sdk/conformance:test   |       Tests  142 passed (142)
+@byok-sdk/core:test          |       Tests  251 passed (251)
+@byok-sdk/keys:test          |       Tests  373 passed (373)
+@byok-sdk/protocol:test      |       Tests  349 passed (349)
+@byok-sdk/server:test        |       Tests  266 passed (266)
+(no failing test file in any package)
+```
+
+Live smokes against the real CLIs (`claude` 2.1.251, `codex-cli` 0.149.0):
+
+```
+$ bun run --filter '@byok-sdk/client' smoke:claude-toolset-permission
+[claude-toolset-permission] claude called the projected toolset tool only with --allowedTools, built-ins still empty
+Exited with code 0
+
+$ bun run --filter '@byok-sdk/client' smoke:codex-toolset-permission
+[codex-toolset-permission] codex called the projected toolset tool only with its per-tool grant, global approval still never
+Exited with code 0
+```
+
 ## Evidence Links
 
 - Checks: `.ai/harness/checks/latest.json`

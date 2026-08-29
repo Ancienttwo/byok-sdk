@@ -76,7 +76,12 @@ import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } f
 import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
 import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
-import { probeMcpServerTools, type McpToolsProbeOptions } from './mcp-tools-probe';
+import {
+  McpToolsProbeAuthorityError,
+  MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
+  probeMcpServerTools,
+  type McpToolsProbeOptions,
+} from './mcp-tools-probe';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { prependAgentMemoryGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
@@ -483,8 +488,17 @@ export interface TaskRunnerDeps {
   resultDocument?: { readonly extract: ResultDocumentExtractor };
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
-  /** Production pre-runtime executability/handshake gate for the exact message helper config. */
-  agentMessageMcpPreflight?: (server: Readonly<McpStdioServerConfig>) => Promise<void>;
+  /**
+   * Production pre-runtime executability/handshake gate for the exact message
+   * helper config. `env` is the same allowlisted child environment the runtime
+   * gets (`buildRuntimeEnv`), and `cwd` the same working directory, so the
+   * helper is proved under the conditions it will actually run in.
+   */
+  agentMessageMcpPreflight?: (
+    server: Readonly<McpStdioServerConfig>,
+    env: Readonly<Record<string, string>>,
+    cwd?: string,
+  ) => Promise<void>;
   /**
    * Override the `tools/list` observation of a projected toolset MCP server.
    * Defaults to the real handshake (`mcp-tools-probe.ts`); tests substitute a
@@ -1642,14 +1656,50 @@ export class TaskRunner {
         decline(pick.reason, pick.retryable);
         return;
       }
+      // The environment EVERY child process of this task receives. Computed
+      // here, before admission, because the admission-time MCP probes below
+      // spawn host-configured commands too: handing them `process.env` would
+      // make the probe the one path where the daemon's own ambient
+      // credentials reach a server the runtime path itself filters out (see
+      // `./environment.ts`). One computation, one allowlist, both phases.
+      const env = buildRuntimeEnv({
+        ambient: process.env,
+        requirements: pick.descriptor.environmentRequirements,
+        locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
+      });
       let taskMcpServers = this.withAgentMessageMcp(
         resolvedMcp?.ok ? resolvedMcp.servers : undefined,
         taskId,
         messageRequirement,
       );
+      // Only the adapters that pre-grant projected toolset tools need the
+      // daemon's `tools/list` observation (see
+      // `RuntimeAdapterDescriptor.requiresMcpToolsetToolObservation`). An
+      // adapter that grants them itself must not pay a probe per projected
+      // server on every offer.
+      const needsToolsetObservation = resolvedMcp?.ok === true
+        && pick.descriptor.requiresMcpToolsetToolObservation === true;
+      // Same cwd the runtime CLI itself is spawned in, so a probed server
+      // resolves relative paths exactly as it will at run time. Only the
+      // Agent-home case is knowable this early: a non-Agent task's workspace
+      // directory is created after admission, below.
+      let probeCwd: string | undefined;
+      const probesAnMcpServer = needsToolsetObservation
+        || (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
+      if (probesAnMcpServer && agentRef !== undefined && this.deps.agentHome !== undefined) {
+        try {
+          probeCwd = (await this.deps.agentHome.layout.resolve(agentRef)).canonicalHome;
+        } catch (error) {
+          decline(
+            `Agent home admission failed: ${errorMessage(error)}`,
+            !(error instanceof AgentHomeResolutionError),
+          );
+          return;
+        }
+      }
       if (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
-          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!);
+          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, env, probeCwd);
         } catch (error) {
           decline(`required Agent message helper preflight failed: ${errorMessage(error)}`, false);
           return;
@@ -1667,23 +1717,53 @@ export class TaskRunner {
       // adapter is asked to admit the task. Both bundled runtimes refuse an
       // MCP tool they were not told to allow, and the only honest source for
       // those names is the server itself — device toolset configuration
-      // carries `command`/`args` and nothing more. Retryable: a server that
-      // cannot start or list right now may well start later, exactly like the
-      // workspace-busy declines above.
+      // carries `command`/`args` and nothing more.
+      //
+      // All servers are probed CONCURRENTLY under one shared deadline
+      // (`MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS`, see its own doc comment):
+      // `handleOffer` holds this connection's FIFO, so a serial loop would
+      // multiply the timeout by the server count and let one unresponsive
+      // command delay `task.cancel`/`task.approve` for minutes. Every probe
+      // kills its own child when the deadline expires, so a decline never
+      // leaves a probed server running.
+      //
+      // Retryability follows the KIND of failure, not the phase: a spawn
+      // error, an early exit, or a timeout may well succeed later and stays
+      // retryable, exactly like the workspace-busy declines below. A server
+      // that answered and reported an ungrantable tool name has stated a
+      // permanent fact about itself — re-offering the task would probe the
+      // same command and get the same answer forever, so that declines
+      // non-retryably and names the server and the tool.
       let mcpToolsetTools: Record<string, readonly string[]> | undefined;
-      if (resolvedMcp?.ok) {
-        mcpToolsetTools = {};
-        for (const [serverName, server] of Object.entries(resolvedMcp.servers)) {
-          try {
-            const tools = await (this.deps.mcpToolsetToolsProbe ?? probeMcpServerTools)(server, { label: `MCP toolset server "${serverName}"` });
-            if (tools.length === 0) throw new Error('tools/list reported no tools');
-            mcpToolsetTools[serverName] = Object.freeze([...tools]);
-          } catch (error) {
-            decline(`required MCP toolset server "${serverName}" could not be observed: ${errorMessage(error)}`, true);
-            return;
-          }
+      if (needsToolsetObservation) {
+        const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServerTools;
+        const entries = Object.entries(resolvedMcp!.servers);
+        const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
+          const tools = await probe(server, {
+            label: `MCP toolset server "${serverName}"`,
+            timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
+            env,
+            ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
+          });
+          if (tools.length === 0) throw new Error('tools/list reported no tools');
+          return Object.freeze([...tools]) as readonly string[];
+        }));
+        const observed: Record<string, readonly string[]> = {};
+        let failure: { serverName: string; error: unknown } | undefined;
+        for (let index = 0; index < entries.length; index += 1) {
+          const serverName = entries[index]![0];
+          const result = settled[index]!;
+          if (result.status === 'fulfilled') observed[serverName] = result.value;
+          else if (failure === undefined) failure = { serverName, error: result.reason };
         }
-        mcpToolsetTools = Object.freeze(mcpToolsetTools);
+        if (failure !== undefined) {
+          decline(
+            `required MCP toolset server "${failure.serverName}" could not be observed: ${errorMessage(failure.error)}`,
+            !(failure.error instanceof McpToolsProbeAuthorityError),
+          );
+          return;
+        }
+        mcpToolsetTools = Object.freeze(observed);
       }
       let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
       try {
@@ -1809,11 +1889,9 @@ export class TaskRunner {
         return;
       }
 
-      const env = buildRuntimeEnv({
-        ambient: process.env,
-        requirements: pick.descriptor.environmentRequirements,
-        locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
-      });
+      // `env` was built before admission (see its declaration above) so the
+      // MCP probes and the runtime child are guaranteed to share one
+      // allowlist decision rather than two computations that could drift.
       const manifest = sealRuntimeOperationManifest({
         taskId,
         runtimeId: pick.descriptor.id,

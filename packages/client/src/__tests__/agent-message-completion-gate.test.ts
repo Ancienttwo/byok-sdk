@@ -8,7 +8,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
-import { TaskRunner } from '../daemon/task-runner';
+import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const roots: string[] = [];
@@ -65,7 +65,7 @@ describe('required Agent message completion gate', () => {
     const researchExtractor = vi.fn(() => {
       throw new Error('message-only output is not a research document');
     });
-    const helperPreflight = vi.fn(async () => {});
+    const helperPreflight = vi.fn<NonNullable<TaskRunnerDeps['agentMessageMcpPreflight']>>(async () => {});
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary('byok-message-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -89,7 +89,15 @@ describe('required Agent message completion gate', () => {
 
     const messageMcp = adapter.startCalls[0]?.ctx.mcpServers?.byokagentmessage;
     expect(helperPreflight).toHaveBeenCalledOnce();
-    expect(helperPreflight).toHaveBeenCalledWith(messageMcp);
+    // The helper is proved under the conditions it will actually run in: the
+    // exact server config, the same allowlisted child environment the runtime
+    // gets (never `process.env` — `BYOK_*` is hard-denied there), and the
+    // Agent home as cwd.
+    const [preflightServer, preflightEnv, preflightCwd] = helperPreflight.mock.calls[0]!;
+    expect(preflightServer).toEqual(messageMcp);
+    expect(preflightEnv).toEqual(adapter.startCalls[0]?.ctx.env);
+    expect(Object.keys(preflightEnv!)).not.toContain('BYOK_STORE_DIR');
+    expect(preflightCwd).toBe(adapter.startCalls[0]?.ctx.workspaceDir);
     expect(messageMcp).toMatchObject({
       command: process.execPath,
       args: ['/sdk/byok-agent-message-mcp.js'],

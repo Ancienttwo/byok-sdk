@@ -194,6 +194,26 @@ export interface RuntimeAdapterDescriptor {
   readonly environmentRequirements: RuntimeEnvironmentRequirements;
   /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
   readonly supportsDispatchSelection: boolean;
+  /**
+   * Whether this adapter actually CONSUMES
+   * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
+   * pre-grants each projected toolset server's tools in the runtime's own
+   * grant surface (claude's `--allowedTools`, codex's `enabled_tools` +
+   * per-tool `approval_mode`) and therefore needs the daemon to observe
+   * them first.
+   *
+   * The daemon uses this, and only this, to decide whether to pay for the
+   * pre-admission `tools/list` probe of every projected server
+   * (`daemon/mcp-tools-probe.ts`). An adapter that projects toolsets through
+   * its own proxy and grants them itself (the pi adapter) declares nothing
+   * here and never makes an offer wait on a probe it has no use for.
+   *
+   * Omission is fail-closed in the direction that matters: no probe means no
+   * observation, and an adapter that does consume the observation rejects a
+   * projected server it has no tool names for (`adapters/mcp-tool-grants.ts`).
+   * A grant is never widened by a missing declaration.
+   */
+  readonly requiresMcpToolsetToolObservation?: boolean;
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -321,6 +341,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
   return Object.freeze({
     id: descriptor.id,
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
+    requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     capabilities: Object.freeze({
       steer: descriptor.capabilities.steer === true,
       resume: descriptor.capabilities.resume === true,

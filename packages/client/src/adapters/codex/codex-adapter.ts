@@ -87,6 +87,11 @@ export class CodexAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
+    // `mcp_servers.<name>.enabled_tools` plus a per-tool `approval_mode`
+    // names each projected toolset tool explicitly, so this adapter cannot
+    // admit a projected server without the daemon's own `tools/list`
+    // observation of it.
+    requiresMcpToolsetToolObservation: true,
     capabilities: {
       steer: false,
       resume: true,
@@ -349,6 +354,19 @@ async function probeCodexMcpToolApproval(
   server: NonNullable<RuntimeAdapterPrepareInput['mcpServers']>[string],
   tools: readonly string[],
 ): Promise<void> {
+  // NOT `--ignore-user-config`, deliberately: the real turn is launched with
+  // that flag (`codexMcpConfigArgs`), but `codex mcp get` does not accept it —
+  // codex-cli 0.149.0 answers `error: unexpected argument '--ignore-user-config'
+  // found` whether it is placed before or after the subcommand (`codex mcp get
+  // --help` lists only `-c/--config`, `--json`, `--enable`, `--disable`). The
+  // read-back therefore resolves `~/.codex/config.toml` on top of the `-c`
+  // overrides below, so it validates a slightly wider configuration than the
+  // one that actually runs. The `-c` overrides pin every key this grant
+  // depends on (command, `enabled_tools`, per-tool `approval_mode`), so a
+  // user-level entry cannot weaken the assertion; it could only add keys the
+  // real run would drop. Closing that last gap needs an isolated `CODEX_HOME`
+  // for the probe — a filesystem side effect in `prepare()` — and is not
+  // taken here.
   const probeArgs = [
     'mcp', 'get', name, '--json',
     '-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`,

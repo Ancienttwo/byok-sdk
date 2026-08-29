@@ -164,6 +164,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'claude',
     supportsDispatchSelection: true,
+    // `--allowedTools mcp__<server>__<tool>` names each projected toolset
+    // tool explicitly, so this adapter cannot admit a projected server
+    // without the daemon's own `tools/list` observation of it.
+    requiresMcpToolsetToolObservation: true,
     capabilities: {
       steer: false,
       resume: true,

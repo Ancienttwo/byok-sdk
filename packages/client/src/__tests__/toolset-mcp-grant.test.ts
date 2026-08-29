@@ -141,6 +141,44 @@ describe('projected MCP toolset grant — claude', () => {
       reason: expect.stringContaining('no tools/list observation'),
     });
   });
+
+  it('fails non-retryably when the tool observation drifts between prepare() and start()', async () => {
+    const captured: string[][] = [];
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    await expect(startWith(adapter, {
+      workspaceDir: await workspace('byok-claude-grant-drift-'),
+      policy: { mode: 'readonly', allowTools: [] },
+      env: process.env,
+      mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
+      mcpToolsetTools: { saleskoprobe: ['echo'] },
+      startMcpToolsetTools: { saleskoprobe: ['echo', 'delete_everything'] },
+    })).rejects.toMatchObject({
+      category: 'authority',
+      retry: 'non-retryable',
+      message: expect.stringContaining('different MCP toolset tool authority'),
+    });
+    // The widened grant never reached a process.
+    expect(captured).toHaveLength(0);
+  });
+
+  it('rejects a projected server name that cannot form an mcp__<server>__<tool> identifier', async () => {
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
+    await expect(adapter.prepare({
+      offer: { instruction: 'x', policy: { mode: 'readonly', allowTools: [] } },
+      policy: { mode: 'readonly', allowTools: [] },
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: ['salesko'],
+      mcpServers: { 'salesko.probe': { command: process.execPath } },
+      mcpToolsetTools: { 'salesko.probe': ['echo'] },
+    })).resolves.toMatchObject({
+      kind: 'reject',
+      retryable: false,
+      reason: expect.stringContaining('cannot be expressed as a runtime tool grant'),
+    });
+  });
 });
 
 describe('projected MCP toolset grant — codex', () => {
@@ -248,6 +286,43 @@ describe('projected MCP toolset grant — codex', () => {
       kind: 'reject',
       retryable: false,
       reason: expect.stringContaining('no tools/list observation'),
+    });
+  });
+
+  it('fails non-retryably when the tool observation drifts between prepare() and start()', async () => {
+    const captured: string[][] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: CODEX_FIXTURE, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    await expect(startWith(adapter, {
+      workspaceDir: await workspace('byok-codex-grant-drift-'),
+      policy: { mode: 'readonly', allowTools: [] },
+      env: process.env,
+      mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
+      mcpToolsetTools: { saleskoprobe: ['echo'] },
+      startMcpToolsetTools: { saleskoprobe: ['echo', 'delete_everything'] },
+    })).rejects.toMatchObject({
+      category: 'authority',
+      retry: 'non-retryable',
+      message: expect.stringContaining('different MCP toolset tool authority'),
+    });
+    expect(captured).toHaveLength(0);
+  });
+
+  it('rejects a projected server name that cannot form a flat mcp_servers.<name> config key', async () => {
+    const adapter = new CodexAdapter({ resolveBin: () => ({ command: CODEX_FIXTURE, source: 'path' }) });
+    await expect(adapter.prepare({
+      offer: { instruction: 'x', policy: { mode: 'readonly', allowTools: [] } },
+      policy: { mode: 'readonly', allowTools: [] },
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: ['salesko'],
+      mcpServers: { 'salesko.probe': { command: process.execPath } },
+      mcpToolsetTools: { 'salesko.probe': ['echo'] },
+    })).resolves.toMatchObject({
+      kind: 'reject',
+      retryable: false,
+      reason: expect.stringContaining('cannot be expressed as a runtime tool grant'),
     });
   });
 });

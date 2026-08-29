@@ -12,6 +12,12 @@ import { preflightAgentMessageMcp } from '../daemon/agent-message-mcp-preflight'
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))));
 
+/**
+ * Stands in for the allowlisted child environment `buildRuntimeEnv` produces
+ * for the selected runtime — the preflight never sees `process.env` itself.
+ */
+const PROBE_BASE_ENV: Readonly<Record<string, string>> = { PATH: process.env.PATH ?? '' };
+
 async function fixture(name: string, source: string): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sdk-helper-'));
   roots.push(root);
@@ -51,10 +57,10 @@ describe('SDK-reserved helper host composition', () => {
       command: process.execPath,
       args: [helper],
       env: { BYOK_STORE_DIR: '/tmp/store', BYOK_PRODUCT_ID: 'product', BYOK_AGENT_MESSAGE_CONTEXT: 'context' },
-    })).resolves.toBeUndefined();
+    }, PROBE_BASE_ENV)).resolves.toBeUndefined();
 
     const broken = await fixture('broken.mjs', `process.stderr.write('unknown command\\n'); process.exit(2);`);
-    await expect(preflightAgentMessageMcp({ command: process.execPath, args: [broken] }))
+    await expect(preflightAgentMessageMcp({ command: process.execPath, args: [broken] }, PROBE_BASE_ENV))
       .rejects.toThrow(/exited before handshake.*unknown command/);
   });
 
@@ -72,6 +78,6 @@ describe('SDK-reserved helper host composition', () => {
     await expect(preflightAgentMessageMcp({
       command: process.execPath,
       args: [delayedHelper],
-    })).resolves.toBeUndefined();
+    }, PROBE_BASE_ENV)).resolves.toBeUndefined();
   });
 });

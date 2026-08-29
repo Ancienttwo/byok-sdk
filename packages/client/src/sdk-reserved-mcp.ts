@@ -10,9 +10,21 @@ export const APPROVAL_MCP_SERVER_NAME = 'byokapproval';
  * never a projected host toolset server: `toolset-registry.ts` refuses to
  * configure one, and the adapters grant each reserved server exactly the
  * fixed tool its own protocol needs rather than anything observed.
+ *
+ * A frozen tuple rather than a `Set`: `Object.freeze` on a `Set` freezes the
+ * object's own properties and leaves `add`/`delete` fully functional, so the
+ * previous shape advertised an immutability it did not have. Three entries
+ * make `includes` the same cost as a hash lookup, and the array really is
+ * immutable. Use {@link isReservedMcpServerName} rather than reaching for
+ * membership directly.
  */
-export const RESERVED_MCP_SERVER_NAMES: ReadonlySet<string> = Object.freeze(new Set([
+export const RESERVED_MCP_SERVER_NAMES = Object.freeze([
   AGENT_MESSAGE_MCP_SERVER_NAME,
   AGENT_MEMORY_MCP_SERVER_NAME,
   APPROVAL_MCP_SERVER_NAME,
-])) as ReadonlySet<string>;
+] as const) satisfies readonly string[];
+
+/** Whether `name` is one of the SDK-owned MCP server names above. */
+export function isReservedMcpServerName(name: string): boolean {
+  return (RESERVED_MCP_SERVER_NAMES as readonly string[]).includes(name);
+}

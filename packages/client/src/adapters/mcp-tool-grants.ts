@@ -1,5 +1,6 @@
 import type { McpStdioServerConfig, McpToolsetToolObservation } from '../types';
-import { RESERVED_MCP_SERVER_NAMES } from '../sdk-reserved-mcp';
+import { isReservedMcpServerName } from '../sdk-reserved-mcp';
+import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../daemon/mcp-tools-probe';
 
 /** One projected toolset server and the exact tool names observed on it. */
 export interface McpToolsetGrant {
@@ -33,7 +34,19 @@ export function resolveMcpToolsetGrants(
   servers: Readonly<Record<string, McpStdioServerConfig>> | undefined,
   observation: McpToolsetToolObservation | undefined,
 ): McpToolsetGrantResolution {
-  const projected = Object.keys(servers ?? {}).filter((name) => !RESERVED_MCP_SERVER_NAMES.has(name)).sort();
+  const projected = Object.keys(servers ?? {}).filter((name) => !isReservedMcpServerName(name)).sort();
+  // The server half of `mcp__<server>__<tool>` / `mcp_servers.<server>
+  // .tools.<tool>.approval_mode` is interpolated into runtime authority
+  // exactly like the tool half is, so it gets the same shape gate. A `.`
+  // alone would land the codex grant in a different TOML table than the
+  // server definition it is supposed to govern.
+  const ungrantableServers = projected.filter((name) => !GRANTABLE_MCP_SERVER_NAME.test(name));
+  if (ungrantableServers.length > 0) {
+    return {
+      ok: false,
+      reason: `projected MCP toolset server name(s) [${ungrantableServers.join(', ')}] cannot be expressed as a runtime tool grant — refusing to start a task whose grants would be ambiguous`,
+    };
+  }
   const observed = observation ?? {};
   const unexpected = Object.keys(observed).filter((name) => !projected.includes(name)).sort();
   if (unexpected.length > 0) {
@@ -49,6 +62,18 @@ export function resolveMcpToolsetGrants(
       return {
         ok: false,
         reason: `no tools/list observation for projected MCP toolset server "${server}" — refusing to start a task whose toolset tools cannot be granted`,
+      };
+    }
+    // The daemon's probe already rejects an ungrantable tool name at
+    // observation time; this repeats the check because `start()` is handed a
+    // separately-supplied observation object, and an adapter must never
+    // interpolate a name into CLI authority on the strength of an upstream
+    // check it cannot see.
+    const ungrantableTools = tools.filter((tool) => typeof tool !== 'string' || !GRANTABLE_TOOL_NAME.test(tool));
+    if (ungrantableTools.length > 0) {
+      return {
+        ok: false,
+        reason: `MCP toolset server "${server}" reported tool name(s) [${ungrantableTools.map((tool) => JSON.stringify(tool)).join(', ')}] that cannot be expressed as a runtime tool grant`,
       };
     }
     grants.push({ server, tools: Object.freeze([...tools].sort()) });

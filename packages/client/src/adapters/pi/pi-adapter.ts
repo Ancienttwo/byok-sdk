@@ -144,6 +144,11 @@ export class PiAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
     supportsDispatchSelection: true,
+    // `requiresMcpToolsetToolObservation` is deliberately absent: pi projects
+    // MCP servers through its own adapter extension and grants their tools
+    // itself, so it never reads `mcpToolsetTools`. Declaring the requirement
+    // would make every pi-routed toolset offer wait on a `tools/list` probe of
+    // every projected server for an observation nothing consumes.
     capabilities: {
       steer: true,
       resume: true,
