@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.1 / @byok-sdk/keys 0.3.6 — 2026-08-30
+
+Only the final assistant text run reaches the user.
+
+- `@byok-sdk/client`: the daemon-authored required Agent message carries only
+  the assistant text after the last tool interaction (falling back to the whole
+  run's text), so intermediate narration no longer ships to the user.
+
 ## 0.10.0 / @byok-sdk/keys 0.3.5 — 2026-08-29
 
 One physical machine, one active device row.

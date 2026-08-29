@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/ui-runtime",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "React-free deterministic Live Activity Timeline projection for BYOK task activity",
   "type": "module",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/cloud",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "BYOK SDK hosted device surface: stateless frozen-v1 HTTP handlers over tenant-first @byok-sdk/core ports",
   "type": "module",
   "license": "MIT",
