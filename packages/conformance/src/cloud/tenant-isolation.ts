@@ -58,13 +58,21 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
     it('does not let another tenant revoke a device it cannot see', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.devices.register(TENANT_A, registration('device-1'));
+        await stores.devices.register(TENANT_B, registration('device-2'));
 
         // A no-op, not an error: revoking what you cannot address changes nothing.
         await stores.devices.revoke(TENANT_B, 'device-1');
 
-        expect((await stores.devices.get(TENANT_A, 'device-1'))?.revoked).toBe(false);
+        expect(await stores.devices.get(TENANT_A, 'device-1')).toBeDefined();
+        expect(await stores.devices.list(TENANT_B)).toHaveLength(1);
+
+        // Revocation DELETES: the owner's own revoke removes the row, and the
+        // other tenant's untouched row proves the delete never reached across.
         await stores.devices.revoke(TENANT_A, 'device-1');
-        expect((await stores.devices.get(TENANT_A, 'device-1'))?.revoked).toBe(true);
+        expect(await stores.devices.get(TENANT_A, 'device-1')).toBeUndefined();
+        expect(await stores.devices.list(TENANT_A)).toHaveLength(0);
+        expect(await stores.devices.list(TENANT_B)).toHaveLength(1);
+        expect((await stores.devices.get(TENANT_B, 'device-2'))?.revoked).toBe(false);
       });
     });
 
@@ -76,15 +84,20 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
       // supersession by machine alone would silently revoke a stranger's
       // device. Asserted here rather than in one composition's own suite
       // because it is a property of the port, not of an implementation.
+      //
+      // Supersession DELETES the predecessor, so the cross-tenant assertion is
+      // now the strongest form available: the stranger's row is still THERE.
       const machineId = 'a'.repeat(64);
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.devices.register(TENANT_A, registration('device-1', { machineId }));
         await stores.devices.register(TENANT_B, registration('device-2', { machineId }));
         await stores.devices.register(TENANT_B, registration('device-3', { machineId }));
 
-        expect((await stores.devices.get(TENANT_A, 'device-1'))?.revoked).toBe(false);
-        expect((await stores.devices.get(TENANT_B, 'device-2'))?.revoked).toBe(true);
-        expect((await stores.devices.get(TENANT_B, 'device-3'))?.revoked).toBe(false);
+        expect(await stores.devices.get(TENANT_A, 'device-1')).toBeDefined();
+        expect(await stores.devices.list(TENANT_A)).toHaveLength(1);
+        expect(await stores.devices.get(TENANT_B, 'device-2')).toBeUndefined();
+        expect(await stores.devices.get(TENANT_B, 'device-3')).toBeDefined();
+        expect(await stores.devices.list(TENANT_B)).toHaveLength(1);
       });
     });
 
@@ -107,12 +120,15 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
 
     it('keeps a revocation visible to the pre-tenant resolve immediately', async () => {
       // One row, two access paths — never two copies to keep in sync. A stale
-      // pre-tenant index is a revoked device that can still get a token.
+      // pre-tenant index is a revoked device that can still get a token, and
+      // now that revocation deletes the row the index must lose it too:
+      // the revoked device and the never-registered one resolve identically.
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.devices.register(TENANT_A, registration('device-1'));
         await stores.devices.revoke(TENANT_A, 'device-1');
 
-        expect((await stores.devices.resolveByDeviceId('device-1'))?.revoked).toBe(true);
+        expect(await stores.devices.resolveByDeviceId('device-1')).toBeUndefined();
+        expect(await stores.devices.resolveByDeviceId('never-registered')).toBeUndefined();
       });
     });
 

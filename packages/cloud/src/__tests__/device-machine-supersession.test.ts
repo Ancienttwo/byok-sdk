@@ -27,20 +27,21 @@ describe('device machine supersession (protocol §6.1 `machineId`)', () => {
 
     expect(second.deviceId).not.toBe(first.deviceId);
     const devices = await harness.stores.devices.list(TENANT_A);
-    expect(devices).toHaveLength(2);
-    expect(devices.filter((device) => !device.revoked).map((device) => device.deviceId)).toEqual([
-      second.deviceId,
-    ]);
-    // Superseded, not deleted: the prior grant stays as the audit fact that
-    // this machine once held it.
-    expect((await harness.stores.devices.get(TENANT_A, first.deviceId))?.revoked).toBe(true);
-    expect((await harness.stores.devices.get(TENANT_A, first.deviceId))?.machineId).toBe(MACHINE_ONE);
+    // Exactly one row, not one active row among two: the predecessor is gone.
+    expect(devices).toHaveLength(1);
+    expect(devices.map((device) => device.deviceId)).toEqual([second.deviceId]);
+    expect(devices[0]?.machineId).toBe(MACHINE_ONE);
+    expect(devices.every((device) => !device.revoked)).toBe(true);
+    // Superseded means DELETED. A lingering row is a credential every read
+    // path has to remember to exclude; absence needs no remembering.
+    expect(await harness.stores.devices.get(TENANT_A, first.deviceId)).toBeUndefined();
+    expect(await harness.stores.devices.resolveByDeviceId(first.deviceId)).toBeUndefined();
   });
 
   it('makes the superseded device immediately unusable on the pre-tenant resolve path', async () => {
-    // A revoked row that could still mint a token is the whole failure this
-    // supersession is supposed to prevent, so it is asserted rather than
-    // inferred from the `revoked` flag.
+    // A superseded row that could still mint a token is the whole failure this
+    // supersession is supposed to prevent, so it is asserted at the route
+    // rather than inferred from the store's shape.
     const harness = createHarness();
 
     const first = await harness.pairDevice(TENANT_A, PRODUCT_ID, MACHINE_ONE);
@@ -60,8 +61,8 @@ describe('device machine supersession (protocol §6.1 `machineId`)', () => {
     const one = await harness.pairDevice(TENANT_A, PRODUCT_ID, MACHINE_ONE);
     const two = await harness.pairDevice(TENANT_A, PRODUCT_ID, MACHINE_TWO);
 
-    const active = (await harness.stores.devices.list(TENANT_A)).filter((device) => !device.revoked);
-    expect(active.map((device) => device.deviceId).sort()).toEqual([one.deviceId, two.deviceId].sort());
+    const rows = await harness.stores.devices.list(TENANT_A);
+    expect(rows.map((device) => device.deviceId).sort()).toEqual([one.deviceId, two.deviceId].sort());
   });
 
   it('supersedes nothing when no machineId is sent', async () => {
@@ -88,7 +89,7 @@ describe('device machine supersession (protocol §6.1 `machineId`)', () => {
     const anonymous = await harness.pairDevice(TENANT_A);
     await harness.pairDevice(TENANT_A, PRODUCT_ID, MACHINE_ONE);
 
-    expect((await harness.stores.devices.get(TENANT_A, anonymous.deviceId))?.revoked).toBe(false);
+    expect(await harness.stores.devices.get(TENANT_A, anonymous.deviceId)).toBeDefined();
   });
 
   it('never reaches across tenants, even for an identical machine digest', async () => {
@@ -101,8 +102,8 @@ describe('device machine supersession (protocol §6.1 `machineId`)', () => {
     const inB = await harness.pairDevice(TENANT_B, PRODUCT_ID, MACHINE_ONE);
     await harness.pairDevice(TENANT_B, PRODUCT_ID, MACHINE_ONE);
 
-    expect((await harness.stores.devices.get(TENANT_A, inA.deviceId))?.revoked).toBe(false);
-    expect((await harness.stores.devices.get(TENANT_B, inB.deviceId))?.revoked).toBe(true);
+    expect(await harness.stores.devices.get(TENANT_A, inA.deviceId)).toBeDefined();
+    expect(await harness.stores.devices.get(TENANT_B, inB.deviceId)).toBeUndefined();
   });
 
   it('never reaches across products within one tenant', async () => {
@@ -111,8 +112,8 @@ describe('device machine supersession (protocol §6.1 `machineId`)', () => {
     const inDefaultProduct = await harness.pairDevice(TENANT_A, PRODUCT_ID, MACHINE_ONE);
     const inOtherProduct = await harness.pairDevice(TENANT_A, OTHER_PRODUCT, MACHINE_ONE);
 
-    expect((await harness.stores.devices.get(TENANT_A, inDefaultProduct.deviceId))?.revoked).toBe(false);
-    expect((await harness.stores.devices.get(TENANT_A, inOtherProduct.deviceId))?.revoked).toBe(false);
+    expect(await harness.stores.devices.get(TENANT_A, inDefaultProduct.deviceId)).toBeDefined();
+    expect(await harness.stores.devices.get(TENANT_A, inOtherProduct.deviceId)).toBeDefined();
   });
 
   it('rejects a malformed machineId at the wire boundary instead of storing it', async () => {

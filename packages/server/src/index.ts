@@ -147,8 +147,12 @@ export interface ByokServer {
   };
   /**
    * Device revocation (§6.3) — server-side only, no wire message. Revoking a
-   * device makes its next `/byok/challenge`, `/byok/token`, WSS connect, or
-   * authed HTTP call get a 401; its only recourse is to re-run `/byok/pair`.
+   * device DELETES its registration, so its next `/byok/challenge`,
+   * `/byok/token`, WSS connect, or authed HTTP call gets a 401 — the same
+   * answer as for a device id that was never registered — and its only
+   * recourse is to re-run `/byok/pair`. The device-scoped state the row
+   * owned (outstanding challenge nonces, presence, inbound dedup) is deleted
+   * with it; what the device DID (tasks, receipts) is history and survives.
    *
    * S1: tenant-first, and a tenant can only revoke a device it owns — a
    * `(tenantId, deviceId)` pair belonging to someone else resolves to
@@ -253,7 +257,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       subscribe: () => hub.subscribeServerEvents(),
     },
     devices: {
-      revoke: (tenantId: TenantId, deviceId: string) => devices.revoke(tenantId, deviceId),
+      revoke: (tenantId: TenantId, deviceId: string): void => {
+        // §6.3: the registration and the device-scoped state that only
+        // existed to serve it go together. `DeviceRegistry.revoke` reports
+        // whether a row was actually removed, so revoking a device this
+        // tenant does not own (or one that never existed) touches nothing at
+        // all — no nonce, no presence entry, no dedup ring — and stays
+        // indistinguishable from a revoke that did nothing.
+        if (!devices.revoke(tenantId, deviceId)) return;
+        nonces.deleteForDevice(deviceId);
+        hub.forgetDevice(deviceId);
+      },
     },
     stop(): void {
       hub.stopLeaseReaper();

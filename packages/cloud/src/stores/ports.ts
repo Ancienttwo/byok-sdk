@@ -62,6 +62,12 @@ export interface DeviceRecord {
   readonly proofKeyId: string;
   /** Current proof signing-key rotation generation. */
   readonly proofKeyEpoch: number;
+  /**
+   * Always `false`. Revocation and machine supersession DELETE the record, so
+   * no implementation ever produces a `true` here; the field stays because
+   * every auth path reads it and a missing row must fail exactly as a revoked
+   * one used to.
+   */
   readonly revoked: boolean;
   /**
    * Client-hashed physical machine identity (lowercase hex SHA-256), when the
@@ -78,7 +84,7 @@ export interface DeviceRecord {
   readonly capabilities?: readonly string[];
 }
 
-/** Everything `POST /byok/pair` knows at registration time. `tenantId` is the store's first parameter; `revoked` is the store's own to set. */
+/** Everything `POST /byok/pair` knows at registration time. `tenantId` is the store's first parameter; `revoked` is the store's own to set (always `false`). */
 export interface DeviceRegistration {
   readonly productId: string;
   readonly deviceId: string;
@@ -88,9 +94,10 @@ export interface DeviceRegistration {
   readonly proofKeyEpoch: number;
   /**
    * Optional client-hashed physical machine identity from `PairRequest`. When
-   * present, `register` revokes this tenant/product's prior non-revoked rows
-   * carrying the same value before inserting, so one physical machine holds
-   * one active device row per product. It names no tenant and no product of
+   * present, `register` DELETES this tenant/product's prior rows carrying the
+   * same value — and the device-scoped state those rows were the only reason
+   * to keep — before inserting, so one physical machine holds one device row
+   * per product. It names no tenant and no product of
    * its own — both still come from the redeemed pairing code's claims — so it
    * can only ever supersede rows the caller already addressed.
    */
@@ -98,18 +105,26 @@ export interface DeviceRegistration {
 }
 
 export interface DeviceDirectory {
-  /** Registers the device. With `input.machineId` set this ALSO revokes this tenant/product's prior non-revoked rows carrying that same machine identity — one physical machine, one active row. */
+  /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row. */
   register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
   /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
+  /**
+   * Deletes the registration and the device-scoped state it owned (presence,
+   * challenge nonces, assertion-replay entries, inbound dedup) — never the
+   * history keyed by the device_id string. A no-op for a device this tenant
+   * cannot address. Afterwards every read answers exactly as it does for a
+   * device that was never registered.
+   */
   revoke(tenant: TenantId, deviceId: string): Promise<void>;
   list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
-  /** Set-wise tenant observation; revoked devices never contribute presence. */
+  /** Set-wise tenant observation. `revokedDeviceCount` is structurally 0 — a revoked device has no row to count. */
   readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness>;
   /**
    * Persist a capability snapshot obtained from an authenticated device
-   * message. Implementations may return `undefined` for an unknown/revoked
-   * device; callers must fail closed in that case.
+   * message. Implementations may return `undefined` for an unknown (including
+   * revoked, which is the same absence) device; callers must fail closed in
+   * that case.
    */
   recordCapabilities(
     tenant: TenantId,

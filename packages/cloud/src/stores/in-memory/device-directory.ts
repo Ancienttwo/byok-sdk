@@ -3,9 +3,15 @@
  *
  * Rows live under a `(tenant, deviceId)` composite key, so a cross-tenant read
  * is not "denied" — it addresses a different key space and finds nothing
- * (§12.6.2 layer 3). The pre-tenant index below holds the SAME record objects,
- * so a revocation applied through the composite key is immediately visible to
- * `/byok/challenge` and `/byok/token` with no second copy to keep in sync.
+ * (§12.6.2 layer 3). The pre-tenant index below maps a deviceId to that same
+ * composite key, so a revocation applied through the composite key is
+ * immediately visible to `/byok/challenge` and `/byok/token` with no second
+ * copy to keep in sync — and a deleted row is removed from BOTH in one step.
+ *
+ * Revocation DELETES. `DeviceRecord.revoked` survives as the field every auth
+ * path already reads, but no record this store writes ever carries `true`:
+ * revocation and machine supersession remove the record outright, so "revoked"
+ * and "never registered" are one indistinguishable answer rather than two.
  */
 import {
   PRESENCE_LEVELS,
@@ -30,24 +36,29 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
       devicePublicKey: input.devicePublicKey,
       proofKeyId: input.proofKeyId,
       proofKeyEpoch: input.proofKeyEpoch,
+      // Always false, and there is no writer that sets it true — see the file
+      // header. The field stays because every auth path reads it.
       revoked: false,
       ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
     };
-    // One physical machine, one active device row per product. The scan is
+    // One physical machine, one device row per product. The scan is
     // deliberately narrowed by tenant AND product AND a present machineId:
     // an absent machineId matches nothing, so devices that could not identify
-    // their machine never supersede each other. Prior rows are revoked rather
-    // than deleted — a revoked row is still the audit fact that this machine
-    // held that grant, and revocation is already the state every read path
-    // (`resolveDevice`, readiness, presence) knows how to exclude.
+    // their machine never supersede each other. Prior rows are DELETED, not
+    // flagged: a superseded grant that lingers as a row is a credential the
+    // directory still has to remember to exclude on every read path, and the
+    // history of which machine held which grant belongs to the audit surfaces
+    // keyed by device id (tasks, egress, proof receipts), not to the directory.
+    //
+    // The device being registered is skipped: re-pairing the SAME deviceId is
+    // an in-place replacement below, not a supersession of itself.
     if (input.machineId !== undefined) {
-      for (const [key, existing] of this.#byTenant) {
-        if (existing.revoked) continue;
+      for (const [key, existing] of [...this.#byTenant]) {
         if (existing.deviceId === record.deviceId) continue;
         if (existing.tenantId !== tenant) continue;
         if (existing.productId !== input.productId) continue;
         if (existing.machineId !== input.machineId) continue;
-        this.#byTenant.set(key, { ...existing, revoked: true });
+        this.#forget(key, existing.deviceId);
       }
     }
     const key = tenantKey(tenant, record.deviceId);
@@ -60,11 +71,25 @@ export class InMemoryDeviceDirectory implements DeviceDirectory {
     return this.#byTenant.get(tenantKey(tenant, deviceId));
   }
 
+  /**
+   * Revocation removes the registration. A no-op for a device this tenant does
+   * not own: revoking what you cannot address changes nothing.
+   */
   async revoke(tenant: TenantId, deviceId: string): Promise<void> {
     const key = tenantKey(tenant, deviceId);
-    const record = this.#byTenant.get(key);
-    if (record === undefined) return;
-    this.#byTenant.set(key, { ...record, revoked: true });
+    if (!this.#byTenant.has(key)) return;
+    this.#forget(key, deviceId);
+  }
+
+  /**
+   * Drops a record from the composite map and, only when it still points here,
+   * from the pre-tenant index. A re-registration under the same deviceId has
+   * already re-pointed that index, and a stale delete would blind
+   * `/byok/challenge` to a device that is currently paired.
+   */
+  #forget(key: string, deviceId: string): void {
+    this.#byTenant.delete(key);
+    if (this.#byDeviceId.get(deviceId) === key) this.#byDeviceId.delete(deviceId);
   }
 
   async recordCapabilities(

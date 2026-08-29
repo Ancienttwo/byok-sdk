@@ -179,6 +179,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
     // ...and the owning tenant can, which is what proves the row is under A.
     started.byok.devices.revoke(TENANT_A, device.deviceId);
     expect((await probeAuthedRoute(started.baseUrl, device.accessToken)).status).toBe(401);
+    expect(started.byok.machines.list().map((machine) => machine.deviceId)).not.toContain(device.deviceId);
   });
 
   it('keeps two devices paired under different tenants independent', async () => {
@@ -235,6 +236,10 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
     const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
     const revoked = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
     started.byok.devices.revoke(TENANT_A, revoked.deviceId);
+    // §6.3: revocation DELETES the row, so "revoked" is not a fourth state
+    // the listing could still expose — the device id is now byte-for-byte one
+    // that was never registered.
+    expect(started.byok.machines.list().map((machine) => machine.deviceId)).not.toContain(revoked.deviceId);
 
     const unknownDevice = await forging.forge({
       deviceId: 'device-that-never-existed',
@@ -274,6 +279,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
     const started = await startWith();
     const device = await pairInto(started.baseUrl, started.byok, { tenantId: TENANT_A, productId: PRODUCT_ID });
     started.byok.devices.revoke(TENANT_A, device.deviceId);
+    expect(started.byok.machines.list().map((machine) => machine.deviceId)).not.toContain(device.deviceId);
 
     const forRevoked = await requestChallenge(started.baseUrl, device.deviceId);
     const forUnknown = await requestChallenge(started.baseUrl, 'device-that-never-existed');
@@ -339,6 +345,9 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
     const signature = device.identity.signNonce(challenge.nonce!);
 
     started.byok.devices.revoke(TENANT_A, device.deviceId);
+
+    // The registration is gone, not flagged — nothing is left to list.
+    expect(started.byok.machines.list().map((machine) => machine.deviceId)).not.toContain(device.deviceId);
 
     expect((await requestChallenge(started.baseUrl, device.deviceId)).status).toBe(401);
     expect((await requestToken(started.baseUrl, device.deviceId, challenge.nonce!, signature)).status).toBe(401);

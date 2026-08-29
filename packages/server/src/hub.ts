@@ -684,6 +684,37 @@ export class ConnectionHub {
     this.settleLongPollWaiter(deviceId);
   }
 
+  /**
+   * Drop every piece of hub state keyed by `deviceId` — called when the
+   * device's registration is DELETED (§6.3 revocation, composed in
+   * `index.ts`). Presence, its undelivered outbox, its inbound-dedup ring,
+   * any held long-poll, and its rate-limit episode suppression only ever
+   * existed to serve a row the directory can no longer name; leaving them
+   * would keep a deleted device visible as live state and would let a
+   * re-paired device inherit the dead one's dedup window and seq cursor.
+   *
+   * What the device DID is not revocation's business and is untouched here:
+   * task records (`taskStore`), egress and content receipts, and projection
+   * facts are history, not credentials.
+   *
+   * A live socket is closed rather than left attached — a still-open WS whose
+   * next envelope would re-create the presence entry we just deleted is a
+   * half-applied revocation. The close is detached first so `handleDisconnect`
+   * sees no connection state and skips its disconnect bookkeeping: the device
+   * is not going dark, it is gone.
+   */
+  forgetDevice(deviceId: string): void {
+    const conn = this.connections.get(deviceId);
+    this.connections.delete(deviceId);
+    this.outboxes.delete(deviceId);
+    this.dedupRings.delete(deviceId);
+    this.rateLimitEventEmittedFor.delete(deviceId);
+    // Settled AFTER the outbox is gone, so a held poll resolves empty rather
+    // than handing a revoked device one last batch of envelopes.
+    this.settleLongPollWaiter(deviceId);
+    conn?.ws?.close(1000, 'device revoked');
+  }
+
   // ---------------------------------------------------------------------
   // long-poll fallback (§8) — GET /byok/events, called from http.ts
   // ---------------------------------------------------------------------
@@ -2107,7 +2138,7 @@ export class ConnectionHub {
     const desired = this.agentHomeProjectionRequests.get(key);
     if (desired === undefined) return undefined;
     const device = this.devices.resolveByDeviceId(deviceId);
-    if (device === undefined || device.revoked) return undefined;
+    if (device === undefined) return undefined;
     return AgentHomeProjectionReadbackSchema.parse({
       tenantId: device.tenantId,
       deviceId,
@@ -2142,7 +2173,7 @@ export class ConnectionHub {
       return existing;
     }
     const device = this.devices.resolveByDeviceId(deviceId);
-    if (device === undefined || device.revoked) {
+    if (device === undefined) {
       throw new AgentHomeProjectionCompletionError('not_found', 'Agent-home projection device was not found');
     }
     const readback = AgentHomeProjectionReadbackSchema.parse({
