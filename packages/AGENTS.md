@@ -37,8 +37,8 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-08-28T02:38:32+0800
-- Last changed path: `packages/client/src/__tests__/fixtures/fake-codex.mjs`
+- Last architecture event: 2026-08-29T20:31:44+0800
+- Last changed path: `packages/client/src/__tests__/agent-memory-entry-constraints.test.ts`
 - Severity: low
 - Change type: source-change
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.

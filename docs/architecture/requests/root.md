@@ -2,10 +2,10 @@
 
 > **Status**: Pending
 > **Detected**: 2026-08-28T02:25:31+0800
-> **Updated**: 2026-08-28T02:38:32+0800
+> **Updated**: 2026-08-29T20:31:44+0800
 > **Severity**: high
 > **Change Type**: source-change
-> **File**: `packages/client/src/__tests__/fixtures/fake-codex.mjs`
+> **File**: `packages/client/src/__tests__/agent-memory-entry-constraints.test.ts`
 > **Functional Block**: `packages`
 > **Capability ID**: `root`
 > **Matched Prefix**: `packages`
@@ -16,7 +16,7 @@
 > **Contract Files**: `packages/AGENTS.md`, `packages/CLAUDE.md`
 > **Contract Sync Required**: false
 > **Spawn Recommended**: true
-> **Open Edits**: 73
+> **Open Edits**: 75
 
 ## Required Follow-up
 
@@ -33,6 +33,8 @@
 
 | Last Event | Severity | Change Type | File | Event Key |
 | --- | --- | --- | --- | --- |
+| 2026-08-29T20:31:44+0800 | low | source-change | `packages/client/src/__tests__/agent-memory-entry-constraints.test.ts` | `sha256:19c548a891fe019dd789bff5859248fe604fe0f4c8b6a8837627ca8181d98fdc` |
+| 2026-08-29T20:31:43+0800 | low | source-change | `packages/client/src/__tests__/agent-memory-embedded-entry.test.ts` | `sha256:18a7039c876675eaba27801730374d0aa5282b661dffdfc507ce8e2b3a6e8b70` |
 | 2026-08-28T02:38:32+0800 | low | source-change | `packages/client/src/__tests__/fixtures/fake-codex.mjs` | `sha256:c816c6de17eadc23292e5751508ef3eed20481e99aa611f789be847693a5d65d` |
 | 2026-08-28T02:27:57+0800 | low | source-change | `packages/client/src/__tests__/fixtures/fake-claude.mjs` | `sha256:43e8075525491d9081a89f542dd078e261b8b1ae3813336645a489010dc75f75` |
 | 2026-08-28T02:27:55+0800 | low | source-change | `packages/client/src/__tests__/fixtures/device-enrollment.ts` | `sha256:60fdf9f7451dfbdf81ac7a693df3edd7b8520eb002b2841c8534b971da0db7fb` |
@@ -111,8 +113,8 @@
 
 ```json
 {
-  "ts": "2026-08-28T02:38:32+0800",
-  "file_path": "packages/client/src/__tests__/fixtures/fake-codex.mjs",
+  "ts": "2026-08-29T20:31:44+0800",
+  "file_path": "packages/client/src/__tests__/agent-memory-entry-constraints.test.ts",
   "severity": "low",
   "functional_block": "packages",
   "capability_id": "root",
@@ -127,7 +129,7 @@
   "request_file": "docs/architecture/requests/root.md",
   "spawn_recommended": false,
   "contract_sync_required": false,
-  "event_key": "sha256:c816c6de17eadc23292e5751508ef3eed20481e99aa611f789be847693a5d65d"
+  "event_key": "sha256:19c548a891fe019dd789bff5859248fe604fe0f4c8b6a8837627ca8181d98fdc"
 }
 ```
 
@@ -135,6 +137,44 @@
 
 ```json
 [
+  {
+    "ts": "2026-08-29T20:31:44+0800",
+    "file_path": "packages/client/src/__tests__/agent-memory-entry-constraints.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:19c548a891fe019dd789bff5859248fe604fe0f4c8b6a8837627ca8181d98fdc"
+  },
+  {
+    "ts": "2026-08-29T20:31:43+0800",
+    "file_path": "packages/client/src/__tests__/agent-memory-embedded-entry.test.ts",
+    "severity": "low",
+    "functional_block": "packages",
+    "capability_id": "root",
+    "matched_prefix": "packages",
+    "architecture_domain": "sdk",
+    "architecture_capability": "sdk-root",
+    "architecture_module": "docs/architecture/sdk-architecture.md",
+    "workstream_dir": "tasks/workstreams/root",
+    "contract_agents": "packages/AGENTS.md",
+    "contract_claude": "packages/CLAUDE.md",
+    "change_type": "source-change",
+    "request_file": "docs/architecture/requests/root.md",
+    "spawn_recommended": false,
+    "contract_sync_required": false,
+    "event_key": "sha256:18a7039c876675eaba27801730374d0aa5282b661dffdfc507ce8e2b3a6e8b70"
+  },
   {
     "ts": "2026-08-28T02:38:32+0800",
     "file_path": "packages/client/src/__tests__/fixtures/fake-codex.mjs",
