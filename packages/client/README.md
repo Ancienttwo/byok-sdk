@@ -111,7 +111,9 @@ never a configured value, never a wildcard — are what each adapter grants:
 
 A projected server that cannot start, or that lists no tools, is declined
 pre-claim and retryably, rather than claimed and handed a toolset the model can
-list but never call.
+list but never call. A server that answers with a tool name that cannot be
+expressed as a runtime grant is declined permanently (`retryable: false`), with
+the server and the offending tool named in the decline.
 
 The daemon derives one sorted `configuredToolsets` snapshot from this
 validated registry. Only those logical IDs are advertised in `conn.hello`

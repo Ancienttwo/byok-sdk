@@ -13,8 +13,10 @@ Projected MCP toolset tools are now callable, not just listable.
   `approval_mode="approve"` with `approval_policy=never` and `sandbox_mode`
   untouched. `confirm` and `plan` deliberately never pre-grant, no wildcard or
   unobserved name is ever granted, Codex older than 0.149 is rejected before
-  spawn, and a projected server that cannot be observed is declined pre-claim
-  and retryably. Previously such a toolset was visible to the model and refused
+  spawn, a projected server that cannot start or lists no tools is declined
+  pre-claim and retryably, and a server that answers with a tool name that
+  cannot be expressed as a runtime grant is declined permanently, naming the
+  server and the tool. Previously such a toolset was visible to the model and refused
   by each runtime's own approval layer at call time.
 ## 0.10.2 / @byok-sdk/keys 0.3.7 — 2026-08-30
 
