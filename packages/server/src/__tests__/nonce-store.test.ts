@@ -38,4 +38,16 @@ describe('NonceStore pruning (§6.2)', () => {
 
     expect(store.size).toBe(2);
   });
+
+  it('drops every outstanding nonce for a device whose registration was deleted (§6.3)', () => {
+    const store = new NonceStore();
+    const first = store.issue('device-1');
+    store.issue('device-1');
+    store.issue('device-2');
+
+    store.deleteForDevice('device-1');
+
+    expect(store.size).toBe(1); // only device-2's nonce survives
+    expect(store.validate('device-1', first)).toBe(false);
+  });
 });

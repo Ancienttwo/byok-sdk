@@ -148,9 +148,10 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     // contract and carries only a deviceId, so the row is what tells this
     // server which tenant the device belongs to (see
     // `DeviceRegistry.resolveByDeviceId`). Unknown and revoked answer
-    // identically — no existence oracle.
+    // identically — no existence oracle — and since §6.3 revocation deletes
+    // the row, they are literally the same case here.
     const device = deps.devices.resolveByDeviceId(deviceId);
-    if (!device || device.revoked) {
+    if (!device) {
       return c.json({ error: 'unknown or revoked device' }, 401);
     }
 
@@ -168,7 +169,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     // is the credential here, and the row supplies the tenant/product the
     // renewed token gets bound to.
     const device = deps.devices.resolveByDeviceId(deviceId);
-    if (!device || device.revoked) {
+    if (!device) {
       return c.json({ error: 'unknown or revoked device' }, 401);
     }
     if (!deps.nonces.validate(deviceId, nonce)) {
