@@ -11,5 +11,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- (none)
+- [ ] 2026-08-28T02:38:32+0800 [high] `packages/client/src/__tests__/fixtures/fake-codex.mjs` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->

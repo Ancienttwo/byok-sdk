@@ -37,8 +37,8 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-08-27T08:54:48+0800
-- Last changed path: `packages/cloud/src/handlers/shared.ts`
+- Last architecture event: 2026-08-28T02:38:32+0800
+- Last changed path: `packages/client/src/__tests__/fixtures/fake-codex.mjs`
 - Severity: low
 - Change type: source-change
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.
@@ -50,7 +50,7 @@ Owns the root capability boundary declared in .ai/context/capabilities.json.
 - Verification: Use root required checks plus local commands recorded in this capability contract.
 - Latest snapshot: `(none yet)`
 - Semantic diagram source: `docs/architecture/sdk-architecture.md`
-- Pending architecture request: `(none)`
+- Pending architecture request: `docs/architecture/requests/root.md`
 
 ## Active Workstreams
 
