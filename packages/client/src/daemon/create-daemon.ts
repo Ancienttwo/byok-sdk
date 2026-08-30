@@ -79,6 +79,13 @@ import {
   parseAssertionIssueParams,
   parseEnrollmentPairParams,
   parseShutdownParams,
+  parseTeamContextParams,
+  parseTeamMessageAckParams,
+  parseTeamMessageInspectParams,
+  parseTeamMessagePostParams,
+  parseTeamMessageReadParams,
+  parseTeamWorkspaceCreateParams,
+  parseTeamWorkspaceJoinParams,
   parseToolsetsReloadParams,
   type AssertionIssueResult,
   type ControlActiveTask,
@@ -86,6 +93,7 @@ import {
   type ControlStorageStatus,
   type ShutdownReason,
 } from './control-protocol';
+import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
@@ -1187,6 +1195,7 @@ export function buildDaemonWithAdapters(
   let shuttingDown = false;
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
+  const teamWorkspaces = new LocalTeamWorkspace(storeDir);
   const store = new DeviceStore(storeDir, undefined, config.productId);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   let fleetJitter: FleetJitter | undefined;
@@ -2862,6 +2871,44 @@ export function buildDaemonWithAdapters(
         if (!parsed) throw new ControlError('bad_request', 'approvals.request requires {taskId, summary}');
         if (!runner) throw new ControlError('not_found', 'daemon is not started');
         return runner.requestApproval(parsed.taskId, parsed.summary);
+      },
+      'team_workspaces.create': async (params) => {
+        const parsed = parseTeamWorkspaceCreateParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_workspaces.create requires exactly {workspaceId,members,limits}');
+        return teamWorkspaces.createWorkspace(parsed);
+      },
+      'team_workspaces.list': () => teamWorkspaces.listWorkspaces(),
+      'team_workspaces.join': async (params) => {
+        const parsed = parseTeamWorkspaceJoinParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_workspaces.join requires exactly {workspaceId,memberId,ttlMs?}');
+        const lease = await teamWorkspaces.createMemberLease(parsed);
+        return { workspaceId: lease.workspaceId, memberId: lease.memberId, expiresAt: lease.expiresAt, context: encodeTeamMemberContext(lease) };
+      },
+      'team_workspaces.revoke': async (params) => {
+        const parsed = parseTeamContextParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_workspaces.revoke requires exactly {context}');
+        await teamWorkspaces.revokeMemberLease({ lease: decodeTeamMemberContext(parsed.context) });
+        return { revoked: true };
+      },
+      'team_messages.post': (params) => {
+        const parsed = parseTeamMessagePostParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_messages.post requires exactly {context,body,contentType?}');
+        return teamWorkspaces.postMessage({ lease: decodeTeamMemberContext(parsed.context), body: parsed.body, ...(parsed.contentType === undefined ? {} : { contentType: parsed.contentType }) });
+      },
+      'team_messages.read': (params) => {
+        const parsed = parseTeamMessageReadParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_messages.read requires exactly {context,afterSeq?}');
+        return teamWorkspaces.readMessages({ lease: decodeTeamMemberContext(parsed.context), ...(parsed.afterSeq === undefined ? {} : { afterSeq: parsed.afterSeq }) });
+      },
+      'team_messages.ack': (params) => {
+        const parsed = parseTeamMessageAckParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_messages.ack requires exactly {context,throughSeq}');
+        return teamWorkspaces.ackMessages({ lease: decodeTeamMemberContext(parsed.context), throughSeq: parsed.throughSeq });
+      },
+      'team_messages.inspect': (params) => {
+        const parsed = parseTeamMessageInspectParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_messages.inspect requires exactly {workspaceId,afterSeq?}');
+        return teamWorkspaces.inspectMessages(parsed.workspaceId, parsed.afterSeq);
       },
       'agent_messages.publish': (params) => {
         const parsed = parseAgentMessagePublishParams(params);

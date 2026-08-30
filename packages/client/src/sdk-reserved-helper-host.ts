@@ -4,7 +4,7 @@ import { runSdkReservedHelper } from './bin/sdk-reserved-helper-runners';
 
 export const BYOK_SDK_HELPER_SUBCOMMAND = '__byok_sdk_helper';
 
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp' | 'agent-team-mcp';
 
 export interface SdkHelperHostConfig {
   /**
@@ -27,6 +27,7 @@ const DIST_SCRIPT_BY_KIND: Readonly<Record<SdkReservedHelperKind, string>> = Obj
   'agent-message-mcp': 'byok-agent-message-mcp.js',
   'agent-memory-mcp': 'byok-agent-memory-mcp.js',
   'approval-mcp': 'byok-approval-mcp.js',
+  'agent-team-mcp': 'byok-agent-team-mcp.js',
 });
 
 function assertExecutable(executable: string): void {
@@ -63,7 +64,7 @@ export function resolveSdkReservedHelperBin(
 }
 
 function isHelperKind(value: string | undefined): value is SdkReservedHelperKind {
-  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'approval-mcp';
+  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'approval-mcp' || value === 'agent-team-mcp';
 }
 
 /**

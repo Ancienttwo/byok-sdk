@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream';
 import { connectControlClient, type ControlClient } from './control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
 import { serveAgentMemoryMcpOverStdio, type AgentMemoryMcpDeps } from './agent-memory-mcp-server';
+import { serveTeamMcpOverStdio, type TeamMcpDeps } from './team-mcp-server';
 import { serveApprovalMcpOverStdio, type ApprovalMcpDeps } from './approval-mcp-server';
 import type { SdkReservedHelperKind } from '../sdk-reserved-helper-host';
 
@@ -99,6 +100,27 @@ async function runApprovalMcp(): Promise<void> {
   await waitForInputClose();
 }
 
+async function runAgentTeamMcp(): Promise<void> {
+  const storeDir = required('BYOK_STORE_DIR');
+  const productId = required('BYOK_PRODUCT_ID');
+  const lease = required('BYOK_TEAM_MEMBER_CONTEXT');
+  let clientPromise: Promise<ControlClient> | undefined;
+  const client = async (): Promise<ControlClient> => {
+    if (!clientPromise) clientPromise = connectControlClient({ storeDir, productId }).then((result) => {
+      if (!result.ok) throw new Error(result.reason);
+      return result.client;
+    });
+    return clientPromise;
+  };
+  const deps: TeamMcpDeps = {
+    post: async (input) => (await client()).request('team_messages.post', { context: lease, ...input }),
+    read: async (input) => (await client()).request('team_messages.read', { context: lease, ...input }),
+    ack: async (input) => (await client()).request('team_messages.ack', { context: lease, ...input }),
+  };
+  serveTeamMcpOverStdio({ deps });
+  await waitForInputClose();
+}
+
 export async function runSdkReservedHelper(kind: SdkReservedHelperKind): Promise<void> {
   switch (kind) {
     case 'agent-message-mcp':
@@ -109,6 +131,9 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind): Promise
       return;
     case 'approval-mcp':
       await runApprovalMcp();
+      return;
+    case 'agent-team-mcp':
+      await runAgentTeamMcp();
       return;
   }
 }

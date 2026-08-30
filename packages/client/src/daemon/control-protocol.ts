@@ -693,3 +693,48 @@ export function parseShutdownParams(value: unknown): ShutdownParams {
   if (!isRecord(value)) return {};
   return value.reason === 'unpair' || value.reason === 'operator' ? { reason: value.reason } : {};
 }
+
+// ---------------------------------------------------------------------------
+// Local TeamWorkspace control methods (local-only; never cloud task wire)
+// ---------------------------------------------------------------------------
+
+export interface TeamWorkspaceCreateParams { workspaceId: string; members: string[]; limits: { maxMembers: number; maxMessages: number; maxBytes: number } }
+export interface TeamWorkspaceJoinParams { workspaceId: string; memberId: string; ttlMs?: number }
+export interface TeamContextParams { context: string }
+export interface TeamMessagePostParams extends TeamContextParams { body: string; contentType?: string }
+export interface TeamMessageReadParams extends TeamContextParams { afterSeq?: number }
+export interface TeamMessageAckParams extends TeamContextParams { throughSeq: number }
+export interface TeamMessageInspectParams { workspaceId: string; afterSeq?: number }
+
+const exactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(value).every((key) => keys.includes(key));
+const safeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0;
+const contextString = (value: unknown): value is string => typeof value === 'string' && value.length >= 32 && value.length <= 2048 && /^[A-Za-z0-9_-]+$/u.test(value);
+
+export function parseTeamWorkspaceCreateParams(value: unknown): TeamWorkspaceCreateParams | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['workspaceId', 'members', 'limits']) || typeof value.workspaceId !== 'string' || !Array.isArray(value.members) || !value.members.every((member) => typeof member === 'string') || !isRecord(value.limits) || !exactKeys(value.limits, ['maxMembers', 'maxMessages', 'maxBytes']) || !safeInteger(value.limits.maxMembers) || !safeInteger(value.limits.maxMessages) || !safeInteger(value.limits.maxBytes)) return undefined;
+  return { workspaceId: value.workspaceId, members: [...value.members], limits: { maxMembers: value.limits.maxMembers, maxMessages: value.limits.maxMessages, maxBytes: value.limits.maxBytes } };
+}
+export function parseTeamWorkspaceJoinParams(value: unknown): TeamWorkspaceJoinParams | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['workspaceId', 'memberId', 'ttlMs']) || typeof value.workspaceId !== 'string' || typeof value.memberId !== 'string' || (value.ttlMs !== undefined && !safeInteger(value.ttlMs))) return undefined;
+  return { workspaceId: value.workspaceId, memberId: value.memberId, ...(value.ttlMs === undefined ? {} : { ttlMs: value.ttlMs }) };
+}
+export function parseTeamContextParams(value: unknown): TeamContextParams | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['context']) || !contextString(value.context)) return undefined;
+  return { context: value.context };
+}
+export function parseTeamMessagePostParams(value: unknown): TeamMessagePostParams | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['context', 'body', 'contentType']) || !contextString(value.context) || typeof value.body !== 'string' || (value.contentType !== undefined && typeof value.contentType !== 'string')) return undefined;
+  return { context: value.context, body: value.body, ...(value.contentType === undefined ? {} : { contentType: value.contentType }) };
+}
+export function parseTeamMessageReadParams(value: unknown): TeamMessageReadParams | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['context', 'afterSeq']) || !contextString(value.context) || (value.afterSeq !== undefined && !safeInteger(value.afterSeq))) return undefined;
+  return { context: value.context, ...(value.afterSeq === undefined ? {} : { afterSeq: value.afterSeq }) };
+}
+export function parseTeamMessageAckParams(value: unknown): TeamMessageAckParams | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['context', 'throughSeq']) || !contextString(value.context) || !safeInteger(value.throughSeq)) return undefined;
+  return { context: value.context, throughSeq: value.throughSeq };
+}
+export function parseTeamMessageInspectParams(value: unknown): TeamMessageInspectParams | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['workspaceId', 'afterSeq']) || typeof value.workspaceId !== 'string' || (value.afterSeq !== undefined && !safeInteger(value.afterSeq))) return undefined;
+  return { workspaceId: value.workspaceId, ...(value.afterSeq === undefined ? {} : { afterSeq: value.afterSeq }) };
+}

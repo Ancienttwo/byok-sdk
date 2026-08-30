@@ -30,7 +30,7 @@ describe('SDK-reserved helper host composition', () => {
   it('keeps normal product argv untouched and resolves one explicit self-executable shape for all helpers', async () => {
     await expect(runSdkReservedHelperCommand(['status'])).resolves.toBe(false);
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'unknown'])).rejects.toThrow(/invalid/);
-    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'approval-mcp'] as const) {
+    for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'approval-mcp', 'agent-team-mcp'] as const) {
       expect(resolveSdkReservedHelperBin(kind, { mode: 'self-executable', executable: '/product/salesko-agent' }))
         .toEqual({
           command: '/product/salesko-agent',

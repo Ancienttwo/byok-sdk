@@ -308,4 +308,25 @@ OS-backed refresh-token custody, a PKCE desktop Google OAuth flow, exact domain
 policy, a real read-only Gmail metadata adapter, and a closed metadata-only MCP
 result.
 
+## Local TeamWorkspace and tmux communication pane
+
+`byok-agent team` provides one local-only broadcast channel for Pi, Claude,
+and Codex harnesses. The daemon owns durable ordered messages, member receipts,
+quotas, and short-lived member leases under `<storeDir>/team-workspaces/v1`.
+`team join` prints the exact `byokagentteam` stdio MCP configuration for a
+member; model tool inputs never contain workspace or sender identity.
+
+```bash
+byok-agent team create dev --members pi,claude,codex --config /absolute/agent.json
+byok-agent team join dev --member pi --config /absolute/agent.json
+byok-agent team open dev --tmux-bin /opt/homebrew/bin/tmux --config /absolute/agent.json
+```
+
+The tmux view has one explicit native dependency: tmux must be installed and
+its absolute executable path supplied with `--tmux-bin`. It is intentionally
+not an npm dependency and is not required to run the daemon, MCP channel, or
+plain watcher. Native Windows returns `unsupported_platform` for the tmux view.
+The launcher never uses `send-keys` or `capture-pane`; tmux displays the
+daemon-owned stream but is never message transport or protocol authority.
+
 MIT licensed. Node.js 22.22.0 or newer.

@@ -111,6 +111,26 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
+export {
+  LocalTeamWorkspace,
+  LocalTeamWorkspaceService,
+  TeamWorkspaceError,
+  TeamWorkspaceValidationError,
+  TeamWorkspaceNotFoundError,
+  TeamWorkspaceConflictError,
+  TeamWorkspaceQuotaError,
+  TeamWorkspaceLeaseError,
+  TeamWorkspaceReceiptError,
+  TeamWorkspaceCorruptError,
+  encodeTeamMemberContext,
+  decodeTeamMemberContext,
+  type TeamWorkspaceDefinition,
+  type TeamWorkspaceLimits,
+  type TeamMessage,
+  type TeamMemberLease,
+  type TeamWorkspaceMemberReceipt,
+} from './daemon/team-workspace';
+export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
 export type {
   Daemon,
   DaemonConfig,

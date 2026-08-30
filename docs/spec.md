@@ -445,6 +445,23 @@ into a directory the host names. Projection copies bytes rather than linking
 them, and re-verifies each file against the lock on the way out; the SDK never
 writes into `~/.claude/skills` or any equivalent directory on a host's behalf.
 
+## Local TeamWorkspace
+
+The client daemon may own a local-only TeamWorkspace independent of cloud task
+and TaskRunner authority. A workspace has an immutable id, CAS revision,
+explicit member set, bounded retention limits, ordered broadcast messages, and
+per-member monotonic delivered/acknowledged receipts. An accepted post is
+durable before its receipt is returned. Short-lived member leases bind sender
+and workspace identity outside model-controlled MCP arguments.
+
+The SDK-reserved `byokagentteam` stdio MCP server exposes only
+`post_team_message`, `read_team_messages`, and `ack_team_messages`. It reaches
+the daemon through the authenticated local control socket. tmux is an optional
+native view dependency selected by an explicit absolute executable path; it
+must not carry message bodies, inject prompts with `send-keys`, or infer
+delivery from `capture-pane`. This contract adds no cloud protocol, cross-device
+room, or task-manifest fallback.
+
 ## Task-scoped host MCP toolsets
 
 A SaaS task may require one or more host-integrated tools without making the

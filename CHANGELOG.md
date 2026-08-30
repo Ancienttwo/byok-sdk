@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Local agents can now share a durable SDK-owned TeamWorkspace across Pi,
+Claude, and Codex through the reserved `byokagentteam` MCP server. Messages are
+lease-bound, ordered, quota-bounded, and acknowledged monotonically. The new
+`byok-agent team open` command can display the same stream in a tmux comm pane
+when given an explicit absolute tmux binary; tmux never injects or captures
+agent terminal text and remains an optional native view dependency.
+
 Projected MCP toolset tools are now callable, not just listable.
 
 - A task carrying `requiredToolsets` now has each projected MCP server started

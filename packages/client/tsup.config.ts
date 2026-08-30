@@ -14,6 +14,7 @@ export default defineConfig({
     'src/bin/byok-approval-mcp.ts',
     'src/bin/byok-agent-message-mcp.ts',
     'src/bin/byok-agent-memory-mcp.ts',
+    'src/bin/byok-agent-team-mcp.ts',
   ],
   format: ['esm'],
   target: 'es2022',
