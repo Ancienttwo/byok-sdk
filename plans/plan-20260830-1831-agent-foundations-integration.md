@@ -133,12 +133,12 @@ The direction fails if a strict MCP client cannot complete initialize/initialize
 
 ## Task Breakdown
 
-- [ ] Re-gate and integrate `readonly-toolset-mcp-grant`, then integrate `pi-subagents-dependency` in dependency order.
+- [x] Re-gate and integrate `readonly-toolset-mcp-grant`, then integrate `pi-subagents-dependency` in dependency order.
 - [x] Implement TeamWorkspace durable registry/messages/receipts/lease authority with bounded limits and fail-closed validation.
 - [x] Add authenticated control methods and SDK-reserved MCP helper with strict three-tool schema.
 - [x] Add `byok-agent team` CLI operations and explicit tmux watcher pane with absolute executable preflight.
 - [x] Add targeted durability, authorization, MCP handshake, tmux argv/no-send-keys, and unsupported-platform tests.
-- [ ] Run build, typecheck, full tests, strict workflow, packed-artifact smoke, and a disposable real-tmux smoke.
+- [x] Run build, typecheck, full tests, strict workflow, packed-artifact smoke, and a disposable real-tmux smoke.
 - [ ] Freeze independent review evidence; do not push, publish, tag, or deploy.
 
 ## Evidence Contract
@@ -162,10 +162,10 @@ The direction fails if a strict MCP client cannot complete initialize/initialize
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Re-gate and integrate `readonly-toolset-mcp-grant`, then integrate `pi-subagents-dependency` in dependency order.
+- [x] Re-gate and integrate `readonly-toolset-mcp-grant`, then integrate `pi-subagents-dependency` in dependency order.
 - [x] Implement TeamWorkspace durable registry/messages/receipts/lease authority with bounded limits and fail-closed validation.
 - [x] Add authenticated control methods and SDK-reserved MCP helper with strict three-tool schema.
 - [x] Add `byok-agent team` CLI operations and explicit tmux watcher pane with absolute executable preflight.
 - [x] Add targeted durability, authorization, MCP handshake, tmux argv/no-send-keys, and unsupported-platform tests.
-- [ ] Run build, typecheck, full tests, strict workflow, packed-artifact smoke, and a disposable real-tmux smoke.
+- [x] Run build, typecheck, full tests, strict workflow, packed-artifact smoke, and a disposable real-tmux smoke.
 - [ ] Freeze independent review evidence; do not push, publish, tag, or deploy.
