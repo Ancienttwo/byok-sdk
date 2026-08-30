@@ -111,10 +111,10 @@ Compose one unpublished 0.11.0 local release candidate from the accepted agent-f
 - Keep a single 0.11.0 version authority. Reuse the existing aligned train bump instead of creating a competing release edit. Fail closed on merge conflicts, lock drift, package-content drift, or packed-host smoke failure.
 
 ## Task Breakdown
-- [ ] Merge accepted agent-memory-mcp-grant and retain both accepted feature sets.
-- [ ] Verify aligned package versions, changelog/spec authority, and frozen lockfile.
-- [ ] Run required root gates and exact packed artifact smoke without publishing.
-- [ ] Record local candidate identity and residual publication gate.
+- [x] Merge accepted agent-memory-mcp-grant and retain both accepted feature sets.
+- [x] Verify aligned package versions, changelog/spec authority, and frozen lockfile.
+- [x] Run required root gates and exact packed artifact smoke without publishing.
+- [x] Record local candidate identity and residual publication gate.
 
 ## Out of Scope
 - Push, npm publish, tag, GitHub Release, deploy, production rollout, and downstream pinning.
@@ -123,7 +123,7 @@ Compose one unpublished 0.11.0 local release candidate from the accepted agent-f
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Merge accepted agent-memory-mcp-grant and retain both accepted feature sets.
-- [ ] Verify aligned package versions, changelog/spec authority, and frozen lockfile.
-- [ ] Run required root gates and exact packed artifact smoke without publishing.
-- [ ] Record local candidate identity and residual publication gate.
+- [x] Merge accepted agent-memory-mcp-grant and retain both accepted feature sets.
+- [x] Verify aligned package versions, changelog/spec authority, and frozen lockfile.
+- [x] Run required root gates and exact packed artifact smoke without publishing.
+- [x] Record local candidate identity and residual publication gate.

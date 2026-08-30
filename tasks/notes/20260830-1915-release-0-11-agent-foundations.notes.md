@@ -32,6 +32,12 @@
 
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
+- Combined release source commit: `4f76deb9558ed6ef7a6d9ac066daa007f072f292`.
+- Frozen install and package graph: 9 aligned packages at `0.11.0`; `@byok-sdk/keys` remains `0.3.7`.
+- Focused cross-feature guard: Pi adapter, TeamWorkspace, and memory-tool grant suites passed 47/47.
+- Root gates: build, typecheck, full test, and strict task-workflow passed; client passed 1,558 tests with 11 skipped and all other workspace suites passed.
+- Exact artifact evidence: `.ai/harness/runs/20260830-release-0-11-agent-foundations/artifacts/release-manifest.json` records 10 tarballs, isolated install closure, and source SHA `4f76deb9558ed6ef7a6d9ac066daa007f072f292`.
+- External state: no push, npm publish, registry readback, tag, GitHub Release, deploy, downstream pin, or production rollout was performed.
 
 ## Promotion Filter
 
