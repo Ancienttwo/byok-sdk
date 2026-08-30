@@ -166,7 +166,6 @@ exit_criteria:
     - path: packages/client/src/__tests__/team-workspace.test.ts
     - path: packages/client/src/__tests__/toolset-mcp-grant.test.ts
   commands_succeed:
-    - bun install --frozen-lockfile
     - node scripts/release/check-package-graph.mjs
     - bun run build
     - bun run typecheck
