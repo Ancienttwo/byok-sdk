@@ -14,6 +14,9 @@ const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta
 const FIXTURE_EXTENSIONS = Object.freeze({
   webAccess: '/extensions/pi-web-access/index.ts',
   mcpAdapter: '/extensions/byok-pi-mcp.js',
+  subagentsPolicy: '/extensions/byok-pi-subagents-policy.js',
+  subagents: '/extensions/pi-subagents/index.ts',
+  todo: '/extensions/rpiv-todo/index.ts',
 });
 const resolveFixtureExtensions = () => FIXTURE_EXTENSIONS;
 
@@ -105,6 +108,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('classifies spawn unavailability as typed start infrastructure retryable', async () => {
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
       spawnFn: (() => {
         throw new Error('spawn ENOENT');
       }) as never,
@@ -169,6 +173,14 @@ describe('PiAdapter against the fake-pi fixture', () => {
       'rpc',
       '--extension',
       FIXTURE_EXTENSIONS.webAccess,
+      '--extension',
+      FIXTURE_EXTENSIONS.mcpAdapter,
+      '--extension',
+      FIXTURE_EXTENSIONS.subagentsPolicy,
+      '--extension',
+      FIXTURE_EXTENSIONS.subagents,
+      '--extension',
+      FIXTURE_EXTENSIONS.todo,
     ]);
     expect(JSON.stringify(calls[0])).not.toContain('sk-sentinel');
     expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
@@ -235,6 +247,14 @@ describe('PiAdapter against the fake-pi fixture', () => {
         'rpc',
         '--extension',
         FIXTURE_EXTENSIONS.webAccess,
+        '--extension',
+        FIXTURE_EXTENSIONS.mcpAdapter,
+        '--extension',
+        FIXTURE_EXTENSIONS.subagentsPolicy,
+        '--extension',
+        FIXTURE_EXTENSIONS.subagents,
+        '--extension',
+        FIXTURE_EXTENSIONS.todo,
       ],
     }]);
   });
@@ -415,7 +435,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/No API key found/);
   });
 
-  it('loads bundled web access and an isolated task-scoped MCP config, then removes the config on close', async () => {
+  it('loads bundled web access, subagents, and an isolated task-scoped MCP config, then removes the config on close', async () => {
     const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
     const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
       calls.push({ args: [...args], env: options?.env ?? {} });
@@ -442,14 +462,65 @@ describe('PiAdapter against the fake-pi fixture', () => {
       FIXTURE_EXTENSIONS.webAccess,
       '--extension',
       FIXTURE_EXTENSIONS.mcpAdapter,
+      '--extension',
+      FIXTURE_EXTENSIONS.subagentsPolicy,
+      '--extension',
+      FIXTURE_EXTENSIONS.subagents,
+      '--extension',
+      FIXTURE_EXTENSIONS.todo,
     ]);
     const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH;
     expect(typeof configPath).toBe('string');
+    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBe('auto');
     expect(JSON.parse(await fs.readFile(configPath as string, 'utf8'))).toEqual({
       mcpServers: {
         docs: { command: '/opt/docs-mcp', args: ['--readonly'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
       },
     });
+
+    await session.close();
+    openSessions.splice(openSessions.indexOf(session), 1);
+    await expect(fs.access(configPath as string)).rejects.toThrow();
+  });
+
+  it('keeps the base extension stack loaded while constraining readonly tools', async () => {
+    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ args: [...args], env: options?.env ?? {} });
+      return realSpawn(FIXTURE_PATH, args, options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
+      resolveExtensions: resolveFixtureExtensions,
+      spawnFn,
+    });
+    const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
+    const ctx = await makeCtx();
+    ctx.policy = task.policy;
+
+    const session = await startAdapter(adapter, task, ctx);
+    openSessions.push(session);
+
+    expect(calls[0]?.args).toEqual([
+      '--mode',
+      'rpc',
+      '--extension',
+      FIXTURE_EXTENSIONS.webAccess,
+      '--extension',
+      FIXTURE_EXTENSIONS.mcpAdapter,
+      '--extension',
+      FIXTURE_EXTENSIONS.subagentsPolicy,
+      '--extension',
+      FIXTURE_EXTENSIONS.subagents,
+      '--extension',
+      FIXTURE_EXTENSIONS.todo,
+      '--tools',
+      'read,grep,find,ls,subagent,todo',
+    ]);
+    const configPath = calls[0]?.env.BYOK_PI_MCP_CONFIG_PATH;
+    expect(typeof configPath).toBe('string');
+    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBe('readonly');
+    expect(JSON.parse(await fs.readFile(configPath as string, 'utf8'))).toEqual({ mcpServers: {} });
 
     await session.close();
     openSessions.splice(openSessions.indexOf(session), 1);

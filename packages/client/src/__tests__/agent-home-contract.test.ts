@@ -636,6 +636,9 @@ describe('SDK-owned Agent home contract', () => {
             resolveExtensions: () => ({
               webAccess: '/extensions/pi-web-access/index.ts',
               mcpAdapter: '/extensions/byok-pi-mcp.js',
+              subagentsPolicy: '/extensions/byok-pi-subagents-policy.js',
+              subagents: '/extensions/pi-subagents/index.ts',
+              todo: '/extensions/rpiv-todo/index.ts',
             }),
             spawnFn,
           })
