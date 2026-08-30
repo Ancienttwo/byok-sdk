@@ -59,7 +59,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"team-workspace-contract-tests","kind":"deterministic_test","paths":["packages/client/src/daemon/team-workspace.ts","packages/client/src/__tests__/team-workspace.test.ts","packages/client/src/__tests__/team-mcp-server.test.ts","packages/client/src/__tests__/team-tmux-view.test.ts"]},{"id":"packed-tmux-runtime-readback","kind":"runtime_readback","paths":["packages/client/package.json","packages/client/src/bin/"]}]}
+{"protocol":1,"oracles":[{"id":"team-workspace-contract-tests","kind":"deterministic_test","paths":["*"]},{"id":"packed-tmux-runtime-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
