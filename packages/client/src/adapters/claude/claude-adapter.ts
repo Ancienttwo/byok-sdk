@@ -24,8 +24,13 @@ import { mapPermissionPolicyToClaudeArgs } from './permission-mapping';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
 import { APPROVAL_TOOL_NAME } from '../../bin/approval-mcp-server';
-import { grantFingerprint, resolveMcpToolsetGrants, type McpToolsetGrant } from '../mcp-tool-grants';
-import { APPROVAL_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
+import {
+  grantFingerprint,
+  resolveMcpToolsetGrants,
+  resolveReservedMcpToolGrants,
+  type McpToolsetGrant,
+} from '../mcp-tool-grants';
+import { AGENT_MEMORY_MCP_SERVER_NAME, APPROVAL_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 
 /** The MCP server NAME this adapter registers `byok-approval-mcp` under in the generated `--mcp-config` — combined with {@link APPROVAL_TOOL_NAME} (single-sourced from `bin/approval-mcp-server.ts` so the two can never independently drift) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. Defined in `sdk-reserved-mcp.ts` beside the other SDK-owned server names, and re-exported from here, its original home, so the host-config rejection and the toolset-grant rule read one list. */
 export { APPROVAL_MCP_SERVER_NAME };
@@ -204,7 +209,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // discovers mid-turn that its only tools are unusable.
     const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
     if (!toolsetGrants.ok) return { kind: 'reject', reason: `claude adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
-    const mapping = mapPermissionPolicyToClaudeArgs(input.policy, toolsetGrants.grants);
+    const reservedMemoryGrants = resolveReservedMcpToolGrants(input.mcpServers)
+      .filter((grant) => grant.server === AGENT_MEMORY_MCP_SERVER_NAME);
+    const mapping = mapPermissionPolicyToClaudeArgs(input.policy, [
+      ...reservedMemoryGrants,
+      ...toolsetGrants.grants,
+    ]);
     if (!mapping.ok) return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by claude adapter', retryable: false };
     let modelId: string | undefined;
     try {

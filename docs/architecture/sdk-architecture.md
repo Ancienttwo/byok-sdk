@@ -1445,7 +1445,7 @@ Agent 长期 working memory 的唯一 authoring authority 是 canonical Agent ho
 guidance 只约束 runtime 自行 recall/save，不成为第二份内容权威。
 
 Strict Agent task 可获得 SDK-owned reserved stdio MCP：
-`memory.recall` 与 `memory.save`。Daemon 从 active task 重建
+`memory_recall` 与 `memory_save`。Daemon 从 active task 重建
 tenant/device/task/session/runtime/exact `AgentRef` 与 canonical home，model 不能
 传这些 identity/root。文件面仅允许 `MEMORY.md` 和经校验的
 `notes/**/*.md`，用 sha256 revision CAS、atomic replace/delete、fsync

@@ -103,12 +103,12 @@ describe('Agent memory MCP local authority', () => {
       save: async (input: { op: 'replace' | 'delete'; path: string; expectedRevision: string; content?: string }) => { calls.push(`save:${input.path}`); return { path: input.path, revision: sha256(input.content ?? ''), deleted: input.op === 'delete' }; },
     };
     const list = await handleAgentMemoryMcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, deps);
-    expect(JSON.stringify(list)).toContain('memory.recall');
-    expect(JSON.stringify(list)).toContain('memory.save');
+    expect(JSON.stringify(list)).toContain('memory_recall');
+    expect(JSON.stringify(list)).toContain('memory_save');
     expect(JSON.stringify(list)).not.toContain('tenantId');
-    const bad = await handleAgentMemoryMcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'memory.save', arguments: { op: 'delete', path: 'notes/a.md', expectedRevision: sha256(''), content: 'forbidden' } } }, deps);
+    const bad = await handleAgentMemoryMcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'memory_save', arguments: { op: 'delete', path: 'notes/a.md', expectedRevision: sha256(''), content: 'forbidden' } } }, deps);
     expect(bad?.error).toBeDefined();
-    await handleAgentMemoryMcpRequest({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'memory.recall', arguments: { path: 'MEMORY.md' } } }, deps);
+    await handleAgentMemoryMcpRequest({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'memory_recall', arguments: { path: 'MEMORY.md' } } }, deps);
     expect(calls).toEqual(['recall:MEMORY.md']);
   });
 

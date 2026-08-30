@@ -5,8 +5,8 @@
  * and no transport. That is a negative property, and a negative property alone
  * would be satisfied by an entry that exports nothing usable. This file is the
  * positive half: a host that runs no daemon, holds no control socket, and
- * imports nothing but `../agent-memory/index` can serve `memory.recall` and
- * `memory.save` over stdio against its own Agent home and then snapshot it.
+ * imports nothing but `../agent-memory/index` can serve `memory_recall` and
+ * `memory_save` over stdio against its own Agent home and then snapshot it.
  *
  * The only test-owned piece is the filesystem authority, which is exactly the
  * seam `AgentMemoryFilesystem` exists for: on macOS a host supplies the signed
