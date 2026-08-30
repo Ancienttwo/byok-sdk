@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/cloud-dataplane",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "BYOK SDK hosted data plane: canonical Postgres + R2 stores, migrations, truth transactions, and maintenance",
   "type": "module",
   "license": "MIT",

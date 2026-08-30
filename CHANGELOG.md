@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 / @byok-sdk/keys 0.3.7 — 2026-08-30
 
 Local agents can now share a durable SDK-owned TeamWorkspace across Pi,
 Claude, and Codex through the reserved `byokagentteam` MCP server. Messages are
@@ -11,6 +11,14 @@ agent terminal text and remains an optional native view dependency.
 
 Projected MCP toolset tools are now callable, not just listable.
 
+- **Breaking (MCP tool names):** the SDK-reserved Agent-memory helper now
+  exposes `memory_recall` and `memory_save` instead of the dot-named
+  `memory.recall` and `memory.save`. The flat names are directly expressible
+  in Claude's `mcp__<server>__<tool>` permission identifier and Codex's TOML
+  per-tool approval key. No alias or dual-name compatibility path is kept.
+  Under `readonly`, Claude and Codex now pre-grant exactly these two tools from
+  the helper-owned constants; Codex keeps global `approval_policy=never` and
+  uses the same exact read-back preflight as the reserved message helper.
 - A task carrying `requiredToolsets` now has each projected MCP server started
   and asked for its own `tools/list` before adapter admission; those observed
   names are the only tools an adapter may pre-grant. Claude receives

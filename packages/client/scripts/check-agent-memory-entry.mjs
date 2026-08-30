@@ -65,8 +65,8 @@ assert.deepEqual(Object.keys(agentMemory).sort(), [
   'validateAgentMemoryPath',
 ]);
 
-assert.equal(agentMemory.AGENT_MEMORY_RECALL_TOOL_NAME, 'memory.recall');
-assert.equal(agentMemory.AGENT_MEMORY_SAVE_TOOL_NAME, 'memory.save');
+assert.equal(agentMemory.AGENT_MEMORY_RECALL_TOOL_NAME, 'memory_recall');
+assert.equal(agentMemory.AGENT_MEMORY_SAVE_TOOL_NAME, 'memory_save');
 assert.equal(agentMemory.validateAgentMemoryPath('MEMORY.md'), 'MEMORY.md');
 assert.throws(() => agentMemory.validateAgentMemoryPath('../escape.md'), /memory path/);
 assert.equal(typeof agentMemory.isAgentMemorySecureFilesystemAvailable(false), 'boolean');

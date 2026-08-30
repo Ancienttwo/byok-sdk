@@ -67,6 +67,31 @@ async function startWith(
 }
 
 describe('projected MCP toolset grant — claude', () => {
+  it('pre-grants exactly the SDK-reserved memory tools under readonly', async () => {
+    const captured: string[][] = [];
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    const session = await startWith(adapter, {
+      workspaceDir: await workspace('byok-claude-memory-grant-'),
+      policy: { mode: 'readonly', allowTools: [] },
+      env: process.env,
+      mcpServers: {
+        byokagentmemory: { command: '/opt/byok-agent-memory-mcp' },
+        byokagentmessage: { command: '/opt/byok-agent-message-mcp' },
+      },
+    });
+    await drain(session, 1);
+
+    const argv = captured[0] ?? [];
+    expect(argv[argv.indexOf('--tools') + 1]).toBe('');
+    expect(argv[argv.indexOf('--allowedTools') + 1]).toBe(
+      'mcp__byokagentmemory__memory_recall,mcp__byokagentmemory__memory_save',
+    );
+    expect(argv[argv.indexOf('--allowedTools') + 1]).not.toContain('send_agent_message');
+  });
+
   it('readonly + allowTools:[] grants exactly the observed tools and keeps built-ins disabled', async () => {
     const captured: string[][] = [];
     const adapter = new ClaudeAdapter({
@@ -182,6 +207,28 @@ describe('projected MCP toolset grant — claude', () => {
 });
 
 describe('projected MCP toolset grant — codex', () => {
+  it('pre-grants exactly the SDK-reserved memory tools while global approval stays never', async () => {
+    const captured: string[][] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: CODEX_FIXTURE, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    const session = await startWith(adapter, {
+      workspaceDir: await workspace('byok-codex-memory-grant-'),
+      policy: { mode: 'readonly', allowTools: [] },
+      env: process.env,
+      mcpServers: { byokagentmemory: { command: '/opt/byok-agent-memory-mcp' } },
+    });
+    await drain(session, 1);
+
+    const argv = captured[0] ?? [];
+    expect(argv).toContain('approval_policy=never');
+    expect(argv).toContain('mcp_servers.byokagentmemory.enabled_tools=["memory_recall","memory_save"]');
+    expect(argv).toContain('mcp_servers.byokagentmemory.tools.memory_recall.approval_mode="approve"');
+    expect(argv).toContain('mcp_servers.byokagentmemory.tools.memory_save.approval_mode="approve"');
+    expect(argv.some((arg) => arg.includes('memory.recall') || arg.includes('memory.save'))).toBe(false);
+  });
+
   it('emits enabled_tools plus per-tool approval while the global dials stay pinned', async () => {
     const captured: string[][] = [];
     const adapter = new CodexAdapter({

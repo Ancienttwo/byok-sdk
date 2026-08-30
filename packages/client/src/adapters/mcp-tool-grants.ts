@@ -1,11 +1,45 @@
 import type { McpStdioServerConfig, McpToolsetToolObservation } from '../types';
-import { isReservedMcpServerName } from '../sdk-reserved-mcp';
+import {
+  AGENT_MEMORY_MCP_SERVER_NAME,
+  AGENT_MESSAGE_MCP_SERVER_NAME,
+  AGENT_MESSAGE_TOOL_NAME,
+  isReservedMcpServerName,
+} from '../sdk-reserved-mcp';
+import {
+  AGENT_MEMORY_RECALL_TOOL_NAME,
+  AGENT_MEMORY_SAVE_TOOL_NAME,
+} from '../bin/agent-memory-mcp-server';
 import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../daemon/mcp-tools-probe';
 
 /** One projected toolset server and the exact tool names observed on it. */
 export interface McpToolsetGrant {
   readonly server: string;
   readonly tools: readonly string[];
+}
+
+/**
+ * SDK-reserved servers whose protocol tools may be pre-granted non-interactively.
+ *
+ * The helper binary owns each tool-name constant; this table only binds those
+ * names to the reserved registration name shared by daemon and adapters. The
+ * approval-channel server is intentionally absent: its tool is routed through
+ * Claude's interactive `--permission-prompt-tool`, never pre-granted.
+ */
+const PREGRANTED_RESERVED_MCP_TOOLS = Object.freeze({
+  [AGENT_MESSAGE_MCP_SERVER_NAME]: Object.freeze([AGENT_MESSAGE_TOOL_NAME]),
+  [AGENT_MEMORY_MCP_SERVER_NAME]: Object.freeze([
+    AGENT_MEMORY_RECALL_TOOL_NAME,
+    AGENT_MEMORY_SAVE_TOOL_NAME,
+  ]),
+} satisfies Readonly<Record<string, readonly string[]>>);
+
+/** Static grant candidates for exactly the SDK-owned pre-grantable servers present in one task. */
+export function resolveReservedMcpToolGrants(
+  servers: Readonly<Record<string, McpStdioServerConfig>> | undefined,
+): readonly McpToolsetGrant[] {
+  return Object.entries(PREGRANTED_RESERVED_MCP_TOOLS)
+    .filter(([server]) => Object.prototype.hasOwnProperty.call(servers ?? {}, server))
+    .map(([server, tools]) => Object.freeze({ server, tools }));
 }
 
 export type McpToolsetGrantResolution =
@@ -28,7 +62,7 @@ export type McpToolsetGrantResolution =
  * `denyTools` or `network` constraint.
  *
  * Reserved SDK servers are deliberately absent from the result: each carries
- * a fixed, single-tool grant its own protocol defines, never an observed one.
+ * a fixed grant its own protocol defines, never an observed one.
  */
 export function resolveMcpToolsetGrants(
   servers: Readonly<Record<string, McpStdioServerConfig>> | undefined,
