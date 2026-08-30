@@ -4,6 +4,7 @@
 > **Plan**: plans/plan-20260830-1915-release-0-11-agent-foundations.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
+> **Workflow Profile**: strict
 > **Owner**: kito
 > **Capability ID**: root
 > **Last Updated**: 2026-08-30 19:16
@@ -17,12 +18,12 @@ The accepted Pi foundations and Agent-memory grant changes currently live on sep
 
 ## Goal
 
-Produce one unpublished, clean local 0.11.0 candidate that contains both accepted source lines, preserves the nine-package aligned version train and the independent `@byok-sdk/keys` version, and passes frozen install, package graph, root verification, and exact packed-artifact smoke.
+Produce one unpublished, clean local 0.11.0 candidate that contains both accepted source lines, preserves the nine-package aligned version train, advances the independent `@byok-sdk/keys` package to the next immutable version required by its exact core edge, and passes frozen install, package graph, root verification, and exact packed-artifact smoke.
 
 ## Scope
 
-- In scope: local merge of `codex/agent-memory-mcp-grant`; conflict resolution across client source, changelog/spec, package manifests, and `bun.lock`; release graph and exact tarball verification; release evidence and workflow projections.
-- Out of scope: main merge, push, npm publish, registry readback, tag, GitHub Release, deploy, production rollout, and downstream pinning.
+- In scope: local merge of `codex/agent-memory-mcp-grant`; conflict resolution across client source, changelog/spec, package manifests, and `bun.lock`; repair `@byok-sdk/keys` from already-published `0.3.7` to `0.3.8` so its packed manifest can declare exact `@byok-sdk/core@0.11.0`; release graph and exact tarball verification; release evidence and workflow projections; exact-SHA non-force push and GitHub Actions wait.
+- Out of scope: npm publish, registry mutation, tag, GitHub Release, deploy, production rollout, and downstream pinning.
 - Taste constraints: one 0.11.0 authority; no duplicate changelog entries, compatibility aliases, workspace overlays, or hand-edited packed artifacts.
 
 ## Stop Conditions
@@ -33,7 +34,7 @@ Produce one unpublished, clean local 0.11.0 candidate that contains both accepte
 
 ## Falsifier
 
-Direction is wrong if the merge drops either accepted behavior, any aligned public package differs from 0.11.0, `@byok-sdk/keys` changes from its independent line, frozen install rewrites the lockfile, package graph rejects an internal edge, or exact tarball install/smoke fails. Cheapest proof: inspect conflicts and run package-graph plus focused memory/team/Pi tests before the full pack.
+Direction is wrong if the merge drops either accepted behavior, any aligned public package differs from 0.11.0, `@byok-sdk/keys` is not exactly 0.3.8 with packed `@byok-sdk/core@0.11.0`, frozen install rewrites the lockfile, package graph rejects an internal edge, or exact tarball install/smoke fails. Cheapest proof: inspect the frozen keys manifest and run package-graph plus focused memory/team/Pi tests before the full pack.
 
 ## Root Cause Evidence
 
@@ -85,6 +86,7 @@ allowed_paths:
   - packages/cloud-dataplane/package.json
   - packages/cloud/package.json
   - packages/core/package.json
+  - packages/keys/package.json
   - packages/protocol/package.json
   - packages/sdk/package.json
   - packages/server/package.json
@@ -182,4 +184,4 @@ exit_criteria:
 ## Rollback Point
 
 - Commit / checkpoint: isolated `codex/release-0-11-agent-foundations` branch before any external publication.
-- Revert strategy: remove only this isolated worktree/branch after preserving evidence; no registry, tag, deploy, or production state is created.
+- Revert strategy: revert the bounded 0.3.8 repair commit or remove only this isolated worktree/branch after preserving evidence; no registry, tag, deploy, or production state is created.

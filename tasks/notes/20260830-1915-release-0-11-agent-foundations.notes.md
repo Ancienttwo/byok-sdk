@@ -33,11 +33,30 @@
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Combined release source commit: `4f76deb9558ed6ef7a6d9ac066daa007f072f292`.
-- Frozen install and package graph: 9 aligned packages at `0.11.0`; `@byok-sdk/keys` remains `0.3.7`.
+- Original frozen install and package graph: 9 aligned packages at `0.11.0`; the first candidate incorrectly reused `@byok-sdk/keys@0.3.7`.
 - Focused cross-feature guard: Pi adapter, TeamWorkspace, and memory-tool grant suites passed 47/47.
 - Root gates: build, typecheck, full test, and strict task-workflow passed; client passed 1,558 tests with 11 skipped and all other workspace suites passed.
 - Exact artifact evidence: `.ai/harness/runs/20260830-release-0-11-agent-foundations/artifacts/release-manifest.json` records 10 tarballs, isolated install closure, and source SHA `4f76deb9558ed6ef7a6d9ac066daa007f072f292`.
 - External state: no push, npm publish, registry readback, tag, GitHub Release, deploy, downstream pin, or production rollout was performed.
+
+## Keys 0.3.8 release repair
+
+- Live npm preflight proved `@byok-sdk/keys@0.3.7` already exists with
+  integrity `sha512-FOuLGTWTui5RUOMEeyx+Dvm6c8uaQBgAdepKjJIAThUhI2ZLp/X7sSSjHR/IMGPVsYj0D++0ATCYI3AQHVt23g==`
+  and exact `@byok-sdk/core@0.10.2`, while the first frozen 0.11.0 candidate
+  repacked the same immutable version with exact core 0.11.0 and different
+  integrity. No 0.11.0 package was published.
+- The approved repair advances the independent keys package to `0.3.8`; live
+  npm vacancy returned E404 before any publication attempt, and
+  `check-package-graph.mjs` reports `9 aligned manifests at 0.11.0, keys at
+  0.3.8`.
+- `bun install --frozen-lockfile` made no changes. Release tooling tests passed
+  6/6; focused Pi/TeamWorkspace/MCP-grant tests passed 47/47; root build and
+  typecheck passed. The first full test attempt hit only the known Wrangler
+  5-second dry-run timeout; the exact test then passed 6/6 and the single full
+  rerun passed every workspace suite.
+- npm publish, registry mutation, tag, GitHub Release, downstream pin, deploy,
+  and production remain out of scope for this repair.
 
 ## Promotion Filter
 

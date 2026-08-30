@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.11.0 / @byok-sdk/keys 0.3.7 — 2026-08-30
+## 0.11.0 / @byok-sdk/keys 0.3.8 — 2026-08-30
+
+`@byok-sdk/keys` advances independently because npm already owns immutable
+`0.3.7` with an exact `@byok-sdk/core@0.10.2` edge. The 0.11.0 train therefore
+uses `keys@0.3.8`, whose packed manifest must declare exact
+`@byok-sdk/core@0.11.0`; reusing 0.3.7 would create a split registry graph.
 
 Local agents can now share a durable SDK-owned TeamWorkspace across Pi,
 Claude, and Codex through the reserved `byokagentteam` MCP server. Messages are

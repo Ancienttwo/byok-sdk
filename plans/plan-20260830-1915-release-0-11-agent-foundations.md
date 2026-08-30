@@ -122,6 +122,19 @@ Compose one unpublished 0.11.0 local release candidate from the accepted agent-f
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
+## Approved Release Repair Amendment (2026-08-30)
+
+Live npm preflight proved `@byok-sdk/keys@0.3.7` is already immutable with an exact
+`@byok-sdk/core@0.10.2` edge, while the frozen 0.11.0 candidate repacks the same
+version with `@byok-sdk/core@0.11.0`. The approved repair advances keys to 0.3.8,
+regenerates the exact ten-package artifact set, then non-force pushes the exact
+candidate SHA and waits for GitHub Actions. npm publish, tag, GitHub Release,
+downstream pinning, deploy, and production remain out of scope.
+
+- [x] Advance keys to 0.3.8 and update the single version projections.
+- [ ] Regenerate and verify the exact ten-package frozen artifact set.
+- [ ] Commit, non-force push the exact candidate SHA, and verify GitHub Actions.
+
 ## Task Breakdown
 - [x] Merge accepted agent-memory-mcp-grant and retain both accepted feature sets.
 - [x] Verify aligned package versions, changelog/spec authority, and frozen lockfile.
