@@ -145,16 +145,29 @@ export async function probeMcpServerTools(
       if (error) reject(error);
       else resolve(tools ?? []);
     };
+    const requestTools = (): void => {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`);
+    };
     /** Consume exactly one complete line of the server's stdout. */
     const inspectLine = (line: string): void => {
       if (!line.trim()) return;
       let response: unknown;
       try { response = JSON.parse(line); } catch { return; }
       if (response === null || typeof response !== 'object' || Array.isArray(response)) return;
-      const record = response as { id?: unknown; result?: { tools?: unknown } };
-      if (record.id !== 2 || !Array.isArray(record.result?.tools)) return;
+      const record = response as { id?: unknown; result?: unknown; error?: unknown };
+      if (record.id === 1) {
+        if (record.error !== undefined || record.result === null || typeof record.result !== 'object' || Array.isArray(record.result)) {
+          finish(new Error(`${label} initialize failed${record.error === undefined ? '' : `: ${JSON.stringify(record.error)}`}`));
+          return;
+        }
+        requestTools();
+        return;
+      }
+      const toolsResult = record.result as { tools?: unknown } | undefined;
+      if (record.id !== 2 || !Array.isArray(toolsResult?.tools)) return;
       const names: string[] = [];
-      for (const tool of record.result.tools) {
+      for (const tool of toolsResult.tools) {
         if (tool === null || typeof tool !== 'object' || Array.isArray(tool)) {
           finish(new McpToolsProbeAuthorityError(`${label} tools/list returned a malformed tool entry`));
           return;
@@ -210,7 +223,15 @@ export async function probeMcpServerTools(
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => { stderr += chunk; });
     child.stdin.on('error', (error) => finish(new Error(`${label} stdin failed: ${error.message}`)));
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } })}\n`);
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`);
+    child.stdin.write(`${JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: '@byok-sdk/client-mcp-tools-probe', version: '0.0.0' },
+      },
+    })}\n`);
   });
 }

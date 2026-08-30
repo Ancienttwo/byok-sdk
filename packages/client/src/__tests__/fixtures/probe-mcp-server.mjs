@@ -29,6 +29,7 @@ if (config.dumpPidTo) writeFileSync(config.dumpPidTo, String(process.pid), 'utf8
 // Keep the process alive even when nothing is expected of it, so a timeout is
 // a timeout rather than an early exit.
 const keepAlive = setInterval(() => {}, 60_000);
+let initialized = false;
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -44,11 +45,30 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   } catch {
     return;
   }
-  if (request.id === 1) {
+  if (request.id === 1 && request.method === 'initialize') {
+    if (
+      request.params?.protocolVersion !== '2024-11-05'
+      || request.params?.capabilities === null
+      || typeof request.params?.capabilities !== 'object'
+      || typeof request.params?.clientInfo?.name !== 'string'
+      || typeof request.params?.clientInfo?.version !== 'string'
+    ) {
+      send({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'invalid initialize params' } });
+      return;
+    }
     send({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} } } });
     return;
   }
+  if (request.method === 'notifications/initialized' && request.id === undefined) {
+    initialized = true;
+    return;
+  }
   if (request.id !== 2) return;
+  if (!initialized) {
+    send({ jsonrpc: '2.0', id: 2, error: { code: -32002, message: 'server not initialized' } });
+    clearInterval(keepAlive);
+    return;
+  }
   if (typeof config.floodBytes === 'number') {
     // Unrelated, well-formed newline-delimited JSON the probe must skip. The
     // answer never arrives; the byte cap is what ends this.

@@ -70,11 +70,18 @@ describe('probeMcpServerTools — observed tool names', () => {
 
   it('observes the shipped toolset-echo fixture the live smokes use', async () => {
     const root = await tmpRoot();
+    const auditPath = path.join(root, 'audit.jsonl');
     const tools = await probe({
       command: process.execPath,
-      args: [ECHO_FIXTURE, path.join(root, 'audit.jsonl')],
+      args: [ECHO_FIXTURE, auditPath],
     });
     expect(tools).toEqual(['echo']);
+    const handshake = (await fs.readFile(auditPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => (JSON.parse(line) as { kind: string }).kind)
+      .filter((kind) => kind !== 'spawn');
+    expect(handshake).toEqual(['initialize', 'notifications/initialized', 'tools/list']);
   });
 
   // Each of these would forge a second grant, or a different config key, out

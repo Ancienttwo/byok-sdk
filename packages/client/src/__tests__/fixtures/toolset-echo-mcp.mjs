@@ -40,6 +40,7 @@ const TOOL = {
     additionalProperties: false,
   },
 };
+let initialized = false;
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -56,7 +57,13 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
   const { id, method, params } = request;
   // A notification carries no id and gets no reply.
-  if (id === undefined || id === null) return;
+  if (id === undefined || id === null) {
+    if (method === 'notifications/initialized') {
+      initialized = true;
+      record({ kind: 'notifications/initialized' });
+    }
+    return;
+  }
 
   switch (method) {
     case 'initialize':
@@ -75,6 +82,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       send({ jsonrpc: '2.0', id, result: {} });
       return;
     case 'tools/list':
+      if (!initialized) {
+        send({ jsonrpc: '2.0', id, error: { code: -32002, message: 'server not initialized' } });
+        return;
+      }
       record({ kind: 'tools/list' });
       send({ jsonrpc: '2.0', id, result: { tools: [TOOL] } });
       return;

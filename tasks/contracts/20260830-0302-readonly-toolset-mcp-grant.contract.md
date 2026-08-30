@@ -1,6 +1,6 @@
 # Task Contract: readonly-toolset-mcp-grant
 
-> **Status**: Active
+> **Status**: Partial
 > **Plan**: plans/plan-20260830-0302-readonly-toolset-mcp-grant.md
 > **Task Profile**: code-change
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
@@ -21,8 +21,8 @@ Under `readonly` + `allowTools: []`, the tools of exactly the projected toolset 
 
 ## Scope
 
-- In scope: `packages/client/src/adapters/{claude,codex}/**`, `packages/client/src/daemon/task-runner.ts`, `packages/client/src/daemon/toolset-registry.ts`, `packages/client/src/types.ts` (start-input shape), `packages/client/src/__tests__/**`, `packages/client/README.md`, `CHANGELOG.md`.
-- Out of scope: protocol/store changes, Pi adapter, any change to reserved-server behaviour beyond reusing its mechanism, release/version bump, merging `codex/packed-host-sdk-helper`.
+- In scope: `packages/client/src/adapters/{claude,codex}/**`, the Pi descriptor's explicit non-consumer declaration, `packages/client/src/daemon/{task-runner,toolset-registry,mcp-tools-probe,agent-message-mcp-preflight}.ts`, reserved-server name centralization, `packages/client/src/types.ts` (start-input shape), `packages/client/src/__tests__/**`, the two permission smoke scripts and their package scripts, `packages/client/README.md`, `CHANGELOG.md`.
+- Out of scope: protocol/store changes, Pi runtime behavior, release/version bump, merging `codex/packed-host-sdk-helper`.
 - Taste constraints: <!-- advisory only, no run gate; default style/taste lives in AGENTS.md and the minimal-change policy, use this to record a per-task override -->
 
 ## Stop Conditions
@@ -74,6 +74,8 @@ allowed_paths:
   - plans/
   - tasks/todos.md
   - packages/client/src/
+  - packages/client/scripts/
+  - packages/client/package.json
   - packages/client/README.md
   - CHANGELOG.md
   - tasks/contracts/20260830-0302-readonly-toolset-mcp-grant.contract.md
