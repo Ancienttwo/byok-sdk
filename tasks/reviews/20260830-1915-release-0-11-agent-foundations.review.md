@@ -5,38 +5,38 @@
 > **Contract**: tasks/contracts/20260830-1915-release-0-11-agent-foundations.contract.md
 > **Notes File**: tasks/notes/20260830-1915-release-0-11-agent-foundations.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-08-30 20:30
+> **Last Updated**: 2026-08-30 20:55
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: sha256:8698e9cd4c3e1077336e9e4a184522967241adc97c02c977122e3a2d7feb394d
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 4cedcc92270e2eebdae0a50e6d94ec5316c0a136
+> **Reviewed Target Revision**: 7a937e5ed8eb5aef102eacb0df9183f296da7e1f
 
 ## Human Review Card
 
-- Verdict: the immutable-version repair passes objective source and packed-artifact gates; semantic acceptance is projected separately below.
-- Change type: release-metadata repair / exact candidate branch push.
-- Intended files changed: advance only the independent keys package to 0.3.8 and align its lock/spec/changelog projections.
-- Actual files changed: `packages/keys/package.json`, `bun.lock`, `docs/spec.md`, `CHANGELOG.md`, and workflow evidence; no runtime implementation changed and no registry state changed.
-- Commands passed: frozen install, package graph, focused 47-test cross-feature guard, root build/typecheck/test, strict workflow, exact ten-tarball pack-and-smoke.
-- Residual risks: remote exact-SHA CI, registry publication, and downstream fresh-install/runtime readback remain separate gates.
-- Reviewer action required: accept or reject only the exact prepared repair subject; publication is not authorized by this review.
-- Rollback: revert the repair commit or delete the isolated release branch before publication; no registry, tag, deploy, or production cleanup exists.
+- Verdict: exact source, CI, frozen artifact, live registry vacancy, ownership, and stable-channel dry-run gates pass for publication.
+- Change type: external stable npm publication gate; normalized source subject is empty because target main already equals the frozen release source.
+- Intended files changed: workflow authority only; published bytes remain the exact `main@7a937e5` artifacts.
+- Actual files changed: plan, contract, notes, and this review on the isolated evidence branch; no runtime or package bytes changed.
+- Commands passed: both exact-SHA GitHub Actions runs, live npm ownership/vacancy/dist-tag checks, canonical build plus ten-tarball pack/install dry-run, and byte-identical manifest comparison.
+- Residual risks: npm browser/OTP expiry or a sequential partial publish requires immediate live registry inspection; remote tag/Release and downstream remain separate gates.
+- Reviewer action required: accept or reject only local annotated tag creation, ten-package stable npm publication, and canonical registry readback.
+- Rollback: npm versions are immutable; on partial publication stop and inspect registry state rather than retrying occupied versions.
 
 ## Mode Evidence
 
-- Selected route: code-change release composition.
-- P1/P2/P3 evidence: the approved repair amendment in `plans/plan-20260830-1915-release-0-11-agent-foundations.md` and the root-cause evidence in the implementation notes.
-- Root cause or plan evidence: live npm already owns `@byok-sdk/keys@0.3.7` with an exact core 0.10.2 edge, so repacking 0.3.7 against core 0.11.0 would violate npm immutability; the smallest coherent repair is the vacant 0.3.8 version.
+- Selected route: strict external publication gate over an already accepted source SHA.
+- P1/P2/P3 evidence: the approved stable publication amendment and publication preflight section in the implementation notes.
+- Root cause or plan evidence: every exact target version is vacant, the final and dry-run manifests are byte-identical, and stable `0.11.0` must omit `--tag` to advance `latest` without creating a second channel authority.
 
 ## Verification Evidence
 
 - Waza `/check` run: not invoked; user waiver is allowed by contract.
-- Commands run: frozen install, package graph, release-tool tests, focused 47-test guard, root build/typecheck/full-test, and exact `pack-and-smoke` at source commit `81558983f76e66b4f09f16494b7926ff484d7ad0`.
-- Manual checks: live npm vacancy for keys 0.3.8 returned E404; the release manifest contains ten tarballs, nine packages at 0.11.0 and keys at 0.3.8 with an exact core 0.11.0 edge.
-- Supporting artifacts: `.ai/harness/runs/20260830-release-0-11-keys-0-3-8/artifacts/release-manifest.json`.
+- Commands run: `npm ping`, `npm whoami`, maintainer/dist-tag/version vacancy checks, tag/Release vacancy checks, and canonical `publish.mjs` dry-run at exact source `7a937e5ed8eb5aef102eacb0df9183f296da7e1f`.
+- Manual checks: all ten target versions returned E404 before and after dry-run; `latest` is 0.10.2 for the aligned train and 0.3.7 for keys; local/remote tag and GitHub Release are vacant.
+- Supporting artifacts: `.ai/harness/runs/20260830-release-0-11-publish-preflight/artifacts/release-manifest.json` with SHA-256 `75e2a43204cd26944080613d3c784e1ac7adb966efd85470ad63cb99ec2b30d5`.
 - Implementation notes reviewed: `tasks/notes/20260830-1915-release-0-11-agent-foundations.notes.md`.
-- Run snapshot: `.ai/harness/checks/latest.json` is fresh and passing for the exact repair subject.
+- Run snapshot: pending fresh publication-gate `verify-sprint --prepare-acceptance`.
 
 ## Manual Check Evidence
 
@@ -52,13 +52,13 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewer**: User
 > **Source**: user-waiver
 > **Actor**: kito
-> **Reviewed Subject SHA256**: sha256:8698e9cd4c3e1077336e9e4a184522967241adc97c02c977122e3a2d7feb394d
+> **Reviewed Subject SHA256**: sha256:8a48a87d4183098e73ae4f89c74fed8f1767410bd1f5272e245d4ec977b74183
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 4cedcc92270e2eebdae0a50e6d94ec5316c0a136
-> **Verification Evidence SHA256**: sha256:220bf07e5abcc6a77d7f31cf98222f3bc0826ffa07bb65c6c45dc7609a808c2a
-> **Issued At**: 2026-08-30T12:11:31.920Z
+> **Reviewed Target Revision**: 7a937e5ed8eb5aef102eacb0df9183f296da7e1f
+> **Verification Evidence SHA256**: sha256:70c9440d37b21be26c978af1e33ff444f580e689d3772d1116a4d370b9a3c185
+> **Issued At**: 2026-08-30T13:20:22.892Z
 
-- Summary: User approved the exact keys 0.3.8 source and packed-artifact repair, non-force push of the candidate branch, and exact-SHA GitHub Actions verification; npm publish, tag, GitHub Release, downstream pin, deploy, and production remain unauthorized.
+- Summary: User authorized stable npm publication of the exact main@7a937e5ed8eb5aef102eacb0df9183f296da7e1f ten-package artifact set, local annotated v0.11.0 tag creation, and canonical registry readback; remote tag push, GitHub Release, downstream pinning, deploy, and production remain unauthorized.
 - Findings: none
 
 ## Behavior Diff Notes
@@ -67,7 +67,7 @@ screenshot/artifact path, or reviewer observation.
 
 ## Residual Risks / Follow-ups
 
-- The local tarballs are validation artifacts only. Registry state, tag/Release, downstream consumption, and live runtime are unproven and unauthorized.
+- Publication has not begun at review time. Remote tag/Release, downstream consumption, and live runtime remain unauthorized.
 
 ## Scorecard
 
@@ -80,13 +80,13 @@ screenshot/artifact path, or reviewer observation.
 
 ## Failing Items
 
-- None in the local source, package, review, acceptance, or workflow gates. Exact-SHA remote CI remains the approved external check.
+- Fresh publication AcceptanceReceipt and final strict workflow state remain pending.
 
 ## Retest Steps
 
-- Re-run: `repo-harness run check-task-workflow --strict` and verify the AcceptanceReceipt against `.ai/harness/checks/latest.json`.
-- Re-check: repack from the final committed source SHA and bind GitHub Actions to that exact SHA before any future publication request.
+- Re-run: `repo-harness run verify-sprint --prepare-acceptance`, record the user-authorized receipt, then verify strict ship state.
+- Re-check immediately before execution: npm identity, ten vacancies, local tag vacancy, and detached source SHA.
 
 ## Summary
 
-- The keys 0.3.8 repair subject passes deterministic review and is ready for fresh AcceptanceReceipt plus exact-SHA branch CI; registry release actions remain blocked.
+- The exact stable publication subject passes deterministic review and is ready for a fresh user-authorized AcceptanceReceipt; registry mutation remains blocked until that receipt and checks are fresh.
