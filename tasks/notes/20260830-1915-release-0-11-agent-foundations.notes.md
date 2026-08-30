@@ -64,6 +64,22 @@
   and npm integrity
   `sha512-Tig3yBBTFdjlIstloKSoy8megaWm4W5bvDqxqW7DxN49P58/7QcOMkRj8XpSQVwrIQqr2s8+rjS98bpZJj4+EA==`.
 
+## Stable 0.11.0 publication preflight
+
+- Local main, remote main, final artifact manifest, and both branch/main GitHub
+  Actions resolve to source `7a937e5ed8eb5aef102eacb0df9183f296da7e1f`;
+  both CI runs passed 22/22 jobs.
+- npm registry access and `npm whoami` passed for `ancienttwo`; all ten package
+  authorities include that maintainer. Live `latest` is `0.10.2` for the nine
+  aligned packages and `0.3.7` for keys. Every `0.11.0` target and
+  `@byok-sdk/keys@0.3.8` returned E404 vacancy before publication.
+- Local/remote `v0.11.0` and GitHub Release were vacant. Stable publication must
+  omit `--tag`; remote tag push and GitHub Release remain out of scope.
+- The canonical `publish.mjs` dry-run passed build, exact ten-tarball pack/install,
+  dependency order, and single-version closure. Its manifest is byte-identical to
+  the final frozen manifest with SHA-256
+  `75e2a43204cd26944080613d3c784e1ac7adb966efd85470ad63cb99ec2b30d5`.
+
 ## Promotion Filter
 
 Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset files only when all three hold: hard to reverse, surprising without local context, and a real trade-off existed. If any one is missing, keep it in this notes file instead.

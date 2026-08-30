@@ -133,7 +133,23 @@ downstream pinning, deploy, and production remain out of scope.
 
 - [x] Advance keys to 0.3.8 and update the single version projections.
 - [x] Regenerate and verify the exact ten-package frozen artifact set.
-- [ ] Commit, non-force push the exact candidate SHA, and verify GitHub Actions.
+- [x] Commit, non-force push the exact candidate SHA, and verify GitHub Actions.
+
+## Approved Stable Publication Amendment (2026-08-30)
+
+The user authorized publication of the exact source and frozen artifacts bound to
+`main@7a937e5ed8eb5aef102eacb0df9183f296da7e1f`. The registry operation is the
+stable channel: omit `--tag`, publish the nine aligned packages at `0.11.0` plus
+`@byok-sdk/keys@0.3.8`, then require the canonical registry readback before
+claiming publication. The release driver may create the local annotated
+`v0.11.0` tag. Remote tag push, GitHub Release, downstream pinning, deploy, and
+production remain separate gates.
+
+- [x] Recheck npm identity/ownership, ten version vacancies, dist-tags, tag and Release vacancy.
+- [x] Run the canonical non-executing publish dry-run and prove the manifest is byte-identical.
+- [ ] Refresh strict checks/review/AcceptanceReceipt for this publication authority.
+- [ ] Publish all ten frozen artifacts and complete registry readback.
+- [ ] Record immutable registry identity and stop before remote tag/Release/downstream actions.
 
 ## Task Breakdown
 - [x] Merge accepted agent-memory-mcp-grant and retain both accepted feature sets.
