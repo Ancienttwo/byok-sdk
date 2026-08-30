@@ -278,12 +278,22 @@ export class CodexAdapter implements RuntimeAdapter {
         reason: 'prepared codex operation received a manifest with different runtime selection',
       });
     }
+    // Computed ONCE, from this operation's frozen start input, and carried on
+    // the session for every later `codex exec resume` turn (see
+    // `CodexSession.mcpConfigArgs`). A resume spawns a brand new codex
+    // process that inherits none of the first turn's `-c` overrides, so
+    // re-passing exactly these bytes is what keeps the reserved message
+    // server and the projected toolset grants alive past turn one. Never
+    // recomputed later: `preparedGrants` was probed at admission and
+    // `startInput.mcpServers` is the sealed authority for this operation, so
+    // a second computation could only widen or drift.
+    const mcpConfigArgs = codexMcpConfigArgs(startInput.mcpServers, preparedGrants);
     const { sessionRef, runner } = await runCodexTurn({
       command,
       resumeRef: startInput.manifest.sessionRef,
       instruction: startInput.instruction,
       modelId: manifestModelId,
-      policyArgs: [...policyArgs, ...codexMcpConfigArgs(startInput.mcpServers, preparedGrants)],
+      policyArgs: [...policyArgs, ...mcpConfigArgs],
       cwd: manifestCwd,
       env: runtimeEnv,
       spawnFn: this.options.spawnFn,
@@ -308,6 +318,7 @@ export class CodexAdapter implements RuntimeAdapter {
       preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
       modelId: manifestModelId,
       terminal,
+      mcpConfigArgs,
     });
   }
 
@@ -737,6 +748,12 @@ interface CodexSessionOptions {
   preparedGit: boolean;
   modelId: string | undefined;
   terminal: RuntimeTurnTerminal;
+  /**
+   * The exact MCP config argv the FIRST turn was launched with, computed once
+   * in `startPrepared` from that operation's frozen start input. Replayed
+   * byte-for-byte on every resume.
+   */
+  mcpConfigArgs: readonly string[];
 }
 
 class CodexSession implements Session {
@@ -762,6 +779,19 @@ class CodexSession implements Session {
   private readonly recordUnmapped: (key: string) => void;
   private readonly preparedGit: boolean;
   private readonly modelId: string | undefined;
+  /**
+   * A resume spawns a BRAND NEW codex process, which inherits none of the
+   * first turn's `-c` overrides — exactly the same reason `followUp()`
+   * re-maps the permission policy on every call. Without replaying these
+   * bytes, `--ignore-user-config` and every `mcp_servers.*` key (command,
+   * args, env, `enabled_tools`, per-tool `approval_mode`) would silently
+   * vanish after turn one: the reserved message server and any projected
+   * toolset would stop existing, and any surviving tool call would be
+   * refused outright under `approval_policy=never`. Frozen at start; never
+   * recomputed from anything a later turn supplies, so a follow-up can never
+   * widen this session's MCP authority.
+   */
+  private readonly mcpConfigArgs: readonly string[];
   private terminal: RuntimeTurnTerminal;
   private currentRunner: CodexProcessRunner | undefined;
   private readonly ownedRunners = new Set<CodexProcessRunner>();
@@ -780,6 +810,7 @@ class CodexSession implements Session {
     this.preparedGit = options.preparedGit;
     this.modelId = options.modelId;
     this.terminal = options.terminal;
+    this.mcpConfigArgs = options.mcpConfigArgs;
     this.currentRunner = options.initialRunner;
     this.ownedRunners.add(options.initialRunner);
     void this.forgetRunnerOnceClosed(options.initialRunner);
@@ -897,7 +928,9 @@ class CodexSession implements Session {
         resumeRef,
         instruction: task.instruction,
         modelId,
-        policyArgs: mapping.args,
+        // Freshly re-mapped policy for THIS turn, plus the start turn's
+        // frozen MCP config replayed verbatim — see `mcpConfigArgs`.
+        policyArgs: [...mapping.args, ...this.mcpConfigArgs],
         cwd: this.workspaceDir,
         env: withoutProviderCredentials(this.env),
         spawnFn: this.spawnFn,

@@ -18,6 +18,14 @@ Projected MCP toolset tools are now callable, not just listable.
   cannot be expressed as a runtime grant is declined permanently, naming the
   server and the tool. Previously such a toolset was visible to the model and refused
   by each runtime's own approval layer at call time.
+- A Codex follow-up turn keeps the MCP servers the session started with. `codex
+  exec resume` now carries the exact `--ignore-user-config` and `mcp_servers.*`
+  argv (command, args, env, `enabled_tools`, per-tool `approval_mode`) computed
+  from the first turn's frozen start input — never recomputed, so a follow-up
+  cannot widen the session's MCP authority. Previously a resume passed only the
+  permission-policy args, so the reserved message server and every projected
+  toolset silently vanished after turn one.
+
 ## 0.10.2 / @byok-sdk/keys 0.3.7 — 2026-08-30
 
 Revocation deletes the device registration.
