@@ -132,7 +132,7 @@ candidate SHA and waits for GitHub Actions. npm publish, tag, GitHub Release,
 downstream pinning, deploy, and production remain out of scope.
 
 - [x] Advance keys to 0.3.8 and update the single version projections.
-- [ ] Regenerate and verify the exact ten-package frozen artifact set.
+- [x] Regenerate and verify the exact ten-package frozen artifact set.
 - [ ] Commit, non-force push the exact candidate SHA, and verify GitHub Actions.
 
 ## Task Breakdown

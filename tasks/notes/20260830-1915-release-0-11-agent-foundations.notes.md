@@ -57,6 +57,12 @@
   rerun passed every workspace suite.
 - npm publish, registry mutation, tag, GitHub Release, downstream pin, deploy,
   and production remain out of scope for this repair.
+- The repaired packed candidate at source commit
+  `81558983f76e66b4f09f16494b7926ff484d7ad0` passed the exact ten-package
+  install smoke. Its keys tarball has SHA-256
+  `f502e00d2f60929cea3546b14391c57402a1d52e021dbf90e601542e789ebe5d`
+  and npm integrity
+  `sha512-Tig3yBBTFdjlIstloKSoy8megaWm4W5bvDqxqW7DxN49P58/7QcOMkRj8XpSQVwrIQqr2s8+rjS98bpZJj4+EA==`.
 
 ## Promotion Filter
 
