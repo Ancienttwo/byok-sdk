@@ -77,9 +77,13 @@ allowed_paths:
   - docs/researches/
   - CHANGELOG.md
   - packages/client/package.json
+  - packages/client/tsconfig.json
+  - packages/client/tsconfig.build.json
+  - packages/client/tsup.config.ts
   - packages/client/README.md
   - packages/client/src/
   - packages/client/scripts/
+  - bun.lock
   - plans/
   - tasks/todos.md
   - tasks/contracts/20260830-1831-agent-foundations-integration.contract.md
