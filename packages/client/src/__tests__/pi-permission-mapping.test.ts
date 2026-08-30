@@ -17,7 +17,7 @@ describe('mapPermissionPolicyToPiArgs', () => {
   it('readonly with no allowTools maps to the default readonly tool set', () => {
     const result = mapPermissionPolicyToPiArgs({ mode: 'readonly' });
     expect(result.ok).toBe(true);
-    expect(result.args).toEqual(['--tools', 'read,grep,find,ls']);
+    expect(result.args).toEqual(['--tools', 'read,grep,find,ls,subagent,todo']);
   });
 
   it('readonly intersects a caller-provided allowTools with the readonly set', () => {
@@ -57,7 +57,7 @@ describe('mapPermissionPolicyToPiArgs', () => {
   it('readonly constrains the allowlist before adding the native denylist', () => {
     const result = mapPermissionPolicyToPiArgs({ mode: 'readonly', denyTools: ['read'] });
     expect(result.ok).toBe(true);
-    expect(result.args).toEqual(['--tools', 'read,grep,find,ls', '--exclude-tools', 'read']);
+    expect(result.args).toEqual(['--tools', 'read,grep,find,ls,subagent,todo', '--exclude-tools', 'read']);
   });
 
   it('an empty denyTools array behaves exactly like no denyTools at all', () => {
