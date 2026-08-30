@@ -1,6 +1,6 @@
 {
   "name": "byok-sdk",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "Bring-your-own-agent SDK for local daemons, self-hosted coordination, and hosted multi-tenant BYOK infrastructure",
   "type": "module",
   "license": "MIT",

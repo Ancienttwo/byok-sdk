@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 / @byok-sdk/keys 0.3.7 — 2026-08-30
 
 Projected MCP toolset tools are now callable, not just listable.
 
