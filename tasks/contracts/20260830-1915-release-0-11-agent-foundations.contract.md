@@ -76,6 +76,10 @@ allowed_paths:
   - docs/spec.md
   - docs/architecture/sdk-architecture.md
   - packages/client/package.json
+  - packages/client/README.md
+  - packages/client/tsconfig.json
+  - packages/client/tsconfig.build.json
+  - packages/client/tsup.config.ts
   - packages/client/src/
   - packages/client/scripts/
   - packages/cloud-dataplane/package.json
@@ -91,6 +95,9 @@ allowed_paths:
   - tasks/contracts/20260830-1223-agent-memory-mcp-grant.contract.md
   - tasks/reviews/20260830-1223-agent-memory-mcp-grant.review.md
   - tasks/notes/20260830-1223-agent-memory-mcp-grant.notes.md
+  - tasks/contracts/20260830-1831-agent-foundations-integration.contract.md
+  - tasks/reviews/20260830-1831-agent-foundations-integration.review.md
+  - tasks/notes/20260830-1831-agent-foundations-integration.notes.md
   - tasks/contracts/20260830-1915-release-0-11-agent-foundations.contract.md
   - tasks/reviews/20260830-1915-release-0-11-agent-foundations.review.md
   - tasks/notes/20260830-1915-release-0-11-agent-foundations.notes.md
