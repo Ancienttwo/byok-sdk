@@ -6,7 +6,7 @@
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-30 19:15
+> **Last Updated**: 2026-08-30 19:16
 > **Review File**: `tasks/reviews/20260830-1915-release-0-11-agent-foundations.review.md`
 > **Notes File**: `tasks/notes/20260830-1915-release-0-11-agent-foundations.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
