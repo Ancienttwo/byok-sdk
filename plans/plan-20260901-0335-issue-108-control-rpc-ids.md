@@ -1,6 +1,6 @@
 # Plan: Issue 108 duplicate in-flight control RPC IDs
 
-> **Status**: Executing
+> **Status**: Complete
 > **Created**: 20260901-0335
 > **Slug**: issue-108-control-rpc-ids
 > **Planning Source**: codex-plan
@@ -57,7 +57,7 @@ At 10x concurrent requests per connection, the registry grows linearly with genu
 - [x] Reject a duplicate active unary or stream ID before a second handler starts.
 - [x] Release an ID only when the completing request record still owns it.
 - [x] Prove handler rejection releases ownership and disconnect aborts every active stream once.
-- [ ] Run focused, client/root, strict workflow, and independent acceptance gates.
+- [x] Run focused, client/root, strict workflow, and independent acceptance gates.
 
 ## Evidence Contract
 

@@ -1,12 +1,12 @@
 # Task Contract: issue-108-control-rpc-ids
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260901-0335-issue-108-control-rpc-ids.md
 > **Task Profile**: bugfix
 > **Workflow Profile**: strict
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-09-01 03:37
+> **Last Updated**: 2026-09-01 03:57
 > **Review File**: `tasks/reviews/20260901-0335-issue-108-control-rpc-ids.review.md`
 > **Notes File**: `tasks/notes/20260901-0335-issue-108-control-rpc-ids.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`

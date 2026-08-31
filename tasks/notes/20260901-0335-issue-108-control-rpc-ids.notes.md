@@ -1,10 +1,10 @@
 # Implementation Notes: issue-108-control-rpc-ids
 
-> **Status**: Active
+> **Status**: Complete
 > **Plan**: plans/plan-20260901-0335-issue-108-control-rpc-ids.md
 > **Contract**: tasks/contracts/20260901-0335-issue-108-control-rpc-ids.contract.md
 > **Review**: tasks/reviews/20260901-0335-issue-108-control-rpc-ids.review.md
-> **Last Updated**: 2026-09-01 03:37
+> **Last Updated**: 2026-09-01 03:57
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -42,6 +42,8 @@
 - Client typecheck/build passed after workspace dependency artifacts were built.
 - Frozen-source root build, typecheck, and test passed; client reported 1568 passed / 11 skipped.
 - Strict workflow and exact diff whitespace checks passed before acceptance.
+- Independent gatekeeper reviewed `9d2b052...524ce6d`, returned PASS with no P0-P3 finding, and confirmed no #109 outbound-flow changes.
+- Protocol-2 `external_pass` AcceptanceReceipt was recorded for the exact normalized source subject and final sprint acceptance succeeded.
 
 ## Residual Risks
 
