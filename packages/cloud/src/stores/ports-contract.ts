@@ -21,7 +21,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
   approvals: ['append', 'read'],
   devices: ['register', 'get', 'revoke', 'list', 'readiness', 'recordCapabilities', 'resolveByDeviceId'],
   pairingCodes: ['issue', 'redeem'],
-  nonces: ['issue', 'validate', 'markUsed'],
+  nonces: ['issue', 'consumeIfValid'],
   dedup: ['checkAndRecord'],
   tasks: ['open', 'reserveAgentOffer', 'get', 'getMany', 'claim', 'recordStatus'],
   cancellations: ['request'],

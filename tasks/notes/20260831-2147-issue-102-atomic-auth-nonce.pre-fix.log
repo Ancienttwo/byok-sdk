@@ -1,0 +1,36 @@
+REGRESSION_GUARD=packages/cloud/src/__tests__/auth-parity.test.ts
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-102-atomic-auth-nonce/packages/cloud
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  ❯ src/__tests__/auth-parity.test.ts (17 tests | 1 failed) 69ms
+@byok-sdk/cloud test:      × allows exactly one concurrent valid request to mint from a nonce 4ms
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  FAIL  src/__tests__/auth-parity.test.ts > token renewal (§6.2) > allows exactly one concurrent valid request to mint from a nonce
+@byok-sdk/cloud test: AssertionError: expected [ …(2) ] to have a length of 1 but got 2
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: - Expected
+@byok-sdk/cloud test: + Received
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: - 1
+@byok-sdk/cloud test: + 2
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  ❯ src/__tests__/auth-parity.test.ts:236:69
+@byok-sdk/cloud test:     234|     const responses = await Promise.all([request(), request()]);
+@byok-sdk/cloud test:     235|
+@byok-sdk/cloud test:     236|     expect(responses.filter((response) => response.status === 200)).to…
+@byok-sdk/cloud test:        |                                                                     ^
+@byok-sdk/cloud test:     237|     expect(responses.filter((response) => response.status === 401)).to…
+@byok-sdk/cloud test:     238|     expect(minted).toBe(1);
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  Test Files  1 failed (1)
+@byok-sdk/cloud test:       Tests  1 failed | 16 passed (17)
+@byok-sdk/cloud test:    Start at  21:58:51
+@byok-sdk/cloud test:    Duration  501ms (transform 205ms, setup 0ms, import 312ms, tests 69ms, environment 0ms)
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: Exited with code 1
+PRE_FIX_EXIT=1

@@ -158,14 +158,13 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
       });
     });
 
-    it('does not let one tenant validate or consume another tenant nonce', async () => {
+    it('does not let one tenant or device consume another nonce', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         const nonce = await stores.nonces.issue(TENANT_A, 'device-1');
 
-        expect(await stores.nonces.validate(TENANT_B, 'device-1', nonce)).toBe(false);
-        // Consuming from the wrong tenant must not burn the real owner's nonce.
-        await stores.nonces.markUsed(TENANT_B, nonce);
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(true);
+        expect(await stores.nonces.consumeIfValid(TENANT_B, 'device-1', nonce)).toBe(false);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-2', nonce)).toBe(false);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-1', nonce)).toBe(true);
       });
     });
 

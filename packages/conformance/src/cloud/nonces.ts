@@ -1,5 +1,5 @@
 /**
- * Challenge nonce conformance: bound to one (tenant, device), valid once, and
+ * Challenge nonce conformance: bound to one (tenant, device), consumable once, and
  * dead after `NONCE_TTL_MS`.
  *
  * `NONCE_TTL_MS` is imported rather than restated because it is the contract
@@ -16,48 +16,46 @@ import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 export function runNonceConformance(factory: CloudCompositionFactory): void {
   describe('nonces', () => {
-    it('validates a freshly issued nonce for its own device only', async () => {
+    it('consumes a freshly issued nonce only for its own device', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         const nonce = await stores.nonces.issue(TENANT_A, 'device-1');
         expect(nonce.length).toBeGreaterThan(0);
 
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(true);
         // Same tenant, different device: the nonce is bound to the pair.
-        expect(await stores.nonces.validate(TENANT_A, 'device-2', nonce)).toBe(false);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-2', nonce)).toBe(false);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-1', nonce)).toBe(true);
       });
     });
 
     it('rejects a nonce that was never issued', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', 'never-issued')).toBe(false);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-1', 'never-issued')).toBe(false);
       });
     });
 
-    it('never validates a nonce twice once it has been consumed', async () => {
+    it('admits exactly one consume winner', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         const nonce = await stores.nonces.issue(TENANT_A, 'device-1');
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(true);
-
-        await stores.nonces.markUsed(TENANT_A, nonce);
-
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(false);
-        // Consuming twice is a no-op, not an error: the gate calls it after
-        // every other check has already passed.
-        await stores.nonces.markUsed(TENANT_A, nonce);
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(false);
+        const results = await Promise.all([
+          stores.nonces.consumeIfValid(TENANT_A, 'device-1', nonce),
+          stores.nonces.consumeIfValid(TENANT_A, 'device-1', nonce),
+        ]);
+        expect(results.filter(Boolean)).toHaveLength(1);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-1', nonce)).toBe(false);
       });
     });
 
-    it('stops validating once the TTL has elapsed', async () => {
+    it('stops consuming once the TTL has elapsed', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores } = handle;
-        const nonce = await stores.nonces.issue(TENANT_A, 'device-1');
+        const valid = await stores.nonces.issue(TENANT_A, 'device-1');
+        const expired = await stores.nonces.issue(TENANT_A, 'device-1');
 
         await handle.advanceTime(NONCE_TTL_MS - 1);
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(true);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-1', valid)).toBe(true);
 
         await handle.advanceTime(2);
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(false);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-1', expired)).toBe(false);
       });
     });
 
