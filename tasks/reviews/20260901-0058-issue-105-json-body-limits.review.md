@@ -5,7 +5,7 @@
 > **Contract**: tasks/contracts/20260901-0058-issue-105-json-body-limits.contract.md
 > **Notes File**: tasks/notes/20260901-0058-issue-105-json-body-limits.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-09-01 01:22
+> **Last Updated**: 2026-09-01 01:34
 > **Recommendation**: fail
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
@@ -23,7 +23,7 @@
 
 ## Verification Evidence
 
-- Commands run: focused Cloud suites 48/48; `bun run build`; `bun run typecheck`; `bun run test` (3,332 passing tests); `repo-harness run check-task-workflow --strict`; `git diff --check`.
+- Commands run: focused Cloud suites 52/52 after current-main rebase; `bun run build`; `bun run typecheck`; `bun run test` (3,344 passing tests); `repo-harness run check-task-workflow --strict`; explicit-range `git diff --check main..HEAD`.
 - Supporting artifacts: `tasks/notes/20260901-0058-issue-105-json-body-limits.pre-fix.txt` records the clean-base 400-vs-413 assertion and exit 1.
 
 ## Manual Check Evidence
