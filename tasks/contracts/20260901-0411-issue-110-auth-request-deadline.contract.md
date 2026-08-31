@@ -59,7 +59,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"auth-deadline-deterministic","kind":"deterministic_test","paths":["packages/client/src/daemon/auth-manager.ts","packages/client/src/__tests__/daemon-auth.test.ts","packages/client/src/__tests__/fixtures/test-server.ts"]},{"id":"daemon-config-runtime","kind":"runtime_readback","paths":["packages/client/src/daemon/create-daemon.ts","packages/client/src/__tests__/bin-config.test.ts"]}]}
+{"protocol":1,"oracles":[{"id":"auth-deadline-deterministic","kind":"deterministic_test","paths":["packages/client/src/daemon/auth-manager.ts","packages/client/src/daemon/create-daemon.ts","packages/client/src/__tests__/daemon-auth.test.ts","packages/client/src/__tests__/bin-config.test.ts","packages/client/src/__tests__/fixtures/test-server.ts"]},{"id":"daemon-config-runtime","kind":"runtime_readback","paths":["packages/client/src/daemon/create-daemon.ts","packages/client/src/__tests__/bin-config.test.ts"]}]}
 ```
 
 ## Acceptance Policy
