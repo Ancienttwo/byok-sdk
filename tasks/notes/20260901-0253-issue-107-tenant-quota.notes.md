@@ -1,10 +1,10 @@
 # Implementation Notes: issue-107-tenant-quota
 
-> **Status**: Active
+> **Status**: Complete
 > **Plan**: plans/plan-20260901-0253-issue-107-tenant-quota.md
 > **Contract**: tasks/contracts/20260901-0253-issue-107-tenant-quota.contract.md
 > **Review**: tasks/reviews/20260901-0253-issue-107-tenant-quota.review.md
-> **Last Updated**: 2026-09-01 02:56
+> **Last Updated**: 2026-09-01 03:21
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -39,6 +39,12 @@
 - The isolated candidate passes the focused egress/home contract suite: 2 files, 32 tests.
 - Client typecheck/build, exact diff whitespace check, and strict workflow check passed before root verification.
 - Frozen-source root `bun run build`, `bun run typecheck`, and `bun run test` passed across every selected workspace package; client reported 1566 passed / 11 skipped.
+- Independent gatekeeper reviewed `9d2b052...ac8c7eb` and returned PASS with no P0-P3 finding or dirty-main scope contamination. Its first root test attempt saw the unrelated Wrangler packaging 5-second timeout; the exact retry and final full run passed, so the observation remains report-only.
+
+## Residual Risks
+
+- One controller-wide fsync tail intentionally creates tenant-local head-of-line blocking; a future multi-process tenant writer requires shared transactional quota authority.
+- Append durability that becomes unknown after a filesystem error, and an append queued across controller deactivation, remain separate lifecycle/durability work rather than implicit #107 expansion.
 
 ## Promotion Filter
 

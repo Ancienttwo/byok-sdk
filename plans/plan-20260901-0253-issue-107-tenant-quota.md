@@ -1,6 +1,6 @@
 # Plan: Issue 107 atomic tenant reliable-egress quota
 
-> **Status**: Executing
+> **Status**: Complete
 > **Created**: 20260901-0253
 > **Slug**: issue-107-tenant-quota
 > **Planning Source**: codex-plan
@@ -57,7 +57,7 @@ At 10x concurrent Agents, the controller tail intentionally trades parallel fsyn
 - [x] Serialize both new-record paths across `spoolFor`, tenant observation, and durable append.
 - [x] Prove exactly one racing append succeeds when only one fits and total bytes never exceed the tenant ceiling.
 - [x] Prove existing per-Agent quota behavior and definite failed-append release remain intact.
-- [ ] Run focused, client/root, strict workflow, and independent acceptance gates.
+- [x] Run focused, client/root, strict workflow, and independent acceptance gates.
 
 ## Evidence Contract
 

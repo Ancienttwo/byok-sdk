@@ -5,7 +5,7 @@
 > **Contract**: tasks/contracts/20260901-0253-issue-107-tenant-quota.contract.md
 > **Notes File**: tasks/notes/20260901-0253-issue-107-tenant-quota.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-09-01 02:56
+> **Last Updated**: 2026-09-01 03:21
 > **Recommendation**: fail
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
@@ -14,13 +14,13 @@
 
 ## Human Review Card
 
-- Verdict: pending
+- Verdict: pass; independent gatekeeper found no P0-P3 finding.
 - Change type: durable concurrency bugfix
 - Intended files changed: controller, focused test, and work-package evidence only.
-- Actual files changed:
-- Commands passed:
-- Residual risks:
-- Reviewer action required: inspect diff and card
+- Actual files changed: controller, focused test, and five work-package evidence files; no #106, ack/recovery, persistence, or dirty-main WIP is present.
+- Commands passed: audit-baseline red guard; focused 32/32; client/root build and typecheck; root test; strict workflow; exact diff check.
+- Residual risks: tenant-local fsync head-of-line blocking; multi-process authority, durability-unknown failures, and deactivate queuing remain separately scoped.
+- Reviewer action required: none for local source acceptance.
 - Rollback: revert the complete work package.
 
 ## Mode Evidence
@@ -31,12 +31,12 @@
 
 ## Verification Evidence
 
-- Waza `/check` run:
-- Commands run:
-- Manual checks:
-- Supporting artifacts:
-- Implementation notes reviewed:
-- Run snapshot:
+- Waza `/check` run: not separately invoked; repo contract and independent gatekeeper are the review authorities.
+- Commands run: contract `commands_succeed`; root `bun run build`, `bun run typecheck`, and `bun run test`; strict workflow and `git diff --check main..HEAD`.
+- Manual checks: gatekeeper traced both append variants through the shared tail and verified `finally` release.
+- Supporting artifacts: audit-baseline two-race failure and external PASS verdict.
+- Implementation notes reviewed: yes.
+- Run snapshot: subject-bound acceptance evidence pending.
 
 ## Manual Check Evidence
 
@@ -59,30 +59,32 @@
 
 ## Behavior Diff Notes
 
-- ...
+- Both new-record APIs share one controller tail around spool open, tenant-byte observation, and durable append.
+- Different Agent spools can no longer admit against the same stale total; only one race winner remains when only one fits.
+- Sanitizer and spool-local event/byte/cursor rules retain their existing ownership; a definite append failure releases the next caller.
 
 ## Residual Risks / Follow-ups
 
-- ...
+- This review covers one process-local controller. Merge, push, issue mutation, publication, deployment, multi-process quota, and broader lifecycle/durability changes remain separate gates.
 
 ## Scorecard
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| Functionality | 0/10 | |
-| Product depth | 0/10 | |
-| Design quality | 0/10 | |
-| Code quality | 0/10 | |
+| Functionality | 10/10 | Both named race combinations and failure release are covered. |
+| Product depth | 9/10 | Preserves public append and real spool readback boundaries. |
+| Design quality | 9/10 | One authority, no reservation ledger or compatibility path. |
+| Code quality | 9/10 | Small tail helper and deterministic public-path tests. |
 
 ## Failing Items
 
-- ...
+- None.
 
 ## Retest Steps
 
-- Re-run:
-- Re-check:
+- Re-run contract `commands_succeed` and the root required checks.
+- Re-check multi-process/runtime assumptions only under a separately approved architecture slice.
 
 ## Summary
 
-- ...
+- PASS. The exact #107 candidate makes tenant reliable-byte admission atomic across Agent spools and is ready for subject-bound local acceptance.
