@@ -1,6 +1,6 @@
 # Task Review: issue-109-control-backpressure
 
-> **Status**: Complete
+> **Status**: Accepted
 > **Plan**: plans/plan-20260901-0409-issue-109-control-backpressure.md
 > **Contract**: tasks/contracts/20260901-0409-issue-109-control-backpressure.contract.md
 > **Notes File**: tasks/notes/20260901-0409-issue-109-control-backpressure.notes.md
@@ -8,9 +8,9 @@
 > **Last Updated**: 2026-09-01 04:30
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending-local-commit
+> **Reviewed Subject SHA256**: sha256:d15d9de794cbce6a516473f6a94cfa5898bb2daaa7393fa74d82e21efbfbde1b
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 42a8b92f22fb4f9ba5844c4ded5d1ad6d58d6353
+> **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
 
 ## Human Review Card
 
@@ -44,18 +44,18 @@ No non-built-in manual check is required by this contract. The focused suite is 
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-plugin
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:d15d9de794cbce6a516473f6a94cfa5898bb2daaa7393fa74d82e21efbfbde1b
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
+> **Verification Evidence SHA256**: sha256:cda7c8a3bc2aaa9ec657183447d43f70d3c31db44df491b500ca74f304a955ff
+> **Issued At**: 2026-08-31T20:44:02.045Z
 
-- Summary: No AcceptanceReceipt has been recorded by design; Protocol-2 acceptance is frozen but deferred to a separate authority.
-- Findings: none recorded by this execution slice.
+- Summary: GitHub #109 bounds each authenticated control connection's retained outbound queue, stops writes until drain, and aborts active streams on overflow or socket failure; exact-delta review found no confirmed P0-P2 issue, with accepted #108 retained as the normalized dependency.
+- Findings: none
 
 ## Behavior Diff Notes
 
