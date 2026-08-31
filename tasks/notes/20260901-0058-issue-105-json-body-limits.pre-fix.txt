@@ -1,0 +1,46 @@
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test:  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-105-json-body-limits/packages/cloud
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test:  ❯ src/__tests__/request-body-limits.test.ts (1 test | 1 failed) 27ms
+@byok-sdk/cloud test:      × rejects a streamed pair body above the 16 KiB auth ceiling without Content-Length 27ms
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test:  FAIL  src/__tests__/request-body-limits.test.ts > Cloud JSON request-body limits > rejects a streamed pair body above the 16 KiB auth ceiling without Content-Length
+@byok-sdk/cloud test: AssertionError: expected 400 to be 413 // Object.is equality
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test: - Expected
+@byok-sdk/cloud test: + Received
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test: - 413
+@byok-sdk/cloud test: + 400
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test:  ❯ src/__tests__/request-body-limits.test.ts:27:29
+@byok-sdk/cloud test:      25|     expect(request.headers.has('content-length')).toBe(false);
+@byok-sdk/cloud test:      26|     const response = await harness.cloud.fetch(request);
+@byok-sdk/cloud test:      27|     expect(response.status).toBe(413);
+@byok-sdk/cloud test:        |                             ^
+@byok-sdk/cloud test:      28|   });
+@byok-sdk/cloud test:      29| });
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test:  Test Files  1 failed (1)
+@byok-sdk/cloud test:       Tests  1 failed (1)
+@byok-sdk/cloud test:    Start at  01:11:10
+@byok-sdk/cloud test:    Duration  421ms (transform 168ms, setup 0ms, import 263ms, tests 27ms, environment 0ms)
+@byok-sdk/cloud test: 
+@byok-sdk/cloud test: Exited with code 1
+
+PRE_FIX_EXIT=1
+
+Root Cause Evidence
+root_cause: `packages/cloud/src/handlers/auth.ts:33` calls unbounded `readJsonBody`, so a streamed `/byok/pair` JSON body above 16 KiB without `Content-Length` is fully parsed and reaches `PairRequestSchema`, returning 400 instead of 413.
+repro: `bun --filter @byok-sdk/cloud test -- src/__tests__/request-body-limits.test.ts`
+regression_guard: `packages/cloud/src/__tests__/request-body-limits.test.ts`
+pre_fix_failure_artifact: `tasks/notes/20260901-0058-issue-105-json-body-limits.pre-fix.txt`
+expected invariant: a streamed `/byok/pair` JSON body larger than the 16 KiB auth ceiling and lacking trustworthy `Content-Length` receives 413 before JSON/schema processing.
+actual result: clean-base guard received 400; Vitest reported `AssertionError: expected 400 to be 413`.
+smallest reproducer: two-chunk `ReadableStream` request to `/byok/pair`, JSON `{"ignored":"${"x".repeat(16384)}"}`, no `Content-Length`, with the guard expecting 413.
+pre-fix non-zero command/exit/assertion: `bun --filter @byok-sdk/cloud test -- src/__tests__/request-body-limits.test.ts`; `PRE_FIX_EXIT=1`; assertion at `packages/cloud/src/__tests__/request-body-limits.test.ts:27` expected 413 and received 400.

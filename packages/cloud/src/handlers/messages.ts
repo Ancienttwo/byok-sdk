@@ -31,7 +31,9 @@ import { handleAgentMessagePublish, handleInboundEnvelope } from '../inbound';
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
-import { authenticateDevice, readJsonBody, type DeviceRouteDeps } from './shared';
+import { authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+
+const MESSAGES_JSON_BODY_MAX_BYTES = 2 * 1024 * 1024;
 
 export interface MessagesRouteDeps extends DeviceRouteDeps {
   readonly activityBounds: ActivityBounds;
@@ -70,7 +72,9 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
     const { device, stores } = authenticated;
 
-    const parsed = MessagesSendRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, MESSAGES_JSON_BODY_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = MessagesSendRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'messages must be an array of envelopes' }, 400);
 
     let accepted = 0;
