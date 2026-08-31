@@ -54,7 +54,7 @@ describe('url.ts: assertServerUrlAllowed', () => {
       expect(() => assertServerUrlAllowed('ws://example.com')).toThrow(InsecureServerUrlError);
     });
 
-    it('the error message names the offending URL and the fix (wss:/https: or the escape hatch)', () => {
+    it('the error message names the redacted endpoint and the fix (wss:/https: or the escape hatch)', () => {
       let caught: unknown;
       try {
         assertServerUrlAllowed('http://example.com');
@@ -66,6 +66,21 @@ describe('url.ts: assertServerUrlAllowed', () => {
       expect(message).toContain('http://example.com');
       expect(message).toMatch(/wss:|https:/);
       expect(message).toContain('dangerouslyAllowInsecureRemote');
+    });
+
+    it('omits userinfo, query, and fragment secrets from plaintext-remote errors', () => {
+      let caught: unknown;
+      try {
+        assertServerUrlAllowed('http://alice:password-sentinel@example.com/control?token=query-sentinel#fragment-sentinel');
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(InsecureServerUrlError);
+      const message = (caught as Error).message;
+      expect(message).toContain('http://example.com/control');
+      for (const secret of ['alice', 'password-sentinel', 'query-sentinel', 'fragment-sentinel']) {
+        expect(message).not.toContain(secret);
+      }
     });
 
     it('a hostname that merely STARTS WITH "127." but is not actually in 127.0.0.0/8 is still rejected (no naive prefix match)', () => {
@@ -105,11 +120,42 @@ describe('url.ts: assertServerUrlAllowed', () => {
         InsecureServerUrlError,
       );
     });
+
+    it('omits userinfo, query, and fragment secrets from unsupported-scheme errors', () => {
+      let caught: unknown;
+      try {
+        assertServerUrlAllowed('ftp://alice:password-sentinel@example.com/archive?token=query-sentinel#fragment-sentinel');
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(InsecureServerUrlError);
+      const message = (caught as Error).message;
+      expect(message).toContain('ftp://example.com/archive');
+      for (const secret of ['alice', 'password-sentinel', 'query-sentinel', 'fragment-sentinel']) {
+        expect(message).not.toContain(secret);
+      }
+    });
   });
 
   describe('unparseable serverUrl', () => {
     it('rejects with a typed error rather than letting the raw URL constructor error escape uncaught', () => {
       expect(() => assertServerUrlAllowed('not a url at all')).toThrow(InsecureServerUrlError);
+    });
+
+    it('does not echo malformed input that may itself contain secrets', () => {
+      const malformed = 'http://alice:password-sentinel@exa mple.com/?token=query-sentinel#fragment-sentinel';
+      let caught: unknown;
+      try {
+        assertServerUrlAllowed(malformed);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(InsecureServerUrlError);
+      const message = (caught as Error).message;
+      expect(message).toBe('invalid server URL');
+      for (const secret of ['alice', 'password-sentinel', 'query-sentinel', 'fragment-sentinel']) {
+        expect(message).not.toContain(secret);
+      }
     });
   });
 });

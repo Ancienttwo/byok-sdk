@@ -44,6 +44,14 @@ export function describeEndpoint(transport: TransportEndpoint['transport'], url:
 }
 
 /**
+ * The only URL projection used by validation errors. Reading from the parsed
+ * structure means userinfo, query, and fragment never enter the diagnostic.
+ */
+function describeServerUrlForError(url: URL): string {
+  return `${url.protocol}//${url.host}${url.pathname}`;
+}
+
+/**
  * M5: thrown by {@link assertServerUrlAllowed} — see that function's own doc
  * comment for the full allow/deny rule this names. Deliberately ONE error
  * type for every way the gate can refuse a `serverUrl` (plaintext-to-remote,
@@ -122,7 +130,7 @@ function isLoopbackHostname(hostname: string): boolean {
  *    `localhost` or any `*.localhost` subdomain, an IPv4 literal in
  *    `127.0.0.0/8`, or the IPv6 loopback `::1` — see {@link isLoopbackHostname}.
  *  - `http:`/`ws:` to any other host — refused with a clear, typed
- *    {@link InsecureServerUrlError} naming the offending URL and the fix
+ *    {@link InsecureServerUrlError} naming the redacted scheme/host/path and the fix
  *    (use `wss:`/`https:`, or pass `dangerouslyAllowInsecureRemote: true` if
  *    this is a deliberate, understood exception) — UNLESS
  *    `opts.dangerouslyAllowInsecureRemote` is `true`.
@@ -136,9 +144,12 @@ export function assertServerUrlAllowed(rawUrl: string, opts: AssertServerUrlAllo
   let url: URL;
   try {
     url = new URL(rawUrl);
-  } catch (err) {
-    throw new InsecureServerUrlError(`invalid server URL "${rawUrl}": ${err instanceof Error ? err.message : String(err)}`);
+  } catch {
+    // A WHATWG parse error may reproduce the rejected input. Malformed input
+    // has no trustworthy structural projection, so do not echo any of it.
+    throw new InsecureServerUrlError('invalid server URL');
   }
+  const endpoint = describeServerUrlForError(url);
 
   switch (url.protocol) {
     case 'https:':
@@ -148,13 +159,13 @@ export function assertServerUrlAllowed(rawUrl: string, opts: AssertServerUrlAllo
     case 'ws:':
       if (opts.dangerouslyAllowInsecureRemote || isLoopbackHostname(url.hostname)) return;
       throw new InsecureServerUrlError(
-        `refusing to connect to "${rawUrl}" over plaintext ${url.protocol.replace(':', '')} — "${url.hostname}" is not a ` +
+        `refusing to connect to "${endpoint}" over plaintext ${url.protocol.replace(':', '')} — "${url.hostname}" is not a ` +
           'loopback host. Use wss:/https: for any non-loopback server, or pass { dangerouslyAllowInsecureRemote: true } ' +
           '(DaemonConfig) if you understand and accept the risk of sending device credentials over an unencrypted connection.',
       );
     default:
       throw new InsecureServerUrlError(
-        `refusing to connect to "${rawUrl}" — unsupported scheme "${url.protocol}" (expected http:, https:, ws:, or wss:).`,
+        `refusing to connect to "${endpoint}" — unsupported scheme "${url.protocol}" (expected http:, https:, ws:, or wss:).`,
       );
   }
 }
