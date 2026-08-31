@@ -56,8 +56,8 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewed Subject SHA256**: sha256:7b18743cac9fb9c3cef7632022da2ff149a835b95d9508095d418904d5082a00
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
-> **Verification Evidence SHA256**: sha256:0dfdb2f6d0aa7e989ecbbdb95f141559dbca43630eba7f0a4d1f135001944010
-> **Issued At**: 2026-08-31T19:56:44.876Z
+> **Verification Evidence SHA256**: sha256:ead58447813b6ddff69b3c6dce78960104995992c9eca7c65838e3fa5bd9e07e
+> **Issued At**: 2026-08-31T19:58:54.050Z
 
 - Summary: Exact candidate passes connection-local unary and stream request ID ownership, identity-safe cleanup, and disconnect teardown; no P0-P3 findings.
 - Findings: none
