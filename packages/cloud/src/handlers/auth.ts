@@ -22,7 +22,9 @@ import {
   type TokenResponse,
 } from '@byok-sdk/protocol';
 import type { AuthPlane } from '../auth/plane';
-import { readJsonBody } from './shared';
+import { readBoundedJsonBody } from './shared';
+
+const AUTH_JSON_BODY_MAX_BYTES = 16 * 1024;
 
 export interface AuthRouteDeps {
   readonly auth: AuthPlane;
@@ -30,7 +32,9 @@ export interface AuthRouteDeps {
 
 export function pairHandler(deps: AuthRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const parsed = PairRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, AUTH_JSON_BODY_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = PairRequestSchema.safeParse(body.body);
     if (!parsed.success) {
       return c.json(
         {
@@ -60,7 +64,9 @@ export function pairHandler(deps: AuthRouteDeps) {
 
 export function challengeHandler(deps: AuthRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const parsed = ChallengeRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, AUTH_JSON_BODY_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = ChallengeRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'deviceId is required' }, 400);
 
     // Pre-tenant by construction: `ChallengeRequest` is the pinned wire
@@ -76,7 +82,9 @@ export function challengeHandler(deps: AuthRouteDeps) {
 
 export function tokenHandler(deps: AuthRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const parsed = TokenRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, AUTH_JSON_BODY_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = TokenRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'deviceId, nonce, and signature are required' }, 400);
     const { deviceId, nonce, signature } = parsed.data;
 
