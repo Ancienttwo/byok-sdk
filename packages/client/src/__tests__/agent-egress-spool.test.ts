@@ -373,6 +373,93 @@ describe('Agent reliable egress spool', () => {
     expect(controller.status().reliable.pendingBytes).toBeLessThanOrEqual(policy.reliable.maxPendingBytesPerTenant);
   });
 
+  it('accounts for durable records from a slow first-open before admitting a cached Agent append', async () => {
+    const tenantId = 'tenant-slow-open-quota';
+    const preloadedAgent = { agentId: 'agent-slow-open', profileRevision: 'r1' };
+    const preloadedHome = await home('tenant-slow-open');
+    const preloadedSpool = await AgentReliableSpool.open(preloadedHome);
+    const preloadedRecord = await preloadedSpool.append({
+      agentRef: preloadedAgent,
+      tenantId,
+      policyRevision: DEFAULT_AGENT_EGRESS_POLICY.policyRevision,
+      sessionRef: 'session-slow-open-existing',
+      eventId: '81000000-0000-4000-8000-000000000031',
+      payload: { status: 'preloaded' },
+    }, DEFAULT_AGENT_EGRESS_POLICY, 0);
+    const policy: AgentEgressPolicy = {
+      ...DEFAULT_AGENT_EGRESS_POLICY,
+      policyRevision: 'tenant-slow-open-quota-r1',
+      reliable: {
+        maxPendingEventsPerAgent: 2,
+        maxPendingBytesPerAgent: 1024,
+        maxPendingBytesPerTenant: preloadedRecord.byteCount,
+      },
+    };
+    const cachedAgent = { agentId: 'agent-cached-quota', profileRevision: 'r1' };
+    const cachedHome = await home('tenant-cached-quota');
+    const controller = new AgentEgressController({ policy, tenantId });
+    const seed = await controller.appendReliable({
+      homeDir: cachedHome,
+      agentRef: cachedAgent,
+      sessionRef: 'session-cached-seed',
+      eventId: '81000000-0000-4000-8000-000000000032',
+      payload: { status: 'seed' },
+    });
+    expect(seed.ok).toBe(true);
+    if (!seed.ok) throw new Error('cached Agent seed append must succeed');
+    expect(await controller.acknowledge({
+      agentRef: cachedAgent,
+      tenantId,
+      sessionRef: 'session-cached-seed',
+      policyRevision: seed.record.policyRevision,
+      eventId: '81000000-0000-4000-8000-000000000032',
+      cursor: seed.record.cursor,
+    })).toBe(true);
+
+    const originalOpen = AgentReliableSpool.open.bind(AgentReliableSpool);
+    let openReached!: () => void;
+    let releaseOpen!: () => void;
+    const reached = new Promise<void>((resolve) => { openReached = resolve; });
+    const release = new Promise<void>((resolve) => { releaseOpen = resolve; });
+    vi.spyOn(AgentReliableSpool, 'open').mockImplementation(async (homeDir) => {
+      if (homeDir === preloadedHome) {
+        openReached();
+        await release;
+      }
+      return originalOpen(homeDir);
+    });
+
+    const opening = controller.appendReliable({
+      homeDir: preloadedHome,
+      agentRef: preloadedAgent,
+      sessionRef: 'session-slow-open-new',
+      eventId: '81000000-0000-4000-8000-000000000033',
+      payload: { status: 'new' },
+    });
+    await reached;
+    let cachedSettled = false;
+    const cached = controller.appendReliable({
+      homeDir: cachedHome,
+      agentRef: cachedAgent,
+      sessionRef: 'session-cached-race',
+      eventId: '81000000-0000-4000-8000-000000000034',
+      payload: { status: 'cached' },
+    }).finally(() => { cachedSettled = true; });
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(cachedSettled).toBe(false);
+    } finally {
+      releaseOpen();
+    }
+
+    await expect(Promise.all([opening, cached])).resolves.toEqual([
+      { ok: false, reason: 'quota_exceeded' },
+      { ok: false, reason: 'quota_exceeded' },
+    ]);
+    expect(controller.reliableRecords()).toEqual([preloadedRecord]);
+    expect(controller.status().reliable.pendingBytes).toBe(preloadedRecord.byteCount);
+  });
+
   it('accounts for a reliable append racing a content receipt across Agent spools', async () => {
     const policy: AgentEgressPolicy = {
       ...DEFAULT_AGENT_EGRESS_POLICY,

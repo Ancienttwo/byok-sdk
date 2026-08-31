@@ -159,8 +159,10 @@ export class AgentEgressController {
       return { ok: false, reason: 'sanitizer_rejected' };
     }
     try {
-      const spool = await this.spoolFor(input.homeDir, input.agentRef);
+      const spoolOpen = this.spoolFor(input.homeDir, input.agentRef);
       return await this.withAppendTail(async () => {
+        const spool = await spoolOpen;
+        this.bindSpool(input.agentRef, spool, spoolOpen);
         const record = await spool.append({
           agentRef: input.agentRef,
           tenantId,
@@ -191,8 +193,10 @@ export class AgentEgressController {
       return { ok: false, reason: 'policy_denied' };
     }
     try {
-      const spool = await this.spoolFor(input.homeDir, input.agentRef);
+      const spoolOpen = this.spoolFor(input.homeDir, input.agentRef);
       return await this.withAppendTail(async () => {
+        const spool = await spoolOpen;
+        this.bindSpool(input.agentRef, spool, spoolOpen);
         const record = await spool.appendContentReceipt({
           agentRef: input.agentRef,
           tenantId,
@@ -285,12 +289,12 @@ export class AgentEgressController {
     return this.reliableRecords();
   }
 
-  private async spoolFor(homeDir: string, agentRef: AgentRef): Promise<AgentReliableSpool> {
+  private spoolFor(homeDir: string, agentRef: AgentRef): Promise<AgentReliableSpool> {
     const key = agentKey(agentRef);
     const existing = this.spools.get(key);
     if (existing) {
       if (existing.homeDir !== homeDir) throw new Error('Agent reliable spool is already bound to a different home');
-      return existing;
+      return Promise.resolve(existing);
     }
     const inFlight = this.spoolOpens.get(key);
     if (inFlight !== undefined) {
@@ -302,15 +306,25 @@ export class AgentEgressController {
       if (spool.records().some((record) => !sameAgent(record.agentRef, agentRef))) {
         throw new Error('Agent-local reliable spool has a different AgentRef');
       }
-      this.spools.set(key, spool);
       return spool;
     })();
     const slot: AgentReliableSpoolOpenSlot = { homeDir, promise: opened };
     this.spoolOpens.set(key, slot);
-    try {
-      return await opened;
-    } finally {
+    void opened.catch(() => {
       if (this.spoolOpens.get(key) === slot) this.spoolOpens.delete(key);
+    });
+    return opened;
+  }
+
+  private bindSpool(agentRef: AgentRef, spool: AgentReliableSpool, spoolOpen: Promise<AgentReliableSpool>): void {
+    const key = agentKey(agentRef);
+    const existing = this.spools.get(key);
+    try {
+      if (existing && existing !== spool) throw new Error('multiple Agent egress spools claim the same AgentRef');
+      this.spools.set(key, spool);
+    } finally {
+      const slot = this.spoolOpens.get(key);
+      if (slot?.promise === spoolOpen) this.spoolOpens.delete(key);
     }
   }
 

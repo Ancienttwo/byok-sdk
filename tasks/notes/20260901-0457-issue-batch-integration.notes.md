@@ -16,7 +16,8 @@
 
 ## Deviations From Plan Or Spec
 
-- None recorded.
+- The first combined client run exposed a real ordering conflict between #106 and #107: placing the start of `spoolFor()` inside the controller-wide append tail prevented concurrent callers from sharing the same first-open promise and delayed a different-home rejection behind the blocked append. The final composition starts or joins the home-bound per-Agent open before queueing, but awaits and binds that spool inside the tenant-wide critical section before observing aggregate bytes and appending. This keeps same-Agent open sharing and immediate home mismatch rejection without hiding preloaded durable records from tenant quota authority.
+- The first focused invocation ran before workspace package build artifacts existed, so Vitest could not resolve `@byok-sdk/core` / `@byok-sdk/protocol`. `bun run build` materialized the authoritative package exports, after which the identical focused commands entered the tests and passed.
 
 ## Tradeoffs Considered
 
@@ -35,6 +36,13 @@
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Accepted per-issue receipts: each issue review projection plus its worktree `.ai/harness/checks/latest.json`; live verification is repeated against the combined subject.
+- Frozen target: `9d2b05253570c13f235ef4f9aa2a1e94e431c576`.
+- Accepted heads proven as ancestors: `224aa942`, `ee155265`, `19d8e7a0`, `42a8b92f`, `4b4c8db1`, `7da14ec4`, and `c575126c`.
+- Focused Cloud guard: 1 file, 14 tests passed.
+- Focused Client guards after the integration guard was added: 5 files, 118 tests passed, 1 skipped.
+- Root verification after code freeze: `bun run build`, `bun run typecheck`, and `bun run test` passed; the final suite totals 3,372 passed and 109 skipped across package reports.
+- One intermediate root suite run timed out the unrelated Wrangler packaging dry-run while typecheck ran concurrently. The exact file then passed 6/6 without parallel load, and the subsequent sequential root suite passed without source changes.
+- Workflow/diff verification: `repo-harness run check-task-workflow --strict` and `git diff --check` passed.
 
 ## Promotion Filter
 

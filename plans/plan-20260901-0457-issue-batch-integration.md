@@ -1,6 +1,6 @@
 # Plan: Issues 105-111 accepted batch integration
 
-> **Status**: Executing
+> **Status**: Review
 > **Created**: 20260901-0457
 > **Slug**: issue-batch-integration
 > **Artifact Level**: work-package
@@ -56,8 +56,8 @@
 
 ## Task Breakdown
 
-- [ ] Freeze target and verify all accepted input heads/receipts.
-- [ ] Merge accepted subjects in dependency order and resolve the #106/#107 shared authority.
-- [ ] Run shared-surface and root verification on the frozen integration head.
+- [x] Freeze target and verify all accepted input heads/receipts.
+- [x] Merge accepted subjects in dependency order and resolve the #106/#107 shared authority.
+- [x] Run shared-surface and root verification on the frozen integration head.
 - [ ] Record merge-gate evidence and non-force push to `origin/main`.
 - [ ] Read back remote SHA and preserve the dirty primary worktree unchanged.
