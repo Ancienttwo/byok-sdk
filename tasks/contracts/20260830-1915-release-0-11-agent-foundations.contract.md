@@ -7,7 +7,7 @@
 > **Workflow Profile**: strict
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-08-30 19:16
+> **Last Updated**: 2026-08-30 20:50
 > **Review File**: `tasks/reviews/20260830-1915-release-0-11-agent-foundations.review.md`
 > **Notes File**: `tasks/notes/20260830-1915-release-0-11-agent-foundations.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -18,12 +18,12 @@ The accepted Pi foundations and Agent-memory grant changes currently live on sep
 
 ## Goal
 
-Produce one unpublished, clean local 0.11.0 candidate that contains both accepted source lines, preserves the nine-package aligned version train, advances the independent `@byok-sdk/keys` package to the next immutable version required by its exact core edge, and passes frozen install, package graph, root verification, and exact packed-artifact smoke.
+Publish and read back the exact clean `main@7a937e5ed8eb5aef102eacb0df9183f296da7e1f` artifact set: nine aligned public packages at `0.11.0` and the independent `@byok-sdk/keys@0.3.8`, preserving the already accepted source, package graph, frozen integrity, and exact core edge.
 
 ## Scope
 
-- In scope: local merge of `codex/agent-memory-mcp-grant`; conflict resolution across client source, changelog/spec, package manifests, and `bun.lock`; repair `@byok-sdk/keys` from already-published `0.3.7` to `0.3.8` so its packed manifest can declare exact `@byok-sdk/core@0.11.0`; release graph and exact tarball verification; release evidence and workflow projections; exact-SHA non-force push and GitHub Actions wait.
-- Out of scope: npm publish, registry mutation, tag, GitHub Release, deploy, production rollout, and downstream pinning.
+- In scope: the accepted source composition and keys repair; exact-SHA main/CI and artifact readback; fresh publication checks/review/AcceptanceReceipt; local annotated `v0.11.0` tag creation; stable-channel npm publication of the exact ten frozen tarballs with no `--tag`; canonical registry metadata, integrity, dependency-edge, fresh-import, and single-version-closure readback.
+- Out of scope: remote tag push, GitHub Release, downstream pinning, deploy, production migration/rollout, secrets, and any source or package-version change.
 - Taste constraints: one 0.11.0 authority; no duplicate changelog entries, compatibility aliases, workspace overlays, or hand-edited packed artifacts.
 
 ## Stop Conditions
@@ -31,6 +31,7 @@ Produce one unpublished, clean local 0.11.0 candidate that contains both accepte
 - Stop and hand back to the parent if the change would require editing a path outside Allowed Paths.
 - Stop if an Exit Criteria command cannot be run in this environment.
 - Stop if Goal, Scope, or Exit Criteria are internally contradictory.
+- Stop on any partial publication, browser/OTP expiry, registry mismatch, or readback failure; inspect immutable live registry state before any retry and do not republish an occupied version.
 
 ## Falsifier
 
@@ -163,6 +164,7 @@ exit_criteria:
     - .ai/harness/checks/latest.json
     - tasks/notes/20260830-1915-release-0-11-agent-foundations.notes.md
     - .ai/harness/runs/20260830-release-0-11-agent-foundations/artifacts/release-manifest.json
+    - .ai/harness/runs/20260830-release-0-11-publish-preflight/artifacts/release-manifest.json
   tests_pass:
     - path: packages/client/src/__tests__/pi-adapter.test.ts
     - path: packages/client/src/__tests__/team-workspace.test.ts
@@ -183,5 +185,5 @@ exit_criteria:
 
 ## Rollback Point
 
-- Commit / checkpoint: isolated `codex/release-0-11-agent-foundations` branch before any external publication.
-- Revert strategy: revert the bounded 0.3.8 repair commit or remove only this isolated worktree/branch after preserving evidence; no registry, tag, deploy, or production state is created.
+- Commit / checkpoint: exact release source `7a937e5ed8eb5aef102eacb0df9183f296da7e1f`; publication-gate evidence remains on the isolated `codex/release-0-11-agent-foundations` branch and must not change artifact identity.
+- Revert strategy: source and local tags remain recoverable, but npm versions are immutable. On partial publication, stop and read back the registry; never delete/recreate or republish an occupied version. No remote tag, GitHub Release, downstream, deploy, or production state is authorized here.
