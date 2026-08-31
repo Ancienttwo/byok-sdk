@@ -38,7 +38,7 @@ function cancellableRequest(
   path: string,
   chunk: Uint8Array,
   headers: Record<string, string> = {},
-  cancel: () => void = () => {},
+  cancel: () => void | Promise<void> = () => {},
 ): Request {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -56,6 +56,22 @@ function cancellableRequest(
 
 function oversizedJson(limit: number): Uint8Array {
   return bytes(`{"ignored":"${'x'.repeat(limit)}"}`);
+}
+
+async function responseWithin<T>(value: T | Promise<T>, timeoutMs = 100): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`response did not arrive within ${timeoutMs}ms`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([Promise.resolve(value), deadline]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+function neverSettlingCancel(): Promise<void> {
+  return new Promise(() => {});
 }
 
 describe('Cloud JSON request-body limits', () => {
@@ -126,6 +142,30 @@ describe('Cloud JSON request-body limits', () => {
       {},
       () => { throw new Error('test cancellation failure'); },
     ));
+
+    expect(response.status).toBe(413);
+  });
+
+  it('returns 413 within the deadline when declared-over-limit cancellation never settles', async () => {
+    const harness = createHarness();
+    const response = await responseWithin(harness.cloud.fetch(cancellableRequest(
+      '/byok/pair',
+      bytes('{"ignored":"small"}'),
+      { 'content-length': String(AUTH_JSON_BODY_MAX_BYTES + 1) },
+      neverSettlingCancel,
+    )));
+
+    expect(response.status).toBe(413);
+  });
+
+  it('returns 413 within the deadline when overflow cancellation never settles', async () => {
+    const harness = createHarness();
+    const response = await responseWithin(harness.cloud.fetch(cancellableRequest(
+      '/byok/pair',
+      oversizedJson(AUTH_JSON_BODY_MAX_BYTES),
+      {},
+      neverSettlingCancel,
+    )));
 
     expect(response.status).toBe(413);
   });

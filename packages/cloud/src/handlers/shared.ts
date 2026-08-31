@@ -43,7 +43,7 @@ export async function readBoundedJsonBody(
   if (declaredLength !== undefined) {
     const parsedLength = parseContentLength(declaredLength);
     if (parsedLength !== undefined && parsedLength > BigInt(maximum)) {
-      await cancelBody(c.req.raw.body);
+      cancelBody(c.req.raw.body);
       return { body: undefined, tooLarge: true };
     }
   }
@@ -59,7 +59,7 @@ export async function readBoundedJsonBody(
       const { done, value } = await reader.read();
       if (done) break;
       if (value.byteLength > maximum - total) {
-        await cancelBody(reader);
+        cancelBody(reader);
         return { body: undefined, tooLarge: true };
       }
       if (value.byteLength === 0) continue;
@@ -82,17 +82,20 @@ export async function readBoundedJsonBody(
 }
 
 /**
- * Cancellation is a resource-release best effort, never a condition for
+ * Cancellation is a resource-release best effort that is never awaited before
  * rejecting an already oversized request. `ReadableStream.cancel()` is used
  * before a reader exists; `ReadableStreamDefaultReader.cancel()` owns the
  * same underlying request stream after an overflow has been observed.
  */
-async function cancelBody(
+function cancelBody(
   body: ReadableStream<Uint8Array> | ReadableStreamDefaultReader<Uint8Array> | null,
-): Promise<void> {
+): void {
   if (body === null) return;
   try {
-    await body.cancel();
+    void Promise.resolve(body.cancel()).catch(() => {
+      // An already over-limit request must remain a 413 even when its producer
+      // cannot be cancelled (for example, a disconnected or misbehaving peer).
+    });
   } catch {
     // An already over-limit request must remain a 413 even when its producer
     // cannot be cancelled (for example, a disconnected or misbehaving peer).
