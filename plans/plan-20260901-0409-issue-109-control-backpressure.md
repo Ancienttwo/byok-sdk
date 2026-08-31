@@ -1,6 +1,6 @@
 # Plan: Issue 109 control socket outbound backpressure
 
-> **Status**: Complete
+> **Status**: Review
 > **Created**: 20260901-0409
 > **Slug**: issue-109-control-backpressure
 > **Artifact Level**: work-package
