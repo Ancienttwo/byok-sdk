@@ -1,6 +1,6 @@
 # Task Review: issue-111-url-redaction
 
-> **Status**: Complete
+> **Status**: Accepted
 > **Plan**: plans/plan-20260901-0409-issue-111-url-redaction.md
 > **Contract**: tasks/contracts/20260901-0409-issue-111-url-redaction.contract.md
 > **Notes File**: tasks/notes/20260901-0409-issue-111-url-redaction.notes.md
@@ -8,9 +8,9 @@
 > **Last Updated**: 2026-09-01 04:10
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:4f106dfdd62359135923c407bbdeb143953531adca3c81bf25cd6b0bf838ec8f
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
+> **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
 
 ## Human Review Card
 
@@ -48,17 +48,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-plugin
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:4f106dfdd62359135923c407bbdeb143953531adca3c81bf25cd6b0bf838ec8f
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
+> **Verification Evidence SHA256**: sha256:9a5efda8d921aaa1187d858fe69919591a72cf43978a533c6bf8d259383ce009
+> **Issued At**: 2026-08-31T20:28:09.536Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: GitHub #111 thrown validation messages omit credential-bearing URL components without changing allow/deny behavior; exact-diff review found no in-scope P0-P2 findings.
 - Findings: none
 
 ## Behavior Diff Notes
