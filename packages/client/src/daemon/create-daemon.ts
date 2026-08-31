@@ -245,6 +245,8 @@ export interface DaemonConfig {
   productName: string;
   productId: string;
   serverUrl: string;
+  /** Bounds one AuthManager pair/challenge/token exchange, including response-body reads. */
+  authRequestDeadlineMs?: number;
   deviceName?: string;
   /**
    * Optional override for the client-hashed physical machine identity sent
@@ -1398,6 +1400,7 @@ export function buildDaemonWithAdapters(
   function buildAuthManager(): AuthManager {
     return new AuthManager({
       serverUrl: config.serverUrl,
+      authRequestDeadlineMs: config.authRequestDeadlineMs,
       store,
       deviceName: config.deviceName,
       machineId: config.machineId ?? (() => resolveMachineId({ productId: config.productId })),

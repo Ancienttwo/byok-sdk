@@ -20,6 +20,18 @@ export class DeviceRevokedError extends Error {
 }
 
 /**
+ * Thrown when the local AuthManager deadline or shutdown cancels its own
+ * in-flight request. This is deliberately distinct from `DeviceRevokedError`:
+ * only an actual challenge/token HTTP 401 is server authority for revocation.
+ */
+export class AuthRequestAbortedError extends Error {
+  constructor(readonly reason: 'deadline' | 'stopped') {
+    super(reason === 'deadline' ? 'authentication request exceeded its deadline' : 'authentication request was cancelled during shutdown');
+    this.name = 'AuthRequestAbortedError';
+  }
+}
+
+/**
  * Conservative assumed lifetime for the token minted directly by
  * `/byok/pair`, which — unlike `/byok/token` — reports no explicit
  * `expiresAt` (only an opaque `refreshHint`). docs/protocol.md §6.1
@@ -29,6 +41,8 @@ export class DeviceRevokedError extends Error {
 const ASSUMED_PAIR_TOKEN_TTL_MS = 45 * 60 * 1000;
 /** Renew this long before a token's recorded expiry — both proactively (background timer) and as the "already close enough to expiry, renew now" reactive threshold. */
 const RENEW_MARGIN_MS = 60 * 1000;
+/** A bounded default for every device-auth HTTP exchange, including response-body reads. */
+const DEFAULT_AUTH_REQUEST_DEADLINE_MS = 15_000;
 
 export interface AuthManagerOptions {
   serverUrl: string;
@@ -44,6 +58,8 @@ export interface AuthManagerOptions {
    * permission to supersede this machine's prior active device rows.
    */
   machineId?: () => Promise<string | undefined>;
+  /** Upper bound for one pair/challenge/token fetch plus its response-body read. */
+  authRequestDeadlineMs?: number;
   /** Called once revocation is detected, so a caller (ConnectionManager) can stop retrying and surface the state instead of looping. */
   onRevoked?: () => void;
 }
@@ -63,11 +79,15 @@ export class AuthManager {
   private stopped = false;
   private pairing = false;
   private credentialMutationTail: Promise<void> = Promise.resolve();
+  /** The sole cancellation authority for the request currently inside the serialized credential mutation. */
+  private activeRequest: AbortController | undefined;
 
   private readonly credentials: DeviceCredentialStore | InMemoryDeviceCredentialStore;
+  private readonly requestDeadlineMs: number;
 
   constructor(private readonly opts: AuthManagerOptions) {
     this.credentials = opts.credentials ?? opts.store.credentials;
+    this.requestDeadlineMs = resolveRequestDeadlineMs(opts.authRequestDeadlineMs);
   }
 
   get deviceId(): string | undefined {
@@ -123,24 +143,27 @@ export class AuthManager {
         // becomes an empty string or any other placeholder the server would
         // then treat as a real machine shared by every unidentifiable device.
         const machineId = await this.opts.machineId?.();
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            pairingCode,
-            deviceName: this.opts.deviceName ?? os.hostname(),
-            devicePublicKey: keyPair.publicKeyBase64Url,
-            ...(machineId === undefined ? {} : { machineId }),
-          }),
+        const body = await this.runRequest(async (signal) => {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              pairingCode,
+              deviceName: this.opts.deviceName ?? os.hostname(),
+              devicePublicKey: keyPair.publicKeyBase64Url,
+              ...(machineId === undefined ? {} : { machineId }),
+            }),
+            signal,
+          });
+          if (!res.ok) {
+            throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
+          }
+          // Pairing is the only time an authenticated tenant binding may enter
+          // local state. Parse the required wire contract before building the
+          // one atomic DeviceRecord; no token claim or host configuration is an
+          // alternate tenant authority.
+          return PairResponseSchema.parse(await res.json());
         });
-        if (!res.ok) {
-          throw new Error(`pairing failed: HTTP ${res.status} ${await safeErrorText(res)}`.trimEnd());
-        }
-        // Pairing is the only time an authenticated tenant binding may enter
-        // local state. Parse the required wire contract before building the
-        // one atomic DeviceRecord; no token claim or host configuration is an
-        // alternate tenant authority.
-        const body = PairResponseSchema.parse(await res.json());
 
         const metadata: DeviceMetadata = {
           deviceId: body.deviceId,
@@ -192,10 +215,11 @@ export class AuthManager {
     this.stopped = true;
     if (this.proactiveTimer) clearTimeout(this.proactiveTimer);
     this.proactiveTimer = undefined;
-    // A timer may already have entered renew() before stop() cleared it. Its
-    // final step persists device.json, so daemon ownership cannot be released
-    // until that promise settles. Renewal failure is surfaced later by the
-    // next token consumer; shutdown only needs the writer barrier here.
+    // Abort before waiting on the writer tail: a timer may already have entered
+    // pair/renew and be blocked in fetch or a response-body read. The same tail
+    // remains the sole credential persistence barrier, so shutdown cannot
+    // release daemon ownership until that operation has observed cancellation.
+    this.activeRequest?.abort();
     await this.credentialMutationTail;
   }
 
@@ -215,30 +239,36 @@ export class AuthManager {
     const base = toHttpBase(this.opts.serverUrl);
     const privateKey = importPrivateKeyPem(record.devicePrivateKeyPem);
 
-    const challengeRes = await fetch(new URL(BYOK_CHALLENGE_PATH, base), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceId: record.deviceId }),
+    const { nonce } = await this.runRequest(async (signal) => {
+      const challengeRes = await fetch(new URL(BYOK_CHALLENGE_PATH, base), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ deviceId: record.deviceId }),
+        signal,
+      });
+      if (challengeRes.status === 401) this.markRevoked();
+      if (!challengeRes.ok) {
+        throw new Error(
+          `token renewal (challenge) failed: HTTP ${challengeRes.status} ${await safeErrorText(challengeRes)}`.trimEnd(),
+        );
+      }
+      return (await challengeRes.json()) as ChallengeResponse;
     });
-    if (challengeRes.status === 401) this.markRevoked();
-    if (!challengeRes.ok) {
-      throw new Error(
-        `token renewal (challenge) failed: HTTP ${challengeRes.status} ${await safeErrorText(challengeRes)}`.trimEnd(),
-      );
-    }
-    const { nonce } = (await challengeRes.json()) as ChallengeResponse;
     const signature = signNonce(privateKey, nonce);
 
-    const tokenRes = await fetch(new URL(BYOK_TOKEN_PATH, base), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceId: record.deviceId, nonce, signature }),
+    const body = await this.runRequest(async (signal) => {
+      const tokenRes = await fetch(new URL(BYOK_TOKEN_PATH, base), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ deviceId: record.deviceId, nonce, signature }),
+        signal,
+      });
+      if (tokenRes.status === 401) this.markRevoked();
+      if (!tokenRes.ok) {
+        throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
+      }
+      return (await tokenRes.json()) as TokenResponse;
     });
-    if (tokenRes.status === 401) this.markRevoked();
-    if (!tokenRes.ok) {
-      throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status} ${await safeErrorText(tokenRes)}`.trimEnd());
-    }
-    const body = (await tokenRes.json()) as TokenResponse;
     const updated: DeviceRecord = {
       ...record,
       accessToken: body.accessToken,
@@ -274,6 +304,38 @@ export class AuthManager {
     }, delay);
     timer.unref?.();
     this.proactiveTimer = timer;
+  }
+
+  /**
+   * Bounds one complete auth exchange rather than fetch alone. Keeping the
+   * controller active through `json()`/`text()` makes a non-cooperative or
+   * partial response body cancellable by the same authority that owns fetch.
+   */
+  private async runRequest<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (this.stopped) throw new AuthRequestAbortedError('stopped');
+    const controller = new AbortController();
+    this.activeRequest = controller;
+    let deadlineElapsed = false;
+    const deadline = setTimeout(() => {
+      deadlineElapsed = true;
+      controller.abort();
+    }, this.requestDeadlineMs);
+    let rejectOnAbort!: (error: AuthRequestAbortedError) => void;
+    const aborted = new Promise<never>((_, reject) => {
+      rejectOnAbort = reject;
+    });
+    const onAbort = () => rejectOnAbort(new AuthRequestAbortedError(deadlineElapsed ? 'deadline' : 'stopped'));
+    controller.signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      return await Promise.race([operation(controller.signal), aborted]);
+    } catch (error) {
+      if (controller.signal.aborted) throw new AuthRequestAbortedError(deadlineElapsed ? 'deadline' : 'stopped');
+      throw error;
+    } finally {
+      clearTimeout(deadline);
+      controller.signal.removeEventListener('abort', onAbort);
+      if (this.activeRequest === controller) this.activeRequest = undefined;
+    }
   }
 
   private async runCredentialMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -330,6 +392,14 @@ function resolvePairExpiry(refreshHint: string | undefined): string {
     if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
   }
   return new Date(Date.now() + ASSUMED_PAIR_TOKEN_TTL_MS).toISOString();
+}
+
+function resolveRequestDeadlineMs(value: number | undefined): number {
+  const deadline = value ?? DEFAULT_AUTH_REQUEST_DEADLINE_MS;
+  if (!Number.isSafeInteger(deadline) || deadline <= 0) {
+    throw new Error('authRequestDeadlineMs must be a positive safe integer');
+  }
+  return deadline;
 }
 
 async function safeErrorText(res: Response): Promise<string> {

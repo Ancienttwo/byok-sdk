@@ -18,6 +18,29 @@ async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
+/** Fails the regression deterministically instead of leaving a pre-fix HTTP/body hang in the test runner. */
+async function settleWithin<T>(operation: Promise<T>, timeoutMs = 250): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`auth request regression guard exceeded ${timeoutMs}ms`)), timeoutMs);
+    void operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function authWithDeadline(serverUrl: string, store: DeviceStore, authRequestDeadlineMs: number): AuthManager {
+  // The temporary assertion makes this guard compile against the unfixed base,
+  // where AuthManager has not yet declared its one deadline configuration.
+  return new AuthManager({ serverUrl, store, authRequestDeadlineMs } as ConstructorParameters<typeof AuthManager>[0]);
+}
+
 describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
   let server: TestServer;
 
@@ -316,6 +339,123 @@ describe('access token renewal (protocol §6.2)', () => {
     expect(auth.isRevoked()).toBe(true);
     auth.stop();
   });
+
+  it('bounds a hung pairing response without persisting a partial credential or treating it as revocation', async () => {
+    const store = new DeviceStore(await tmpDir('byok-auth-pair-deadline-'));
+    const auth = authWithDeadline(server.url, store, 40);
+    const releasePair = server.blockNextPair();
+    try {
+      await expect(settleWithin(auth.pair('pairing-code'))).rejects.toMatchObject({
+        name: 'AuthRequestAbortedError',
+        reason: 'deadline',
+      });
+      expect(auth.isRevoked()).toBe(false);
+      await expect(store.load()).resolves.toBeUndefined();
+      await expect(store.credentials.read()).resolves.toBeUndefined();
+    } finally {
+      releasePair();
+      await auth.stop();
+    }
+  });
+
+  it('stop aborts a hung challenge before waiting for the credential mutation tail', async () => {
+    server.setTokenTtlMs(60 * 60 * 1000);
+    const store = new DeviceStore(await tmpDir('byok-auth-stop-deadline-'));
+    const auth = authWithDeadline(server.url, store, 500);
+    const record = await auth.pair('pairing-code');
+    const before = await store.credentials.read();
+    server.rotateDeviceToken(record.deviceId);
+    const releaseChallenge = server.blockNextChallenge();
+    const renewal = auth.handleUnauthorized();
+    await vi.waitFor(() => expect(server.httpRequests.some((request) => request.pathname === '/byok/challenge')).toBe(true));
+    const stopping = auth.stop();
+    try {
+      const [renewalResult] = await settleWithin(Promise.allSettled([renewal, stopping]));
+      expect(renewalResult).toMatchObject({
+        status: 'rejected',
+        reason: { name: 'AuthRequestAbortedError', reason: 'stopped' },
+      });
+      expect(auth.isRevoked()).toBe(false);
+      expect(await store.credentials.read()).toEqual(before);
+    } finally {
+      releaseChallenge();
+      await auth.stop();
+    }
+  });
+
+  it('bounds a hung token response body and preserves the complete prior credential', async () => {
+    server.setTokenTtlMs(60 * 60 * 1000);
+    const store = new DeviceStore(await tmpDir('byok-auth-token-body-deadline-'));
+    const auth = authWithDeadline(server.url, store, 40);
+    const record = await auth.pair('pairing-code');
+    const before = await store.credentials.read();
+    server.rotateDeviceToken(record.deviceId);
+    const realFetch = globalThis.fetch;
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+      if (url.pathname === '/byok/token') {
+        return new Response(new ReadableStream<Uint8Array>({ start: () => undefined }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return realFetch(input, init);
+    });
+    try {
+      await expect(settleWithin(auth.handleUnauthorized())).rejects.toMatchObject({
+        name: 'AuthRequestAbortedError',
+        reason: 'deadline',
+      });
+      expect(auth.isRevoked()).toBe(false);
+      expect(await store.credentials.read()).toEqual(before);
+    } finally {
+      fetch.mockRestore();
+      // The unfixed base cannot settle this body read. Keep its deterministic
+      // regression guard short without turning teardown itself into a 10s
+      // test timeout; the fixed path independently proves stop/renew abort.
+      void auth.stop().catch(() => undefined);
+    }
+  });
+
+  it('bounds a hung error body instead of leaving safeErrorText unbounded', async () => {
+    const store = new DeviceStore(await tmpDir('byok-auth-error-body-deadline-'));
+    const auth = authWithDeadline(server.url, store, 40);
+    const realFetch = globalThis.fetch;
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(new ReadableStream<Uint8Array>({ start: () => undefined }), {
+        status: 503,
+        headers: { 'content-type': 'text/plain' },
+      }),
+    );
+    try {
+      await expect(settleWithin(auth.pair('pairing-code'))).rejects.toMatchObject({
+        name: 'AuthRequestAbortedError',
+        reason: 'deadline',
+      });
+      expect(auth.isRevoked()).toBe(false);
+      await expect(store.credentials.read()).resolves.toBeUndefined();
+    } finally {
+      fetch.mockRestore();
+      void auth.stop().catch(() => undefined);
+    }
+  });
+
+  it('allows a pairing response released close to the configured deadline to complete', async () => {
+    const store = new DeviceStore(await tmpDir('byok-auth-near-deadline-'));
+    const auth = authWithDeadline(server.url, store, 500);
+    const releasePair = server.blockNextPair();
+    const pairing = auth.pair('pairing-code');
+    await vi.waitFor(() => expect(server.httpRequests.some((request) => request.pathname === '/byok/pair')).toBe(true));
+    const releaseTimer = setTimeout(releasePair, 250);
+    try {
+      await expect(settleWithin(pairing, 750)).resolves.toMatchObject({ deviceId: 'device-1' });
+      expect(auth.isRevoked()).toBe(false);
+    } finally {
+      clearTimeout(releaseTimer);
+      releasePair();
+      await auth.stop();
+    }
+  });
 });
 
 describe('daemon-level auth integration (WS reconnect + revocation)', () => {
@@ -329,6 +469,32 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
   afterEach(async () => {
     await daemon?.stop();
     await server.close();
+  });
+
+  it('composes the configured auth request deadline into the daemon-owned AuthManager', async () => {
+    const workspaceRoot = await tmpDir('byok-daemon-auth-deadline-workspace-');
+    const storeDir = await tmpDir('byok-daemon-auth-deadline-store-');
+    daemon = createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test',
+        productId: 'test-auth-deadline',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        authRequestDeadlineMs: 40,
+      },
+      [new StubRuntimeAdapter()],
+    );
+    const releasePair = server.blockNextPair();
+    try {
+      await expect(settleWithin(daemon.pair('pairing-code'))).rejects.toMatchObject({
+        name: 'AuthRequestAbortedError',
+        reason: 'deadline',
+      });
+    } finally {
+      releasePair();
+    }
   });
 
   it('recovers a stale-token WS rejection by reactively renewing, without operator intervention', async () => {

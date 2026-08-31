@@ -1,0 +1,102 @@
+$ vitest run src/__tests__/daemon-auth.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-110-auth-request-deadline/packages/client
+
+ ❯ src/__tests__/daemon-auth.test.ts (30 tests | 4 failed | 1 skipped) 5750ms
+     × bounds a hung pairing response without persisting a partial credential or treating it as revocation 259ms
+     × stop aborts a hung challenge before waiting for the credential mutation tail 326ms
+     × bounds a hung token response body and preserves the complete prior credential 258ms
+     × bounds a hung error body instead of leaving safeErrorText unbounded 251ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/daemon-auth.test.ts > access token renewal (protocol §6.2) > bounds a hung pairing response without persisting a partial credential or treating it as revocation
+AssertionError: expected Error: auth request regression guard exce… to match object { …(2) }
+
+- Expected
++ Received
+
+- {
+-   "name": "AuthRequestAbortedError",
+-   "reason": "deadline",
++ Error {
++   "message": "auth request regression guard exceeded 250ms",
+  }
+
+ ❯ src/__tests__/daemon-auth.test.ts:348:60
+    346|     const releasePair = server.blockNextPair();
+    347|     try {
+    348|       await expect(settleWithin(auth.pair('pairing-code'))).rejects.to…
+       |                                                            ^
+    349|         name: 'AuthRequestAbortedError',
+    350|         reason: 'deadline',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/__tests__/daemon-auth.test.ts > access token renewal (protocol §6.2) > stop aborts a hung challenge before waiting for the credential mutation tail
+Error: auth request regression guard exceeded 250ms
+ ❯ Timeout.<anonymous> src/__tests__/daemon-auth.test.ts:24:43
+     22| async function settleWithin<T>(operation: Promise<T>, timeoutMs = 250)…
+     23|   return new Promise<T>((resolve, reject) => {
+     24|     const timer = setTimeout(() => reject(new Error(`auth request regr…
+       |                                           ^
+     25|     void operation.then(
+     26|       (value) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/__tests__/daemon-auth.test.ts > access token renewal (protocol §6.2) > bounds a hung token response body and preserves the complete prior credential
+AssertionError: expected Error: auth request regression guard exce… to match object { …(2) }
+
+- Expected
++ Received
+
+- {
+-   "name": "AuthRequestAbortedError",
+-   "reason": "deadline",
++ Error {
++   "message": "auth request regression guard exceeded 250ms",
+  }
+
+ ❯ src/__tests__/daemon-auth.test.ts:405:60
+    403|     });
+    404|     try {
+    405|       await expect(settleWithin(auth.handleUnauthorized())).rejects.to…
+       |                                                            ^
+    406|         name: 'AuthRequestAbortedError',
+    407|         reason: 'deadline',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/__tests__/daemon-auth.test.ts > access token renewal (protocol §6.2) > bounds a hung error body instead of leaving safeErrorText unbounded
+AssertionError: expected Error: auth request regression guard exce… to match object { …(2) }
+
+- Expected
++ Received
+
+- {
+-   "name": "AuthRequestAbortedError",
+-   "reason": "deadline",
++ Error {
++   "message": "auth request regression guard exceeded 250ms",
+  }
+
+ ❯ src/__tests__/daemon-auth.test.ts:431:60
+    429|     );
+    430|     try {
+    431|       await expect(settleWithin(auth.pair('pairing-code'))).rejects.to…
+       |                                                            ^
+    432|         name: 'AuthRequestAbortedError',
+    433|         reason: 'deadline',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 25 passed | 1 skipped (30)
+   Start at  04:16:17
+   Duration  6.64s (transform 534ms, setup 0ms, import 734ms, tests 5.75s, environment 0ms)
+
+error: script "test" exited with code 1
+PRE_FIX_EXIT=1
+REGRESSION_GUARD=packages/client/src/__tests__/daemon-auth.test.ts
