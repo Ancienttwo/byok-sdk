@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEgressPolicy } from '@byok-sdk/protocol';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -17,6 +17,7 @@ async function home(name: string): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -55,6 +56,174 @@ describe('Agent reliable egress spool', () => {
       cursor: record.cursor,
     })).toBe(true);
     expect((await AgentReliableSpool.open(agentHome)).records()).toEqual([]);
+  });
+
+  it('shares one first-open authority across concurrent public reliable appends', async () => {
+    const agentHome = await home('concurrent-first-open');
+    const controller = new AgentEgressController({
+      policy: DEFAULT_AGENT_EGRESS_POLICY,
+      tenantId: 'tenant-concurrent-first-open',
+    });
+    const originalOpen = AgentReliableSpool.open.bind(AgentReliableSpool);
+    let openReached!: () => void;
+    let releaseOpen!: () => void;
+    const reached = new Promise<void>((resolve) => { openReached = resolve; });
+    const release = new Promise<void>((resolve) => { releaseOpen = resolve; });
+    const open = vi.spyOn(AgentReliableSpool, 'open').mockImplementation(async (homeDir) => {
+      openReached();
+      await release;
+      return originalOpen(homeDir);
+    });
+
+    const first = controller.appendReliable({
+      homeDir: agentHome,
+      agentRef,
+      sessionRef: 'session-concurrent-first-open',
+      payload: { status: 'first' },
+      eventId: '2f99ca6e-7cdc-43d5-8db8-94bf4941b1de',
+    });
+    await reached;
+    const second = controller.appendReliable({
+      homeDir: agentHome,
+      agentRef,
+      sessionRef: 'session-concurrent-first-open',
+      payload: { status: 'second' },
+      eventId: '9744a168-7d1f-49a2-95f5-3f5960ed9211',
+    });
+    await Promise.resolve();
+    try {
+      expect(open).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseOpen();
+    }
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult.ok).toBe(true);
+    expect(secondResult.ok).toBe(true);
+    expect(controller.reliableRecords()).toMatchObject([
+      { eventId: '2f99ca6e-7cdc-43d5-8db8-94bf4941b1de', cursor: 1 },
+      { eventId: '9744a168-7d1f-49a2-95f5-3f5960ed9211', cursor: 2 },
+    ]);
+    expect(new Set(controller.reliableRecords().map((record) => record.cursor)).size).toBe(2);
+  });
+
+  it('clears a shared failed first-open slot so a later public reliable append can retry', async () => {
+    const agentHome = await home('shared-failed-first-open');
+    const controller = new AgentEgressController({
+      policy: DEFAULT_AGENT_EGRESS_POLICY,
+      tenantId: 'tenant-shared-failed-first-open',
+    });
+    const originalOpen = AgentReliableSpool.open.bind(AgentReliableSpool);
+    let openReached!: () => void;
+    let releaseOpen!: () => void;
+    const reached = new Promise<void>((resolve) => { openReached = resolve; });
+    const release = new Promise<void>((resolve) => { releaseOpen = resolve; });
+    let opens = 0;
+    const open = vi.spyOn(AgentReliableSpool, 'open').mockImplementation(async (homeDir) => {
+      opens += 1;
+      if (opens === 1) {
+        openReached();
+        await release;
+        throw new Error('controlled first-open failure');
+      }
+      return originalOpen(homeDir);
+    });
+
+    const first = controller.appendReliable({
+      homeDir: agentHome,
+      agentRef,
+      sessionRef: 'session-shared-failed-first-open',
+      payload: { status: 'first' },
+      eventId: '75621fbe-fd6e-4eed-b30e-bc4a2780d4e2',
+    });
+    await reached;
+    const second = controller.appendReliable({
+      homeDir: agentHome,
+      agentRef,
+      sessionRef: 'session-shared-failed-first-open',
+      payload: { status: 'second' },
+      eventId: '20f2cf83-c645-467d-936d-65c66fc5ea50',
+    });
+    await Promise.resolve();
+    try {
+      expect(open).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseOpen();
+    }
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ok: false, reason: 'backpressure' },
+      { ok: false, reason: 'backpressure' },
+    ]);
+
+    const retried = await controller.appendReliable({
+      homeDir: agentHome,
+      agentRef,
+      sessionRef: 'session-shared-failed-first-open',
+      payload: { status: 'retry' },
+      eventId: '8edf1f13-46e8-446f-bb84-e8f39df6c2a8',
+    });
+    expect(retried.ok).toBe(true);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(controller.reliableRecords()).toMatchObject([
+      { eventId: '8edf1f13-46e8-446f-bb84-e8f39df6c2a8', cursor: 1 },
+    ]);
+  });
+
+  it('fails closed for a different home while opening and after caching an Agent reliable spool', async () => {
+    const agentHome = await home('home-bound-first-open');
+    const otherHome = await home('home-bound-other');
+    const controller = new AgentEgressController({
+      policy: DEFAULT_AGENT_EGRESS_POLICY,
+      tenantId: 'tenant-home-bound-first-open',
+    });
+    const originalOpen = AgentReliableSpool.open.bind(AgentReliableSpool);
+    let openReached!: () => void;
+    let releaseOpen!: () => void;
+    const reached = new Promise<void>((resolve) => { openReached = resolve; });
+    const release = new Promise<void>((resolve) => { releaseOpen = resolve; });
+    const open = vi.spyOn(AgentReliableSpool, 'open').mockImplementation(async (homeDir) => {
+      openReached();
+      await release;
+      return originalOpen(homeDir);
+    });
+
+    const first = controller.appendReliable({
+      homeDir: agentHome,
+      agentRef,
+      sessionRef: 'session-home-bound-first-open',
+      payload: { status: 'first' },
+      eventId: 'aa7d1d93-2194-4490-812f-0550e6f90c79',
+    });
+    await reached;
+    const openingMismatch = await controller.appendReliable({
+      homeDir: otherHome,
+      agentRef,
+      sessionRef: 'session-home-bound-opening-mismatch',
+      payload: { status: 'wrong-home-opening' },
+      eventId: '706869a2-8ad7-470d-a631-d041362ec640',
+    });
+    expect(openingMismatch).toEqual({ ok: false, reason: 'backpressure' });
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(controller.reliableRecords()).toEqual([]);
+
+    releaseOpen();
+    expect((await first).ok).toBe(true);
+    expect(controller.reliableRecords()).toMatchObject([
+      { eventId: 'aa7d1d93-2194-4490-812f-0550e6f90c79', cursor: 1 },
+    ]);
+
+    const cachedMismatch = await controller.appendReliable({
+      homeDir: otherHome,
+      agentRef,
+      sessionRef: 'session-home-bound-cached-mismatch',
+      payload: { status: 'wrong-home-cached' },
+      eventId: '5717a541-577a-43ce-a594-bab1949bb609',
+    });
+    expect(cachedMismatch).toEqual({ ok: false, reason: 'backpressure' });
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(controller.reliableRecords()).toMatchObject([
+      { eventId: 'aa7d1d93-2194-4490-812f-0550e6f90c79', cursor: 1 },
+    ]);
+    expect(controller.reliableRecords()).toHaveLength(1);
   });
 
   it('keeps denied content receipts durable and content-free across crash/restart until an exact ack', async () => {

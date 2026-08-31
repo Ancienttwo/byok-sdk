@@ -58,6 +58,11 @@ export type AgentEgressReliableAppendResult =
   | Readonly<{ ok: true; record: AgentReliableEgressRecord }>
   | Readonly<{ ok: false; reason: AgentEgressDropReason }>;
 
+interface AgentReliableSpoolOpenSlot {
+  readonly homeDir: string;
+  readonly promise: Promise<AgentReliableSpool>;
+}
+
 function agentKey(agentRef: AgentRef): string {
   return `${agentRef.agentId}\u0000${agentRef.profileRevision}`;
 }
@@ -74,7 +79,7 @@ function emptyLane(): AgentEgressLaneStatus {
 export class AgentEgressController {
   private readonly latest = new AgentLatestValueState();
   private readonly spools = new Map<string, AgentReliableSpool>();
-  private readonly spoolOpens = new Map<string, Promise<AgentReliableSpool>>();
+  private readonly spoolOpens = new Map<string, AgentReliableSpoolOpenSlot>();
   private readonly latestStatus = emptyLane();
   private readonly reliableStatus = emptyLane();
   private readonly drops: AgentEgressDropReceipt[] = [];
@@ -276,9 +281,15 @@ export class AgentEgressController {
   private async spoolFor(homeDir: string, agentRef: AgentRef): Promise<AgentReliableSpool> {
     const key = agentKey(agentRef);
     const existing = this.spools.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.homeDir !== homeDir) throw new Error('Agent reliable spool is already bound to a different home');
+      return existing;
+    }
     const inFlight = this.spoolOpens.get(key);
-    if (inFlight !== undefined) return inFlight;
+    if (inFlight !== undefined) {
+      if (inFlight.homeDir !== homeDir) throw new Error('Agent reliable spool opening is already bound to a different home');
+      return inFlight.promise;
+    }
     const opened = (async () => {
       const spool = await AgentReliableSpool.open(homeDir);
       if (spool.records().some((record) => !sameAgent(record.agentRef, agentRef))) {
@@ -287,11 +298,12 @@ export class AgentEgressController {
       this.spools.set(key, spool);
       return spool;
     })();
-    this.spoolOpens.set(key, opened);
+    const slot: AgentReliableSpoolOpenSlot = { homeDir, promise: opened };
+    this.spoolOpens.set(key, slot);
     try {
       return await opened;
     } finally {
-      if (this.spoolOpens.get(key) === opened) this.spoolOpens.delete(key);
+      if (this.spoolOpens.get(key) === slot) this.spoolOpens.delete(key);
     }
   }
 
