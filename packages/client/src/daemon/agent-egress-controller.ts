@@ -74,6 +74,7 @@ function emptyLane(): AgentEgressLaneStatus {
 export class AgentEgressController {
   private readonly latest = new AgentLatestValueState();
   private readonly spools = new Map<string, AgentReliableSpool>();
+  private readonly spoolOpens = new Map<string, Promise<AgentReliableSpool>>();
   private readonly latestStatus = emptyLane();
   private readonly reliableStatus = emptyLane();
   private readonly drops: AgentEgressDropReceipt[] = [];
@@ -276,12 +277,22 @@ export class AgentEgressController {
     const key = agentKey(agentRef);
     const existing = this.spools.get(key);
     if (existing) return existing;
-    const spool = await AgentReliableSpool.open(homeDir);
-    if (spool.records().some((record) => !sameAgent(record.agentRef, agentRef))) {
-      throw new Error('Agent-local reliable spool has a different AgentRef');
+    const inFlight = this.spoolOpens.get(key);
+    if (inFlight !== undefined) return inFlight;
+    const opened = (async () => {
+      const spool = await AgentReliableSpool.open(homeDir);
+      if (spool.records().some((record) => !sameAgent(record.agentRef, agentRef))) {
+        throw new Error('Agent-local reliable spool has a different AgentRef');
+      }
+      this.spools.set(key, spool);
+      return spool;
+    })();
+    this.spoolOpens.set(key, opened);
+    try {
+      return await opened;
+    } finally {
+      if (this.spoolOpens.get(key) === opened) this.spoolOpens.delete(key);
     }
-    this.spools.set(key, spool);
-    return spool;
   }
 
   private tenantPendingBytes(): number {

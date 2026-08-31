@@ -538,8 +538,9 @@ symlink and cross-Agent collisions, creates missing Agent home, `MEMORY.md`,
 and `notes/`, and preserves existing bytes. The canonical Agent home root is
 the sole runtime cwd and is sealed with AgentRef, runtime/session identity and
 lease in the immutable operation manifest. `.byok` is the SDK's reserved
-internal namespace for the one-writer lease and exact-match runtime-session
-evidence. All other files are opaque Agent-owned content: the SDK does not
+internal namespace for process-owned home activity, session-scoped execution
+leases, and exact-match runtime-session evidence. All other files are opaque
+Agent-owned content: the SDK does not
 require a literal `artifacts/` directory or parse/index projects, PDFs, images,
 notes, memory, or profile schema.
 
@@ -547,9 +548,23 @@ Agent dispatch requires an explicit device and its durable authenticated
 `agent-home-contract` declaration before task creation or mailbox enqueue.
 Claim, decline, and every terminal message echo exact AgentRef. Resume requires
 exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
-fails closed. One canonical Agent home has one mutable writer across tasks;
-another Agent home remains independent. Crash residue is reclaimable only by
-the same stable daemon owner identity.
+fails closed. Within one daemon process, execution is serialized by
+`(agentId, sessionRef)`, not by Agent home: different sessions of one Agent may
+run concurrently in the same canonical home, while a duplicate execution for
+the same session is busy. A
+fresh task is task-keyed until its runtime creates the durable session, then
+the SDK atomically binds the lease to that `sessionRef`. SDK-reserved shared
+metadata mutations remain short and serialized per home. Agent-memory hosted
+projection is the bounded exception: concurrent closing sessions serialize one
+complete open/replay/snapshot/redact/append/replay transaction per home because
+its durable outbox is one compare-and-swap authority; its publish wait retains
+the existing timeout. Runtime execution remains session-parallel during that
+close-time transaction. The process-owned home activity marker remains until
+the final session exits, so relocation and any other operation that requires a
+quiescent home still fail closed while an execution is active. A second daemon
+process remains excluded by that marker; cross-process session multiplexing is
+not provided. Another Agent home remains independent. Crash residue is
+reclaimable only by the same stable daemon owner identity.
 
 Agent ids are also portable Windows path segments: reserved device names and
 trailing dot/space are rejected before any path or row is created. Hosted

@@ -399,14 +399,43 @@ try {
     writeFileSync(
       path.join(smokeDir, 'smoke.mjs'),
       `import assert from 'node:assert/strict';\n` +
-        `import { readdirSync, statSync } from 'node:fs';\n` +
+        `import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';\n` +
         `import { createRequire } from 'node:module';\n` +
+        `import { tmpdir } from 'node:os';\n` +
+        `import path from 'node:path';\n` +
         `const require = createRequire(import.meta.url);\n` +
         `const expected = ['client','cloud','cloudDataplane','core','protocol','server','uiRuntime'];\n` +
         `const sdk = await import('byok-sdk');\n` +
         `assert.deepEqual(Object.keys(sdk).sort(), expected);\n` +
         `assert.equal('keys' in sdk, false);\n` +
         `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/testkit','@byok-sdk/keys']) await import(name);\n` +
+        `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
+        `const parallelRoot = mkdtempSync(path.join(tmpdir(), 'byok-packed-agent-session-'));\n` +
+        `try {\n` +
+        `  const manager = new AgentHomeManager({ hostStorageRoot: parallelRoot });\n` +
+        `  const agentRef = { agentId: 'packed-parallel-agent', profileRevision: 'profile-1' };\n` +
+        `  const first = await manager.acquireExecution(agentRef, { taskId: 'task-one', sessionRef: 'session-one' });\n` +
+        `  const second = await manager.acquireExecution(agentRef, { taskId: 'task-two', sessionRef: 'session-two' });\n` +
+        `  assert.equal(first.lease.canonicalHome, second.lease.canonicalHome);\n` +
+        `  assert.equal(first.lease.homeIdentity, second.lease.homeIdentity);\n` +
+        `  await assert.rejects(\n` +
+        `    manager.acquireExecution(agentRef, { taskId: 'task-one-retry', sessionRef: 'session-one' }),\n` +
+        `    AgentHomeBusyError,\n` +
+        `  );\n` +
+        `  await assert.rejects(first.lease.bindSession('session-one-mismatch'), AgentHomeBusyError);\n` +
+        `  await assert.rejects(\n` +
+        `    manager.acquireExecution(agentRef, { taskId: 'task-one-after-mismatch', sessionRef: 'session-one' }),\n` +
+        `    AgentHomeBusyError,\n` +
+        `  );\n` +
+        `  await first.lease.release();\n` +
+        `  await assert.rejects(manager.acquire(agentRef), AgentHomeBusyError);\n` +
+        `  await second.lease.release();\n` +
+        `  const quiescent = await manager.acquire(agentRef);\n` +
+        `  await quiescent.lease.release();\n` +
+        `} finally {\n` +
+        `  rmSync(parallelRoot, { recursive: true, force: true });\n` +
+        `}\n` +
+        `console.log('[release-pack] installed Agent sessions parallelize by session and serialize duplicates');\n` +
         // The embedded-host memory subpath is the one entry whose VALUE is what
         // it does not carry: an embedded product imports it precisely to avoid
         // the daemon composition and the WebSocket transport the root entry

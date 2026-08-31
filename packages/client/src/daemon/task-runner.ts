@@ -43,7 +43,7 @@ import {
   AgentHomeBusyError,
   AgentHomeResolutionError,
   AgentHomeManager,
-  type AgentHomeBinding,
+  type AgentHomeExecutionBinding,
   type AgentRef,
   validateAgentRef,
 } from '../agent-home';
@@ -531,7 +531,7 @@ interface ActiveTask {
   adapter: RuntimeAdapter;
   session: Session;
   workspaceDir: string;
-  agentBinding?: AgentHomeBinding;
+  agentBinding?: AgentHomeExecutionBinding;
   agentRef?: AgentRef;
   agentHandoff?: {
     sessionRef: string;
@@ -636,7 +636,7 @@ interface PendingMessageTask {
 }
 
 interface ClaimedAgentFailureContext {
-  readonly binding: AgentHomeBinding;
+  readonly binding: AgentHomeExecutionBinding;
   readonly runtimeId: string;
   readonly sessionRef?: string;
 }
@@ -980,6 +980,7 @@ async function openArtifact(workspaceDir: string, name: string): Promise<OpenArt
 export class TaskRunner {
   private readonly tasks = new Map<string, ActiveTask>();
   private readonly pendingMessageTasks = new Map<string, PendingMessageTask>();
+  private readonly messageOutboxesByHome = new Map<string, Promise<AgentMessageOutbox>>();
   private readonly messageContextByToken = new Map<string, string>();
   private readonly messageContextByTask = new Map<string, string>();
   private readonly memoryContextByToken = new Map<string, { readonly taskId: string; readonly agentRef: AgentRef }>();
@@ -1182,6 +1183,7 @@ export class TaskRunner {
   async recoverAgentMessageOutboxes(agentsRoot: string): Promise<void> {
     if (this.deps.tenantId === undefined) throw new Error('Agent message recovery requires authenticated tenant enrollment');
     for (const outbox of await AgentMessageOutbox.recover(agentsRoot, this.deps.tenantId)) {
+      this.messageOutboxesByHome.set(outbox.homeDir, Promise.resolve(outbox));
       for (const record of outbox.retryableRecords()) {
         if (record.sessionRef === undefined) continue;
         const existing = this.recoveredMessageOutboxes.get(record.taskId);
@@ -1189,6 +1191,17 @@ export class TaskRunner {
         this.recoveredMessageOutboxes.set(record.taskId, outbox);
       }
     }
+  }
+
+  private agentMessageOutbox(homeDir: string): Promise<AgentMessageOutbox> {
+    const existing = this.messageOutboxesByHome.get(homeDir);
+    if (existing !== undefined) return existing;
+    const opened = AgentMessageOutbox.open(homeDir);
+    this.messageOutboxesByHome.set(homeDir, opened);
+    void opened.catch(() => {
+      if (this.messageOutboxesByHome.get(homeDir) === opened) this.messageOutboxesByHome.delete(homeDir);
+    });
+    return opened;
   }
 
   /** Retry stable recovered records after a transport handshake/re-handshake. */
@@ -1526,7 +1539,7 @@ export class TaskRunner {
     // exit path (decline, fail, the checkpoint-2 cancel-teardown, or
     // successful registration) — never leaked past this one call.
     this.inFlightOffers.add(taskId);
-    let agentBinding: AgentHomeBinding | undefined;
+    let agentBinding: AgentHomeExecutionBinding | undefined;
     let agentLeaseTransferred = false;
     try {
       // Finding F4, checkpoint 1 ("before claim where possible -> decline
@@ -1786,7 +1799,7 @@ export class TaskRunner {
 
       if (agentRef !== undefined) {
         try {
-          agentBinding = await this.deps.agentHome!.acquire(agentRef);
+          agentBinding = await this.deps.agentHome!.acquireExecution(agentRef, { taskId, sessionRef });
         } catch (error) {
           decline(
             `Agent home admission failed: ${errorMessage(error)}`,
@@ -1821,7 +1834,7 @@ export class TaskRunner {
           }
         }
         try {
-          await this.deps.agentHome!.initialize(agentBinding);
+          await this.deps.agentHome!.initializeExecution(agentBinding);
         } catch (error) {
           await agentBinding.lease.release().catch(() => {});
           agentBinding = undefined;
@@ -1830,7 +1843,7 @@ export class TaskRunner {
         }
         if (messageRequirement !== undefined) {
           try {
-            const outbox = await AgentMessageOutbox.open(agentBinding.resolution.canonicalHome);
+            const outbox = await this.agentMessageOutbox(agentBinding.resolution.canonicalHome);
             this.pendingMessageTasks.set(taskId, {
               taskId,
               agentRef: agentBinding.resolution.agentRef,
@@ -2089,6 +2102,25 @@ export class TaskRunner {
         return;
       }
 
+      if (agentBinding !== undefined) {
+        try {
+          await agentBinding.lease.bindSession(session.sessionRef);
+        } catch (error) {
+          await session.close().catch(() => {});
+          await this.failClaimedAgent(
+            taskId,
+            `Agent session execution lease could not bind the runtime session: ${errorMessage(error)}`,
+            false,
+            {
+              binding: agentBinding,
+              runtimeId: pick.descriptor.id,
+              sessionRef: session.sessionRef,
+            },
+          );
+          return;
+        }
+      }
+
       let active!: ActiveTask;
       active = {
         taskId,
@@ -2139,15 +2171,17 @@ export class TaskRunner {
       // runtime session that has no durable exact-match receipt must never be
       // advertised as resumable.
       if (agentBinding !== undefined) {
+        const binding = agentBinding;
         try {
-          await this.deps.agentSessionHandoffs!.record({
-            agentRef: agentBinding.resolution.agentRef,
-            taskId,
-            sessionRef: session.sessionRef,
-            runtimeId: pick.descriptor.id,
-            cwd: workspaceDir,
-            leaseId: agentBinding.lease.leaseId,
-          });
+          await this.deps.agentHome!.mutateExecution(binding, () =>
+            this.deps.agentSessionHandoffs!.record({
+              agentRef: binding.resolution.agentRef,
+              taskId,
+              sessionRef: session.sessionRef,
+              runtimeId: pick.descriptor.id,
+              cwd: workspaceDir,
+              leaseId: binding.lease.leaseId,
+            }));
         } catch (error) {
           await session.close().catch(() => {});
           await this.failClaimedAgent(
@@ -3518,15 +3552,16 @@ export class TaskRunner {
   ): Promise<boolean> {
     const agentRef = context.binding.resolution.agentRef;
     const result = await this.retryAgentTerminalEvidence(() =>
-      this.deps.agentSessionHandoffs!.recordTaskTerminal({
-        agentRef,
-        taskId,
-        runtimeId: context.runtimeId,
-        cwd: context.binding.lease.cwd,
-        leaseId: context.binding.lease.leaseId,
-        ...(context.sessionRef === undefined ? {} : { sessionRef: context.sessionRef }),
-        terminalReason: reason,
-      }),
+      this.deps.agentHome!.mutateExecution(context.binding, () =>
+        this.deps.agentSessionHandoffs!.recordTaskTerminal({
+          agentRef,
+          taskId,
+          runtimeId: context.runtimeId,
+          cwd: context.binding.lease.cwd,
+          leaseId: context.binding.lease.leaseId,
+          ...(context.sessionRef === undefined ? {} : { sessionRef: context.sessionRef }),
+          terminalReason: reason,
+        })),
     );
     if (!result.ok) {
       this.reportAgentTerminalEvidenceFailure({

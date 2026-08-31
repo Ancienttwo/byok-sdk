@@ -60,6 +60,8 @@ export type {
   AgentHomeProjectionApplyFunction,
   AgentHomeLease,
   AgentHomeBinding,
+  AgentHomeExecutionLease,
+  AgentHomeExecutionBinding,
 } from './agent-home';
 export {
   localStateRelocation,

@@ -175,9 +175,21 @@ strict Agent execution has one workspace authority and never falls back to a
 task-scoped Git workspace.
 
 Successful startup with this configuration advertises `agent-home-contract`. Agent offers are distinct
-from legacy task offers and fail closed when identity, profile revision,
-session/runtime/cwd evidence, or the one-writer lease does not match. Agent
-files other than the SDK-reserved `.byok` namespace are opaque; there is no
+from legacy task offers and fail closed when identity, profile revision, or
+session/runtime/cwd evidence does not match. Within one daemon process,
+execution leases are scoped to `(agentId, sessionRef)`: different sessions of
+one Agent may run concurrently in the same canonical home, while the same
+session remains serialized. Fresh
+tasks bind their task-scoped admission lease to the runtime-created session
+before the SDK exposes that session. Shared `.byok` metadata mutations use a
+short per-home gate. Agent-memory hosted projection serializes the complete
+close-time outbox transaction per home because its durable outbox is one CAS
+authority; the publish wait remains timeout-bounded and does not serialize the
+sessions' runtime execution. The process-owned home activity marker remains
+held until the final active session exits so relocation stays fail-closed. A
+second daemon process remains excluded by that marker; cross-process session
+multiplexing is not provided. Agent files
+other than the SDK-reserved `.byok` namespace are opaque; there is no
 required `artifacts/` directory and the client does not parse or index their
 contents.
 
