@@ -159,8 +159,8 @@ export class AgentEgressController {
       return { ok: false, reason: 'sanitizer_rejected' };
     }
     try {
+      const spool = await this.spoolFor(input.homeDir, input.agentRef);
       return await this.withAppendTail(async () => {
-        const spool = await this.spoolFor(input.homeDir, input.agentRef);
         const record = await spool.append({
           agentRef: input.agentRef,
           tenantId,
@@ -191,8 +191,8 @@ export class AgentEgressController {
       return { ok: false, reason: 'policy_denied' };
     }
     try {
+      const spool = await this.spoolFor(input.homeDir, input.agentRef);
       return await this.withAppendTail(async () => {
-        const spool = await this.spoolFor(input.homeDir, input.agentRef);
         const record = await spool.appendContentReceipt({
           agentRef: input.agentRef,
           tenantId,
