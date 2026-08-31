@@ -44,7 +44,7 @@ Two concurrent public appends can open two spool instances, lose a successful re
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"agent-spool-first-open-authority","kind":"deterministic_test","paths":["packages/client/src/__tests__/agent-egress-spool.test.ts"]}]}
+{"protocol":1,"oracles":[{"id":"agent-spool-first-open-authority","kind":"deterministic_test","paths":["*"]},{"id":"agent-spool-records-cursor-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy

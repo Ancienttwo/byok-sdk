@@ -23,6 +23,7 @@
 - Root `bun run test` passed on the frozen source: client 1566 passed / 11 skipped plus all subsequently selected packages green. The first run hit a 5-second timeout in the unrelated Cloud Dataplane Wrangler packaging test; that exact test immediately passed 6/6 and the complete root rerun passed.
 - `git diff --check` and `repo-harness run check-task-workflow --strict` passed before acceptance preparation.
 - Independent gatekeeper reviewed frozen commit `ef0dcb04598e282d19c0de93958de7da549a7fc5` against `9d2b05253570c13f235ef4f9aa2a1e94e431c576` and returned PASS with no P0-P3 finding or #107 scope contamination.
+- Change Assessment classifies the same public append guard both as a deterministic concurrency oracle and as runtime readback: it opens a real temporary durable spool and reads the two records and cursors back through `reliableRecords()`.
 
 ## Deviations From Plan Or Spec
 
