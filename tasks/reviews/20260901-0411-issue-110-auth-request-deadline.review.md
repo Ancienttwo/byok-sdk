@@ -1,6 +1,6 @@
 # Task Review: issue-110-auth-request-deadline
 
-> **Status**: Complete
+> **Status**: Accepted
 > **Plan**: plans/plan-20260901-0411-issue-110-auth-request-deadline.md
 > **Contract**: tasks/contracts/20260901-0411-issue-110-auth-request-deadline.contract.md
 > **Notes File**: tasks/notes/20260901-0411-issue-110-auth-request-deadline.notes.md
@@ -8,9 +8,9 @@
 > **Last Updated**: 2026-09-01 04:21
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:2a4f83bdd056920dc227915a90fa19395ca74d97e0f5310a75751e3d625b4bae
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
+> **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
 
 ## Human Review Card
 
@@ -49,17 +49,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-plugin
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:2a4f83bdd056920dc227915a90fa19395ca74d97e0f5310a75751e3d625b4bae
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
+> **Verification Evidence SHA256**: sha256:c9b5635040ccd88f93c8148328ce834a70c4e7aa531e3a6890c257536e4e4509
+> **Issued At**: 2026-08-31T20:45:19.365Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: GitHub #110 bounds each pair, challenge, token, and response-body operation, aborts active auth I/O before shutdown waits on credential mutation, and preserves revocation and credential authority; exact-diff review found no confirmed P0-P2 issue.
 - Findings: none
 
 ## Behavior Diff Notes
