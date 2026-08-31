@@ -1,4 +1,8 @@
 
+AUDIT_BASELINE=7a937e5ed8eb5aef102eacb0df9183f296da7e1f
+REGRESSION_GUARD=packages/client/src/__tests__/agent-egress-spool.test.ts
+COMMAND=bun --filter @byok-sdk/client test -- src/__tests__/agent-egress-spool.test.ts
+
  RUN  v4.1.10 /private/tmp/byok-sdk-issue107-audit/packages/client
 
  ❯ src/__tests__/agent-egress-spool.test.ts (9 tests | 2 failed) 96ms
