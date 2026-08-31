@@ -1,6 +1,6 @@
 # Plan: Issue 103 mailbox cursor delivery authority
 
-> **Status**: Executing
+> **Status**: Complete
 > **Created**: 20260831-2304
 > **Slug**: issue-103-mailbox-cursor-atomicity
 > **Planning Source**: codex-plan

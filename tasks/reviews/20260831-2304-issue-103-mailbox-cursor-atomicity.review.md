@@ -1,6 +1,6 @@
 # Task Review: issue-103-mailbox-cursor-atomicity
 
-> **Status**: Passed
+> **Status**: Accepted
 > **Plan**: plans/plan-20260831-2304-issue-103-mailbox-cursor-atomicity.md
 > **Contract**: tasks/contracts/20260831-2304-issue-103-mailbox-cursor-atomicity.contract.md
 > **Notes File**: tasks/notes/20260831-2304-issue-103-mailbox-cursor-atomicity.notes.md
@@ -8,9 +8,9 @@
 > **Last Updated**: 2026-08-31 23:54
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:10c8f95b1ddb6ad544ed02ff9c14e579745ebf3fdfc14f31a67cca9402c71638
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
+> **Reviewed Target Revision**: 2c039165f35c9d0167dfe7eaa296871faf846a03
 
 ## Human Review Card
 
@@ -50,7 +50,8 @@
 - Supporting artifacts: pre-fix failure artifact, contract run logs, and
   gatekeeper verdict.
 - Implementation notes reviewed: yes.
-- Run snapshot: subject-bound acceptance evidence pending.
+- Run snapshot:
+  `.ai/harness/runs/run-20260831T235723-16620-20260831-2304-issue-103-mailbox-cursor-atomicity.json`.
 
 ## Manual Check Evidence
 
@@ -62,17 +63,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-plugin
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:10c8f95b1ddb6ad544ed02ff9c14e579745ebf3fdfc14f31a67cca9402c71638
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 2c039165f35c9d0167dfe7eaa296871faf846a03
+> **Verification Evidence SHA256**: sha256:e81fb50c2f1b848de2d10b77cfef24925ca816924e3f08a6961ae7174cb1e273
+> **Issued At**: 2026-08-31T15:58:13.151Z
 
-- Summary: No AcceptanceReceipt has been recorded.
+- Summary: Independent gatekeeper accepted the exact local source candidate after real Postgres and in-memory cursor invariants passed; production migration and deployment remain separately gated.
 - Findings: none
 
 ## Behavior Diff Notes

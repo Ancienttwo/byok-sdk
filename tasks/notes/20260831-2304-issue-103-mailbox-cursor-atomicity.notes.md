@@ -1,6 +1,6 @@
 # Implementation Notes: issue-103-mailbox-cursor-atomicity
 
-> **Status**: Active
+> **Status**: Complete
 > **Plan**: plans/plan-20260831-2304-issue-103-mailbox-cursor-atomicity.md
 > **Contract**: tasks/contracts/20260831-2304-issue-103-mailbox-cursor-atomicity.contract.md
 > **Review**: tasks/reviews/20260831-2304-issue-103-mailbox-cursor-atomicity.review.md
