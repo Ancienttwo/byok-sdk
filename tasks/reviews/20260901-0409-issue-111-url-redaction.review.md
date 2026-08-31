@@ -55,8 +55,8 @@ screenshot/artifact path, or reviewer observation.
 > **Reviewed Subject SHA256**: sha256:4f106dfdd62359135923c407bbdeb143953531adca3c81bf25cd6b0bf838ec8f
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
-> **Verification Evidence SHA256**: sha256:9a5efda8d921aaa1187d858fe69919591a72cf43978a533c6bf8d259383ce009
-> **Issued At**: 2026-08-31T20:28:09.536Z
+> **Verification Evidence SHA256**: sha256:681eae79096e915749fa6202a6111b8a500cc5736438be52e526a4bfe1900722
+> **Issued At**: 2026-08-31T20:46:38.781Z
 
 - Summary: GitHub #111 thrown validation messages omit credential-bearing URL components without changing allow/deny behavior; exact-diff review found no in-scope P0-P2 findings.
 - Findings: none
