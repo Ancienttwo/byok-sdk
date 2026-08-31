@@ -1,6 +1,6 @@
 # Plan: Issue 105 bounded Cloud JSON ingress
 
-> **Status**: Executing
+> **Status**: Completed
 > **Created**: 20260901-0058
 > **Slug**: issue-105-json-body-limits
 > **Planning Source**: codex-plan
@@ -52,7 +52,7 @@ At 10x concurrent ingress, peak retained bytes are bounded by each route ceiling
 - [x] Compose bounded reads into pair, challenge, token, and messages with stable 413 responses.
 - [x] Cancel declared-over-limit streams before returning and keep streamed byte counting authoritative.
 - [x] Cover exact-limit, plus-one, malformed under-limit, chunked/lying length, concurrency, and normal routes.
-- [ ] Run focused, package/root, strict workflow, and independent acceptance gates.
+- [x] Run focused, package/root, strict workflow, and independent acceptance gates.
 
 ## Evidence Contract
 

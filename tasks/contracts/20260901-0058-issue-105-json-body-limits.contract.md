@@ -1,12 +1,12 @@
 # Task Contract: issue-105-json-body-limits
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260901-0058-issue-105-json-body-limits.md
 > **Task Profile**: bugfix
 > **Workflow Profile**: strict
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-09-01 00:58
+> **Last Updated**: 2026-09-01 01:40
 > **Review File**: `tasks/reviews/20260901-0058-issue-105-json-body-limits.review.md`
 > **Notes File**: `tasks/notes/20260901-0058-issue-105-json-body-limits.notes.md`
 
