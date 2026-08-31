@@ -1,6 +1,6 @@
 # Plan: Issue 111 secret-safe server URL validation errors
 
-> **Status**: Executing
+> **Status**: Complete
 > **Created**: 20260901-0409
 > **Slug**: issue-111-url-redaction
 > **Planning Source**: codex-plan
@@ -42,7 +42,7 @@
 - [x] Freeze the audit-baseline secret leak with a non-zero artifact.
 - [x] Remove raw URL interpolation from every validation error branch.
 - [x] Preserve loopback, TLS, unsupported scheme, and escape-hatch behavior.
-- [ ] Run focused/client/root checks, strict workflow, and independent acceptance.
+- [x] Run focused/client/root checks, strict workflow, and independent acceptance.
 
 ## Evidence Contract
 

@@ -1,6 +1,6 @@
 # Task Contract: issue-111-url-redaction
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260901-0409-issue-111-url-redaction.md
 > **Task Profile**: bugfix
 > **Workflow Profile**: strict
