@@ -2,12 +2,11 @@
  * Postgres {@link PairingCodeStore}: single-use codes bound to the tenant and
  * product they were minted for.
  *
- * Redemption is one guarded statement. `UPDATE ... WHERE redeemed_at IS NULL
- * AND expires_at >= $now RETURNING ...` consumes and reports in the same
- * round trip, and zero rows is the typed rejection. A read-then-write would let
- * two concurrent redemptions both observe an unused code, and single-use is
- * exactly what makes the caller's "redeem, then register the device" sequence
- * exclusive.
+ * Enrollment is one transaction. `UPDATE ... WHERE redeemed_at IS NULL AND
+ * expires_at >= $now RETURNING ...` claims the code only inside the same client
+ * transaction that applies machine supersession/state cleanup and inserts the
+ * device. A read-then-write would let two callers observe an unused code; an
+ * autocommitted redemption would strand a code when registration fails.
  *
  * Unknown, expired, and already-used all answer `undefined`. The reference
  * server distinguishes them in its 401 text; a hosted multi-tenant surface
@@ -17,12 +16,20 @@
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
-  PairingCodeClaims,
+  DeviceRecord,
   PairingCodeInfo,
   PairingCodeIssueInput,
   PairingCodeStore,
 } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
+import { registerDeviceOnClient } from './devices';
+
+/** Best-effort unwind — the enrollment failure, not a rollback failure, is authoritative. */
+async function rollback(client: import('pg').PoolClient): Promise<void> {
+  try {
+    await client.query('ROLLBACK');
+  } catch {}
+}
 
 export class PostgresPairingCodeStore implements PairingCodeStore {
   readonly #pool: Pool;
@@ -53,17 +60,47 @@ export class PostgresPairingCodeStore implements PairingCodeStore {
     return { code: input.code, expiresAt: input.expiresAt };
   }
 
-  async redeem(code: string): Promise<PairingCodeClaims | undefined> {
+  async redeemAndRegister(input: {
+    readonly pairingCode: string;
+    readonly deviceId: string;
+    readonly deviceName: string;
+    readonly devicePublicKey: string;
+    readonly proofKeyId: string;
+    readonly proofKeyEpoch: number;
+    readonly machineId?: string;
+  }): Promise<DeviceRecord | undefined> {
     const now = this.#clock.now().toISOString();
-    const result = await this.#pool.query<{ tenant_id: string; product_id: string }>(
-      `UPDATE pairing_code
-          SET redeemed_at = $2
-        WHERE code = $1 AND redeemed_at IS NULL AND expires_at >= $2
-      RETURNING tenant_id, product_id`,
-      [code, now],
-    );
-    const row = result.rows[0];
-    if (row === undefined) return undefined;
-    return { tenantId: row.tenant_id as TenantId, productId: row.product_id };
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query<{ tenant_id: string; product_id: string }>(
+        `UPDATE pairing_code
+            SET redeemed_at = $2
+          WHERE code = $1 AND redeemed_at IS NULL AND expires_at >= $2
+        RETURNING tenant_id, product_id`,
+        [input.pairingCode, now],
+      );
+      const claims = result.rows[0];
+      if (claims === undefined) {
+        await client.query('COMMIT');
+        return undefined;
+      }
+      const device = await registerDeviceOnClient(client, claims.tenant_id as TenantId, {
+        productId: claims.product_id,
+        deviceId: input.deviceId,
+        deviceName: input.deviceName,
+        devicePublicKey: input.devicePublicKey,
+        proofKeyId: input.proofKeyId,
+        proofKeyEpoch: input.proofKeyEpoch,
+        ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
+      });
+      await client.query('COMMIT');
+      return device;
+    } catch (cause) {
+      await rollback(client);
+      throw cause;
+    } finally {
+      client.release();
+    }
   }
 }

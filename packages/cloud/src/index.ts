@@ -273,6 +273,8 @@ export type {
   PairingCodeInfo,
   PairingCodeIssueInput,
   PairingCodeStore,
+  PairingEnrollment,
+  PairingEnrollmentInput,
   ProofRequestReceipt,
   ProofRequestReceiptInput,
   ProofRequestReceiptStore,

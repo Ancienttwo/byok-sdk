@@ -66,12 +66,17 @@ export function createInMemoryCloudStores(
   const blobs = createInMemoryBlobs(clock, crypto, objects);
   const taskState = new InMemoryTaskAttemptState(clock);
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
+  const devices = new InMemoryDeviceDirectory();
+  const pairing = new InMemoryPairingCodeStore(clock, devices);
   return {
     stores: {
       activity: new InMemoryActivityStore(clock),
       approvals: new InMemoryApprovalTimelineStore(clock),
-      devices: new InMemoryDeviceDirectory(),
-      pairingCodes: new InMemoryPairingCodeStore(clock),
+      devices,
+      // One code/device authority, projected into issuance and consumption
+      // ports so neither side exposes the other's methods.
+      pairingCodes: { issue: pairing.issue.bind(pairing) },
+      pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
       nonces: new InMemoryNonceStore(clock, crypto),
       dedup: new InMemoryInboundDedupStore(),
       tasks,

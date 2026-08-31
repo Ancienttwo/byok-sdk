@@ -11,7 +11,7 @@
 import { createMutableClock, tenantId, type Clock } from '@byok-sdk/core';
 import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthPlane } from '../auth/plane';
 import { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from '../auth/tokens';
 import { tokenHandler } from '../handlers/auth';
@@ -81,12 +81,46 @@ describe('pairing (§6.1)', () => {
     expect(await harness.cloud.listDevices(TENANT_A)).toHaveLength(1);
   });
 
+  it('keeps a pairing code redeemable when its first device registration fails', async () => {
+    const pairing = await harness.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
+    const keys = createDeviceKeys();
+    const headers = { 'content-type': 'application/json' };
+    const body = JSON.stringify({
+      pairingCode: pairing.code,
+      deviceName: 'retry-after-registration-failure',
+      devicePublicKey: keys.publicKeyBase64Url,
+    });
+    const pair = () => harness.request('/byok/pair', { method: 'POST', headers, body });
+
+    vi.spyOn(harness.stores.devices, 'register').mockRejectedValueOnce(
+      new Error('injected devices.register failure'),
+    );
+
+    const first = await pair();
+    expect(first.status).toBe(500);
+    expect(await harness.cloud.listDevices(TENANT_A)).toHaveLength(0);
+
+    const retry = await pair();
+    expect(retry.status).toBe(200);
+    expect(await harness.cloud.listDevices(TENANT_A)).toHaveLength(1);
+  });
+
   it('answers unknown, expired, and already-used codes identically — no oracle', async () => {
     const clock = createMutableClock();
     const expiring = createHarness({ clock });
     const pairing = await expiring.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
     const used = await expiring.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
-    await expiring.stores.pairingCodes.redeem(used.code);
+    const usedKeys = createDeviceKeys();
+    const usedResponse = await expiring.request('/byok/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pairingCode: used.code,
+        deviceName: 'used',
+        devicePublicKey: usedKeys.publicKeyBase64Url,
+      }),
+    });
+    expect(usedResponse.status).toBe(200);
 
     clock.advance(11 * 60 * 1000);
 
@@ -113,7 +147,18 @@ describe('pairing (§6.1)', () => {
       body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'no key' }),
     });
     expect(bad.status).toBe(400);
-    expect(await harness.stores.pairingCodes.redeem(pairing.code)).toBeDefined();
+
+    const keys = createDeviceKeys();
+    const retry = await harness.request('/byok/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pairingCode: pairing.code,
+        deviceName: 'valid-after-bad-request',
+        devicePublicKey: keys.publicKeyBase64Url,
+      }),
+    });
+    expect(retry.status).toBe(200);
   });
 });
 

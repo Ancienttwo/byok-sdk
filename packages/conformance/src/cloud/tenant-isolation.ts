@@ -17,9 +17,10 @@
  *   was handed against one it guessed. That is asserted directly below: the
  *   resolved record's `tenantId` is the owning tenant, and every subsequent
  *   lookup is tenant-first from there.
- * - `PairingCodeStore.redeem` — the code IS the tenant lookup. Asserted the
- *   same way: redemption yields the minting tenant's claims, and a code minted
- *   for one tenant never yields another's.
+ * - `PairingEnrollment.redeemAndRegister` — the code resolves the tenant
+ *   inside the one atomic enrollment operation. Asserted the same way: its
+ *   returned device carries the minting tenant, and no request field can name
+ *   another tenant or product.
  *
  * There is deliberately no "move a device to another tenant" test, because
  * there is deliberately no such method. If one is ever added, every assertion
@@ -132,7 +133,7 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
       });
     });
 
-    it('redeems a pairing code into the tenant that minted it, never another', async () => {
+    it('enrolls a pairing code into the tenant that minted it, never another', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores } = handle;
         const expiresAt = new Date(Date.parse(handle.now()) + 600_000).toISOString();
@@ -147,11 +148,25 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
           expiresAt,
         });
 
-        expect(await stores.pairingCodes.redeem('code-a')).toEqual({
+        expect(await stores.pairing.redeemAndRegister({
+          pairingCode: 'code-a',
+          deviceId: 'device-a',
+          deviceName: 'device-a',
+          devicePublicKey: 'pk-a',
+          proofKeyId: 'identity',
+          proofKeyEpoch: 0,
+        })).toMatchObject({
           tenantId: TENANT_A,
           productId: 'product-a',
         });
-        expect(await stores.pairingCodes.redeem('code-b')).toEqual({
+        expect(await stores.pairing.redeemAndRegister({
+          pairingCode: 'code-b',
+          deviceId: 'device-b',
+          deviceName: 'device-b',
+          devicePublicKey: 'pk-b',
+          proofKeyId: 'identity',
+          proofKeyEpoch: 0,
+        })).toMatchObject({
           tenantId: TENANT_B,
           productId: 'product-b',
         });
