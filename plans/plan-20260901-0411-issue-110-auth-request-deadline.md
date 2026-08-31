@@ -1,6 +1,6 @@
 # Plan: Issue 110 AuthManager request deadline
 
-> **Status**: Complete
+> **Status**: Review
 > **Created**: 20260901-0411
 > **Slug**: issue-110-auth-request-deadline
 > **Planning Source**: codex-plan
