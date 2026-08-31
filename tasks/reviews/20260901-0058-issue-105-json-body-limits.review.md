@@ -40,7 +40,7 @@
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
 > **Verification Evidence SHA256**: sha256:f65d9b71feeff8f0e6b33eecac9afe5da03e4de47fb3965b77d1d7eb76d5848e
-> **Issued At**: 2026-08-31T17:38:11.620Z
+> **Issued At**: 2026-08-31T17:40:45.229Z
 
 - Summary: Issue 105 exact subject passed independent review: bounded auth and authenticated messages JSON ingress rejects oversized declared or streamed bodies before parsing or side effects, preserves route semantics, and does not block 413 on cancellation.
 - Findings: none
