@@ -54,18 +54,16 @@ export class InMemoryNonceStore implements NonceStore {
     return nonce;
   }
 
-  async validate(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean> {
+  async consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean> {
     const record = this.#nonces.get(nonce);
     if (record === undefined) return false;
     if (record.used) return false;
     if (record.owner !== tenantKey(tenant, deviceId)) return false;
-    return this.#clock.now().getTime() <= record.expiresAtMs;
-  }
-
-  async markUsed(tenant: TenantId, nonce: string): Promise<void> {
-    const record = this.#nonces.get(nonce);
-    if (record === undefined) return;
-    if (!record.owner.startsWith(tenantKey(tenant, ''))) return;
+    if (this.#clock.now().getTime() > record.expiresAtMs) return false;
+    // An async function runs synchronously until its first await. Keep the
+    // predicate and mutation together before returning so concurrent callers
+    // cannot both observe this record as unused.
     record.used = true;
+    return true;
   }
 }

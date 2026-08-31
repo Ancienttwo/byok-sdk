@@ -189,10 +189,12 @@ export interface PairingCodeStore {
 
 export interface NonceStore {
   issue(tenant: TenantId, deviceId: string): Promise<string>;
-  /** `true` iff the nonce exists for this (tenant, device), is unexpired, and has not been consumed. Never mutates. */
-  validate(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
-  /** Consume the nonce. Called only after every other check on the request has passed. */
-  markUsed(tenant: TenantId, nonce: string): Promise<void>;
+  /**
+   * Atomically consume a nonce only when it belongs to this exact (tenant,
+   * device), is unexpired, and has not already been consumed. Returns `true`
+   * for the sole winner; every other case returns `false`.
+   */
+  consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------

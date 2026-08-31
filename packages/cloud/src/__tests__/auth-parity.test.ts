@@ -10,10 +10,14 @@
  */
 import { createMutableClock, tenantId, type Clock } from '@byok-sdk/core';
 import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
+import { Hono } from 'hono';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { AuthPlane } from '../auth/plane';
 import { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from '../auth/tokens';
+import { tokenHandler } from '../handlers/auth';
 import { NONCE_TTL_MS } from '../stores/in-memory/nonces';
 import {
+  CLOUD_ORIGIN,
   PRODUCT_ID,
   TENANT_A,
   TENANT_B,
@@ -183,6 +187,56 @@ describe('token renewal (§6.2)', () => {
     const replay = await token(harness, payload);
     expect(replay.status).toBe(401);
     expect(await replay.json()).toEqual({ error: 'invalid, expired, or already-used nonce' });
+  });
+
+  it('allows exactly one concurrent valid request to mint from a nonce', async () => {
+    let minted = 0;
+    let consumed = false;
+    const device = {
+      tenantId: TENANT_A,
+      productId: PRODUCT_ID,
+      deviceId: 'dev_atomic-nonce',
+      deviceName: 'atomic-nonce',
+      devicePublicKey: 'test-key',
+      proofKeyId: 'identity',
+      proofKeyEpoch: 0,
+      revoked: false,
+    };
+    const auth: AuthPlane = {
+      createPairingCode: async () => {
+        throw new Error('not used by token route test');
+      },
+      redeemAndRegister: async () => {
+        throw new Error('not used by token route test');
+      },
+      resolveDevice: async () => device,
+      issueNonce: async () => {
+        throw new Error('not used by token route test');
+      },
+      verifySignature: async () => true,
+      consumeNonceIfValid: async () => {
+        if (consumed) return false;
+        consumed = true;
+        return true;
+      },
+      mintAccessToken: async () => ({ accessToken: `token-${++minted}`, expiresAt: new Date().toISOString() }),
+    };
+    const app = new Hono();
+    app.post('/byok/token', tokenHandler({ auth }));
+    const request = () =>
+      app.fetch(
+        new Request(`${CLOUD_ORIGIN}/byok/token`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ deviceId: device.deviceId, nonce: 'same-nonce', signature: 'valid' }),
+        }),
+      );
+
+    const responses = await Promise.all([request(), request()]);
+
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect(responses.filter((response) => response.status === 401)).toHaveLength(1);
+    expect(minted).toBe(1);
   });
 
   it('expires a nonce after its TTL', async () => {

@@ -83,17 +83,17 @@ export function tokenHandler(deps: AuthRouteDeps) {
     const device = await deps.auth.resolveDevice(deviceId);
     if (device === undefined) return c.json({ error: 'unknown or revoked device' }, 401);
 
-    if (!(await deps.auth.validateNonce(device, nonce))) {
-      return c.json({ error: 'invalid, expired, or already-used nonce' }, 401);
-    }
     // Domain-separated (`byok-nonce-v1\n`, `auth/verify.ts`): a raw signature
     // over the bare nonce is invalid here, with no second accepted form.
     if (!(await deps.auth.verifySignature(device, nonce, signature))) {
       return c.json({ error: 'invalid signature' }, 401);
     }
-    // Burn the nonce only on a fully verified success (§6.2) — an invalid
-    // signature attempt does not consume the legitimate device's nonce.
-    await deps.auth.consumeNonce(device, nonce);
+    // Atomic consumption follows a fully verified signature (§6.2), so an
+    // invalid signature cannot burn the legitimate device's nonce and only
+    // one concurrent valid caller can reach token minting.
+    if (!(await deps.auth.consumeNonceIfValid(device, nonce))) {
+      return c.json({ error: 'invalid, expired, or already-used nonce' }, 401);
+    }
 
     const { accessToken, expiresAt } = await deps.auth.mintAccessToken(device);
     const response: TokenResponse = { accessToken, expiresAt };

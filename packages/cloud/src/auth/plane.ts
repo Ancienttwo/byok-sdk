@@ -13,7 +13,7 @@
  *   claims never sit in handler scope as a tenant a handler could substitute;
  * - a device resolves to a row (the pre-tenant lookup, §6.2's pinned wire
  *   contract), and unknown/revoked collapse to one answer;
- * - nonce issue/validate/consume and token minting take that ROW, so the
+ * - nonce issue/atomic-consume and token minting take that ROW, so the
  *   tenant they act on is the row's, by construction.
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
@@ -57,9 +57,8 @@ export interface AuthPlane {
   /** The pre-tenant device lookup §6.2's wire contract forces. `undefined` for unknown AND revoked alike — no existence oracle. */
   resolveDevice(deviceId: string): Promise<DeviceRecord | undefined>;
   issueNonce(device: DeviceRecord): Promise<string>;
-  validateNonce(device: DeviceRecord, nonce: string): Promise<boolean>;
-  /** Burn the nonce. Called only on a fully verified request (§6.2). */
-  consumeNonce(device: DeviceRecord, nonce: string): Promise<void>;
+  /** Atomically consume the nonce after signature verification (§6.2). */
+  consumeNonceIfValid(device: DeviceRecord, nonce: string): Promise<boolean>;
   /** Domain-separated (`byok-nonce-v1\n`) — see `verify.ts`. A raw signature over the bare nonce is invalid, with no second accepted form. */
   verifySignature(device: DeviceRecord, nonce: string, signature: string): Promise<boolean>;
   mintAccessToken(device: DeviceRecord): Promise<MintedAccessToken>;
@@ -118,12 +117,8 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
       return stores.nonces.issue(device.tenantId, device.deviceId);
     },
 
-    validateNonce(device, nonce) {
-      return stores.nonces.validate(device.tenantId, device.deviceId, nonce);
-    },
-
-    consumeNonce(device, nonce) {
-      return stores.nonces.markUsed(device.tenantId, nonce);
+    consumeNonceIfValid(device, nonce) {
+      return stores.nonces.consumeIfValid(device.tenantId, device.deviceId, nonce);
     },
 
     verifySignature(device, nonce, signature) {
