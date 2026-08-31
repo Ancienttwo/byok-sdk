@@ -17,6 +17,7 @@
 --   deploy/sql/0013_agent_egress_contract.sql (immutable reliable Agent egress receipt facts)
 --   deploy/sql/0014_agent_memory_projection.sql (bounded redacted head + body-free metering receipts)
 --   deploy/sql/0015_device_machine_identity.sql (nullable client-hashed machine identity + partial active-machine uniqueness)
+--   deploy/sql/0016_mailbox_delivery_watermark.sql (server-owned delivery bound for mailbox acknowledgements)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -377,6 +378,45 @@ BEGIN
     RAISE EXCEPTION
       'control-plane invariants ran without 0012_agent_home_contract.sql: missing column(s): %',
       missing_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.7 Mailbox acknowledgement cannot outrun server-recorded delivery
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  column_ok boolean;
+  ack_bound text;
+BEGIN
+  SELECT a.attnotnull AND a.atttypid = 'bigint'::regtype INTO column_ok
+    FROM pg_class t
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_attribute a ON a.attrelid = t.oid
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'device_stream'
+     AND a.attname = 'delivered_seq'
+     AND a.attnum > 0
+     AND NOT a.attisdropped;
+
+  IF column_ok IS DISTINCT FROM true THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without complete 0016_mailbox_delivery_watermark.sql: device_stream.delivered_seq must be a NOT NULL bigint';
+  END IF;
+
+  SELECT pg_get_constraintdef(c.oid) INTO ack_bound
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'device_stream'
+     AND c.conname = 'device_stream_ack_within_delivery'
+     AND c.contype = 'c';
+
+  IF ack_bound IS NULL OR ack_bound !~ 'acked_seq <= delivered_seq' THEN
+    RAISE EXCEPTION
+      'device_stream_ack_within_delivery must enforce acked_seq <= delivered_seq; found %',
+      COALESCE(ack_bound, '(missing)');
   END IF;
 END $$;
 

@@ -37,6 +37,7 @@ import {
   type MailboxMessage,
   type MailboxPage,
   type MailboxReadQuery,
+  type MailboxRecordDeliveryInput,
   type Principal,
   type PresenceHint,
   type PresenceHintInput,
@@ -68,6 +69,7 @@ export interface TenantBoundMailbox {
   append(input: MailboxAppendInput): Promise<MailboxMessage>;
   /** Pure read. Never advances the cursor — the daemon's next poll is the only ack. */
   readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
+  recordDelivery(input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
   advanceCursor(input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
   readCursor(deviceId: string): Promise<MailboxCursorState>;
 }
@@ -204,6 +206,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     mailbox: {
       append: (input) => core.mailbox.append(tenant, input),
       readAfter: (query) => core.mailbox.readAfter(tenant, query),
+      recordDelivery: (input) => core.mailbox.recordDelivery(tenant, input),
       advanceCursor: (input) => core.mailbox.advanceCursor(tenant, input),
       readCursor: (deviceId) => core.mailbox.readCursor(tenant, deviceId),
     },

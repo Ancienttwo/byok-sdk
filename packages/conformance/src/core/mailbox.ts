@@ -154,6 +154,10 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
       await withComposition(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
+        await stores.mailbox.recordDelivery(TENANT_A, {
+          deviceId: DEVICE,
+          deliveredSeq: 2,
+        });
 
         const cursor = await stores.mailbox.advanceCursor(TENANT_A, {
           deviceId: DEVICE,
@@ -163,6 +167,43 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
 
         const page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
         expect(page.messages.map((message) => message.seq)).toEqual([2]);
+      });
+    });
+
+    it('preserves the zero cursor for a mailbox with no recorded delivery', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        const cursor = await stores.mailbox.advanceCursor(TENANT_A, {
+          deviceId: DEVICE,
+          ackedSeq: 0,
+        });
+        expect(cursor).toMatchObject({ deliveredSeq: 0, ackedSeq: 0 });
+      });
+    });
+
+    it('refuses an acknowledgement beyond the recorded delivery watermark without marking rows', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.mailbox.append(TENANT_A, offer(1));
+        await stores.mailbox.append(TENANT_A, offer(2));
+        await stores.mailbox.recordDelivery(TENANT_A, {
+          deviceId: DEVICE,
+          deliveredSeq: 1,
+        });
+
+        const error = await stores.mailbox
+          .advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 2 })
+          .then(
+            () => undefined,
+            (caught: unknown) => caught,
+          );
+
+        expect(isCoreConflictError(error, 'mailbox_cursor_ahead_of_delivery')).toBe(true);
+        const conflict = error as CoreConflictError<MailboxCursorState>;
+        expect(conflict.current).toMatchObject({ deliveredSeq: 1, ackedSeq: 0 });
+        expect((await stores.mailbox.readCursor(TENANT_A, DEVICE)).ackedSeq).toBe(0);
+        expect(
+          (await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 })).messages
+            .map((message) => message.seq),
+        ).toEqual([1, 2]);
       });
     });
 
@@ -186,10 +227,12 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
           },
         });
         await started;
-        const advance = stores.mailbox.advanceCursor(TENANT_A, {
-          deviceId: DEVICE,
-          ackedSeq: 1,
-        });
+        const advance = stores.mailbox
+          .recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 1 })
+          .then(() => stores.mailbox.advanceCursor(TENANT_A, {
+            deviceId: DEVICE,
+            ackedSeq: 1,
+          }));
 
         releaseMaterializer();
         const [message, cursor] = await Promise.all([append, advance]);
@@ -205,6 +248,10 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
       await withComposition(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
+        await stores.mailbox.recordDelivery(TENANT_A, {
+          deviceId: DEVICE,
+          deliveredSeq: 2,
+        });
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 2 });
 
         const error = await stores.mailbox
@@ -225,6 +272,10 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
       await withComposition(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
+        await stores.mailbox.recordDelivery(TENANT_A, {
+          deviceId: DEVICE,
+          deliveredSeq: 1,
+        });
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 1 });
 
         const result = await stores.mailbox.collectRetired(TENANT_A, {

@@ -11,9 +11,9 @@
  *   that hands back the same cursor replays the same page forever.
  * - **The ack is monotonic.** A cursor at or below what the device already
  *   acked carries no new information and is not an ack attempt; only a
- *   strictly higher one advances. The store's own
- *   `mailbox_cursor_regression` guard stays the authority on going backwards
- *   (asserted directly in `src/__tests__/mailbox-cursor.test.ts`).
+ *   strictly higher one advances. The store stays the authority on both
+ *   bounds: it rejects regression and refuses any cursor beyond the highest
+ *   one this route recorded immediately before returning it.
  * - **The hold.** An empty poll is held open instead of answered immediately,
  *   so an idle daemon is not a busy-loop. The hold is a bounded re-read, not a
  *   registered waiter: a waiter map is exactly the cross-request state a
@@ -21,6 +21,7 @@
  *   instance would not see it anyway.
  */
 import type { Context } from 'hono';
+import { isCoreConflictError } from '@byok-sdk/core';
 import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
 import { authenticateDevice, type DeviceRouteDeps } from './shared';
 
@@ -60,13 +61,22 @@ export function eventsHandler(deps: EventsRouteDeps) {
     let cursor = 0;
     if (cursorRaw !== undefined) {
       const parsedCursor = Number(cursorRaw);
-      if (!Number.isInteger(parsedCursor) || parsedCursor < 0) return c.json({ error: 'invalid cursor' }, 400);
+      if (!Number.isSafeInteger(parsedCursor) || parsedCursor < 0) {
+        return c.json({ error: 'invalid cursor' }, 400);
+      }
       cursor = parsedCursor;
     }
 
     const acked = await stores.mailbox.readCursor(device.deviceId);
     if (cursor > acked.ackedSeq) {
-      await stores.mailbox.advanceCursor({ deviceId: device.deviceId, ackedSeq: cursor });
+      try {
+        await stores.mailbox.advanceCursor({ deviceId: device.deviceId, ackedSeq: cursor });
+      } catch (caught) {
+        if (isCoreConflictError(caught, 'mailbox_cursor_ahead_of_delivery')) {
+          return c.json({ error: 'cursor exceeds delivered watermark' }, 409);
+        }
+        throw caught;
+      }
     }
 
     const attempts = Math.max(1, Math.ceil(deps.longPollHoldMs / deps.longPollIntervalMs));
@@ -120,6 +130,10 @@ export function eventsHandler(deps: EventsRouteDeps) {
           cursor: page.nextSeq,
           capabilities: CLOUD_PROTOCOL_CAPABILITIES,
         };
+        await stores.mailbox.recordDelivery({
+          deviceId: device.deviceId,
+          deliveredSeq: response.cursor,
+        });
         return c.json(response, 200);
       }
       if (attempt < attempts - 1) await sleep(deps.longPollIntervalMs);

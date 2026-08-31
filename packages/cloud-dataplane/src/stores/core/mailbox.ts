@@ -4,9 +4,9 @@
  * The load-bearing rule, and the one a composition can break silently:
  * **reading is not acknowledging.** `readAfter` is a `SELECT` and nothing else.
  * The only ack is `advanceCursor`, which the daemon calls after it has durably
- * journaled the envelope, and it is monotonic — a lower cursor is refused with
- * the cursor it lost to rather than quietly re-delivering work the device has
- * already run.
+ * journaled the envelope. It is monotonic and bounded by `recordDelivery`:
+ * regression and future cursors are refused with the cursor state they lost
+ * to rather than re-delivering or silently skipping work.
  *
  * `collectRetired` deletes acked rows and **marks** unacked ones `expired`. It
  * never deletes an unacked row. §12.7.5 requires an envelope that aged out
@@ -32,6 +32,7 @@ import {
   type MailboxMessageState,
   type MailboxPage,
   type MailboxReadQuery,
+  type MailboxRecordDeliveryInput,
   type MailboxRetentionInput,
   type MailboxRetentionResult,
   type MailboxStore,
@@ -60,6 +61,7 @@ export interface OutboxRow {
 interface CursorRow {
   readonly acked_seq: bigint;
   readonly acked_at: string | null;
+  readonly delivered_seq: bigint;
 }
 
 interface RetentionRow {
@@ -204,9 +206,8 @@ export class PostgresMailboxStore implements MailboxStore {
     this.#requireDeviceId(input.deviceId);
     const now = this.#now();
 
-    // The monotonic guard lives in `WHERE device_stream.acked_seq <=
-    // EXCLUDED.acked_seq`, so a stale ack updates nothing rather than winning a
-    // last-write race and re-opening envelopes the device already journaled.
+    // Both cursor guards live on this UPDATE: a stale ack and a future ack
+    // update nothing, so neither can win a last-write race or mark outbox rows.
     //
     // Marking the rows is folded into the same statement on purpose. Split
     // across two round trips, a crash between them would leave the cursor ahead
@@ -214,13 +215,29 @@ export class PostgresMailboxStore implements MailboxStore {
     // run. When the guard rejects, `(SELECT acked_seq FROM moved)` is NULL and
     // `seq <= NULL` marks nothing — the rejection is total, not partial.
     const moved = await this.#pool.query<CursorRow>(
-      `WITH moved AS (
-         INSERT INTO device_stream (tenant_id, device_id, next_seq, acked_seq, acked_at)
-         VALUES ($1, $2, 1, $3::bigint, $4)
+      `WITH moved_zero AS (
+         INSERT INTO device_stream (
+           tenant_id, device_id, next_seq, acked_seq, acked_at, delivered_seq
+         )
+         SELECT $1, $2, 1, 0, $4, 0
+          WHERE $3::bigint = 0
          ON CONFLICT (tenant_id, device_id) DO UPDATE
-            SET acked_seq = EXCLUDED.acked_seq, acked_at = EXCLUDED.acked_at
-          WHERE device_stream.acked_seq <= EXCLUDED.acked_seq
-         RETURNING acked_seq, acked_at
+            SET acked_seq = 0, acked_at = EXCLUDED.acked_at
+          WHERE device_stream.acked_seq <= 0
+            AND device_stream.delivered_seq >= 0
+         RETURNING acked_seq, acked_at, delivered_seq
+       ), moved_positive AS (
+         UPDATE device_stream
+            SET acked_seq = $3::bigint, acked_at = $4
+          WHERE tenant_id = $1 AND device_id = $2
+            AND $3::bigint > 0
+            AND acked_seq <= $3::bigint
+            AND delivered_seq >= $3::bigint
+         RETURNING acked_seq, acked_at, delivered_seq
+       ), moved AS (
+         SELECT acked_seq, acked_at, delivered_seq FROM moved_zero
+         UNION ALL
+         SELECT acked_seq, acked_at, delivered_seq FROM moved_positive
        ), marked AS (
          UPDATE outbox
             SET state = 'acked'
@@ -228,7 +245,7 @@ export class PostgresMailboxStore implements MailboxStore {
             AND seq <= (SELECT acked_seq FROM moved)
          RETURNING 1
        )
-       SELECT acked_seq, acked_at FROM moved`,
+       SELECT acked_seq, acked_at, delivered_seq FROM moved`,
       [tenant, input.deviceId, input.ackedSeq, now],
     );
 
@@ -237,23 +254,57 @@ export class PostgresMailboxStore implements MailboxStore {
       return {
         tenantId: tenant,
         deviceId: input.deviceId,
+        deliveredSeq: Number(row.delivered_seq),
         ackedSeq: Number(row.acked_seq),
         updatedAt: row.acked_at ?? now,
       };
     }
 
     const current = await this.readCursor(tenant, input.deviceId);
+    if (input.ackedSeq < current.ackedSeq) {
+      throw new CoreConflictError(
+        'mailbox_cursor_regression',
+        `Cursor for device ${input.deviceId} is at ${current.ackedSeq}; refusing to move it back to ${input.ackedSeq}.`,
+        current,
+        this.#now(),
+      );
+    }
     throw new CoreConflictError(
-      'mailbox_cursor_regression',
-      `Cursor for device ${input.deviceId} is at ${current.ackedSeq}; refusing to move it back to ${input.ackedSeq}.`,
+      'mailbox_cursor_ahead_of_delivery',
+      `Cursor for device ${input.deviceId} was delivered through ${current.deliveredSeq}; refusing to acknowledge future cursor ${input.ackedSeq}.`,
       current,
       this.#now(),
     );
   }
 
+  async recordDelivery(
+    tenant: TenantId,
+    input: MailboxRecordDeliveryInput,
+  ): Promise<MailboxCursorState> {
+    this.#requireDeviceId(input.deviceId);
+    const recorded = await this.#pool.query<CursorRow>(
+      `INSERT INTO device_stream (
+         tenant_id, device_id, next_seq, acked_seq, acked_at, delivered_seq
+       )
+       VALUES ($1, $2, 1, 0, NULL, $3::bigint)
+       ON CONFLICT (tenant_id, device_id) DO UPDATE
+          SET delivered_seq = GREATEST(device_stream.delivered_seq, EXCLUDED.delivered_seq)
+       RETURNING acked_seq, acked_at, delivered_seq`,
+      [tenant, input.deviceId, input.deliveredSeq],
+    );
+    const row = recorded.rows[0]!;
+    return {
+      tenantId: tenant,
+      deviceId: input.deviceId,
+      deliveredSeq: Number(row.delivered_seq),
+      ackedSeq: Number(row.acked_seq),
+      updatedAt: row.acked_at ?? this.#now(),
+    };
+  }
+
   async readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState> {
     const result = await this.#pool.query<CursorRow>(
-      `SELECT acked_seq, acked_at FROM device_stream
+      `SELECT acked_seq, acked_at, delivered_seq FROM device_stream
         WHERE tenant_id = $1 AND device_id = $2`,
       [tenant, deviceId],
     );
@@ -264,6 +315,7 @@ export class PostgresMailboxStore implements MailboxStore {
     return {
       tenantId: tenant,
       deviceId,
+      deliveredSeq: row === undefined ? 0 : Number(row.delivered_seq),
       ackedSeq: row === undefined ? 0 : Number(row.acked_seq),
       updatedAt: row?.acked_at ?? this.#now(),
     };

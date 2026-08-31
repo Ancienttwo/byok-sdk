@@ -114,6 +114,10 @@ async function mailboxProbe(connectionString: string) {
       }),
     });
     const page = await stores.mailbox.readAfter(who, { deviceId, afterSeq: 0 });
+    await stores.mailbox.recordDelivery(who, {
+      deviceId,
+      deliveredSeq: page.nextSeq,
+    });
     const cursor = await stores.mailbox.advanceCursor(who, {
       deviceId,
       ackedSeq: appended.seq,
