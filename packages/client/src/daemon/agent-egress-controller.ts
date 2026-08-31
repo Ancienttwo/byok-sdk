@@ -80,6 +80,7 @@ export class AgentEgressController {
   private readonly latest = new AgentLatestValueState();
   private readonly spools = new Map<string, AgentReliableSpool>();
   private readonly spoolOpens = new Map<string, AgentReliableSpoolOpenSlot>();
+  private reliableAppendTail: Promise<void> = Promise.resolve();
   private readonly latestStatus = emptyLane();
   private readonly reliableStatus = emptyLane();
   private readonly drops: AgentEgressDropReceipt[] = [];
@@ -142,7 +143,8 @@ export class AgentEgressController {
   }
 
   async appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult> {
-    if (!this.active || this.options.tenantId === undefined) {
+    const tenantId = this.options.tenantId;
+    if (!this.active || tenantId === undefined) {
       this.noteDrop('reliable', 'policy_denied', input.agentRef);
       return { ok: false, reason: 'policy_denied' };
     }
@@ -157,17 +159,19 @@ export class AgentEgressController {
       return { ok: false, reason: 'sanitizer_rejected' };
     }
     try {
-      const spool = await this.spoolFor(input.homeDir, input.agentRef);
-      const record = await spool.append({
-        agentRef: input.agentRef,
-        tenantId: this.options.tenantId,
-        policyRevision: this.options.policy.policyRevision,
-        payload,
-        sessionRef: input.sessionRef,
-        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
-        ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
-      } satisfies AgentReliableAppendInput, this.options.policy, this.tenantPendingBytes());
-      return { ok: true, record };
+      return await this.withAppendTail(async () => {
+        const spool = await this.spoolFor(input.homeDir, input.agentRef);
+        const record = await spool.append({
+          agentRef: input.agentRef,
+          tenantId,
+          policyRevision: this.options.policy.policyRevision,
+          payload,
+          sessionRef: input.sessionRef,
+          ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+          ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
+        } satisfies AgentReliableAppendInput, this.options.policy, this.tenantPendingBytes());
+        return { ok: true, record };
+      });
     } catch (error) {
       const reason: AgentEgressDropReason = error instanceof AgentReliableQuotaError ? error.reason : 'backpressure';
       this.noteDrop('reliable', reason, input.agentRef);
@@ -181,21 +185,24 @@ export class AgentEgressController {
    * with `wireType: agent.content.receipt` before any transport attempt.
    */
   async appendContentReceipt(input: AgentEgressContentReceiptInput): Promise<AgentEgressReliableAppendResult> {
-    if (!this.active || this.options.tenantId === undefined) {
+    const tenantId = this.options.tenantId;
+    if (!this.active || tenantId === undefined) {
       this.noteDrop('reliable', 'policy_denied', input.agentRef);
       return { ok: false, reason: 'policy_denied' };
     }
     try {
-      const spool = await this.spoolFor(input.homeDir, input.agentRef);
-      const record = await spool.appendContentReceipt({
-        agentRef: input.agentRef,
-        tenantId: this.options.tenantId,
-        policyRevision: this.options.policy.policyRevision,
-        sessionRef: input.payload.sessionRef,
-        payload: input.payload,
-        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
-      } satisfies AgentContentReceiptAppendInput, this.options.policy, this.tenantPendingBytes());
-      return { ok: true, record };
+      return await this.withAppendTail(async () => {
+        const spool = await this.spoolFor(input.homeDir, input.agentRef);
+        const record = await spool.appendContentReceipt({
+          agentRef: input.agentRef,
+          tenantId,
+          policyRevision: this.options.policy.policyRevision,
+          sessionRef: input.payload.sessionRef,
+          payload: input.payload,
+          ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+        } satisfies AgentContentReceiptAppendInput, this.options.policy, this.tenantPendingBytes());
+        return { ok: true, record };
+      });
     } catch (error) {
       const reason: AgentEgressDropReason = error instanceof AgentReliableQuotaError ? error.reason : 'backpressure';
       this.noteDrop('reliable', reason, input.agentRef);
@@ -309,6 +316,20 @@ export class AgentEgressController {
 
   private tenantPendingBytes(): number {
     return this.reliableRecords().reduce((total, record) => total + record.byteCount, 0);
+  }
+
+  private async withAppendTail<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.reliableAppendTail;
+    let release!: () => void;
+    this.reliableAppendTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      await previous;
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private noteDrop(lane: 'latest-value' | 'reliable', reason: AgentEgressDropReason, agentRef?: AgentRef, countDrop = true): void {

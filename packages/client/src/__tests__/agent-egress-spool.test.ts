@@ -331,6 +331,135 @@ describe('Agent reliable egress spool', () => {
     expect(controller.reliableRecords()).toHaveLength(1);
   });
 
+  it('admits at most one cross-Agent reliable append when their combined bytes exceed the tenant ceiling', async () => {
+    const policy: AgentEgressPolicy = {
+      ...DEFAULT_AGENT_EGRESS_POLICY,
+      policyRevision: 'tenant-reliable-race-r1',
+      reliable: { maxPendingEventsPerAgent: 2, maxPendingBytesPerAgent: 1024, maxPendingBytesPerTenant: 31 },
+    };
+    const controller = new AgentEgressController({ policy, tenantId: 'tenant-reliable-race' });
+    const originalAppend = AgentReliableSpool.prototype.append;
+    let releaseAppend!: () => void;
+    const appendMayCommit = new Promise<void>((resolve) => { releaseAppend = resolve; });
+    let firstAppendEntered!: () => void;
+    const firstAppendStarted = new Promise<void>((resolve) => { firstAppendEntered = resolve; });
+    const appendSpy = vi.spyOn(AgentReliableSpool.prototype, 'append').mockImplementation(async function (this: AgentReliableSpool, input, appendPolicy, tenantPendingBytes) {
+      firstAppendEntered();
+      await appendMayCommit;
+      return originalAppend.call(this, input, appendPolicy, tenantPendingBytes);
+    });
+
+    const first = controller.appendReliable({
+      homeDir: await home('tenant-reliable-race-one'),
+      agentRef: { agentId: 'agent-race-one', profileRevision: 'r1' },
+      sessionRef: 'session-race-one',
+      eventId: '81000000-0000-4000-8000-000000000001',
+      payload: { status: 'one' },
+    });
+    await firstAppendStarted;
+    const second = controller.appendReliable({
+      homeDir: await home('tenant-reliable-race-two'),
+      agentRef: { agentId: 'agent-race-two', profileRevision: 'r1' },
+      sessionRef: 'session-race-two',
+      eventId: '81000000-0000-4000-8000-000000000002',
+      payload: { status: 'two' },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseAppend();
+
+    const results = await Promise.all([first, second]);
+    appendSpy.mockRestore();
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(controller.status().reliable.pendingBytes).toBeLessThanOrEqual(policy.reliable.maxPendingBytesPerTenant);
+  });
+
+  it('accounts for a reliable append racing a content receipt across Agent spools', async () => {
+    const policy: AgentEgressPolicy = {
+      ...DEFAULT_AGENT_EGRESS_POLICY,
+      policyRevision: 'tenant-content-receipt-race-r1',
+      reliable: { maxPendingEventsPerAgent: 2, maxPendingBytesPerAgent: 2048, maxPendingBytesPerTenant: 1024 },
+    };
+    const controller = new AgentEgressController({ policy, tenantId: 'tenant-content-receipt-race' });
+    const originalAppend = AgentReliableSpool.prototype.append;
+    let releaseAppend!: () => void;
+    const appendMayCommit = new Promise<void>((resolve) => { releaseAppend = resolve; });
+    let firstAppendEntered!: () => void;
+    const firstAppendStarted = new Promise<void>((resolve) => { firstAppendEntered = resolve; });
+    const appendSpy = vi.spyOn(AgentReliableSpool.prototype, 'append').mockImplementation(async function (this: AgentReliableSpool, input, appendPolicy, tenantPendingBytes) {
+      firstAppendEntered();
+      await appendMayCommit;
+      return originalAppend.call(this, input, appendPolicy, tenantPendingBytes);
+    });
+
+    const firstAgent = { agentId: 'agent-content-race-one', profileRevision: 'r1' };
+    const secondAgent = { agentId: 'agent-content-race-two', profileRevision: 'r1' };
+    const reliable = controller.appendReliable({
+      homeDir: await home('tenant-content-receipt-race-one'),
+      agentRef: firstAgent,
+      sessionRef: 'session-content-race-one',
+      eventId: '81000000-0000-4000-8000-000000000011',
+      payload: { status: 'x'.repeat(800) },
+    });
+    await firstAppendStarted;
+    const receipt = controller.appendContentReceipt({
+      homeDir: await home('tenant-content-receipt-race-two'),
+      agentRef: secondAgent,
+      payload: {
+        requestId: '81000000-0000-4000-8000-000000000012',
+        surface: 'workspace',
+        actor: { kind: 'user', id: 'content-user' },
+        agentRef: secondAgent,
+        sessionRef: 'session-content-race-two',
+        runtime: 'pi',
+        cwd: '/agents/agent-content-race-two',
+        policyRevision: policy.policyRevision,
+        target: 'report.txt',
+        mimeType: 'text/plain',
+        decodeAs: 'utf8',
+        decision: 'denied',
+        byteCount: 0,
+        reason: 'sensitive-name',
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseAppend();
+
+    const results = await Promise.all([reliable, receipt]);
+    appendSpy.mockRestore();
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(controller.status().reliable.pendingBytes).toBeLessThanOrEqual(policy.reliable.maxPendingBytesPerTenant);
+  });
+
+  it('releases the tenant append operation after a durable append fails', async () => {
+    const policy: AgentEgressPolicy = {
+      ...DEFAULT_AGENT_EGRESS_POLICY,
+      policyRevision: 'tenant-append-failure-r1',
+      reliable: { maxPendingEventsPerAgent: 2, maxPendingBytesPerAgent: 1024, maxPendingBytesPerTenant: 1024 },
+    };
+    const controller = new AgentEgressController({ policy, tenantId: 'tenant-append-failure' });
+    vi.spyOn(AgentReliableSpool.prototype, 'append').mockImplementationOnce(async () => {
+      throw new Error('simulated durable append failure');
+    });
+
+    const failed = await controller.appendReliable({
+      homeDir: await home('tenant-append-failure-one'),
+      agentRef: { agentId: 'agent-failure-one', profileRevision: 'r1' },
+      sessionRef: 'session-failure-one',
+      eventId: '81000000-0000-4000-8000-000000000021',
+      payload: { status: 'fails' },
+    });
+    expect(failed).toEqual({ ok: false, reason: 'backpressure' });
+
+    const accepted = await controller.appendReliable({
+      homeDir: await home('tenant-append-failure-two'),
+      agentRef: { agentId: 'agent-failure-two', profileRevision: 'r1' },
+      sessionRef: 'session-failure-two',
+      eventId: '81000000-0000-4000-8000-000000000022',
+      payload: { status: 'after-failure' },
+    });
+    expect(accepted.ok).toBe(true);
+  });
+
   it('keeps one latest value per Agent without applying the reliable per-Agent event quota to tenant peers', () => {
     const latest = new AgentLatestValueState();
     const policy: AgentEgressPolicy = {
