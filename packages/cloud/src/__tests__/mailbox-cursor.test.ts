@@ -124,7 +124,9 @@ describe('GET /byok/events cursor semantics', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    await poll(harness, device.authorization, offer.seq);
+    const delivered = await poll(harness, device.authorization);
+    expect(delivered.cursor).toBe(offer.seq);
+    await poll(harness, device.authorization, delivered.cursor);
 
     // A daemon that lost its journal and polls from zero must not crash the
     // route with a cursor regression — and must not un-ack what it acked.
@@ -137,6 +139,10 @@ describe('GET /byok/events cursor semantics', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await harness.core.mailbox.recordDelivery(TENANT_A, {
+      deviceId: device.deviceId,
+      deliveredSeq: 1,
+    });
     await harness.core.mailbox.advanceCursor(TENANT_A, { deviceId: device.deviceId, ackedSeq: 1 });
 
     await expect(
@@ -157,6 +163,38 @@ describe('GET /byok/events cursor semantics', () => {
     // An EMPTY `cursor=` parses as 0 here exactly as it does on the reference
     // server (`Number('') === 0`) — parity includes the edges.
     expect((await harness.json('/byok/events?cursor=', { headers: device.authorization })).status).toBe(200);
+  });
+
+  it('rejects unsafe and future cursors before they can acknowledge or strand a later envelope', async () => {
+    const harness = createHarness({ longPollHoldMs: 0 });
+    const device = await harness.pairDevice(TENANT_A);
+    const futureCursor = Number.MAX_SAFE_INTEGER;
+
+    // On unfixed source, this is accepted as an acknowledgement despite never
+    // having been returned by the server. A daemon that uses its returned
+    // cursor thereafter cannot read the later envelope at its lower sequence.
+    const forged = await harness.json(`/byok/events?cursor=${futureCursor}`, { headers: device.authorization });
+    const cursorAfterForge = await harness.core.mailbox.readCursor(TENANT_A, device.deviceId);
+    const later = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('later') });
+    const delivered = await poll(harness, device.authorization, 0);
+
+    // Keep the failure artifact causal: the unfixed route returns the forged
+    // cursor, and a client that sends it on the next poll cannot see the new
+    // lower-sequence envelope. The corrected route rejects the first request,
+    // so this follow-up has no valid protocol path and is intentionally absent.
+    if (forged.status === 200) {
+      const suppressed = await poll(harness, device.authorization, futureCursor);
+      expect(suppressed.events).toEqual([]);
+    }
+
+    const unsafe = await harness.json(`/byok/events?cursor=${futureCursor + 1}`, { headers: device.authorization });
+
+    expect(forged.status).toBe(409);
+    expect(forged.body).toEqual({ error: 'cursor exceeds delivered watermark' });
+    expect(cursorAfterForge.ackedSeq).toBe(0);
+    expect(delivered.events).toEqual([later.envelope]);
+    expect(unsafe.status).toBe(400);
+    expect(unsafe.body).toEqual({ error: 'invalid cursor' });
   });
 
   it('holds an empty poll open instead of answering immediately', async () => {

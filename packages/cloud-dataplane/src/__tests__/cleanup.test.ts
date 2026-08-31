@@ -241,6 +241,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         materialize: replayableOffer(2),
       });
       await quota.applyMailboxDelta(TENANT, { deltaBytes: first.byteSize + second.byteSize });
+      await mailbox.recordDelivery(TENANT, { deviceId: 'device-a', deliveredSeq: first.seq });
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-a', ackedSeq: first.seq });
       await scope.pool.query(
         `INSERT INTO auth_nonce (tenant_id, device_id, nonce, expires_at, used)
@@ -333,6 +334,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         materialize: opaqueBody('two', HASH_B),
       });
       await quota.applyMailboxDelta(TENANT, { deltaBytes: 6n });
+      await mailbox.recordDelivery(TENANT, { deviceId: 'device-race', deliveredSeq: first.seq });
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-race', ackedSeq: first.seq });
 
       const cleanup = new PostgresCloudCleanup({

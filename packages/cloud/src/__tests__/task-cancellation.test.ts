@@ -59,6 +59,8 @@ describe('host task cancellation', () => {
     const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('already running'),
     });
+    const delivered = await poll(harness, device);
+    expect(delivered.cursor).toBe(offer.seq);
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,

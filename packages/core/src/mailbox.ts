@@ -87,10 +87,19 @@ export interface MailboxAdvanceCursorInput {
   readonly ackedSeq: number;
 }
 
-/** The device's durable acknowledgement position. */
+/** Server-owned proof that a cursor was returned to this device. */
+export interface MailboxRecordDeliveryInput {
+  readonly deviceId: string;
+  /** Highest cursor the server has returned to this device. */
+  readonly deliveredSeq: number;
+}
+
+/** The device's durable delivery and acknowledgement positions. */
 export interface MailboxCursorState {
   readonly tenantId: TenantId;
   readonly deviceId: string;
+  /** Highest cursor the server has returned to this device. */
+  readonly deliveredSeq: number;
   readonly ackedSeq: number;
   readonly updatedAt: string;
 }
@@ -123,6 +132,8 @@ export interface MailboxRetentionResult {
  *
  * Raises: `mailbox_cursor_regression` (an ack that moves the cursor backwards,
  * which would silently re-deliver already-journaled work),
+ * `mailbox_cursor_ahead_of_delivery` (an ack beyond the highest cursor the
+ * server has returned to that device),
  * `timestamp_not_canonical` (a retention cutoff that is not a canonical
  * ISO-8601 UTC instant).
  */
@@ -130,7 +141,12 @@ export interface MailboxStore {
   append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
   /** Pure read. Never advances the cursor, never deletes, never marks acked. */
   readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
-  /** The one and only ack. Monotonic; a lower `ackedSeq` is rejected. */
+  /** Records the highest cursor a device-facing response is about to return. */
+  recordDelivery(
+    tenant: TenantId,
+    input: MailboxRecordDeliveryInput,
+  ): Promise<MailboxCursorState>;
+  /** The one and only ack. Monotonic and bounded by the recorded delivery watermark. */
   advanceCursor(
     tenant: TenantId,
     input: MailboxAdvanceCursorInput,
