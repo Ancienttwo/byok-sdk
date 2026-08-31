@@ -29,6 +29,7 @@ const inMemoryFactory: CloudCompositionFactory = {
         approvals: stores.approvals,
         devices: stores.devices,
         pairingCodes: stores.pairingCodes,
+        pairing: stores.pairing,
         nonces: stores.nonces,
         dedup: stores.dedup,
         tasks: stores.tasks,

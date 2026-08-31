@@ -118,6 +118,84 @@ async function rollback(client: PoolClient): Promise<void> {
   } catch {}
 }
 
+/**
+ * The client-scoped registration mutation shared by standalone device
+ * registration and pairing enrollment. Its caller owns the transaction so the
+ * guarded pairing-code update, machine supersession cleanup, and insert can
+ * commit or roll back together.
+ */
+export async function registerDeviceOnClient(
+  client: PoolClient,
+  tenant: TenantId,
+  input: DeviceRegistration,
+): Promise<DeviceRecord> {
+  // Re-pairing an existing device replaces its registration in place rather
+  // than creating a second row, matching the in-memory reference. `revoked`
+  // resets because a fresh pairing IS a new grant.
+  //
+  // With a machine identity present this is SEVERAL statements — delete this
+  // tenant/product's prior rows for the same machine, delete the state those
+  // rows were the only reason to keep, then insert — and they must commit or
+  // fail together: a partial apply is either a machine holding two rows or a
+  // machine holding none. The supersession runs FIRST because
+  // `device_active_machine_key` (0015) is a partial unique index, so
+  // inserting before deleting would collide with the row this call replaces.
+  //
+  // The predecessor row is REMOVED rather than flagged: a superseded grant
+  // that lingers is a credential every read path has to remember to exclude,
+  // and the history of what that device did lives in the audit tables keyed
+  // by its device_id string, which this deliberately does not touch.
+  //
+  // `device_id <> $4` skips the device being registered: re-pairing the SAME
+  // id is the ON CONFLICT replacement below, not a supersession of itself.
+  //
+  // Deliberately not one multi-CTE statement: a data-modifying CTE sees the
+  // snapshot from the start of the statement, so the INSERT could not observe
+  // the DELETE's effect and the unique index would reject exactly the
+  // supersession this exists to perform.
+  if (input.machineId !== undefined) {
+    const superseded = await client.query<{ device_id: string }>(
+      `DELETE FROM device
+        WHERE tenant_id = $1 AND product_id = $2 AND machine_id = $3 AND device_id <> $4
+      RETURNING device_id`,
+      [tenant, input.productId, input.machineId, input.deviceId],
+    );
+    await deleteDeviceState(
+      client,
+      tenant,
+      superseded.rows.map((row) => row.device_id),
+    );
+  }
+  const result = await client.query<DeviceRow>(
+    `INSERT INTO device (
+       tenant_id, device_id, product_id, device_name, device_public_key,
+       proof_key_id, proof_key_epoch, revoked, machine_id
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)
+     ON CONFLICT (tenant_id, device_id) DO UPDATE
+       SET product_id = EXCLUDED.product_id,
+           device_name = EXCLUDED.device_name,
+           device_public_key = EXCLUDED.device_public_key,
+           proof_key_id = EXCLUDED.proof_key_id,
+           proof_key_epoch = EXCLUDED.proof_key_epoch,
+           revoked = false,
+           machine_id = EXCLUDED.machine_id,
+           capabilities = NULL
+     RETURNING ${SELECT_COLUMNS}`,
+    [
+      tenant,
+      input.deviceId,
+      input.productId,
+      input.deviceName,
+      input.devicePublicKey,
+      input.proofKeyId,
+      input.proofKeyEpoch,
+      input.machineId ?? null,
+    ],
+  );
+  return toRecord(result.rows[0]!);
+}
+
 export class PostgresDeviceDirectory implements DeviceDirectory {
   readonly #pool: Pool;
   readonly #clock: Clock | undefined;
@@ -128,75 +206,12 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
   }
 
   async register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord> {
-    // Re-pairing an existing device replaces its registration in place rather
-    // than creating a second row, matching the in-memory reference. `revoked`
-    // resets because a fresh pairing IS a new grant.
-    //
-    // With a machine identity present this is SEVERAL statements — delete this
-    // tenant/product's prior rows for the same machine, delete the state those
-    // rows were the only reason to keep, then insert — and they must commit or
-    // fail together: a partial apply is either a machine holding two rows or a
-    // machine holding none. The supersession runs FIRST because
-    // `device_active_machine_key` (0015) is a partial unique index, so
-    // inserting before deleting would collide with the row this call replaces.
-    //
-    // The predecessor row is REMOVED rather than flagged: a superseded grant
-    // that lingers is a credential every read path has to remember to exclude,
-    // and the history of what that device did lives in the audit tables keyed
-    // by its device_id string, which this deliberately does not touch.
-    //
-    // `device_id <> $4` skips the device being registered: re-pairing the SAME
-    // id is the ON CONFLICT replacement below, not a supersession of itself.
-    //
-    // Deliberately not one multi-CTE statement: a data-modifying CTE sees the
-    // snapshot from the start of the statement, so the INSERT could not
-    // observe the DELETE's effect and the unique index would reject exactly
-    // the supersession this exists to perform.
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
-      if (input.machineId !== undefined) {
-        const superseded = await client.query<{ device_id: string }>(
-          `DELETE FROM device
-            WHERE tenant_id = $1 AND product_id = $2 AND machine_id = $3 AND device_id <> $4
-          RETURNING device_id`,
-          [tenant, input.productId, input.machineId, input.deviceId],
-        );
-        await deleteDeviceState(
-          client,
-          tenant,
-          superseded.rows.map((row) => row.device_id),
-        );
-      }
-      const result = await client.query<DeviceRow>(
-        `INSERT INTO device (
-           tenant_id, device_id, product_id, device_name, device_public_key,
-           proof_key_id, proof_key_epoch, revoked, machine_id
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)
-         ON CONFLICT (tenant_id, device_id) DO UPDATE
-           SET product_id = EXCLUDED.product_id,
-               device_name = EXCLUDED.device_name,
-               device_public_key = EXCLUDED.device_public_key,
-               proof_key_id = EXCLUDED.proof_key_id,
-               proof_key_epoch = EXCLUDED.proof_key_epoch,
-               revoked = false,
-               machine_id = EXCLUDED.machine_id,
-               capabilities = NULL
-         RETURNING ${SELECT_COLUMNS}`,
-        [
-          tenant,
-          input.deviceId,
-          input.productId,
-          input.deviceName,
-          input.devicePublicKey,
-          input.proofKeyId,
-          input.proofKeyEpoch,
-          input.machineId ?? null,
-        ],
-      );
+      const record = await registerDeviceOnClient(client, tenant, input);
       await client.query('COMMIT');
-      return toRecord(result.rows[0]!);
+      return record;
     } catch (cause) {
       await rollback(client);
       throw cause;

@@ -18,6 +18,7 @@
 import {
   createByokPool,
   createPostgresCoreStores,
+  PostgresDeviceDirectory,
   PostgresObjectStore,
   PostgresPairingCodeStore,
   PostgresTruthCommitter,
@@ -82,6 +83,7 @@ async function pairingProbe(connectionString: string) {
   const pool = createByokPool({ connectionString });
   try {
     const store = new PostgresPairingCodeStore(pool, clock);
+    const devices = new PostgresDeviceDirectory(pool, clock);
     const who = tenant();
     const code = `smoke-${globalThis.crypto.randomUUID()}`;
     await store.issue(who, {
@@ -89,9 +91,19 @@ async function pairingProbe(connectionString: string) {
       productId: 'byok-worker-smoke',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
-    const claims = await store.redeem(code);
-    if (claims === undefined) throw new Error('pairing redeem returned no claims');
-    return { minted: true, redeemed: claims.tenantId === who, productId: claims.productId };
+    const device = await store.redeemAndRegister({
+      pairingCode: code,
+      deviceId: `device-${globalThis.crypto.randomUUID()}`,
+      deviceName: 'worker pairing probe',
+      devicePublicKey: 'worker-pairing-probe-key',
+      proofKeyId: 'identity',
+      proofKeyEpoch: 0,
+    });
+    if (device === undefined) throw new Error('pairing enrollment returned no device');
+    if ((await devices.get(who, device.deviceId)) === undefined) {
+      throw new Error('pairing enrollment did not persist its device');
+    }
+    return { minted: true, redeemed: device.tenantId === who, productId: device.productId };
   } finally {
     await pool.end();
   }

@@ -13,20 +13,18 @@
  * 1. **Async.** Every method returns a `Promise`, so a SQL or KV composition
  *    can implement the same contract the in-memory reference does.
  * 2. **Tenant-first.** Every method's first parameter is a required
- *    `TenantId` — with exactly two documented exceptions below, each of
- *    which is pre-tenant *by construction* because the credential it is
- *    handed is itself what resolves the tenant.
+ *    `TenantId` — with one documented lookup exception below. Pairing code
+ *    consumption is a separate composition-owned enrollment operation: its
+ *    bearer code resolves the tenant internally and it returns only the
+ *    resulting device row.
  *
- * The two exceptions:
+ * The lookup exception:
  *
  * - {@link DeviceDirectory.resolveByDeviceId} — `POST /byok/challenge` and
  *   `POST /byok/token` carry only a deviceId (the pinned wire contract), and
  *   the row is what tells the deployment which tenant to mint for.
- * - {@link PairingCodeStore.redeem} — the code IS the tenant lookup; it was
- *   minted against a tenant that only the host's control plane knew.
- *
- * Neither is reachable through {@link TenantStores} (see `tenant-stores.ts`),
- * so a device-facing handler cannot call them.
+ * It is not reachable through {@link TenantStores} (see `tenant-stores.ts`),
+ * so a device-facing handler cannot call it.
  *
  * The byte-proxy trio that used to be a third pre-tenant exception is no
  * longer part of this bundle at all: it moved to {@link BlobContentProxy},
@@ -173,14 +171,31 @@ export interface PairingCodeIssueInput {
 
 export interface PairingCodeStore {
   issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
-  /**
-   * Validate and CONSUME a code, returning the claims it was minted with, or
-   * `undefined` when it is unknown, expired, or already used — one answer for
-   * all three, so a redeem attempt is never an existence oracle. Single-use is
-   * what makes the caller's "redeem, then register the device row" sequence
-   * exclusive: a second redeem can never reach the registration step.
-   */
-  redeem(code: string): Promise<PairingCodeClaims | undefined>;
+}
+
+/**
+ * The pre-tenant facts a pairing request carries into enrollment. Tenant and
+ * product are deliberately absent: the guarded pairing-code row is their sole
+ * authority, and no caller can choose the registration scope.
+ */
+export interface PairingEnrollmentInput {
+  readonly pairingCode: string;
+  readonly deviceId: string;
+  readonly deviceName: string;
+  readonly devicePublicKey: string;
+  readonly proofKeyId: string;
+  readonly proofKeyEpoch: number;
+  readonly machineId?: string;
+}
+
+/**
+ * The only pairing-code consumption operation. Implementations atomically
+ * consume a valid code, apply machine supersession/state cleanup, and register
+ * the device; failures leave the code retryable. Unknown, expired, and already
+ * consumed codes all return `undefined`.
+ */
+export interface PairingEnrollment {
+  redeemAndRegister(input: PairingEnrollmentInput): Promise<DeviceRecord | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +538,7 @@ export interface CloudStores {
   readonly approvals: ApprovalTimelineStore;
   readonly devices: DeviceDirectory;
   readonly pairingCodes: PairingCodeStore;
+  readonly pairing: PairingEnrollment;
   readonly nonces: NonceStore;
   readonly dedup: InboundDedupStore;
   readonly tasks: TaskAttemptStore;
@@ -540,6 +556,7 @@ export const CLOUD_STORE_NAMES = [
   'approvals',
   'devices',
   'pairingCodes',
+  'pairing',
   'nonces',
   'dedup',
   'tasks',

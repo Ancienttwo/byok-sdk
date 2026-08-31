@@ -88,17 +88,11 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
     },
 
     async redeemAndRegister(input) {
-      const claims = await stores.pairingCodes.redeem(input.pairingCode);
-      if (claims === undefined) return undefined;
-      // The redeemed code's claims are the ONLY source of the device's
-      // tenant/product — `PairRequest` carries neither, so a device can never
-      // choose where it lands.
-      // `machineId` rides along as an ordinary registration fact. It cannot
-      // widen where the device lands: the store supersedes only rows already
-      // under `claims.tenantId` and `claims.productId`, which the request
-      // never chose.
-      return stores.devices.register(claims.tenantId, {
-        productId: claims.productId,
+      // The enrollment composition alone reads the guarded code claims, so a
+      // handler never holds a tenant/product it could substitute. It consumes
+      // the code only if this registration succeeds.
+      return stores.pairing.redeemAndRegister({
+        pairingCode: input.pairingCode,
         deviceId: `dev_${crypto.randomUuid()}`,
         deviceName: input.deviceName,
         devicePublicKey: input.devicePublicKey,

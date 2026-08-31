@@ -155,9 +155,9 @@ describe('tenant plumbing', () => {
   });
 
   it('keeps every pre-tenant method off the facade, port or proxy', () => {
-    // Two of these are the documented pre-tenant exceptions on `CloudStores`;
-    // the other three are `BlobContentProxy`, which is not a port at all and
-    // must be no more reachable from a handler than they are.
+    // `resolveByDeviceId` is the documented lookup exception on `CloudStores`;
+    // `redeem` is the removed split-authority path, and the final three are
+    // `BlobContentProxy`, which is not a port at all. None belongs here.
     const facade = shipped('tenant-stores.ts');
     for (const method of ['resolveByDeviceId', 'redeem(', 'verifySignedUrl', 'writeContent', 'readContent']) {
       expect(facade, method).not.toContain(method);
@@ -225,6 +225,7 @@ describe('the public surface', () => {
       'approvals',
       'devices',
       'pairingCodes',
+      'pairing',
       'nonces',
       'dedup',
       'tasks',

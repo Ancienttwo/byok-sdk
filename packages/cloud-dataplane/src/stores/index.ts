@@ -102,11 +102,16 @@ export function createPostgresCloudStores(
   options: PostgresCloudStoreOptions,
 ): PostgresCloudStores {
   const { pool, clock, crypto } = options;
+  const devices = new PostgresDeviceDirectory(pool, clock);
+  const pairing = new PostgresPairingCodeStore(pool, clock);
   return {
     activity: new PostgresActivityStore(pool, clock),
     approvals: new PostgresApprovalTimelineStore(pool, clock),
-    devices: new PostgresDeviceDirectory(pool, clock),
-    pairingCodes: new PostgresPairingCodeStore(pool, clock),
+    devices,
+    // One durable code authority, projected into issuance and enrollment ports
+    // so consumers cannot reopen the old redeem-then-register sequence.
+    pairingCodes: { issue: pairing.issue.bind(pairing) },
+    pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
     nonces: new PostgresNonceStore(pool, clock, crypto),
     dedup: new PostgresInboundDedupStore(pool),
     tasks: new PostgresTaskAttemptStore(pool, clock),
