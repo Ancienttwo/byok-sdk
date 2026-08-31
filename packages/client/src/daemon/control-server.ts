@@ -248,7 +248,10 @@ function handleConnection(
   onHandshakeSettled: () => void,
 ): void {
   const reader = new NdjsonLineReader();
-  const activeStreams = new Map<string, AbortController>();
+  type ActiveRequest =
+    | { kind: 'unary' }
+    | { kind: 'stream'; controller: AbortController };
+  const activeRequests = new Map<string, ActiveRequest>();
   let phase: 'client-hello' | 'client-auth' | 'ready' = 'client-hello';
   let serverNonce = '';
   let destroyed = false;
@@ -292,26 +295,60 @@ function handleConnection(
     sendFrame({ v: 1, ready: true });
   }
 
+  function rejectDuplicateRequest(id: string): void {
+    sendFrame({
+      v: 1,
+      id,
+      ok: false,
+      error: { code: 'duplicate_request_id', message: `request id "${id}" is already active` },
+    });
+  }
+
+  function registerRequest(id: string, record: ActiveRequest): boolean {
+    if (activeRequests.has(id)) {
+      rejectDuplicateRequest(id);
+      return false;
+    }
+    activeRequests.set(id, record);
+    return true;
+  }
+
+  function releaseRequest(id: string, record: ActiveRequest): boolean {
+    if (activeRequests.get(id) !== record) return false;
+    activeRequests.delete(id);
+    return true;
+  }
+
   function dispatch(id: string, method: string, params: unknown): void {
     const unary = methods.unary[method];
     if (unary) {
+      const record: ActiveRequest = { kind: 'unary' };
+      if (!registerRequest(id, record)) return;
       Promise.resolve()
         .then(() => unary(params))
-        .then((result) => sendFrame({ v: 1, id, ok: true, result }))
-        .catch((err: unknown) => sendFrame({ v: 1, id, ok: false, error: toControlErrorShape(err) }));
+        .then((result) => {
+          if (!releaseRequest(id, record)) return;
+          sendFrame({ v: 1, id, ok: true, result });
+        })
+        .catch((err: unknown) => {
+          if (!releaseRequest(id, record)) return;
+          sendFrame({ v: 1, id, ok: false, error: toControlErrorShape(err) });
+        });
       return;
     }
     const stream = methods.stream[method];
     if (stream) {
       const controller = new AbortController();
-      activeStreams.set(id, controller);
-      stream(params, { emit: (event) => sendFrame({ v: 1, id, event }), signal: controller.signal })
+      const record: ActiveRequest = { kind: 'stream', controller };
+      if (!registerRequest(id, record)) return;
+      Promise.resolve()
+        .then(() => stream(params, { emit: (event) => sendFrame({ v: 1, id, event }), signal: controller.signal }))
         .then(() => {
-          activeStreams.delete(id);
+          if (!releaseRequest(id, record)) return;
           if (!controller.signal.aborted) sendFrame({ v: 1, id, ok: true, done: true });
         })
         .catch((err: unknown) => {
-          activeStreams.delete(id);
+          if (!releaseRequest(id, record)) return;
           sendFrame({ v: 1, id, ok: false, error: toControlErrorShape(err) });
         });
       return;
@@ -366,8 +403,11 @@ function handleConnection(
     destroyed = true;
     clearTimeout(handshakeTimer);
     settleHandshake(); // in case it closed (timeout, malformed hello/auth, over-cap) before ever completing
-    for (const controller of activeStreams.values()) controller.abort();
-    activeStreams.clear();
+    const requests = [...activeRequests.values()];
+    activeRequests.clear();
+    for (const request of requests) {
+      if (request.kind === 'stream' && !request.controller.signal.aborted) request.controller.abort();
+    }
   });
 }
 

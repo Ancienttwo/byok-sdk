@@ -344,6 +344,231 @@ describe('control-server: RPC dispatch', () => {
   });
 });
 
+describe('control-server: connection-local request ID ownership', () => {
+  let handle: ControlServerHandle | undefined;
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  it('rejects a duplicate active stream ID before a second handler starts, then releases the original owner after completion', async () => {
+    const storeDir = await tmpDir('byok-ctl-duplicate-stream-id-');
+    let starts = 0;
+    const releases: Array<() => void> = [];
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          hold: () => {
+            starts += 1;
+            return new Promise<void>((resolve) => releases.push(resolve));
+          },
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+
+    socket.write(
+      Buffer.concat([
+        Buffer.from(encodeFrame({ v: 1, id: 'same-stream-id', method: 'hold' })),
+        Buffer.from(encodeFrame({ v: 1, id: 'same-stream-id', method: 'hold' })),
+      ]),
+    );
+
+    await vi.waitFor(() => expect(starts).toBe(1));
+    await expect(frames.next()).resolves.toMatchObject({
+      v: 1,
+      id: 'same-stream-id',
+      ok: false,
+      error: { code: 'duplicate_request_id' },
+    });
+
+    releases[0]!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'same-stream-id', ok: true, done: true });
+
+    socket.write(encodeFrame({ v: 1, id: 'same-stream-id', method: 'hold' }));
+    await vi.waitFor(() => expect(starts).toBe(2));
+    releases[1]!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'same-stream-id', ok: true, done: true });
+    socket.destroy();
+  });
+
+  it('rejects a unary request that collides with an active stream on the same authenticated connection', async () => {
+    const storeDir = await tmpDir('byok-ctl-cross-kind-id-');
+    let streamStarts = 0;
+    let unaryStarts = 0;
+    let releaseStream: (() => void) | undefined;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {
+          status: () => {
+            unaryStarts += 1;
+            return 'unexpected';
+          },
+        },
+        stream: {
+          hold: () => {
+            streamStarts += 1;
+            return new Promise<void>((resolve) => {
+              releaseStream = resolve;
+            });
+          },
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+
+    socket.write(encodeFrame({ v: 1, id: 'cross-kind-id', method: 'hold' }));
+    await vi.waitFor(() => expect(streamStarts).toBe(1));
+    socket.write(encodeFrame({ v: 1, id: 'cross-kind-id', method: 'status' }));
+
+    await expect(frames.next()).resolves.toMatchObject({
+      v: 1,
+      id: 'cross-kind-id',
+      ok: false,
+      error: { code: 'duplicate_request_id' },
+    });
+    expect(unaryStarts).toBe(0);
+
+    releaseStream!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'cross-kind-id', ok: true, done: true });
+    socket.destroy();
+  });
+
+  it('rejects a duplicate active unary ID before a second handler starts, then permits reuse after completion', async () => {
+    const storeDir = await tmpDir('byok-ctl-duplicate-unary-id-');
+    let starts = 0;
+    let release: (() => void) | undefined;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {
+          hold: async () => {
+            starts += 1;
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            return starts;
+          },
+        },
+        stream: {},
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+
+    socket.write(encodeFrame({ v: 1, id: 'same-unary-id', method: 'hold' }));
+    await vi.waitFor(() => expect(starts).toBe(1));
+    socket.write(encodeFrame({ v: 1, id: 'same-unary-id', method: 'hold' }));
+
+    await expect(frames.next()).resolves.toMatchObject({
+      v: 1,
+      id: 'same-unary-id',
+      ok: false,
+      error: { code: 'duplicate_request_id' },
+    });
+    expect(starts).toBe(1);
+
+    release!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'same-unary-id', ok: true, result: 1 });
+
+    socket.write(encodeFrame({ v: 1, id: 'same-unary-id', method: 'hold' }));
+    await vi.waitFor(() => expect(starts).toBe(2));
+    release!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'same-unary-id', ok: true, result: 2 });
+    socket.destroy();
+  });
+
+  it('releases a rejected unary request ID so a later request can reuse it', async () => {
+    const storeDir = await tmpDir('byok-ctl-rejected-id-release-');
+    let succeedingHandlerStarts = 0;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {
+          reject: () => {
+            throw new Error('expected rejection');
+          },
+          succeed: () => {
+            succeedingHandlerStarts += 1;
+            return 'reused';
+          },
+        },
+        stream: {},
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+
+    socket.write(encodeFrame({ v: 1, id: 'rejected-id', method: 'reject' }));
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'rejected-id', ok: false, error: { code: 'internal_error' } });
+
+    socket.write(encodeFrame({ v: 1, id: 'rejected-id', method: 'succeed' }));
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'rejected-id', ok: true, result: 'reused' });
+    expect(succeedingHandlerStarts).toBe(1);
+    socket.destroy();
+  });
+
+  it('aborts every distinct active stream exactly once when the authenticated connection closes', async () => {
+    const storeDir = await tmpDir('byok-ctl-stream-teardown-');
+    const starts: string[] = [];
+    const aborts = new Map<string, number>();
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          hold: (params, ctx) => {
+            const id = (params as { id: string }).id;
+            starts.push(id);
+            return new Promise<void>((resolve) => {
+              ctx.signal.addEventListener(
+                'abort',
+                () => {
+                  aborts.set(id, (aborts.get(id) ?? 0) + 1);
+                  resolve();
+                },
+                { once: true },
+              );
+            });
+          },
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+
+    socket.write(
+      Buffer.concat([
+        Buffer.from(encodeFrame({ v: 1, id: 'stream-a', method: 'hold', params: { id: 'a' } })),
+        Buffer.from(encodeFrame({ v: 1, id: 'stream-b', method: 'hold', params: { id: 'b' } })),
+      ]),
+    );
+    await vi.waitFor(() => expect(starts).toEqual(['a', 'b']));
+
+    socket.destroy();
+    await vi.waitFor(() => expect([...aborts.entries()].sort()).toEqual([['a', 1], ['b', 1]]));
+  });
+});
+
 describe('control-server: stale socket cleanup + "another daemon running"', () => {
   let handle: ControlServerHandle | undefined;
   afterEach(async () => {
