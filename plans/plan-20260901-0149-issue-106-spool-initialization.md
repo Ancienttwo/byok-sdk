@@ -1,6 +1,6 @@
 # Plan: Issue 106 single-flight Agent spool initialization
 
-> **Status**: Executing
+> **Status**: Complete
 > **Created**: 20260901-0149
 > **Slug**: issue-106-spool-initialization
 > **Planning Source**: codex-plan
@@ -50,7 +50,7 @@ At 10x concurrent first appends for one AgentRef/home, all callers await one ope
 - [x] Bind cached and in-flight spool authority to the requested home.
 - [x] Prove one open, two immediately visible records, and unique monotonic cursors through public appends.
 - [x] Prove shared failed-open rejection cleanup/retry and in-flight/cached home mismatch rejection.
-- [ ] Run focused, client/root, strict workflow, and independent acceptance gates.
+- [x] Run focused, client/root, strict workflow, and independent acceptance gates.
 
 ## Evidence Contract
 
