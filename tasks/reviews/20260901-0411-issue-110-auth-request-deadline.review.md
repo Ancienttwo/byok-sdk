@@ -1,12 +1,12 @@
 # Task Review: issue-110-auth-request-deadline
 
-> **Status**: LocalVerified
+> **Status**: Complete
 > **Plan**: plans/plan-20260901-0411-issue-110-auth-request-deadline.md
 > **Contract**: tasks/contracts/20260901-0411-issue-110-auth-request-deadline.contract.md
 > **Notes File**: tasks/notes/20260901-0411-issue-110-auth-request-deadline.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
 > **Last Updated**: 2026-09-01 04:21
-> **Recommendation**: local-pass; external acceptance intentionally not requested
+> **Recommendation**: pass
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: pending
 > **Reviewed Subject Scope**: normalized-final-content
@@ -14,13 +14,13 @@
 
 ## Human Review Card
 
-- Verdict: local-pass; no AcceptanceReceipt recorded by dispatch boundary.
+- Verdict: pass; independent exact-diff review found no confirmed P0-P2 issue.
 - Change type: bugfix
 - Intended files changed: AuthManager, daemon config composition, auth/config tests, HTTP fixture, plan/contract/review/notes/pre-fix artifact.
 - Actual files changed: matches contract allowed paths.
 - Commands passed: focused auth/config Vitest, client typecheck/build, root build/typecheck/test, `git diff --check`.
 - Residual risks: a first root test run saw an out-of-scope cloud-dataplane wrangler dry-run test exceed its 5s local timeout; its isolated rerun and the full root rerun passed without a source change.
-- Reviewer action required: external semantic acceptance was deliberately excluded.
+- Reviewer action required: none.
 - Rollback: revert the AuthManager request deadline/controller, daemon config composition, fixture and coupled tests together.
 
 ## Mode Evidence
@@ -33,7 +33,7 @@
 
 - Waza `/check` run: not invoked; dispatch requested repo-harness strict workflow instead.
 - Commands run: focused client test/typecheck/build; root build/typecheck/test; static contract preflight; `git diff --check`.
-- Manual checks: not applicable; deterministic test and runtime-readback oracles cover the contract.
+- Manual checks: independent review confirmed each pair/challenge/token HTTP and body operation has one bounded controller, stop aborts before awaiting the tail, and only actual 401 responses revoke.
 - Supporting artifacts: `tasks/notes/20260901-0411-issue-110-auth-request-deadline.pre-fix.txt`.
 - Implementation notes reviewed: yes.
 - Run snapshot: `.ai/harness/checks/latest.json` remains a workflow-owned projection and must not be treated as an AcceptanceReceipt.
@@ -71,16 +71,16 @@ screenshot/artifact path, or reviewer observation.
 ## Residual Risks / Follow-ups
 
 - No partial credential persistence was observed in the timeout/cancellation guards.
-- The 15s production default is configurable through `DaemonConfig.authRequestDeadlineMs`; the contract tests use short deterministic deadlines.
+- The 15s production default is configurable through `DaemonConfig.authRequestDeadlineMs`; the contract tests use short deterministic deadlines. It applies per auth HTTP/body operation, not to the whole multi-request renewal transaction.
 
 ## Scorecard
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| Functionality | n/a | Local evidence only; no external score or acceptance requested. |
-| Product depth | n/a | Local evidence only; no external score or acceptance requested. |
-| Design quality | n/a | Local evidence only; no external score or acceptance requested. |
-| Code quality | n/a | Local evidence only; no external score or acceptance requested. |
+| Functionality | 10/10 | All GitHub #110 acceptance cases pass. |
+| Product depth | 9/10 | Deadline, shutdown, persistence, and revocation boundaries are covered. |
+| Design quality | 10/10 | AuthManager remains the single cancellation authority. |
+| Code quality | 9/10 | Small typed surface with deterministic race/body tests. |
 
 ## Failing Items
 
@@ -93,4 +93,4 @@ screenshot/artifact path, or reviewer observation.
 
 ## Summary
 
-- Local implementation and required code gates are complete. AcceptanceReceipt, merge, push, PR, issue close, publication, and deploy were intentionally not performed.
+- PASS: GitHub #110 behavior and acceptance criteria are complete on the frozen candidate; receipt projection is recorded separately by the parent gate.

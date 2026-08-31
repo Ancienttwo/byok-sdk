@@ -1,6 +1,6 @@
 # Task Contract: issue-110-auth-request-deadline
 
-> **Status**: Verified
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260901-0411-issue-110-auth-request-deadline.md
 > **Task Profile**: bugfix
 > **Workflow Profile**: strict

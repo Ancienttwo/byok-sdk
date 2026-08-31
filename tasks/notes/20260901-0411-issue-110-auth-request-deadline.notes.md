@@ -1,6 +1,6 @@
 # Implementation Notes: issue-110-auth-request-deadline
 
-> **Status**: Active
+> **Status**: Complete
 > **Plan**: plans/plan-20260901-0411-issue-110-auth-request-deadline.md
 > **Contract**: tasks/contracts/20260901-0411-issue-110-auth-request-deadline.contract.md
 > **Review**: tasks/reviews/20260901-0411-issue-110-auth-request-deadline.review.md
@@ -27,7 +27,7 @@
 
 ## Open Questions
 
-- None.
+- None. The configured deadline applies to each pair, challenge, or token HTTP/body operation, matching GitHub #110's requirement that every auth network operation be bounded.
 
 ## Evidence Links
 
@@ -35,6 +35,7 @@
 - Run snapshots: `.ai/harness/runs/`
 - Pre-fix regression: `tasks/notes/20260901-0411-issue-110-auth-request-deadline.pre-fix.txt` (`PRE_FIX_EXIT=1` after four deterministic guarded hangs).
 - Focused post-fix: `bun run --cwd packages/client test -- src/__tests__/daemon-auth.test.ts src/__tests__/bin-config.test.ts` (43 passed, 1 skipped); client typecheck/build and root build/typecheck/test passed.
+- Independent exact-diff review found no confirmed P0-P2 issue. A first root test run observed one scope-external Cloud Dataplane packaging timeout; isolated and full-suite reruns passed without source changes.
 
 ## Promotion Filter
 

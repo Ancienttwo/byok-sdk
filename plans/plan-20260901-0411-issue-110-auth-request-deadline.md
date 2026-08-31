@@ -1,6 +1,6 @@
 # Plan: Issue 110 AuthManager request deadline
 
-> **Status**: Review
+> **Status**: Complete
 > **Created**: 20260901-0411
 > **Slug**: issue-110-auth-request-deadline
 > **Planning Source**: codex-plan
@@ -142,7 +142,7 @@ Add the smallest AuthManager-owned configurable deadline and a single active req
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Freeze deterministic fetch/HTTP hang regressions for pair, challenge/token/body response, stop-vs-renewal abort, near-deadline success, and no partial/revoked state on timeout/cancel; capture non-zero pre-fix evidence.
-- [ ] Add the bounded AuthManager request deadline/controller lifecycle with stable timeout/cancel errors and response-body coverage.
-- [ ] Thread the single daemon config field into AuthManager and assert CLI config composition.
-- [ ] Verify focused auth/daemon coverage, client build/typecheck, root gates, strict workflow, diff, and candidate commit.
+- [x] Freeze deterministic fetch/HTTP hang regressions for pair, challenge/token/body response, stop-vs-renewal abort, near-deadline success, and no partial/revoked state on timeout/cancel; capture non-zero pre-fix evidence.
+- [x] Add the bounded AuthManager request deadline/controller lifecycle with stable timeout/cancel errors and response-body coverage.
+- [x] Thread the single daemon config field into AuthManager and assert CLI config composition.
+- [x] Verify focused auth/daemon coverage, client build/typecheck, root gates, strict workflow, diff, and candidate commit.
