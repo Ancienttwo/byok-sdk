@@ -30,6 +30,23 @@ describe('bin/config: loadConfig', () => {
     });
   });
 
+  it('projects the single AuthManager request deadline from JSON config without creating a CLI-specific authority', async () => {
+    const dir = await tmpDir('byok-bin-config-auth-deadline-');
+    const configPath = path.join(dir, 'config.json');
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        productName: 'Acme',
+        productId: 'acme',
+        serverUrl: 'http://example',
+        workspaceRoot: '/ws',
+        authRequestDeadlineMs: 250,
+      }),
+    );
+
+    expect((loadConfig(configPath) as unknown as Record<string, unknown>).authRequestDeadlineMs).toBe(250);
+  });
+
   it('rejects config-authored Local Agent release identity instead of accepting a second authority', async () => {
     const dir = await tmpDir('byok-bin-config-release-');
     const configPath = path.join(dir, 'config.json');

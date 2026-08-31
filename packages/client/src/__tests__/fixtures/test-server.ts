@@ -81,6 +81,8 @@ export class TestServer {
   private tokenTtlMs = 60 * 60 * 1000;
   /** One-shot gate that holds the next `/byok/pair` handler open — see `blockNextPair`. */
   private pairGate: Promise<void> | undefined;
+  /** One-shot gate that holds the next `/byok/challenge` handler open for auth-shutdown coverage. */
+  private challengeGate: Promise<void> | undefined;
   private rejectWs = false;
   private failEventsPolls = false;
   private failBlobUploads = false;
@@ -179,6 +181,15 @@ export class TestServer {
   blockNextPair(): () => void {
     let release!: () => void;
     this.pairGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return release;
+  }
+
+  /** Hold the next challenge after its request body was received, until the returned release function is called. */
+  blockNextChallenge(): () => void {
+    let release!: () => void;
+    this.challengeGate = new Promise<void>((resolve) => {
       release = resolve;
     });
     return release;
@@ -418,6 +429,11 @@ export class TestServer {
 
   private async handleChallenge(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = (await readJsonBody(req)) as { deviceId: string };
+    if (this.challengeGate) {
+      const gate = this.challengeGate;
+      this.challengeGate = undefined;
+      await gate;
+    }
     const device = this.devicesById.get(body.deviceId);
     if (!device || device.revoked) {
       respondJson(res, 401, { error: 'invalid or revoked device' });
