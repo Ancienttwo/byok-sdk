@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260831-2147-issue-102-atomic-auth-nonce.md
 > **Contract**: tasks/contracts/20260831-2147-issue-102-atomic-auth-nonce.contract.md
 > **Review**: tasks/reviews/20260831-2147-issue-102-atomic-auth-nonce.review.md
-> **Last Updated**: 2026-08-31 22:16
+> **Last Updated**: 2026-08-31 22:40
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -54,6 +54,12 @@
   evidence binding correctly stopped because the active contract is still
   untracked/uncommitted; no commit authority was inferred from implementation
   approval.
+- After the approved local checkpoint, current repo-harness Change Assessment
+  routed the auth authority cutover through two already-produced oracles: the
+  deterministic route/store/conformance suite and the real disposable
+  Postgres cross-pool readback. The contract now declares both explicitly and
+  uses the current Codex-host protocol-2 acceptance policy; this changes no
+  product behavior.
 - The disposable compose stack was removed and Colima returned to its initial
   stopped state after verification.
 

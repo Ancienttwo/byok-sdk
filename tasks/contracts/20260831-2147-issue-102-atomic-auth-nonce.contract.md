@@ -77,13 +77,13 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[]}
+{"protocol":1,"oracles":[{"id":"hosted-nonce-contract-suite","kind":"deterministic_test","paths":["*"]},{"id":"postgres-nonce-concurrency-readback","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
 
 ```json
-{"protocol":1,"reviewer":"Claude","user_waiver":"allowed"}
+{"protocol":2,"reviewer":"Codex","source":"codex-plugin","user_waiver":"allowed"}
 ```
 
 ## Allowed Paths
