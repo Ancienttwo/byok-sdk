@@ -43,6 +43,9 @@ export class AnotherControlServerRunningError extends Error {
 /** Default cap on simultaneous pre-handshake ("half-open") connections — see `startControlServer`'s own comment on why. */
 export const MAX_HALF_OPEN_CONNECTIONS = 8;
 
+/** A single authenticated control connection must never retain more outbound application bytes than this. */
+const MAX_OUTBOUND_QUEUE_BYTES = 1024 * 1024;
+
 export interface ControlMethodContext {
   /** Emits one `event` frame for a streaming method's current request. */
   emit: (event: unknown) => void;
@@ -248,11 +251,15 @@ function handleConnection(
   onHandshakeSettled: () => void,
 ): void {
   const reader = new NdjsonLineReader();
-  const activeStreams = new Map<string, AbortController>();
+  type ActiveRequest =
+    | { kind: 'unary' }
+    | { kind: 'stream'; controller: AbortController };
+  const activeRequests = new Map<string, ActiveRequest>();
   let phase: 'client-hello' | 'client-auth' | 'ready' = 'client-hello';
   let serverNonce = '';
   let destroyed = false;
   let handshakeSettled = false;
+  let disposeOutboundWriter: (() => void) | undefined;
 
   function settleHandshake(): void {
     if (handshakeSettled) return;
@@ -265,8 +272,91 @@ function handleConnection(
   }, handshakeTimeoutMs);
   handshakeTimer.unref?.();
 
+  function terminateConnection(): void {
+    if (destroyed) return;
+    destroyed = true;
+    clearTimeout(handshakeTimer);
+    settleHandshake();
+    disposeOutboundWriter?.();
+    const requests = [...activeRequests.values()];
+    activeRequests.clear();
+    for (const request of requests) {
+      if (request.kind === 'stream' && !request.controller.signal.aborted) request.controller.abort();
+    }
+    if (!socket.destroyed) socket.destroy();
+  }
+
+  type QueuedFrame = { encoded: string; bytes: number };
+  const queuedFrames: QueuedFrame[] = [];
+  let queuedBytes = 0;
+  let blocked = false;
+  let terminal = false;
+  let drainListening = false;
+
+  function disposeQueuedFrames(): void {
+    terminal = true;
+    blocked = false;
+    queuedFrames.length = 0;
+    queuedBytes = 0;
+    if (drainListening) {
+      socket.removeListener('drain', onDrain);
+      drainListening = false;
+    }
+  }
+
+  function waitForDrain(): void {
+    if (drainListening || terminal) return;
+    drainListening = true;
+    socket.once('drain', onDrain);
+  }
+
+  function writeEncodedFrame(encoded: string): void {
+    if (terminal) return;
+    if (!socket.writable) {
+      terminateConnection();
+      return;
+    }
+    try {
+      if (!socket.write(encoded)) {
+        blocked = true;
+        waitForDrain();
+      }
+    } catch {
+      terminateConnection();
+    }
+  }
+
+  function onDrain(): void {
+    drainListening = false;
+    if (terminal) return;
+    blocked = false;
+    while (!blocked && queuedFrames.length > 0) {
+      const frame = queuedFrames.shift()!;
+      queuedBytes -= frame.bytes;
+      writeEncodedFrame(frame.encoded);
+    }
+  }
+
+  disposeOutboundWriter = disposeQueuedFrames;
+
   function sendFrame(frame: unknown): void {
-    if (!destroyed && socket.writable) socket.write(encodeFrame(frame));
+    if (destroyed || terminal) return;
+    const encoded = encodeFrame(frame);
+    const bytes = Buffer.byteLength(encoded);
+    if (bytes > MAX_OUTBOUND_QUEUE_BYTES) {
+      terminateConnection();
+      return;
+    }
+    if (blocked) {
+      if (queuedBytes + bytes > MAX_OUTBOUND_QUEUE_BYTES) {
+        terminateConnection();
+        return;
+      }
+      queuedFrames.push({ encoded, bytes });
+      queuedBytes += bytes;
+      return;
+    }
+    writeEncodedFrame(encoded);
   }
 
   function handleClientHello(parsed: unknown): void {
@@ -292,26 +382,60 @@ function handleConnection(
     sendFrame({ v: 1, ready: true });
   }
 
+  function rejectDuplicateRequest(id: string): void {
+    sendFrame({
+      v: 1,
+      id,
+      ok: false,
+      error: { code: 'duplicate_request_id', message: `request id "${id}" is already active` },
+    });
+  }
+
+  function registerRequest(id: string, record: ActiveRequest): boolean {
+    if (activeRequests.has(id)) {
+      rejectDuplicateRequest(id);
+      return false;
+    }
+    activeRequests.set(id, record);
+    return true;
+  }
+
+  function releaseRequest(id: string, record: ActiveRequest): boolean {
+    if (activeRequests.get(id) !== record) return false;
+    activeRequests.delete(id);
+    return true;
+  }
+
   function dispatch(id: string, method: string, params: unknown): void {
     const unary = methods.unary[method];
     if (unary) {
+      const record: ActiveRequest = { kind: 'unary' };
+      if (!registerRequest(id, record)) return;
       Promise.resolve()
         .then(() => unary(params))
-        .then((result) => sendFrame({ v: 1, id, ok: true, result }))
-        .catch((err: unknown) => sendFrame({ v: 1, id, ok: false, error: toControlErrorShape(err) }));
+        .then((result) => {
+          if (!releaseRequest(id, record)) return;
+          sendFrame({ v: 1, id, ok: true, result });
+        })
+        .catch((err: unknown) => {
+          if (!releaseRequest(id, record)) return;
+          sendFrame({ v: 1, id, ok: false, error: toControlErrorShape(err) });
+        });
       return;
     }
     const stream = methods.stream[method];
     if (stream) {
       const controller = new AbortController();
-      activeStreams.set(id, controller);
-      stream(params, { emit: (event) => sendFrame({ v: 1, id, event }), signal: controller.signal })
+      const record: ActiveRequest = { kind: 'stream', controller };
+      if (!registerRequest(id, record)) return;
+      Promise.resolve()
+        .then(() => stream(params, { emit: (event) => sendFrame({ v: 1, id, event }), signal: controller.signal }))
         .then(() => {
-          activeStreams.delete(id);
+          if (!releaseRequest(id, record)) return;
           if (!controller.signal.aborted) sendFrame({ v: 1, id, ok: true, done: true });
         })
         .catch((err: unknown) => {
-          activeStreams.delete(id);
+          if (!releaseRequest(id, record)) return;
           sendFrame({ v: 1, id, ok: false, error: toControlErrorShape(err) });
         });
       return;
@@ -359,15 +483,13 @@ function handleConnection(
     for (const line of lines) handleLine(line);
   });
   socket.on('error', () => {
-    // 'close' always follows and does cleanup below — swallow so a peer
-    // reset/EPIPE never becomes an unhandled 'error' crash.
+    // A write/reset error is terminal for this connection. Swallow it here
+    // so it never becomes an unhandled EventEmitter error, but immediately
+    // release queued output and abort active stream producers.
+    terminateConnection();
   });
   socket.on('close', () => {
-    destroyed = true;
-    clearTimeout(handshakeTimer);
-    settleHandshake(); // in case it closed (timeout, malformed hello/auth, over-cap) before ever completing
-    for (const controller of activeStreams.values()) controller.abort();
-    activeStreams.clear();
+    terminateConnection(); // also handles pre-handshake close and drops a queued pre-drain burst
   });
 }
 

@@ -344,6 +344,556 @@ describe('control-server: RPC dispatch', () => {
   });
 });
 
+describe('control-server: connection-local request ID ownership', () => {
+  let handle: ControlServerHandle | undefined;
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  it('rejects a duplicate active stream ID before a second handler starts, then releases the original owner after completion', async () => {
+    const storeDir = await tmpDir('byok-ctl-duplicate-stream-id-');
+    let starts = 0;
+    const releases: Array<() => void> = [];
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          hold: () => {
+            starts += 1;
+            return new Promise<void>((resolve) => releases.push(resolve));
+          },
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+
+    socket.write(
+      Buffer.concat([
+        Buffer.from(encodeFrame({ v: 1, id: 'same-stream-id', method: 'hold' })),
+        Buffer.from(encodeFrame({ v: 1, id: 'same-stream-id', method: 'hold' })),
+      ]),
+    );
+
+    await vi.waitFor(() => expect(starts).toBe(1));
+    await expect(frames.next()).resolves.toMatchObject({
+      v: 1,
+      id: 'same-stream-id',
+      ok: false,
+      error: { code: 'duplicate_request_id' },
+    });
+
+    releases[0]!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'same-stream-id', ok: true, done: true });
+
+    socket.write(encodeFrame({ v: 1, id: 'same-stream-id', method: 'hold' }));
+    await vi.waitFor(() => expect(starts).toBe(2));
+    releases[1]!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'same-stream-id', ok: true, done: true });
+    socket.destroy();
+  });
+
+  it('rejects a unary request that collides with an active stream on the same authenticated connection', async () => {
+    const storeDir = await tmpDir('byok-ctl-cross-kind-id-');
+    let streamStarts = 0;
+    let unaryStarts = 0;
+    let releaseStream: (() => void) | undefined;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {
+          status: () => {
+            unaryStarts += 1;
+            return 'unexpected';
+          },
+        },
+        stream: {
+          hold: () => {
+            streamStarts += 1;
+            return new Promise<void>((resolve) => {
+              releaseStream = resolve;
+            });
+          },
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+
+    socket.write(encodeFrame({ v: 1, id: 'cross-kind-id', method: 'hold' }));
+    await vi.waitFor(() => expect(streamStarts).toBe(1));
+    socket.write(encodeFrame({ v: 1, id: 'cross-kind-id', method: 'status' }));
+
+    await expect(frames.next()).resolves.toMatchObject({
+      v: 1,
+      id: 'cross-kind-id',
+      ok: false,
+      error: { code: 'duplicate_request_id' },
+    });
+    expect(unaryStarts).toBe(0);
+
+    releaseStream!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'cross-kind-id', ok: true, done: true });
+    socket.destroy();
+  });
+
+  it('rejects a duplicate active unary ID before a second handler starts, then permits reuse after completion', async () => {
+    const storeDir = await tmpDir('byok-ctl-duplicate-unary-id-');
+    let starts = 0;
+    let release: (() => void) | undefined;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {
+          hold: async () => {
+            starts += 1;
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            return starts;
+          },
+        },
+        stream: {},
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+
+    socket.write(encodeFrame({ v: 1, id: 'same-unary-id', method: 'hold' }));
+    await vi.waitFor(() => expect(starts).toBe(1));
+    socket.write(encodeFrame({ v: 1, id: 'same-unary-id', method: 'hold' }));
+
+    await expect(frames.next()).resolves.toMatchObject({
+      v: 1,
+      id: 'same-unary-id',
+      ok: false,
+      error: { code: 'duplicate_request_id' },
+    });
+    expect(starts).toBe(1);
+
+    release!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'same-unary-id', ok: true, result: 1 });
+
+    socket.write(encodeFrame({ v: 1, id: 'same-unary-id', method: 'hold' }));
+    await vi.waitFor(() => expect(starts).toBe(2));
+    release!();
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'same-unary-id', ok: true, result: 2 });
+    socket.destroy();
+  });
+
+  it('releases a rejected unary request ID so a later request can reuse it', async () => {
+    const storeDir = await tmpDir('byok-ctl-rejected-id-release-');
+    let succeedingHandlerStarts = 0;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {
+          reject: () => {
+            throw new Error('expected rejection');
+          },
+          succeed: () => {
+            succeedingHandlerStarts += 1;
+            return 'reused';
+          },
+        },
+        stream: {},
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+
+    socket.write(encodeFrame({ v: 1, id: 'rejected-id', method: 'reject' }));
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'rejected-id', ok: false, error: { code: 'internal_error' } });
+
+    socket.write(encodeFrame({ v: 1, id: 'rejected-id', method: 'succeed' }));
+    await expect(frames.next()).resolves.toMatchObject({ v: 1, id: 'rejected-id', ok: true, result: 'reused' });
+    expect(succeedingHandlerStarts).toBe(1);
+    socket.destroy();
+  });
+
+  it('aborts every distinct active stream exactly once when the authenticated connection closes', async () => {
+    const storeDir = await tmpDir('byok-ctl-stream-teardown-');
+    const starts: string[] = [];
+    const aborts = new Map<string, number>();
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          hold: (params, ctx) => {
+            const id = (params as { id: string }).id;
+            starts.push(id);
+            return new Promise<void>((resolve) => {
+              ctx.signal.addEventListener(
+                'abort',
+                () => {
+                  aborts.set(id, (aborts.get(id) ?? 0) + 1);
+                  resolve();
+                },
+                { once: true },
+              );
+            });
+          },
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+
+    socket.write(
+      Buffer.concat([
+        Buffer.from(encodeFrame({ v: 1, id: 'stream-a', method: 'hold', params: { id: 'a' } })),
+        Buffer.from(encodeFrame({ v: 1, id: 'stream-b', method: 'hold', params: { id: 'b' } })),
+      ]),
+    );
+    await vi.waitFor(() => expect(starts).toEqual(['a', 'b']));
+
+    socket.destroy();
+    await vi.waitFor(() => expect([...aborts.entries()].sort()).toEqual([['a', 1], ['b', 1]]));
+  });
+});
+
+describe('control-server: outbound backpressure', () => {
+  let handle: ControlServerHandle | undefined;
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  it('does not write a second stream event after write(false) until the connection drains', async () => {
+    const storeDir = await tmpDir('byok-ctl-backpressure-order-');
+    const marker = 'issue-109-backpressure-order';
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          burst: (_params, ctx) => {
+            ctx.emit({ marker, index: 1 });
+            ctx.emit({ marker, index: 2 });
+            return new Promise<void>((resolve) => {
+              ctx.signal.addEventListener('abort', () => resolve(), { once: true });
+            });
+          },
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+    const originalWrite = net.Socket.prototype.write;
+    let eventWriteCalls = 0;
+    let serverSocket: net.Socket | undefined;
+    net.Socket.prototype.write = function (this: net.Socket, chunk: string | Uint8Array, ...args: unknown[]): boolean {
+      const encoded = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      if (encoded.includes(marker)) {
+        eventWriteCalls += 1;
+        serverSocket ??= this;
+        Reflect.apply(originalWrite, this, [chunk, ...args]);
+        return false;
+      }
+      return Reflect.apply(originalWrite, this, [chunk, ...args]) as boolean;
+    } as typeof net.Socket.prototype.write;
+
+    try {
+      socket.write(encodeFrame({ v: 1, id: 'backpressure-order', method: 'burst' }));
+      await expect(frames.next()).resolves.toMatchObject({ id: 'backpressure-order', event: { marker, index: 1 } });
+      await vi.waitFor(() => expect(eventWriteCalls).toBe(1));
+      expect(serverSocket).toBeDefined();
+
+      net.Socket.prototype.write = originalWrite;
+      serverSocket!.emit('drain');
+      await expect(frames.next()).resolves.toMatchObject({ id: 'backpressure-order', event: { marker, index: 2 } });
+    } finally {
+      net.Socket.prototype.write = originalWrite;
+      socket.destroy();
+    }
+  });
+
+  it('closes and aborts the stream when its first outbound frame exceeds the byte ceiling', async () => {
+    const storeDir = await tmpDir('byok-ctl-backpressure-oversized-');
+    let aborts = 0;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          oversized: (_params, ctx) =>
+            new Promise<void>((resolve) => {
+              ctx.signal.addEventListener(
+                'abort',
+                () => {
+                  aborts += 1;
+                  resolve();
+                },
+                { once: true },
+              );
+              ctx.emit({ payload: 'x'.repeat(1024 * 1024) });
+            }),
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const closed = waitForClose(socket);
+
+    socket.write(encodeFrame({ v: 1, id: 'oversized-frame', method: 'oversized' }));
+
+    await closed;
+    expect(aborts).toBe(1);
+  });
+
+  it('closes and aborts the stream when blocked queued frames exceed the byte ceiling', async () => {
+    const storeDir = await tmpDir('byok-ctl-backpressure-overflow-');
+    const marker = 'issue-109-backpressure-overflow';
+    let aborts = 0;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          overflow: (_params, ctx) =>
+            new Promise<void>((resolve) => {
+              ctx.signal.addEventListener(
+                'abort',
+                () => {
+                  aborts += 1;
+                  resolve();
+                },
+                { once: true },
+              );
+              ctx.emit({ marker, index: 1 });
+              ctx.emit({ marker, index: 2, payload: 'x'.repeat(700 * 1024) });
+              ctx.emit({ marker, index: 3, payload: 'x'.repeat(700 * 1024) });
+            }),
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const originalWrite = net.Socket.prototype.write;
+    let firstEventWrites = 0;
+    net.Socket.prototype.write = function (this: net.Socket, chunk: string | Uint8Array, ...args: unknown[]): boolean {
+      const encoded = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      if (encoded.includes(marker) && encoded.includes('"index":1')) {
+        firstEventWrites += 1;
+        Reflect.apply(originalWrite, this, [chunk, ...args]);
+        return false;
+      }
+      return Reflect.apply(originalWrite, this, [chunk, ...args]) as boolean;
+    } as typeof net.Socket.prototype.write;
+
+    try {
+      const closed = waitForClose(socket);
+      socket.write(encodeFrame({ v: 1, id: 'queue-overflow', method: 'overflow' }));
+      await closed;
+      expect(firstEventWrites).toBe(1);
+      expect(aborts).toBe(1);
+    } finally {
+      net.Socket.prototype.write = originalWrite;
+      socket.destroy();
+    }
+  });
+
+  it('drops queued output and removes the drain listener when the peer disconnects before drain', async () => {
+    const storeDir = await tmpDir('byok-ctl-backpressure-disconnect-');
+    const marker = 'issue-109-backpressure-disconnect';
+    let aborts = 0;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          burst: (_params, ctx) =>
+            new Promise<void>((resolve) => {
+              ctx.signal.addEventListener(
+                'abort',
+                () => {
+                  aborts += 1;
+                  resolve();
+                },
+                { once: true },
+              );
+              ctx.emit({ marker, index: 1 });
+              ctx.emit({ marker, index: 2 });
+            }),
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const originalWrite = net.Socket.prototype.write;
+    let eventWriteCalls = 0;
+    let serverSocket: net.Socket | undefined;
+    net.Socket.prototype.write = function (this: net.Socket, chunk: string | Uint8Array, ...args: unknown[]): boolean {
+      const encoded = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      if (encoded.includes(marker)) {
+        eventWriteCalls += 1;
+        serverSocket ??= this;
+        Reflect.apply(originalWrite, this, [chunk, ...args]);
+        return false;
+      }
+      return Reflect.apply(originalWrite, this, [chunk, ...args]) as boolean;
+    } as typeof net.Socket.prototype.write;
+
+    try {
+      socket.write(encodeFrame({ v: 1, id: 'disconnect-before-drain', method: 'burst' }));
+      await vi.waitFor(() => expect(eventWriteCalls).toBe(1));
+      expect(serverSocket).toBeDefined();
+
+      const closed = waitForClose(socket);
+      socket.destroy();
+      await closed;
+      await vi.waitFor(() => expect(aborts).toBe(1));
+      expect(serverSocket!.listenerCount('drain')).toBe(0);
+      serverSocket!.emit('drain');
+      expect(eventWriteCalls).toBe(1);
+    } finally {
+      net.Socket.prototype.write = originalWrite;
+      socket.destroy();
+    }
+  });
+
+  it('closes and aborts the stream when a socket write throws', async () => {
+    const storeDir = await tmpDir('byok-ctl-backpressure-write-error-');
+    const marker = 'issue-109-backpressure-write-error';
+    let aborts = 0;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          writeError: (_params, ctx) =>
+            new Promise<void>((resolve) => {
+              ctx.signal.addEventListener(
+                'abort',
+                () => {
+                  aborts += 1;
+                  resolve();
+                },
+                { once: true },
+              );
+              ctx.emit({ marker });
+            }),
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const originalWrite = net.Socket.prototype.write;
+    let writeAttempts = 0;
+    net.Socket.prototype.write = function (this: net.Socket, chunk: string | Uint8Array, ...args: unknown[]): boolean {
+      const encoded = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      if (encoded.includes(marker)) {
+        writeAttempts += 1;
+        throw new Error('simulated outbound write failure');
+      }
+      return Reflect.apply(originalWrite, this, [chunk, ...args]) as boolean;
+    } as typeof net.Socket.prototype.write;
+
+    try {
+      const closed = waitForClose(socket);
+      socket.write(encodeFrame({ v: 1, id: 'write-error', method: 'writeError' }));
+      await closed;
+      expect(writeAttempts).toBe(1);
+      expect(aborts).toBe(1);
+    } finally {
+      net.Socket.prototype.write = originalWrite;
+      socket.destroy();
+    }
+  });
+
+  it('closes an authenticated connection and drops queued output after an asynchronous socket error', async () => {
+    const storeDir = await tmpDir('byok-ctl-backpressure-async-error-');
+    const marker = 'issue-109-backpressure-async-error';
+    let aborts = 0;
+    handle = await startControlServer({
+      storeDir,
+      productId: 'acme',
+      methods: {
+        unary: {},
+        stream: {
+          asyncError: (_params, ctx) =>
+            new Promise<void>((resolve) => {
+              ctx.signal.addEventListener(
+                'abort',
+                () => {
+                  aborts += 1;
+                  resolve();
+                },
+                { once: true },
+              );
+              ctx.emit({ marker, index: 1 });
+              ctx.emit({ marker, index: 2 });
+            }),
+        },
+      },
+    });
+    const token = await readToken(storeDir);
+    const socket = await rawConnectAndHandshake(handle.endpoint, token);
+    socket.on('error', () => {});
+    const frames = frameStream(socket);
+    const originalWrite = net.Socket.prototype.write;
+    let eventWriteCalls = 0;
+    let serverSocket: net.Socket | undefined;
+    net.Socket.prototype.write = function (this: net.Socket, chunk: string | Uint8Array, ...args: unknown[]): boolean {
+      const encoded = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      if (encoded.includes(marker)) {
+        eventWriteCalls += 1;
+        serverSocket ??= this;
+        Reflect.apply(originalWrite, this, [chunk, ...args]);
+        return false;
+      }
+      return Reflect.apply(originalWrite, this, [chunk, ...args]) as boolean;
+    } as typeof net.Socket.prototype.write;
+
+    try {
+      socket.write(encodeFrame({ v: 1, id: 'async-socket-error', method: 'asyncError' }));
+      await expect(frames.next()).resolves.toMatchObject({ id: 'async-socket-error', event: { marker, index: 1 } });
+      await vi.waitFor(() => expect(eventWriteCalls).toBe(1));
+      expect(serverSocket).toBeDefined();
+      expect(serverSocket!.listenerCount('drain')).toBe(1);
+
+      const closed = waitForClose(socket);
+      setTimeout(() => serverSocket!.emit('error', new Error('simulated asynchronous socket failure')), 0);
+      await closed;
+      await vi.waitFor(() => expect(aborts).toBe(1));
+      expect(serverSocket!.listenerCount('drain')).toBe(0);
+      serverSocket!.emit('drain');
+      expect(eventWriteCalls).toBe(1);
+    } finally {
+      net.Socket.prototype.write = originalWrite;
+      socket.destroy();
+    }
+  });
+});
+
 describe('control-server: stale socket cleanup + "another daemon running"', () => {
   let handle: ControlServerHandle | undefined;
   afterEach(async () => {
