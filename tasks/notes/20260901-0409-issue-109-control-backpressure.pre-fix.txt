@@ -1,0 +1,37 @@
+Regression guard: packages/client/src/__tests__/control-server.test.ts
+$ vitest run src/__tests__/control-server.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-109-control-backpressure/packages/client
+
+ ❯ src/__tests__/control-server.test.ts (25 tests | 1 failed) 1688ms
+     × does not write a second stream event after write(false) until the connection drains 1016ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/control-server.test.ts > control-server: outbound backpressure > does not write a second stream event after write(false) until the connection drains
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/__tests__/control-server.test.ts:619:54
+    617|       socket.write(encodeFrame({ v: 1, id: 'backpressure-order', metho…
+    618|       await expect(frames.next()).resolves.toMatchObject({ id: 'backpr…
+    619|       await vi.waitFor(() => expect(eventWriteCalls).toBe(1));
+       |                                                      ^
+    620|       expect(serverSocket).toBeDefined();
+    621|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 24 passed (25)
+   Start at  04:13:06
+   Duration  1.88s (transform 50ms, setup 0ms, import 68ms, tests 1.69s, environment 0ms)
+
+error: script "test" exited with code 1
+PRE_FIX_EXIT=1
