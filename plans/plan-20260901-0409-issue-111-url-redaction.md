@@ -1,6 +1,6 @@
 # Plan: Issue 111 secret-safe server URL validation errors
 
-> **Status**: Complete
+> **Status**: Review
 > **Created**: 20260901-0409
 > **Slug**: issue-111-url-redaction
 > **Planning Source**: codex-plan
