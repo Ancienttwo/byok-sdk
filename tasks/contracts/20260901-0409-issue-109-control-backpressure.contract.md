@@ -1,6 +1,6 @@
 # Task Contract: issue-109-control-backpressure
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260901-0409-issue-109-control-backpressure.md
 > **Task Profile**: bugfix
 > **Workflow Profile**: strict
