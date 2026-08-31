@@ -1,0 +1,38 @@
+PRE_FIX_COMMAND=bun --filter @byok-sdk/client test -- src/__tests__/agent-egress-spool.test.ts
+@byok-sdk/client test:
+@byok-sdk/client test:  RUN  v4.1.10 /private/tmp/byok-sdk-issue-106-baseline.Wj7jzh/packages/client
+@byok-sdk/client test:
+@byok-sdk/client test:  ❯ src/__tests__/agent-egress-spool.test.ts (7 tests | 1 failed) 84ms
+@byok-sdk/client test:      × shares one first-open authority across concurrent public reliable appends 17ms
+@byok-sdk/client test:
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+@byok-sdk/client test:
+@byok-sdk/client test:  FAIL  src/__tests__/agent-egress-spool.test.ts > Agent reliable egress spool > shares one first-open authority across concurrent public reliable appends
+@byok-sdk/client test: AssertionError: expected "open" to be called 1 times, but got 2 times
+@byok-sdk/client test:  ❯ src/__tests__/agent-egress-spool.test.ts:94:20
+@byok-sdk/client test:      92|     await Promise.resolve();
+@byok-sdk/client test:      93|     try {
+@byok-sdk/client test:      94|       expect(open).toHaveBeenCalledTimes(1);
+@byok-sdk/client test:        |                    ^
+@byok-sdk/client test:      95|     } finally {
+@byok-sdk/client test:      96|       releaseOpen();
+@byok-sdk/client test:
+@byok-sdk/client test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+@byok-sdk/client test:
+@byok-sdk/client test:
+@byok-sdk/client test:  Test Files  1 failed (1)
+@byok-sdk/client test:       Tests  1 failed | 6 passed (7)
+@byok-sdk/client test:    Start at  02:05:01
+@byok-sdk/client test:    Duration  334ms (transform 59ms, setup 0ms, import 118ms, tests 84ms, environment 0ms)
+@byok-sdk/client test:
+@byok-sdk/client test: Exited with code 1
+
+PRE_FIX_EXIT=1
+
+Root Cause Evidence
+root_cause: Audit baseline 7a937e5ed8eb5aef102eacb0df9183f296da7e1f packages/client/src/daemon/agent-egress-controller.ts:279 awaits AgentReliableSpool.open() before packages/client/src/daemon/agent-egress-controller.ts:283 inserts the spool, so two same-AgentRef/home public appendReliable() calls both pass the empty cache and open independent instances.
+repro: In a detached worktree at audit baseline 7a937e5ed8eb5aef102eacb0df9183f296da7e1f, pipe only the diff for packages/client/src/__tests__/agent-egress-spool.test.ts, run bun --filter @byok-sdk/client test -- src/__tests__/agent-egress-spool.test.ts, and observe the barrier assertion fail before release.
+regression_guard: packages/client/src/__tests__/agent-egress-spool.test.ts
+pre_fix_failure_artifact: tasks/notes/20260901-0149-issue-106-spool-initialization.pre-fix.txt
+baseline: 7a937e5ed8eb5aef102eacb0df9183f296da7e1f
+assertion: src/__tests__/agent-egress-spool.test.ts:94 expected AgentReliableSpool.open to be called 1 time before release, but got 2.
