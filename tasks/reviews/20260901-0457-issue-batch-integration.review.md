@@ -1,6 +1,6 @@
 # Task Review: issue-batch-integration
 
-> **Status**: Complete
+> **Status**: Accepted
 > **Plan**: plans/plan-20260901-0457-issue-batch-integration.md
 > **Contract**: tasks/contracts/20260901-0457-issue-batch-integration.contract.md
 > **Notes File**: tasks/notes/20260901-0457-issue-batch-integration.notes.md
@@ -8,7 +8,7 @@
 > **Last Updated**: 2026-09-01 05:25
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:c6c4747964f561df9bbb63b876f685e1def241e08d52cf3f7424af33614df360
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
 
@@ -48,17 +48,17 @@ screenshot/artifact path, or reviewer observation.
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-plugin
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:c6c4747964f561df9bbb63b876f685e1def241e08d52cf3f7424af33614df360
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: pending
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 9d2b05253570c13f235ef4f9aa2a1e94e431c576
+> **Verification Evidence SHA256**: sha256:c0b0a86849e88a597b23eec5b80d5430a5e8cef75865e5df1ff4465ad1caf3bb
+> **Issued At**: 2026-08-31T21:28:58.096Z
 
-- Summary: Semantic review passed; the SHA-bound AcceptanceReceipt is recorded only after the final verification snapshot.
+- Summary: Accepted issues 105-111 compose on frozen origin/main; combined focused and root verification passed with no remaining P0-P2 findings.
 - Findings: none
 
 ## Behavior Diff Notes
