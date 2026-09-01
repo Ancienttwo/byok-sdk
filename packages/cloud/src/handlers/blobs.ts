@@ -47,6 +47,8 @@ export const BLOB_RESERVATION_TTL_MS = 15 * 60 * 1000;
  */
 export interface BlobContentRouteDeps {
   readonly contentProxy: BlobContentProxy;
+  /** Absolute ceiling independent of an untrusted Content-Length header. */
+  readonly maxUploadBytes: number;
 }
 
 /**
@@ -164,11 +166,51 @@ export function blobUploadContentHandler(deps: BlobContentRouteDeps) {
     if (!query.success || !(await deps.contentProxy.verifySignedUrl(blobId, 'put', query.data.sig, query.data.exp))) {
       return c.json({ error: 'invalid or expired signature' }, 401);
     }
-
-    const result = await deps.contentProxy.writeContent(blobId, new Uint8Array(await c.req.arrayBuffer()));
+    const expectedBytes = await deps.contentProxy.expectedUploadBytes(blobId);
+    if (expectedBytes === undefined) return c.json({ error: 'blob not found' }, 404);
+    const absoluteCeiling = BigInt(deps.maxUploadBytes);
+    if (expectedBytes > absoluteCeiling) return c.json({ error: 'upload exceeds size limit' }, 413);
+    const contentLength = c.req.header('content-length');
+    if (contentLength !== undefined && /^\d+$/u.test(contentLength) && BigInt(contentLength) > expectedBytes) {
+      return c.json({ error: 'upload exceeds declared size' }, 413);
+    }
+    const body = await readBoundedBody(c.req.raw.body, Number(expectedBytes));
+    if (body.tooLarge) return c.json({ error: 'upload exceeds declared size' }, 413);
+    const result = await deps.contentProxy.writeContent(blobId, body.data);
     if (!result.ok) return c.json({ error: result.reason }, 422);
     return c.body(null, 204);
   };
+}
+
+async function readBoundedBody(
+  body: ReadableStream<Uint8Array> | null,
+  ceiling: number,
+): Promise<{ readonly tooLarge: true } | { readonly tooLarge: false; readonly data: Uint8Array }> {
+  if (body === null) return { tooLarge: false, data: new Uint8Array() };
+  const reader = body.getReader();
+  // The reservation's authoritative size is already bounded by the deployment
+  // ceiling. Retaining chunks and later joining them would briefly hold a
+  // second attacker-sized copy at the moment memory pressure is highest.
+  const data = new Uint8Array(ceiling);
+  let offset = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      const chunk = next.value;
+      if (chunk.byteLength > ceiling - offset) {
+        void reader.cancel().catch(() => undefined);
+        return { tooLarge: true };
+      }
+      data.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  // A subarray is a view of the one preallocated buffer. The content proxy
+  // retains exact-size validation without a second allocation.
+  return { tooLarge: false, data: data.subarray(0, offset) };
 }
 
 export function blobDownloadContentHandler(deps: BlobContentRouteDeps) {

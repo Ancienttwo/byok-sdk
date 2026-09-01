@@ -18,6 +18,7 @@
 --   deploy/sql/0014_agent_memory_projection.sql (bounded redacted head + body-free metering receipts)
 --   deploy/sql/0015_device_machine_identity.sql (nullable client-hashed machine identity + partial active-machine uniqueness)
 --   deploy/sql/0016_mailbox_delivery_watermark.sql (server-owned delivery bound for mailbox acknowledgements)
+--   deploy/sql/0017_agent_message_admission.sql (live-task first-message reservation)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -75,10 +76,115 @@ BEGIN
      AND t.relkind = 'r'
      AND t.relname <> 'byok_schema_migration';
 
-  IF port_tables < 31 THEN
+  IF port_tables < 32 THEN
     RAISE EXCEPTION
-      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 31 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql + 0013_agent_egress_contract.sql + 0014_agent_memory_projection.sql; 0009_task_cancellation.sql, 0010_tenant_readiness.sql, and 0012_agent_home_contract.sql are checked separately)',
+      'control-plane invariants ran against an unmigrated schema: %.% has % port table(s), expected at least 32 (0001_cloud_local.sql + 0002_core_domain.sql + 0003_cloud_cleanup.sql + 0004_device_proof_truth.sql + 0005_skill_packs.sql + 0007_approval_timeline.sql + 0008_device_assertion_replay.sql + 0011_tenant_erasure.sql + 0013_agent_egress_contract.sql + 0014_agent_memory_projection.sql + 0017_agent_message_admission.sql; 0009_task_cancellation.sql, 0010_tenant_readiness.sql, and 0012_agent_home_contract.sql are checked separately)',
       current_database(), current_schema(), port_tables;
+  END IF;
+END $$;
+
+DO $$
+DECLARE
+  missing_terminal_columns text;
+BEGIN
+  SELECT string_agg(required.column_name, ', ' ORDER BY required.column_name)
+    INTO missing_terminal_columns
+    FROM (
+      VALUES
+        ('terminal_body'::text, 'text'::regtype)
+    ) AS required(column_name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'agent_message_admission'
+         AND a.attname = required.column_name
+         AND a.atttypid = required.type_oid
+         AND NOT a.attnotnull
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_terminal_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'agent_message_admission needs a nullable immutable terminal body: %',
+      missing_terminal_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.8 Agent-message admission has one tenant-first task/message authority
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  missing_columns text;
+  primary_key_columns text[];
+  message_unique_columns text[];
+BEGIN
+  SELECT string_agg(required.column_name, ', ' ORDER BY required.column_name)
+    INTO missing_columns
+    FROM (
+      VALUES
+        ('tenant_id'::text, 'text'::regtype),
+        ('device_id'::text, 'text'::regtype),
+        ('task_id'::text, 'text'::regtype),
+        ('message_id'::text, 'text'::regtype),
+        ('payload_body'::text, 'text'::regtype)
+    ) AS required(column_name, type_oid)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'agent_message_admission'
+         AND a.attname = required.column_name
+         AND a.atttypid = required.type_oid
+         AND a.attnotnull
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without complete 0017_agent_message_admission.sql: missing/non-required column(s): %',
+      missing_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO primary_key_columns
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_message_admission'
+     AND c.contype = 'p';
+
+  IF primary_key_columns IS DISTINCT FROM ARRAY['tenant_id', 'device_id', 'task_id']::text[] THEN
+    RAISE EXCEPTION
+      'agent_message_admission primary key must be (tenant_id, device_id, task_id), found %',
+      primary_key_columns;
+  END IF;
+
+  SELECT array_agg(a.attname ORDER BY key_columns.ordinality)
+    INTO message_unique_columns
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS key_columns(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_columns.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'agent_message_admission'
+     AND c.contype = 'u';
+
+  IF message_unique_columns IS DISTINCT FROM ARRAY['tenant_id', 'device_id', 'message_id']::text[] THEN
+    RAISE EXCEPTION
+      'agent_message_admission message uniqueness must be (tenant_id, device_id, message_id), found %',
+      message_unique_columns;
   END IF;
 END $$;
 

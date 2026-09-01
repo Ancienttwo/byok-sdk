@@ -63,7 +63,7 @@ import {
   DEFAULT_PRESENCE_TTL_MS,
   PresencePublisher,
 } from './presence-publisher';
-import { assertServerUrlAllowed, toHttpBase } from './url';
+import { assertServerUrlAllowed, formatServerUrl, toHttpBase } from './url';
 import { mintDeviceAssertion } from './device-assertion-signer';
 import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
@@ -1350,6 +1350,7 @@ export function buildDaemonWithAdapters(
   const approvalRegistry = new ApprovalRegistry();
 
   let connection: ConnectionManager | undefined;
+  let blobLifecycleAbort: AbortController | undefined;
   let connectionState: ConnectionState = 'closed';
   // A successful start owns tenant-bound egress and journal composition. A
   // re-pair during that lifetime is refused rather than leaving any active
@@ -1448,7 +1449,7 @@ export function buildDaemonWithAdapters(
       assertServerUrlAllowed(config.serverUrl, { dangerouslyAllowInsecureRemote: true });
       const reason = err instanceof Error ? err.message : String(err);
       console.warn(
-        `[byok/client] WARNING: dangerouslyAllowInsecureRemote is set — proceeding with an insecure server URL (${config.serverUrl}). ` +
+        `[byok/client] WARNING: dangerouslyAllowInsecureRemote is set — proceeding with an insecure server URL (${formatServerUrl(config.serverUrl)}). ` +
           `Device credentials and task data will be sent in the clear to a non-loopback host. This should never be used in a real ` +
           `deployment. (${reason})`,
       );
@@ -1718,9 +1719,10 @@ export function buildDaemonWithAdapters(
       await gitWorkspaceStore?.reconcile();
     }
 
+    blobLifecycleAbort = new AbortController();
     const [runtimes, blobClient] = await Promise.all([
       detectRuntimes(adapters),
-      Promise.resolve(new BlobClient(config.serverUrl, auth)),
+      Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
     // M3-2a: local runtime-detection result — computed once per `start()`,
     // same as the `conn.hello.runtimes` it also feeds (see `detectRuntimes`'s
@@ -2337,6 +2339,8 @@ export function buildDaemonWithAdapters(
     // batch cannot mint in the gap between the RPC returning and this function
     // being scheduled. Latched, never cleared.
     shuttingDown = true;
+    blobLifecycleAbort?.abort();
+    blobLifecycleAbort = undefined;
     const errors: unknown[] = [];
     let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
     if (!hostedStorageInitializationBarrierComplete) {

@@ -63,7 +63,7 @@ describe('pairing (§6.1)', () => {
     expect(await harness.stores.devices.get(TENANT_B, device.deviceId)).toBeUndefined();
   });
 
-  it('refuses a second redeem of the same code, and writes no second device row', async () => {
+  it('replays an exact completed pairing and writes no second device row', async () => {
     const pairing = await harness.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
     const keys = createDeviceKeys();
     const body = JSON.stringify({
@@ -77,7 +77,8 @@ describe('pairing (§6.1)', () => {
     const second = await harness.request('/byok/pair', { method: 'POST', headers, body });
 
     expect(first.status).toBe(200);
-    expect(second.status).toBe(401);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ deviceId: (await first.json() as { deviceId: string }).deviceId });
     expect(await harness.cloud.listDevices(TENANT_A)).toHaveLength(1);
   });
 

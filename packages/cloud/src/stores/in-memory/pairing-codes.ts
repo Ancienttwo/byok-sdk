@@ -28,6 +28,30 @@ interface PairingCodeRecord {
   readonly claims: PairingCodeClaims;
   readonly expiresAtMs: number;
   used: boolean;
+  completion?: {
+    readonly device: DeviceRecord;
+    readonly binding: PairingBinding;
+  };
+}
+
+type PairingBinding = Omit<PairingEnrollmentInput, 'pairingCode' | 'deviceId'>;
+
+function bindingOf(input: PairingEnrollmentInput): PairingBinding {
+  return {
+    deviceName: input.deviceName,
+    devicePublicKey: input.devicePublicKey,
+    proofKeyId: input.proofKeyId,
+    proofKeyEpoch: input.proofKeyEpoch,
+    ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
+  };
+}
+
+function sameBinding(left: PairingBinding, right: PairingBinding): boolean {
+  return left.deviceName === right.deviceName &&
+    left.devicePublicKey === right.devicePublicKey &&
+    left.proofKeyId === right.proofKeyId &&
+    left.proofKeyEpoch === right.proofKeyEpoch &&
+    left.machineId === right.machineId;
 }
 
 export class InMemoryPairingCodeStore implements PairingCodeStore, PairingEnrollment {
@@ -66,7 +90,12 @@ export class InMemoryPairingCodeStore implements PairingCodeStore, PairingEnroll
     try {
       const record = this.#codes.get(input.pairingCode);
       if (record === undefined) return undefined;
-      if (record.used) return undefined;
+      if (record.used) {
+        const completion = record.completion;
+        if (completion === undefined || !sameBinding(completion.binding, bindingOf(input))) return undefined;
+        const active = await this.#devices.get(completion.device.tenantId, completion.device.deviceId);
+        return active === undefined ? undefined : completion.device;
+      }
       if (this.#clock.now().getTime() > record.expiresAtMs) return undefined;
 
       const device = await this.#devices.register(record.claims.tenantId, {
@@ -79,6 +108,7 @@ export class InMemoryPairingCodeStore implements PairingCodeStore, PairingEnroll
         ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
       });
       record.used = true;
+      record.completion = { device, binding: bindingOf(input) };
       return device;
     } finally {
       release!();

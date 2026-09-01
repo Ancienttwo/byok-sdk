@@ -1,6 +1,7 @@
 import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, MessagesSendResponseSchema, parseMessage, UnknownMessageTypeError, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { authedFetch } from './http-client';
+import { ReplayCursorTooOldError } from './replay-cursor';
 import { describeEndpoint, toHttpBase, type TransportEndpoint } from './url';
 
 /**
@@ -54,6 +55,8 @@ export interface LongPollClientOptions {
   onServerCapabilities?: (capabilities: string[]) => void;
   /** Called once the device is found to be revoked (401 surfaced through {@link AuthManager}) — the loop stops itself rather than retrying. */
   onRevoked?: () => void;
+  /** Called when the server cannot replay the durable cursor supplied to this poll. */
+  onReplayCursorTooOld?: (error: ReplayCursorTooOldError) => void;
   /**
    * M4 Phase 4 (version-negotiation drill fix), scope narrowed by finding F1:
    * called ONLY for a batch entry that failed to parse because its `type`
@@ -404,6 +407,12 @@ export class LongPollClient {
           throw err;
         }
         if (!res.ok) {
+          const replayCursorTooOld = await parseReplayCursorTooOld(res);
+          if (replayCursorTooOld) {
+            this.running = false;
+            this.opts.onReplayCursorTooOld?.(replayCursorTooOld);
+            return;
+          }
           this.warnRouteFailure(this.eventsEndpoint, res.status, undefined);
           // Long-poll has no persistent peer identity: a failed request no
           // longer proves that the responder behind the NEXT request supports
@@ -553,6 +562,27 @@ export class LongPollClient {
       }
     }
   }
+}
+
+async function parseReplayCursorTooOld(res: Response): Promise<ReplayCursorTooOldError | undefined> {
+  if (res.status !== 409) return undefined;
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return undefined;
+  }
+  if (typeof body !== 'object' || body === null) return undefined;
+  const { error, recoverableFrom } = body as { error?: unknown; recoverableFrom?: unknown };
+  if (
+    error !== 'cursor_too_old' ||
+    typeof recoverableFrom !== 'number' ||
+    !Number.isSafeInteger(recoverableFrom) ||
+    recoverableFrom < 0
+  ) {
+    return undefined;
+  }
+  return new ReplayCursorTooOldError(recoverableFrom);
 }
 
 function sleep(ms: number): Promise<void> {

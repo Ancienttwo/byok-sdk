@@ -27,7 +27,7 @@ import {
   type AgentMessagePublishPayload,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
-import { handleAgentMessagePublish, handleInboundEnvelope } from '../inbound';
+import { handleInboundEnvelope, readAgentMessageDisposition } from '../inbound';
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
@@ -80,21 +80,19 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     let accepted = 0;
     let rejected = 0;
     for (const envelope of parsed.data.messages) {
-      const messageResult = envelope.type === 'agent.message.publish'
-        ? await handleAgentMessagePublish(
-            stores,
-            device.deviceId,
-            envelope.task_id,
-            envelope.payload,
-            deps.agentMessage?.consume,
-          )
-        : undefined;
-      const outcome = messageResult?.outcome ?? await handleInboundEnvelope(
-        stores, device.deviceId, envelope, deps.activityBounds,
+      const outcome = await handleInboundEnvelope(
+        stores,
+        device.deviceId,
+        envelope,
+        deps.activityBounds,
+        envelope.type === 'agent.message.publish' ? deps.agentMessage?.consume : undefined,
       );
       if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);
-      if (envelope.type === 'agent.message.publish' && messageResult?.disposition !== undefined) {
-        await deps.appendAgentMessageDisposition(stores, device.deviceId, envelope.task_id, messageResult.disposition);
+      if (envelope.type === 'agent.message.publish') {
+        const disposition = await readAgentMessageDisposition(stores, device.deviceId, envelope.task_id, envelope.payload);
+        if (disposition !== undefined) {
+          await deps.appendAgentMessageDisposition(stores, device.deviceId, envelope.task_id, disposition);
+        }
       }
       if (envelope.type === 'agent.egress.reliable' && (outcome === 'accepted' || outcome === 'duplicate')) {
         const record = await stores.egress.get(device.deviceId, envelope.payload.eventId);

@@ -10,6 +10,7 @@ import {
   type ToolsetId,
 } from '@byok-sdk/protocol';
 import { describeEndpoint, toWsUrl, type TransportEndpoint } from './url';
+import { ReplayCursorTooOldError } from './replay-cursor';
 
 export type ConnectionState = 'connecting' | 'open' | 'closed' | 'degraded' | 'revoked';
 
@@ -275,16 +276,19 @@ export class WsTransport {
       this.opts.onEnvelope(envelope);
     });
 
-    socket.on('close', () => {
+    socket.on('close', (code, reason) => {
       this.socket = undefined;
       this.stopLivenessCheck();
       this.opts.onStateChange?.('closed');
       const acked = this.everAckedThisAttempt;
       const status = this.lastUnexpectedStatus;
       this.lastUnexpectedStatus = undefined;
+      const replayCursorTooOld = code === 1008 && reason.toString('utf8') === 'cursor_too_old'
+        ? new ReplayCursorTooOldError()
+        : undefined;
       this.opts.onConnectOutcome?.(
         acked,
-        status !== undefined ? new WsUnexpectedStatusError(status, endpoint) : undefined,
+        replayCursorTooOld ?? (status !== undefined ? new WsUnexpectedStatusError(status, endpoint) : undefined),
         endpoint,
       );
       if (!this.closedByUser && this.autoReconnect) this.scheduleReconnect();

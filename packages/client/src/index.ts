@@ -345,8 +345,9 @@ export type {
   VerifiedTruthRecord,
 } from './daemon/truth-memory-client';
 export type { ConnectionState } from './daemon/ws-transport';
-export { BlobClient } from './daemon/blob-client';
-export type { BlobResolver } from './daemon/blob-client';
+export { ReplayCursorTooOldError } from './daemon/replay-cursor';
+export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
+export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';
 // M3-2a: local observability — the seam the CLI (M3-2b) consumes for a live
 // task feed, a task list, and approve/reject/unpair, all local to a running
 // daemon. See `daemon/observer.ts`.

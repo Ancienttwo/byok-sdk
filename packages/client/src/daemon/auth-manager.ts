@@ -133,25 +133,54 @@ export class AuthManager {
             if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
           }
         }
-        const keyPair = existing
-          ? { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey }
-          : generateDeviceKeyPair();
+        // These request facts join the key as one immutable first-pair
+        // attempt. A retry after process restart must not silently change its
+        // server-side binding because hostname/config or machine observation
+        // changed after the registration commit.
+        const observedDeviceName = this.opts.deviceName ?? os.hostname();
+        const observedMachineId = await this.opts.machineId?.();
+        let keyPair: ReturnType<typeof generateDeviceKeyPair>;
+        let pairingDeviceName = observedDeviceName;
+        let pairingMachineId = observedMachineId;
+        if (existing) {
+          keyPair = { privateKey: importPrivateKeyPem(existing.devicePrivateKeyPem), publicKeyBase64Url: existing.devicePublicKey };
+        } else {
+          const firstAttempt = await this.credentials.readFirstPairingAttempt();
+          if (firstAttempt) {
+            keyPair = {
+              privateKey: importPrivateKeyPem(firstAttempt.devicePrivateKeyPem),
+              publicKeyBase64Url: firstAttempt.devicePublicKey,
+            };
+            pairingDeviceName = firstAttempt.deviceName;
+            pairingMachineId = firstAttempt.machineId;
+          } else {
+            keyPair = generateDeviceKeyPair();
+            // Persist before the first network request. If the server commits
+            // while its response is lost, the explicit retry uses this exact key.
+            await this.credentials.saveFirstPairingAttempt({
+              kind: 'first-pairing-attempt-v1',
+              deviceName: pairingDeviceName,
+              devicePublicKey: keyPair.publicKeyBase64Url,
+              devicePrivateKeyPem: exportPrivateKeyPem(keyPair.privateKey),
+              ...(pairingMachineId === undefined ? {} : { machineId: pairingMachineId }),
+            });
+          }
+        }
 
         const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
         // Best-effort and optional: an unresolvable machine identity omits the
         // field, which is the documented "no supersession" case — it never
         // becomes an empty string or any other placeholder the server would
         // then treat as a real machine shared by every unidentifiable device.
-        const machineId = await this.opts.machineId?.();
         const body = await this.runRequest(async (signal) => {
           const res = await fetch(url, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               pairingCode,
-              deviceName: this.opts.deviceName ?? os.hostname(),
+              deviceName: pairingDeviceName,
               devicePublicKey: keyPair.publicKeyBase64Url,
-              ...(machineId === undefined ? {} : { machineId }),
+              ...(pairingMachineId === undefined ? {} : { machineId: pairingMachineId }),
             }),
             signal,
           });

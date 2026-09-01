@@ -526,6 +526,8 @@ export type AdmissionGuardDecision =
 
 interface ActiveTask {
   taskId: string;
+  /** Cancels every blob transfer owned by this task before its terminal path runs. */
+  blobAbort: AbortController;
   /** True only for the distinct task.offer_for_agent_with_egress contract. */
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
@@ -1041,6 +1043,8 @@ export class TaskRunner {
    * costs nothing.
    */
   private readonly inFlightOffers = new Set<string>();
+  /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
+  private readonly inFlightBlobAborts = new Map<string, AbortController>();
   /**
    * Finding P2 (Fix 2c): taskIds that have reached a terminal outcome
    * (Complete/Failed/Cancelled) this session — populated in `finish()`.
@@ -1366,6 +1370,7 @@ export class TaskRunner {
     // A soft interrupt may end the event stream; mark it as runner-initiated
     // before crossing that boundary.
     active.beingTornDown = true;
+    active.blobAbort.abort();
     await this.observeGit(active, 'salvage');
     const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
     await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
@@ -1539,6 +1544,8 @@ export class TaskRunner {
     // exit path (decline, fail, the checkpoint-2 cancel-teardown, or
     // successful registration) — never leaked past this one call.
     this.inFlightOffers.add(taskId);
+    const blobAbort = new AbortController();
+    this.inFlightBlobAborts.set(taskId, blobAbort);
     let agentBinding: AgentHomeExecutionBinding | undefined;
     let agentLeaseTransferred = false;
     try {
@@ -1976,7 +1983,7 @@ export class TaskRunner {
       // Resolve the instruction blob after claim; workspace preparation follows.
       let resolvedInstruction: string;
       try {
-        resolvedInstruction = await this.resolveInstruction(payload.instruction);
+        resolvedInstruction = await this.resolveInstruction(payload.instruction, blobAbort.signal);
         if (plainWorkspaceNeedsResolve) workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
       } catch (err) {
         gitLease?.release();
@@ -2124,6 +2131,7 @@ export class TaskRunner {
       let active!: ActiveTask;
       active = {
         taskId,
+        blobAbort,
         egressEnabled: 'egressPolicy' in payload,
         adapter: pick.adapter,
         session,
@@ -2248,6 +2256,7 @@ export class TaskRunner {
       // exactly this: a cancel racing a task.offer lost its `interrupt()`/
       // `task.cancelled` entirely.
       agentLeaseTransferred = agentBinding !== undefined;
+      this.inFlightBlobAborts.delete(taskId);
       this.tasks.set(taskId, active);
       this.pendingMessageTasks.delete(taskId);
       if (active.messageOutbox !== undefined && activatedMessageRecord !== undefined) {
@@ -2289,6 +2298,7 @@ export class TaskRunner {
       if (agentBinding !== undefined && !agentLeaseTransferred) {
         await agentBinding.lease.release().catch(() => {});
       }
+      this.inFlightBlobAborts.delete(taskId);
       this.inFlightOffers.delete(taskId);
     }
   }
@@ -2477,9 +2487,9 @@ export class TaskRunner {
   }
 
   /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
-  private async resolveInstruction(instruction: TaskOfferPayload['instruction']): Promise<string> {
+  private async resolveInstruction(instruction: TaskOfferPayload['instruction'], signal: AbortSignal): Promise<string> {
     if (typeof instruction === 'string') return instruction;
-    return this.deps.blobClient.resolveInstruction(instruction.blobRef);
+    return this.deps.blobClient.resolveInstruction(instruction.blobRef, { signal });
   }
 
   /** Resolve every requested logical id locally and reject missing/colliding server authority before claim. */
@@ -2882,7 +2892,9 @@ export class TaskRunner {
     }
 
     try {
-      const blobRef: BlobRef = await this.deps.blobClient.uploadArtifact(bytes, contentType);
+      const blobRef: BlobRef = await this.deps.blobClient.uploadArtifact(bytes, contentType, {
+        signal: active.blobAbort.signal,
+      });
       this.deps.send(createEnvelope('task.artifact', { name, contentType, blobRef }, { taskId: active.taskId }));
     } catch (err) {
       this.reportArtifactError(active, name, `failed to upload artifact "${name}": ${errorMessage(err)}`);
@@ -2906,6 +2918,7 @@ export class TaskRunner {
       // identical in effect to the old silent-drop behavior for that case
       // (M3-B: except now bounded — see `setPendingCancelled`).
       this.setPendingCancelled(taskId, reason);
+      this.inFlightBlobAborts.get(taskId)?.abort();
       return;
     }
     if (active.finalizationStarted) {
@@ -2916,6 +2929,7 @@ export class TaskRunner {
       await active.semanticTerminalSettled;
       return;
     }
+    active.blobAbort.abort();
     try {
       await active.session.interrupt();
     } catch {

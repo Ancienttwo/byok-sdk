@@ -76,6 +76,7 @@ export async function handleAgentMessagePublish(
     readonly context: AgentMessageServerContext;
     readonly payload: AgentMessagePublishPayload;
   }) => Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>) | undefined,
+  alreadyDeduplicated: boolean,
 ): Promise<{ readonly outcome: InboundOutcome; readonly disposition?: AgentMessageDispositionPayload }> {
   const device = await stores.devices.get(deviceId);
   const attempt = await stores.tasks.get(taskId);
@@ -84,7 +85,7 @@ export async function handleAgentMessagePublish(
     device === undefined || device.revoked ||
     !hasCapabilities(device.capabilities, [AGENT_MESSAGE_EGRESS_CAPABILITY]) ||
     attempt === undefined || attempt.deviceId !== deviceId || binding === undefined ||
-    !sameAgentRef(attempt.agentRef!, payload.agentRef)
+    attempt.agentRef === undefined || !sameAgentRef(attempt.agentRef, payload.agentRef)
   ) return { outcome: 'rejected' };
 
   let frozen: { agentRef?: AgentRef; sessionRef?: string; requirement?: { contract?: string; contentType?: string; maxBytes?: number }; context?: AgentMessageServerContext };
@@ -98,22 +99,55 @@ export async function handleAgentMessagePublish(
     typeof frozen.requirement.maxBytes !== 'number' || payload.byteCount > frozen.requirement.maxBytes
   ) return { outcome: 'rejected' };
 
-  const taskMessageKey = `agent-message-task:${deviceId}:${taskId}`;
-  const taskMessageBody = JSON.stringify(payload);
-  const lockedTaskMessage = await stores.receipts.record({ key: taskMessageKey, body: taskMessageBody });
-  if (!lockedTaskMessage.created && lockedTaskMessage.receipt.body !== taskMessageBody) return { outcome: 'rejected' };
-  const receiptKey = `agent-message:${deviceId}:${payload.messageId}`;
-  const previous = await stores.receipts.get(receiptKey);
-  if (previous !== undefined) {
-    const decoded = JSON.parse(previous.body) as { payload: AgentMessagePublishPayload; disposition: AgentMessageDispositionPayload };
-    if (JSON.stringify(decoded.payload) !== JSON.stringify(payload)) return { outcome: 'rejected' };
-    return { outcome: 'duplicate', disposition: decoded.disposition };
-  }
+  // Terminal receipt replay is intentionally before the live-state reservation:
+  // an already-consumed side effect remains a replay even when the task has
+  // subsequently become complete or cancellation-requested.
+  const priorDisposition = await readAgentMessageDisposition(stores, deviceId, taskId, payload);
+  if (priorDisposition !== undefined) return { outcome: 'duplicate', disposition: priorDisposition };
 
-  const decision = consume === undefined
-    ? { outcome: 'held' as const, reasonCode: 'consumer_unavailable' }
-    : await consume({ tenant: stores.tenant, deviceId, taskId, context: frozen.context, payload });
-  const disposition: AgentMessageDispositionPayload = {
+  if (alreadyDeduplicated) return { outcome: 'rejected' };
+
+  const payloadBody = JSON.stringify(payload);
+  const reservation = await stores.tasks.reserveAgentMessage({
+    taskId,
+    deviceId,
+    messageId: payload.messageId,
+    payloadBody,
+  });
+  if (reservation === 'pending') return { outcome: 'rejected' };
+  if (reservation !== 'reserved') return { outcome: 'rejected' };
+
+  let decision: { readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string };
+  if (consume === undefined) {
+    decision = { outcome: 'held', reasonCode: 'consumer_unavailable' };
+  } else {
+    try {
+      decision = await consume({ tenant: stores.tenant, deviceId, taskId, context: frozen.context, payload });
+    } catch {
+      // A throwing consumer may have already crossed an external side-effect
+      // boundary. Freeze a held terminal rather than retrying that consumer.
+      decision = { outcome: 'held', reasonCode: 'consumer_failed' };
+    }
+  }
+  const disposition = agentMessageDisposition(payload, decision);
+  const admission = await stores.tasks.finalizeAgentMessage({
+    taskId,
+    deviceId,
+    messageId: payload.messageId,
+    payloadBody,
+    terminalBody: JSON.stringify({ payload, disposition }),
+  });
+  const terminal = admission?.terminalBody === undefined
+    ? undefined
+    : parseAgentMessageDisposition(payload, admission.terminalBody);
+  return terminal === undefined ? { outcome: 'rejected' } : { outcome: 'accepted', disposition: terminal };
+}
+
+function agentMessageDisposition(
+  payload: AgentMessagePublishPayload,
+  decision: { readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string },
+): AgentMessageDispositionPayload {
+  return {
     agentRef: payload.agentRef,
     sessionRef: payload.sessionRef,
     contract: payload.contract,
@@ -124,9 +158,39 @@ export async function handleAgentMessagePublish(
     receiptId: crypto.randomUUID(),
     ...(decision.reasonCode === undefined ? {} : { reasonCode: decision.reasonCode }),
   };
-  const recorded = await stores.receipts.record({ key: receiptKey, body: JSON.stringify({ payload, disposition }) });
-  if (!recorded.created && recorded.receipt.body !== JSON.stringify({ payload, disposition })) return { outcome: 'rejected' };
-  return { outcome: 'accepted', disposition };
+}
+
+/** Reads only a terminal immutable admission; pending rows have no disposition to acknowledge. */
+export async function readAgentMessageDisposition(
+  stores: TenantStores,
+  deviceId: string,
+  taskId: string,
+  payload: AgentMessagePublishPayload,
+): Promise<AgentMessageDispositionPayload | undefined> {
+  const admission = await stores.tasks.readAgentMessage({
+    taskId,
+    deviceId,
+    messageId: payload.messageId,
+    payloadBody: JSON.stringify(payload),
+  });
+  return admission?.terminalBody === undefined ? undefined : parseAgentMessageDisposition(payload, admission.terminalBody);
+}
+
+function parseAgentMessageDisposition(
+  payload: AgentMessagePublishPayload,
+  terminalBody: string,
+): AgentMessageDispositionPayload | undefined {
+  try {
+    const decoded = JSON.parse(terminalBody) as {
+      readonly payload?: AgentMessagePublishPayload;
+      readonly disposition?: AgentMessageDispositionPayload;
+    };
+    return decoded.disposition !== undefined && JSON.stringify(decoded.payload) === JSON.stringify(payload)
+      ? decoded.disposition
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
@@ -236,6 +300,7 @@ export async function handleInboundEnvelope(
   deviceId: string,
   envelope: Envelope,
   activityBounds: ActivityBounds = DEFAULT_ACTIVITY_BOUNDS,
+  agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4],
 ): Promise<InboundOutcome> {
   if (!(await stores.rateLimiter.consume(deviceId))) return 'rate_limited';
 
@@ -257,6 +322,18 @@ export async function handleInboundEnvelope(
   }
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return 'rejected';
+
+  if (envelope.type === 'agent.message.publish') {
+    const alreadyDeduplicated = await stores.dedup.checkAndRecord(deviceId, envelope.id);
+    return (await handleAgentMessagePublish(
+      stores,
+      deviceId,
+      envelope.task_id,
+      envelope.payload,
+      agentMessageConsume,
+      alreadyDeduplicated,
+    )).outcome;
+  }
 
   if (envelope.type === 'agent.egress.reliable') {
     const device = await stores.devices.get(deviceId);

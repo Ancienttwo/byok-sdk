@@ -196,6 +196,20 @@ export async function registerDeviceOnClient(
   return toRecord(result.rows[0]!);
 }
 
+/** Read one active device while a caller-owned transaction still holds its authority lock. */
+export async function getDeviceOnClient(
+  client: PoolClient,
+  tenant: TenantId,
+  deviceId: string,
+): Promise<DeviceRecord | undefined> {
+  const result = await client.query<DeviceRow>(
+    `SELECT ${SELECT_COLUMNS} FROM device WHERE tenant_id = $1 AND device_id = $2`,
+    [tenant, deviceId],
+  );
+  const row = result.rows[0];
+  return row === undefined ? undefined : toRecord(row);
+}
+
 export class PostgresDeviceDirectory implements DeviceDirectory {
   readonly #pool: Pool;
   readonly #clock: Clock | undefined;
@@ -221,12 +235,12 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
   }
 
   async get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined> {
-    const result = await this.#pool.query<DeviceRow>(
-      `SELECT ${SELECT_COLUMNS} FROM device WHERE tenant_id = $1 AND device_id = $2`,
-      [tenant, deviceId],
-    );
-    const row = result.rows[0];
-    return row === undefined ? undefined : toRecord(row);
+    const client = await this.#pool.connect();
+    try {
+      return await getDeviceOnClient(client, tenant, deviceId);
+    } finally {
+      client.release();
+    }
   }
 
   /**

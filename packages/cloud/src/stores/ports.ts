@@ -241,6 +241,13 @@ export const TASK_ATTEMPT_STATUSES = [
 ] as const;
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
 
+/** The durable first-message reservation and, once present, its terminal disposition. */
+export interface AgentMessageAdmission {
+  readonly messageId: string;
+  readonly payloadBody: string;
+  readonly terminalBody?: string;
+}
+
 export interface TaskAttempt {
   readonly tenantId: TenantId;
   readonly taskId: string;
@@ -283,6 +290,42 @@ export interface TaskAttemptStore {
       readonly agentRef: AgentRef;
     },
   ): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }>;
+  /**
+   * Atomically binds one message payload to a live task before an external
+   * consumer can run. `pending` is an existing exact reservation whose terminal
+   * receipt has not been recorded yet; callers must fail closed rather than
+   * invoke the consumer again.
+   */
+  reserveAgentMessage(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly messageId: string;
+      readonly payloadBody: string;
+    },
+  ): Promise<'reserved' | 'pending' | 'rejected'>;
+  /** Read only an exact reservation; conflicting task/message bindings are not observable. */
+  readAgentMessage(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly messageId: string;
+      readonly payloadBody: string;
+    },
+  ): Promise<AgentMessageAdmission | undefined>;
+  /** CAS the exact reservation to one immutable terminal disposition body. */
+  finalizeAgentMessage(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly messageId: string;
+      readonly payloadBody: string;
+      readonly terminalBody: string;
+    },
+  ): Promise<AgentMessageAdmission | undefined>;
   get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Batch lookup used by mailbox projection; implementations must not turn one poll into N queries. */
   getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
@@ -505,6 +548,8 @@ export interface CloudBlobStore {
  */
 export interface BlobContentProxy {
   verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): Promise<boolean>;
+  /** Authoritative declared size for a signed PUT; no byte buffering precedes this lookup. */
+  expectedUploadBytes(blobId: string): Promise<bigint | undefined>;
   writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult>;
   /** `undefined` = no such blob (404); a `{ok:false}` result = the blob exists but its bytes could not be proxied (502, distinguished by {@link BlobReadErrorCode}). */
   readContent(blobId: string): Promise<BlobReadResult | undefined>;

@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import type { Hono } from 'hono';
+import { RESULT_DOCUMENT_MAX_BYTES } from '@byok-sdk/protocol';
 import { createHmacTokenSigner, DeviceRegistry, NonceStore, type TenantId } from './auth';
 import { LocalDiskBlobStore } from './blob-store';
 import { buildHonoApp } from './http';
@@ -61,8 +62,8 @@ export { SteerRejectedError } from './hub';
 export type { SteerRejectionCode } from './hub';
 export { AgentHomeProjectionCompletionError } from './hub';
 export type { AgentHomeProjectionCompletionErrorCode } from './hub';
-export { PairingCodeInvalidError } from './pairing';
-export type { PairingCodeClaims, PairingCodeInfo } from './pairing';
+export { PairingAttemptConflictError, PairingCodeInvalidError } from './pairing';
+export type { PairingAttemptBinding, PairingCodeClaims, PairingCodeInfo, PairingCompletion } from './pairing';
 export type {
   AccessTokenClaims,
   AuthenticatedDevice,
@@ -81,6 +82,7 @@ export type {
 export { createHmacTokenSigner } from './auth';
 export type {
   BlobStore,
+  BlobUploadReservation,
   CreateUploadInput,
   ReadContentResult,
   WriteContentResult,
@@ -106,6 +108,11 @@ const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
  * reconnects at all, not a normal-latency timeout.
  */
 const DEFAULT_TASK_LEASE_MS = 30 * 60_000;
+/** Authenticated WS admission defaults — finite even when an embedder configures nothing. */
+const DEFAULT_WEBSOCKET_HELLO_TIMEOUT_MS = 5_000;
+const DEFAULT_MAX_PENDING_WEBSOCKETS = 32;
+/** Largest protocol document plus fixed envelope/metadata headroom. */
+const DEFAULT_MAX_WEBSOCKET_PAYLOAD_BYTES = RESULT_DOCUMENT_MAX_BYTES + 64 * 1024;
 
 /** The object `createByokServer` returns — the SaaS-embedder-facing surface. */
 export interface ByokServer {
@@ -202,6 +209,18 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const maxBlobSizeBytes = opts.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES;
   const longPollHoldMs = opts.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS;
   const taskLeaseMs = opts.taskLeaseMs ?? DEFAULT_TASK_LEASE_MS;
+  const webSocketHelloTimeoutMs = positiveSafeInteger(
+    opts.webSocketHelloTimeoutMs ?? DEFAULT_WEBSOCKET_HELLO_TIMEOUT_MS,
+    'webSocketHelloTimeoutMs',
+  );
+  const maxPendingWebSockets = positiveSafeInteger(
+    opts.maxPendingWebSockets ?? DEFAULT_MAX_PENDING_WEBSOCKETS,
+    'maxPendingWebSockets',
+  );
+  const maxWebSocketPayloadBytes = positiveSafeInteger(
+    opts.maxWebSocketPayloadBytes ?? DEFAULT_MAX_WEBSOCKET_PAYLOAD_BYTES,
+    'maxWebSocketPayloadBytes',
+  );
 
   const rateLimiter = new RateLimiter(opts.rateLimit);
 
@@ -233,6 +252,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         hub,
         productId: opts.productId,
         heartbeatIntervalMs: opts.heartbeatIntervalMs,
+        helloTimeoutMs: webSocketHelloTimeoutMs,
+        maxPendingWebSockets,
+        maxPayloadBytes: maxWebSocketPayloadBytes,
       });
     },
     pairing: {
@@ -274,4 +296,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
     stats: () => hub.stats(),
   };
+}
+
+function positiveSafeInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive safe integer`);
+  return value;
 }

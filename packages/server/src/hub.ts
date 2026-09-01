@@ -173,6 +173,8 @@ function contentReadCapability(surface: AgentContentReadPayload['surface']): str
 /** A device's live transport (WS or long-poll — never both, §8) plus last-known metadata. */
 interface ConnectionState {
   ws?: WebSocket;
+  /** Monotonic ownership token for the current WS transport, never client supplied. */
+  epoch: number;
   connected: boolean;
   lastSeen: string;
   /** Process-immutable Local Agent release from conn.hello; omission means legacy/unknown. */
@@ -230,12 +232,15 @@ interface OutboxEntry {
 /** Per-device outbound sequence counter + bounded history (§1.2, §9). */
 interface DeviceOutbox {
   nextSeq: number;
+  /** Lowest sequence whose control fact may still need recovery. */
+  recoverableFrom: number;
   ring: OutboxEntry[];
 }
 
 interface LongPollWaiter {
   cursor: number;
   resolve: (result: { events: Envelope[]; cursor: number }) => void;
+  reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
@@ -488,8 +493,20 @@ export class AgentHomeProjectionCompletionError extends Error {
   }
 }
 
+/** A requested delivery cursor predates controls this bounded hub can recover. */
+export class ReplayGapError extends Error {
+  constructor(
+    public readonly cursor: number,
+    public readonly recoverableFrom: number,
+  ) {
+    super(`cursor_too_old: cursor ${String(cursor)} is older than recoverable sequence ${String(recoverableFrom)}`);
+    this.name = 'ReplayGapError';
+  }
+}
+
 export class ConnectionHub {
   private readonly connections = new Map<string, ConnectionState>();
+  private readonly connectionEpochs = new Map<string, number>();
   private readonly outboxes = new Map<string, DeviceOutbox>();
   /** Idempotency window per device (N3) — recent inbound envelope ids, capped at {@link DEDUP_RING_CAPACITY}. */
   private readonly dedupRings = new Map<string, Set<string>>();
@@ -603,10 +620,13 @@ export class ConnectionHub {
     capabilities?: readonly string[],
     configuredToolsets?: readonly ToolsetId[],
     clientVersion?: string,
-  ): void {
+  ): number {
     const at = new Date().toISOString();
+    const prior = this.connections.get(deviceId);
+    const epoch = this.nextConnectionEpoch(deviceId);
     this.connections.set(deviceId, {
       ws,
+      epoch,
       connected: true,
       lastSeen: at,
       clientVersion,
@@ -619,6 +639,16 @@ export class ConnectionHub {
     // request currently held open for this device — let it complete now
     // instead of leaving it hanging until its own timeout.
     this.settleLongPollWaiter(deviceId);
+    if (prior?.ws && prior.ws !== ws) {
+      prior.ws.close(1000, 'superseded by newer websocket connection');
+    }
+    return epoch;
+  }
+
+  /** True only while this exact WS registration remains the device authority. */
+  isCurrentConnection(deviceId: string, ws: WebSocket, epoch: number): boolean {
+    const connection = this.connections.get(deviceId);
+    return connection?.connected === true && connection.ws === ws && connection.epoch === epoch;
   }
 
   sendConnAck(deviceId: string, capabilities: string[]): void {
@@ -640,6 +670,7 @@ export class ConnectionHub {
    * non-terminal task. Called after `conn.ack` (step 2), per the spec.
    */
   redeliverAfterReconnect(deviceId: string, cursor: number): void {
+    this.assertReplayAvailable(deviceId, cursor);
     const conn = this.connections.get(deviceId);
     if (!conn?.ws || !conn.connected) return;
     for (const envelope of this.collectRelevant(deviceId, cursor)) {
@@ -706,6 +737,7 @@ export class ConnectionHub {
   forgetDevice(deviceId: string): void {
     const conn = this.connections.get(deviceId);
     this.connections.delete(deviceId);
+    this.connectionEpochs.delete(deviceId);
     this.outboxes.delete(deviceId);
     this.dedupRings.delete(deviceId);
     this.rateLimitEventEmittedFor.delete(deviceId);
@@ -728,6 +760,7 @@ export class ConnectionHub {
    * {@link ConnectionState}).
    */
   async pollEvents(deviceId: string, cursor: number, holdMs: number): Promise<{ events: Envelope[]; cursor: number }> {
+    this.assertReplayAvailable(deviceId, cursor);
     this.takeOverAsLongPoll(deviceId);
     this.settleLongPollWaiter(deviceId); // in case a previous poll for this device is still outstanding
 
@@ -736,13 +769,18 @@ export class ConnectionHub {
       return { events: immediate, cursor: this.currentCursor(deviceId) };
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.longPollWaiters.delete(deviceId);
-        resolve({ events: [], cursor: this.currentCursor(deviceId) });
+        try {
+          this.assertReplayAvailable(deviceId, cursor);
+          resolve({ events: [], cursor: this.currentCursor(deviceId) });
+        } catch (error) {
+          reject(error);
+        }
       }, holdMs);
       timer.unref?.();
-      this.longPollWaiters.set(deviceId, { cursor, resolve, timer });
+      this.longPollWaiters.set(deviceId, { cursor, resolve, reject, timer });
     });
   }
 
@@ -763,6 +801,7 @@ export class ConnectionHub {
       // switch, not silently reset to `undefined` (see `ConnectionState.
       // capabilities`'s own doc comment).
       this.connections.set(deviceId, {
+        epoch: this.nextConnectionEpoch(deviceId),
         connected: true,
         lastSeen: at,
         runtimes: conn.runtimes,
@@ -771,7 +810,7 @@ export class ConnectionHub {
       });
       ws.close(1000, 'superseded by long-poll connection');
     } else if (!conn) {
-      this.connections.set(deviceId, { connected: true, lastSeen: at });
+      this.connections.set(deviceId, { epoch: this.nextConnectionEpoch(deviceId), connected: true, lastSeen: at });
     } else {
       conn.connected = true;
       conn.lastSeen = at;
@@ -789,7 +828,12 @@ export class ConnectionHub {
     if (!waiter) return;
     this.longPollWaiters.delete(deviceId);
     clearTimeout(waiter.timer);
-    waiter.resolve({ events: this.collectRelevant(deviceId, waiter.cursor), cursor: this.currentCursor(deviceId) });
+    try {
+      this.assertReplayAvailable(deviceId, waiter.cursor);
+      waiter.resolve({ events: this.collectRelevant(deviceId, waiter.cursor), cursor: this.currentCursor(deviceId) });
+    } catch (error) {
+      waiter.reject(error as Error);
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -946,7 +990,6 @@ export class ConnectionHub {
     ) return 'rejected';
     const taskPayload = this.agentMessageTaskPayloads.get(taskId);
     if (taskPayload !== undefined && JSON.stringify(taskPayload) !== JSON.stringify(payload)) return 'rejected';
-    if (taskPayload === undefined) this.agentMessageTaskPayloads.set(taskId, payload);
     const key = `${deviceId}\u0000${payload.messageId}`;
     const previous = this.agentMessageReceipts.get(key);
     if (previous !== undefined) {
@@ -954,6 +997,15 @@ export class ConnectionHub {
       this.sendAgentMessageDisposition(deviceId, taskId, previous.disposition);
       return 'duplicate';
     }
+    // A completed receipt remains the sole replay authority even after the
+    // task is terminal. A NEW side effect, by contrast, may start only while
+    // the task's lifecycle is still live.
+    if (isTerminal(record.state)) return 'rejected';
+    // This map is the in-process CAS reservation for the one permitted first
+    // message. It is written before the consumer runs, so cancellation cannot
+    // win after the lifecycle check and still allow a second first publish.
+    if (taskPayload !== undefined) return 'rejected';
+    this.agentMessageTaskPayloads.set(taskId, payload);
     const decision = this.agentMessage?.consume({ deviceId, taskId, context: binding.context, payload }) ?? { outcome: 'held' as const, reasonCode: 'consumer_unavailable' };
     const disposition: AgentMessageDispositionPayload = {
       agentRef: payload.agentRef, sessionRef: payload.sessionRef, contract: payload.contract,
@@ -2405,7 +2457,12 @@ export class ConnectionHub {
     const redeliverWithoutTask =
       type === 'agent.egress.ack' || type === 'agent.content.read' || type === 'agent.home.projection' || type === 'agent.message.disposition';
     outbox.ring.push({ seq, taskId, envelope, redeliverThroughTerminal, redeliverWithoutTask });
-    if (outbox.ring.length > OUTBOX_RING_CAPACITY) outbox.ring.shift();
+    if (outbox.ring.length > OUTBOX_RING_CAPACITY) {
+      const evicted = outbox.ring.shift();
+      if (evicted !== undefined && this.isRecoverableEntry(evicted)) {
+        outbox.recoverableFrom = Math.max(outbox.recoverableFrom, evicted.seq + 1);
+      }
+    }
     this.deliverToDevice(deviceId, envelope);
     return envelope;
   }
@@ -2444,6 +2501,28 @@ export class ConnectionHub {
       .map((entry) => entry.envelope);
   }
 
+  /**
+   * A caller at `recoverableFrom - 1` can still receive the first retained
+   * control. Anything earlier would be a partial tail and must fail closed.
+   */
+  assertReplayAvailable(deviceId: string, cursor: number, pendingOutbound = 0): void {
+    const outbox = this.outboxes.get(deviceId);
+    if (outbox === undefined) return;
+    let recoverableFrom = outbox.recoverableFrom;
+    const evictions = Math.max(0, outbox.ring.length + pendingOutbound - OUTBOX_RING_CAPACITY);
+    for (let index = 0; index < evictions; index++) {
+      const evicted = outbox.ring[index];
+      if (evicted !== undefined && this.isRecoverableEntry(evicted)) {
+        recoverableFrom = Math.max(recoverableFrom, evicted.seq + 1);
+      }
+    }
+    if (cursor < recoverableFrom - 1) throw new ReplayGapError(cursor, recoverableFrom);
+  }
+
+  private isRecoverableEntry(entry: OutboxEntry): boolean {
+    return entry.redeliverWithoutTask === true || (entry.taskId !== undefined && (!this.isTaskTerminal(entry.taskId) || entry.redeliverThroughTerminal === true));
+  }
+
   private isTaskTerminal(taskId: string): boolean {
     const record = this.taskStore.get(taskId);
     return !record || isTerminal(record.state);
@@ -2458,10 +2537,16 @@ export class ConnectionHub {
   private getOrCreateOutbox(deviceId: string): DeviceOutbox {
     let outbox = this.outboxes.get(deviceId);
     if (!outbox) {
-      outbox = { nextSeq: 1, ring: [] };
+      outbox = { nextSeq: 1, recoverableFrom: 1, ring: [] };
       this.outboxes.set(deviceId, outbox);
     }
     return outbox;
+  }
+
+  private nextConnectionEpoch(deviceId: string): number {
+    const epoch = (this.connectionEpochs.get(deviceId) ?? 0) + 1;
+    this.connectionEpochs.set(deviceId, epoch);
+    return epoch;
   }
 
   // ---------------------------------------------------------------------

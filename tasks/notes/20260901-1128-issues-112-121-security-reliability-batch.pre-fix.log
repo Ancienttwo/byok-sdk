@@ -1,0 +1,26 @@
+Issue batch: #112-#121
+Baseline: main@d8df33e6f99d051877e3d825773e000b50eefe3c
+Capture: package write workers ran the dedicated regression guards before changing production source.
+PRE_FIX_EXIT=1
+
+CLIENT_GUARD=packages/client/src/__tests__/issues-113-116-121-security-reliability.test.ts
+CLIENT_COMMAND=bun run --cwd packages/client test -- src/__tests__/issues-113-116-121-security-reliability.test.ts
+CLIENT_PRE_FIX_EXIT=1
+CLIENT_OBSERVATION=6 of 6 issue assertions failed against the unchanged client production paths.
+
+SERVER_GUARD=packages/server/src/__tests__/issues-112-120-security-reliability.test.ts
+SERVER_COMMAND=bun run --cwd packages/server test -- src/__tests__/issues-112-120-security-reliability.test.ts
+SERVER_PRE_FIX_EXIT=1
+SERVER_OBSERVATION=The guard exposed missing recoverable pairing, bounded upload, tenant ownership, replay-floor, stale-socket, WebSocket admission, and terminal publish enforcement.
+
+HOSTED_GUARD=packages/cloud/src/__tests__/issues-112-114-119-120-security-reliability.test.ts
+HOSTED_COMMAND=bun run --cwd packages/cloud test -- src/__tests__/issues-112-114-119-120-security-reliability.test.ts
+HOSTED_PRE_FIX_EXIT=1
+HOSTED_OBSERVATION=The guard exposed missing pairing completion replay, bounded upload, common message admission, and terminal publish enforcement.
+
+POSTGRES_GUARD=packages/cloud-dataplane/src/__tests__/issues-112-120-security-reliability.test.ts
+POSTGRES_COMMAND=bun run --cwd packages/cloud-dataplane test -- src/__tests__/issues-112-120-security-reliability.test.ts
+POSTGRES_PRE_FIX_EXIT=1
+POSTGRES_OBSERVATION=The new durable-store contract was absent on the baseline; runtime execution requires POSTGRES_URL and S3_ENDPOINT and was unavailable in this worktree environment.
+
+The artifact records the red-first boundary and exit status only. It does not reconstruct or fabricate discarded terminal output.

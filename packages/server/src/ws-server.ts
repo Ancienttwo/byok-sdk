@@ -47,11 +47,20 @@ function toDecodable(data: RawData): string | Uint8Array {
   return data; // Buffer, which is a Uint8Array
 }
 
+function rawDataByteLength(data: RawData): number {
+  if (typeof data === 'string') return Buffer.byteLength(data);
+  if (Array.isArray(data)) return data.reduce((total, part) => total + part.byteLength, 0);
+  return data.byteLength;
+}
+
 interface AttachDeps extends AuthDeps {
   hub: ConnectionHub;
   productId: string;
   /** WS-native ping interval, ms. Defaults inside `heartbeat.ts` (30s) if omitted. */
   heartbeatIntervalMs?: number;
+  helloTimeoutMs: number;
+  maxPendingWebSockets: number;
+  maxPayloadBytes: number;
 }
 
 /**
@@ -64,7 +73,8 @@ interface AttachDeps extends AuthDeps {
  * upgraded.
  */
 export function attachWebSocket(server: HttpServer, deps: AttachDeps): void {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: deps.maxPayloadBytes });
+  let pendingHelloConnections = 0;
 
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     if (!matchesWsPath(req.url ?? '')) return; // not ours; leave it for any other listener
@@ -75,19 +85,54 @@ export function attachWebSocket(server: HttpServer, deps: AttachDeps): void {
         rejectUpgrade(socket, 401, 'Unauthorized');
         return;
       }
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        handleConnection(ws, principal, deps);
-      });
+      if (pendingHelloConnections >= deps.maxPendingWebSockets) {
+        rejectUpgrade(socket, 503, 'WebSocket hello admission limit reached');
+        return;
+      }
+      pendingHelloConnections++;
+      let released = false;
+      const releasePendingHello = () => {
+        if (released) return;
+        released = true;
+        pendingHelloConnections--;
+      };
+      try {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          handleConnection(ws, principal, deps, releasePendingHello);
+        });
+      } catch {
+        releasePendingHello();
+        socket.destroy();
+      }
     })();
   });
 }
 
-function handleConnection(ws: WebSocket, principal: AuthenticatedDevice, deps: AttachDeps): void {
+function handleConnection(
+  ws: WebSocket,
+  principal: AuthenticatedDevice,
+  deps: AttachDeps,
+  releasePendingHello: () => void,
+): void {
   const { deviceId } = principal;
   let helloReceived = false;
+  let epoch: number | undefined;
   let heartbeat: Heartbeat | undefined;
+  const helloDeadline = setTimeout(() => {
+    if (!helloReceived) ws.close(1008, 'hello_timeout');
+  }, deps.helloTimeoutMs);
+  helloDeadline.unref?.();
+  const clearHelloDeadline = () => clearTimeout(helloDeadline);
+  // `ws` emits an error when its transport-level maxPayload guard rejects a
+  // frame. A listener makes that a normal connection failure; close cleanup
+  // releases the pre-hello slot or current epoch exactly once.
+  ws.on('error', () => undefined);
 
   ws.once('message', (data: RawData) => {
+    if (rawDataByteLength(data) > deps.maxPayloadBytes) {
+      ws.close(1009, 'payload_too_large');
+      return;
+    }
     let envelope;
     try {
       envelope = decodeEnvelope(toDecodable(data));
@@ -127,10 +172,21 @@ function handleConnection(ws: WebSocket, principal: AuthenticatedDevice, deps: A
       return;
     }
 
+    if (payload.cursor !== undefined) {
+      try {
+        // `conn.ack` itself consumes one ring slot. Prove it cannot evict a
+        // required replay control before writing any normal handshake frame.
+        deps.hub.assertReplayAvailable(deviceId, payload.cursor, 1);
+      } catch {
+        ws.close(1008, 'cursor_too_old');
+        return;
+      }
+    }
+
     helloReceived = true;
     // M5 (hello-capability plumbing): previously only `runtimes` was
     // forwarded — `payload.capabilities` was silently ignored end to end.
-    deps.hub.registerConnection(
+    epoch = deps.hub.registerConnection(
       deviceId,
       ws,
       payload.runtimes,
@@ -138,6 +194,8 @@ function handleConnection(ws: WebSocket, principal: AuthenticatedDevice, deps: A
       payload.configuredToolsets,
       payload.clientVersion,
     );
+    clearHelloDeadline();
+    releasePendingHello();
     deps.hub.sendConnAck(deviceId, SUPPORTED_CAPABILITIES);
     // Reconnection procedure step 3 (§9): redeliver anything still relevant
     // sent since the daemon's last-seen `seq`. Omitted on a device's
@@ -149,6 +207,11 @@ function handleConnection(ws: WebSocket, principal: AuthenticatedDevice, deps: A
     heartbeat = startHeartbeat(ws, { intervalMs: deps.heartbeatIntervalMs });
 
     ws.on('message', (msgData: RawData) => {
+      if (epoch === undefined || !deps.hub.isCurrentConnection(deviceId, ws, epoch)) return;
+      if (rawDataByteLength(msgData) > deps.maxPayloadBytes) {
+        ws.close(1009, 'payload_too_large');
+        return;
+      }
       let msg;
       try {
         msg = decodeEnvelope(toDecodable(msgData));
@@ -156,13 +219,17 @@ function handleConnection(ws: WebSocket, principal: AuthenticatedDevice, deps: A
         console.warn(`[byok/server] dropping unparsable frame from device ${deviceId}:`, err);
         return;
       }
-      deps.hub.handleInbound(deviceId, msg);
+      if (deps.hub.isCurrentConnection(deviceId, ws, epoch)) {
+        deps.hub.handleInbound(deviceId, msg);
+      }
     });
   });
 
   ws.on('close', () => {
+    clearHelloDeadline();
+    releasePendingHello();
     heartbeat?.stop();
-    if (helloReceived) {
+    if (helloReceived && epoch !== undefined) {
       deps.hub.handleDisconnect(deviceId, ws);
     }
   });

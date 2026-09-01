@@ -47,7 +47,9 @@ export function describeEndpoint(transport: TransportEndpoint['transport'], url:
  * The only URL projection used by validation errors. Reading from the parsed
  * structure means userinfo, query, and fragment never enter the diagnostic.
  */
-function describeServerUrlForError(url: URL): string {
+/** The sole secret-safe projection for a configured server URL diagnostic. */
+export function formatServerUrl(value: string | URL): string {
+  const url = typeof value === 'string' ? new URL(value) : value;
   return `${url.protocol}//${url.host}${url.pathname}`;
 }
 
@@ -149,7 +151,7 @@ export function assertServerUrlAllowed(rawUrl: string, opts: AssertServerUrlAllo
     // has no trustworthy structural projection, so do not echo any of it.
     throw new InsecureServerUrlError('invalid server URL');
   }
-  const endpoint = describeServerUrlForError(url);
+  const endpoint = formatServerUrl(url);
 
   switch (url.protocol) {
     case 'https:':

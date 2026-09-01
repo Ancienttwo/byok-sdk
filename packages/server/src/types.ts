@@ -37,6 +37,12 @@ export interface CreateByokServerOptions {
   productId: string;
   /** WS-native ping interval, ms (§ heartbeat). Default 30s. */
   heartbeatIntervalMs?: number;
+  /** Deadline for one authenticated socket to present a valid `conn.hello`. Default 5s. */
+  webSocketHelloTimeoutMs?: number;
+  /** Global cap for authenticated sockets that have not completed `conn.hello`. Default 32. */
+  maxPendingWebSockets?: number;
+  /** Maximum inbound WS message bytes before envelope decoding. Default accommodates the largest protocol document envelope. */
+  maxWebSocketPayloadBytes?: number;
   /** How long `GET /byok/events` holds an empty poll open before returning, ms (§8). Default ~50s; override for tests. */
   longPollHoldMs?: number;
   /** Per-product blob size ceiling in bytes (§7). Default 100MB. */

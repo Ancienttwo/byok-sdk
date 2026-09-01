@@ -173,7 +173,7 @@ app.post('/api/tasks', async (c) => {
 // token. Used by the UI when an `artifact` event carries a `blobRef` (a
 // >64KB artifact — see task.artifact's inline-vs-blob split).
 app.get('/api/blobs/:blobId/url', async (c) => {
-  const downloadUrl = await blobStore.getDownloadUrl(c.req.param('blobId'));
+  const downloadUrl = await blobStore.getDownloadUrl(DEMO_TENANT_ID, c.req.param('blobId'));
   if (!downloadUrl) return c.json({ error: 'blob not found' }, 404);
   return c.json({ downloadUrl });
 });
