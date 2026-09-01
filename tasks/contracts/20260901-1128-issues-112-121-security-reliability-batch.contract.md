@@ -1,13 +1,13 @@
 # Task Contract: issues-112-121-security-reliability-batch
 
-> **Status**: Fulfilled
+> **Status**: Active
 > **Plan**: plans/plan-20260901-1128-issues-112-121-security-reliability-batch.md
 > **Task Profile**: bugfix
 > **Workflow Profile**: strict
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
 > **Owner**: kito
 > **Capability ID**: root
-> **Last Updated**: 2026-09-01 11:28
+> **Last Updated**: 2026-09-01 13:46
 > **Review File**: `tasks/reviews/20260901-1128-issues-112-121-security-reliability-batch.review.md`
 > **Notes File**: `tasks/notes/20260901-1128-issues-112-121-security-reliability-batch.notes.md`
 > **Exemplar**: `docs/reference-configs/contract-brief-example.md`
@@ -172,14 +172,18 @@ exit_criteria:
     - tasks/notes/20260901-1128-issues-112-121-security-reliability-batch.notes.md
     - tasks/notes/20260901-1128-issues-112-121-security-reliability-batch.pre-fix.log
   tests_pass:
+    - path: packages/client/src/__tests__/daemon-auth.test.ts
     - path: packages/client/src/__tests__/issues-113-116-121-security-reliability.test.ts
     - path: packages/server/src/__tests__/issues-112-120-security-reliability.test.ts
     - path: packages/cloud/src/__tests__/issues-112-114-119-120-security-reliability.test.ts
+    - path: packages/cloud-dataplane/src/__tests__/authenticated-enrollment-tenant-projection.test.ts
     - path: packages/cloud-dataplane/src/__tests__/issues-112-120-security-reliability.test.ts
   commands_succeed:
+    - bun run --cwd packages/client test -- src/__tests__/daemon-auth.test.ts -t 'composes the configured auth request deadline into the daemon-owned AuthManager'
     - bun run --cwd packages/client test -- src/__tests__/issues-113-116-121-security-reliability.test.ts
     - bun run --cwd packages/server test -- src/__tests__/issues-112-120-security-reliability.test.ts
     - bun run --cwd packages/cloud test -- src/__tests__/issues-112-114-119-120-security-reliability.test.ts
+    - bun run --cwd packages/cloud-dataplane test -- src/__tests__/authenticated-enrollment-tenant-projection.test.ts
     - bun run --cwd packages/cloud-dataplane test -- src/__tests__/issues-112-120-security-reliability.test.ts
     - bun run build
     - bun run typecheck

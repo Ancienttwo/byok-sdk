@@ -488,7 +488,10 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     );
     const releasePair = server.blockNextPair();
     try {
-      await expect(settleWithin(daemon.pair('pairing-code'))).rejects.toMatchObject({
+      // The 40ms request deadline starts inside AuthManager after daemon-owned
+      // key/store setup. Keep the outer regression guard well below the 15s
+      // default without racing that legitimate pre-request work under CI load.
+      await expect(settleWithin(daemon.pair('pairing-code'), 2_000)).rejects.toMatchObject({
         name: 'AuthRequestAbortedError',
         reason: 'deadline',
       });

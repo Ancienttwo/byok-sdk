@@ -1,12 +1,12 @@
 # Task Review: issues-112-121-security-reliability-batch
 
-> **Status**: Accepted
+> **Status**: Pending
 > **Plan**: plans/plan-20260901-1128-issues-112-121-security-reliability-batch.md
 > **Contract**: tasks/contracts/20260901-1128-issues-112-121-security-reliability-batch.contract.md
 > **Notes File**: tasks/notes/20260901-1128-issues-112-121-security-reliability-batch.notes.md
 > **Checks File**: .ai/harness/checks/latest.json
-> **Last Updated**: 2026-09-01 12:55
-> **Recommendation**: pass
+> **Last Updated**: 2026-09-01 13:47
+> **Recommendation**: hold
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: sha256:eb66a7ce6ffbfbbcc6c58b203f7f1ae3ad053212882289b436a7fa5ce3746894
 > **Reviewed Subject Scope**: normalized-final-content
@@ -127,7 +127,9 @@ screenshot/artifact path, or reviewer observation.
 
 ## Failing Items
 
-- None.
+- Fresh successor verification, exact-SHA GitHub CI, and a successor-bound
+  typed AcceptanceReceipt are pending. The previous receipt remains evidence
+  only for its earlier frozen subject.
 
 ## Retest Steps
 

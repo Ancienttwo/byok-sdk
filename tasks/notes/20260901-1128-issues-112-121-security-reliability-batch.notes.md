@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260901-1128-issues-112-121-security-reliability-batch.md
 > **Contract**: tasks/contracts/20260901-1128-issues-112-121-security-reliability-batch.contract.md
 > **Review**: tasks/reviews/20260901-1128-issues-112-121-security-reliability-batch.review.md
-> **Last Updated**: 2026-09-01 12:55
+> **Last Updated**: 2026-09-01 13:47
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -36,6 +36,21 @@
 
 ## Deviations From Plan Or Spec
 
+- The exact merged SHA `f8d6701ef344f51c2f236ac6321056ae816cbfa1`
+  reached GitHub Actions run `33472355689`, which exposed two stale test
+  oracles rather than a production-code regression. The authenticated
+  enrollment projection test still expected a second exact pairing completion
+  to return 401 even though Issue #112 intentionally makes the immutable exact
+  binding replayable with 200. The daemon composition test placed a 250ms
+  wall-clock guard around `daemon.pair()` even though the configured 40ms HTTP
+  deadline starts only after daemon-owned key/store preparation. The fixes keep
+  product behavior unchanged: the replay test now asserts the same tenant and
+  device identity, while the outer guard is 2 seconds—still far below the
+  default 15-second request deadline.
+- The prior protocol-2 `user_waiver` was explicitly owner-authorized and was
+  valid for its frozen subject. It is not portable to this successor subject;
+  fresh verification and a fresh typed waiver receipt are required after the
+  CI-oracle corrections freeze.
 - Independent review first found three correctness gaps: BlobClient rejected
   without cancelling its body stream, hosted PUT retained chunks plus a second
   full buffer, and hosted message reservation could remain pending while a
@@ -65,6 +80,11 @@
 
 ## Evidence Links
 
+- Exact-SHA remote CI (pre-fix): GitHub Actions run `33472355689`; failures were
+  `packages/cloud-dataplane/src/__tests__/authenticated-enrollment-tenant-projection.test.ts`
+  (expected 401, received 200) and
+  `packages/client/src/__tests__/daemon-auth.test.ts` (the outer 250ms guard
+  fired before the expected `AuthRequestAbortedError`).
 - Checks: `.ai/harness/checks/latest.json`
 - Run snapshots: `.ai/harness/runs/`
 - Red-first record: `tasks/notes/20260901-1128-issues-112-121-security-reliability-batch.pre-fix.log`
