@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260901-1128-issues-112-121-security-reliability-batch.md
 > **Contract**: tasks/contracts/20260901-1128-issues-112-121-security-reliability-batch.contract.md
 > **Review**: tasks/reviews/20260901-1128-issues-112-121-security-reliability-batch.review.md
-> **Last Updated**: 2026-09-01 13:47
+> **Last Updated**: 2026-09-01 13:55
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -80,6 +80,14 @@
 
 ## Evidence Links
 
+- Exact-SHA remote CI (successor): GitHub Actions run `33475066108` completed
+  successfully for commit `2e12a654d86e4b068240e4a6a5a029132972c6f2`;
+  all 22 jobs passed, including the real-Postgres dataplane job and the fixed
+  Node build/typecheck/test job that failed on the previous SHA.
+- Successor local gates: focused client deadline 1/1; focused Postgres replay
+  plus #112/#120 4/4; client/server/Cloud issue suites 6/6, 12/12, and 8/8;
+  full real-substrate dataplane 312 passed and 5 skipped; root build,
+  typecheck, test, strict workflow, deploy-SQL order, and diff check passed.
 - Exact-SHA remote CI (pre-fix): GitHub Actions run `33472355689`; failures were
   `packages/cloud-dataplane/src/__tests__/authenticated-enrollment-tenant-projection.test.ts`
   (expected 401, received 200) and
