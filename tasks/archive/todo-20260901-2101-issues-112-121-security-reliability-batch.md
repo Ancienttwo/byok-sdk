@@ -1,7 +1,13 @@
+> **Archived**: 2026-09-01 21:01
+> **Related Plan**: plans/archive/plan-20260901-1128-issues-112-121-security-reliability-batch.md
+> **Outcome**: Completed
+> **Source Plan**: (none)
+> **Parent Run ID**: run-20260901-2101
+
 # Deferred Goal Ledger
 
 > **Status**: Backlog
-> **Updated**: (archive-workflow)
+> **Updated**: 2026-08-31 21:53
 > **Scope**: Medium/long-term goals deferred from active plan execution
 
 Current plan tasks live in the active plan's `## Task Breakdown`.

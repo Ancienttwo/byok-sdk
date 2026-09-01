@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-31T15:29:19+0800 -->
+<!-- updated_at: 2026-09-01T21:01:50+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-31T15:29:19+0800
-> **Source Branch**: codex/agent-session-parallel-contract-canary
-> **Source Commit**: 5905bcd
+> **Updated At**: 2026-09-01T21:01:50+0800
+> **Source Branch**: codex/issues-112-121-ci-regate
+> **Source Commit**: 322bb08
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,18 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- linked-worktree-ce21c0c05deb: plans/plan-20260830-0302-readonly-toolset-mcp-grant.md
-- linked-worktree-ce21c0c05deb: active-worktree owner -> self
-- linked-worktree-217d2da485b1: plans/plan-20260830-1831-agent-foundations-integration.md
-- linked-worktree-217d2da485b1: active-worktree owner -> self
 - linked-worktree-97eccea44efe: plans/plan-20260826-1405-agent-provider-profile-binding.md
 - linked-worktree-97eccea44efe: active-worktree owner -> self
-- linked-worktree-35e355aae7d5: plans/plan-20260824-0248-credential-blind-enrollment-status.md
-- linked-worktree-35e355aae7d5: active-worktree owner -> self
-- linked-worktree-abce2199a3d7: plans/plan-20260829-1926-agent-message-helper-startup-jitter.md
-- linked-worktree-abce2199a3d7: active-worktree owner -> self
-- linked-worktree-b4dd1502872c: plans/plan-20260830-1915-release-0-11-agent-foundations.md
-- linked-worktree-b4dd1502872c: active-worktree owner -> self
 ## Active Sprint
 
 - Sprint: (none)
@@ -51,7 +41,7 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - (none)
 ## Handoff
 
-- Exact Next Step: If a major module was just completed, stage its coherent diff first; then continue the next Task Breakdown item: Keep local merge, push, publish, downstream upgrade, and production unpause behind separate explicit authority.
+- Exact Next Step: Stage the completed module diff first; then run /check and let canonical workflow gates determine whether review, external acceptance, verification, or worktree finish is next. Command: /check
 
 ## Checks
 
@@ -62,16 +52,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260831-1248-agent-session-parallel-contract-canary.md
- D tasks/contracts/20260831-1248-agent-session-parallel-contract-canary.contract.md
- D tasks/notes/20260831-1248-agent-session-parallel-contract-canary.notes.md
- D tasks/reviews/20260831-1248-agent-session-parallel-contract-canary.review.md
+ D plans/plan-20260901-1128-issues-112-121-security-reliability-batch.md
+ D tasks/contracts/20260901-1128-issues-112-121-security-reliability-batch.contract.md
+ D tasks/notes/20260901-1128-issues-112-121-security-reliability-batch.notes.md
+ D tasks/reviews/20260901-1128-issues-112-121-security-reliability-batch.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260831-1248-agent-session-parallel-contract-canary.md
-?? tasks/archive/contract-20260831-1529-agent-session-parallel-contract-canary.md
-?? tasks/archive/notes-20260831-1529-agent-session-parallel-contract-canary.md
-?? tasks/archive/review-20260831-1529-agent-session-parallel-contract-canary.md
-?? tasks/archive/todo-20260831-1529-agent-session-parallel-contract-canary.md
+?? plans/archive/plan-20260901-1128-issues-112-121-security-reliability-batch.md
+?? tasks/archive/contract-20260901-2101-issues-112-121-security-reliability-batch.md
+?? tasks/archive/notes-20260901-2101-issues-112-121-security-reliability-batch.md
+?? tasks/archive/review-20260901-2101-issues-112-121-security-reliability-batch.md
+?? tasks/archive/todo-20260901-2101-issues-112-121-security-reliability-batch.md
 ```
 
 ## Source Artifacts

@@ -1,6 +1,6 @@
 # Plan: Issues 112-121 security and reliability batch
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260901-1128
 > **Slug**: issues-112-121-security-reliability-batch
 > **Planning Source**: codex-plan
