@@ -2121,3 +2121,12 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-023 | `workspaceHint` 维持 reserved，接线需另立 ADR 与明确 resolver 设计 | Accepted |
 | ADR-024 | R2 object 的 canonical SHA-256 以通过认证的 daemon 声明为权威；cloud `HEAD` 只观测存在性与 size/type | Accepted |
 | ADR-025 | Device、Agent、placement 与 runtime session 分权；fleet 不得复用 runtime/task identity | Accepted；仅由明确 multi-Agent 产品 slice 触发实现 |
+| ADR-026 | 领域词汇冻结为 Tenant / Computer / Installation / Agent / Session / Run / Attempt / Workspace / ResultContext；`deviceId` 语义即 Installation，Computer 留宿主侧 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-027 | 一事实一权威矩阵（SaaS 与 Local Agent 两列），ambient device selection 标 legacy | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-028 | native session locator 永不上云；`sessionId` 由 SDK 铸造；云端 Session 不存运行时中间态 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-029 | Attempt 由 store 原子铸造 `{attemptId, leaseEpoch}`；每次权威副作用校验当前 Attempt，旧 epoch 只进 audit | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-030 | capability 收敛为一个 FeatureRegistry + Deployment / Installation / Runtime 三个独立 authority，准入取交集 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-031 | AgentHome / SessionState / Workspace 三分；mutable Workspace 单写者、同 Session Run 串行；backend 只有 plain-directory 与 git-worktree | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-032 | `@byok-sdk/server` 折叠为 cloud domain kernel 的 embedded façade，删 `hub.ts` 独立状态机与 WS | Accepted，Supersedes ADR-004（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
