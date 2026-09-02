@@ -10,6 +10,7 @@ import {
   type ProviderAuthMode,
   type ProviderModelCapability,
   type ProviderProfileRef,
+  exactProviderProfileBinding,
   parseModelProviderProfile,
 } from './provider-profile';
 import {
@@ -65,6 +66,10 @@ export interface ProviderStatus {
   enabled: boolean;
   model: string;
   profile_ref: ProviderProfileRef;
+  /** Canonical credential-free revision used by exact task admission. */
+  profile_revision: string;
+  /** SHA-256 of the normalized non-secret local record. */
+  profile_hash: string;
   provider_kind: ModelProviderKind;
   /** Whether the credential store currently holds this profile's key. */
   secret_configured: boolean;
@@ -131,8 +136,16 @@ export class ProviderRegistry {
     configuration: ProviderConfiguration,
     secret?: string,
   ): Promise<ProviderStatus> {
-    const timestamp = this.#now().toISOString();
     const previous = await this.#profiles.get(configuration.profile_ref);
+    const observedNow = this.#now().getTime();
+    const previousRevision = previous === undefined ? undefined : Date.parse(previous.updated_at);
+    const revision = previousRevision === undefined
+      ? observedNow
+      : Math.max(observedNow, previousRevision + 1);
+    if (!Number.isSafeInteger(revision) || revision < 0) {
+      throw new ByokKeysError('PROVIDER_PROFILE_INVALID', 'Provider clock cannot produce a monotonic profile revision');
+    }
+    const timestamp = new Date(revision).toISOString();
     const profile = parseModelProviderProfile({
       ...configuration,
       capabilities: [...configuration.capabilities],
@@ -244,6 +257,7 @@ export class ProviderRegistry {
   }
 
   async #status(profile: ModelProviderProfile): Promise<ProviderStatus> {
+    const binding = exactProviderProfileBinding(profile, []);
     return {
       adapter: profile.adapter,
       auth_mode: profile.auth_mode,
@@ -254,6 +268,8 @@ export class ProviderRegistry {
       enabled: profile.enabled,
       model: profile.model,
       profile_ref: profile.profile_ref,
+      profile_revision: binding.profileRevision,
+      profile_hash: binding.profileHash,
       provider_kind: profile.provider_kind,
       secret_configured: await this.#secrets.has(
         modelProviderSecretName(profile.profile_ref),

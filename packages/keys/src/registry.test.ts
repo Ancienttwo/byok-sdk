@@ -95,6 +95,15 @@ describe('ProviderRegistry.configure', () => {
     });
   });
 
+  it('advances the exact profile revision even when the host clock does not move', async () => {
+    const subject = registry();
+    const first = await subject.configure(OPENAI, CANARY);
+    const second = await subject.configure({ ...OPENAI, model: 'gpt-5.3' });
+
+    expect(BigInt(second.profile_revision)).toBe(BigInt(first.profile_revision) + 1n);
+    expect(second.profile_hash).not.toBe(first.profile_hash);
+  });
+
   it('reuses an already-stored secret when none is supplied', async () => {
     await registry().configure(OPENAI, CANARY);
     const status = await registry().configure({ ...OPENAI, model: 'gpt-5.3' });

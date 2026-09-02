@@ -10,12 +10,15 @@ export {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
   parseModelProviderProfile,
+  exactProviderProfileBinding,
+  assertExactProviderProfileBinding,
 } from './provider-profile';
 export type {
   ModelProviderAdapter,
   ModelProviderKind,
   ModelProviderProfile,
   ModelProviderProfileInput,
+  ExactProviderProfileBinding,
   ProviderAuthMode,
   ProviderModelCapability,
   ProviderProfileRef,

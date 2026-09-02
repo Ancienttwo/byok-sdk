@@ -15,6 +15,16 @@ evidence.
 
 ## Positioning
 
+### Provider-profile authority
+
+Provider profile metadata and secrets remain device-local. Agent task
+transport contains only an opaque profile ref, monotonic revision, hash of the
+normalized non-secret runtime projection, exact model, and required
+capabilities. Admission validates these fields before claim; the Pi launcher
+revalidates them before accessing the OS credential store. No mismatch falls
+back to a provider kind or another profile, and neither protocol/manifests nor
+validation errors include Base URLs or credential values.
+
 - **The SaaS server is a proposer, never an executor.** It offers tasks,
   can approve/reject/cancel them over the wire, and observes progress — it
   never runs code itself. `packages/server/src/hub.ts`'s own doc comment on

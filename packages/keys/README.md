@@ -125,6 +125,18 @@ authority selection, not a mirror, migration shim, cache, or dual-write path.
 It stores the complete four-ID provider registry as one versioned deterministic
 snapshot so delete and the one-enabled invariant share one CAS decision.
 
+Each normalized profile also has an exact credential-free binding. The
+registry exposes `profile_revision` (a strictly advancing decimal derived from
+`updated_at`) and `profile_hash` (SHA-256 over the normalized runtime-relevant,
+non-secret record). `exactProviderProfileBinding()` and
+`assertExactProviderProfileBinding()` are the local authority used by Agent
+admission. Base URLs and credential bytes never enter the wire binding.
+
+For `byok-profile` launches, the Pi launcher receives the exact ref,
+revision/hash, model, and required capabilities. A validation-only invocation
+checks the read-only SQLite authority before task claim; the launch invocation
+checks the same fields again before reading the OS credential or spawning Pi.
+
 ## Module inventory
 
 Every module under `src/`, one line of responsibility each. The public surface is
@@ -134,7 +146,7 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | --- | --- |
 | `index.ts` | The package barrel — the single public entry point, and the only supported import path |
 | `errors.ts` | `ByokKeysError` (`code` + message) and `BYOK_KEYS_ERROR_CODES`, the code strings consumers branch on |
-| `provider-profile.ts` | zod schema for the model provider profile, including the adapter/auth-mode legality rules |
+| `provider-profile.ts` | zod schema plus exact credential-free revision/hash binding for the model provider profile |
 | `headers.ts` | `providerHeaders()` and fail-closed `requiredProviderSecret()` |
 | `url.ts` | `normalizeProviderUrl()` with the HTTPS / loopback / private-network guard |
 | `http.ts` | Shared transport guards: injectable `fetch`, timeout, bounded JSON, HTTP error classification |

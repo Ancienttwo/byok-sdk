@@ -13,6 +13,7 @@ import {
   parsePiProviderLauncherOptions,
   resolvePiProviderSecret,
 } from '../pi-provider-launcher-core';
+import { assertExactProviderProfileBinding } from '../provider-profile';
 import {
   buildPiProviderArgs,
   buildPiProviderProjection,
@@ -69,6 +70,10 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
         `selected model ${options.modelId} does not match configured provider model ${profile.model}`,
       );
     }
+    if (options.expectedBinding !== undefined) {
+      assertExactProviderProfileBinding(profile, options.expectedBinding);
+    }
+    if (options.validateOnly) return 0;
 
     const secret = await resolvePiProviderSecret(
       profile,

@@ -375,6 +375,9 @@ present.** It is a strict discriminated union:
 - subscription: `{lane:'subscription', runtimeId:'claude'|'codex',
   providerId:null, modelId:string}`;
 - BYOK: `{lane:'byok', runtimeId:'pi', providerId:string, modelId:string}`.
+- exact local profile: `{lane:'byok-profile', runtimeId:'pi',
+  providerProfile:{profileRef,profileRevision,profileHash,modelId,
+  requiredCapabilities}}`.
 
 Every id is non-empty, bounded to 160 characters, and rejects NUL/CR/LF. The
 server derives the task's requested runtime from `runtimeId`; if the legacy
@@ -389,6 +392,16 @@ Pi, provider) to the runtime. No layer may infer a missing provider/model or
 fall back to another target. The field is additive in frozen v1; offers that do
 not use provider selection retain the pre-existing `runtime?` behavior, but the
 new path never degrades into it after a selection was supplied.
+
+The `byok-profile` lane additionally requires the target daemon to advertise
+`provider-profile-binding`. Its ref is an opaque device-local identity, its
+revision is canonical decimal, and its hash is lowercase SHA-256 over the
+normalized non-secret runtime profile. Base URL, auth mode, and credential
+bytes never enter the offer. The daemon validates ref/revision/hash/model and
+required capabilities against the read-only local authority before claim, and
+the credential-custody launcher rechecks the same binding before credential
+access and Pi spawn. Missing or stale state is a fail-closed refusal, never a
+fallback to `providerId` or provider kind.
 
 **`task.offer_with_toolsets` is a distinct additive message, not an optional
 field on `task.offer`.** `requiredToolsets` carries only bounded logical ids

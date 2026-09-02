@@ -362,13 +362,26 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
 
 /** Copy then freeze the complete safe operation authority just before claim. */
 export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest): RuntimeOperationManifest {
+  const dispatchSelection = manifest.dispatchSelection === undefined
+    ? undefined
+    : manifest.dispatchSelection.lane === 'byok-profile'
+      ? Object.freeze({
+          ...manifest.dispatchSelection,
+          providerProfile: Object.freeze({
+            ...manifest.dispatchSelection.providerProfile,
+            requiredCapabilities: Object.freeze([
+              ...manifest.dispatchSelection.providerProfile.requiredCapabilities,
+            ]),
+          }),
+        }) as TaskOfferPayload['dispatchSelection']
+      : Object.freeze({ ...manifest.dispatchSelection });
   return Object.freeze({
     taskId: manifest.taskId,
     runtimeId: manifest.runtimeId,
     descriptor: freezeRuntimeAdapterDescriptor(manifest.descriptor),
     policy: frozenPolicy(manifest.policy),
     requiredToolsetIds: Object.freeze([...manifest.requiredToolsetIds]),
-    ...(manifest.dispatchSelection === undefined ? {} : { dispatchSelection: Object.freeze({ ...manifest.dispatchSelection }) }),
+    ...(dispatchSelection === undefined ? {} : { dispatchSelection }),
     ...(manifest.sessionRef === undefined ? {} : { sessionRef: manifest.sessionRef }),
     ...(manifest.agentRef === undefined
       ? {}

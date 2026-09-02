@@ -68,8 +68,30 @@ describe('Pi provider launcher core', () => {
       '--session-dir', sessionDir,
       '--provider', 'openrouter-primary',
       '--model', 'anthropic/claude-sonnet-4',
-      '--', '--mode', 'rpc',
-    ])).toMatchObject({ profileRef: 'openrouter-primary' });
+      '--profile-revision', '1787702400000',
+      '--profile-hash', `sha256:${'a'.repeat(64)}`,
+      '--required-capabilities', '["image-input"]',
+      '--validate-only', 'true',
+    ])).toMatchObject({
+      profileRef: 'openrouter-primary',
+      validateOnly: true,
+      expectedBinding: {
+        profileRef: 'openrouter-primary',
+        profileRevision: '1787702400000',
+        modelId: 'anthropic/claude-sonnet-4',
+        requiredCapabilities: ['image-input'],
+      },
+    });
+
+    expect(() => parsePiProviderLauncherOptions([
+      '--pi-bin', '/opt/pi',
+      '--profile-db', profileDbPath,
+      '--session-dir', sessionDir,
+      '--provider', 'openrouter-primary',
+      '--model', 'anthropic/claude-sonnet-4',
+      '--profile-revision', '1787702400001',
+      '--validate-only', 'true',
+    ])).toThrow(/requires revision, hash, and required capabilities together/);
 
     expect(() => parsePiProviderLauncherOptions([
       '--pi-bin', '/opt/pi',
