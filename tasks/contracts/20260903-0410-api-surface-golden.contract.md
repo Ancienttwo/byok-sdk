@@ -66,7 +66,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"api-surface-golden-regeneration","kind":"deterministic_test","paths":["api-surface/","scripts/api-surface/"]}]}
+{"protocol":1,"oracles":[{"id":"api-surface-golden-regeneration","kind":"deterministic_test","paths":["*"]}]}
 ```
 
 ## Acceptance Policy

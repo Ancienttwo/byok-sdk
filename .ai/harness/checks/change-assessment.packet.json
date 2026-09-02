@@ -1,0 +1,268 @@
+{
+  "schema": "repo-harness-change-assessment-evidence.v1",
+  "status": "fail",
+  "assessment": {
+    "protocol": 1,
+    "kind": "repo-harness-change-assessment",
+    "status": "blocked",
+    "review_subject_sha256": "sha256:fac5377e6a94f44ef3c6f48dfd227935e519869437511b8c95cfcdf5c2f8827d",
+    "target_ref": "main",
+    "target_revision": "4cc765fe1bf0509496f298a50188476329b440cb",
+    "subject_paths": [
+      ".github/workflows/ci.yml",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+      "api-surface/README.md",
+      "api-surface/client.d.ts",
+      "api-surface/cloud-dataplane.d.ts",
+      "api-surface/cloud.d.ts",
+      "api-surface/core.d.ts",
+      "api-surface/keys.d.ts",
+      "api-surface/protocol.d.ts",
+      "api-surface/server.d.ts",
+      "api-surface/testkit.d.ts",
+      "api-surface/ui-runtime.d.ts",
+      "package.json",
+      "scripts/api-surface/check-api-surface.mjs",
+      "scripts/api-surface/check-api-surface.test.mjs",
+      "scripts/api-surface/check-version-authority.mjs",
+      "scripts/api-surface/check-version-authority.test.mjs"
+    ],
+    "workflow_profile": "strict",
+    "strict_categories": [
+      "public-api"
+    ],
+    "selected_paths": [
+      ".github/workflows/ci.yml",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+      "api-surface/README.md",
+      "api-surface/client.d.ts",
+      "api-surface/cloud-dataplane.d.ts",
+      "api-surface/cloud.d.ts",
+      "api-surface/core.d.ts",
+      "api-surface/keys.d.ts",
+      "api-surface/protocol.d.ts",
+      "api-surface/server.d.ts",
+      "api-surface/testkit.d.ts",
+      "api-surface/ui-runtime.d.ts",
+      "package.json",
+      "scripts/api-surface/check-api-surface.mjs",
+      "scripts/api-surface/check-api-surface.test.mjs",
+      "scripts/api-surface/check-version-authority.mjs",
+      "scripts/api-surface/check-version-authority.test.mjs"
+    ],
+    "required_oracles": [],
+    "reasons": [
+      {
+        "code": "authority_change",
+        "paths": [
+          ".github/workflows/ci.yml",
+          "AGENTS.md",
+          "CLAUDE.md",
+          "README.md",
+          "api-surface/README.md",
+          "api-surface/client.d.ts",
+          "api-surface/cloud-dataplane.d.ts",
+          "api-surface/cloud.d.ts",
+          "api-surface/core.d.ts",
+          "api-surface/keys.d.ts",
+          "api-surface/protocol.d.ts",
+          "api-surface/server.d.ts",
+          "api-surface/testkit.d.ts",
+          "api-surface/ui-runtime.d.ts",
+          "package.json",
+          "scripts/api-surface/check-api-surface.mjs",
+          "scripts/api-surface/check-api-surface.test.mjs",
+          "scripts/api-surface/check-version-authority.mjs",
+          "scripts/api-surface/check-version-authority.test.mjs"
+        ],
+        "required_oracle_kinds": [
+          "deterministic_test"
+        ],
+        "evidence": "strict workflow categories: public-api"
+      },
+      {
+        "code": "pattern_novelty",
+        "paths": [
+          "api-surface/client.d.ts",
+          "api-surface/cloud-dataplane.d.ts",
+          "api-surface/cloud.d.ts",
+          "api-surface/core.d.ts",
+          "api-surface/keys.d.ts",
+          "api-surface/protocol.d.ts",
+          "api-surface/server.d.ts",
+          "api-surface/testkit.d.ts",
+          "api-surface/ui-runtime.d.ts"
+        ],
+        "required_oracle_kinds": [
+          "deterministic_test"
+        ],
+        "evidence": "final content contains a deterministic new-abstraction signal"
+      },
+      {
+        "code": "oracle_gap",
+        "paths": [
+          ".github/workflows/ci.yml",
+          "AGENTS.md",
+          "CLAUDE.md",
+          "README.md",
+          "api-surface/README.md",
+          "api-surface/client.d.ts",
+          "api-surface/cloud-dataplane.d.ts",
+          "api-surface/cloud.d.ts",
+          "api-surface/core.d.ts",
+          "api-surface/keys.d.ts",
+          "api-surface/protocol.d.ts",
+          "api-surface/server.d.ts",
+          "api-surface/testkit.d.ts",
+          "api-surface/ui-runtime.d.ts",
+          "package.json",
+          "scripts/api-surface/check-api-surface.mjs",
+          "scripts/api-surface/check-api-surface.test.mjs",
+          "scripts/api-surface/check-version-authority.mjs",
+          "scripts/api-surface/check-version-authority.test.mjs"
+        ],
+        "required_oracle_kinds": [
+          "deterministic_test",
+          "runtime_readback"
+        ],
+        "evidence": "a selected risk surface has no declared executable oracle with the required kind"
+      }
+    ],
+    "assessment_sha256": "sha256:96ab98dbc1311e9d4cca793122bf11f99f8c2230956a39ac05aeef34a779ad84"
+  },
+  "selection_packet": {
+    "protocol": 1,
+    "kind": "repo-harness-review-selection-packet",
+    "status": "blocked",
+    "assessment_sha256": "sha256:96ab98dbc1311e9d4cca793122bf11f99f8c2230956a39ac05aeef34a779ad84",
+    "review_subject_sha256": "sha256:fac5377e6a94f44ef3c6f48dfd227935e519869437511b8c95cfcdf5c2f8827d",
+    "target_ref": "main",
+    "target_revision": "4cc765fe1bf0509496f298a50188476329b440cb",
+    "subject_paths": [
+      ".github/workflows/ci.yml",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+      "api-surface/README.md",
+      "api-surface/client.d.ts",
+      "api-surface/cloud-dataplane.d.ts",
+      "api-surface/cloud.d.ts",
+      "api-surface/core.d.ts",
+      "api-surface/keys.d.ts",
+      "api-surface/protocol.d.ts",
+      "api-surface/server.d.ts",
+      "api-surface/testkit.d.ts",
+      "api-surface/ui-runtime.d.ts",
+      "package.json",
+      "scripts/api-surface/check-api-surface.mjs",
+      "scripts/api-surface/check-api-surface.test.mjs",
+      "scripts/api-surface/check-version-authority.mjs",
+      "scripts/api-surface/check-version-authority.test.mjs"
+    ],
+    "selected_paths": [
+      ".github/workflows/ci.yml",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+      "api-surface/README.md",
+      "api-surface/client.d.ts",
+      "api-surface/cloud-dataplane.d.ts",
+      "api-surface/cloud.d.ts",
+      "api-surface/core.d.ts",
+      "api-surface/keys.d.ts",
+      "api-surface/protocol.d.ts",
+      "api-surface/server.d.ts",
+      "api-surface/testkit.d.ts",
+      "api-surface/ui-runtime.d.ts",
+      "package.json",
+      "scripts/api-surface/check-api-surface.mjs",
+      "scripts/api-surface/check-api-surface.test.mjs",
+      "scripts/api-surface/check-version-authority.mjs",
+      "scripts/api-surface/check-version-authority.test.mjs"
+    ],
+    "required_oracles": [],
+    "reasons": [
+      {
+        "code": "authority_change",
+        "paths": [
+          ".github/workflows/ci.yml",
+          "AGENTS.md",
+          "CLAUDE.md",
+          "README.md",
+          "api-surface/README.md",
+          "api-surface/client.d.ts",
+          "api-surface/cloud-dataplane.d.ts",
+          "api-surface/cloud.d.ts",
+          "api-surface/core.d.ts",
+          "api-surface/keys.d.ts",
+          "api-surface/protocol.d.ts",
+          "api-surface/server.d.ts",
+          "api-surface/testkit.d.ts",
+          "api-surface/ui-runtime.d.ts",
+          "package.json",
+          "scripts/api-surface/check-api-surface.mjs",
+          "scripts/api-surface/check-api-surface.test.mjs",
+          "scripts/api-surface/check-version-authority.mjs",
+          "scripts/api-surface/check-version-authority.test.mjs"
+        ],
+        "required_oracle_kinds": [
+          "deterministic_test"
+        ],
+        "evidence": "strict workflow categories: public-api"
+      },
+      {
+        "code": "pattern_novelty",
+        "paths": [
+          "api-surface/client.d.ts",
+          "api-surface/cloud-dataplane.d.ts",
+          "api-surface/cloud.d.ts",
+          "api-surface/core.d.ts",
+          "api-surface/keys.d.ts",
+          "api-surface/protocol.d.ts",
+          "api-surface/server.d.ts",
+          "api-surface/testkit.d.ts",
+          "api-surface/ui-runtime.d.ts"
+        ],
+        "required_oracle_kinds": [
+          "deterministic_test"
+        ],
+        "evidence": "final content contains a deterministic new-abstraction signal"
+      },
+      {
+        "code": "oracle_gap",
+        "paths": [
+          ".github/workflows/ci.yml",
+          "AGENTS.md",
+          "CLAUDE.md",
+          "README.md",
+          "api-surface/README.md",
+          "api-surface/client.d.ts",
+          "api-surface/cloud-dataplane.d.ts",
+          "api-surface/cloud.d.ts",
+          "api-surface/core.d.ts",
+          "api-surface/keys.d.ts",
+          "api-surface/protocol.d.ts",
+          "api-surface/server.d.ts",
+          "api-surface/testkit.d.ts",
+          "api-surface/ui-runtime.d.ts",
+          "package.json",
+          "scripts/api-surface/check-api-surface.mjs",
+          "scripts/api-surface/check-api-surface.test.mjs",
+          "scripts/api-surface/check-version-authority.mjs",
+          "scripts/api-surface/check-version-authority.test.mjs"
+        ],
+        "required_oracle_kinds": [
+          "deterministic_test",
+          "runtime_readback"
+        ],
+        "evidence": "a selected risk surface has no declared executable oracle with the required kind"
+      }
+    ],
+    "packet_sha256": "sha256:0657f1bc3e9fc8098a93ee6acf1765a3c4bc48589e1999b98d18bd9d05aea35f"
+  },
+  "evidence_sha256": "sha256:0d7c28f6b5192631edab4407142d72c09c0a33295902b854d6563d192b388844"
+}
