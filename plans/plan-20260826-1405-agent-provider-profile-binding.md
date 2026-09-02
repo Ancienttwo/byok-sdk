@@ -1,6 +1,6 @@
 # Plan: Agent-scoped provider profile binding
 
-> **Status**: Completed
+> **Status**: Executing
 > **Created**: 20260826-1405
 > **Slug**: agent-provider-profile-binding
 > **Planning Source**: codex-plan
