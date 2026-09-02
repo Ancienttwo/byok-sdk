@@ -15,6 +15,8 @@ This is the root routing contract for Claude Code and Codex. Load this before ta
 - `bun run build`
 - `bun run typecheck`
 - `bun run test`
+- `bun run check:api-surface`
+- `bun run check:version-authority`
 - `repo-harness run check-task-workflow --strict`
 
 <!-- BEGIN ARCHITECTURE CONTRACT -->

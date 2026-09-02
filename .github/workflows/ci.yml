@@ -54,6 +54,15 @@ jobs:
       - name: Build (required before typecheck/test — see note above)
         run: bun run build
 
+      - name: Check API surface goldens
+        run: bun run check:api-surface
+
+      - name: Check version authority
+        run: bun run check:version-authority
+
+      - name: Test root scripts
+        run: bun run test:scripts
+
       - name: Typecheck
         run: bun run typecheck
 

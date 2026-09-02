@@ -22,11 +22,14 @@
     "check:context-files": "repo-harness run check-context-files",
     "check:deploy-sql": "repo-harness run check-deploy-sql-order",
     "check:architecture-sync": "repo-harness run check-architecture-sync",
+    "check:api-surface": "node scripts/api-surface/check-api-surface.mjs",
+    "check:version-authority": "node scripts/api-surface/check-version-authority.mjs",
     "check:release-graph": "node scripts/release/check-package-graph.mjs",
     "check:release-pack": "node scripts/release/pack-and-smoke.mjs",
     "check:task-sync": "repo-harness run check-task-sync",
     "check:task-workflow": "repo-harness run check-task-workflow --strict",
-    "sync:brain-docs": "repo-harness run sync-brain-docs --all"
+    "sync:brain-docs": "repo-harness run sync-brain-docs --all",
+    "test:scripts": "node --test scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/check-version-authority.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

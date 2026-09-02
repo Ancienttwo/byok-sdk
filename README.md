@@ -7,25 +7,10 @@ Postgres and R2.
 
 ## Current release
 
-The current release is `byok-sdk@0.8.1`, with the independently versioned
-`@byok-sdk/keys@0.3.2`. It binds the daemon tenant to the authenticated pairing
-response and persists that non-secret identity atomically in the local
-`DeviceRecord`; legacy 0.6.x records fail closed and must re-pair. It also
-includes durable Agent-first local homes, exact Agent/session identity across
-hosted dispatch, task-free exact-device Agent-home projection, explicit
-fresh-session Agent dispatch, policy-controlled local/cloud egress with reliable
-Agent-local evidence, atomically reloadable device-local MCP toolsets, Pi
-web/MCP extension loading, and self-hosted Local Agent release readback. The
-hosted data plane ships migrations `0001` through `0013` and verifies their
-exact ledger before serving traffic.
-
-The 0.8.1 patch makes exact Agent-home projection replay re-run the existing
-idempotent product ensure hook under the canonical writer lease, repairing lost
-derived product files without changing revision/hash ordering. It also exposes
-`readDeviceEnrollmentStatus()` as the credential-blind SDK authority for cold
-host setup and diagnostics: only `unpaired`, `paired(deviceId)`, or
-`re_pair_required` are projected, while tenant/token/key material stays private
-and unrelated filesystem failures remain observable.
+The current release is `byok-sdk@0.12.0`, with the independently versioned
+`@byok-sdk/keys@0.3.9`. `CHANGELOG.md` carries the per-train release notes for
+the daemon, the hosted data plane, and the key management surface. Read it
+there rather than from a summary duplicated in this file.
 
 The bundled Pi runtime authority remains the exact
 `@earendil-works/pi-coding-agent@0.84.2` dependency. Release SemVer is
@@ -49,7 +34,7 @@ adapter that supports both shapes or allocates process/temp/workspace/session
 resources during `prepare()`; reject unsupported input before claim instead.
 
 ```sh
-npm install byok-sdk@0.8.1
+npm install byok-sdk@0.12.0
 ```
 
 ```ts
@@ -115,7 +100,7 @@ It is intentionally outside `byok-sdk` and the entire dispatch dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.3.2
+npm install @byok-sdk/keys@0.3.9
 ```
 
 ## Host connector composition
@@ -131,5 +116,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.3.2`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.3.9`
 require Node.js 22.22.0 or newer. MIT licensed.
