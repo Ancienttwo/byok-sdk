@@ -1,6 +1,6 @@
 # Plan: Agent-scoped provider profile binding
 
-> **Status**: Executing
+> **Status**: Completed
 > **Created**: 20260826-1405
 > **Slug**: agent-provider-profile-binding
 > **Planning Source**: codex-plan
@@ -124,14 +124,14 @@ Keep secrets and endpoint details device-local. Replace the fixed provider-id-as
 
 ## Task Breakdown
 
-- [ ] Freeze a BYOK pre-fix regression test and Salesko packed-consumer falsifier for arbitrary provider ids, multiple custom profiles, image capability, and missing local configuration.
-- [ ] Add typed opaque provider profile identity/revision/capability declarations and additive capability negotiation to protocol/public exports.
-- [ ] Refactor `@byok-sdk/keys` local profile authority to support multiple safe custom profile refs while preserving provider kind separately, exact model binding, credential custody, and atomic persistence.
-- [ ] Add non-secret exact-device provider status/readback and pre-claim resolver/admission surfaces required by the consumer.
-- [ ] Seal provider profile identity/revision/hash and requested capabilities into the runtime operation manifest; revalidate in the Pi launcher and project model capabilities into Pi configuration.
-- [ ] Add negative tests for unknown/malformed/oversize refs, missing profile, stale revision/hash, model mismatch, unsupported capability, cross-device/Agent confusion, secret exclusion, restart readback, and no-claim/no-runtime side effects.
-- [ ] Update protocol/client/keys architecture and downstream integration documentation, explicitly keeping Salesko description/Profile semantics and credential UI out of SDK schema.
-- [ ] Run focused tests, build, typecheck, full tests, strict workflow, packed tarball smoke, and frozen Salesko consumer acceptance. Produce an unpublished RC manifest only.
+- [x] Freeze a BYOK pre-fix regression test and Salesko packed-consumer falsifier for arbitrary provider ids, multiple custom profiles, image capability, and missing local configuration.
+- [x] Add typed opaque provider profile identity/revision/capability declarations and additive capability negotiation to protocol/public exports.
+- [x] Refactor `@byok-sdk/keys` local profile authority to support multiple safe custom profile refs while preserving provider kind separately, exact model binding, credential custody, and atomic persistence.
+- [x] Add non-secret exact-device provider status/readback and pre-claim resolver/admission surfaces required by the consumer.
+- [x] Seal provider profile identity/revision/hash and requested capabilities into the runtime operation manifest; revalidate in the Pi launcher and project model capabilities into Pi configuration.
+- [x] Add negative tests for unknown/malformed/oversize refs, missing profile, stale revision/hash, model mismatch, unsupported capability, cross-device/Agent confusion, secret exclusion, restart readback, and no-claim/no-runtime side effects.
+- [x] Update protocol/client/keys architecture and downstream integration documentation, explicitly keeping Salesko description/Profile semantics and credential UI out of SDK schema.
+- [x] Run focused tests, build, typecheck, full tests, strict workflow, packed tarball smoke, and frozen Salesko consumer acceptance. Produce an unpublished RC manifest only.
 
 ## Evidence Contract
 
@@ -154,11 +154,11 @@ Keep secrets and endpoint details device-local. Replace the fixed provider-id-as
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Freeze a BYOK pre-fix regression test and Salesko packed-consumer falsifier for arbitrary provider ids, multiple custom profiles, image capability, and missing local configuration.
-- [ ] Add typed opaque provider profile identity/revision/capability declarations and additive capability negotiation to protocol/public exports.
-- [ ] Refactor `@byok-sdk/keys` local profile authority to support multiple safe custom profile refs while preserving provider kind separately, exact model binding, credential custody, and atomic persistence.
-- [ ] Add non-secret exact-device provider status/readback and pre-claim resolver/admission surfaces required by the consumer.
-- [ ] Seal provider profile identity/revision/hash and requested capabilities into the runtime operation manifest; revalidate in the Pi launcher and project model capabilities into Pi configuration.
-- [ ] Add negative tests for unknown/malformed/oversize refs, missing profile, stale revision/hash, model mismatch, unsupported capability, cross-device/Agent confusion, secret exclusion, restart readback, and no-claim/no-runtime side effects.
-- [ ] Update protocol/client/keys architecture and downstream integration documentation, explicitly keeping Salesko description/Profile semantics and credential UI out of SDK schema.
-- [ ] Run focused tests, build, typecheck, full tests, strict workflow, packed tarball smoke, and frozen Salesko consumer acceptance. Produce an unpublished RC manifest only.
+- [x] Freeze a BYOK pre-fix regression test and Salesko packed-consumer falsifier for arbitrary provider ids, multiple custom profiles, image capability, and missing local configuration.
+- [x] Add typed opaque provider profile identity/revision/capability declarations and additive capability negotiation to protocol/public exports.
+- [x] Refactor `@byok-sdk/keys` local profile authority to support multiple safe custom profile refs while preserving provider kind separately, exact model binding, credential custody, and atomic persistence.
+- [x] Add non-secret exact-device provider status/readback and pre-claim resolver/admission surfaces required by the consumer.
+- [x] Seal provider profile identity/revision/hash and requested capabilities into the runtime operation manifest; revalidate in the Pi launcher and project model capabilities into Pi configuration.
+- [x] Add negative tests for unknown/malformed/oversize refs, missing profile, stale revision/hash, model mismatch, unsupported capability, cross-device/Agent confusion, secret exclusion, restart readback, and no-claim/no-runtime side effects.
+- [x] Update protocol/client/keys architecture and downstream integration documentation, explicitly keeping Salesko description/Profile semantics and credential UI out of SDK schema.
+- [x] Run focused tests, build, typecheck, full tests, strict workflow, packed tarball smoke, and frozen Salesko consumer acceptance. Produce an unpublished RC manifest only.

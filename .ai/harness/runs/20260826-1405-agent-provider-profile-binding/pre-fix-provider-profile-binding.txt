@@ -1,0 +1,65 @@
+$ vitest run agent-provider-profile-binding.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-agent-provider-profile-binding/packages/client
+
+ ❯ src/__tests__/agent-provider-profile-binding.test.ts (2 tests | 2 failed) 6ms
+     × validates the exact non-secret binding before returning a prepared operation 4ms
+     × declines stale local profile authority before preparation completes 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/agent-provider-profile-binding.test.ts > Agent provider profile binding admission > validates the exact non-secret binding before returning a prepared operation
+AssertionError: expected { kind: 'reject', …(2) } to match object { kind: 'prepared' }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "kind": "prepared",
++   "kind": "reject",
+  }
+
+ ❯ src/__tests__/agent-provider-profile-binding.test.ts:51:50
+     49|     } as never);
+     50|
+     51|     await expect(adapter.prepare(prepareInput())).resolves.toMatchObje…
+       |                                                  ^
+     52|     expect(validateProviderProfileBinding).toHaveBeenCalledWith(
+     53|       expect.objectContaining(binding),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/__tests__/agent-provider-profile-binding.test.ts > Agent provider profile binding admission > declines stale local profile authority before preparation completes
+AssertionError: expected { kind: 'reject', …(2) } to deeply equal { kind: 'reject', …(2) }
+
+- Expected
++ Received
+
+  {
+    "kind": "reject",
+-   "reason": "provider profile admission failed: provider profile revision mismatch",
++   "reason": "pi adapter cannot execute byok-profile selection for runtime pi",
+    "retryable": false,
+  }
+
+ ❯ src/__tests__/agent-provider-profile-binding.test.ts:78:50
+     76|     } as never);
+     77|
+     78|     await expect(adapter.prepare(prepareInput())).resolves.toEqual({
+       |                                                  ^
+     79|       kind: 'reject',
+     80|       reason: 'provider profile admission failed: provider profile rev…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  02:18:58
+   Duration  211ms (transform 56ms, setup 0ms, import 72ms, tests 6ms, environment 0ms)
+
+error: script "test" exited with code 1
+
+REGRESSION_GUARD=packages/client/src/__tests__/agent-provider-profile-binding.test.ts
+PRE_FIX_EXIT=1
