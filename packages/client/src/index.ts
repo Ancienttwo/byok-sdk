@@ -60,6 +60,8 @@ export type {
   AgentHomeProjectionApplyFunction,
   AgentHomeLease,
   AgentHomeBinding,
+  AgentHomeExecutionLease,
+  AgentHomeExecutionBinding,
 } from './agent-home';
 export {
   localStateRelocation,
@@ -75,6 +77,16 @@ export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDesc
 export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
+export {
+  BYOK_SDK_HELPER_SUBCOMMAND,
+  resolveSdkReservedHelperBin,
+  runSdkReservedHelperCommand,
+} from './sdk-reserved-helper-host';
+export type {
+  SdkHelperHostConfig,
+  SdkReservedHelperKind,
+  ResolvedSdkReservedHelperBin,
+} from './sdk-reserved-helper-host';
 export {
   RuntimeExecutionFailure,
   RuntimeDisposalFailure,
@@ -101,6 +113,26 @@ export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } 
 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
+export {
+  LocalTeamWorkspace,
+  LocalTeamWorkspaceService,
+  TeamWorkspaceError,
+  TeamWorkspaceValidationError,
+  TeamWorkspaceNotFoundError,
+  TeamWorkspaceConflictError,
+  TeamWorkspaceQuotaError,
+  TeamWorkspaceLeaseError,
+  TeamWorkspaceReceiptError,
+  TeamWorkspaceCorruptError,
+  encodeTeamMemberContext,
+  decodeTeamMemberContext,
+  type TeamWorkspaceDefinition,
+  type TeamWorkspaceLimits,
+  type TeamMessage,
+  type TeamMemberLease,
+  type TeamWorkspaceMemberReceipt,
+} from './daemon/team-workspace';
+export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
 export type {
   Daemon,
   DaemonConfig,
@@ -313,8 +345,9 @@ export type {
   VerifiedTruthRecord,
 } from './daemon/truth-memory-client';
 export type { ConnectionState } from './daemon/ws-transport';
-export { BlobClient } from './daemon/blob-client';
-export type { BlobResolver } from './daemon/blob-client';
+export { ReplayCursorTooOldError } from './daemon/replay-cursor';
+export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
+export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';
 // M3-2a: local observability — the seam the CLI (M3-2b) consumes for a live
 // task feed, a task list, and approve/reject/unpair, all local to a running
 // daemon. See `daemon/observer.ts`.

@@ -14,6 +14,31 @@ Provider
 credentials are not read by the dispatch plane; `@byok-sdk/keys` is a separate
 install and keeps a zero dependency edge to this package.
 
+Single-file Bun/SEA products must explicitly re-enter SDK-reserved helpers
+before their own CLI parser. The SDK owns the reserved subcommand and helper
+implementation; the product does not resolve `dist/bin` paths:
+
+```ts
+import { createDaemon, runSdkReservedHelperCommand } from '@byok-sdk/client';
+
+if (await runSdkReservedHelperCommand()) process.exit(0);
+
+const daemon = createDaemon({
+  // ...normal device, Agent-home, and egress configuration
+  sdkHelperHost: { mode: 'self-executable' },
+});
+```
+
+Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
+package's installed helper scripts. A required-message offer performs an exact
+stdio MCP initialize/tools-list handshake before adapter preparation; an
+unwired or unstartable single-file helper is declined before runtime execution.
+For Codex 0.149+, the adapter additionally proves the native per-MCP-tool
+approval contract before claim, then approves only the SDK-reserved
+`byokagentmessage/send_agent_message` tool. The global Codex
+`approval_policy=never` remains pinned and every other MCP/tool retains the
+normal non-interactive fail-closed posture.
+
 Pi is a required exact npm dependency and runs as an external Node subprocess.
 For an authoritative BYOK `dispatchSelection`, configure `piByokLauncher` with
 the separately installed `byok-pi-provider-launcher`, the local non-secret
@@ -64,9 +89,31 @@ createDaemon({
 ```
 
 The map accepts only `command` and `args`; put OAuth tokens, cookies, and other
-secrets behind the local MCP process's own credential broker. Toolset offers
-for Pi or Codex are declined because those adapters do not yet expose a strict
-task-scoped MCP configuration boundary.
+secrets behind the local MCP process's own credential broker.
+
+A projected toolset must also be *callable*, and neither runtime grants an MCP
+tool implicitly: Claude auto-denies an ungranted `mcp__<server>__<tool>` call
+under `--permission-mode default` and under `acceptEdits`, and Codex refuses
+every MCP tool call under its pinned `approval_policy=never`. So before an
+adapter is asked to admit a toolset offer, the daemon starts each projected
+server and reads that server's own `tools/list` answer. Those observed names —
+never a configured value, never a wildcard — are what each adapter grants:
+
+- Claude: `--allowedTools mcp__<server>__<tool>,…` under `readonly` and
+  `auto`, alongside the unchanged `--tools` (so `readonly` with
+  `allowTools: []` still runs with every built-in disabled). `confirm` and
+  `plan` never pre-grant: `confirm`'s approval channel must see each call, and
+  `plan` promises not to execute one.
+- Codex: `mcp_servers.<server>.enabled_tools` plus
+  `mcp_servers.<server>.tools.<tool>.approval_mode="approve"` for exactly
+  those tools. Global `approval_policy=never` and the mode's `sandbox_mode`
+  stay untouched, and Codex older than 0.149 is rejected before spawn.
+
+A projected server that cannot start, or that lists no tools, is declined
+pre-claim and retryably, rather than claimed and handed a toolset the model can
+list but never call. A server that answers with a tool name that cannot be
+expressed as a runtime grant is declined permanently (`retryable: false`), with
+the server and the offending tool named in the decline.
 
 The daemon derives one sorted `configuredToolsets` snapshot from this
 validated registry. Only those logical IDs are advertised in `conn.hello`
@@ -128,11 +175,82 @@ strict Agent execution has one workspace authority and never falls back to a
 task-scoped Git workspace.
 
 Successful startup with this configuration advertises `agent-home-contract`. Agent offers are distinct
-from legacy task offers and fail closed when identity, profile revision,
-session/runtime/cwd evidence, or the one-writer lease does not match. Agent
-files other than the SDK-reserved `.byok` namespace are opaque; there is no
+from legacy task offers and fail closed when identity, profile revision, or
+session/runtime/cwd evidence does not match. Within one daemon process,
+execution leases are scoped to `(agentId, sessionRef)`: different sessions of
+one Agent may run concurrently in the same canonical home, while the same
+session remains serialized. Fresh
+tasks bind their task-scoped admission lease to the runtime-created session
+before the SDK exposes that session. Shared `.byok` metadata mutations use a
+short per-home gate. Agent-memory hosted projection serializes the complete
+close-time outbox transaction per home because its durable outbox is one CAS
+authority; the publish wait remains timeout-bounded and does not serialize the
+sessions' runtime execution. The process-owned home activity marker remains
+held until the final active session exits so relocation stays fail-closed. A
+second daemon process remains excluded by that marker; cross-process session
+multiplexing is not provided. Agent files
+other than the SDK-reserved `.byok` namespace are opaque; there is no
 required `artifacts/` directory and the client does not parse or index their
 contents.
+
+## Embedded Agent memory
+
+A product that embeds this SDK rather than running the daemon owns its own
+Agent home, its own lease, and — on macOS — the absolute signed and notarized
+helper binary. It still must not own the memory authority itself: the sha256
+compare-and-swap, the audit record, the platform gate, and the exact set of
+paths a model may name stay in the SDK. `@byok-sdk/client/agent-memory` is that
+authority without the daemon.
+
+```ts
+import {
+  AgentMemoryService,
+  captureAgentMemorySnapshot,
+  isAgentMemorySecureFilesystemAvailable,
+  openAgentMemoryFilesystemHelper,
+  prependAgentMemoryGuidance,
+  serveAgentMemoryMcpOverStdio,
+} from '@byok-sdk/client/agent-memory';
+
+if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return;
+
+const context = {
+  taskId, tenantId, deviceId, agentRef, sessionRef, runtimeId, leaseId,
+  canonicalHome: lease.canonicalHome,
+  homeIdentity: lease.homeIdentity,
+  // macOS only: the host's own helper binary, admitted by absolute path.
+  ...(helperBin === undefined ? {} : {
+    filesystem: await openAgentMemoryFilesystemHelper({
+      helperBin, canonicalHome: lease.canonicalHome, homeIdentity: lease.homeIdentity,
+    }),
+  }),
+};
+
+const service = new AgentMemoryService(context);
+serveAgentMemoryMcpOverStdio({ deps: service });
+const instruction = prependAgentMemoryGuidance(agentInstruction);
+// After the session closes, while the lease still exists:
+const snapshot = await captureAgentMemorySnapshot(context);
+```
+
+Platform behavior is inherited from the daemon path, not restated: Linux uses
+the native descriptor-relative backend, macOS requires the external helper, and
+Windows stays fail-closed with or without one.
+
+This entry deliberately reaches no transport, no daemon composition, and no
+control socket — importing the same symbols from the package root pulls all
+three in. `connectControlClient` is not public anywhere in this package and
+must not become reachable here; `src/__tests__/agent-memory-entry-constraints.test.ts`
+pins the source module graph and `scripts/check-agent-memory-entry.mjs` pins the
+built bundle.
+
+Hosted projection is not on this entry. An embedded host gets the local
+snapshot and no way to send it anywhere from this package.
+
+Because each entry is bundled separately, `AgentMemoryError` imported from
+`@byok-sdk/client/agent-memory` and from `@byok-sdk/client` are distinct
+constructors. Discriminate on `error.name`, not `instanceof`, if a host mixes
+both entries.
 
 ## Agent egress and explicit content reads
 
@@ -201,5 +319,26 @@ reference. It keeps `@byok-sdk/client` credential-blind while combining
 OS-backed refresh-token custody, a PKCE desktop Google OAuth flow, exact domain
 policy, a real read-only Gmail metadata adapter, and a closed metadata-only MCP
 result.
+
+## Local TeamWorkspace and tmux communication pane
+
+`byok-agent team` provides one local-only broadcast channel for Pi, Claude,
+and Codex harnesses. The daemon owns durable ordered messages, member receipts,
+quotas, and short-lived member leases under `<storeDir>/team-workspaces/v1`.
+`team join` prints the exact `byokagentteam` stdio MCP configuration for a
+member; model tool inputs never contain workspace or sender identity.
+
+```bash
+byok-agent team create dev --members pi,claude,codex --config /absolute/agent.json
+byok-agent team join dev --member pi --config /absolute/agent.json
+byok-agent team open dev --tmux-bin /opt/homebrew/bin/tmux --config /absolute/agent.json
+```
+
+The tmux view has one explicit native dependency: tmux must be installed and
+its absolute executable path supplied with `--tmux-bin`. It is intentionally
+not an npm dependency and is not required to run the daemon, MCP channel, or
+plain watcher. Native Windows returns `unsupported_platform` for the tmux view.
+The launcher never uses `send-keys` or `capture-pane`; tmux displays the
+daemon-owned stream but is never message transport or protocol authority.
 
 MIT licensed. Node.js 22.22.0 or newer.

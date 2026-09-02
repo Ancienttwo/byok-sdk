@@ -36,10 +36,10 @@ const packages = [
   'byok-sdk',
   '@byok-sdk/keys',
 ];
-// These are the stable sentinels for the beta release: a prerelease must not
-// advance npm's default channel even if every beta artifact is otherwise exact.
+// These are the stable sentinels for the prerelease channel: a prerelease must
+// not advance npm's default channel even if every artifact is otherwise exact.
 const expectedLatestVersions = new Map(
-  packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? '0.3.0' : '0.7.0']),
+  packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? '0.3.2' : '0.8.1']),
 );
 const expectedPackageVersions = Object.fromEntries(
   packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? keysVersion : expectedVersion]),

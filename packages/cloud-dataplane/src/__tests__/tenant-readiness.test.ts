@@ -93,7 +93,14 @@ if (POSTGRES_URL === undefined) {
           ttlMs: 60_000,
           minimumIntervalMs: 0,
         });
+        await expect(core.presence.read(TENANT_A, 'readiness-revoked')).resolves.toBeDefined();
         await devices.revoke(TENANT_A, 'readiness-revoked');
+
+        // Revocation deletes the registration AND the device-scoped state it
+        // was the only reason to keep. Presence is the observable one; the
+        // rest is asserted against the tables in `device-revocation.test.ts`.
+        await expect(devices.get(TENANT_A, 'readiness-revoked')).resolves.toBeUndefined();
+        await expect(core.presence.read(TENANT_A, 'readiness-revoked')).resolves.toBeUndefined();
 
         await expect(core.presence.read(TENANT_A, 'readiness-active')).resolves.toMatchObject({
           clientVersion: '0.4.2',
@@ -104,7 +111,8 @@ if (POSTGRES_URL === undefined) {
         expect(readinessA).toMatchObject({
           tenantId: TENANT_A,
           activePairedDeviceCount: 5,
-          revokedDeviceCount: 1,
+          // Structurally zero: a revoked device has no row left to count.
+          revokedDeviceCount: 0,
           observedPresenceCount: 5,
           observedPresenceByLevel: {
             online: 1,
@@ -129,14 +137,10 @@ if (POSTGRES_URL === undefined) {
               expiresAt: '2026-01-01T00:01:00.000Z',
             },
           },
-          {
-            deviceId: 'readiness-revoked',
-            productId: 'test-product',
-            deviceName: 'readiness-revoked',
-            revoked: true,
-          },
         ]));
-        expect(readinessA.devices).toHaveLength(6);
+        expect(readinessA.devices).toHaveLength(5);
+        expect(readinessA.devices.map((device) => device.deviceId)).not.toContain('readiness-revoked');
+        expect(readinessA.devices.every((device) => !device.revoked)).toBe(true);
         const readinessB = await devices.readiness(TENANT_B, core.presence);
         expect(readinessB).toMatchObject({
           activePairedDeviceCount: 1,

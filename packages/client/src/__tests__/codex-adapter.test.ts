@@ -45,6 +45,26 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   return results;
 }
 
+/** Drain exactly one turn's events (the fixture's frame count varies per env toggle). */
+async function takeTurn(session: Session): Promise<AgentEvent[]> {
+  const results: AgentEvent[] = [];
+  for await (const event of session.events) {
+    results.push(event);
+    if (event.type === 'turn_end') break;
+  }
+  return results;
+}
+
+/** The MCP half of a codex turn argv: `--ignore-user-config` and every `mcp_servers.*` override. */
+function mcpConfigSlice(argv: readonly string[]): string[] {
+  const slice: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === '--ignore-user-config') slice.push('--ignore-user-config');
+    if (argv[index] === '-c' && argv[index + 1]?.startsWith('mcp_servers.')) slice.push('-c', argv[index + 1]!);
+  }
+  return slice;
+}
+
 async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-adapter-test-'));
   return { workspaceDir, policy: { mode: 'auto' }, env };
@@ -71,7 +91,7 @@ describe('CodexAdapter against the fake-codex fixture', () => {
     const adapter = fakeCodexAdapter();
     const result = await adapter.detect();
     expect(result.present).toBe(true);
-    expect(result.version).toBe('codex-cli 0.0.0-fake');
+    expect(result.version).toBe('codex-cli 0.149.0-fake');
     expect(result.authPresent).toBe(true);
   });
 
@@ -185,8 +205,79 @@ describe('CodexAdapter against the fake-codex fixture', () => {
       '-c', 'mcp_servers.byokagentmessage.command="/opt/byok-agent-message-mcp"',
       '-c', 'mcp_servers.byokagentmessage.args=["--stdio"]',
       '-c', 'mcp_servers.byokagentmessage.env.BYOK_AGENT_MESSAGE_CONTEXT="sealed-context"',
+      '-c', 'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]',
+      '-c', 'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"',
       'say hi',
     ]);
+  });
+
+  it('replays the first turn\'s exact MCP config argv on a resumed turn, so the MCP tool still resolves', async () => {
+    const captured: string[][] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    // The fixture calls this MCP tool on EVERY turn and refuses the call —
+    // exactly like real codex under `approval_policy=never` — unless that
+    // turn's own argv carries the full grant. A resume that drops the MCP
+    // config therefore fails the turn instead of passing quietly.
+    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_MCP_TOOL_CALL: 'byokagentmessage/send_agent_message' });
+    ctx.mcpServers = {
+      byokagentmessage: {
+        command: '/opt/byok-agent-message-mcp',
+        args: ['--stdio'],
+        env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' },
+      },
+    };
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    const firstTurn = await takeTurn(session);
+    expect(firstTurn.some((event) => event.type === 'progress' && event.text === 'called byokagentmessage.send_agent_message')).toBe(true);
+
+    await session.followUp({ instruction: 'follow up', policy: { mode: 'auto' } });
+    const secondTurn = await takeTurn(session);
+    expect(secondTurn.some((event) => event.type === 'progress' && event.text === 'called byokagentmessage.send_agent_message')).toBe(true);
+    // The fixture's refusal shape (`error` + `turn.failed`, no
+    // `turn.completed`) would have ended this turn without a `turn_end`.
+    expect(secondTurn.at(-1)).toEqual({ type: 'turn_end' });
+
+    expect(captured[1]).toEqual([
+      'exec', 'resume', 'fake-thread-1', '--json', '--skip-git-repo-check',
+      '-c', 'sandbox_mode=workspace-write',
+      '-c', 'approval_policy=never',
+      '--ignore-user-config',
+      '-c', 'mcp_servers.byokagentmessage.command="/opt/byok-agent-message-mcp"',
+      '-c', 'mcp_servers.byokagentmessage.args=["--stdio"]',
+      '-c', 'mcp_servers.byokagentmessage.env.BYOK_AGENT_MESSAGE_CONTEXT="sealed-context"',
+      '-c', 'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]',
+      '-c', 'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"',
+      'follow up',
+    ]);
+    // Byte-identical, not merely equivalent: the resume replays the exact
+    // argv the first turn was launched with.
+    expect(mcpConfigSlice(captured[1]!)).toEqual(mcpConfigSlice(captured[0]!));
+    expect(mcpConfigSlice(captured[0]!).length).toBeGreaterThan(0);
+  });
+
+  it('resumes with no MCP config args at all when the session started without MCP servers', async () => {
+    const captured: string[][] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: capturingSpawn(captured),
+    });
+    const session = await startAdapter(adapter, baseTask, await makeCtx());
+    openSessions.push(session);
+    await takeTurn(session);
+    await session.followUp({ instruction: 'follow up', policy: { mode: 'auto' } });
+    await takeTurn(session);
+
+    expect(captured[1]).toEqual([
+      'exec', 'resume', 'fake-thread-1', '--json', '--skip-git-repo-check',
+      '-c', 'sandbox_mode=workspace-write',
+      '-c', 'approval_policy=never',
+      'follow up',
+    ]);
+    expect(mcpConfigSlice(captured[1]!)).toEqual([]);
   });
 
   it('passes the subscription selection model to Codex on the exact turn argv', async () => {

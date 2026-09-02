@@ -1,4 +1,5 @@
 import type { PermissionPolicy } from '@byok-sdk/protocol';
+import type { McpToolsetGrant } from '../mcp-tool-grants';
 
 export interface ClaudePermissionMapping {
   ok: boolean;
@@ -158,6 +159,52 @@ const READONLY_TOOLS: readonly string[] = ['Read', 'Glob', 'Grep'];
  *   "default set minus these" this mapper can construct. Refusing is the
  *   fail-closed choice over guessing a set that might not match reality.
  *
+ * ## Projected MCP toolset tools: `--allowedTools`, and ONLY for them
+ *
+ * The two flags above govern claude's BUILT-IN tools. A projected host
+ * toolset arrives by a third path entirely — `--mcp-config` (see
+ * `claude-adapter.ts`) — and empirically it is granted by neither: on the
+ * installed 2.1.251 binary, a `mcp__<server>__<tool>` call is auto-denied
+ * (`system:permission_denied`, `permission_denials` populated) under
+ * `--permission-mode default` AND under `--permission-mode acceptEdits`,
+ * whether or not `--tools` is present. `acceptEdits`' documented breadth
+ * (which really does cover Write and Bash — see `auto` above) stops at
+ * claude's own built-ins; MCP tools are never implicitly permitted.
+ *
+ * So a projected toolset is only actually callable if its tools appear in
+ * `--allowedTools`. Live-verified against 2.1.251 against a one-tool stdio
+ * echo server: with `--permission-mode default --tools "" --mcp-config …
+ * --strict-mcp-config`, `tools/list` reached the server and `tools/call`
+ * never did; appending `--allowedTools mcp__saleskoprobe__echo` (nothing
+ * else changed) produced `permission_denials: []`, a real `tools/call` on
+ * the server, and the tool's own result — while `system/init` still
+ * reported `tools: ["mcp__saleskoprobe__echo"]`, i.e. `--tools ""` kept
+ * every built-in disabled. This is the one use of `--allowedTools` this
+ * mapper makes, and it is a PERMISSION pre-grant (what the flag genuinely
+ * is), never a capability restriction (what the findings above prove it is
+ * not): the capability surface is still fixed by `--tools` alone.
+ *
+ * Which modes receive the grant, and why the others deliberately do not:
+ *
+ * - `readonly` and `auto`: granted. Both auto-deny MCP calls without it
+ *   (live-confirmed above for each), so withholding it would offer a task
+ *   a toolset it can list and never call. Nothing is widened: the granted
+ *   identifiers are exactly the tools the daemon OBSERVED on exactly the
+ *   servers this task projected (`daemon/mcp-tools-probe.ts`), an unobserved
+ *   name is never granted, and no server-scoped `mcp__<server>` wildcard is
+ *   ever emitted (that form was never verified, and it would silently grant
+ *   tools a server adds later).
+ * - `confirm`: NOT granted, deliberately. Confirm's whole point is that a
+ *   human answers each call through `--permission-prompt-tool`; a pre-grant
+ *   would resolve those calls before the channel ever sees them, silently
+ *   removing the decision the caller asked for.
+ * - `plan`: NOT granted, deliberately. Plan mode's contract is that the
+ *   mutating call never actually runs. This SDK cannot know whether an
+ *   opaque host toolset tool mutates anything, so pre-granting one would
+ *   turn plan into an executing mode for exactly the tools it knows least
+ *   about. A plan-mode task that needs its toolset callable belongs in
+ *   `readonly`.
+ *
  * `network: false` fails closed for the same reason as pi: no verified
  * network sandbox exists for claude's Bash tool either (`claude --help`
  * exposes no network/sandbox flag at all) — this was not independently
@@ -166,7 +213,10 @@ const READONLY_TOOLS: readonly string[] = ['Read', 'Glob', 'Grep'];
  * task didn't run), but is the same conservative, precedent-consistent
  * default pi already applies for an unverifiable constraint.
  */
-export function mapPermissionPolicyToClaudeArgs(policy: PermissionPolicy): ClaudePermissionMapping {
+export function mapPermissionPolicyToClaudeArgs(
+  policy: PermissionPolicy,
+  toolsetGrants: readonly McpToolsetGrant[] = [],
+): ClaudePermissionMapping {
   if (policy.network === false) {
     return {
       ok: false,
@@ -223,7 +273,10 @@ export function mapPermissionPolicyToClaudeArgs(policy: PermissionPolicy): Claud
     const effective = subtractDenied(base, denyTools);
     // Never fall through to an absent `--tools` flag here — that would run
     // claude's full active toolset, silently widening a readonly request.
-    return { ok: true, args: ['--permission-mode', 'default', '--tools', effective.join(',')] };
+    return {
+      ok: true,
+      args: ['--permission-mode', 'default', '--tools', effective.join(','), ...allowedToolsArgs(toolsetGrants)],
+    };
   }
 
   // `auto` and `plan` share the same tool-restriction logic below — plan
@@ -245,10 +298,25 @@ export function mapPermissionPolicyToClaudeArgs(policy: PermissionPolicy): Claud
   if (policy.allowTools && policy.allowTools.length > 0) {
     args.push('--tools', policy.allowTools.join(','));
   }
+  // Only `auto` takes the MCP grant here; `plan` shares this branch but not
+  // that decision — see the module doc comment's mode-by-mode reasoning.
+  if (policy.mode !== 'plan') args.push(...allowedToolsArgs(toolsetGrants));
   return { ok: true, args };
 }
 
 function subtractDenied(tools: readonly string[], denyTools: readonly string[]): string[] {
   const denied = new Set(denyTools);
   return tools.filter((tool) => !denied.has(tool));
+}
+
+/**
+ * `--allowedTools` for exactly the observed toolset tools, or nothing at all.
+ * Never a `mcp__<server>` server wildcard, and never a name the daemon did
+ * not observe — see the module doc comment.
+ */
+function allowedToolsArgs(toolsetGrants: readonly McpToolsetGrant[]): string[] {
+  const identifiers = toolsetGrants
+    .flatMap((grant) => grant.tools.map((tool) => `mcp__${grant.server}__${tool}`))
+    .sort();
+  return identifiers.length === 0 ? [] : ['--allowedTools', identifiers.join(',')];
 }

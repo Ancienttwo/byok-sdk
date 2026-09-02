@@ -11,5 +11,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- (none)
+- [ ] 2026-08-29T20:31:44+0800 [high] `packages/client/src/__tests__/agent-memory-entry-constraints.test.ts` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->

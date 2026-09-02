@@ -1,10 +1,9 @@
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 
 export interface ResolvedApprovalMcpBin {
   command: string;
   args: string[];
-  source: 'env' | 'dist';
+  source: 'env' | 'dist' | 'host';
 }
 
 /**
@@ -46,11 +45,15 @@ export interface ResolvedApprovalMcpBin {
  * (see `claude-adapter.test.ts`), exactly like `BYOK_CLAUDE_BIN` already
  * does for the real `claude` binary.
  */
-export function resolveApprovalMcpBin(): ResolvedApprovalMcpBin {
+export function resolveApprovalMcpBin(host?: SdkHelperHostConfig): ResolvedApprovalMcpBin {
   const override = process.env.BYOK_APPROVAL_MCP_BIN;
   if (override) {
     return { command: override, args: [], source: 'env' };
   }
-  const distBin = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bin', 'byok-approval-mcp.js');
-  return { command: process.execPath, args: [distBin], source: 'dist' };
+  const resolved = resolveSdkReservedHelperBin('approval-mcp', host);
+  return {
+    command: resolved.command,
+    args: [...resolved.args],
+    source: resolved.source === 'self-executable' ? 'host' : 'dist',
+  };
 }

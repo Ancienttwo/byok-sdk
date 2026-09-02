@@ -119,6 +119,16 @@ export interface AgentHomeBinding {
   readonly lease: AgentHomeLease;
 }
 
+export interface AgentHomeExecutionLease extends AgentHomeLease {
+  /** Fresh tasks are task-keyed until the runtime returns its durable session id. */
+  bindSession(sessionRef: string): Promise<void>;
+}
+
+export interface AgentHomeExecutionBinding {
+  readonly resolution: AgentHomeResolution;
+  readonly lease: AgentHomeExecutionLease;
+}
+
 export function validateAgentRef(value: unknown): AgentRef {
   let candidate: AgentRef;
   try {
@@ -541,6 +551,137 @@ export class AgentHomeLeaseManager {
   }
 }
 
+interface AgentHomeExecutionGroup {
+  readonly manager: AgentHomeLeaseManager;
+  readonly baseLease: AgentHomeLease;
+  readonly agentId: string;
+  readonly leasesByKey: Map<string, string>;
+}
+
+function executionKey(input: { readonly taskId: string; readonly sessionRef?: string }): string {
+  const value = input.sessionRef === undefined ? input.taskId : input.sessionRef;
+  const label = input.sessionRef === undefined ? 'taskId' : 'sessionRef';
+  if (typeof value !== 'string' || value.length === 0 || /[\u0000\r\n]/u.test(value)) {
+    throw new AgentHomeResolutionError(`Agent execution ${label} must be a non-empty single-line string`);
+  }
+  return `${input.sessionRef === undefined ? 'task' : 'session'}\0${value}`;
+}
+
+/**
+ * Session-scoped execution leases share one process-owned home marker. The
+ * marker remains until the final session exits, so relocation still sees the
+ * Agent home as active, while different sessions no longer exclude each other.
+ */
+export class AgentHomeExecutionLeaseManager {
+  private static readonly groups = new Map<string, AgentHomeExecutionGroup>();
+  private static readonly queues = new Map<string, Promise<void>>();
+
+  constructor(private readonly manager: AgentHomeLeaseManager) {}
+
+  async acquire(
+    resolution: AgentHomeResolution,
+    input: { readonly taskId: string; readonly sessionRef?: string },
+  ): Promise<AgentHomeExecutionLease> {
+    const initialKey = executionKey(input);
+    return this.exclusive(resolution.canonicalHome, async () => {
+      let group = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
+      if (group === undefined) {
+        const baseLease = await this.manager.acquire(resolution);
+        group = {
+          manager: this.manager,
+          baseLease,
+          agentId: resolution.agentRef.agentId,
+          leasesByKey: new Map(),
+        };
+        AgentHomeExecutionLeaseManager.groups.set(resolution.canonicalHome, group);
+      } else if (group.manager !== this.manager || group.agentId !== resolution.agentRef.agentId) {
+        throw new AgentHomeBusyError(`Agent home ${resolution.canonicalHome} is active under another execution owner`);
+      }
+      if (group.leasesByKey.has(initialKey)) {
+        throw new AgentHomeBusyError(`Agent session already has an active execution lease in ${resolution.canonicalHome}`);
+      }
+
+      const leaseId = randomUUID();
+      group.leasesByKey.set(initialKey, leaseId);
+      let currentKey = initialKey;
+      let sessionBound = input.sessionRef !== undefined;
+      let released = false;
+      return Object.freeze({
+        leaseId,
+        agentRef: resolution.agentRef,
+        canonicalHome: resolution.canonicalHome,
+        cwd: resolution.canonicalHome,
+        homeIdentity: group.baseLease.homeIdentity,
+        bindSession: async (sessionRef: string): Promise<void> => {
+          const nextKey = executionKey({ taskId: input.taskId, sessionRef });
+          await this.exclusive(resolution.canonicalHome, async () => {
+            if (released) throw new AgentHomeBusyError(`Agent execution lease ${leaseId} is already released`);
+            const currentGroup = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
+            if (currentGroup !== group || currentGroup.leasesByKey.get(currentKey) !== leaseId) {
+              throw new AgentHomeBusyError(`Agent execution lease ${leaseId} is no longer owned by this process`);
+            }
+            if (nextKey === currentKey) return;
+            if (sessionBound) {
+              throw new AgentHomeBusyError(
+                `Agent session execution lease ${leaseId} cannot rebind to a different runtime session`,
+              );
+            }
+            if (currentGroup.leasesByKey.has(nextKey)) {
+              throw new AgentHomeBusyError(`Agent session already has an active execution lease in ${resolution.canonicalHome}`);
+            }
+            currentGroup.leasesByKey.set(nextKey, leaseId);
+            currentGroup.leasesByKey.delete(currentKey);
+            currentKey = nextKey;
+            sessionBound = true;
+          });
+        },
+        release: async (): Promise<void> => {
+          await this.exclusive(resolution.canonicalHome, async () => {
+            if (released) return;
+            const currentGroup = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
+            if (currentGroup !== group || currentGroup.leasesByKey.get(currentKey) !== leaseId) {
+              released = true;
+              throw new AgentHomeBusyError(`Agent execution lease ${leaseId} is no longer owned by this process`);
+            }
+            currentGroup.leasesByKey.delete(currentKey);
+            released = true;
+            if (currentGroup.leasesByKey.size === 0) {
+              AgentHomeExecutionLeaseManager.groups.delete(resolution.canonicalHome);
+              await currentGroup.baseLease.release();
+            }
+          });
+        },
+      });
+    });
+  }
+
+  async mutate<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T> {
+    return this.exclusive(binding.resolution.canonicalHome, async () => {
+      const group = AgentHomeExecutionLeaseManager.groups.get(binding.resolution.canonicalHome);
+      if (group === undefined || group.manager !== this.manager || ![...group.leasesByKey.values()].includes(binding.lease.leaseId)) {
+        throw new AgentHomeBusyError('Agent execution lease does not own this home mutation');
+      }
+      return operation();
+    });
+  }
+
+  private async exclusive<T>(canonicalHome: string, operation: () => Promise<T>): Promise<T> {
+    const prior = AgentHomeExecutionLeaseManager.queues.get(canonicalHome) ?? Promise.resolve();
+    let release!: () => void;
+    const tail = new Promise<void>((resolve) => { release = resolve; });
+    AgentHomeExecutionLeaseManager.queues.set(canonicalHome, tail);
+    await prior;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (AgentHomeExecutionLeaseManager.queues.get(canonicalHome) === tail) {
+        AgentHomeExecutionLeaseManager.queues.delete(canonicalHome);
+      }
+    }
+  }
+}
+
 async function initializeAgentHome(resolution: AgentHomeResolution): Promise<void> {
   await ensureDirectoryNoSymlink(
     resolution.canonicalHome,
@@ -640,6 +781,7 @@ export class AgentHomeManager {
   readonly layout: AgentHomeLayout;
   readonly projection?: AgentHomeProjection;
   readonly leaseManager: AgentHomeLeaseManager;
+  readonly executionLeaseManager: AgentHomeExecutionLeaseManager;
 
   constructor(options: {
     hostStorageRoot: string;
@@ -649,6 +791,7 @@ export class AgentHomeManager {
     this.layout = new AgentHomeLayout(options.hostStorageRoot);
     this.projection = options.projection;
     this.leaseManager = options.leaseManager ?? new AgentHomeLeaseManager();
+    this.executionLeaseManager = new AgentHomeExecutionLeaseManager(this.leaseManager);
   }
 
   async prepare(agentRef: AgentRef): Promise<AgentHomeBinding> {
@@ -679,12 +822,33 @@ export class AgentHomeManager {
     return Object.freeze({ resolution, lease });
   }
 
+  async acquireExecution(
+    agentRef: AgentRef,
+    input: { readonly taskId: string; readonly sessionRef?: string },
+  ): Promise<AgentHomeExecutionBinding> {
+    const resolution = await this.layout.resolve(agentRef);
+    const lease = await this.executionLeaseManager.acquire(resolution, input);
+    return Object.freeze({ resolution, lease });
+  }
+
   /** Initialize only after any requested session exact-match has succeeded. */
   async initialize(binding: AgentHomeBinding): Promise<void> {
-    const { resolution, lease } = binding;
+    await this.initializeResolved(binding.resolution, binding.lease.cwd);
+  }
+
+  async initializeExecution(binding: AgentHomeExecutionBinding): Promise<void> {
+    await this.mutateExecution(binding, () =>
+      this.initializeResolved(binding.resolution, binding.lease.cwd));
+  }
+
+  async mutateExecution<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T> {
+    return this.executionLeaseManager.mutate(binding, operation);
+  }
+
+  private async initializeResolved(resolution: AgentHomeResolution, cwd: string): Promise<void> {
     await initializeAgentHome(resolution);
     const prepare = this.projection?.prepare;
-    if (prepare !== undefined) await prepare({ ...resolution, cwd: lease.cwd });
+    if (prepare !== undefined) await prepare({ ...resolution, cwd });
     if (await fs.realpath(resolution.homeDir) !== resolution.canonicalHome) {
       throw new AgentHomeResolutionError('Agent projection changed the canonical home path');
     }

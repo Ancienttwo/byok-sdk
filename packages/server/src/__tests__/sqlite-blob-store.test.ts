@@ -17,6 +17,7 @@ import { pairFakeDaemon, startServer, stopServer, testPairingClaims } from './te
 // really usable (the CI Node 20 leg, or an intermediate flagged 22.x) and
 // still runs on one where it is.
 const sqliteReady = isSqliteAvailable();
+const TENANT_ID = 'tenant-test';
 
 /** Canonical `contentHash` form (docs/protocol.md §7, finding F9): `sha256:<64 lowercase hex>` — same helper `blob.test.ts` uses. */
 function sha256Hex(data: Buffer): string {
@@ -43,18 +44,18 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     const content = Buffer.from('hello sqlite blob world');
     const contentHash = sha256Hex(content);
 
-    const { blobId, uploadUrl } = await store.createUpload({ size: content.length, contentType: 'text/plain', contentHash });
+    const { blobId, uploadUrl } = await store.createUpload(TENANT_ID, { size: content.length, contentType: 'text/plain', contentHash });
     expect(blobId).toBeTruthy();
     expect(uploadUrl).toMatch(new RegExp(`^/byok/blobs/${blobId}/content\\?sig=.+&exp=\\d+$`));
 
-    expect(await store.exists(blobId)).toBe(false);
-    expect(await store.getDownloadUrl(blobId)).toBeUndefined();
+    expect(await store.exists(TENANT_ID, blobId)).toBe(false);
+    expect(await store.getDownloadUrl(TENANT_ID, blobId)).toBeUndefined();
 
     const writeResult = await store.writeContent(blobId, content);
     expect(writeResult).toEqual({ ok: true });
 
-    expect(await store.exists(blobId)).toBe(true);
-    const downloadUrl = await store.getDownloadUrl(blobId);
+    expect(await store.exists(TENANT_ID, blobId)).toBe(true);
+    const downloadUrl = await store.getDownloadUrl(TENANT_ID, blobId);
     expect(downloadUrl).toMatch(new RegExp(`^/byok/blobs/${blobId}/content\\?sig=.+&exp=\\d+$`));
 
     const read = await store.readContent(blobId);
@@ -66,24 +67,24 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     const store = new SqliteBlobStore({ path: ':memory:' });
     const content = Buffer.from('hello');
     const contentHash = sha256Hex(content);
-    const { blobId } = await store.createUpload({ size: content.length, contentType: 'text/plain', contentHash });
+    const { blobId } = await store.createUpload(TENANT_ID, { size: content.length, contentType: 'text/plain', contentHash });
 
     const result = await store.writeContent(blobId, Buffer.from('hello world'));
     expect(result.ok).toBe(false);
-    expect(await store.exists(blobId)).toBe(false);
+    expect(await store.exists(TENANT_ID, blobId)).toBe(false);
   });
 
   it('rejects writeContent on a contentHash mismatch, without storing anything', async () => {
     const store = new SqliteBlobStore({ path: ':memory:' });
     const content = Buffer.from('hello');
     const contentHash = sha256Hex(content);
-    const { blobId } = await store.createUpload({ size: content.length, contentType: 'text/plain', contentHash });
+    const { blobId } = await store.createUpload(TENANT_ID, { size: content.length, contentType: 'text/plain', contentHash });
 
     // Same length as declared, different bytes -> different hash.
     const tampered = Buffer.from('HELLO');
     const result = await store.writeContent(blobId, tampered);
     expect(result.ok).toBe(false);
-    expect(await store.exists(blobId)).toBe(false);
+    expect(await store.exists(TENANT_ID, blobId)).toBe(false);
 
     const ok = await store.writeContent(blobId, content);
     expect(ok).toEqual({ ok: true });
@@ -93,8 +94,8 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     const store = new SqliteBlobStore({ path: ':memory:' });
     expect((await store.writeContent('blob_nope', Buffer.from('x'))).ok).toBe(false);
     expect(await store.readContent('blob_nope')).toBeUndefined();
-    expect(await store.getDownloadUrl('blob_nope')).toBeUndefined();
-    expect(await store.exists('blob_nope')).toBe(false);
+    expect(await store.getDownloadUrl(TENANT_ID, 'blob_nope')).toBeUndefined();
+    expect(await store.exists(TENANT_ID, 'blob_nope')).toBe(false);
     store.close();
     expect(() => store.close()).not.toThrow();
   });
@@ -105,7 +106,7 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     const contentHash = sha256Hex(content);
 
     const storeA = new SqliteBlobStore({ path: dbPath });
-    const { blobId } = await storeA.createUpload({
+    const { blobId } = await storeA.createUpload(TENANT_ID, {
       size: content.length,
       contentType: 'application/octet-stream',
       contentHash,
@@ -117,7 +118,7 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     const read = await storeB.readContent(blobId);
     expect(read?.data.equals(content)).toBe(true);
     expect(read?.contentType).toBe('application/octet-stream');
-    expect(await storeB.exists(blobId)).toBe(true);
+    expect(await storeB.exists(TENANT_ID, blobId)).toBe(true);
     storeB.close();
   });
 
@@ -132,16 +133,16 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     };
 
     const storeA = new SqliteBlobStore({ path: dbPath });
-    expect((await storeA.createUpload(declaration, blobId)).blobId).toBe(blobId);
+    expect((await storeA.createUpload(TENANT_ID, declaration, blobId)).blobId).toBe(blobId);
     expect(await storeA.writeContent(blobId, content)).toEqual({ ok: true });
     storeA.close();
 
     const storeB = new SqliteBlobStore({ path: dbPath });
-    expect((await storeB.createUpload(declaration, blobId)).blobId).toBe(blobId);
+    expect((await storeB.createUpload(TENANT_ID, declaration, blobId)).blobId).toBe(blobId);
     await expect(
-      storeB.createUpload({ ...declaration, contentType: 'application/json' }, blobId),
+      storeB.createUpload(TENANT_ID, { ...declaration, contentType: 'application/json' }, blobId),
     ).rejects.toBeInstanceOf(BlobDeclarationConflictError);
-    expect(await storeB.exists(blobId)).toBe(true);
+    expect(await storeB.exists(TENANT_ID, blobId)).toBe(true);
     expect(await storeB.writeContent(blobId, content)).toEqual({
       ok: false,
       reason: 'blob already uploaded',
@@ -155,9 +156,9 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     const contentHash = sha256Hex(content);
 
     const storeA = new SqliteBlobStore({ path: dbPath });
-    const { blobId, uploadUrl } = await storeA.createUpload({ size: content.length, contentType: 'text/plain', contentHash });
+    const { blobId, uploadUrl } = await storeA.createUpload(TENANT_ID, { size: content.length, contentType: 'text/plain', contentHash });
     await storeA.writeContent(blobId, content);
-    const downloadUrl = (await storeA.getDownloadUrl(blobId))!;
+    const downloadUrl = (await storeA.getDownloadUrl(TENANT_ID, blobId))!;
     storeA.close();
 
     const storeB = new SqliteBlobStore({ path: dbPath });
@@ -212,7 +213,7 @@ describe.skipIf(!sqliteReady)('SqliteBlobStore', () => {
     // Force a write so the WAL/SHM siblings are guaranteed to exist.
     const content = Buffer.from('secure me');
     const contentHash = sha256Hex(content);
-    const { blobId } = await store.createUpload({ size: content.length, contentType: 'text/plain', contentHash });
+    const { blobId } = await store.createUpload(TENANT_ID, { size: content.length, contentType: 'text/plain', contentHash });
     await store.writeContent(blobId, content);
 
     expect(statSync(path.dirname(dbPath)).mode & 0o777).toBe(0o700);

@@ -1,5 +1,315 @@
 # Changelog
 
+## 0.12.0 / @byok-sdk/keys 0.3.9 — 2026-09-02
+
+`@byok-sdk/keys` advances independently because npm already owns immutable
+`0.3.8` with an exact `@byok-sdk/core@0.11.0` edge. The 0.12.0 train therefore
+uses `keys@0.3.9`, whose packed manifest must declare exact
+`@byok-sdk/core@0.12.0`; reusing 0.3.8 would create a split registry graph.
+
+A security and reliability train closing GitHub issues #102–#121. Every fix
+takes the same shape: an untrusted input now crosses exactly one authority
+before its side effect, and where the repository cannot prove recovery it fails
+closed instead of retrying or synthesizing a result.
+
+**Hosted deployments must apply two new forward migrations, in order,
+before running this train: `deploy/sql/0016_mailbox_delivery_watermark.sql`
+and `deploy/sql/0017_agent_message_admission.sql`.** 0016 adds
+`device_stream.delivered_seq`, the server-owned delivery watermark the
+mailbox store now reads and writes unconditionally, and backfills it from
+`acked_seq`, because an acknowledgement already persisted is the one safe
+proof that those rows were delivered. 0017 creates
+`agent_message_admission`, the one durable row that both reserves and
+terminally disposes the single `agent.message.publish` a live task may cross
+into a product consumer. A row that carries a reservation but no
+`terminal_body` is `pending`: the process that owned it stopped before
+recording a terminal disposition, and an external consumer may still be
+running. `pending` is permanently fail-closed — elapsed time cannot prove the
+consumer is dead, so a retry is rejected rather than invoking the consumer a
+second time or inventing a disposition, and reconciliation is an operator
+action. The table locks against `task` in the same application transaction, so
+cancellation and first-message admission have one durable winner.
+
+- **Breaking (Cloud store ports):** `CloudStores` gains a `pairing:
+  PairingEnrollment` port and `PairingCodeStore` loses `redeem`. Pairing-code
+  consumption is now the single composition-owned
+  `pairing.redeemAndRegister(input)`, which atomically consumes the code,
+  applies machine supersession and state cleanup, and registers the device;
+  a failure leaves the code retryable, and unknown, expired, and already
+  consumed codes still return one indistinguishable `undefined` (#104).
+  `NonceStore.validate` and `NonceStore.markUsed` are replaced by the single
+  atomic `consumeIfValid(tenant, deviceId, nonce)`, which returns `true` only
+  for the sole winner (#102). `TaskAttemptStore` gains `reserveAgentMessage`,
+  `readAgentMessage`, and `finalizeAgentMessage`, and `BlobContentProxy` gains
+  `expectedUploadBytes` (#114, #120). `CLOUD_STORE_NAMES`,
+  `CLOUD_PORT_METHODS`, and `CLOUD_PORT_INTERFACES` carry the new inventory, so
+  a durable adapter that does not implement it is rejected by the contract
+  table rather than at call time. No dual-method or alias path is kept.
+- **Breaking (core MailboxStore):** an acknowledgement is now bounded by what
+  the server proved it delivered. `MailboxStore` gains
+  `recordDelivery(tenant, { deviceId, deliveredSeq })`, `MailboxCursorState`
+  gains `deliveredSeq`, and `advanceCursor` raises the new core error code
+  `mailbox_cursor_ahead_of_delivery` for an ack beyond that watermark.
+  `mailbox_cursor_regression` still covers a backwards ack. The hosted schema
+  change behind the watermark is migration
+  `deploy/sql/0016_mailbox_delivery_watermark.sql` (#103).
+- **Breaking (reference `BlobStore`):** blobs are tenant-owned.
+  `createUpload`, `getDownloadUrl`, and `exists` now take `TenantId` as their
+  first argument, and lookup plus signed-URL minting require ownership, so a
+  bearer token for one tenant can no longer resolve or mint a URL for another
+  tenant's blob. `getUploadReservation(blobId)` is new: HTTP resolves the
+  immutable declared size before it retains any bytes. `LocalDiskBlobStore` now
+  persists its metadata and signing secret to `metadata.json` in its directory,
+  so the same directory survives a restart. `SqliteBlobStore` adds a
+  `tenant_id` column; a legacy database's rows keep `tenant_id = NULL` and
+  return 404 forever, because no evidence exists from which an owner could be
+  reconstructed and the upgrade does not guess one (#115).
+- **Breaking (new terminal client error):** `@byok-sdk/client` exports
+  `ReplayCursorTooOldError`. The reference hub tracks a `recoverableFrom` floor
+  as its bounded outbox ring evicts recoverable control facts, and
+  `GET /byok/events` and the WS `conn.hello` cursor check now fail closed —
+  409 `{ error: 'cursor_too_old', recoverableFrom }` and a 1008
+  `cursor_too_old` close — instead of silently returning a partial tail.
+  `ConnectionManager` treats it as terminal for the current enrollment: it
+  stops the transports, clears capabilities, rejects `start()` and
+  `waitForAck()`, and reports through the new `onTerminalError` callback and
+  `getTerminalError()`. Retrying the same cursor can only repeat the loss, so
+  re-pair or operator recovery is required (#116).
+- **Breaking (WS admission limits and new server config knobs):**
+  `CreateByokServerOptions` gains `webSocketHelloTimeoutMs` (default 5s),
+  `maxPendingWebSockets` (default 32), and `maxWebSocketPayloadBytes` (default
+  `RESULT_DOCUMENT_MAX_BYTES` plus 64KiB of envelope headroom); each is
+  validated as a positive safe integer and each has a finite default even when
+  an embedder configures nothing. An authenticated socket that does not present
+  a valid `conn.hello` inside the deadline is closed 1008 `hello_timeout`, an
+  upgrade beyond the pending-hello cap is refused with 503, and an oversized
+  frame is closed 1009 `payload_too_large` before envelope decoding.
+  `ConnectionHub.registerConnection` now returns a server-owned monotonic
+  epoch, exposes `isCurrentConnection(deviceId, ws, epoch)`, and closes a
+  superseded socket, so a stale half-open socket cannot mutate device state
+  after a newer one takes over (#117, #118).
+- **Breaking (Agent home execution):** within one daemon process, execution is
+  serialized by `(agentId, sessionRef)` rather than by Agent home. Different
+  sessions of one Agent may now run concurrently in the same canonical home,
+  and a duplicate execution for the same session is busy. A fresh task is
+  task-keyed until its runtime creates the durable session, at which point the
+  SDK atomically binds the lease to that `sessionRef`; `@byok-sdk/client`
+  exports the new `AgentHomeExecutionLease` and `AgentHomeExecutionBinding`
+  types. Agent-memory hosted projection stays the bounded exception —
+  concurrent closing sessions serialize one complete
+  open/replay/snapshot/redact/append/replay transaction per home, because its
+  durable outbox is one compare-and-swap authority. The process-owned home
+  activity marker survives until the final session exits, so relocation still
+  fails closed while any execution is active, and a second daemon process
+  remains excluded. Documented in `docs/spec.md`.
+- Hosted `POST /byok/auth/*` and `POST /byok/messages` bodies are bounded
+  before parsing and answer 413 past the ceiling (2MiB for messages). An
+  oversized request stays a 413 even when the producer cannot be cancelled:
+  stream cancellation is a best-effort resource release, never a condition for
+  the rejection (#105).
+- Hosted `PUT` blob content resolves the reservation's authoritative declared
+  size and the deployment's `maxBlobSizeBytes` ceiling before it retains a
+  byte, rejects an untrusted `Content-Length` above the declared size, and
+  reads into one preallocated bounded buffer rather than a chunk list plus a
+  final join, which would have doubled peak attacker-controlled upload memory
+  (#114).
+- `AgentEgressController` serializes the initial reliable-spool open per agent
+  and rejects a second open bound to a different Agent home (#106), serializes
+  the tenant reliable-egress quota so concurrent appends cannot both pass the
+  same check (#107), and keeps both authorities intact once they are composed
+  together (`eb5ca7d`, `39ab1ef`).
+- The daemon control server rejects a reused in-flight request id with
+  `duplicate_request_id` instead of letting a second request silently take over
+  the first's stream (#108), and bounds one authenticated connection's outbound
+  queue at 1MiB, terminating the connection rather than buffering without limit
+  when the peer stops reading (#109).
+- `AuthManager` bounds every pair/challenge/token exchange, including its
+  response-body read, at the new `DaemonConfig.authRequestDeadlineMs` (default
+  15s), and cancels the in-flight request on shutdown. The new
+  `AuthRequestAbortedError` carries `'deadline' | 'stopped'` and is deliberately
+  distinct from `DeviceRevokedError`: only an actual challenge/token 401 is
+  server authority for revocation (#110).
+- Server-URL validation errors no longer echo the configured URL. The single
+  `formatServerUrl` projection reads scheme, host, and path from the parsed
+  `URL`, so userinfo, query, and fragment never enter a diagnostic or the
+  `dangerouslyAllowInsecureRemote` warning, and a URL that fails to parse at all
+  is reported as `invalid server URL` with none of the input echoed (#111,
+  #113).
+- Exact pairing completion is replayable. The hosted composition records an
+  immutable `pairing-completion:v1:` enrollment receipt that tenant cleanup no
+  longer deletes as a TTL-bound request receipt, so an exact bearer-code retry
+  returns the same tenant and device identity instead of becoming a new or
+  failed enrollment; the reference server keeps that binding in its existing
+  process-lifetime pairing authority and raises `PairingAttemptConflictError`
+  for a conflicting one. The daemon holds up the other half of that binding:
+  before the first pairing request leaves, it durably records an immutable
+  `first-pairing-attempt-v1` entry — device name, public key, and the device
+  private key PEM — in the OS credential store, so a lost response cannot
+  destroy the key and an exact retry proves the same public-key binding (#112).
+- Every hosted publish crosses the common rate-limit and dedup gate exactly
+  once. `agent.message.publish` no longer bypasses `handleInboundEnvelope` with
+  its own pre-gate path; the consumer runs inside that one admission, and the
+  disposition is read back from the durable admission row rather than from the
+  in-process result (#119).
+- `BlobClient` accepts `BlobClientOptions` with a lifecycle `signal` and
+  per-request deadlines, and the daemon aborts it on shutdown. A rejected or
+  timed-out transfer explicitly cancels the underlying body stream instead of
+  leaving it to the garbage collector, and the new `BlobRequestAbortedError`
+  (with `BlobRequestAbortReason`) names why (#121).
+
+## 0.11.0 / @byok-sdk/keys 0.3.8 — 2026-08-30
+
+`@byok-sdk/keys` advances independently because npm already owns immutable
+`0.3.7` with an exact `@byok-sdk/core@0.10.2` edge. The 0.11.0 train therefore
+uses `keys@0.3.8`, whose packed manifest must declare exact
+`@byok-sdk/core@0.11.0`; reusing 0.3.7 would create a split registry graph.
+
+Local agents can now share a durable SDK-owned TeamWorkspace across Pi,
+Claude, and Codex through the reserved `byokagentteam` MCP server. Messages are
+lease-bound, ordered, quota-bounded, and acknowledged monotonically. The new
+`byok-agent team open` command can display the same stream in a tmux comm pane
+when given an explicit absolute tmux binary; tmux never injects or captures
+agent terminal text and remains an optional native view dependency.
+
+Projected MCP toolset tools are now callable, not just listable.
+
+- **Breaking (MCP tool names):** the SDK-reserved Agent-memory helper now
+  exposes `memory_recall` and `memory_save` instead of the dot-named
+  `memory.recall` and `memory.save`. The flat names are directly expressible
+  in Claude's `mcp__<server>__<tool>` permission identifier and Codex's TOML
+  per-tool approval key. No alias or dual-name compatibility path is kept.
+  Under `readonly`, Claude and Codex now pre-grant exactly these two tools from
+  the helper-owned constants; Codex keeps global `approval_policy=never` and
+  uses the same exact read-back preflight as the reserved message helper.
+- A task carrying `requiredToolsets` now has each projected MCP server started
+  and asked for its own `tools/list` before adapter admission; those observed
+  names are the only tools an adapter may pre-grant. Claude receives
+  `--allowedTools mcp__<server>__<tool>` under `readonly` and `auto` with
+  `--tools` unchanged (so `readonly` with `allowTools: []` still disables every
+  built-in), and Codex receives `enabled_tools` plus per-tool
+  `approval_mode="approve"` with `approval_policy=never` and `sandbox_mode`
+  untouched. `confirm` and `plan` deliberately never pre-grant, no wildcard or
+  unobserved name is ever granted, Codex older than 0.149 is rejected before
+  spawn, a projected server that cannot start or lists no tools is declined
+  pre-claim and retryably, and a server that answers with a tool name that
+  cannot be expressed as a runtime grant is declined permanently, naming the
+  server and the tool. Previously such a toolset was visible to the model and refused
+  by each runtime's own approval layer at call time.
+- A Codex follow-up turn keeps the MCP servers the session started with. `codex
+  exec resume` now carries the exact `--ignore-user-config` and `mcp_servers.*`
+  argv (command, args, env, `enabled_tools`, per-tool `approval_mode`) computed
+  from the first turn's frozen start input — never recomputed, so a follow-up
+  cannot widen the session's MCP authority. Previously a resume passed only the
+  permission-policy args, so the reserved message server and every projected
+  toolset silently vanished after turn one.
+
+## 0.10.2 / @byok-sdk/keys 0.3.7 — 2026-08-30
+
+Revocation deletes the device registration.
+
+- **Breaking (stored state, not the wire):** `devices.revoke(tenant, deviceId)`
+  and `machineId` supersession inside `register` now DELETE the device row
+  instead of setting `revoked = true`. Both device directories — the in-memory
+  reference and the Postgres dataplane — leave no row behind, so a revoked
+  device is indistinguishable from one that was never registered on every read
+  path: `get`, `list`, `resolveByDeviceId`, and the tenant readiness projection
+  (whose `revokedDeviceCount` is now structurally `0`).
+- The Postgres directory deletes the device-scoped state the row was the only
+  reason to keep — `device_presence`, `auth_nonce`, `inbound_dedup`,
+  `device_assertion_replay` — in the same transaction as the row. History keyed
+  by the device_id string is deliberately untouched: `task`,
+  `agent_egress_event`, and `proof_request_receipt` are facts about what a
+  device did, not credentials. `outbox`/`device_stream` stay with core's
+  mailbox retention, and `agent_memory_projection_*` stays with 0014's own
+  erase-fence protocol.
+- No new migration and no schema change. The `revoked` column and
+  `DeviceRecord.revoked` remain because every auth path reads them, but nothing
+  writes `true` any more; `device_active_machine_key` (0015) is still the
+  concurrency invariant, with no false row left for its `NOT revoked`
+  predicate to exclude. Every dependent delete is covered by its table's
+  primary key.
+- HTTP behavior is unchanged. `/byok/challenge`, `/byok/token`, bearer routes,
+  device proof, and hosted device-assertion exchange already answered `401` /
+  `undefined` identically for an unknown and a revoked device (§12.6, no
+  existence oracle), and a missing row now takes that same path. Daemons still
+  observe the `401`, surface `revoked`, and re-pair. Documented in
+  `docs/protocol.md` §6.1 and §6.3.
+- `@byok-sdk/server`: the standalone reference server's `DeviceRegistry` is
+  aligned with the same rule — `revoke` removes the record, its challenge
+  nonces, and the hub's per-device presence, outbox, and dedup state, and
+  closes any live socket, so the bundled server and the cloud directories
+  answer identically.
+
+## 0.10.1 / @byok-sdk/keys 0.3.6 — 2026-08-30
+
+Only the final assistant text run reaches the user.
+
+- `@byok-sdk/client`: the daemon-authored required Agent message carries only
+  the assistant text after the last tool interaction (falling back to the whole
+  run's text), so intermediate narration no longer ships to the user.
+
+## 0.10.0 / @byok-sdk/keys 0.3.5 — 2026-08-29
+
+One physical machine, one active device row.
+
+- Added an optional client-hashed `machineId` to `PairRequest`: the lowercase
+  hex SHA-256 of the product id and an OS-provided machine identifier, never
+  the raw identifier and never a tenant or product claim. Both device
+  directories revoke the prior non-revoked rows of the same
+  `(tenant, product, machineId)` inside the registration transaction, so one
+  physical machine holds one active device row per tenant and product.
+  Migration `0015_device_machine_identity` adds the nullable column, its shape
+  CHECK, and the tenant-first partial unique index over active rows, which is
+  where two concurrent pairings from the same machine actually race. Devices
+  paired before the migration — and any device that cannot identify its
+  machine — keep a NULL and are unaffected. The client probe is bounded and
+  never blocks or fails pairing.
+- Advanced the nine-package aligned dispatch train to `0.10.0` and keys to
+  `0.3.5` with its exact core `0.10.0` edge. Registry publication proves artifact
+  identity only; it does not authorize deployment, production migration,
+  downstream pinning, secret changes, or live rollout.
+
+## 0.9.1 / @byok-sdk/keys 0.3.4 — 2026-08-29
+
+Embedded-host Agent-memory composition.
+
+- Added the `@byok-sdk/client/agent-memory` subpath so a product that embeds the
+  SDK without running the daemon can compose the Agent-memory service directly:
+  `AgentMemoryService`, `captureAgentMemorySnapshot`,
+  `serveAgentMemoryMcpOverStdio`, external-helper admission, the platform gate,
+  and the prompt guidance. Platform semantics are unchanged — native Linux,
+  macOS only with a host-provided signed helper, Windows fail-closed. The entry
+  reaches no transport, daemon composition, or control socket, and exposes no
+  hosted projection; a source module-graph constraint test and a built-bundle
+  check pin both properties.
+- `@byok-sdk/client`: the daemon now delivers the required Agent message from
+  the run's final assistant text when the runtime did not publish one via the
+  task message tool; empty output fails the task instead of hanging (shipped in
+  `0.9.1`).
+- Advanced the nine-package aligned dispatch train to `0.9.1` and keys to
+  `0.3.4` with its exact core `0.9.1` edge. Registry publication proves artifact
+  identity only; it does not authorize deployment, production migration,
+  downstream pinning, secret changes, or live rollout.
+
+## 0.9.0 / @byok-sdk/keys 0.3.3 — 2026-08-28
+
+Agent-initiated message egress and long-term Agent memory.
+
+- Added a distinct Agent-authored message lane with content-only runtime tools,
+  exact tenant/device/task/Agent/session binding, durable local replay, hosted
+  product-consumer disposition, and required-message completion gating. Message
+  content does not become activity or terminal-result authority.
+- Added SDK-owned `memory.recall` / `memory.save` MCP tools over the canonical
+  Agent-home `MEMORY.md` and `notes/` authority, with revision CAS, atomic
+  mutation, bounded audit/outbox state, secure native/helper filesystem
+  admission, and optional one-way redacted hosted projection. Migration `0014`
+  adds the bounded projection head, replay sequence, metering receipt, and
+  server-side erase authority.
+- Published the nine-package aligned dispatch train at `0.9.0` and keys at
+  `0.3.3` with its exact core edge. Registry publication proves artifact
+  identity only; it does not authorize deployment, production migration,
+  downstream pinning, secret changes, or live rollout.
+
 ## 0.8.1 / @byok-sdk/keys 0.3.2 — 2026-08-24
 
 Agent-home exact-replay repair and credential-blind enrollment status.

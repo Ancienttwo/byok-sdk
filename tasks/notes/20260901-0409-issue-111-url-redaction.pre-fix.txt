@@ -1,0 +1,19 @@
+regression_guard=packages/client/src/__tests__/url.test.ts
+command=bun run --cwd packages/client test -- src/__tests__/url.test.ts
+
+Test Files  1 failed (1)
+Tests       3 failed | 29 passed (32)
+
+plaintext remote failure:
+Expected redacted endpoint http://example.com/control.
+Received raw URL containing alice, password-sentinel, query-sentinel, and fragment-sentinel.
+
+unsupported scheme failure:
+Expected redacted endpoint ftp://example.com/archive.
+Received raw URL containing all credential sentinels.
+
+malformed URL failure:
+Expected "invalid server URL".
+Received the complete malformed credential-bearing input plus parser error.
+
+PRE_FIX_EXIT=1

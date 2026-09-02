@@ -24,11 +24,19 @@ import { withoutProviderCredentials } from '../provider-credential-environment';
 import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
 import { isRoutineCodexEvent, mapCodexEventToAgentEvents, unmappedFrameKey } from './events';
 import { CodexProcessRunner, type CodexRawEvent, type SpawnFn } from './process-runner';
+import {
+  grantFingerprint,
+  resolveMcpToolsetGrants,
+  resolveReservedMcpToolGrants,
+  type McpToolsetGrant,
+} from '../mcp-tool-grants';
 
 const execFileAsync = promisify(execFile);
 
 /** Applied to both `detect()` probe calls — both are local-only and empirically fast (~50-80ms each), but detect() runs on every allowlist-narrowed task offer (see task-runner.ts's `pickAdapter`), so a small ceiling is cheap insurance against either ever unexpectedly hanging. */
 const DETECT_TIMEOUT_MS = 5000;
+const RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS = 5000;
+const MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION = [0, 149, 0] as const;
 
 export interface CodexAdapterOptions {
   /** Override bin resolution — tests substitute the fake-codex fixture script. */
@@ -83,6 +91,11 @@ export class CodexAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
+    // `mcp_servers.<name>.enabled_tools` plus a per-tool `approval_mode`
+    // names each projected toolset tool explicitly, so this adapter cannot
+    // admit a projected server without the daemon's own `tools/list`
+    // observation of it.
+    requiresMcpToolsetToolObservation: true,
     capabilities: {
       steer: false,
       resume: true,
@@ -158,10 +171,34 @@ export class CodexAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
     }
+    // Every pre-granted MCP server this task projects needs the same 0.149
+    // per-tool approval contract: SDK-reserved helpers use their static
+    // protocol tool list; host toolsets use exactly the daemon observation.
+    // One version gate, then one exact read-back per server.
+    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools);
+    if (!toolsetGrants.ok) {
+      return { kind: 'reject', reason: `codex adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
+    }
+    const reservedGrants = resolveReservedMcpToolGrants(input.mcpServers);
+    const allGrants = Object.freeze([...reservedGrants, ...toolsetGrants.grants]);
+    if (allGrants.length > 0) {
+      try {
+        await requireCodexPerToolApprovalSupport(command);
+        for (const grant of allGrants) {
+          await probeCodexMcpToolApproval(command, grant.server, input.mcpServers![grant.server]!, grant.tools);
+        }
+      } catch (error) {
+        return {
+          kind: 'reject',
+          reason: `codex MCP tool approval preflight failed: ${error instanceof Error ? error.message : String(error)}`,
+          retryable: false,
+        };
+      }
+    }
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command),
+        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command, toolsetGrants.grants, allGrants),
       },
     };
   }
@@ -171,7 +208,21 @@ export class CodexAdapter implements RuntimeAdapter {
     policyArgs: readonly string[],
     modelId: string | undefined,
     command: string,
+    preparedToolsetGrants: readonly McpToolsetGrant[],
+    preparedMcpGrants: readonly McpToolsetGrant[],
   ): Promise<Session> {
+    // Same fail-closed re-check the model selection below gets: the grants
+    // were probed against the ADMISSION input, so start() may not arrive with
+    // different MCP authority or a different tool observation.
+    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools);
+    if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(preparedToolsetGrants)) {
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: 'authority',
+        retry: 'non-retryable',
+        reason: 'prepared codex operation received different MCP toolset tool authority than it was admitted with',
+      });
+    }
     if (typeof startInput.instruction !== 'string') {
       throw new RuntimeExecutionFailure({
         phase: 'start',
@@ -230,12 +281,22 @@ export class CodexAdapter implements RuntimeAdapter {
         reason: 'prepared codex operation received a manifest with different runtime selection',
       });
     }
+    // Computed ONCE, from this operation's frozen start input, and carried on
+    // the session for every later `codex exec resume` turn (see
+    // `CodexSession.mcpConfigArgs`). A resume spawns a brand new codex
+    // process that inherits none of the first turn's `-c` overrides, so
+    // re-passing exactly these bytes is what keeps the reserved message
+    // server and the projected toolset grants alive past turn one. Never
+    // recomputed later: `preparedMcpGrants` was probed at admission and
+    // `startInput.mcpServers` is the sealed authority for this operation, so
+    // a second computation could only widen or drift.
+    const mcpConfigArgs = codexMcpConfigArgs(startInput.mcpServers, preparedMcpGrants);
     const { sessionRef, runner } = await runCodexTurn({
       command,
       resumeRef: startInput.manifest.sessionRef,
       instruction: startInput.instruction,
       modelId: manifestModelId,
-      policyArgs: [...policyArgs, ...codexMcpConfigArgs(startInput.mcpServers)],
+      policyArgs: [...policyArgs, ...mcpConfigArgs],
       cwd: manifestCwd,
       env: runtimeEnv,
       spawnFn: this.options.spawnFn,
@@ -260,6 +321,7 @@ export class CodexAdapter implements RuntimeAdapter {
       preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
       modelId: manifestModelId,
       terminal,
+      mcpConfigArgs,
     });
   }
 
@@ -268,8 +330,90 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 }
 
-function codexMcpConfigArgs(servers: RuntimeOperationStartInput['mcpServers']): string[] {
+/**
+ * `approval_policy=never` (pinned on every invocation, see
+ * `permission-mapping.ts`) makes codex refuse EVERY MCP tool call outright —
+ * "MCP tool call requires approval, but approval policy is never" — no matter
+ * which sandbox mode is in effect. Codex 0.149's per-tool
+ * `mcp_servers.<name>.tools.<tool>.approval_mode="approve"`, paired with an
+ * exact `enabled_tools` allowlist, is the one narrow control that lifts that
+ * refusal for named tools while leaving the global policy alone
+ * (`mcp_servers.<name>.default_tools_approval_mode="auto"` is read back by
+ * `codex mcp get` but was empirically ineffective under
+ * `approval_policy=never`, so it is never used).
+ *
+ * Both the version gate and read-back apply identically to SDK-reserved
+ * helpers and projected host toolsets. Reserved names come from their helper
+ * protocol constants; projected names come from the daemon's `tools/list`.
+ */
+async function requireCodexPerToolApprovalSupport(command: string): Promise<void> {
+  const versionResult = await execFileAsync(command, ['--version'], { timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS });
+  const versionText = `${versionResult.stdout}\n${versionResult.stderr}`.trim();
+  const versionMatch = /codex-cli\s+(\d+)\.(\d+)\.(\d+)/u.exec(versionText);
+  if (versionMatch === null) throw new Error(`unrecognized Codex version: ${versionText || '(empty)'}`);
+  const version = versionMatch.slice(1, 4).map(Number);
+  for (let index = 0; index < MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION.length; index += 1) {
+    if (version[index]! > MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION[index]!) break;
+    if (version[index]! < MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION[index]!) {
+      throw new Error(`Codex ${version.slice(0, 3).join('.')} lacks the required per-MCP-tool approval contract`);
+    }
+  }
+}
+
+/** Prove this codex reads back the exact per-tool allowlist this adapter is about to pass for one server. */
+async function probeCodexMcpToolApproval(
+  command: string,
+  name: string,
+  server: NonNullable<RuntimeAdapterPrepareInput['mcpServers']>[string],
+  tools: readonly string[],
+): Promise<void> {
+  // NOT `--ignore-user-config`, deliberately: the real turn is launched with
+  // that flag (`codexMcpConfigArgs`), but `codex mcp get` does not accept it —
+  // codex-cli 0.149.0 answers `error: unexpected argument '--ignore-user-config'
+  // found` whether it is placed before or after the subcommand (`codex mcp get
+  // --help` lists only `-c/--config`, `--json`, `--enable`, `--disable`). The
+  // read-back therefore resolves `~/.codex/config.toml` on top of the `-c`
+  // overrides below, so it validates a slightly wider configuration than the
+  // one that actually runs. The `-c` overrides pin every key this grant
+  // depends on (command, `enabled_tools`, per-tool `approval_mode`), so a
+  // user-level entry cannot weaken the assertion; it could only add keys the
+  // real run would drop. Closing that last gap needs an isolated `CODEX_HOME`
+  // for the probe — a filesystem side effect in `prepare()` — and is not
+  // taken here.
+  const probeArgs = [
+    'mcp', 'get', name, '--json',
+    '-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`,
+    ...codexMcpToolApprovalArgs(name, tools),
+  ];
+  const result = await execFileAsync(command, probeArgs, { timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS });
+  const parsed = JSON.parse(result.stdout) as { name?: unknown; enabled?: unknown; enabled_tools?: unknown };
+  const readBack = Array.isArray(parsed.enabled_tools) ? parsed.enabled_tools : undefined;
+  if (
+    parsed.name !== name
+    || parsed.enabled !== true
+    || readBack === undefined
+    || readBack.length !== tools.length
+    || readBack.some((tool, index) => tool !== tools[index])
+  ) {
+    throw new Error(`Codex did not read back the exact tool allowlist for MCP server "${name}"`);
+  }
+}
+
+/** The one-server grant pair: an exact tool allowlist, and per-tool approval for exactly those tools. */
+function codexMcpToolApprovalArgs(name: string, tools: readonly string[]): string[] {
+  const args = ['-c', `mcp_servers.${name}.enabled_tools=${JSON.stringify([...tools])}`];
+  for (const tool of tools) {
+    args.push('-c', `mcp_servers.${name}.tools.${tool}.approval_mode="approve"`);
+  }
+  return args;
+}
+
+function codexMcpConfigArgs(
+  servers: RuntimeOperationStartInput['mcpServers'],
+  grants: readonly McpToolsetGrant[] = [],
+): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
+  const grantedTools = new Map(grants.map((grant) => [grant.server, grant.tools] as const));
   const args = ['--ignore-user-config'];
   for (const [name, server] of Object.entries(servers).sort(([left], [right]) => left.localeCompare(right))) {
     args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`);
@@ -277,6 +421,8 @@ function codexMcpConfigArgs(servers: RuntimeOperationStartInput['mcpServers']): 
     for (const [key, value] of Object.entries(server.env ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
       args.push('-c', `mcp_servers.${name}.env.${key}=${JSON.stringify(value)}`);
     }
+    const granted = grantedTools.get(name);
+    if (granted !== undefined) args.push(...codexMcpToolApprovalArgs(name, granted));
   }
   return args;
 }
@@ -601,6 +747,12 @@ interface CodexSessionOptions {
   preparedGit: boolean;
   modelId: string | undefined;
   terminal: RuntimeTurnTerminal;
+  /**
+   * The exact MCP config argv the FIRST turn was launched with, computed once
+   * in `startPrepared` from that operation's frozen start input. Replayed
+   * byte-for-byte on every resume.
+   */
+  mcpConfigArgs: readonly string[];
 }
 
 class CodexSession implements Session {
@@ -626,6 +778,19 @@ class CodexSession implements Session {
   private readonly recordUnmapped: (key: string) => void;
   private readonly preparedGit: boolean;
   private readonly modelId: string | undefined;
+  /**
+   * A resume spawns a BRAND NEW codex process, which inherits none of the
+   * first turn's `-c` overrides — exactly the same reason `followUp()`
+   * re-maps the permission policy on every call. Without replaying these
+   * bytes, `--ignore-user-config` and every `mcp_servers.*` key (command,
+   * args, env, `enabled_tools`, per-tool `approval_mode`) would silently
+   * vanish after turn one: the reserved message server and any projected
+   * toolset would stop existing, and any surviving tool call would be
+   * refused outright under `approval_policy=never`. Frozen at start; never
+   * recomputed from anything a later turn supplies, so a follow-up can never
+   * widen this session's MCP authority.
+   */
+  private readonly mcpConfigArgs: readonly string[];
   private terminal: RuntimeTurnTerminal;
   private currentRunner: CodexProcessRunner | undefined;
   private readonly ownedRunners = new Set<CodexProcessRunner>();
@@ -644,6 +809,7 @@ class CodexSession implements Session {
     this.preparedGit = options.preparedGit;
     this.modelId = options.modelId;
     this.terminal = options.terminal;
+    this.mcpConfigArgs = options.mcpConfigArgs;
     this.currentRunner = options.initialRunner;
     this.ownedRunners.add(options.initialRunner);
     void this.forgetRunnerOnceClosed(options.initialRunner);
@@ -761,7 +927,9 @@ class CodexSession implements Session {
         resumeRef,
         instruction: task.instruction,
         modelId,
-        policyArgs: mapping.args,
+        // Freshly re-mapped policy for THIS turn, plus the start turn's
+        // frozen MCP config replayed verbatim — see `mcpConfigArgs`.
+        policyArgs: [...mapping.args, ...this.mcpConfigArgs],
         cwd: this.workspaceDir,
         env: withoutProviderCredentials(this.env),
         spawnFn: this.spawnFn,

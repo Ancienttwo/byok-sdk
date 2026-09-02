@@ -186,6 +186,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       policy: TaskOfferPayload['policy'];
       env: NodeJS.ProcessEnv;
       mcpServers?: RuntimeOperationStartInput['mcpServers'];
+      mcpToolsetTools?: RuntimeOperationStartInput['mcpToolsetTools'];
       gitWorkspace?: { workspaceId: string; baseline?: string };
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
     };
@@ -206,16 +207,24 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
    * claude-like stub, or a pi/codex-like stub that can't express
    * `confirm`/`plan`) for `TaskRunner.pickAdapter`'s capability-match gate
    * without needing the real bundled adapters + fake-CLI fixtures.
+   *
+   * `requiresMcpToolsetToolObservation` (4th param) defaults to `true` — the
+   * claude/codex shape, where the daemon must observe each projected server's
+   * tools before admission. Pass `false` for a pi-shaped stub that projects
+   * toolsets but grants their tools itself and must therefore never make an
+   * offer wait on a `tools/list` probe.
    */
   constructor(
     id = 'stub',
     detectResult: RuntimeDetectResult = { present: true, version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
+    requiresMcpToolsetToolObservation = true,
   ) {
     this.detectResult = detectResult;
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id,
       supportsDispatchSelection: true,
+      requiresMcpToolsetToolObservation,
       capabilities,
       environmentRequirements: { credentialNames: [] },
     });
@@ -262,6 +271,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
         policy: startInput.manifest.policy,
         env: startInput.env,
         ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
+        ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
         ...(startInput.manifest.workspace.workspaceId === undefined
           ? {}
           : { gitWorkspace: { workspaceId: startInput.manifest.workspace.workspaceId, baseline: startInput.manifest.workspace.baseline } }),

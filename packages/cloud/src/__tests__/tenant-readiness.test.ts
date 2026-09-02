@@ -76,7 +76,9 @@ describe('SDK-owned tenant readiness projection', () => {
     expect(await harness.cloud.readTenantReadiness(TENANT_A)).toMatchObject({
       tenantId: TENANT_A,
       activePairedDeviceCount: 5,
-      revokedDeviceCount: 1,
+      // Structurally zero: revocation deleted the row, so there is nothing
+      // left to count as revoked and nothing left to project presence for.
+      revokedDeviceCount: 0,
       observedPresenceCount: 5,
       observedPresenceByLevel: {
         online: 1,
@@ -102,14 +104,17 @@ describe('SDK-owned tenant readiness projection', () => {
             expiresAt: '2026-01-01T00:01:00.000Z',
           },
         },
-        {
-          deviceId: residual.deviceId,
-          productId: 'test-product',
-          deviceName: 'test-device',
-          revoked: true,
-        },
       ]),
     );
+    // The revoked device is not "listed as revoked" — it is not listed. Its
+    // presence hint was published and is still unexpired, and it contributes
+    // to nothing, because the durable row it hung off is gone.
+    const afterRevoke = await harness.cloud.readTenantReadiness(TENANT_A);
+    expect(afterRevoke.devices).toHaveLength(5);
+    expect(afterRevoke.devices.map((device) => device.deviceId)).not.toContain(residual.deviceId);
+    expect(afterRevoke.devices.every((device) => !device.revoked)).toBe(true);
+    expect(await harness.stores.devices.get(TENANT_A, residual.deviceId)).toBeUndefined();
+    expect(await harness.stores.devices.list(TENANT_A)).toHaveLength(5);
     const onlinePresence = (await harness.cloud.readTenantReadiness(TENANT_A)).devices.find(
       (device) => device.deviceId === online.deviceId,
     )?.presence;
@@ -128,17 +133,15 @@ describe('SDK-owned tenant readiness projection', () => {
     clock.advance(60_000);
     expect(await harness.cloud.readTenantReadiness(TENANT_A)).toMatchObject({
       activePairedDeviceCount: 5,
-      revokedDeviceCount: 1,
+      revokedDeviceCount: 0,
       observedPresenceCount: 0,
     });
     const expired = await harness.cloud.readTenantReadiness(TENANT_A);
-    expect(expired.devices).toHaveLength(6);
+    expect(expired.devices).toHaveLength(5);
     const expiredActive = expired.devices.find((device) => device.deviceId === active.deviceId);
-    const expiredRevoked = expired.devices.find((device) => device.deviceId === residual.deviceId);
     expect(expiredActive).toMatchObject({ deviceId: active.deviceId, revoked: false });
-    expect(expiredRevoked).toMatchObject({ deviceId: residual.deviceId, revoked: true });
     expect(expiredActive).not.toHaveProperty('presence');
-    expect(expiredRevoked).not.toHaveProperty('presence');
+    expect(expired.devices.find((device) => device.deviceId === residual.deviceId)).toBeUndefined();
     expect(await harness.cloud.readTenantReadiness(TENANT_B)).toMatchObject({
       activePairedDeviceCount: 1,
       revokedDeviceCount: 0,

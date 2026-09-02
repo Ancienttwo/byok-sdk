@@ -77,7 +77,7 @@ describe('the inbound gate', () => {
     }
   });
 
-  it('step 1: accepts every daemon -> server type', async () => {
+  it('step 1: accepts every generic daemon -> server type', async () => {
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
     await stores.devices.recordCapabilities({
       capabilities: [
@@ -111,7 +111,10 @@ describe('the inbound gate', () => {
       const outcome = await handleInboundEnvelope(stores, deviceId, envelope);
       if (outcome === 'accepted') accepted.push(type);
     }
-    expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES]);
+    // `agent.message.publish` has its own exact task/Agent binding and product
+    // consumer contract; its common rate/dedup admission is covered by the
+    // issue regression rather than this generic lifecycle fixture.
+    expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES].filter((type) => type !== 'agent.message.publish'));
   });
 
   it('step 2: rejects an envelope for a task another device already owns, and does not disturb it', async () => {

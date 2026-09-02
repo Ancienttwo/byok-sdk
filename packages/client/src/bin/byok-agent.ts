@@ -20,6 +20,7 @@ import { runStatusCommand } from './commands/status';
 import { runSupportBundleCommand } from './commands/support-bundle';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
 import { runToolsetsReloadCommand } from './commands/toolsets';
+import { runTeamCreateCommand, runTeamJoinCommand, runTeamListCommand, runTeamOpenCommand, runTeamWatchCommand } from './commands/team';
 import { runUnpairCommand } from './commands/unpair';
 import { runWorkspacesCommand } from './commands/workspaces';
 import { runVersionCommand } from './version';
@@ -126,6 +127,11 @@ function usage(): never {
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
       '  byok-agent toolsets reload --config <path>',
+      '  byok-agent team list --config <path>',
+      '  byok-agent team create <workspace> --members <id,id> --config <path>',
+      '  byok-agent team join <workspace> --member <id> --config <path>   (prints MCP config)',
+      '  byok-agent team watch <workspace> --config <path>',
+      '  byok-agent team open <workspace> --tmux-bin <absolute> [--session <name>] --config <path>',
       '  byok-agent workspaces [--show-paths] [--config <path>]',
       '  byok-agent unpair [--yes] [--force] [--config <path>]',
       '  byok-agent approvals [--config <path>]                    (list pending approvalIds — see approve/reject below)',
@@ -227,6 +233,31 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     return runToolsetsReloadCommand(loadConfig(configPath));
+  }
+
+  if (command === 'team') {
+    const [action, workspaceId, ...extra] = positionalArgs(rest, ['--members', '--member', '--tmux-bin', '--session', '--config']);
+    if (extra.length > 0) usage();
+    const configPath = configPathFrom(rest);
+    if (!configPath) { console.error('team commands require --config <path> or a BYOK_CONFIG env var'); process.exit(1); }
+    const config = loadConfig(configPath);
+    if (action === 'list' && workspaceId === undefined) return runTeamListCommand(config);
+    if (!workspaceId) usage();
+    if (action === 'create') {
+      const members = argValue(rest, '--members')?.split(',').filter(Boolean);
+      if (!members?.length) usage();
+      return runTeamCreateCommand(config, workspaceId, members);
+    }
+    if (action === 'join') {
+      const memberId = argValue(rest, '--member'); if (!memberId) usage();
+      return runTeamJoinCommand(config, workspaceId, memberId);
+    }
+    if (action === 'watch') { const controller = abortOnSignal(); return runTeamWatchCommand(config, workspaceId, controller.signal); }
+    if (action === 'open') {
+      const tmuxBin = argValue(rest, '--tmux-bin'); if (!tmuxBin) usage();
+      return runTeamOpenCommand({ config, configPath, workspaceId, tmuxBin, sessionName: argValue(rest, '--session') });
+    }
+    usage();
   }
 
   if (command === 'workspaces') {

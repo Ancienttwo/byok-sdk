@@ -2,12 +2,17 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
+import { AGENT_MEMORY_PROJECTION_CAPABILITY } from '@byok-sdk/protocol';
+
 import {
   AGENT_MEMORY_AUDIT_FILENAME,
+  AGENT_MEMORY_OUTBOX_FILENAME,
   AgentMemoryError,
   AgentMemoryRevisionConflictError,
   AgentMemoryService,
   captureAgentMemorySnapshot,
+  snapshotAndProjectAgentMemory,
+  type AgentMemoryProjectionPort,
   type AgentMemoryTaskContext,
 } from '../daemon/agent-memory';
 import type {
@@ -16,6 +21,7 @@ import type {
 } from '../daemon/agent-memory-filesystem';
 
 const AUDIT_PATH = `.byok/${AGENT_MEMORY_AUDIT_FILENAME}`;
+const OUTBOX_PATH = `.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`;
 
 function revision(content: string): string {
   return `sha256:${createHash('sha256').update(content).digest('hex')}`;
@@ -35,6 +41,8 @@ class AuditRaceFilesystem implements AgentMemoryFilesystem {
   readonly files = new Map<string, string>([['MEMORY.md', 'durable memory']]);
   activeAuditReads = 0;
   maxConcurrentAuditReads = 0;
+  activeOutboxReads = 0;
+  maxConcurrentOutboxReads = 0;
 
   constructor(private readonly failAuditReplace = false) {}
 
@@ -42,6 +50,19 @@ class AuditRaceFilesystem implements AgentMemoryFilesystem {
     const value = this.files.get(filePath);
     if (value !== undefined && Buffer.byteLength(value, 'utf8') > maxBytes) {
       throw new AgentMemoryError('memory file is not a bounded regular file');
+    }
+    if (filePath === OUTBOX_PATH) {
+      this.activeOutboxReads += 1;
+      this.maxConcurrentOutboxReads = Math.max(this.maxConcurrentOutboxReads, this.activeOutboxReads);
+      try {
+        // Force same-home close paths to overlap at the outbox CAS read. A
+        // per-instance write tail cannot serialize two independently opened
+        // outboxes; the transaction-level home gate must prevent this overlap.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        return state(this.files.get(filePath));
+      } finally {
+        this.activeOutboxReads -= 1;
+      }
     }
     if (filePath !== AUDIT_PATH) return state(value);
 
@@ -159,6 +180,34 @@ describe('Agent memory metadata-only audit concurrency P1 regression', () => {
     expect(snapshot.files).toHaveLength(1);
     expect(filesystem.maxConcurrentAuditReads).toBe(1);
     expect(auditEntries(filesystem).map((entry) => entry.kind).sort()).toEqual(['recall', 'snapshot']);
+  });
+
+  it('serializes concurrent session-close projection transactions for the same Agent home', async () => {
+    const filesystem = new AuditRaceFilesystem();
+    const published: Array<{ taskId: string; sourceSeq: number }> = [];
+    const projection = {
+      capability: AGENT_MEMORY_PROJECTION_CAPABILITY,
+      grant: { grantRef: 'grant-projection-race', writerEpoch: 1, policyRevision: 'policy-projection-race' },
+      redactor: { redact: () => new TextEncoder().encode('{"summary":"redacted"}') },
+      port: {
+        publish: async ({ mutation }: Parameters<AgentMemoryProjectionPort['publish']>[0]) => {
+          published.push({ taskId: mutation.taskId, sourceSeq: mutation.sourceSeq });
+          return { accepted: true };
+        },
+      },
+    } as const;
+
+    const results = await Promise.allSettled([
+      snapshotAndProjectAgentMemory(context(filesystem, 'projection-a'), projection),
+      snapshotAndProjectAgentMemory(context(filesystem, 'projection-b'), projection),
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(filesystem.maxConcurrentOutboxReads).toBe(1);
+    expect(published).toEqual([
+      { taskId: 'task-audit-projection-a', sourceSeq: 1 },
+      { taskId: 'task-audit-projection-b', sourceSeq: 2 },
+    ]);
   });
 
   it('returns recalled source content with a metadata-only warning when audit persistence fails', async () => {

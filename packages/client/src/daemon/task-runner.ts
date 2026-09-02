@@ -43,7 +43,7 @@ import {
   AgentHomeBusyError,
   AgentHomeResolutionError,
   AgentHomeManager,
-  type AgentHomeBinding,
+  type AgentHomeExecutionBinding,
   type AgentRef,
   validateAgentRef,
 } from '../agent-home';
@@ -75,7 +75,13 @@ import { prependGitWorkspaceGuidance } from './git-workspace';
 import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
-import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME } from './toolset-registry';
+import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
+import {
+  McpToolsProbeAuthorityError,
+  MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
+  probeMcpServerTools,
+  type McpToolsProbeOptions,
+} from './mcp-tools-probe';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { prependAgentMemoryGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
@@ -482,6 +488,29 @@ export interface TaskRunnerDeps {
   resultDocument?: { readonly extract: ResultDocumentExtractor };
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
+  /**
+   * Production pre-runtime executability/handshake gate for the exact message
+   * helper config. `env` is the same allowlisted child environment the runtime
+   * gets (`buildRuntimeEnv`), and `cwd` the same working directory, so the
+   * helper is proved under the conditions it will actually run in.
+   */
+  agentMessageMcpPreflight?: (
+    server: Readonly<McpStdioServerConfig>,
+    env: Readonly<Record<string, string>>,
+    cwd?: string,
+  ) => Promise<void>;
+  /**
+   * Override the `tools/list` observation of a projected toolset MCP server.
+   * Defaults to the real handshake (`mcp-tools-probe.ts`); tests substitute a
+   * stub. It is deliberately NOT optional-with-no-default the way
+   * `agentMessageMcpPreflight` is: an adapter may only grant tool names that
+   * were observed, so a runner with no observation at all would silently
+   * project toolsets the model can list and never call.
+   */
+  mcpToolsetToolsProbe?: (
+    server: Readonly<McpStdioServerConfig>,
+    options: McpToolsProbeOptions,
+  ) => Promise<readonly string[]>;
   /** SDK-owned MCP helper injected only into strict Agent tasks. */
   agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
@@ -497,12 +526,14 @@ export type AdmissionGuardDecision =
 
 interface ActiveTask {
   taskId: string;
+  /** Cancels every blob transfer owned by this task before its terminal path runs. */
+  blobAbort: AbortController;
   /** True only for the distinct task.offer_for_agent_with_egress contract. */
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
   session: Session;
   workspaceDir: string;
-  agentBinding?: AgentHomeBinding;
+  agentBinding?: AgentHomeExecutionBinding;
   agentRef?: AgentRef;
   agentHandoff?: {
     sessionRef: string;
@@ -518,6 +549,23 @@ interface ActiveTask {
   gitBaseline?: string;
   batcher: ProgressBatcher;
   summaryParts: string[];
+  /**
+   * The FINAL text run only: every `progress` text emitted after the last
+   * tool interaction (`tool_use` / `tool_result` / `needs_approval`), which
+   * reset it. `summaryParts` above stays the whole run's concatenation and
+   * remains what `task.complete.summary` carries; this narrower slice is
+   * what the DAEMON-authored required Agent message publishes, so the
+   * user-visible reply is the model's closing answer rather than its
+   * intermediate narration ("let me read X first…") glued in front of it.
+   *
+   * `turn_end` deliberately does not reset (it is what reads this), and
+   * neither does `usage`: bundled adapters emit terminal usage IMMEDIATELY
+   * BEFORE `turn_end` (see `claude/events.ts` — "Ordering is load-bearing"),
+   * so resetting on it would discard every closing reply. `artifact` does
+   * not reset either — it is a content side effect, not a tool interaction
+   * the model narrates around.
+   */
+  finalTextParts: string[];
   /**
    * M4 Phase 3: the `ApprovalRegistry` id of the single out-of-band approval
    * currently DISPATCHED (registered + `task.await_approval` sent) for this
@@ -590,7 +638,7 @@ interface PendingMessageTask {
 }
 
 interface ClaimedAgentFailureContext {
-  readonly binding: AgentHomeBinding;
+  readonly binding: AgentHomeExecutionBinding;
   readonly runtimeId: string;
   readonly sessionRef?: string;
 }
@@ -934,6 +982,7 @@ async function openArtifact(workspaceDir: string, name: string): Promise<OpenArt
 export class TaskRunner {
   private readonly tasks = new Map<string, ActiveTask>();
   private readonly pendingMessageTasks = new Map<string, PendingMessageTask>();
+  private readonly messageOutboxesByHome = new Map<string, Promise<AgentMessageOutbox>>();
   private readonly messageContextByToken = new Map<string, string>();
   private readonly messageContextByTask = new Map<string, string>();
   private readonly memoryContextByToken = new Map<string, { readonly taskId: string; readonly agentRef: AgentRef }>();
@@ -994,6 +1043,8 @@ export class TaskRunner {
    * costs nothing.
    */
   private readonly inFlightOffers = new Set<string>();
+  /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
+  private readonly inFlightBlobAborts = new Map<string, AbortController>();
   /**
    * Finding P2 (Fix 2c): taskIds that have reached a terminal outcome
    * (Complete/Failed/Cancelled) this session — populated in `finish()`.
@@ -1136,6 +1187,7 @@ export class TaskRunner {
   async recoverAgentMessageOutboxes(agentsRoot: string): Promise<void> {
     if (this.deps.tenantId === undefined) throw new Error('Agent message recovery requires authenticated tenant enrollment');
     for (const outbox of await AgentMessageOutbox.recover(agentsRoot, this.deps.tenantId)) {
+      this.messageOutboxesByHome.set(outbox.homeDir, Promise.resolve(outbox));
       for (const record of outbox.retryableRecords()) {
         if (record.sessionRef === undefined) continue;
         const existing = this.recoveredMessageOutboxes.get(record.taskId);
@@ -1143,6 +1195,17 @@ export class TaskRunner {
         this.recoveredMessageOutboxes.set(record.taskId, outbox);
       }
     }
+  }
+
+  private agentMessageOutbox(homeDir: string): Promise<AgentMessageOutbox> {
+    const existing = this.messageOutboxesByHome.get(homeDir);
+    if (existing !== undefined) return existing;
+    const opened = AgentMessageOutbox.open(homeDir);
+    this.messageOutboxesByHome.set(homeDir, opened);
+    void opened.catch(() => {
+      if (this.messageOutboxesByHome.get(homeDir) === opened) this.messageOutboxesByHome.delete(homeDir);
+    });
+    return opened;
   }
 
   /** Retry stable recovered records after a transport handshake/re-handshake. */
@@ -1307,6 +1370,7 @@ export class TaskRunner {
     // A soft interrupt may end the event stream; mark it as runner-initiated
     // before crossing that boundary.
     active.beingTornDown = true;
+    active.blobAbort.abort();
     await this.observeGit(active, 'salvage');
     const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
     await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
@@ -1480,7 +1544,9 @@ export class TaskRunner {
     // exit path (decline, fail, the checkpoint-2 cancel-teardown, or
     // successful registration) — never leaked past this one call.
     this.inFlightOffers.add(taskId);
-    let agentBinding: AgentHomeBinding | undefined;
+    const blobAbort = new AbortController();
+    this.inFlightBlobAborts.set(taskId, blobAbort);
+    let agentBinding: AgentHomeExecutionBinding | undefined;
     let agentLeaseTransferred = false;
     try {
       // Finding F4, checkpoint 1 ("before claim where possible -> decline
@@ -1610,11 +1676,55 @@ export class TaskRunner {
         decline(pick.reason, pick.retryable);
         return;
       }
+      // The environment EVERY child process of this task receives. Computed
+      // here, before admission, because the admission-time MCP probes below
+      // spawn host-configured commands too: handing them `process.env` would
+      // make the probe the one path where the daemon's own ambient
+      // credentials reach a server the runtime path itself filters out (see
+      // `./environment.ts`). One computation, one allowlist, both phases.
+      const env = buildRuntimeEnv({
+        ambient: process.env,
+        requirements: pick.descriptor.environmentRequirements,
+        locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
+      });
       let taskMcpServers = this.withAgentMessageMcp(
         resolvedMcp?.ok ? resolvedMcp.servers : undefined,
         taskId,
         messageRequirement,
       );
+      // Only the adapters that pre-grant projected toolset tools need the
+      // daemon's `tools/list` observation (see
+      // `RuntimeAdapterDescriptor.requiresMcpToolsetToolObservation`). An
+      // adapter that grants them itself must not pay a probe per projected
+      // server on every offer.
+      const needsToolsetObservation = resolvedMcp?.ok === true
+        && pick.descriptor.requiresMcpToolsetToolObservation === true;
+      // Same cwd the runtime CLI itself is spawned in, so a probed server
+      // resolves relative paths exactly as it will at run time. Only the
+      // Agent-home case is knowable this early: a non-Agent task's workspace
+      // directory is created after admission, below.
+      let probeCwd: string | undefined;
+      const probesAnMcpServer = needsToolsetObservation
+        || (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
+      if (probesAnMcpServer && agentRef !== undefined && this.deps.agentHome !== undefined) {
+        try {
+          probeCwd = (await this.deps.agentHome.layout.resolve(agentRef)).canonicalHome;
+        } catch (error) {
+          decline(
+            `Agent home admission failed: ${errorMessage(error)}`,
+            !(error instanceof AgentHomeResolutionError),
+          );
+          return;
+        }
+      }
+      if (messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
+        try {
+          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, env, probeCwd);
+        } catch (error) {
+          decline(`required Agent message helper preflight failed: ${errorMessage(error)}`, false);
+          return;
+        }
+      }
       if (requiresAgentMemoryMcp && agentRef !== undefined) {
         try {
           taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef);
@@ -1622,6 +1732,58 @@ export class TaskRunner {
           decline(`Agent memory MCP configuration failed: ${errorMessage(error)}`, false);
           return;
         }
+      }
+      // Observe each projected toolset server's OWN tool list before the
+      // adapter is asked to admit the task. Both bundled runtimes refuse an
+      // MCP tool they were not told to allow, and the only honest source for
+      // those names is the server itself — device toolset configuration
+      // carries `command`/`args` and nothing more.
+      //
+      // All servers are probed CONCURRENTLY under one shared deadline
+      // (`MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS`, see its own doc comment):
+      // `handleOffer` holds this connection's FIFO, so a serial loop would
+      // multiply the timeout by the server count and let one unresponsive
+      // command delay `task.cancel`/`task.approve` for minutes. Every probe
+      // kills its own child when the deadline expires, so a decline never
+      // leaves a probed server running.
+      //
+      // Retryability follows the KIND of failure, not the phase: a spawn
+      // error, an early exit, or a timeout may well succeed later and stays
+      // retryable, exactly like the workspace-busy declines below. A server
+      // that answered and reported an ungrantable tool name has stated a
+      // permanent fact about itself — re-offering the task would probe the
+      // same command and get the same answer forever, so that declines
+      // non-retryably and names the server and the tool.
+      let mcpToolsetTools: Record<string, readonly string[]> | undefined;
+      if (needsToolsetObservation) {
+        const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServerTools;
+        const entries = Object.entries(resolvedMcp!.servers);
+        const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
+          const tools = await probe(server, {
+            label: `MCP toolset server "${serverName}"`,
+            timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
+            env,
+            ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
+          });
+          if (tools.length === 0) throw new Error('tools/list reported no tools');
+          return Object.freeze([...tools]) as readonly string[];
+        }));
+        const observed: Record<string, readonly string[]> = {};
+        let failure: { serverName: string; error: unknown } | undefined;
+        for (let index = 0; index < entries.length; index += 1) {
+          const serverName = entries[index]![0];
+          const result = settled[index]!;
+          if (result.status === 'fulfilled') observed[serverName] = result.value;
+          else if (failure === undefined) failure = { serverName, error: result.reason };
+        }
+        if (failure !== undefined) {
+          decline(
+            `required MCP toolset server "${failure.serverName}" could not be observed: ${errorMessage(failure.error)}`,
+            !(failure.error instanceof McpToolsProbeAuthorityError),
+          );
+          return;
+        }
+        mcpToolsetTools = Object.freeze(observed);
       }
       let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
       try {
@@ -1631,6 +1793,7 @@ export class TaskRunner {
           descriptor: pick.descriptor,
           requiredToolsetIds: requiredToolsets ?? [],
           ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
+          ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
         });
       } catch (error) {
         decline(`runtime preparation failed: ${errorMessage(error)}`, true);
@@ -1643,7 +1806,7 @@ export class TaskRunner {
 
       if (agentRef !== undefined) {
         try {
-          agentBinding = await this.deps.agentHome!.acquire(agentRef);
+          agentBinding = await this.deps.agentHome!.acquireExecution(agentRef, { taskId, sessionRef });
         } catch (error) {
           decline(
             `Agent home admission failed: ${errorMessage(error)}`,
@@ -1678,7 +1841,7 @@ export class TaskRunner {
           }
         }
         try {
-          await this.deps.agentHome!.initialize(agentBinding);
+          await this.deps.agentHome!.initializeExecution(agentBinding);
         } catch (error) {
           await agentBinding.lease.release().catch(() => {});
           agentBinding = undefined;
@@ -1687,7 +1850,7 @@ export class TaskRunner {
         }
         if (messageRequirement !== undefined) {
           try {
-            const outbox = await AgentMessageOutbox.open(agentBinding.resolution.canonicalHome);
+            const outbox = await this.agentMessageOutbox(agentBinding.resolution.canonicalHome);
             this.pendingMessageTasks.set(taskId, {
               taskId,
               agentRef: agentBinding.resolution.agentRef,
@@ -1746,11 +1909,9 @@ export class TaskRunner {
         return;
       }
 
-      const env = buildRuntimeEnv({
-        ambient: process.env,
-        requirements: pick.descriptor.environmentRequirements,
-        locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
-      });
+      // `env` was built before admission (see its declaration above) so the
+      // MCP probes and the runtime child are guaranteed to share one
+      // allowlist decision rather than two computations that could drift.
       const manifest = sealRuntimeOperationManifest({
         taskId,
         runtimeId: pick.descriptor.id,
@@ -1822,7 +1983,7 @@ export class TaskRunner {
       // Resolve the instruction blob after claim; workspace preparation follows.
       let resolvedInstruction: string;
       try {
-        resolvedInstruction = await this.resolveInstruction(payload.instruction);
+        resolvedInstruction = await this.resolveInstruction(payload.instruction, blobAbort.signal);
         if (plainWorkspaceNeedsResolve) workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
       } catch (err) {
         gitLease?.release();
@@ -1903,6 +2064,7 @@ export class TaskRunner {
           : prependAgentMemoryGuidance(resolvedInstruction),
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
+        ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,
@@ -1947,9 +2109,29 @@ export class TaskRunner {
         return;
       }
 
+      if (agentBinding !== undefined) {
+        try {
+          await agentBinding.lease.bindSession(session.sessionRef);
+        } catch (error) {
+          await session.close().catch(() => {});
+          await this.failClaimedAgent(
+            taskId,
+            `Agent session execution lease could not bind the runtime session: ${errorMessage(error)}`,
+            false,
+            {
+              binding: agentBinding,
+              runtimeId: pick.descriptor.id,
+              sessionRef: session.sessionRef,
+            },
+          );
+          return;
+        }
+      }
+
       let active!: ActiveTask;
       active = {
         taskId,
+        blobAbort,
         egressEnabled: 'egressPolicy' in payload,
         adapter: pick.adapter,
         session,
@@ -1967,6 +2149,7 @@ export class TaskRunner {
         gitLease,
         gitBaseline,
         summaryParts: [],
+        finalTextParts: [],
         batcher: new ProgressBatcher(
           (seq, events) => {
             const projected = active.egressEnabled
@@ -1996,15 +2179,17 @@ export class TaskRunner {
       // runtime session that has no durable exact-match receipt must never be
       // advertised as resumable.
       if (agentBinding !== undefined) {
+        const binding = agentBinding;
         try {
-          await this.deps.agentSessionHandoffs!.record({
-            agentRef: agentBinding.resolution.agentRef,
-            taskId,
-            sessionRef: session.sessionRef,
-            runtimeId: pick.descriptor.id,
-            cwd: workspaceDir,
-            leaseId: agentBinding.lease.leaseId,
-          });
+          await this.deps.agentHome!.mutateExecution(binding, () =>
+            this.deps.agentSessionHandoffs!.record({
+              agentRef: binding.resolution.agentRef,
+              taskId,
+              sessionRef: session.sessionRef,
+              runtimeId: pick.descriptor.id,
+              cwd: workspaceDir,
+              leaseId: binding.lease.leaseId,
+            }));
         } catch (error) {
           await session.close().catch(() => {});
           await this.failClaimedAgent(
@@ -2071,6 +2256,7 @@ export class TaskRunner {
       // exactly this: a cancel racing a task.offer lost its `interrupt()`/
       // `task.cancelled` entirely.
       agentLeaseTransferred = agentBinding !== undefined;
+      this.inFlightBlobAborts.delete(taskId);
       this.tasks.set(taskId, active);
       this.pendingMessageTasks.delete(taskId);
       if (active.messageOutbox !== undefined && activatedMessageRecord !== undefined) {
@@ -2112,6 +2298,7 @@ export class TaskRunner {
       if (agentBinding !== undefined && !agentLeaseTransferred) {
         await agentBinding.lease.release().catch(() => {});
       }
+      this.inFlightBlobAborts.delete(taskId);
       this.inFlightOffers.delete(taskId);
     }
   }
@@ -2300,9 +2487,9 @@ export class TaskRunner {
   }
 
   /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
-  private async resolveInstruction(instruction: TaskOfferPayload['instruction']): Promise<string> {
+  private async resolveInstruction(instruction: TaskOfferPayload['instruction'], signal: AbortSignal): Promise<string> {
     if (typeof instruction === 'string') return instruction;
-    return this.deps.blobClient.resolveInstruction(instruction.blobRef);
+    return this.deps.blobClient.resolveInstruction(instruction.blobRef, { signal });
   }
 
   /** Resolve every requested logical id locally and reject missing/colliding server authority before claim. */
@@ -2382,6 +2569,14 @@ export class TaskRunner {
           // before turn_end/error; a custom adapter that emits several keeps
           // only the latest actual observation rather than inventing a sum.
           active.lastUsage = event;
+        }
+
+        if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
+          // A tool interaction ends the current text run: whatever the model
+          // said before it was narration about what it was ABOUT to do, not
+          // its answer. See `ActiveTask.finalTextParts` for why `usage`,
+          // `artifact` and `turn_end` deliberately do not reset here.
+          active.finalTextParts.length = 0;
         }
 
         if (event.type === 'needs_approval') {
@@ -2482,9 +2677,87 @@ export class TaskRunner {
           await this.observeGit(active, 'completed');
           if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
           if (active.messageRequirement !== undefined && active.messageAccepted !== true) {
+            // A `messageEgress.mode:'required'` task completes only after an
+            // exact `accepted` disposition, so the completion is parked here
+            // and replayed by `handleAgentMessageDisposition`.
+            //
+            // Delivering the message is the DAEMON's obligation, not the
+            // model's. When the runtime called the injected
+            // `send_agent_message` MCP tool, that tool-authored draft is
+            // already the task's one immutable message and is sent
+            // unchanged. When it never called the tool there is no record,
+            // and waiting for one that can no longer arrive (the turn has
+            // ended) used to hang the task until `maxDurationMs`. Instead the
+            // daemon authors the message itself from the runtime's own final
+            // reply text — the assistant text emitted after the last tool
+            // interaction (`active.finalTextParts`), falling back to the whole
+            // run's text (`finalOutput`, which is also what `summary` carries)
+            // when the run ends on a tool call with no closing text — through
+            // the exact same outbox path `publishAgentMessage` uses, so the wire
+            // contract (immutable draft, session binding, byte cap, replay)
+            // is identical regardless of who authored it.
+            //
+            // Fail closed, never hang: an empty final output or a rejected
+            // draft (byte cap, quota, session mismatch) fails the task with a
+            // stated reason rather than silently waiting.
             active.pendingMessageCompletion = { finalOutput, ...(outcome.document === undefined ? {} : { document: outcome.document }) };
-            const record = active.messageOutbox?.get(active.taskId);
-            if (record !== undefined) this.sendAgentMessageRecord(active.messageOutbox!, record);
+            const outbox = active.messageOutbox;
+            const record = outbox?.get(active.taskId);
+            if (record !== undefined) {
+              this.sendAgentMessageRecord(outbox!, record);
+              return;
+            }
+            const finalTextRun = active.finalTextParts.join('').trim();
+            const body = finalTextRun !== '' ? finalTextRun : finalOutput.trim();
+            if (outbox === undefined || active.agentRef === undefined) {
+              // Invariant violation, not a runtime shortfall: a
+              // `messageEgress.mode:'required'` task cannot be admitted
+              // without both an outbox and a bound agent ref, so reaching
+              // here means the lane was torn down or never wired.
+              active.pendingMessageCompletion = undefined;
+              await this.fail(active.taskId, 'required Agent message lane is unavailable for this task', false);
+              return;
+            }
+            if (body === '') {
+              active.pendingMessageCompletion = undefined;
+              await this.fail(active.taskId, 'runtime produced no reply text for the required Agent message', false);
+              return;
+            }
+            try {
+              await outbox.appendDraft({
+                taskId: active.taskId,
+                tenantId: this.deps.tenantId!,
+                agentRef: active.agentRef,
+                requirement: active.messageRequirement,
+                contentType: active.messageRequirement.contentType,
+                body,
+                maxPendingEvents: 64,
+                maxPendingBytes: 4 * 1024 * 1024,
+              });
+              // A cancel/teardown landing during `appendDraft` must not be
+              // followed by an `activate`: an activated record is what
+              // restart recovery republishes, so the draft is left inert
+              // instead.
+              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+              const activated = await outbox.activate(active.taskId, active.session.sessionRef);
+              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+              if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
+              this.sendAgentMessageRecord(outbox, activated);
+            } catch (err) {
+              if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+              // A concurrent tool-authored `publishAgentMessage` can win the
+              // outbox lock while the daemon-authored draft is in flight —
+              // the append then rejects because the task already has its one
+              // immutable message. That is the contract working, not a
+              // delivery failure: send the record that won.
+              const raced = outbox.get(active.taskId);
+              if (raced !== undefined && raced.sessionRef !== undefined) {
+                this.sendAgentMessageRecord(outbox, raced);
+                return;
+              }
+              active.pendingMessageCompletion = undefined;
+              await this.fail(active.taskId, `failed to deliver the required Agent message: ${errorMessage(err)}`, false);
+            }
             return;
           }
           await this.publishSuccessfulCompletion(active, finalOutput, outcome.document);
@@ -2492,6 +2765,7 @@ export class TaskRunner {
         }
         if (event.type === 'progress') {
           active.summaryParts.push(event.text);
+          active.finalTextParts.push(event.text);
         }
         if (event.type === 'artifact') {
           if (active.agentRef !== undefined && this.deps.agentEgress !== undefined) {
@@ -2618,7 +2892,9 @@ export class TaskRunner {
     }
 
     try {
-      const blobRef: BlobRef = await this.deps.blobClient.uploadArtifact(bytes, contentType);
+      const blobRef: BlobRef = await this.deps.blobClient.uploadArtifact(bytes, contentType, {
+        signal: active.blobAbort.signal,
+      });
       this.deps.send(createEnvelope('task.artifact', { name, contentType, blobRef }, { taskId: active.taskId }));
     } catch (err) {
       this.reportArtifactError(active, name, `failed to upload artifact "${name}": ${errorMessage(err)}`);
@@ -2642,6 +2918,7 @@ export class TaskRunner {
       // identical in effect to the old silent-drop behavior for that case
       // (M3-B: except now bounded — see `setPendingCancelled`).
       this.setPendingCancelled(taskId, reason);
+      this.inFlightBlobAborts.get(taskId)?.abort();
       return;
     }
     if (active.finalizationStarted) {
@@ -2652,6 +2929,7 @@ export class TaskRunner {
       await active.semanticTerminalSettled;
       return;
     }
+    active.blobAbort.abort();
     try {
       await active.session.interrupt();
     } catch {
@@ -3288,15 +3566,16 @@ export class TaskRunner {
   ): Promise<boolean> {
     const agentRef = context.binding.resolution.agentRef;
     const result = await this.retryAgentTerminalEvidence(() =>
-      this.deps.agentSessionHandoffs!.recordTaskTerminal({
-        agentRef,
-        taskId,
-        runtimeId: context.runtimeId,
-        cwd: context.binding.lease.cwd,
-        leaseId: context.binding.lease.leaseId,
-        ...(context.sessionRef === undefined ? {} : { sessionRef: context.sessionRef }),
-        terminalReason: reason,
-      }),
+      this.deps.agentHome!.mutateExecution(context.binding, () =>
+        this.deps.agentSessionHandoffs!.recordTaskTerminal({
+          agentRef,
+          taskId,
+          runtimeId: context.runtimeId,
+          cwd: context.binding.lease.cwd,
+          leaseId: context.binding.lease.leaseId,
+          ...(context.sessionRef === undefined ? {} : { sessionRef: context.sessionRef }),
+          terminalReason: reason,
+        })),
     );
     if (!result.ok) {
       this.reportAgentTerminalEvidenceFailure({

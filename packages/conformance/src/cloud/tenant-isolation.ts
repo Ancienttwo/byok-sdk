@@ -17,9 +17,10 @@
  *   was handed against one it guessed. That is asserted directly below: the
  *   resolved record's `tenantId` is the owning tenant, and every subsequent
  *   lookup is tenant-first from there.
- * - `PairingCodeStore.redeem` — the code IS the tenant lookup. Asserted the
- *   same way: redemption yields the minting tenant's claims, and a code minted
- *   for one tenant never yields another's.
+ * - `PairingEnrollment.redeemAndRegister` — the code resolves the tenant
+ *   inside the one atomic enrollment operation. Asserted the same way: its
+ *   returned device carries the minting tenant, and no request field can name
+ *   another tenant or product.
  *
  * There is deliberately no "move a device to another tenant" test, because
  * there is deliberately no such method. If one is ever added, every assertion
@@ -58,13 +59,46 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
     it('does not let another tenant revoke a device it cannot see', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.devices.register(TENANT_A, registration('device-1'));
+        await stores.devices.register(TENANT_B, registration('device-2'));
 
         // A no-op, not an error: revoking what you cannot address changes nothing.
         await stores.devices.revoke(TENANT_B, 'device-1');
 
-        expect((await stores.devices.get(TENANT_A, 'device-1'))?.revoked).toBe(false);
+        expect(await stores.devices.get(TENANT_A, 'device-1')).toBeDefined();
+        expect(await stores.devices.list(TENANT_B)).toHaveLength(1);
+
+        // Revocation DELETES: the owner's own revoke removes the row, and the
+        // other tenant's untouched row proves the delete never reached across.
         await stores.devices.revoke(TENANT_A, 'device-1');
-        expect((await stores.devices.get(TENANT_A, 'device-1'))?.revoked).toBe(true);
+        expect(await stores.devices.get(TENANT_A, 'device-1')).toBeUndefined();
+        expect(await stores.devices.list(TENANT_A)).toHaveLength(0);
+        expect(await stores.devices.list(TENANT_B)).toHaveLength(1);
+        expect((await stores.devices.get(TENANT_B, 'device-2'))?.revoked).toBe(false);
+      });
+    });
+
+    it('never supersedes another tenant\'s device for an identical machine identity', async () => {
+      // `DeviceRegistration.machineId` is the one registration fact that makes
+      // `register` mutate rows the caller did not name. It carries no tenant of
+      // its own, so the same physical machine legitimately holds an active row
+      // in every tenant it pairs into — and a composition that scoped the
+      // supersession by machine alone would silently revoke a stranger's
+      // device. Asserted here rather than in one composition's own suite
+      // because it is a property of the port, not of an implementation.
+      //
+      // Supersession DELETES the predecessor, so the cross-tenant assertion is
+      // now the strongest form available: the stranger's row is still THERE.
+      const machineId = 'a'.repeat(64);
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.devices.register(TENANT_A, registration('device-1', { machineId }));
+        await stores.devices.register(TENANT_B, registration('device-2', { machineId }));
+        await stores.devices.register(TENANT_B, registration('device-3', { machineId }));
+
+        expect(await stores.devices.get(TENANT_A, 'device-1')).toBeDefined();
+        expect(await stores.devices.list(TENANT_A)).toHaveLength(1);
+        expect(await stores.devices.get(TENANT_B, 'device-2')).toBeUndefined();
+        expect(await stores.devices.get(TENANT_B, 'device-3')).toBeDefined();
+        expect(await stores.devices.list(TENANT_B)).toHaveLength(1);
       });
     });
 
@@ -87,16 +121,19 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
 
     it('keeps a revocation visible to the pre-tenant resolve immediately', async () => {
       // One row, two access paths — never two copies to keep in sync. A stale
-      // pre-tenant index is a revoked device that can still get a token.
+      // pre-tenant index is a revoked device that can still get a token, and
+      // now that revocation deletes the row the index must lose it too:
+      // the revoked device and the never-registered one resolve identically.
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.devices.register(TENANT_A, registration('device-1'));
         await stores.devices.revoke(TENANT_A, 'device-1');
 
-        expect((await stores.devices.resolveByDeviceId('device-1'))?.revoked).toBe(true);
+        expect(await stores.devices.resolveByDeviceId('device-1')).toBeUndefined();
+        expect(await stores.devices.resolveByDeviceId('never-registered')).toBeUndefined();
       });
     });
 
-    it('redeems a pairing code into the tenant that minted it, never another', async () => {
+    it('enrolls a pairing code into the tenant that minted it, never another', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores } = handle;
         const expiresAt = new Date(Date.parse(handle.now()) + 600_000).toISOString();
@@ -111,25 +148,38 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
           expiresAt,
         });
 
-        expect(await stores.pairingCodes.redeem('code-a')).toEqual({
+        expect(await stores.pairing.redeemAndRegister({
+          pairingCode: 'code-a',
+          deviceId: 'device-a',
+          deviceName: 'device-a',
+          devicePublicKey: 'pk-a',
+          proofKeyId: 'identity',
+          proofKeyEpoch: 0,
+        })).toMatchObject({
           tenantId: TENANT_A,
           productId: 'product-a',
         });
-        expect(await stores.pairingCodes.redeem('code-b')).toEqual({
+        expect(await stores.pairing.redeemAndRegister({
+          pairingCode: 'code-b',
+          deviceId: 'device-b',
+          deviceName: 'device-b',
+          devicePublicKey: 'pk-b',
+          proofKeyId: 'identity',
+          proofKeyEpoch: 0,
+        })).toMatchObject({
           tenantId: TENANT_B,
           productId: 'product-b',
         });
       });
     });
 
-    it('does not let one tenant validate or consume another tenant nonce', async () => {
+    it('does not let one tenant or device consume another nonce', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         const nonce = await stores.nonces.issue(TENANT_A, 'device-1');
 
-        expect(await stores.nonces.validate(TENANT_B, 'device-1', nonce)).toBe(false);
-        // Consuming from the wrong tenant must not burn the real owner's nonce.
-        await stores.nonces.markUsed(TENANT_B, nonce);
-        expect(await stores.nonces.validate(TENANT_A, 'device-1', nonce)).toBe(true);
+        expect(await stores.nonces.consumeIfValid(TENANT_B, 'device-1', nonce)).toBe(false);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-2', nonce)).toBe(false);
+        expect(await stores.nonces.consumeIfValid(TENANT_A, 'device-1', nonce)).toBe(true);
       });
     });
 

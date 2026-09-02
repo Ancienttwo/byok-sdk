@@ -23,6 +23,7 @@ export function runTenantIsolationConformance(factory: CoreCompositionFactory): 
           messageId: 'msg-1',
           materialize: () => ({ body: '{}', bodyHash: hashOf(1), byteSize: 2n }),
         });
+        await stores.mailbox.recordDelivery(TENANT_A, { deviceId: 'device-1', deliveredSeq: 1 });
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: 'device-1', ackedSeq: 1 });
 
         const page = await stores.mailbox.readAfter(TENANT_B, {

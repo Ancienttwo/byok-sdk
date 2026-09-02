@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 
-export const AGENT_MEMORY_RECALL_TOOL_NAME = 'memory.recall';
-export const AGENT_MEMORY_SAVE_TOOL_NAME = 'memory.save';
+export const AGENT_MEMORY_RECALL_TOOL_NAME = 'memory_recall';
+export const AGENT_MEMORY_SAVE_TOOL_NAME = 'memory_save';
 
 export interface AgentMemoryMcpDeps {
   recall(input: { path: string; ifRevision?: string }): Promise<{ path: string; revision: string; content: string; auditWarning?: { code: 'agent_memory_audit_unavailable' } }>;
@@ -30,11 +30,11 @@ export async function handleAgentMemoryMcpRequest(request: RequestLike, deps: Ag
   if (!params || !args || typeof params.name !== 'string') return invalid(id, 'memory tool input must be an object');
   try {
     if (params.name === AGENT_MEMORY_RECALL_TOOL_NAME) {
-      if (Object.keys(args).some((key) => key !== 'path' && key !== 'ifRevision') || typeof args.path !== 'string' || (args.ifRevision !== undefined && typeof args.ifRevision !== 'string')) return invalid(id, 'memory.recall accepts only path and optional ifRevision');
+      if (Object.keys(args).some((key) => key !== 'path' && key !== 'ifRevision') || typeof args.path !== 'string' || (args.ifRevision !== undefined && typeof args.ifRevision !== 'string')) return invalid(id, 'memory_recall accepts only path and optional ifRevision');
       return success(id, await deps.recall({ path: args.path, ...(args.ifRevision === undefined ? {} : { ifRevision: args.ifRevision }) }));
     }
     if (params.name === AGENT_MEMORY_SAVE_TOOL_NAME) {
-      if (Object.keys(args).some((key) => key !== 'op' && key !== 'path' && key !== 'expectedRevision' && key !== 'content') || (args.op !== 'replace' && args.op !== 'delete') || typeof args.path !== 'string' || typeof args.expectedRevision !== 'string' || (args.op === 'replace' && typeof args.content !== 'string') || (args.op === 'delete' && args.content !== undefined)) return invalid(id, 'memory.save requires replace|delete, path, expectedRevision, and content only for replace');
+      if (Object.keys(args).some((key) => key !== 'op' && key !== 'path' && key !== 'expectedRevision' && key !== 'content') || (args.op !== 'replace' && args.op !== 'delete') || typeof args.path !== 'string' || typeof args.expectedRevision !== 'string' || (args.op === 'replace' && typeof args.content !== 'string') || (args.op === 'delete' && args.content !== undefined)) return invalid(id, 'memory_save requires replace|delete, path, expectedRevision, and content only for replace');
       const content = args.content;
       return success(id, await deps.save({ op: args.op, path: args.path, expectedRevision: args.expectedRevision, ...(typeof content === 'string' ? { content } : {}) }));
     }

@@ -737,6 +737,10 @@ export class PostgresCloudCleanup {
          ), receipts AS (
            DELETE FROM device_request_receipts
             WHERE tenant_id = $1 AND recorded_at < $5::timestamptz
+              -- Pairing completion is an immutable enrollment authority, not
+              -- a TTL-bound request receipt. Removing it would turn an exact
+              -- bearer-code retry into a new/failed enrollment after cleanup.
+              AND key NOT LIKE 'pairing-completion:v1:%'
            RETURNING 1
          ), presence AS (
            DELETE FROM device_presence

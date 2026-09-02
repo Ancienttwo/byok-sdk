@@ -391,19 +391,28 @@ async function recordAuditWarning(context: AgentMemoryTaskContext, kind: 'recall
 }
 
 const agentMemoryHomeQueues = new Map<string, Promise<void>>();
+const agentMemoryProjectionTransactionQueues = new Map<string, Promise<void>>();
 
-async function exclusiveAgentMemoryHome<T>(home: string, fn: () => Promise<T>): Promise<T> {
-  const previous = agentMemoryHomeQueues.get(home) ?? Promise.resolve();
+async function exclusiveAgentMemoryHomeQueue<T>(queues: Map<string, Promise<void>>, home: string, fn: () => Promise<T>): Promise<T> {
+  const previous = queues.get(home) ?? Promise.resolve();
   let release!: () => void;
   const next = new Promise<void>((resolve) => { release = resolve; });
-  agentMemoryHomeQueues.set(home, next);
+  queues.set(home, next);
   await previous;
   try {
     return await fn();
   } finally {
     release();
-    if (agentMemoryHomeQueues.get(home) === next) agentMemoryHomeQueues.delete(home);
+    if (queues.get(home) === next) queues.delete(home);
   }
+}
+
+async function exclusiveAgentMemoryHome<T>(home: string, fn: () => Promise<T>): Promise<T> {
+  return exclusiveAgentMemoryHomeQueue(agentMemoryHomeQueues, home, fn);
+}
+
+async function exclusiveAgentMemoryProjectionTransaction<T>(home: string, fn: () => Promise<T>): Promise<T> {
+  return exclusiveAgentMemoryHomeQueue(agentMemoryProjectionTransactionQueues, home, fn);
 }
 
 export class AgentMemoryService {
@@ -673,14 +682,21 @@ export class AgentMemoryRedactedOutbox {
 export async function snapshotAndProjectAgentMemory(input: AgentMemoryTaskContext, projection: AgentMemoryHostedProjection | undefined): Promise<void> {
   if (projection?.capability !== AGENT_MEMORY_PROJECTION_CAPABILITY || !projection.grant || !projection.redactor || !projection.port) return;
   const context = taskContext(input);
-  const outbox = await AgentMemoryRedactedOutbox.open(context, projection.grant);
-  // Pending redacted mutations retain their original task/session/runtime/grant
-  // binding. Drain them before touching local source files or minting a newer
-  // sequence, so an offline replay cannot create a source-sequence gap.
-  const initialReplay = await outbox.replay(projection.port);
-  if (initialReplay.status === 'pending') throw new AgentMemoryProjectionReplayPendingError(initialReplay);
-  const snapshot = await captureAgentMemorySnapshot(context);
-  await outbox.append(redactedBytes(snapshot, await projection.redactor.redact(snapshot)));
-  const trailingReplay = await outbox.replay(projection.port);
-  if (trailingReplay.status === 'pending') throw new AgentMemoryProjectionReplayPendingError(trailingReplay);
+  const { grant, redactor, port } = projection;
+  await exclusiveAgentMemoryProjectionTransaction(context.canonicalHome, async () => {
+    // The outbox is one CAS-replaced authority per Agent home. Keep open,
+    // replay, snapshot/redaction, append, and trailing replay in one
+    // transaction so independently closing sessions cannot load the same file
+    // revision and lose the later projection to a revision conflict.
+    const outbox = await AgentMemoryRedactedOutbox.open(context, grant);
+    // Pending redacted mutations retain their original task/session/runtime/grant
+    // binding. Drain them before touching local source files or minting a newer
+    // sequence, so an offline replay cannot create a source-sequence gap.
+    const initialReplay = await outbox.replay(port);
+    if (initialReplay.status === 'pending') throw new AgentMemoryProjectionReplayPendingError(initialReplay);
+    const snapshot = await captureAgentMemorySnapshot(context);
+    await outbox.append(redactedBytes(snapshot, await redactor.redact(snapshot)));
+    const trailingReplay = await outbox.replay(port);
+    if (trailingReplay.status === 'pending') throw new AgentMemoryProjectionReplayPendingError(trailingReplay);
+  });
 }

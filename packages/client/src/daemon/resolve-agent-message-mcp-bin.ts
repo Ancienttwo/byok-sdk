@@ -1,5 +1,4 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 
 export interface ResolvedAgentMessageMcpBin {
   readonly command: string;
@@ -7,7 +6,7 @@ export interface ResolvedAgentMessageMcpBin {
 }
 
 /** Resolve the SDK-owned stdio MCP helper shipped beside the client bundle. */
-export function resolveAgentMessageMcpBin(): ResolvedAgentMessageMcpBin {
-  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bin', 'byok-agent-message-mcp.js');
-  return Object.freeze({ command: process.execPath, args: Object.freeze([script]) });
+export function resolveAgentMessageMcpBin(host?: SdkHelperHostConfig): ResolvedAgentMessageMcpBin {
+  const resolved = resolveSdkReservedHelperBin('agent-message-mcp', host);
+  return Object.freeze({ command: resolved.command, args: resolved.args });
 }

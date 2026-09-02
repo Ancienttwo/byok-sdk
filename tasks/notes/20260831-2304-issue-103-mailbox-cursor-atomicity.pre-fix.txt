@@ -1,0 +1,36 @@
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-103-pref-fix/packages/cloud
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  ❯ src/__tests__/mailbox-cursor.test.ts (15 tests | 1 failed) 238ms
+@byok-sdk/cloud test:      × rejects unsafe and future cursors before they can acknowledge or strand a later envelope 4ms
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  FAIL  src/__tests__/mailbox-cursor.test.ts > GET /byok/events cursor semantics > rejects unsafe and future cursors before they can acknowledge or strand a later envelope
+@byok-sdk/cloud test: AssertionError: expected 200 to be 409 // Object.is equality
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: - Expected
+@byok-sdk/cloud test: + Received
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: - 409
+@byok-sdk/cloud test: + 200
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  ❯ src/__tests__/mailbox-cursor.test.ts:186:27
+@byok-sdk/cloud test:     184|     const unsafe = await harness.json(`/byok/events?cursor=${futureCur…
+@byok-sdk/cloud test:     185|
+@byok-sdk/cloud test:     186|     expect(forged.status).toBe(409);
+@byok-sdk/cloud test:        |                           ^
+@byok-sdk/cloud test:     187|     expect(forged.body).toEqual({ error: 'cursor exceeds delivered wat…
+@byok-sdk/cloud test:     188|     expect(cursorAfterForge.ackedSeq).toBe(0);
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  Test Files  1 failed (1)
+@byok-sdk/cloud test:       Tests  1 failed | 14 passed (15)
+@byok-sdk/cloud test:    Start at  23:20:15
+@byok-sdk/cloud test:    Duration  688ms (transform 213ms, setup 0ms, import 322ms, tests 238ms, environment 0ms)
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: Exited with code 1
+PRE_FIX_EXIT=1
+REGRESSION_GUARD=packages/cloud/src/__tests__/mailbox-cursor.test.ts

@@ -30,9 +30,9 @@ import {
 import { authenticateBearer, mintAccessToken, verifyNonceSignature, type AuthDeps, type NonceStore } from './auth';
 import { BlobDeclarationConflictError, type BlobStore } from './blob-store';
 import type { ConnectionHub } from './hub';
-import { AgentHomeProjectionCompletionError } from './hub';
+import { AgentHomeProjectionCompletionError, ReplayGapError } from './hub';
 import { generateDeviceId } from './ids';
-import { PairingCodeInvalidError, type PairingCodeClaims, type PairingManager } from './pairing';
+import { PairingAttemptConflictError, PairingCodeInvalidError, type PairingManager } from './pairing';
 
 export interface HttpDeps extends AuthDeps {
   pairing: PairingManager;
@@ -52,6 +52,48 @@ async function readJsonBody(c: Context): Promise<unknown> {
     return await c.req.json();
   } catch {
     return undefined;
+  }
+}
+
+type BoundedUploadRead =
+  | { readonly kind: 'ok'; readonly data: Buffer }
+  | { readonly kind: 'too_large' }
+  | { readonly kind: 'read_error' };
+
+/** `Content-Length` is only an early-reject hint; streamed bytes remain authoritative. */
+function declaredLengthExceeds(value: string | undefined, limit: number): boolean {
+  if (value === undefined || !/^(?:0|[1-9]\d*)$/.test(value)) return false;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > limit;
+}
+
+/**
+ * Retain at most the immutable reservation size in one Buffer. On the first
+ * byte over that bound, cancellation is detached from the 413 response: a
+ * malicious stream whose cancellation never settles must not hold the route.
+ */
+async function readBoundedUpload(c: Context, limit: number): Promise<BoundedUploadRead> {
+  const body = c.req.raw.body;
+  if (body === null) return { kind: 'ok', data: Buffer.alloc(0) };
+
+  const reader = body.getReader();
+  const target = Buffer.allocUnsafe(limit);
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return { kind: 'ok', data: target.subarray(0, received) };
+      if (received + value.byteLength > limit) {
+        void reader.cancel().catch(() => undefined);
+        return { kind: 'too_large' };
+      }
+      target.set(value, received);
+      received += value.byteLength;
+    }
+  } catch {
+    return { kind: 'read_error' };
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -96,29 +138,38 @@ export function buildHonoApp(deps: HttpDeps): Hono {
 
     // S1: the redeemed code's claims are the ONLY source of the device's
     // tenant/product — `PairRequest` carries neither, so a device can never
-    // choose where it lands. Redeem and registration happen in one
-    // synchronous step, and the code's single-use semantics (`pairing.ts`)
-    // are what make that step exclusive: a second redeem throws above and
-    // never reaches the row write below.
-    let claims: PairingCodeClaims;
+    // choose where it lands. The immutable pairing attempt below is the only
+    // retry authority: an exact retry returns its stored completion, while a
+    // different binding is rejected before it can reach the row write.
+    const binding = { deviceName, devicePublicKey };
+    let attempt: ReturnType<PairingManager['beginPairingAttempt']>;
     try {
-      claims = deps.pairing.redeemPairingCode(pairingCode);
+      attempt = deps.pairing.beginPairingAttempt(pairingCode, binding);
     } catch (err) {
       if (err instanceof PairingCodeInvalidError) {
         return c.json({ error: err.message }, 401);
       }
+      if (err instanceof PairingAttemptConflictError) {
+        return c.json({ error: 'pairing_attempt_conflict' }, 409);
+      }
       throw err;
     }
 
-    const deviceId = generateDeviceId();
-    deps.devices.register({
-      tenantId: claims.tenantId,
-      productId: claims.productId,
-      deviceId,
-      deviceName,
-      devicePublicKey,
-    });
-    const device = deps.devices.get(claims.tenantId, deviceId);
+    let completion = attempt.completion;
+    if (completion === undefined) {
+      const candidate = {
+        tenantId: attempt.claims.tenantId,
+        productId: attempt.claims.productId,
+        deviceId: generateDeviceId(),
+        deviceName,
+        devicePublicKey,
+      };
+      // Both operations are synchronous in the reference composition. No
+      // fallible token/response work can interleave with this exact binding.
+      deps.devices.register(candidate);
+      completion = deps.pairing.completePairingAttempt(pairingCode, binding, candidate);
+    }
+    const device = deps.devices.get(completion.tenantId, completion.deviceId);
     if (device === undefined) {
       throw new Error('paired device row was not persisted');
     }
@@ -148,9 +199,10 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     // contract and carries only a deviceId, so the row is what tells this
     // server which tenant the device belongs to (see
     // `DeviceRegistry.resolveByDeviceId`). Unknown and revoked answer
-    // identically — no existence oracle.
+    // identically — no existence oracle — and since §6.3 revocation deletes
+    // the row, they are literally the same case here.
     const device = deps.devices.resolveByDeviceId(deviceId);
-    if (!device || device.revoked) {
+    if (!device) {
       return c.json({ error: 'unknown or revoked device' }, 401);
     }
 
@@ -168,7 +220,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     // is the credential here, and the row supplies the tenant/product the
     // renewed token gets bound to.
     const device = deps.devices.resolveByDeviceId(deviceId);
-    if (!device || device.revoked) {
+    if (!device) {
       return c.json({ error: 'unknown or revoked device' }, 401);
     }
     if (!deps.nonces.validate(deviceId, nonce)) {
@@ -224,7 +276,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
 
     const blobId = reservationBlobId(principal.tenantId, reservationId);
     try {
-      const created = await deps.blobStore.createUpload(parsed.data, blobId);
+      const created = await deps.blobStore.createUpload(principal.tenantId, parsed.data, blobId);
       const response: CreateBlobResponse = created;
       return c.json(response, 200);
     } catch (error) {
@@ -247,7 +299,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     if (reservationBlobId(principal.tenantId, reservationId) !== blobId) {
       return c.json({ error: 'storage_integrity_mismatch' }, 422);
     }
-    if (!(await deps.blobStore.exists(blobId))) {
+    if (!(await deps.blobStore.exists(principal.tenantId, blobId))) {
       return c.json({ error: 'storage_reservation_not_found' }, 404);
     }
     return c.body(null, 204);
@@ -257,7 +309,7 @@ export function buildHonoApp(deps: HttpDeps): Hono {
     const principal = await authenticateBearer(c.req.header('authorization'), deps);
     if (!principal) return c.json({ error: 'unauthorized' }, 401);
 
-    const downloadUrl = await deps.blobStore.getDownloadUrl(c.req.param('id'));
+    const downloadUrl = await deps.blobStore.getDownloadUrl(principal.tenantId, c.req.param('id'));
     if (!downloadUrl) return c.json({ error: 'blob not found' }, 404);
 
     const response: BlobDownloadUrlResponse = { downloadUrl };
@@ -271,8 +323,18 @@ export function buildHonoApp(deps: HttpDeps): Hono {
       return c.json({ error: 'invalid or expired signature' }, 401);
     }
 
-    const data = Buffer.from(await c.req.arrayBuffer());
-    const result = await deps.blobStore.writeContent(blobId, data);
+    const reservation = await deps.blobStore.getUploadReservation(blobId);
+    if (reservation === undefined) return c.json({ error: 'blob not found' }, 404);
+    if (reservation.size > deps.maxBlobSizeBytes) {
+      return c.json({ error: `blob exceeds max size of ${deps.maxBlobSizeBytes} bytes` }, 413);
+    }
+    if (declaredLengthExceeds(c.req.header('content-length'), reservation.size)) {
+      return c.json({ error: 'upload body exceeds reservation' }, 413);
+    }
+    const body = await readBoundedUpload(c, reservation.size);
+    if (body.kind === 'too_large') return c.json({ error: 'upload body exceeds reservation' }, 413);
+    if (body.kind === 'read_error') return c.json({ error: 'failed to read upload body' }, 400);
+    const result = await deps.blobStore.writeContent(blobId, body.data);
     if (!result.ok) return c.json({ error: result.reason }, 422);
     return c.body(null, 204);
   });
@@ -315,9 +377,16 @@ export function buildHonoApp(deps: HttpDeps): Hono {
       cursor = parsedCursor;
     }
 
-    const result = await deps.hub.pollEvents(principal.deviceId, cursor, deps.longPollHoldMs);
-    const response: EventsPollResponse = { ...result, capabilities: [...CAPABILITY_FLAGS] };
-    return c.json(response, 200);
+    try {
+      const result = await deps.hub.pollEvents(principal.deviceId, cursor, deps.longPollHoldMs);
+      const response: EventsPollResponse = { ...result, capabilities: [...CAPABILITY_FLAGS] };
+      return c.json(response, 200);
+    } catch (error) {
+      if (error instanceof ReplayGapError) {
+        return c.json({ error: 'cursor_too_old', recoverableFrom: error.recoverableFrom }, 409);
+      }
+      throw error;
+    }
   });
 
   // -------------------------------------------------------------------

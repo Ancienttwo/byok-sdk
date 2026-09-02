@@ -27,6 +27,21 @@ export interface DeviceMetadata {
  */
 export type DeviceRecord = DeviceMetadata & DeviceCredentials;
 
+/**
+ * The one durable authority allowed before a first pairing response is
+ * received. It keeps the generated key immutable across a lost response, so
+ * an exact server-side retry can prove the same public-key binding.
+ */
+export interface FirstPairingAttempt {
+  readonly kind: 'first-pairing-attempt-v1';
+  readonly deviceName: string;
+  readonly devicePublicKey: string;
+  readonly devicePrivateKeyPem: string;
+  readonly machineId?: string;
+}
+
+type DeviceCredentialAuthority = DeviceRecord | FirstPairingAttempt;
+
 export interface DeviceCommandResult {
   readonly exitCode: number;
   readonly stdout: string;
@@ -127,9 +142,33 @@ function assertRecord(value: unknown): asserts value is DeviceRecord {
   }
 }
 
-function encode(record: DeviceRecord): string {
-  assertRecord(record);
-  const encoded = Buffer.from(JSON.stringify(record), 'utf8').toString('base64');
+function isFirstPairingAttempt(value: DeviceCredentialAuthority): value is FirstPairingAttempt {
+  return 'kind' in value && value.kind === 'first-pairing-attempt-v1';
+}
+
+function assertFirstPairingAttempt(value: unknown): asserts value is FirstPairingAttempt {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    (value as Partial<FirstPairingAttempt>).kind !== 'first-pairing-attempt-v1' ||
+    typeof (value as Partial<FirstPairingAttempt>).deviceName !== 'string' ||
+    typeof (value as Partial<FirstPairingAttempt>).devicePublicKey !== 'string' ||
+    typeof (value as Partial<FirstPairingAttempt>).devicePrivateKeyPem !== 'string' ||
+    ((value as Partial<FirstPairingAttempt>).machineId !== undefined &&
+      typeof (value as Partial<FirstPairingAttempt>).machineId !== 'string') ||
+    (value as FirstPairingAttempt).deviceName.length === 0 ||
+    (value as FirstPairingAttempt).devicePublicKey.length === 0 ||
+    (value as FirstPairingAttempt).devicePrivateKeyPem.length === 0
+  ) {
+    throw new DeviceCredentialStoreError('OS credential entry has an invalid first-pairing attempt shape');
+  }
+}
+
+function encode(authority: DeviceCredentialAuthority): string {
+  if (isFirstPairingAttempt(authority)) assertFirstPairingAttempt(authority);
+  else assertRecord(authority);
+  const encoded = Buffer.from(JSON.stringify(authority), 'utf8').toString('base64');
   const value = `${ENCODED_PREFIX}${encoded}`;
   // Windows generic-credential blobs are limited; do not silently truncate a
   // bearer/key authority into a different credential.
@@ -139,7 +178,7 @@ function encode(record: DeviceRecord): string {
   return value;
 }
 
-function decode(value: string): DeviceRecord {
+function decode(value: string): DeviceCredentialAuthority {
   if (!value.startsWith(ENCODED_PREFIX)) {
     throw new DeviceCredentialStoreError('OS credential entry is not owned by this client credential store');
   }
@@ -160,6 +199,16 @@ function decode(value: string): DeviceRecord {
     parsed = JSON.parse(raw);
   } catch {
     throw new DeviceCredentialStoreError('OS credential entry is not valid JSON');
+  }
+  if (typeof parsed === 'object' && parsed !== null && (parsed as Partial<FirstPairingAttempt>).kind === 'first-pairing-attempt-v1') {
+    assertFirstPairingAttempt(parsed);
+    return Object.freeze({
+      kind: parsed.kind,
+      deviceName: parsed.deviceName,
+      devicePublicKey: parsed.devicePublicKey,
+      devicePrivateKeyPem: parsed.devicePrivateKeyPem,
+      ...(parsed.machineId === undefined ? {} : { machineId: parsed.machineId }),
+    });
   }
   assertRecord(parsed);
   return Object.freeze({
@@ -208,6 +257,21 @@ export class DeviceCredentialStore {
   }
 
   async read(): Promise<DeviceRecord | undefined> {
+    const authority = await this.#readAuthority();
+    return authority === undefined || isFirstPairingAttempt(authority) ? undefined : authority;
+  }
+
+  async readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined> {
+    const authority = await this.#readAuthority();
+    return authority !== undefined && isFirstPairingAttempt(authority) ? authority : undefined;
+  }
+
+  async saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void> {
+    assertFirstPairingAttempt(attempt);
+    await this.#replaceAuthority(attempt);
+  }
+
+  async #readAuthority(): Promise<DeviceCredentialAuthority | undefined> {
     const result = await this.#invoke('read');
     if (
       result.exitCode === NOT_FOUND ||
@@ -224,6 +288,14 @@ export class DeviceCredentialStore {
 
   async replace(record: DeviceRecord): Promise<void> {
     const encoded = encode(record);
+    await this.#replaceEncoded(encoded);
+  }
+
+  async #replaceAuthority(authority: DeviceCredentialAuthority): Promise<void> {
+    await this.#replaceEncoded(encode(authority));
+  }
+
+  async #replaceEncoded(encoded: string): Promise<void> {
     const result = await this.#invoke('replace', encoded);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) {
@@ -235,7 +307,7 @@ export class DeviceCredentialStore {
 
   /** Returns true only after the sole secret authority is confirmed absent. */
   async clear(): Promise<boolean> {
-    const before = await this.read();
+    const before = await this.#readAuthority();
     if (before === undefined) return false;
     const result = await this.#invoke('clear');
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
@@ -244,7 +316,7 @@ export class DeviceCredentialStore {
         `operating-system credential provider could not clear device credentials${providerDiagnostic(result.stderr)}`,
       );
     }
-    if ((await this.read()) !== undefined) {
+    if ((await this.#readAuthority()) !== undefined) {
       throw new DeviceCredentialStoreError('operating-system credential provider reported deletion but device credentials remain');
     }
     return true;
@@ -321,20 +393,33 @@ export class DeviceCredentialStore {
 
 /** Test-only double; it is intentionally internal and never selected by a production config. */
 export class InMemoryDeviceCredentialStore {
-  #record: DeviceRecord | undefined;
+  #authority: DeviceCredentialAuthority | undefined;
 
   async read(): Promise<DeviceRecord | undefined> {
-    return this.#record === undefined ? undefined : Object.freeze({ ...this.#record });
+    return this.#authority === undefined || isFirstPairingAttempt(this.#authority)
+      ? undefined
+      : Object.freeze({ ...this.#authority });
+  }
+
+  async readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined> {
+    return this.#authority !== undefined && isFirstPairingAttempt(this.#authority)
+      ? Object.freeze({ ...this.#authority })
+      : undefined;
+  }
+
+  async saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void> {
+    assertFirstPairingAttempt(attempt);
+    this.#authority = Object.freeze({ ...attempt });
   }
 
   async replace(record: DeviceRecord): Promise<void> {
     assertRecord(record);
-    this.#record = Object.freeze({ ...record });
+    this.#authority = Object.freeze({ ...record });
   }
 
   async clear(): Promise<boolean> {
-    const had = this.#record !== undefined;
-    this.#record = undefined;
+    const had = this.#authority !== undefined;
+    this.#authority = undefined;
     return had;
   }
 }

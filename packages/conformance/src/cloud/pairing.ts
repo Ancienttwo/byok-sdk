@@ -19,9 +19,20 @@ import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 
+function enrollment(pairingCode: string, deviceId: string) {
+  return {
+    pairingCode,
+    deviceId,
+    deviceName: `name-${deviceId}`,
+    devicePublicKey: `pk-${deviceId}`,
+    proofKeyId: 'identity',
+    proofKeyEpoch: 0,
+  };
+}
+
 export function runPairingConformance(factory: CloudCompositionFactory): void {
-  describe('pairing codes', () => {
-    it('returns the claims it was minted with, exactly once', async () => {
+  describe('pairing enrollment', () => {
+    it('registers under the code claims, exactly once', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores } = handle;
         const expiresAt = new Date(Date.parse(handle.now()) + CODE_TTL_MS).toISOString();
@@ -33,17 +44,22 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
         expect(info.code).toBe('code-1');
         expect(info.expiresAt).toBe(expiresAt);
 
-        const claims = await stores.pairingCodes.redeem('code-1');
-        expect(claims).toEqual({ tenantId: TENANT_A, productId: 'product-1' });
+        const device = await stores.pairing.redeemAndRegister(enrollment('code-1', 'device-1'));
+        expect(device).toMatchObject({
+          tenantId: TENANT_A,
+          productId: 'product-1',
+          deviceId: 'device-1',
+        });
 
-        // The second redemption is the one that must not reach registration.
-        expect(await stores.pairingCodes.redeem('code-1')).toBeUndefined();
+        // The second enrollment is the one that must not reach registration.
+        expect(await stores.pairing.redeemAndRegister(enrollment('code-1', 'device-2'))).toBeUndefined();
+        expect(await stores.devices.list(TENANT_A)).toHaveLength(1);
       });
     });
 
     it('answers undefined for a code that was never minted', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
-        expect(await stores.pairingCodes.redeem('never-minted')).toBeUndefined();
+        expect(await stores.pairing.redeemAndRegister(enrollment('never-minted', 'device-1'))).toBeUndefined();
       });
     });
 
@@ -58,7 +74,7 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
 
         await handle.advanceTime(CODE_TTL_MS + 1);
 
-        expect(await stores.pairingCodes.redeem('code-2')).toBeUndefined();
+        expect(await stores.pairing.redeemAndRegister(enrollment('code-2', 'device-1'))).toBeUndefined();
       });
     });
 
@@ -75,7 +91,7 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
         });
 
         await handle.advanceTime(CODE_TTL_MS + 1);
-        expect(await stores.pairingCodes.redeem('code-3')).toBeUndefined();
+        expect(await stores.pairing.redeemAndRegister(enrollment('code-3', 'device-1'))).toBeUndefined();
 
         // Re-issuing the same code with a fresh deadline must work: the row was
         // never spent, and a mint is the host's control plane speaking.
@@ -84,10 +100,29 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
           productId: 'product-2',
           expiresAt: new Date(Date.parse(handle.now()) + CODE_TTL_MS).toISOString(),
         });
-        expect(await stores.pairingCodes.redeem('code-3')).toEqual({
+        expect(await stores.pairing.redeemAndRegister(enrollment('code-3', 'device-2'))).toMatchObject({
           tenantId: TENANT_A,
           productId: 'product-2',
         });
+      });
+    });
+
+    it('serializes concurrent enrollment of one code to one registered device', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        await stores.pairingCodes.issue(TENANT_A, {
+          code: 'code-concurrent',
+          productId: 'product-1',
+          expiresAt: new Date(Date.parse(handle.now()) + CODE_TTL_MS).toISOString(),
+        });
+
+        const results = await Promise.all([
+          stores.pairing.redeemAndRegister(enrollment('code-concurrent', 'device-a')),
+          stores.pairing.redeemAndRegister(enrollment('code-concurrent', 'device-b')),
+        ]);
+        const enrolled = results.filter((device) => device !== undefined);
+        expect(enrolled).toHaveLength(1);
+        expect(await stores.devices.list(TENANT_A)).toHaveLength(1);
       });
     });
   });

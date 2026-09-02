@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/client",
-  "version": "0.9.0-rc.1",
+  "version": "0.12.0",
   "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
   "type": "module",
   "license": "MIT",
@@ -24,7 +24,8 @@
     "byok-agent": "./dist/bin/byok-agent.js",
     "byok-approval-mcp": "./dist/bin/byok-approval-mcp.js",
     "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
-    "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js"
+    "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js",
+    "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js"
   },
   "exports": {
     ".": {
@@ -34,6 +35,10 @@
     "./adapters": {
       "types": "./dist/adapters/index.d.ts",
       "import": "./dist/adapters/index.js"
+    },
+    "./agent-memory": {
+      "types": "./dist/agent-memory/index.d.ts",
+      "import": "./dist/agent-memory/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -46,12 +51,14 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs",
+    "build": "tsup && tsc -p tsconfig.build.json && node scripts/check-adapters-entry.mjs && node scripts/check-agent-memory-entry.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "smoke:adapters": "node scripts/adapter-task-smoke.mjs",
+    "smoke:claude-toolset-permission": "node scripts/claude-toolset-permission-smoke.mjs",
+    "smoke:codex-toolset-permission": "node scripts/codex-toolset-permission-smoke.mjs",
     "audit:adapter-task-smoke": "node scripts/adapter-task-smoke.mjs",
     "audit:credentials": "node scripts/linux-credential-audit.mjs",
     "clean": "rm -rf dist"
@@ -60,7 +67,9 @@
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
     "@earendil-works/pi-coding-agent": "0.84.2",
+    "@juicesharp/rpiv-todo": "2.8.0",
     "pi-mcp-adapter": "2.27.0",
+    "pi-subagents": "0.60.0",
     "pi-web-access": "0.24.1",
     "ws": "^8.21.1"
   },

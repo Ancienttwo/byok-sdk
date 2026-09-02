@@ -1,4 +1,5 @@
 import type { PermissionPolicy } from '@byok-sdk/protocol';
+import { BYOK_PI_READONLY_PARENT_TOOLS } from './subagents-policy-config';
 
 export interface PiPermissionMapping {
   ok: boolean;
@@ -8,8 +9,8 @@ export interface PiPermissionMapping {
   reason?: string;
 }
 
-/** pi's own read-only built-ins, per `pi --help`'s documented example: `pi --tools read,grep,find,ls -p ...`. */
-const READONLY_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls'];
+/** Pi read-only built-ins plus SDK-contained planning/delegation tools. */
+const READONLY_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls', ...BYOK_PI_READONLY_PARENT_TOOLS];
 
 /**
  * Map an effective {@link PermissionPolicy} to `pi --mode rpc` CLI args,

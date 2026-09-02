@@ -22,7 +22,9 @@ import {
   type TokenResponse,
 } from '@byok-sdk/protocol';
 import type { AuthPlane } from '../auth/plane';
-import { readJsonBody } from './shared';
+import { readBoundedJsonBody } from './shared';
+
+const AUTH_JSON_BODY_MAX_BYTES = 16 * 1024;
 
 export interface AuthRouteDeps {
   readonly auth: AuthPlane;
@@ -30,9 +32,17 @@ export interface AuthRouteDeps {
 
 export function pairHandler(deps: AuthRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const parsed = PairRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, AUTH_JSON_BODY_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = PairRequestSchema.safeParse(body.body);
     if (!parsed.success) {
-      return c.json({ error: 'pairingCode, deviceName, and devicePublicKey are required strings' }, 400);
+      return c.json(
+        {
+          error:
+            'pairingCode, deviceName, and devicePublicKey are required strings; optional machineId must be 64 lowercase hex characters',
+        },
+        400,
+      );
     }
 
     const device = await deps.auth.redeemAndRegister(parsed.data);
@@ -54,7 +64,9 @@ export function pairHandler(deps: AuthRouteDeps) {
 
 export function challengeHandler(deps: AuthRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const parsed = ChallengeRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, AUTH_JSON_BODY_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = ChallengeRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'deviceId is required' }, 400);
 
     // Pre-tenant by construction: `ChallengeRequest` is the pinned wire
@@ -70,24 +82,26 @@ export function challengeHandler(deps: AuthRouteDeps) {
 
 export function tokenHandler(deps: AuthRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const parsed = TokenRequestSchema.safeParse(await readJsonBody(c));
+    const body = await readBoundedJsonBody(c, AUTH_JSON_BODY_MAX_BYTES);
+    if (body.tooLarge) return c.json({ error: 'request body too large' }, 413);
+    const parsed = TokenRequestSchema.safeParse(body.body);
     if (!parsed.success) return c.json({ error: 'deviceId, nonce, and signature are required' }, 400);
     const { deviceId, nonce, signature } = parsed.data;
 
     const device = await deps.auth.resolveDevice(deviceId);
     if (device === undefined) return c.json({ error: 'unknown or revoked device' }, 401);
 
-    if (!(await deps.auth.validateNonce(device, nonce))) {
-      return c.json({ error: 'invalid, expired, or already-used nonce' }, 401);
-    }
     // Domain-separated (`byok-nonce-v1\n`, `auth/verify.ts`): a raw signature
     // over the bare nonce is invalid here, with no second accepted form.
     if (!(await deps.auth.verifySignature(device, nonce, signature))) {
       return c.json({ error: 'invalid signature' }, 401);
     }
-    // Burn the nonce only on a fully verified success (§6.2) — an invalid
-    // signature attempt does not consume the legitimate device's nonce.
-    await deps.auth.consumeNonce(device, nonce);
+    // Atomic consumption follows a fully verified signature (§6.2), so an
+    // invalid signature cannot burn the legitimate device's nonce and only
+    // one concurrent valid caller can reach token minting.
+    if (!(await deps.auth.consumeNonceIfValid(device, nonce))) {
+      return c.json({ error: 'invalid, expired, or already-used nonce' }, 401);
+    }
 
     const { accessToken, expiresAt } = await deps.auth.mintAccessToken(device);
     const response: TokenResponse = { accessToken, expiresAt };

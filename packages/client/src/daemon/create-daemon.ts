@@ -49,10 +49,12 @@ import {
 } from '../release-identity';
 import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { resolveApprovalMcpBin } from '../adapters/claude/resolve-approval-mcp-bin';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
+import { resolveMachineId } from './machine-id';
 import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
 import {
   assertPresenceHeartbeatCadence,
@@ -61,7 +63,7 @@ import {
   DEFAULT_PRESENCE_TTL_MS,
   PresencePublisher,
 } from './presence-publisher';
-import { assertServerUrlAllowed, toHttpBase } from './url';
+import { assertServerUrlAllowed, formatServerUrl, toHttpBase } from './url';
 import { mintDeviceAssertion } from './device-assertion-signer';
 import type { BackoffOptions, ConnectionState, LivenessOptions } from './ws-transport';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
@@ -77,6 +79,13 @@ import {
   parseAssertionIssueParams,
   parseEnrollmentPairParams,
   parseShutdownParams,
+  parseTeamContextParams,
+  parseTeamMessageAckParams,
+  parseTeamMessageInspectParams,
+  parseTeamMessagePostParams,
+  parseTeamMessageReadParams,
+  parseTeamWorkspaceCreateParams,
+  parseTeamWorkspaceJoinParams,
   parseToolsetsReloadParams,
   type AssertionIssueResult,
   type ControlActiveTask,
@@ -84,6 +93,7 @@ import {
   type ControlStorageStatus,
   type ShutdownReason,
 } from './control-protocol';
+import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
@@ -125,7 +135,9 @@ import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRec
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
+import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { isAgentMemorySecureFilesystemAvailable, type AgentMemoryHostedProjection } from './agent-memory';
 import { isAgentMemoryFilesystemHelperSupported } from './agent-memory-fs-helper';
 import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
@@ -233,7 +245,17 @@ export interface DaemonConfig {
   productName: string;
   productId: string;
   serverUrl: string;
+  /** Bounds one AuthManager pair/challenge/token exchange, including response-body reads. */
+  authRequestDeadlineMs?: number;
   deviceName?: string;
+  /**
+   * Optional override for the client-hashed physical machine identity sent
+   * with `POST /byok/pair` (protocol §6.1). Defaults to `resolveMachineId`
+   * over this product id, which probes one OS identifier and hashes it; a
+   * host that has its own machine authority can supply it here, and one that
+   * wants no supersession at all supplies `async () => undefined`.
+   */
+  machineId?: () => Promise<string | undefined>;
   workspaceRoot: string;
   /**
    * Strict Agent execution boundary. The host selects one absolute branded
@@ -253,6 +275,12 @@ export interface DaemonConfig {
    * 2 on macOS. Windows remains fail-closed pending its native race proof.
    */
   agentMemoryFilesystem?: AgentMemoryFilesystemHelperConfig;
+  /**
+   * Explicit composition for SDK-reserved MCP helpers when this daemon is
+   * embedded in a single-file/SEA product executable. The product entrypoint
+   * must also call `runSdkReservedHelperCommand()` before its own CLI parser.
+   */
+  sdkHelperHost?: SdkHelperHostConfig;
   /**
    * Refuse legacy task offers locally. This is an additive capability only
    * after the SDK-owned Agent home has passed construction-time preflight.
@@ -977,7 +1005,9 @@ function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
     case 'pi':
       return new PiAdapter({ byokLauncher: config.piByokLauncher });
     case 'claude':
-      return new ClaudeAdapter();
+      return new ClaudeAdapter({
+        resolveApprovalMcpBin: () => resolveApprovalMcpBin(config.sdkHelperHost),
+      });
     case 'codex':
       return new CodexAdapter();
   }
@@ -1088,6 +1118,9 @@ export function buildDaemonWithAdapters(
   if (config.agentMemoryFilesystem !== undefined && (!path.isAbsolute(config.agentMemoryFilesystem.helperBin) || /[\u0000\r\n]/u.test(config.agentMemoryFilesystem.helperBin))) {
     throw new Error('DaemonConfig.agentMemoryFilesystem.helperBin must be an explicit absolute executable path');
   }
+  if (config.sdkHelperHost !== undefined) {
+    resolveSdkReservedHelperBin('agent-message-mcp', config.sdkHelperHost);
+  }
   const externalAgentMemoryFilesystem = config.agentMemoryFilesystem !== undefined;
   if (externalAgentMemoryFilesystem && !isAgentMemoryFilesystemHelperSupported()) {
     throw new Error('DaemonConfig.agentMemoryFilesystem is not admitted on this platform without its native race proof');
@@ -1095,7 +1128,9 @@ export function buildDaemonWithAdapters(
   if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
     throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
   }
-  const agentMemoryMcpBin = config.agentHome === undefined ? undefined : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem);
+  const agentMemoryMcpBin = config.agentHome === undefined
+    ? undefined
+    : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
@@ -1162,6 +1197,7 @@ export function buildDaemonWithAdapters(
   let shuttingDown = false;
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
+  const teamWorkspaces = new LocalTeamWorkspace(storeDir);
   const store = new DeviceStore(storeDir, undefined, config.productId);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   let fleetJitter: FleetJitter | undefined;
@@ -1314,6 +1350,7 @@ export function buildDaemonWithAdapters(
   const approvalRegistry = new ApprovalRegistry();
 
   let connection: ConnectionManager | undefined;
+  let blobLifecycleAbort: AbortController | undefined;
   let connectionState: ConnectionState = 'closed';
   // A successful start owns tenant-bound egress and journal composition. A
   // re-pair during that lifetime is refused rather than leaving any active
@@ -1364,8 +1401,10 @@ export function buildDaemonWithAdapters(
   function buildAuthManager(): AuthManager {
     return new AuthManager({
       serverUrl: config.serverUrl,
+      authRequestDeadlineMs: config.authRequestDeadlineMs,
       store,
       deviceName: config.deviceName,
+      machineId: config.machineId ?? (() => resolveMachineId({ productId: config.productId })),
       onRevoked: () => {
         connectionState = 'revoked';
       },
@@ -1410,7 +1449,7 @@ export function buildDaemonWithAdapters(
       assertServerUrlAllowed(config.serverUrl, { dangerouslyAllowInsecureRemote: true });
       const reason = err instanceof Error ? err.message : String(err);
       console.warn(
-        `[byok/client] WARNING: dangerouslyAllowInsecureRemote is set — proceeding with an insecure server URL (${config.serverUrl}). ` +
+        `[byok/client] WARNING: dangerouslyAllowInsecureRemote is set — proceeding with an insecure server URL (${formatServerUrl(config.serverUrl)}). ` +
           `Device credentials and task data will be sent in the clear to a non-loopback host. This should never be used in a real ` +
           `deployment. (${reason})`,
       );
@@ -1680,9 +1719,10 @@ export function buildDaemonWithAdapters(
       await gitWorkspaceStore?.reconcile();
     }
 
+    blobLifecycleAbort = new AbortController();
     const [runtimes, blobClient] = await Promise.all([
       detectRuntimes(adapters),
-      Promise.resolve(new BlobClient(config.serverUrl, auth)),
+      Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
     // M3-2a: local runtime-detection result — computed once per `start()`,
     // same as the `conn.hello.runtimes` it also feeds (see `detectRuntimes`'s
@@ -1850,7 +1890,10 @@ export function buildDaemonWithAdapters(
       ...(config.resultDocument ? { resultDocument: config.resultDocument } : {}),
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
       ...(config.agentMemoryFilesystem === undefined ? {} : { agentMemoryFilesystemHelperBin: path.resolve(config.agentMemoryFilesystem.helperBin) }),
-      ...(config.agentHome !== undefined && config.agentEgress !== undefined ? { agentMessageMcpBin: resolveAgentMessageMcpBin() } : {}),
+      ...(config.agentHome !== undefined && config.agentEgress !== undefined ? {
+        agentMessageMcpBin: resolveAgentMessageMcpBin(config.sdkHelperHost),
+        agentMessageMcpPreflight: preflightAgentMessageMcp,
+      } : {}),
       ...(config.agentMemory === undefined ? {} : { agentMemoryHostedProjection: config.agentMemory }),
       // M4 Phase 3 hardening: bridges TaskRunner's stale-approval-race
       // finding out to the SAME local observability seam every other
@@ -2296,6 +2339,8 @@ export function buildDaemonWithAdapters(
     // batch cannot mint in the gap between the RPC returning and this function
     // being scheduled. Latched, never cleared.
     shuttingDown = true;
+    blobLifecycleAbort?.abort();
+    blobLifecycleAbort = undefined;
     const errors: unknown[] = [];
     let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
     if (!hostedStorageInitializationBarrierComplete) {
@@ -2833,6 +2878,44 @@ export function buildDaemonWithAdapters(
         if (!parsed) throw new ControlError('bad_request', 'approvals.request requires {taskId, summary}');
         if (!runner) throw new ControlError('not_found', 'daemon is not started');
         return runner.requestApproval(parsed.taskId, parsed.summary);
+      },
+      'team_workspaces.create': async (params) => {
+        const parsed = parseTeamWorkspaceCreateParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_workspaces.create requires exactly {workspaceId,members,limits}');
+        return teamWorkspaces.createWorkspace(parsed);
+      },
+      'team_workspaces.list': () => teamWorkspaces.listWorkspaces(),
+      'team_workspaces.join': async (params) => {
+        const parsed = parseTeamWorkspaceJoinParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_workspaces.join requires exactly {workspaceId,memberId,ttlMs?}');
+        const lease = await teamWorkspaces.createMemberLease(parsed);
+        return { workspaceId: lease.workspaceId, memberId: lease.memberId, expiresAt: lease.expiresAt, context: encodeTeamMemberContext(lease) };
+      },
+      'team_workspaces.revoke': async (params) => {
+        const parsed = parseTeamContextParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_workspaces.revoke requires exactly {context}');
+        await teamWorkspaces.revokeMemberLease({ lease: decodeTeamMemberContext(parsed.context) });
+        return { revoked: true };
+      },
+      'team_messages.post': (params) => {
+        const parsed = parseTeamMessagePostParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_messages.post requires exactly {context,body,contentType?}');
+        return teamWorkspaces.postMessage({ lease: decodeTeamMemberContext(parsed.context), body: parsed.body, ...(parsed.contentType === undefined ? {} : { contentType: parsed.contentType }) });
+      },
+      'team_messages.read': (params) => {
+        const parsed = parseTeamMessageReadParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_messages.read requires exactly {context,afterSeq?}');
+        return teamWorkspaces.readMessages({ lease: decodeTeamMemberContext(parsed.context), ...(parsed.afterSeq === undefined ? {} : { afterSeq: parsed.afterSeq }) });
+      },
+      'team_messages.ack': (params) => {
+        const parsed = parseTeamMessageAckParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_messages.ack requires exactly {context,throughSeq}');
+        return teamWorkspaces.ackMessages({ lease: decodeTeamMemberContext(parsed.context), throughSeq: parsed.throughSeq });
+      },
+      'team_messages.inspect': (params) => {
+        const parsed = parseTeamMessageInspectParams(params);
+        if (!parsed) throw new ControlError('bad_request', 'team_messages.inspect requires exactly {workspaceId,afterSeq?}');
+        return teamWorkspaces.inspectMessages(parsed.workspaceId, parsed.afterSeq);
       },
       'agent_messages.publish': (params) => {
         const parsed = parseAgentMessagePublishParams(params);

@@ -204,7 +204,7 @@ describe('blob flows (§7)', () => {
     expect((await harness.request(uploadUrl, { method: 'PUT', body: bytes })).status).toBe(401);
   });
 
-  it('rejects a payload that does not match its declaration', async () => {
+  it('rejects a payload above its declaration before proxy buffering', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const declared = new TextEncoder().encode('declared');
@@ -224,7 +224,7 @@ describe('blob flows (§7)', () => {
       method: 'PUT',
       body: new TextEncoder().encode('different'),
     });
-    expect(wrong.status).toBe(422);
+    expect(wrong.status).toBe(413);
   });
 
   it('requires one request id and binds finalize to its exact blob resource', async () => {

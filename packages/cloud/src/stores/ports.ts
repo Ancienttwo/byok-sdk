@@ -13,20 +13,18 @@
  * 1. **Async.** Every method returns a `Promise`, so a SQL or KV composition
  *    can implement the same contract the in-memory reference does.
  * 2. **Tenant-first.** Every method's first parameter is a required
- *    `TenantId` — with exactly two documented exceptions below, each of
- *    which is pre-tenant *by construction* because the credential it is
- *    handed is itself what resolves the tenant.
+ *    `TenantId` — with one documented lookup exception below. Pairing code
+ *    consumption is a separate composition-owned enrollment operation: its
+ *    bearer code resolves the tenant internally and it returns only the
+ *    resulting device row.
  *
- * The two exceptions:
+ * The lookup exception:
  *
  * - {@link DeviceDirectory.resolveByDeviceId} — `POST /byok/challenge` and
  *   `POST /byok/token` carry only a deviceId (the pinned wire contract), and
  *   the row is what tells the deployment which tenant to mint for.
- * - {@link PairingCodeStore.redeem} — the code IS the tenant lookup; it was
- *   minted against a tenant that only the host's control plane knew.
- *
- * Neither is reachable through {@link TenantStores} (see `tenant-stores.ts`),
- * so a device-facing handler cannot call them.
+ * It is not reachable through {@link TenantStores} (see `tenant-stores.ts`),
+ * so a device-facing handler cannot call it.
  *
  * The byte-proxy trio that used to be a third pre-tenant exception is no
  * longer part of this bundle at all: it moved to {@link BlobContentProxy},
@@ -62,7 +60,20 @@ export interface DeviceRecord {
   readonly proofKeyId: string;
   /** Current proof signing-key rotation generation. */
   readonly proofKeyEpoch: number;
+  /**
+   * Always `false`. Revocation and machine supersession DELETE the record, so
+   * no implementation ever produces a `true` here; the field stays because
+   * every auth path reads it and a missing row must fail exactly as a revoked
+   * one used to.
+   */
   readonly revoked: boolean;
+  /**
+   * Client-hashed physical machine identity (lowercase hex SHA-256), when the
+   * pairing carried one. Absent for every device paired without it — an
+   * absent value supersedes nothing, so it is never a filter that silently
+   * groups unidentified machines together.
+   */
+  readonly machineId?: string;
   /**
    * The latest capability snapshot written by an authenticated device
    * handshake. This is deliberately separate from core presence: presence is
@@ -71,7 +82,7 @@ export interface DeviceRecord {
   readonly capabilities?: readonly string[];
 }
 
-/** Everything `POST /byok/pair` knows at registration time. `tenantId` is the store's first parameter; `revoked` is the store's own to set. */
+/** Everything `POST /byok/pair` knows at registration time. `tenantId` is the store's first parameter; `revoked` is the store's own to set (always `false`). */
 export interface DeviceRegistration {
   readonly productId: string;
   readonly deviceId: string;
@@ -79,20 +90,49 @@ export interface DeviceRegistration {
   readonly devicePublicKey: string;
   readonly proofKeyId: string;
   readonly proofKeyEpoch: number;
+  /**
+   * Optional client-hashed physical machine identity from `PairRequest`. When
+   * present, `register` DELETES this tenant/product's prior rows carrying the
+   * same value — and the device-scoped state those rows were the only reason
+   * to keep — before inserting, so one physical machine holds one device row
+   * per product. It names no tenant and no product of
+   * its own — both still come from the redeemed pairing code's claims — so it
+   * can only ever supersede rows the caller already addressed.
+   */
+  readonly machineId?: string;
 }
 
 export interface DeviceDirectory {
+  /** Registers the device. With `input.machineId` set this ALSO deletes this tenant/product's prior rows carrying that same machine identity — one physical machine, one row. */
   register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
   /** The row `tenant` owns under `deviceId` — `undefined` including when the device exists under a DIFFERENT tenant. */
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
+  /**
+   * Deletes the registration and the device-scoped state it owned (presence,
+   * challenge nonces, assertion-replay entries, inbound dedup) — never the
+   * history keyed by the device_id string. A no-op for a device this tenant
+   * cannot address. Afterwards every read answers exactly as it does for a
+   * device that was never registered.
+   *
+   * How far the deletion physically reaches is driver-scoped. The durable
+   * (Postgres) driver deletes the registration and every dependent
+   * device-scoped row in the same transaction, so the state is gone the moment
+   * `revoke` resolves. The in-memory reference directory deletes only the
+   * registration: its sibling stores are separate maps it does not own, so a
+   * presence hint expires on its own `expiresAt` TTL and, until then, is
+   * excluded from every projection by the readiness active-device filter
+   * (`activeDeviceIds`, built from the surviving rows). The observable contract
+   * above holds either way — no read path can see a revoked device.
+   */
   revoke(tenant: TenantId, deviceId: string): Promise<void>;
   list(tenant: TenantId): Promise<readonly DeviceRecord[]>;
-  /** Set-wise tenant observation; revoked devices never contribute presence. */
+  /** Set-wise tenant observation. `revokedDeviceCount` is structurally 0 — a revoked device has no row to count. */
   readiness(tenant: TenantId, presence: PresenceStore): Promise<TenantReadiness>;
   /**
    * Persist a capability snapshot obtained from an authenticated device
-   * message. Implementations may return `undefined` for an unknown/revoked
-   * device; callers must fail closed in that case.
+   * message. Implementations may return `undefined` for an unknown (including
+   * revoked, which is the same absence) device; callers must fail closed in
+   * that case.
    */
   recordCapabilities(
     tenant: TenantId,
@@ -131,14 +171,31 @@ export interface PairingCodeIssueInput {
 
 export interface PairingCodeStore {
   issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
-  /**
-   * Validate and CONSUME a code, returning the claims it was minted with, or
-   * `undefined` when it is unknown, expired, or already used — one answer for
-   * all three, so a redeem attempt is never an existence oracle. Single-use is
-   * what makes the caller's "redeem, then register the device row" sequence
-   * exclusive: a second redeem can never reach the registration step.
-   */
-  redeem(code: string): Promise<PairingCodeClaims | undefined>;
+}
+
+/**
+ * The pre-tenant facts a pairing request carries into enrollment. Tenant and
+ * product are deliberately absent: the guarded pairing-code row is their sole
+ * authority, and no caller can choose the registration scope.
+ */
+export interface PairingEnrollmentInput {
+  readonly pairingCode: string;
+  readonly deviceId: string;
+  readonly deviceName: string;
+  readonly devicePublicKey: string;
+  readonly proofKeyId: string;
+  readonly proofKeyEpoch: number;
+  readonly machineId?: string;
+}
+
+/**
+ * The only pairing-code consumption operation. Implementations atomically
+ * consume a valid code, apply machine supersession/state cleanup, and register
+ * the device; failures leave the code retryable. Unknown, expired, and already
+ * consumed codes all return `undefined`.
+ */
+export interface PairingEnrollment {
+  redeemAndRegister(input: PairingEnrollmentInput): Promise<DeviceRecord | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,10 +204,12 @@ export interface PairingCodeStore {
 
 export interface NonceStore {
   issue(tenant: TenantId, deviceId: string): Promise<string>;
-  /** `true` iff the nonce exists for this (tenant, device), is unexpired, and has not been consumed. Never mutates. */
-  validate(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
-  /** Consume the nonce. Called only after every other check on the request has passed. */
-  markUsed(tenant: TenantId, nonce: string): Promise<void>;
+  /**
+   * Atomically consume a nonce only when it belongs to this exact (tenant,
+   * device), is unexpired, and has not already been consumed. Returns `true`
+   * for the sole winner; every other case returns `false`.
+   */
+  consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +240,13 @@ export const TASK_ATTEMPT_STATUSES = [
   'cancelled',
 ] as const;
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
+
+/** The durable first-message reservation and, once present, its terminal disposition. */
+export interface AgentMessageAdmission {
+  readonly messageId: string;
+  readonly payloadBody: string;
+  readonly terminalBody?: string;
+}
 
 export interface TaskAttempt {
   readonly tenantId: TenantId;
@@ -224,6 +290,42 @@ export interface TaskAttemptStore {
       readonly agentRef: AgentRef;
     },
   ): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }>;
+  /**
+   * Atomically binds one message payload to a live task before an external
+   * consumer can run. `pending` is an existing exact reservation whose terminal
+   * receipt has not been recorded yet; callers must fail closed rather than
+   * invoke the consumer again.
+   */
+  reserveAgentMessage(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly messageId: string;
+      readonly payloadBody: string;
+    },
+  ): Promise<'reserved' | 'pending' | 'rejected'>;
+  /** Read only an exact reservation; conflicting task/message bindings are not observable. */
+  readAgentMessage(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly messageId: string;
+      readonly payloadBody: string;
+    },
+  ): Promise<AgentMessageAdmission | undefined>;
+  /** CAS the exact reservation to one immutable terminal disposition body. */
+  finalizeAgentMessage(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly messageId: string;
+      readonly payloadBody: string;
+      readonly terminalBody: string;
+    },
+  ): Promise<AgentMessageAdmission | undefined>;
   get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Batch lookup used by mailbox projection; implementations must not turn one poll into N queries. */
   getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
@@ -446,6 +548,8 @@ export interface CloudBlobStore {
  */
 export interface BlobContentProxy {
   verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): Promise<boolean>;
+  /** Authoritative declared size for a signed PUT; no byte buffering precedes this lookup. */
+  expectedUploadBytes(blobId: string): Promise<bigint | undefined>;
   writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult>;
   /** `undefined` = no such blob (404); a `{ok:false}` result = the blob exists but its bytes could not be proxied (502, distinguished by {@link BlobReadErrorCode}). */
   readContent(blobId: string): Promise<BlobReadResult | undefined>;
@@ -481,6 +585,7 @@ export interface CloudStores {
   readonly approvals: ApprovalTimelineStore;
   readonly devices: DeviceDirectory;
   readonly pairingCodes: PairingCodeStore;
+  readonly pairing: PairingEnrollment;
   readonly nonces: NonceStore;
   readonly dedup: InboundDedupStore;
   readonly tasks: TaskAttemptStore;
@@ -498,6 +603,7 @@ export const CLOUD_STORE_NAMES = [
   'approvals',
   'devices',
   'pairingCodes',
+  'pairing',
   'nonces',
   'dedup',
   'tasks',

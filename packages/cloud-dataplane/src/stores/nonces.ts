@@ -51,25 +51,15 @@ export class PostgresNonceStore implements NonceStore {
     return nonce;
   }
 
-  async validate(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean> {
-    // Never mutates: the gate calls `markUsed` only after every other check on
-    // the request has passed, so validation and consumption are separate steps.
+  async consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean> {
     const result = await this.#pool.query(
-      `SELECT 1 FROM auth_nonce
-        WHERE tenant_id = $1 AND device_id = $2 AND nonce = $3
-          AND used = false AND expires_at >= $4`,
+      `UPDATE auth_nonce
+         SET used = true
+       WHERE tenant_id = $1 AND device_id = $2 AND nonce = $3
+         AND used = false AND expires_at >= $4
+       RETURNING nonce`,
       [tenant, deviceId, nonce, this.#clock.now().toISOString()],
     );
     return result.rowCount === 1;
-  }
-
-  async markUsed(tenant: TenantId, nonce: string): Promise<void> {
-    // Tenant-first even though the signature carries no device: a nonce
-    // belonging to another tenant is not addressable here, so a cross-tenant
-    // consume cannot burn the real owner's nonce.
-    await this.#pool.query('UPDATE auth_nonce SET used = true WHERE tenant_id = $1 AND nonce = $2', [
-      tenant,
-      nonce,
-    ]);
   }
 }

@@ -56,6 +56,7 @@ export type {
   MailboxMessageState,
   MailboxPage,
   MailboxReadQuery,
+  MailboxRecordDeliveryInput,
   MailboxRetentionInput,
   MailboxRetentionResult,
   MailboxStore,

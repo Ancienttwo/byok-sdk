@@ -1,0 +1,68 @@
+regression_guard=packages/client/src/__tests__/control-server.test.ts
+command=bun run --cwd packages/client test -- src/__tests__/control-server.test.ts
+
+$ vitest run src/__tests__/control-server.test.ts
+
+ RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-108-control-rpc-ids/packages/client
+
+ ❯ src/__tests__/control-server.test.ts (23 tests | 2 failed) 1460ms
+     × rejects a duplicate active stream ID before a second handler starts, then releases the original owner after completion 1012ms
+     × rejects a unary request that collides with an active stream on the same authenticated connection 60ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/control-server.test.ts > control-server: connection-local request ID ownership > rejects a duplicate active stream ID before a second handler starts, then releases the original owner after completion
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/__tests__/control-server.test.ts:383:43
+    381|     );
+    382|
+    383|     await vi.waitFor(() => expect(starts).toBe(1));
+       |                                           ^
+    384|     await expect(frames.next()).resolves.toMatchObject({
+    385|       v: 1,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/__tests__/control-server.test.ts > control-server: connection-local request ID ownership > rejects a unary request that collides with an active stream on the same authenticated connection
+AssertionError: expected { v: 1, id: 'cross-kind-id', …(2) } to match object { v: 1, id: 'cross-kind-id', …(2) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "error": {
+-     "code": "duplicate_request_id",
+-   },
+    "id": "cross-kind-id",
+-   "ok": false,
++   "ok": true,
+    "v": 1,
+  }
+
+ ❯ src/__tests__/control-server.test.ts:435:32
+    433|     socket.write(encodeFrame({ v: 1, id: 'cross-kind-id', method: 'sta…
+    434|
+    435|     await expect(frames.next()).resolves.toMatchObject({
+       |                                ^
+    436|       v: 1,
+    437|       id: 'cross-kind-id',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 21 passed (23)
+   Start at  03:41:57
+   Duration  1.66s (transform 54ms, setup 0ms, import 73ms, tests 1.46s, environment 0ms)
+
+error: script "test" exited with code 1
+
+PRE_FIX_EXIT=1

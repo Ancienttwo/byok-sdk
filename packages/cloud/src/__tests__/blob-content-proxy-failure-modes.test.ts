@@ -17,11 +17,12 @@ import type { BlobContentProxy, BlobReadResult } from '../stores/ports';
 function appFor(read: BlobReadResult | undefined): Hono {
   const contentProxy: BlobContentProxy = {
     verifySignedUrl: async () => true,
+    expectedUploadBytes: async () => 0n,
     writeContent: async () => ({ ok: true }),
     readContent: async () => read,
   };
   const app = new Hono();
-  app.get(BYOK_BLOB_CONTENT_ROUTE, blobDownloadContentHandler({ contentProxy }));
+  app.get(BYOK_BLOB_CONTENT_ROUTE, blobDownloadContentHandler({ contentProxy, maxUploadBytes: 1 }));
   return app;
 }
 

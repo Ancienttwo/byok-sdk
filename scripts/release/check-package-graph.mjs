@@ -279,6 +279,12 @@ if (
 ) {
   errors.push('packages/client/package.json: adapter-only import/types exports are incomplete');
 }
+if (
+  clientManifest?.exports?.['./agent-memory']?.import !== './dist/agent-memory/index.js' ||
+  clientManifest?.exports?.['./agent-memory']?.types !== './dist/agent-memory/index.d.ts'
+) {
+  errors.push('packages/client/package.json: embedded agent-memory import/types exports are incomplete');
+}
 
 const cloudDataplaneManifest = manifests.get('@byok-sdk/cloud-dataplane');
 if (

@@ -678,7 +678,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   // client could only discover by probing.
   const contentProxy = options.blobContentProxy;
   if (contentProxy !== undefined && declares(declaration, CLOUD_CAPABILITIES.blobsContentProxy)) {
-    const contentDeps = { contentProxy };
+    const contentDeps = {
+      contentProxy,
+      maxUploadBytes: options.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES,
+    };
     registry.register(
       { method: 'PUT', path: BYOK_BLOB_CONTENT_ROUTE, class: 'presigned' },
       blobUploadContentHandler(contentDeps),

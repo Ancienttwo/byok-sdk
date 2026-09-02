@@ -1,0 +1,91 @@
+# Implementation Notes: release-0-11-agent-foundations
+
+> **Status**: Active
+> **Plan**: plans/plan-20260830-1915-release-0-11-agent-foundations.md
+> **Contract**: tasks/contracts/20260830-1915-release-0-11-agent-foundations.contract.md
+> **Review**: tasks/reviews/20260830-1915-release-0-11-agent-foundations.review.md
+> **Last Updated**: 2026-08-30 19:16
+> **Lifecycle**: notes
+
+## Design Decisions
+
+- Compose from two already accepted local branches; do not treat either branch's standalone package projection as the final release authority.
+- Reuse `d8e36b6` as the version-train input, then verify its manifests and lockfile against the combined final source.
+- Run exact `pack-and-smoke` once after the combined source is frozen; publication and registry readback remain separate gates.
+
+## Deviations From Plan Or Spec
+
+- None recorded.
+
+## Tradeoffs Considered
+
+| Option | Decision | Reason |
+|--------|----------|--------|
+| Re-bump versions manually on the foundations branch | Rejected | It would create a second 0.11.0 release authority and risk divergence from the accepted memory train. |
+| Merge the accepted memory/release line into an isolated composition branch | Selected | It preserves source ancestry and gives the combined candidate one verifiable identity without touching main or external state. |
+
+## Open Questions
+
+- None.
+
+## Evidence Links
+
+- Checks: `.ai/harness/checks/latest.json`
+- Run snapshots: `.ai/harness/runs/`
+- Combined release source commit: `4f76deb9558ed6ef7a6d9ac066daa007f072f292`.
+- Original frozen install and package graph: 9 aligned packages at `0.11.0`; the first candidate incorrectly reused `@byok-sdk/keys@0.3.7`.
+- Focused cross-feature guard: Pi adapter, TeamWorkspace, and memory-tool grant suites passed 47/47.
+- Root gates: build, typecheck, full test, and strict task-workflow passed; client passed 1,558 tests with 11 skipped and all other workspace suites passed.
+- Exact artifact evidence: `.ai/harness/runs/20260830-release-0-11-agent-foundations/artifacts/release-manifest.json` records 10 tarballs, isolated install closure, and source SHA `4f76deb9558ed6ef7a6d9ac066daa007f072f292`.
+- External state: no push, npm publish, registry readback, tag, GitHub Release, deploy, downstream pin, or production rollout was performed.
+
+## Keys 0.3.8 release repair
+
+- Live npm preflight proved `@byok-sdk/keys@0.3.7` already exists with
+  integrity `sha512-FOuLGTWTui5RUOMEeyx+Dvm6c8uaQBgAdepKjJIAThUhI2ZLp/X7sSSjHR/IMGPVsYj0D++0ATCYI3AQHVt23g==`
+  and exact `@byok-sdk/core@0.10.2`, while the first frozen 0.11.0 candidate
+  repacked the same immutable version with exact core 0.11.0 and different
+  integrity. No 0.11.0 package was published.
+- The approved repair advances the independent keys package to `0.3.8`; live
+  npm vacancy returned E404 before any publication attempt, and
+  `check-package-graph.mjs` reports `9 aligned manifests at 0.11.0, keys at
+  0.3.8`.
+- `bun install --frozen-lockfile` made no changes. Release tooling tests passed
+  6/6; focused Pi/TeamWorkspace/MCP-grant tests passed 47/47; root build and
+  typecheck passed. The first full test attempt hit only the known Wrangler
+  5-second dry-run timeout; the exact test then passed 6/6 and the single full
+  rerun passed every workspace suite.
+- npm publish, registry mutation, tag, GitHub Release, downstream pin, deploy,
+  and production remain out of scope for this repair.
+- The repaired packed candidate at source commit
+  `81558983f76e66b4f09f16494b7926ff484d7ad0` passed the exact ten-package
+  install smoke. Its keys tarball has SHA-256
+  `f502e00d2f60929cea3546b14391c57402a1d52e021dbf90e601542e789ebe5d`
+  and npm integrity
+  `sha512-Tig3yBBTFdjlIstloKSoy8megaWm4W5bvDqxqW7DxN49P58/7QcOMkRj8XpSQVwrIQqr2s8+rjS98bpZJj4+EA==`.
+
+## Stable 0.11.0 publication preflight
+
+- Local main, remote main, final artifact manifest, and both branch/main GitHub
+  Actions resolve to source `7a937e5ed8eb5aef102eacb0df9183f296da7e1f`;
+  both CI runs passed 22/22 jobs.
+- npm registry access and `npm whoami` passed for `ancienttwo`; all ten package
+  authorities include that maintainer. Live `latest` is `0.10.2` for the nine
+  aligned packages and `0.3.7` for keys. Every `0.11.0` target and
+  `@byok-sdk/keys@0.3.8` returned E404 vacancy before publication.
+- Local/remote `v0.11.0` and GitHub Release were vacant. Stable publication must
+  omit `--tag`; remote tag push and GitHub Release remain out of scope.
+- The canonical `publish.mjs` dry-run passed build, exact ten-tarball pack/install,
+  dependency order, and single-version closure. Its manifest is byte-identical to
+  the final frozen manifest with SHA-256
+  `75e2a43204cd26944080613d3c784e1ac7adb966efd85470ad63cb99ec2b30d5`.
+
+## Promotion Filter
+
+Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset files only when all three hold: hard to reverse, surprising without local context, and a real trade-off existed. If any one is missing, keep it in this notes file instead.
+
+## Promotion Candidates
+
+- Promote to `tasks/lessons.md` only after a repeated correction or failure pattern.
+- Promote to `docs/researches/` only when it is durable repo knowledge with evidence.
+- Promote to harness asset files only after verification across more than one task or fixture.

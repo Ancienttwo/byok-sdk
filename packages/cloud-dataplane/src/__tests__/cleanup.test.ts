@@ -241,6 +241,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         materialize: replayableOffer(2),
       });
       await quota.applyMailboxDelta(TENANT, { deltaBytes: first.byteSize + second.byteSize });
+      await mailbox.recordDelivery(TENANT, { deviceId: 'device-a', deliveredSeq: first.seq });
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-a', ackedSeq: first.seq });
       await scope.pool.query(
         `INSERT INTO auth_nonce (tenant_id, device_id, nonce, expires_at, used)
@@ -250,6 +251,11 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       await scope.pool.query(
         `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at)
          VALUES ($1, 'old-receipt', '{}', '2026-01-01T00:00:00.000Z')`,
+        [TENANT],
+      );
+      await scope.pool.query(
+        `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at)
+         VALUES ($1, 'pairing-completion:v1:durable-code', '{}', '2026-01-01T00:00:00.000Z')`,
         [TENANT],
       );
       await scope.pool.query(
@@ -273,6 +279,11 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       expect(result.mailboxReleasedBytes).toBe(first.byteSize);
       expect(result.ttlRowsDeleted).toBe(4n);
       expect((await quota.readUsage(TENANT)).mailboxBytes).toBe(second.byteSize);
+      await expect(scope.pool.query(
+        `SELECT key FROM device_request_receipts
+          WHERE tenant_id = $1 AND key = 'pairing-completion:v1:durable-code'`,
+        [TENANT],
+      )).resolves.toMatchObject({ rows: [{ key: 'pairing-completion:v1:durable-code' }] });
 
       const dead = await cleanup.listDeadLetters(TENANT, { deviceId: 'device-a' });
       expect(dead.messages.map((message) => message.seq)).toEqual([second.seq]);
@@ -333,6 +344,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         materialize: opaqueBody('two', HASH_B),
       });
       await quota.applyMailboxDelta(TENANT, { deltaBytes: 6n });
+      await mailbox.recordDelivery(TENANT, { deviceId: 'device-race', deliveredSeq: first.seq });
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-race', ackedSeq: first.seq });
 
       const cleanup = new PostgresCloudCleanup({

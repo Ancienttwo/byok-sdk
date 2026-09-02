@@ -194,6 +194,26 @@ export interface RuntimeAdapterDescriptor {
   readonly environmentRequirements: RuntimeEnvironmentRequirements;
   /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
   readonly supportsDispatchSelection: boolean;
+  /**
+   * Whether this adapter actually CONSUMES
+   * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
+   * pre-grants each projected toolset server's tools in the runtime's own
+   * grant surface (claude's `--allowedTools`, codex's `enabled_tools` +
+   * per-tool `approval_mode`) and therefore needs the daemon to observe
+   * them first.
+   *
+   * The daemon uses this, and only this, to decide whether to pay for the
+   * pre-admission `tools/list` probe of every projected server
+   * (`daemon/mcp-tools-probe.ts`). An adapter that projects toolsets through
+   * its own proxy and grants them itself (the pi adapter) declares nothing
+   * here and never makes an offer wait on a probe it has no use for.
+   *
+   * Omission is fail-closed in the direction that matters: no probe means no
+   * observation, and an adapter that does consume the observation rejects a
+   * projected server it has no tool names for (`adapters/mcp-tool-grants.ts`).
+   * A grant is never widened by a missing declaration.
+   */
+  readonly requiresMcpToolsetToolObservation?: boolean;
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -204,7 +224,22 @@ export interface RuntimeAdapterPrepareInput {
   requiredToolsetIds: readonly string[];
   /** Locally resolved MCP authority; available for pure admission validation only. */
   mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+  /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
+  mcpToolsetTools?: McpToolsetToolObservation;
 }
+
+/**
+ * Tool names observed by starting each projected toolset MCP server and
+ * reading its own `tools/list` answer (`daemon/mcp-tools-probe.ts`), keyed by
+ * the projected server name. SDK-reserved servers are never keyed here — they
+ * carry their own fixed, single-tool grants inside the adapters.
+ *
+ * This is the ONLY set of names an adapter may pre-grant to a runtime. Device
+ * toolset configuration carries `command`/`args` only, so a configured value
+ * could never be an authority on what a server exposes; a name absent from
+ * this observation is a name the runtime is never told to allow.
+ */
+export type McpToolsetToolObservation = Readonly<Record<string, readonly string[]>>;
 
 /** A permanent or currently-unavailable pre-claim admission rejection. */
 export interface RuntimeAdapterRejectedOperation {
@@ -261,6 +296,8 @@ export interface RuntimeOperationStartInput {
   readonly env: NodeJS.ProcessEnv;
   /** Local MCP authority resolved from logical wire ids. */
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+  /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
+  readonly mcpToolsetTools?: McpToolsetToolObservation;
   /** Optional, adapter-agnostic out-of-band approval channel. */
   readonly approvalChannel?: ApprovalChannel;
 }
@@ -304,6 +341,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
   return Object.freeze({
     id: descriptor.id,
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
+    requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     capabilities: Object.freeze({
       steer: descriptor.capabilities.steer === true,
       resume: descriptor.capabilities.resume === true,

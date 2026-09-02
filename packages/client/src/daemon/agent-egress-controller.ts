@@ -58,6 +58,11 @@ export type AgentEgressReliableAppendResult =
   | Readonly<{ ok: true; record: AgentReliableEgressRecord }>
   | Readonly<{ ok: false; reason: AgentEgressDropReason }>;
 
+interface AgentReliableSpoolOpenSlot {
+  readonly homeDir: string;
+  readonly promise: Promise<AgentReliableSpool>;
+}
+
 function agentKey(agentRef: AgentRef): string {
   return `${agentRef.agentId}\u0000${agentRef.profileRevision}`;
 }
@@ -74,6 +79,8 @@ function emptyLane(): AgentEgressLaneStatus {
 export class AgentEgressController {
   private readonly latest = new AgentLatestValueState();
   private readonly spools = new Map<string, AgentReliableSpool>();
+  private readonly spoolOpens = new Map<string, AgentReliableSpoolOpenSlot>();
+  private reliableAppendTail: Promise<void> = Promise.resolve();
   private readonly latestStatus = emptyLane();
   private readonly reliableStatus = emptyLane();
   private readonly drops: AgentEgressDropReceipt[] = [];
@@ -136,7 +143,8 @@ export class AgentEgressController {
   }
 
   async appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult> {
-    if (!this.active || this.options.tenantId === undefined) {
+    const tenantId = this.options.tenantId;
+    if (!this.active || tenantId === undefined) {
       this.noteDrop('reliable', 'policy_denied', input.agentRef);
       return { ok: false, reason: 'policy_denied' };
     }
@@ -151,17 +159,21 @@ export class AgentEgressController {
       return { ok: false, reason: 'sanitizer_rejected' };
     }
     try {
-      const spool = await this.spoolFor(input.homeDir, input.agentRef);
-      const record = await spool.append({
-        agentRef: input.agentRef,
-        tenantId: this.options.tenantId,
-        policyRevision: this.options.policy.policyRevision,
-        payload,
-        sessionRef: input.sessionRef,
-        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
-        ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
-      } satisfies AgentReliableAppendInput, this.options.policy, this.tenantPendingBytes());
-      return { ok: true, record };
+      const spoolOpen = this.spoolFor(input.homeDir, input.agentRef);
+      return await this.withAppendTail(async () => {
+        const spool = await spoolOpen;
+        this.bindSpool(input.agentRef, spool, spoolOpen);
+        const record = await spool.append({
+          agentRef: input.agentRef,
+          tenantId,
+          policyRevision: this.options.policy.policyRevision,
+          payload,
+          sessionRef: input.sessionRef,
+          ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+          ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
+        } satisfies AgentReliableAppendInput, this.options.policy, this.tenantPendingBytes());
+        return { ok: true, record };
+      });
     } catch (error) {
       const reason: AgentEgressDropReason = error instanceof AgentReliableQuotaError ? error.reason : 'backpressure';
       this.noteDrop('reliable', reason, input.agentRef);
@@ -175,21 +187,26 @@ export class AgentEgressController {
    * with `wireType: agent.content.receipt` before any transport attempt.
    */
   async appendContentReceipt(input: AgentEgressContentReceiptInput): Promise<AgentEgressReliableAppendResult> {
-    if (!this.active || this.options.tenantId === undefined) {
+    const tenantId = this.options.tenantId;
+    if (!this.active || tenantId === undefined) {
       this.noteDrop('reliable', 'policy_denied', input.agentRef);
       return { ok: false, reason: 'policy_denied' };
     }
     try {
-      const spool = await this.spoolFor(input.homeDir, input.agentRef);
-      const record = await spool.appendContentReceipt({
-        agentRef: input.agentRef,
-        tenantId: this.options.tenantId,
-        policyRevision: this.options.policy.policyRevision,
-        sessionRef: input.payload.sessionRef,
-        payload: input.payload,
-        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
-      } satisfies AgentContentReceiptAppendInput, this.options.policy, this.tenantPendingBytes());
-      return { ok: true, record };
+      const spoolOpen = this.spoolFor(input.homeDir, input.agentRef);
+      return await this.withAppendTail(async () => {
+        const spool = await spoolOpen;
+        this.bindSpool(input.agentRef, spool, spoolOpen);
+        const record = await spool.appendContentReceipt({
+          agentRef: input.agentRef,
+          tenantId,
+          policyRevision: this.options.policy.policyRevision,
+          sessionRef: input.payload.sessionRef,
+          payload: input.payload,
+          ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+        } satisfies AgentContentReceiptAppendInput, this.options.policy, this.tenantPendingBytes());
+        return { ok: true, record };
+      });
     } catch (error) {
       const reason: AgentEgressDropReason = error instanceof AgentReliableQuotaError ? error.reason : 'backpressure';
       this.noteDrop('reliable', reason, input.agentRef);
@@ -272,20 +289,61 @@ export class AgentEgressController {
     return this.reliableRecords();
   }
 
-  private async spoolFor(homeDir: string, agentRef: AgentRef): Promise<AgentReliableSpool> {
+  private spoolFor(homeDir: string, agentRef: AgentRef): Promise<AgentReliableSpool> {
     const key = agentKey(agentRef);
     const existing = this.spools.get(key);
-    if (existing) return existing;
-    const spool = await AgentReliableSpool.open(homeDir);
-    if (spool.records().some((record) => !sameAgent(record.agentRef, agentRef))) {
-      throw new Error('Agent-local reliable spool has a different AgentRef');
+    if (existing) {
+      if (existing.homeDir !== homeDir) throw new Error('Agent reliable spool is already bound to a different home');
+      return Promise.resolve(existing);
     }
-    this.spools.set(key, spool);
-    return spool;
+    const inFlight = this.spoolOpens.get(key);
+    if (inFlight !== undefined) {
+      if (inFlight.homeDir !== homeDir) throw new Error('Agent reliable spool opening is already bound to a different home');
+      return inFlight.promise;
+    }
+    const opened = (async () => {
+      const spool = await AgentReliableSpool.open(homeDir);
+      if (spool.records().some((record) => !sameAgent(record.agentRef, agentRef))) {
+        throw new Error('Agent-local reliable spool has a different AgentRef');
+      }
+      return spool;
+    })();
+    const slot: AgentReliableSpoolOpenSlot = { homeDir, promise: opened };
+    this.spoolOpens.set(key, slot);
+    void opened.catch(() => {
+      if (this.spoolOpens.get(key) === slot) this.spoolOpens.delete(key);
+    });
+    return opened;
+  }
+
+  private bindSpool(agentRef: AgentRef, spool: AgentReliableSpool, spoolOpen: Promise<AgentReliableSpool>): void {
+    const key = agentKey(agentRef);
+    const existing = this.spools.get(key);
+    try {
+      if (existing && existing !== spool) throw new Error('multiple Agent egress spools claim the same AgentRef');
+      this.spools.set(key, spool);
+    } finally {
+      const slot = this.spoolOpens.get(key);
+      if (slot?.promise === spoolOpen) this.spoolOpens.delete(key);
+    }
   }
 
   private tenantPendingBytes(): number {
     return this.reliableRecords().reduce((total, record) => total + record.byteCount, 0);
+  }
+
+  private async withAppendTail<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.reliableAppendTail;
+    let release!: () => void;
+    this.reliableAppendTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      await previous;
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private noteDrop(lane: 'latest-value' | 'reliable', reason: AgentEgressDropReason, agentRef?: AgentRef, countDrop = true): void {

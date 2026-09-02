@@ -866,11 +866,22 @@ auth/device-flow UI, outside this protocol's concern) plus a freshly
 generated device keypair register the device and mint its first token.
 
 ```
-Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey }
+Request  (PairRequestSchema):  { pairingCode, deviceName, devicePublicKey, machineId? }
 Response (PairResponseSchema): { deviceId, accessToken, tenantId, refreshHint? }
 ```
 
 - `devicePublicKey`: Ed25519 public key, base64url-encoded.
+- `machineId`: OPTIONAL client-hashed machine identity — lowercase hex SHA-256
+  of the product id and an OS-provided machine identifier (macOS
+  `IOPlatformUUID`, Linux `/etc/machine-id`, Windows `MachineGuid`), never the
+  raw identifier. When a pairing carries it, the server DELETES every prior
+  device row of the same `(tenantId, productId, machineId)` before registering
+  the new one, so one physical machine holds one device row per product. The
+  superseded device is gone, not flagged: its next `/byok/challenge` gets the
+  same `401` an id that was never registered gets. It carries no tenant or
+  product of its own — those still come
+  only from the redeemed pairing code's claims — and a client that cannot
+  resolve one omits the field, in which case no supersession happens at all.
 - `accessToken`: JWT, ~1h lifetime.
 - `tenantId`: required opaque, non-secret tenant binding copied exactly from
   the authenticated redeemed pairing-code/device row. It is bounded to 1–200
@@ -973,12 +984,32 @@ device's next `/byok/challenge`, `/byok/token`, or WSS connect attempt gets a
 fresh device keypair is not required, but re-registering the existing public
 key is the simplest implementation and is an acceptable choice for M1).
 
+**Revocation DELETES the device registration (changed 2026-08-29).** It does
+not mark the row revoked and leave it in place. Afterwards the device id is
+byte-for-byte an id that was never registered: it is absent from the device
+listing and from the tenant readiness projection, it resolves to nothing on
+the pre-tenant `/byok/challenge` and `/byok/token` paths, and the
+device-scoped state it owned — its presence hint, its outstanding challenge
+nonces, its inbound-dedup entries, its assertion-replay entries — is deleted
+in the same transaction. What the device DID is not revocation's business and
+survives untouched: the task, egress, and proof-receipt records keyed by its
+device id are history, not credentials. Nothing observable on the wire
+changes, because `401` was already the answer for both a revoked device and
+an unknown one (§12.6, no existence oracle); what changes is that there is no
+longer a stored row whose `revoked` flag every read path has to remember to
+exclude. The daemon's contract is unchanged: it sees the `401`, surfaces
+`revoked`, and must re-pair.
+
 The revocation surface is tenant-first (S1): the reference server's public
 action is `devices.revoke(tenantId, deviceId)`, and the tenant is part of the
 lookup rather than a check applied afterward — a caller holding one tenant's
 credentials cannot revoke, or even confirm the existence of, another tenant's
-device. Revoking a device that the named tenant does not own is silently
-indistinguishable from revoking one that does not exist at all.
+device. Revoking a device that the named tenant does not own deletes nothing
+and is silently indistinguishable from revoking one that does not exist at
+all. Pairing is the one other path that revokes: per §6.1, a `POST /byok/pair`
+carrying `machineId` supersedes — that is, deletes — that same machine's prior
+rows within the tenant and product the redeemed pairing code chose, and the
+caller still cannot name, or otherwise learn of, the rows it removes.
 
 ## 7. Blob flows
 
@@ -1088,7 +1119,18 @@ fails closed. Sending this field is gated by
 under the host-global default. A `messageEgress.mode:'required'` offer with no
 second terminal selection is itself message-only authority and therefore
 bypasses the extractor; an offer can request both lanes only by explicitly
-selecting `result-document`.
+selecting `result-document`. Delivery of that one required message is the
+daemon's obligation, not the model's: when the runtime never publishes
+through the SDK-owned tool, the daemon sends on the message lane the
+assistant text after the last tool interaction (falling back to the whole
+run's text) — the `progress` text emitted after the last `tool_use`,
+`tool_result` or `needs_approval` event, concatenated and trimmed, so
+intermediate narration about work still to be done never reaches the user;
+when that run is empty (the turn ends on a tool call with no closing text)
+the whole run's concatenated text — the same prose `summary` carries — is
+sent instead. It never includes tool calls, tool results or thinking, and
+`summary` itself remains the whole run either way. An empty trimmed body
+fails the task.
 
 **A document must be PLAIN JSON DATA — equal to its own JSON round trip.**
 Not merely "a value `JSON.stringify` accepts", which is a much weaker bar
@@ -1335,6 +1377,17 @@ lesser-validated path.
 user-visible Agent message. A strict fresh or resume Agent egress offer may
 declare `messageEgress: {mode:'required', contract, contentType, maxBytes}`;
 presence is capability-gated before task/mailbox allocation.
+
+The daemon, not the model, is responsible for delivering that message: if the
+runtime's turn ends without a publish through the SDK-owned tool, the daemon
+authors the one immutable draft from the assistant text after the last tool
+interaction (falling back to the whole run's text) — the `progress` text
+emitted after the last `tool_use`, `tool_result` or `needs_approval` event,
+concatenated and trimmed, or, when that run is empty, the whole run's text
+(the prose the task's `summary` carries), never tool calls, tool results or
+thinking — and sends it on this lane; an empty trimmed body fails the task
+instead of waiting. `summary` is unaffected: it always carries the whole
+run.
 
 The SDK-owned task MCP tool accepts only `body` and optional `contentType`.
 Its local control call carries a daemon-issued, single-task sealed context

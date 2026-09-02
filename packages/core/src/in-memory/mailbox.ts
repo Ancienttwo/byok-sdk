@@ -14,6 +14,7 @@ import type {
   MailboxMessage,
   MailboxPage,
   MailboxReadQuery,
+  MailboxRecordDeliveryInput,
   MailboxRetentionInput,
   MailboxRetentionResult,
   MailboxStore,
@@ -26,6 +27,7 @@ const DEFAULT_READ_LIMIT = 50;
 
 interface DeviceMailbox {
   nextSeq: number;
+  deliveredSeq: number;
   ackedSeq: number;
   cursorUpdatedAt: string;
   mutationTail: Promise<void>;
@@ -106,6 +108,14 @@ export class InMemoryMailboxStore implements MailboxStore {
           this.#now(),
         );
       }
+      if (input.ackedSeq > device.deliveredSeq) {
+        throw new CoreConflictError(
+          'mailbox_cursor_ahead_of_delivery',
+          `Cursor for device ${input.deviceId} was delivered through ${device.deliveredSeq}; refusing to acknowledge future cursor ${input.ackedSeq}.`,
+          this.#cursorState(tenant, input.deviceId, device),
+          this.#now(),
+        );
+      }
       device.ackedSeq = input.ackedSeq;
       device.cursorUpdatedAt = this.#now();
       for (const [index, message] of device.messages.entries()) {
@@ -123,10 +133,28 @@ export class InMemoryMailboxStore implements MailboxStore {
     return advanced;
   }
 
+  async recordDelivery(
+    tenant: TenantId,
+    input: MailboxRecordDeliveryInput,
+  ): Promise<MailboxCursorState> {
+    const device = this.#device(tenant, input.deviceId);
+    const recorded = device.mutationTail.then(() => {
+      if (input.deliveredSeq > device.deliveredSeq) {
+        device.deliveredSeq = input.deliveredSeq;
+      }
+      return this.#cursorState(tenant, input.deviceId, device);
+    });
+    device.mutationTail = recorded.then(
+      () => undefined,
+      () => undefined,
+    );
+    return recorded;
+  }
+
   async readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState> {
     const device = this.#devices.get(tenantKey(tenant, deviceId));
     if (device === undefined) {
-      return { tenantId: tenant, deviceId, ackedSeq: 0, updatedAt: this.#now() };
+      return { tenantId: tenant, deviceId, deliveredSeq: 0, ackedSeq: 0, updatedAt: this.#now() };
     }
     return this.#cursorState(tenant, deviceId, device);
   }
@@ -181,6 +209,7 @@ export class InMemoryMailboxStore implements MailboxStore {
     if (existing !== undefined) return existing;
     const created: DeviceMailbox = {
       nextSeq: 1,
+      deliveredSeq: 0,
       ackedSeq: 0,
       cursorUpdatedAt: this.#now(),
       mutationTail: Promise.resolve(),
@@ -199,6 +228,7 @@ export class InMemoryMailboxStore implements MailboxStore {
     return {
       tenantId: tenant,
       deviceId,
+      deliveredSeq: device.deliveredSeq,
       ackedSeq: device.ackedSeq,
       updatedAt: device.cursorUpdatedAt,
     };

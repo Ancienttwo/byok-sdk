@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-08-26T15:11:42+0800 -->
+<!-- updated_at: 2026-09-01T21:01:50+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-08-26T15:11:42+0800
-> **Source Branch**: codex/agent-message-egress-research
-> **Source Commit**: 405db77
+> **Updated At**: 2026-09-01T21:01:50+0800
+> **Source Branch**: codex/issues-112-121-ci-regate
+> **Source Commit**: 322bb08
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -31,10 +31,8 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 ## Active Work
 
-- /Users/kito/Projects/byok-sdk-wt-agent-provider-profile-binding: plans/plan-20260826-1405-agent-provider-profile-binding.md
-- /Users/kito/Projects/byok-sdk-wt-agent-provider-profile-binding: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-agent-provider-profile-binding
-- /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model: plans/plan-20260824-0248-credential-blind-enrollment-status.md
-- /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model: active-worktree owner -> /Users/kito/Projects/byok-sdk-wt-authenticated-enrollment-read-model
+- linked-worktree-97eccea44efe: plans/plan-20260826-1405-agent-provider-profile-binding.md
+- linked-worktree-97eccea44efe: active-worktree owner -> self
 ## Active Sprint
 
 - Sprint: (none)
@@ -54,16 +52,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260826-1159-agent-message-egress.md
- D tasks/contracts/20260826-1159-agent-message-egress.contract.md
- D tasks/notes/20260826-1159-agent-message-egress.notes.md
- D tasks/reviews/20260826-1159-agent-message-egress.review.md
+ D plans/plan-20260901-1128-issues-112-121-security-reliability-batch.md
+ D tasks/contracts/20260901-1128-issues-112-121-security-reliability-batch.contract.md
+ D tasks/notes/20260901-1128-issues-112-121-security-reliability-batch.notes.md
+ D tasks/reviews/20260901-1128-issues-112-121-security-reliability-batch.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260826-1159-agent-message-egress.md
-?? tasks/archive/contract-20260826-1511-agent-message-egress.md
-?? tasks/archive/notes-20260826-1511-agent-message-egress.md
-?? tasks/archive/review-20260826-1511-agent-message-egress.md
-?? tasks/archive/todo-20260826-1511-agent-message-egress.md
+?? plans/archive/plan-20260901-1128-issues-112-121-security-reliability-batch.md
+?? tasks/archive/contract-20260901-2101-issues-112-121-security-reliability-batch.md
+?? tasks/archive/notes-20260901-2101-issues-112-121-security-reliability-batch.md
+?? tasks/archive/review-20260901-2101-issues-112-121-security-reliability-batch.md
+?? tasks/archive/todo-20260901-2101-issues-112-121-security-reliability-batch.md
 ```
 
 ## Source Artifacts

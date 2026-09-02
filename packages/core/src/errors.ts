@@ -55,6 +55,7 @@ export const CORE_ERROR_CODES = {
   // mailbox (§12.7.3)
   mailbox_message_not_found: 'mailbox_message_not_found',
   mailbox_cursor_regression: 'mailbox_cursor_regression',
+  mailbox_cursor_ahead_of_delivery: 'mailbox_cursor_ahead_of_delivery',
 
   // board coordination (§12.3)
   board_item_not_found: 'board_item_not_found',

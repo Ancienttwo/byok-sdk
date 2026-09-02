@@ -56,6 +56,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'approvals',
   'devices',
   'pairingCodes',
+  'pairing',
   'nonces',
   'dedup',
   'tasks',

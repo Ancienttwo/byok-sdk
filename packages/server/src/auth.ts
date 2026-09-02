@@ -115,7 +115,8 @@ export async function mintAccessToken(
 // DeviceRegistry — device identity directory, keyed by (tenantId, deviceId).
 // Registered at `/byok/pair` time from the redeemed pairing-code claims;
 // consulted by every authed surface so a revoked device's JWT (even if not
-// yet expired) stops working immediately (§6.3).
+// yet expired) stops working immediately (§6.3) — revocation deletes the row,
+// so the lookup that used to find a flagged row now finds nothing.
 //
 // S1: every lookup that has a tenant in scope MUST pass it — the composite
 // key is the lookup, not a post-hoc comparison, so a token whose tenant does
@@ -133,20 +134,24 @@ export interface DeviceRecord {
   deviceName: string;
   /** Ed25519 public key, base64url-encoded (JWK `x` form — see {@link verifyEd25519Signature}). */
   devicePublicKey: string;
-  revoked: boolean;
 }
 
-/** Everything `POST /byok/pair` knows at registration time; `revoked` is the registry's own to set. */
-export type DeviceRegistration = Omit<DeviceRecord, 'revoked'>;
+/**
+ * Everything `POST /byok/pair` knows at registration time — which is the whole
+ * row. Revocation DELETES the registration (§6.3), so there is no lifecycle
+ * flag for the registry to own on top of what pairing supplies.
+ */
+export type DeviceRegistration = DeviceRecord;
 
 export class DeviceRegistry {
   /** Keyed by {@link DeviceRegistry.key} — `(tenantId, deviceId)`. */
   private readonly devices = new Map<string, DeviceRecord>();
   /**
    * Secondary index over the SAME record objects, for the two pre-tenant
-   * endpoints only (see {@link resolveByDeviceId}). Holding the same object
-   * reference means a revocation applied through the composite key is
-   * immediately visible here too — there is no second copy to keep in sync.
+   * endpoints only (see {@link resolveByDeviceId}). It holds the same record
+   * objects rather than copies, and {@link revoke} removes the entry here in
+   * the same call that removes the composite-key one — a stale entry left
+   * behind would be a deleted device that can still get a token.
    */
   private readonly byDeviceId = new Map<string, DeviceRecord>();
 
@@ -162,7 +167,7 @@ export class DeviceRegistry {
    * — which is the whole point of S1.
    */
   register(device: DeviceRegistration): void {
-    const record: DeviceRecord = { ...device, revoked: false };
+    const record: DeviceRecord = { ...device };
     this.devices.set(DeviceRegistry.key(record.tenantId, record.deviceId), record);
     this.byDeviceId.set(record.deviceId, record);
   }
@@ -174,15 +179,33 @@ export class DeviceRegistry {
 
   /**
    * Revoke a device (public API via `createByokServer(...).devices.revoke`).
-   * Its next `/byok/challenge`, `/byok/token`, WSS connect, or authed HTTP
-   * call gets a 401; the daemon's only recourse is to re-run `/byok/pair`
-   * (docs/protocol.md §6.3). A tenant can only revoke its own devices: a
-   * (tenantId, deviceId) pair it does not own resolves to nothing and this is
-   * a no-op.
+   * Revocation DELETES the registration (docs/protocol.md §6.3): afterwards
+   * the device id is byte-for-byte one that was never registered — absent
+   * from {@link list}, resolving to nothing on the pre-tenant
+   * `/byok/challenge` and `/byok/token` paths, and a 401 on every authed
+   * surface. The daemon's only recourse is to re-run `/byok/pair`.
+   *
+   * There is deliberately no retained `revoked` row: a flag every read path
+   * has to remember to exclude is a second way to represent "not a
+   * principal", and the first read path that forgets it is a live credential.
+   *
+   * A tenant can only revoke its own devices: a (tenantId, deviceId) pair it
+   * does not own resolves to nothing, deletes nothing, and is silently
+   * indistinguishable from revoking one that never existed.
+   *
+   * Returns whether a row was actually removed — the composition in
+   * `index.ts` uses it to delete the device-scoped state that only existed to
+   * serve that row (nonces, presence, dedup), so a no-op revoke touches
+   * nothing at all.
    */
-  revoke(tenantId: TenantId, deviceId: string): void {
+  revoke(tenantId: TenantId, deviceId: string): boolean {
     const record = this.get(tenantId, deviceId);
-    if (record) record.revoked = true;
+    if (!record) return false;
+    this.devices.delete(DeviceRegistry.key(tenantId, deviceId));
+    // The secondary index holds the SAME object; drop it only if it still
+    // points at this row (a re-pair could have replaced it).
+    if (this.byDeviceId.get(deviceId) === record) this.byDeviceId.delete(deviceId);
+    return true;
   }
 
   /** Every known device row, across tenants — the in-process read model behind `ByokServer.machines.list()`. */
@@ -256,6 +279,18 @@ export class NonceStore {
     if (record.deviceId !== deviceId) return false;
     if (Date.now() > record.expiresAt) return false;
     return true;
+  }
+
+  /**
+   * Drop every nonce outstanding for `deviceId` — called when the device's
+   * registration is deleted (§6.3 revocation). An unspent challenge is state
+   * that only existed to serve a row the directory can no longer name, so it
+   * goes with the row rather than sitting until its TTL sweeps it.
+   */
+  deleteForDevice(deviceId: string): void {
+    for (const [nonce, record] of this.nonces) {
+      if (record.deviceId === deviceId) this.nonces.delete(nonce);
+    }
   }
 
   /** Mark `nonce` consumed so a replay of the same (deviceId, nonce, signature) is rejected. */
@@ -340,9 +375,10 @@ export interface AuthenticatedDevice {
  * S1 shape: the token's `(tenantId, deviceId)` are LOOKUP KEYS into the
  * registry, and the row that comes back is the authority. A token for a
  * device that no longer exists, one whose tenant does not own that device,
- * one whose product disagrees with the row, one whose row belongs to a
- * different product than this instance serves, and one for a revoked device
- * all fail identically here and are indistinguishable to the caller — there
+ * one whose product disagrees with the row, and one whose row belongs to a
+ * different product than this instance serves all fail identically here and
+ * are indistinguishable to the caller — a revoked device is exactly the first
+ * of those, since revocation deleted its row (§6.3) — there
  * is deliberately no "which of those was it" signal to hand back, so no route
  * can turn a 401 into a cross-tenant (or cross-product) existence oracle.
  *
@@ -364,7 +400,7 @@ export async function authenticateBearer(
   const claims = await deps.tokenSigner.verify(token);
   if (!claims) return undefined;
   const device = deps.devices.get(claims.tenantId, claims.deviceId);
-  if (!device || device.revoked) return undefined;
+  if (!device) return undefined;
   if (device.productId !== claims.productId) return undefined;
   if (device.productId !== deps.productId) return undefined;
   return { deviceId: device.deviceId, tenantId: device.tenantId, productId: device.productId };

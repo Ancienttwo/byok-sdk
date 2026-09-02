@@ -343,6 +343,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     ctx.mcpServers = {
       salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
     };
+    ctx.mcpToolsetTools = { salesko: ['find_leads'] };
 
     const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
@@ -350,6 +351,11 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(args).toContain('--mcp-config');
     expect(args).toContain('--strict-mcp-config');
     expect(args).not.toContain('--permission-prompt-tool');
+    // The projected server's observed tool is pre-granted (real claude
+    // auto-denies an ungranted MCP tool), and nothing else is. The
+    // observation itself never enters the generated config file, which stays
+    // exactly the MCP authority claude understands.
+    expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__salesko__find_leads');
     const configPath = args[args.indexOf('--mcp-config') + 1];
     if (typeof configPath !== 'string') throw new Error('missing mcp config path');
     expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toEqual({

@@ -77,6 +77,21 @@
 //                                        relative path — see events.ts's
 //                                        `extractArtifactEvents`).
 //   FAKE_CODEX_ARTIFACT_CONTENT=<text> -> overrides the written file content.
+//   FAKE_CODEX_MCP_TOOL_CALL=<s>/<t>   -> this turn calls MCP tool <t> on
+//                                        server <s>. Enforced exactly like
+//                                        real codex 0.149 enforces it: the
+//                                        turn fails with codex's own
+//                                        "requires approval, but approval
+//                                        policy is never" shape unless THIS
+//                                        turn's argv carries
+//                                        `--ignore-user-config`, the
+//                                        server's `command`, an
+//                                        `enabled_tools` allowlist naming
+//                                        <t>, and its per-tool
+//                                        `approval_mode="approve"`. Applies
+//                                        to `exec resume` identically, which
+//                                        is what makes a follow-up turn that
+//                                        drops the MCP config fail loudly.
 //   FAKE_CODEX_UNMAPPED_TYPE=1         -> emit one never-seen item type and
 //                                        one never-seen top-level type
 //                                        alongside the normal sequence, for
@@ -136,7 +151,7 @@ function send(obj) {
 }
 
 if (argv[0] === '--version') {
-  process.stdout.write(`${process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.0.0-fake'}\n`);
+  process.stdout.write(`${process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.149.0-fake'}\n`);
   process.exit(0);
 }
 
@@ -147,6 +162,45 @@ if (argv[0] === 'login' && argv[1] === 'status') {
   }
   // Real codex prints this on STDERR, not stdout — confirmed live.
   process.stderr.write('Logged in using ChatGPT\n');
+  process.exit(0);
+}
+
+// `codex mcp get <server> --json` policy read-back. Real codex 0.149 answers
+// for whatever server the -c overrides define, so this accepts any name: the
+// SDK-reserved message helper and a projected host toolset server take the
+// identical path, differing only in which tool names the adapter passes.
+if (argv[0] === 'mcp' && argv[1] === 'get' && argv[3] === '--json') {
+  const serverName = argv[2];
+  const overrides = [];
+  for (let index = 4; index < argv.length; index += 1) {
+    if (argv[index] !== '-c' || argv[index + 1] === undefined) {
+      process.stderr.write(`fake-codex: invalid mcp policy probe argv: ${JSON.stringify(argv)}\n`);
+      process.exit(2);
+    }
+    overrides.push(argv[index + 1]);
+    index += 1;
+  }
+  const enabledPrefix = `mcp_servers.${serverName}.enabled_tools=`;
+  const enabled = overrides.find((override) => override.startsWith(enabledPrefix));
+  let tools;
+  try {
+    tools = enabled === undefined ? undefined : JSON.parse(enabled.slice(enabledPrefix.length));
+  } catch {
+    tools = undefined;
+  }
+  if (!Array.isArray(tools) || tools.length === 0) {
+    process.stderr.write(`fake-codex: no enabled_tools allowlist for ${serverName}\n`);
+    process.exit(2);
+  }
+  // Every allowlisted tool must ALSO carry its own approval_mode: the
+  // allowlist alone leaves the call refused under approval_policy=never.
+  for (const tool of tools) {
+    if (!overrides.includes(`mcp_servers.${serverName}.tools.${tool}.approval_mode="approve"`)) {
+      process.stderr.write(`fake-codex: ${serverName} tool policy is incomplete for ${tool}\n`);
+      process.exit(2);
+    }
+  }
+  process.stdout.write(`${JSON.stringify({ name: serverName, enabled: true, enabled_tools: tools })}\n`);
   process.exit(0);
 }
 
@@ -163,10 +217,16 @@ if (rest[0] === 'resume') {
 }
 
 const ALLOWED_CONFIG_KEYS = new Set(['sandbox_mode', 'approval_policy']);
+const configOverrides = [];
+let ignoreUserConfig = false;
 let prompt;
 for (let i = 0; i < rest.length; i++) {
   const arg = rest[i];
-  if (arg === '--json' || arg === '--skip-git-repo-check' || arg === '--ignore-user-config') continue;
+  if (arg === '--ignore-user-config') {
+    ignoreUserConfig = true;
+    continue;
+  }
+  if (arg === '--json' || arg === '--skip-git-repo-check') continue;
   if (arg === '--model') {
     i += 1;
     continue;
@@ -179,6 +239,7 @@ for (let i = 0; i < rest.length; i++) {
       process.stderr.write(`error: unknown configuration field \`${key}\` in -c/--config override\n`);
       process.exit(2);
     }
+    configOverrides.push(value);
     continue;
   }
   if (arg.startsWith('-')) {
@@ -227,6 +288,43 @@ send({
   type: 'item.completed',
   item: { id: 'item_0', type: 'error', message: 'Exceeded skills context budget of 2%. All skill descriptions were removed and 54 additional skills were not included in the model-visible skills list.' },
 });
+
+// FAKE_CODEX_MCP_TOOL_CALL: this turn "calls" the named MCP tool, and is
+// governed by exactly the config keys real codex 0.149 governs it by — see
+// codex-adapter.ts's own doc comment on the per-tool approval contract.
+// Deliberately evaluated on EVERY turn, resume included: a resume that drops
+// `--ignore-user-config` or the server's `enabled_tools`/`approval_mode`
+// keys is exactly the regression this exists to fail loudly on, and real
+// codex would refuse it with this same message.
+if (process.env.FAKE_CODEX_MCP_TOOL_CALL) {
+  const [server, tool] = process.env.FAKE_CODEX_MCP_TOOL_CALL.split('/');
+  const enabledPrefix = `mcp_servers.${server}.enabled_tools=`;
+  const enabled = configOverrides.find((override) => override.startsWith(enabledPrefix));
+  let allowlist;
+  try {
+    allowlist = enabled === undefined ? undefined : JSON.parse(enabled.slice(enabledPrefix.length));
+  } catch {
+    allowlist = undefined;
+  }
+  const granted = ignoreUserConfig
+    && configOverrides.some((override) => override.startsWith(`mcp_servers.${server}.command=`))
+    && Array.isArray(allowlist)
+    && allowlist.includes(tool)
+    && configOverrides.includes(`mcp_servers.${server}.tools.${tool}.approval_mode="approve"`);
+  if (!granted) {
+    const message = `MCP tool call ${server}.${tool} requires approval, but approval policy is never`;
+    send({ type: 'error', message });
+    send({ type: 'turn.failed', error: { message } });
+    process.exit(1);
+  }
+  // Mapped item type on purpose (no `mcp_tool_call` mapping exists in
+  // events.ts): the tool call's evidence rides an agent_message so a test can
+  // see it without polluting unmapped-frame accounting.
+  send({
+    type: 'item.completed',
+    item: { id: 'item_mcp', type: 'agent_message', text: `called ${server}.${tool}` },
+  });
+}
 
 if (process.env.FAKE_CODEX_UNMAPPED_TYPE === '1') {
   send({ type: 'item.completed', item: { id: 'item_unknown', type: 'reasoning', text: 'thinking...' } });

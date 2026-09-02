@@ -1,7 +1,6 @@
 import { createInterface } from 'node:readline';
 import type { AgentMessageContentType } from '@byok-sdk/protocol';
-
-export const AGENT_MESSAGE_TOOL_NAME = 'send_agent_message';
+import { AGENT_MESSAGE_TOOL_NAME } from '../sdk-reserved-mcp';
 
 export interface AgentMessageMcpDeps {
   publish(input: { contentType: AgentMessageContentType; body: string }): Promise<{ messageId: string; state: string }>;

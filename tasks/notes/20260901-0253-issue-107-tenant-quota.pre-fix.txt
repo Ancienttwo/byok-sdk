@@ -1,0 +1,59 @@
+
+AUDIT_BASELINE=7a937e5ed8eb5aef102eacb0df9183f296da7e1f
+REGRESSION_GUARD=packages/client/src/__tests__/agent-egress-spool.test.ts
+COMMAND=bun --filter @byok-sdk/client test -- src/__tests__/agent-egress-spool.test.ts
+
+ RUN  v4.1.10 /private/tmp/byok-sdk-issue107-audit/packages/client
+
+ ❯ src/__tests__/agent-egress-spool.test.ts (9 tests | 2 failed) 96ms
+     × admits at most one cross-Agent reliable append when their combined bytes exceed the tenant ceiling 17ms
+     × accounts for a reliable append racing a content receipt across Agent spools 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/agent-egress-spool.test.ts > Agent reliable egress spool > admits at most one cross-Agent reliable append when their combined bytes exceed the tenant ceiling
+AssertionError: expected [ …(2) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/__tests__/agent-egress-spool.test.ts:203:51
+    201|     const results = await Promise.all([first, second]);
+    202|     appendSpy.mockRestore();
+    203|     expect(results.filter((result) => result.ok)).toHaveLength(1);
+       |                                                   ^
+    204|     expect(controller.status().reliable.pendingBytes).toBeLessThanOrEq…
+    205|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/__tests__/agent-egress-spool.test.ts > Agent reliable egress spool > accounts for a reliable append racing a content receipt across Agent spools
+AssertionError: expected [ …(2) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/__tests__/agent-egress-spool.test.ts:260:51
+    258|     const results = await Promise.all([reliable, receipt]);
+    259|     appendSpy.mockRestore();
+    260|     expect(results.filter((result) => result.ok)).toHaveLength(1);
+       |                                                   ^
+    261|     expect(controller.status().reliable.pendingBytes).toBeLessThanOrEq…
+    262|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 7 passed (9)
+   Start at  03:05:18
+   Duration  295ms (transform 62ms, setup 0ms, import 121ms, tests 96ms, environment 0ms)
+
+
+PRE_FIX_EXIT=1

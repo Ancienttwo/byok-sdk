@@ -13,7 +13,7 @@
  *   claims never sit in handler scope as a tenant a handler could substitute;
  * - a device resolves to a row (the pre-tenant lookup, §6.2's pinned wire
  *   contract), and unknown/revoked collapse to one answer;
- * - nonce issue/validate/consume and token minting take that ROW, so the
+ * - nonce issue/atomic-consume and token minting take that ROW, so the
  *   tenant they act on is the row's, by construction.
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
@@ -35,6 +35,8 @@ export interface PairInput {
   readonly pairingCode: string;
   readonly deviceName: string;
   readonly devicePublicKey: string;
+  /** Optional client-hashed machine identity (protocol §6.1). Carried into registration verbatim; it is never a tenant or product authority. */
+  readonly machineId?: string;
 }
 
 export interface MintedAccessToken {
@@ -55,9 +57,8 @@ export interface AuthPlane {
   /** The pre-tenant device lookup §6.2's wire contract forces. `undefined` for unknown AND revoked alike — no existence oracle. */
   resolveDevice(deviceId: string): Promise<DeviceRecord | undefined>;
   issueNonce(device: DeviceRecord): Promise<string>;
-  validateNonce(device: DeviceRecord, nonce: string): Promise<boolean>;
-  /** Burn the nonce. Called only on a fully verified request (§6.2). */
-  consumeNonce(device: DeviceRecord, nonce: string): Promise<void>;
+  /** Atomically consume the nonce after signature verification (§6.2). */
+  consumeNonceIfValid(device: DeviceRecord, nonce: string): Promise<boolean>;
   /** Domain-separated (`byok-nonce-v1\n`) — see `verify.ts`. A raw signature over the bare nonce is invalid, with no second accepted form. */
   verifySignature(device: DeviceRecord, nonce: string, signature: string): Promise<boolean>;
   mintAccessToken(device: DeviceRecord): Promise<MintedAccessToken>;
@@ -86,18 +87,17 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
     },
 
     async redeemAndRegister(input) {
-      const claims = await stores.pairingCodes.redeem(input.pairingCode);
-      if (claims === undefined) return undefined;
-      // The redeemed code's claims are the ONLY source of the device's
-      // tenant/product — `PairRequest` carries neither, so a device can never
-      // choose where it lands.
-      return stores.devices.register(claims.tenantId, {
-        productId: claims.productId,
+      // The enrollment composition alone reads the guarded code claims, so a
+      // handler never holds a tenant/product it could substitute. It consumes
+      // the code only if this registration succeeds.
+      return stores.pairing.redeemAndRegister({
+        pairingCode: input.pairingCode,
         deviceId: `dev_${crypto.randomUuid()}`,
         deviceName: input.deviceName,
         devicePublicKey: input.devicePublicKey,
         proofKeyId: DEVICE_IDENTITY_PROOF_KEY_ID,
         proofKeyEpoch: DEVICE_IDENTITY_PROOF_KEY_EPOCH,
+        ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
       });
     },
 
@@ -111,12 +111,8 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
       return stores.nonces.issue(device.tenantId, device.deviceId);
     },
 
-    validateNonce(device, nonce) {
-      return stores.nonces.validate(device.tenantId, device.deviceId, nonce);
-    },
-
-    consumeNonce(device, nonce) {
-      return stores.nonces.markUsed(device.tenantId, nonce);
+    consumeNonceIfValid(device, nonce) {
+      return stores.nonces.consumeIfValid(device.tenantId, device.deviceId, nonce);
     },
 
     verifySignature(device, nonce, signature) {

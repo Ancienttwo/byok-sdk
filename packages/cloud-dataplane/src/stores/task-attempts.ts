@@ -14,7 +14,13 @@
  * `claim` and `recordStatus` on a task this tenant never offered write nothing
  * and return `undefined`.
  */
-import type { AgentRef, TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '@byok-sdk/cloud';
+import {
+  type AgentMessageAdmission,
+  type AgentRef,
+  type TaskAttempt,
+  type TaskAttemptStatus,
+  type TaskAttemptStore,
+} from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
@@ -35,6 +41,22 @@ export interface TaskRow {
 
 export const TASK_SELECT_COLUMNS =
   'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, updated_at';
+
+interface AgentMessageAdmissionRow {
+  readonly message_id: string;
+  readonly payload_body: string;
+  readonly terminal_body: string | null;
+}
+
+const AGENT_MESSAGE_ADMISSION_SELECT_COLUMNS = 'message_id, payload_body, terminal_body';
+
+function admissionRowToRecord(row: AgentMessageAdmissionRow): AgentMessageAdmission {
+  return {
+    messageId: row.message_id,
+    payloadBody: row.payload_body,
+    ...(row.terminal_body === null ? {} : { terminalBody: row.terminal_body }),
+  };
+}
 
 export function taskRowToAttempt(row: TaskRow): TaskAttempt {
   return {
@@ -128,6 +150,99 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     const existing = await this.get(tenant, input.taskId);
     if (existing === undefined) throw new Error(`task ${input.taskId} vanished during Agent offer reservation`);
     return { attempt: existing, created: false };
+  }
+
+  async reserveAgentMessage(
+    tenant: TenantId,
+    input: { readonly taskId: string; readonly deviceId: string; readonly messageId: string; readonly payloadBody: string },
+  ): Promise<'reserved' | 'pending' | 'rejected'> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      // The task row is the common serialization point shared with
+      // cancellation. Holding it while creating the durable reservation makes
+      // one of them the winner before any external consumer is called.
+      const selected = await client.query<TaskRow>(
+        `SELECT ${TASK_SELECT_COLUMNS} FROM task
+          WHERE tenant_id = $1 AND task_id = $2 FOR UPDATE`,
+        [tenant, input.taskId],
+      );
+      const attempt = selected.rows[0];
+      if (
+        attempt === undefined ||
+        attempt.device_id !== input.deviceId ||
+        attempt.cancel_requested_at !== null ||
+        !['offered', 'claimed', 'running'].includes(attempt.status)
+      ) {
+        await client.query('COMMIT');
+        return 'rejected';
+      }
+      const inserted = await client.query<{ payload_body: string }>(
+        `INSERT INTO agent_message_admission (
+           tenant_id, device_id, task_id, message_id, payload_body
+         ) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (tenant_id, device_id, task_id) DO NOTHING
+         RETURNING payload_body`,
+        [tenant, input.deviceId, input.taskId, input.messageId, input.payloadBody],
+      );
+      if (inserted.rows[0] !== undefined) {
+        await client.query('COMMIT');
+        return 'reserved';
+      }
+      const existing = await client.query<{ message_id: string; payload_body: string }>(
+        `SELECT message_id, payload_body FROM agent_message_admission
+          WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3`,
+        [tenant, input.deviceId, input.taskId],
+      );
+      const admission = existing.rows[0];
+      await client.query('COMMIT');
+      return admission?.message_id === input.messageId && admission.payload_body === input.payloadBody
+        ? 'pending'
+        : 'rejected';
+    } catch (cause) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw cause;
+    } finally {
+      client.release();
+    }
+  }
+
+  async readAgentMessage(
+    tenant: TenantId,
+    input: { readonly taskId: string; readonly deviceId: string; readonly messageId: string; readonly payloadBody: string },
+  ): Promise<AgentMessageAdmission | undefined> {
+    const result = await this.#pool.query<AgentMessageAdmissionRow>(
+      `SELECT ${AGENT_MESSAGE_ADMISSION_SELECT_COLUMNS}
+         FROM agent_message_admission
+        WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3`,
+      [tenant, input.deviceId, input.taskId],
+    );
+    const row = result.rows[0];
+    return row !== undefined && row.message_id === input.messageId && row.payload_body === input.payloadBody
+      ? admissionRowToRecord(row)
+      : undefined;
+  }
+
+  async finalizeAgentMessage(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly messageId: string;
+      readonly payloadBody: string;
+      readonly terminalBody: string;
+    },
+  ): Promise<AgentMessageAdmission | undefined> {
+    const terminalized = await this.#pool.query<AgentMessageAdmissionRow>(
+      `UPDATE agent_message_admission
+          SET terminal_body = $6
+        WHERE tenant_id = $1 AND device_id = $2 AND task_id = $3
+          AND message_id = $4 AND payload_body = $5 AND terminal_body IS NULL
+      RETURNING ${AGENT_MESSAGE_ADMISSION_SELECT_COLUMNS}`,
+      [tenant, input.deviceId, input.taskId, input.messageId, input.payloadBody, input.terminalBody],
+    );
+    const row = terminalized.rows[0];
+    return row === undefined ? this.readAgentMessage(tenant, input) : admissionRowToRecord(row);
   }
 
   async get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined> {

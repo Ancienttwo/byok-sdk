@@ -37,6 +37,7 @@ import {
   type MailboxMessage,
   type MailboxPage,
   type MailboxReadQuery,
+  type MailboxRecordDeliveryInput,
   type Principal,
   type PresenceHint,
   type PresenceHintInput,
@@ -68,6 +69,7 @@ export interface TenantBoundMailbox {
   append(input: MailboxAppendInput): Promise<MailboxMessage>;
   /** Pure read. Never advances the cursor — the daemon's next poll is the only ack. */
   readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
+  recordDelivery(input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
   advanceCursor(input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
   readCursor(deviceId: string): Promise<MailboxCursorState>;
 }
@@ -117,6 +119,25 @@ export interface TenantBoundTaskAttempts {
     readonly deviceId: string;
     readonly agentRef: NonNullable<TaskAttempt['agentRef']>;
   }): Promise<{ readonly attempt: TaskAttempt; readonly created: boolean }>;
+  reserveAgentMessage(input: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly messageId: string;
+    readonly payloadBody: string;
+  }): Promise<'reserved' | 'pending' | 'rejected'>;
+  readAgentMessage(input: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly messageId: string;
+    readonly payloadBody: string;
+  }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
+  finalizeAgentMessage(input: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly messageId: string;
+    readonly payloadBody: string;
+    readonly terminalBody: string;
+  }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
   get(taskId: string): Promise<TaskAttempt | undefined>;
   getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
   claim(input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt | undefined>;
@@ -204,6 +225,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     mailbox: {
       append: (input) => core.mailbox.append(tenant, input),
       readAfter: (query) => core.mailbox.readAfter(tenant, query),
+      recordDelivery: (input) => core.mailbox.recordDelivery(tenant, input),
       advanceCursor: (input) => core.mailbox.advanceCursor(tenant, input),
       readCursor: (deviceId) => core.mailbox.readCursor(tenant, deviceId),
     },
@@ -244,6 +266,9 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
     tasks: {
       open: (input) => cloud.tasks.open(tenant, input),
       reserveAgentOffer: (input) => cloud.tasks.reserveAgentOffer(tenant, input),
+      reserveAgentMessage: (input) => cloud.tasks.reserveAgentMessage(tenant, input),
+      readAgentMessage: (input) => cloud.tasks.readAgentMessage(tenant, input),
+      finalizeAgentMessage: (input) => cloud.tasks.finalizeAgentMessage(tenant, input),
       get: (taskId) => cloud.tasks.get(tenant, taskId),
       getMany: (taskIds) => cloud.tasks.getMany(tenant, taskIds),
       claim: (input) => cloud.tasks.claim(tenant, input),

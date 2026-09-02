@@ -80,7 +80,12 @@ if (SKIP_DATAPLANE) {
           headers: { 'content-type': 'application/json' },
           body,
         }));
-        expect(replay.status).toBe(401);
+        expect(replay.status).toBe(200);
+        const replayed = PairResponseSchema.parse(await replay.json());
+        expect(replayed).toMatchObject({
+          tenantId: TENANT,
+          deviceId: paired.deviceId,
+        });
 
         restartedPool = scope.openRestartPool(2);
         const restartedDevices = new PostgresDeviceDirectory(restartedPool, clock);

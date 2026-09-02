@@ -194,6 +194,10 @@ export class InMemoryBlobContentProxy implements BlobContentProxy {
     return this.#registry.crypto.timingSafeEqual(expected, sig);
   }
 
+  async expectedUploadBytes(blobId: string): Promise<bigint | undefined> {
+    return this.#registry.blobs.get(blobId)?.byteSize;
+  }
+
   async writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult> {
     const record = this.#registry.blobs.get(blobId);
     if (record === undefined) return { ok: false, reason: 'unknown blobId' };

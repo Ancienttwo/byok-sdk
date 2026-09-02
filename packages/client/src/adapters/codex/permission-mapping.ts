@@ -105,6 +105,22 @@ export interface CodexPermissionMapping {
  *   `~/.codex/config.toml` default is more permissive than anything this
  *   adapter should ever grant implicitly. Every invocation pins both keys
  *   explicitly so behavior never depends on the end user's own codex config.
+ *   Codex 0.149's per-MCP-tool approval setting is a separate, narrower
+ *   control: `codex-adapter.ts` uses it for the SDK-reserved
+ *   `byokagentmessage/send_agent_message` terminal protocol tool, and for the
+ *   tools of the MCP servers a task's own `requiredToolsets` projected — each
+ *   with an exact `enabled_tools` allowlist naming those tools and nothing
+ *   else. Global approval stays `never` and `sandbox_mode` is untouched, so
+ *   shell/file authority remains exactly what the mode above selected.
+ *   Without that grant a projected toolset is dead weight: `approval_policy=
+ *   never` refuses every MCP tool call outright ("MCP tool call requires
+ *   approval, but approval policy is never"), under `workspace-write` and
+ *   `read-only` alike, so the model can list a toolset's tools and never call
+ *   one. The granted names are only ever the ones the daemon OBSERVED via
+ *   `tools/list` on that exact server (`daemon/mcp-tools-probe.ts`) — never a
+ *   configured value, never a wildcard, and never
+ *   `default_tools_approval_mode`, which codex reads back happily but which
+ *   was empirically ineffective under `approval_policy=never` on 0.149.0.
  */
 export function mapPermissionPolicyToCodexArgs(policy: PermissionPolicy): CodexPermissionMapping {
   if (policy.mode === 'confirm' || policy.mode === 'plan') {

@@ -8,7 +8,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
-import { TaskRunner } from '../daemon/task-runner';
+import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const roots: string[] = [];
@@ -21,6 +21,39 @@ async function temporary(prefix: string): Promise<string> {
 }
 
 describe('required Agent message completion gate', () => {
+  it('declines before adapter preparation when the exact helper handshake fails', async () => {
+    const sent: Envelope[] = [];
+    const storeDir = await temporary('byok-message-preflight-store-');
+    const hostStorageRoot = await temporary('byok-message-preflight-home-');
+    const adapter = new StubRuntimeAdapter('codex', { present: true }, {
+      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
+      permissionModes: ['auto'],
+    });
+    const runner = new TaskRunner({
+      adapters: [adapter], workspaceRoot: await temporary('byok-message-preflight-workspace-'),
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
+      send: (envelope) => sent.push(envelope),
+      blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
+      agentMessageMcpBin: { command: '/compiled/salesko-agent', args: ['__byok_sdk_helper', 'agent-message-mcp'] },
+      agentMessageMcpPreflight: async () => { throw new Error('unknown command'); },
+    });
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'codex',
+      agentRef: { agentId: 'agent-message', profileRevision: 'profile-r1' },
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+    }, { taskId: 'message-preflight-failure', seq: 1 }));
+
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(sent.find((envelope) => envelope.type === 'task.decline')).toMatchObject({
+      payload: { retryable: false, reason: expect.stringContaining('helper preflight failed: unknown command') },
+    });
+  });
+
   it('injects only the bounded body tool, retains held drafts, and completes only after exact accepted disposition', async () => {
     const sent: Envelope[] = [];
     const storeDir = await temporary('byok-message-store-');
@@ -32,6 +65,7 @@ describe('required Agent message completion gate', () => {
     const researchExtractor = vi.fn(() => {
       throw new Error('message-only output is not a research document');
     });
+    const helperPreflight = vi.fn<NonNullable<TaskRunnerDeps['agentMessageMcpPreflight']>>(async () => {});
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary('byok-message-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -42,6 +76,7 @@ describe('required Agent message completion gate', () => {
       sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
+      agentMessageMcpPreflight: helperPreflight,
       resultDocument: { extract: researchExtractor },
     });
     const taskId = 'message-task';
@@ -53,6 +88,16 @@ describe('required Agent message completion gate', () => {
     }, { taskId, seq: 1 }));
 
     const messageMcp = adapter.startCalls[0]?.ctx.mcpServers?.byokagentmessage;
+    expect(helperPreflight).toHaveBeenCalledOnce();
+    // The helper is proved under the conditions it will actually run in: the
+    // exact server config, the same allowlisted child environment the runtime
+    // gets (never `process.env` — `BYOK_*` is hard-denied there), and the
+    // Agent home as cwd.
+    const [preflightServer, preflightEnv, preflightCwd] = helperPreflight.mock.calls[0]!;
+    expect(preflightServer).toEqual(messageMcp);
+    expect(preflightEnv).toEqual(adapter.startCalls[0]?.ctx.env);
+    expect(Object.keys(preflightEnv!)).not.toContain('BYOK_STORE_DIR');
+    expect(preflightCwd).toBe(adapter.startCalls[0]?.ctx.workspaceDir);
     expect(messageMcp).toMatchObject({
       command: process.execPath,
       args: ['/sdk/byok-agent-message-mcp.js'],
@@ -134,5 +179,215 @@ describe('required Agent message completion gate', () => {
     await restarted.recoverAgentMessageOutboxes(path.join(hostStorageRoot, 'agents'));
     restarted.retryRecoveredAgentMessages();
     expect(restartSent.filter((envelope) => envelope.type === 'agent.message.publish')).toHaveLength(0);
+  });
+  it('delivers the runtime final output on the message lane when the model never called the tool', async () => {
+    const sent: Envelope[] = [];
+    const storeDir = await temporary('byok-message-auto-store-');
+    const hostStorageRoot = await temporary('byok-message-auto-home-');
+    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
+      permissionModes: ['auto'],
+    });
+    const runner = new TaskRunner({
+      adapters: [adapter], workspaceRoot: await temporary('byok-message-auto-workspace-'),
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
+      send: (envelope) => sent.push(envelope),
+      blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
+      agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
+    });
+    const taskId = 'message-task-auto';
+    const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+    }, { taskId, seq: 1 }));
+
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'Hello from the runtime' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
+    const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
+    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    expect(message.payload.body).toBe('Hello from the runtime');
+    expect(message.payload.contract).toBe('example.chat.v1');
+    expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+
+    await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
+      agentRef, sessionRef: message.payload.sessionRef, contract: message.payload.contract,
+      messageId: message.payload.messageId, cursor: message.payload.cursor, contentHash: message.payload.contentHash,
+      outcome: 'accepted', receiptId: '20000000-0000-4000-8000-000000000001',
+    }, { taskId, seq: 2 }));
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
+  });
+
+  it('fails closed when the runtime produced no final output for the required message', async () => {
+    const sent: Envelope[] = [];
+    const storeDir = await temporary('byok-message-empty-store-');
+    const hostStorageRoot = await temporary('byok-message-empty-home-');
+    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
+      permissionModes: ['auto'],
+    });
+    const runner = new TaskRunner({
+      adapters: [adapter], workspaceRoot: await temporary('byok-message-empty-workspace-'),
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
+      send: (envelope) => sent.push(envelope),
+      blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
+      agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
+    });
+    const taskId = 'message-task-empty';
+    const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+    }, { taskId, seq: 1 }));
+
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
+    const failure = sent.find((envelope) => envelope.type === 'task.fail');
+    if (failure?.type !== 'task.fail') throw new Error('missing task fail');
+    expect(failure.payload.retryable).toBe(false);
+    expect(failure.payload.reason).toContain('no reply text');
+    expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(false);
+  });
+
+  it('fails closed when the daemon-authored draft exceeds the offer byte cap', async () => {
+    const sent: Envelope[] = [];
+    const storeDir = await temporary('byok-message-cap-store-');
+    const hostStorageRoot = await temporary('byok-message-cap-home-');
+    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
+      permissionModes: ['auto'],
+    });
+    const runner = new TaskRunner({
+      adapters: [adapter], workspaceRoot: await temporary('byok-message-cap-workspace-'),
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
+      send: (envelope) => sent.push(envelope),
+      blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
+      agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
+    });
+    const taskId = 'message-task-cap';
+    const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 8 },
+    }, { taskId, seq: 1 }));
+
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'this final reply is far longer than eight bytes' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
+    const failure = sent.find((envelope) => envelope.type === 'task.fail');
+    if (failure?.type !== 'task.fail') throw new Error('missing task fail');
+    expect(failure.payload.retryable).toBe(false);
+    expect(failure.payload.reason).toMatch(/failed to deliver/);
+    expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(false);
+  });
+  /**
+   * Shared setup for the daemon-authored final-text-run cases below: a
+   * `messageEgress.mode:'required'` task whose model never calls the message
+   * tool, so the DAEMON authors the body from the runtime's own text.
+   */
+  async function startRequiredMessageTask(prefix: string, taskId: string): Promise<{
+    sent: Envelope[];
+    adapter: StubRuntimeAdapter;
+    runner: TaskRunner;
+    agentRef: { agentId: string; profileRevision: string };
+  }> {
+    const sent: Envelope[] = [];
+    const storeDir = await temporary(`byok-${prefix}-store-`);
+    const hostStorageRoot = await temporary(`byok-${prefix}-home-`);
+    const adapter = new StubRuntimeAdapter('pi', { present: true }, {
+      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
+      permissionModes: ['auto'],
+    });
+    const runner = new TaskRunner({
+      adapters: [adapter], workspaceRoot: await temporary(`byok-${prefix}-workspace-`),
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
+      send: (envelope) => sent.push(envelope),
+      blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
+      agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
+    });
+    const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
+    }, { taskId, seq: 1 }));
+    return { sent, adapter, runner, agentRef };
+  }
+
+  it('publishes only the final text run, dropping narration emitted before the last tool interaction', async () => {
+    const taskId = 'message-task-final-run';
+    const { sent, adapter, runner, agentRef } = await startRequiredMessageTask('message-final-run', taskId);
+
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'narration' });
+    adapter.sessions[0]!.emit({ type: 'tool_result', tool: 'Read', output: 'file contents' });
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'the answer' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
+    const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
+    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    expect(message.payload.body).toBe('the answer');
+
+    // `task.complete.summary` is unchanged: still the WHOLE run's text.
+    await runner.handleEnvelope(createEnvelope('agent.message.disposition', {
+      agentRef, sessionRef: message.payload.sessionRef, contract: message.payload.contract,
+      messageId: message.payload.messageId, cursor: message.payload.cursor, contentHash: message.payload.contentHash,
+      outcome: 'accepted', receiptId: '30000000-0000-4000-8000-000000000001',
+    }, { taskId, seq: 2 }));
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
+    const complete = sent.find((envelope) => envelope.type === 'task.complete');
+    if (complete?.type !== 'task.complete') throw new Error('missing task complete');
+    expect(complete.payload.summary).toBe('narrationthe answer');
+  });
+
+  it('falls back to the whole run when the last event is a tool interaction with no closing text', async () => {
+    const taskId = 'message-task-no-closing-text';
+    const { sent, adapter } = await startRequiredMessageTask('message-no-closing', taskId);
+
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'first half. ' });
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'second half.' });
+    adapter.sessions[0]!.emit({ type: 'tool_use', tool: 'Write', input: { path: 'out.txt' } });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
+    const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
+    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    expect(message.payload.body).toBe('first half. second half.');
+  });
+
+  it('keeps terminal usage out of the reset set so a text-only run still publishes its whole reply', async () => {
+    const taskId = 'message-task-usage-before-turn-end';
+    const { sent, adapter } = await startRequiredMessageTask('message-usage', taskId);
+
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'only text, ' });
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'no tools' });
+    // Bundled adapters emit terminal usage immediately before turn_end.
+    adapter.sessions[0]!.emit({ type: 'usage', outputTokens: 12 });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
+    const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
+    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    expect(message.payload.body).toBe('only text, no tools');
   });
 });

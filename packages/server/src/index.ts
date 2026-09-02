@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import type { Hono } from 'hono';
+import { RESULT_DOCUMENT_MAX_BYTES } from '@byok-sdk/protocol';
 import { createHmacTokenSigner, DeviceRegistry, NonceStore, type TenantId } from './auth';
 import { LocalDiskBlobStore } from './blob-store';
 import { buildHonoApp } from './http';
@@ -61,8 +62,8 @@ export { SteerRejectedError } from './hub';
 export type { SteerRejectionCode } from './hub';
 export { AgentHomeProjectionCompletionError } from './hub';
 export type { AgentHomeProjectionCompletionErrorCode } from './hub';
-export { PairingCodeInvalidError } from './pairing';
-export type { PairingCodeClaims, PairingCodeInfo } from './pairing';
+export { PairingAttemptConflictError, PairingCodeInvalidError } from './pairing';
+export type { PairingAttemptBinding, PairingCodeClaims, PairingCodeInfo, PairingCompletion } from './pairing';
 export type {
   AccessTokenClaims,
   AuthenticatedDevice,
@@ -81,6 +82,7 @@ export type {
 export { createHmacTokenSigner } from './auth';
 export type {
   BlobStore,
+  BlobUploadReservation,
   CreateUploadInput,
   ReadContentResult,
   WriteContentResult,
@@ -106,6 +108,11 @@ const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
  * reconnects at all, not a normal-latency timeout.
  */
 const DEFAULT_TASK_LEASE_MS = 30 * 60_000;
+/** Authenticated WS admission defaults — finite even when an embedder configures nothing. */
+const DEFAULT_WEBSOCKET_HELLO_TIMEOUT_MS = 5_000;
+const DEFAULT_MAX_PENDING_WEBSOCKETS = 32;
+/** Largest protocol document plus fixed envelope/metadata headroom. */
+const DEFAULT_MAX_WEBSOCKET_PAYLOAD_BYTES = RESULT_DOCUMENT_MAX_BYTES + 64 * 1024;
 
 /** The object `createByokServer` returns — the SaaS-embedder-facing surface. */
 export interface ByokServer {
@@ -147,8 +154,12 @@ export interface ByokServer {
   };
   /**
    * Device revocation (§6.3) — server-side only, no wire message. Revoking a
-   * device makes its next `/byok/challenge`, `/byok/token`, WSS connect, or
-   * authed HTTP call get a 401; its only recourse is to re-run `/byok/pair`.
+   * device DELETES its registration, so its next `/byok/challenge`,
+   * `/byok/token`, WSS connect, or authed HTTP call gets a 401 — the same
+   * answer as for a device id that was never registered — and its only
+   * recourse is to re-run `/byok/pair`. The device-scoped state the row
+   * owned (outstanding challenge nonces, presence, inbound dedup) is deleted
+   * with it; what the device DID (tasks, receipts) is history and survives.
    *
    * S1: tenant-first, and a tenant can only revoke a device it owns — a
    * `(tenantId, deviceId)` pair belonging to someone else resolves to
@@ -198,6 +209,18 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const maxBlobSizeBytes = opts.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES;
   const longPollHoldMs = opts.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS;
   const taskLeaseMs = opts.taskLeaseMs ?? DEFAULT_TASK_LEASE_MS;
+  const webSocketHelloTimeoutMs = positiveSafeInteger(
+    opts.webSocketHelloTimeoutMs ?? DEFAULT_WEBSOCKET_HELLO_TIMEOUT_MS,
+    'webSocketHelloTimeoutMs',
+  );
+  const maxPendingWebSockets = positiveSafeInteger(
+    opts.maxPendingWebSockets ?? DEFAULT_MAX_PENDING_WEBSOCKETS,
+    'maxPendingWebSockets',
+  );
+  const maxWebSocketPayloadBytes = positiveSafeInteger(
+    opts.maxWebSocketPayloadBytes ?? DEFAULT_MAX_WEBSOCKET_PAYLOAD_BYTES,
+    'maxWebSocketPayloadBytes',
+  );
 
   const rateLimiter = new RateLimiter(opts.rateLimit);
 
@@ -229,6 +252,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         hub,
         productId: opts.productId,
         heartbeatIntervalMs: opts.heartbeatIntervalMs,
+        helloTimeoutMs: webSocketHelloTimeoutMs,
+        maxPendingWebSockets,
+        maxPayloadBytes: maxWebSocketPayloadBytes,
       });
     },
     pairing: {
@@ -253,11 +279,26 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       subscribe: () => hub.subscribeServerEvents(),
     },
     devices: {
-      revoke: (tenantId: TenantId, deviceId: string) => devices.revoke(tenantId, deviceId),
+      revoke: (tenantId: TenantId, deviceId: string): void => {
+        // §6.3: the registration and the device-scoped state that only
+        // existed to serve it go together. `DeviceRegistry.revoke` reports
+        // whether a row was actually removed, so revoking a device this
+        // tenant does not own (or one that never existed) touches nothing at
+        // all — no nonce, no presence entry, no dedup ring — and stays
+        // indistinguishable from a revoke that did nothing.
+        if (!devices.revoke(tenantId, deviceId)) return;
+        nonces.deleteForDevice(deviceId);
+        hub.forgetDevice(deviceId);
+      },
     },
     stop(): void {
       hub.stopLeaseReaper();
     },
     stats: () => hub.stats(),
   };
+}
+
+function positiveSafeInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive safe integer`);
+  return value;
 }

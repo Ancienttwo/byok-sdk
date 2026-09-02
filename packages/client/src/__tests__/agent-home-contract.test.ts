@@ -15,6 +15,9 @@ import {
   validateAgentRef,
 } from '../agent-home';
 import { AgentSessionHandoffStore, AgentSessionHandoffMismatchError } from '../daemon/agent-session-handoff-store';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { AgentReliableSpool } from '../daemon/agent-egress-spool';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
@@ -148,6 +151,53 @@ describe('SDK-owned Agent home contract', () => {
     await two.lease.release();
     await Promise.all([acquired[0]!.value.release(), acquired[0]!.value.release()]);
     const retry = await manager.prepare(ref('one', 'profile-2'));
+    await retry.lease.release();
+  });
+
+  it('serializes one Agent session while keeping the home active until every different session releases', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const first = await manager.acquireExecution(ref('one'), { taskId: 'task-one' });
+    await first.lease.bindSession('session-one');
+
+    await expect(manager.acquireExecution(ref('one'), {
+      taskId: 'task-one-retry',
+      sessionRef: 'session-one',
+    })).rejects.toBeInstanceOf(AgentHomeBusyError);
+    const second = await manager.acquireExecution(ref('one'), {
+      taskId: 'task-two',
+      sessionRef: 'session-two',
+    });
+    await expect(manager.acquire(ref('one'))).rejects.toBeInstanceOf(AgentHomeBusyError);
+
+    await first.lease.release();
+    await expect(manager.acquire(ref('one'))).rejects.toBeInstanceOf(AgentHomeBusyError);
+    await second.lease.release();
+
+    const after = await manager.acquire(ref('one'));
+    await after.lease.release();
+  });
+
+  it('never rekeys an exact-resume execution lease to a different runtime session', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const resumed = await manager.acquireExecution(ref('one'), {
+      taskId: 'task-resume',
+      sessionRef: 'session-authoritative',
+    });
+
+    await expect(resumed.lease.bindSession('session-runtime-mismatch'))
+      .rejects.toThrow(/cannot rebind to a different runtime session/);
+    await expect(manager.acquireExecution(ref('one'), {
+      taskId: 'task-duplicate-resume',
+      sessionRef: 'session-authoritative',
+    })).rejects.toBeInstanceOf(AgentHomeBusyError);
+
+    await resumed.lease.release();
+    const retry = await manager.acquireExecution(ref('one'), {
+      taskId: 'task-resume-retry',
+      sessionRef: 'session-authoritative',
+    });
     await retry.lease.release();
   });
 
@@ -308,6 +358,81 @@ describe('SDK-owned Agent home contract', () => {
       runtimeId: 'pi',
       cwd: expectedCwd,
     })).resolves.toMatchObject({ terminalCause: 'complete' });
+  });
+
+  it('runs different sessions for the same Agent concurrently while retaining one canonical home', async () => {
+    const hostStorageRoot = await makeRoot();
+    const storeDir = await makeRoot();
+    const adapter = new StubRuntimeAdapter('pi');
+    const sent: Envelope[] = [];
+    const runner = new TaskRunner({
+      adapters: [adapter],
+      workspaceRoot: await makeRoot(),
+      agentHome: new AgentHomeManager({ hostStorageRoot }),
+      agentSessionHandoffs: new AgentSessionHandoffStore(),
+      deviceId: 'device-1',
+      send: (envelope) => sent.push(envelope),
+      blobClient: {
+        resolveInstruction: async () => { throw new Error('not used'); },
+        uploadArtifact: async () => { throw new Error('not used'); },
+      },
+      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
+      approvalRegistry: new ApprovalRegistry(),
+      storeDir,
+      productId: 'product-1',
+    });
+    const agentRef = ref('parallel-agent', 'profile-1');
+
+    await Promise.all([
+      runner.handleEnvelope(createEnvelope(
+        'task.offer_for_agent',
+        { instruction: 'first conversation', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+        { taskId: 'task-parallel-a', seq: 1 },
+      )),
+      runner.handleEnvelope(createEnvelope(
+        'task.offer_for_agent',
+        { instruction: 'second conversation', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+        { taskId: 'task-parallel-b', seq: 2 },
+      )),
+    ]);
+
+    expect(adapter.startCalls).toHaveLength(2);
+    expect(sent.filter((entry) => entry.type === 'task.decline' || entry.type === 'task.fail')).toEqual([]);
+    expect(runner.activeTaskCount).toBe(2);
+    expect(new Set(adapter.startCalls.map((call) => call.ctx.workspaceDir))).toEqual(new Set([
+      path.join(await fs.realpath(hostStorageRoot), 'agents', agentRef.agentId),
+    ]));
+    for (const session of adapter.sessions) session.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+  });
+
+  it('single-flights the shared reliable spool when same-Agent sessions append concurrently', async () => {
+    const agentHome = await makeRoot();
+    const agentRef = ref('parallel-egress', 'profile-1');
+    const controller = new AgentEgressController({
+      policy: DEFAULT_AGENT_EGRESS_POLICY,
+      tenantId: 'tenant-parallel',
+    });
+    const outcomes = await Promise.all([
+      controller.appendReliable({
+        homeDir: agentHome,
+        agentRef,
+        sessionRef: 'session-one',
+        eventId: '08b9cfc8-1a55-42bd-88ac-40967b2d1431',
+        payload: { status: 'one' },
+      }),
+      controller.appendReliable({
+        homeDir: agentHome,
+        agentRef,
+        sessionRef: 'session-two',
+        eventId: 'b67cb55a-1f91-48e5-b4ed-317ae6ca661d',
+        payload: { status: 'two' },
+      }),
+    ]);
+
+    expect(outcomes.every((outcome) => outcome.ok)).toBe(true);
+    expect(controller.reliableRecords().map((record) => record.cursor)).toEqual([1, 2]);
+    expect((await AgentReliableSpool.open(agentHome)).records()).toHaveLength(2);
   });
 
   it('persists claimed Agent adapter-start failure before sending task.fail with exact AgentRef', async () => {
@@ -636,6 +761,9 @@ describe('SDK-owned Agent home contract', () => {
             resolveExtensions: () => ({
               webAccess: '/extensions/pi-web-access/index.ts',
               mcpAdapter: '/extensions/byok-pi-mcp.js',
+              subagentsPolicy: '/extensions/byok-pi-subagents-policy.js',
+              subagents: '/extensions/pi-subagents/index.ts',
+              todo: '/extensions/rpiv-todo/index.ts',
             }),
             spawnFn,
           })

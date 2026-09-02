@@ -10,10 +10,14 @@
  */
 import { createMutableClock, tenantId, type Clock } from '@byok-sdk/core';
 import type { ChallengeResponse, TokenResponse } from '@byok-sdk/protocol';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AuthPlane } from '../auth/plane';
 import { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from '../auth/tokens';
+import { tokenHandler } from '../handlers/auth';
 import { NONCE_TTL_MS } from '../stores/in-memory/nonces';
 import {
+  CLOUD_ORIGIN,
   PRODUCT_ID,
   TENANT_A,
   TENANT_B,
@@ -59,7 +63,7 @@ describe('pairing (§6.1)', () => {
     expect(await harness.stores.devices.get(TENANT_B, device.deviceId)).toBeUndefined();
   });
 
-  it('refuses a second redeem of the same code, and writes no second device row', async () => {
+  it('replays an exact completed pairing and writes no second device row', async () => {
     const pairing = await harness.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
     const keys = createDeviceKeys();
     const body = JSON.stringify({
@@ -73,7 +77,32 @@ describe('pairing (§6.1)', () => {
     const second = await harness.request('/byok/pair', { method: 'POST', headers, body });
 
     expect(first.status).toBe(200);
-    expect(second.status).toBe(401);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ deviceId: (await first.json() as { deviceId: string }).deviceId });
+    expect(await harness.cloud.listDevices(TENANT_A)).toHaveLength(1);
+  });
+
+  it('keeps a pairing code redeemable when its first device registration fails', async () => {
+    const pairing = await harness.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
+    const keys = createDeviceKeys();
+    const headers = { 'content-type': 'application/json' };
+    const body = JSON.stringify({
+      pairingCode: pairing.code,
+      deviceName: 'retry-after-registration-failure',
+      devicePublicKey: keys.publicKeyBase64Url,
+    });
+    const pair = () => harness.request('/byok/pair', { method: 'POST', headers, body });
+
+    vi.spyOn(harness.stores.devices, 'register').mockRejectedValueOnce(
+      new Error('injected devices.register failure'),
+    );
+
+    const first = await pair();
+    expect(first.status).toBe(500);
+    expect(await harness.cloud.listDevices(TENANT_A)).toHaveLength(0);
+
+    const retry = await pair();
+    expect(retry.status).toBe(200);
     expect(await harness.cloud.listDevices(TENANT_A)).toHaveLength(1);
   });
 
@@ -82,7 +111,17 @@ describe('pairing (§6.1)', () => {
     const expiring = createHarness({ clock });
     const pairing = await expiring.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
     const used = await expiring.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
-    await expiring.stores.pairingCodes.redeem(used.code);
+    const usedKeys = createDeviceKeys();
+    const usedResponse = await expiring.request('/byok/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pairingCode: used.code,
+        deviceName: 'used',
+        devicePublicKey: usedKeys.publicKeyBase64Url,
+      }),
+    });
+    expect(usedResponse.status).toBe(200);
 
     clock.advance(11 * 60 * 1000);
 
@@ -109,7 +148,18 @@ describe('pairing (§6.1)', () => {
       body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'no key' }),
     });
     expect(bad.status).toBe(400);
-    expect(await harness.stores.pairingCodes.redeem(pairing.code)).toBeDefined();
+
+    const keys = createDeviceKeys();
+    const retry = await harness.request('/byok/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pairingCode: pairing.code,
+        deviceName: 'valid-after-bad-request',
+        devicePublicKey: keys.publicKeyBase64Url,
+      }),
+    });
+    expect(retry.status).toBe(200);
   });
 });
 
@@ -183,6 +233,56 @@ describe('token renewal (§6.2)', () => {
     const replay = await token(harness, payload);
     expect(replay.status).toBe(401);
     expect(await replay.json()).toEqual({ error: 'invalid, expired, or already-used nonce' });
+  });
+
+  it('allows exactly one concurrent valid request to mint from a nonce', async () => {
+    let minted = 0;
+    let consumed = false;
+    const device = {
+      tenantId: TENANT_A,
+      productId: PRODUCT_ID,
+      deviceId: 'dev_atomic-nonce',
+      deviceName: 'atomic-nonce',
+      devicePublicKey: 'test-key',
+      proofKeyId: 'identity',
+      proofKeyEpoch: 0,
+      revoked: false,
+    };
+    const auth: AuthPlane = {
+      createPairingCode: async () => {
+        throw new Error('not used by token route test');
+      },
+      redeemAndRegister: async () => {
+        throw new Error('not used by token route test');
+      },
+      resolveDevice: async () => device,
+      issueNonce: async () => {
+        throw new Error('not used by token route test');
+      },
+      verifySignature: async () => true,
+      consumeNonceIfValid: async () => {
+        if (consumed) return false;
+        consumed = true;
+        return true;
+      },
+      mintAccessToken: async () => ({ accessToken: `token-${++minted}`, expiresAt: new Date().toISOString() }),
+    };
+    const app = new Hono();
+    app.post('/byok/token', tokenHandler({ auth }));
+    const request = () =>
+      app.fetch(
+        new Request(`${CLOUD_ORIGIN}/byok/token`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ deviceId: device.deviceId, nonce: 'same-nonce', signature: 'valid' }),
+        }),
+      );
+
+    const responses = await Promise.all([request(), request()]);
+
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect(responses.filter((response) => response.status === 401)).toHaveLength(1);
+    expect(minted).toBe(1);
   });
 
   it('expires a nonce after its TTL', async () => {

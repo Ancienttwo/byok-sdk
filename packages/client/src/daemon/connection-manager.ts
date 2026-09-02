@@ -9,6 +9,7 @@ import { AuthManager, DeviceRevokedError } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { LongPollClient } from './long-poll-transport';
+import { ReplayCursorTooOldError } from './replay-cursor';
 import {
   createConnectionHelloEnvelope,
   WsTransport,
@@ -19,6 +20,7 @@ import {
 } from './ws-transport';
 
 export type { ConnectionState } from './ws-transport';
+export { ReplayCursorTooOldError } from './replay-cursor';
 
 /**
  * Server work requiring durable handler completion before acknowledgement.
@@ -63,6 +65,7 @@ export interface ConnectionManagerOptions {
   longPollIdleDelayMs?: number;
   fleetJitter?: FleetJitter;
   onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
+  onTerminalError?: (error: ReplayCursorTooOldError) => void;
 }
 
 /**
@@ -147,6 +150,7 @@ export class ConnectionManager {
   private draining = false;
   private stopped = false;
   private revoked = false;
+  private terminalError: ReplayCursorTooOldError | undefined;
   private settledWaiters: Array<(err?: unknown) => void> = [];
   private pendingCursorSave: Promise<void> = Promise.resolve();
   /**
@@ -261,6 +265,7 @@ export class ConnectionManager {
         if (this.mode === 'long-poll') this.serverCapabilities = capabilities;
       },
       onRevoked: () => this.enterRevoked(),
+      onReplayCursorTooOld: (error) => this.enterReplayCursorTooOld(error),
       // M4 Phase 4 (version-negotiation drill fix): a batch entry
       // LongPollClient couldn't parse into a known Envelope at all (an
       // unrecognized message type) still needs its cursor/watermark
@@ -286,6 +291,7 @@ export class ConnectionManager {
   }
 
   async start(): Promise<void> {
+    if (this.terminalError) throw this.terminalError;
     this.cursor = await this.opts.cursorStore.load(this.opts.serverUrl, this.opts.deviceId);
     this.ws.connect({ auto: true });
   }
@@ -424,6 +430,14 @@ export class ConnectionManager {
     return this.serverCapabilities;
   }
 
+  getTerminalError(): ReplayCursorTooOldError | undefined {
+    return this.terminalError;
+  }
+
+  getMode(): 'ws' | 'long-poll' {
+    return this.mode;
+  }
+
   isConnected(): boolean {
     return this.mode === 'ws' && this.ws.isOpen;
   }
@@ -446,6 +460,7 @@ export class ConnectionManager {
    */
   waitForAck(timeoutMs = 10_000): Promise<void> {
     if (this.ws.isOpen || this.mode === 'long-poll') return Promise.resolve();
+    if (this.terminalError) return Promise.reject(this.terminalError);
     if (this.revoked) return Promise.reject(new DeviceRevokedError());
     return new Promise((resolve, reject) => {
       let settle: (err?: unknown) => void = () => {};
@@ -822,6 +837,7 @@ export class ConnectionManager {
    * (which is close-only) at all.
    */
   private onAcked(capabilities: string[]): void {
+    if (this.terminalError) return;
     this.serverCapabilities = capabilities;
     this.consecutiveFailures = 0;
     this.notifySettled();
@@ -831,6 +847,10 @@ export class ConnectionManager {
   }
 
   private onWsOutcome(acked: boolean, err?: unknown): void {
+    if (err instanceof ReplayCursorTooOldError) {
+      this.enterReplayCursorTooOld(err);
+      return;
+    }
     if (this.stopped || this.revoked) return;
 
     // Finding R2: this specific attempt WAS acked at some point but has now
@@ -895,6 +915,21 @@ export class ConnectionManager {
     void this.drainOutbox(); // Design B: anything already queued now drains over the freshly-started long-poll POST path
 
     this.scheduleWsProbe();
+  }
+
+  private enterReplayCursorTooOld(error: ReplayCursorTooOldError): void {
+    if (this.terminalError) return;
+    this.terminalError = error;
+    this.stopped = true;
+    this.serverCapabilities = [];
+    if (this.wsRetryTimer) clearInterval(this.wsRetryTimer);
+    this.longPoll.stop();
+    this.ws.stopAutoReconnect();
+    this.ws.close();
+    this.cancelPendingDrainRetry?.();
+    this.notifySettled(error);
+    this.opts.onStateChange?.('closed');
+    this.opts.onTerminalError?.(error);
   }
 
   private exitLongPoll(): void {

@@ -14,7 +14,10 @@ assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], '0.84.2
 assert.equal(manifest.optionalDependencies?.['@earendil-works/pi-coding-agent'], undefined);
 assert.equal(manifest.dependencies?.['pi-web-access'], '0.24.1');
 assert.equal(manifest.dependencies?.['pi-mcp-adapter'], '2.27.0');
+assert.equal(manifest.dependencies?.['pi-subagents'], '0.60.0');
+assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], '2.8.0');
 assert.equal(existsSync(new URL('../dist/adapters/pi/mcp-extension.js', import.meta.url)), true);
+assert.equal(existsSync(new URL('../dist/adapters/pi/subagents-policy-extension.js', import.meta.url)), true);
 
 for (const relativePath of [adaptersExport.import, adaptersExport.types]) {
   assert.equal(existsSync(new URL(`..${relativePath.slice(1)}`, import.meta.url)), true, `${relativePath} is missing`);

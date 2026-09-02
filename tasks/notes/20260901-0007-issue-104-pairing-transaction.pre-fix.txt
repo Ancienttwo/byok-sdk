@@ -1,0 +1,47 @@
+subject=2c039165f35c9d0167dfe7eaa296871faf846a03
+base=2c039165f35c9d0167dfe7eaa296871faf846a03
+regression_guard=packages/cloud/src/__tests__/auth-parity.test.ts
+command=bun --filter @byok-sdk/cloud test -- src/__tests__/auth-parity.test.ts
+worktree=/Users/kito/Projects/byok-sdk-wt-issue-104-pre-fix-evidence
+
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  RUN  v4.1.10 /Users/kito/Projects/byok-sdk-wt-issue-104-pre-fix-evidence/packages/cloud
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: stderr | src/__tests__/auth-parity.test.ts > pairing (§6.1) > keeps a pairing code redeemable when its first device registration fails
+@byok-sdk/cloud test: Error: injected devices.register failure
+@byok-sdk/cloud test:     at /Users/kito/Projects/byok-sdk-wt-issue-104-pre-fix-evidence/packages/cloud/src/__tests__/auth-parity.test.ts:91:72
+@byok-sdk/cloud test:     at file:///Users/kito/Projects/byok-sdk/node_modules/.bun/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  ❯ src/__tests__/auth-parity.test.ts (17 tests | 1 failed) 69ms
+@byok-sdk/cloud test:      × keeps a pairing code redeemable when its first device registration fails 5ms
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  FAIL  src/__tests__/auth-parity.test.ts > pairing (§6.1) > keeps a pairing code redeemable when its first device registration fails
+@byok-sdk/cloud test: AssertionError: expected 401 to be 200 // Object.is equality
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: - Expected
+@byok-sdk/cloud test: + Received
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: - 200
+@byok-sdk/cloud test: + 401
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  ❯ src/__tests__/auth-parity.test.ts:98:26
+@byok-sdk/cloud test:      96|
+@byok-sdk/cloud test:      97|     const retry = await pair();
+@byok-sdk/cloud test:      98|     expect(retry.status).toBe(200);
+@byok-sdk/cloud test:        |                          ^
+@byok-sdk/cloud test:      99|     expect(await harness.cloud.listDevices(TENANT_A)).toHaveLength(1);
+@byok-sdk/cloud test:     100|   });
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:
+@byok-sdk/cloud test:  Test Files  1 failed (1)
+@byok-sdk/cloud test:       Tests  1 failed | 16 passed (17)
+@byok-sdk/cloud test:    Start at  00:30:21
+@byok-sdk/cloud test:    Duration  502ms (transform 205ms, setup 0ms, import 307ms, tests 69ms, environment 0ms)
+@byok-sdk/cloud test:
+@byok-sdk/cloud test: Exited with code 1
+
+PRE_FIX_EXIT=1

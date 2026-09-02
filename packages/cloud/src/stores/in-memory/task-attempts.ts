@@ -16,7 +16,13 @@
  * unfalsifiable.
  */
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
-import type { AgentRef, TaskAttempt, TaskAttemptStatus, TaskAttemptStore } from '../ports';
+import {
+  type AgentMessageAdmission,
+  type AgentRef,
+  type TaskAttempt,
+  type TaskAttemptStatus,
+  type TaskAttemptStore,
+} from '../ports';
 
 function sameAgentRef(left: AgentRef | undefined, right: AgentRef | undefined): boolean {
   return left?.agentId === right?.agentId && left?.profileRevision === right?.profileRevision;
@@ -69,6 +75,71 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       this.#state.attempts.set(key, attempt);
       return { attempt, created: true };
     });
+  }
+
+  async reserveAgentMessage(
+    tenant: TenantId,
+    input: { readonly taskId: string; readonly deviceId: string; readonly messageId: string; readonly payloadBody: string },
+  ): Promise<'reserved' | 'pending' | 'rejected'> {
+    const key = tenantKey(tenant, input.taskId);
+    return this.#state.mutate(key, () => {
+      const attempt = this.#state.attempts.get(key);
+      if (
+        attempt === undefined ||
+        attempt.deviceId !== input.deviceId ||
+        attempt.cancellation !== undefined ||
+        !['offered', 'claimed', 'running'].includes(attempt.status)
+      ) return 'rejected';
+      const existing = this.#state.messageAdmissions.get(key);
+      if (existing === undefined) {
+        this.#state.messageAdmissions.set(key, {
+          messageId: input.messageId,
+          payloadBody: input.payloadBody,
+        });
+        return 'reserved';
+      }
+      return existing.messageId === input.messageId && existing.payloadBody === input.payloadBody
+        ? 'pending'
+        : 'rejected';
+    });
+  }
+
+  async readAgentMessage(
+    tenant: TenantId,
+    input: { readonly taskId: string; readonly deviceId: string; readonly messageId: string; readonly payloadBody: string },
+  ): Promise<AgentMessageAdmission | undefined> {
+    const admission = this.#state.messageAdmissions.get(tenantKey(tenant, input.taskId));
+    return admission !== undefined && admission.messageId === input.messageId && admission.payloadBody === input.payloadBody
+      ? admission
+      : undefined;
+  }
+
+  async finalizeAgentMessage(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly messageId: string;
+      readonly payloadBody: string;
+      readonly terminalBody: string;
+    },
+  ): Promise<AgentMessageAdmission | undefined> {
+    const key = tenantKey(tenant, input.taskId);
+    return this.#state.mutate(key, () => this.#terminalize(key, input));
+  }
+
+  #terminalize(
+    key: string,
+    input: { readonly messageId: string; readonly payloadBody: string; readonly terminalBody: string },
+  ): AgentMessageAdmission | undefined {
+    const admission = this.#state.messageAdmissions.get(key);
+    if (admission === undefined || admission.messageId !== input.messageId || admission.payloadBody !== input.payloadBody) {
+      return undefined;
+    }
+    if (admission.terminalBody !== undefined) return admission;
+    const terminal = { ...admission, terminalBody: input.terminalBody };
+    this.#state.messageAdmissions.set(key, terminal);
+    return terminal;
   }
 
   async get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined> {
@@ -148,6 +219,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
 /** Shared mutable state for the task and cancellation reference ports. */
 export class InMemoryTaskAttemptState {
   readonly attempts = new Map<string, TaskAttempt>();
+  readonly messageAdmissions = new Map<string, AgentMessageAdmission>();
   readonly #clock: Clock;
   readonly #mutationTails = new Map<string, Promise<void>>();
 

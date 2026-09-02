@@ -8,6 +8,7 @@ import {
   type ReadContentResult,
   type WriteContentResult,
 } from './blob-store';
+import type { TenantId } from './auth';
 import {
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 CREATE TABLE IF NOT EXISTS blobs (
   blob_id      TEXT PRIMARY KEY,
+  tenant_id    TEXT NOT NULL,
   size         INTEGER NOT NULL,
   content_type TEXT NOT NULL,
   content_hash TEXT NOT NULL,
@@ -69,11 +71,25 @@ function toBuffer(value: unknown): Buffer {
 }
 
 interface BlobRow {
+  tenant_id: TenantId | null;
   size: number;
   content_type: string;
   content_hash: string;
   uploaded: number;
   data: unknown;
+}
+
+/**
+ * A legacy reference-store database predates tenant ownership. Its rows have
+ * no evidence from which an owner can be reconstructed, so the upgrade keeps
+ * them unreadable instead of assigning a guessed tenant. New declarations
+ * always carry a non-null tenant through the one current write path.
+ */
+function ensureTenantOwnershipColumn(db: DatabaseSync): void {
+  const columns = db.prepare('PRAGMA table_info(blobs)').all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'tenant_id')) {
+    db.exec('ALTER TABLE blobs ADD COLUMN tenant_id TEXT');
+  }
 }
 
 /**
@@ -155,18 +171,19 @@ export class SqliteBlobStore implements BlobStore {
     this.db = openSqliteDatabase(opts.path);
     try {
       this.db.exec(SCHEMA);
+      ensureTenantOwnershipColumn(this.db);
       secureSqliteFilePermissions(opts.path);
       this.urlTtlMs = opts.urlTtlMs ?? DEFAULT_URL_TTL_MS;
       this.secret = opts.signingKey ?? loadOrCreateSigningSecret(this.db);
 
       this.insertBlobStmt = this.db.prepare(
-        `INSERT INTO blobs (blob_id, size, content_type, content_hash, uploaded, data)
-         VALUES (?, ?, ?, ?, 0, NULL)`,
+        `INSERT INTO blobs (blob_id, tenant_id, size, content_type, content_hash, uploaded, data)
+         VALUES (?, ?, ?, ?, ?, 0, NULL)`,
       );
       this.selectBlobStmt = this.db.prepare(
-        'SELECT size, content_type, content_hash, uploaded, data FROM blobs WHERE blob_id = ?',
+        'SELECT tenant_id, size, content_type, content_hash, uploaded, data FROM blobs WHERE blob_id = ?',
       );
-      this.selectUploadedStmt = this.db.prepare('SELECT uploaded FROM blobs WHERE blob_id = ?');
+      this.selectUploadedStmt = this.db.prepare('SELECT tenant_id, uploaded FROM blobs WHERE blob_id = ?');
       this.writeContentStmt = this.db.prepare('UPDATE blobs SET data = ?, uploaded = 1 WHERE blob_id = ?');
     } catch (error) {
       closeSqliteDatabaseAfterInitializationFailure(
@@ -177,11 +194,12 @@ export class SqliteBlobStore implements BlobStore {
     }
   }
 
-  async createUpload(input: CreateUploadInput, requestedBlobId?: string): Promise<{ blobId: string; uploadUrl: string }> {
+  async createUpload(tenantId: TenantId, input: CreateUploadInput, requestedBlobId?: string): Promise<{ blobId: string; uploadUrl: string }> {
     const blobId = requestedBlobId ?? `blob_${randomUUID()}`;
     const existing = this.selectBlobStmt.get(blobId) as BlobRow | undefined;
     if (existing !== undefined) {
       if (
+        existing.tenant_id !== tenantId ||
         existing.size !== input.size ||
         existing.content_type !== input.contentType ||
         existing.content_hash !== input.contentHash
@@ -190,19 +208,24 @@ export class SqliteBlobStore implements BlobStore {
       }
       return { blobId, uploadUrl: this.signUrl(blobId, 'put') };
     }
-    this.insertBlobStmt.run(blobId, input.size, input.contentType, input.contentHash);
+    this.insertBlobStmt.run(blobId, tenantId, input.size, input.contentType, input.contentHash);
     return { blobId, uploadUrl: this.signUrl(blobId, 'put') };
   }
 
-  async getDownloadUrl(blobId: string): Promise<string | undefined> {
-    const row = this.selectUploadedStmt.get(blobId) as { uploaded: number } | undefined;
-    if (!row?.uploaded) return undefined;
+  async getDownloadUrl(tenantId: TenantId, blobId: string): Promise<string | undefined> {
+    const row = this.selectUploadedStmt.get(blobId) as { tenant_id: TenantId | null; uploaded: number } | undefined;
+    if (!row?.uploaded || row.tenant_id !== tenantId) return undefined;
     return this.signUrl(blobId, 'get');
   }
 
-  async exists(blobId: string): Promise<boolean> {
-    const row = this.selectUploadedStmt.get(blobId) as { uploaded: number } | undefined;
-    return Boolean(row?.uploaded);
+  async exists(tenantId: TenantId, blobId: string): Promise<boolean> {
+    const row = this.selectUploadedStmt.get(blobId) as { tenant_id: TenantId | null; uploaded: number } | undefined;
+    return row?.tenant_id === tenantId && Boolean(row.uploaded);
+  }
+
+  async getUploadReservation(blobId: string): Promise<{ size: number } | undefined> {
+    const row = this.selectBlobStmt.get(blobId) as BlobRow | undefined;
+    return row === undefined ? undefined : { size: row.size };
   }
 
   verifySignedUrl(blobId: string, action: 'put' | 'get', sig: string, exp: number): boolean {

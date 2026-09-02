@@ -19,6 +19,7 @@ import { BYOK_PI_MCP_CONFIG_PATH } from './mcp-config';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { resolvePiExtensions, type ResolvedPiExtensions } from './resolve-extensions';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
+import { BYOK_PI_PERMISSION_MODE } from './subagents-policy-config';
 import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 import {
@@ -144,6 +145,11 @@ export class PiAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
     supportsDispatchSelection: true,
+    // `requiresMcpToolsetToolObservation` is deliberately absent: pi projects
+    // MCP servers through its own adapter extension and grants their tools
+    // itself, so it never reads `mcpToolsetTools`. Declaring the requirement
+    // would make every pi-routed toolset offer wait on a `tools/list` probe of
+    // every projected server for an observation nothing consumes.
     capabilities: {
       steer: true,
       resume: true,
@@ -275,20 +281,37 @@ export class PiAdapter implements RuntimeAdapter {
           let mcpConfigDir: string | undefined;
           let runtimeEnv = manifestSelection === undefined ? startInput.env : withoutProviderCredentials(startInput.env);
           const taskMcpServers = startInput.mcpServers ?? {};
-          const hasMcpServers = Object.keys(taskMcpServers).length > 0;
-          if (hasMcpServers) {
+          let mcpConfigPath: string;
+          try {
             mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-mcp-'));
             await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
-            const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
+            mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
             await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers: taskMcpServers }), { mode: 0o600 });
-            runtimeEnv = { ...runtimeEnv, [BYOK_PI_MCP_CONFIG_PATH]: mcpConfigPath };
+          } catch (cause) {
+            await cleanupMcpConfigDir(mcpConfigDir);
+            throw new RuntimeExecutionFailure({
+              phase: 'start', category: 'infrastructure', retry: 'retryable',
+              reason: 'pi task-scoped MCP configuration could not be created',
+            }, { cause });
           }
+          runtimeEnv = {
+            ...runtimeEnv,
+            [BYOK_PI_MCP_CONFIG_PATH]: mcpConfigPath,
+            [BYOK_PI_PERMISSION_MODE]: input.policy.mode,
+          };
           const piArgs = [
             '--mode',
             'rpc',
             '--extension',
             extensions.webAccess,
-            ...(hasMcpServers ? ['--extension', extensions.mcpAdapter] : []),
+            '--extension',
+            extensions.mcpAdapter,
+            '--extension',
+            extensions.subagentsPolicy,
+            '--extension',
+            extensions.subagents,
+            '--extension',
+            extensions.todo,
             ...(resumeSessionId ? ['--session', resumeSessionId] : []),
             ...mapping.args,
           ];
