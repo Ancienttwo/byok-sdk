@@ -1,6 +1,6 @@
 # Task Contract: agent-provider-profile-binding
 
-> **Status**: Partial
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20260826-1405-agent-provider-profile-binding.md
 > **Task Profile**: code-change
 > **Workflow Profile**: strict
