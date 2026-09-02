@@ -89,7 +89,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"provider-profile-authority","kind":"deterministic_test","paths":["packages/protocol/src/","packages/keys/src/","packages/client/src/"]},{"id":"packed-provider-consumer","kind":"runtime_readback","paths":["*"]}]}
+{"protocol":1,"oracles":[{"id":"provider-profile-authority","kind":"deterministic_test","paths":["*"]},{"id":"packed-provider-consumer","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
