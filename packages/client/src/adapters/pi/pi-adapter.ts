@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path, { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, ProviderProfileBinding, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   freezeRuntimeAdapterDescriptor,
@@ -67,6 +67,11 @@ export interface PiAdapterOptions {
    * and transparently proxies the pinned Pi RPC process.
    */
   byokLauncher?: PiByokLauncherConfig;
+  /** Admission-time exact local profile check. Tests may replace the process boundary. */
+  validateProviderProfileBinding?: (
+    binding: ProviderProfileBinding,
+    launcher: PiByokLauncherConfig,
+  ) => Promise<void>;
 }
 
 export interface PiByokLauncherConfig {
@@ -128,6 +133,10 @@ export function validatePiByokLauncherConfig(
     '--secret-service-prefix',
     '--provider',
     '--model',
+    '--profile-revision',
+    '--profile-hash',
+    '--required-capabilities',
+    '--validate-only',
   ]);
   const conflicting = launcher.args?.find((arg) => reserved.has(arg));
   if (conflicting !== undefined) {
@@ -220,11 +229,21 @@ export class PiAdapter implements RuntimeAdapter {
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
     const selection = input.offer.dispatchSelection;
-    const pinnedSelection = selection === undefined ? undefined : Object.freeze({ ...selection });
+    const pinnedSelection: TaskOfferPayload['dispatchSelection'] = selection === undefined
+      ? undefined
+      : selection.lane === 'byok-profile'
+        ? Object.freeze({
+            ...selection,
+            providerProfile: Object.freeze({
+              ...selection.providerProfile,
+              requiredCapabilities: Object.freeze([...selection.providerProfile.requiredCapabilities]),
+            }),
+          }) as unknown as TaskOfferPayload['dispatchSelection']
+        : Object.freeze({ ...selection }) as TaskOfferPayload['dispatchSelection'];
     let command = bin.command;
     let launcherArgs: string[] | undefined;
     if (pinnedSelection !== undefined) {
-      if (pinnedSelection.lane !== 'byok' || pinnedSelection.runtimeId !== 'pi') {
+      if ((pinnedSelection.lane !== 'byok' && pinnedSelection.lane !== 'byok-profile') || pinnedSelection.runtimeId !== 'pi') {
         return { kind: 'reject', reason: `pi adapter cannot execute ${pinnedSelection.lane} selection for runtime ${pinnedSelection.runtimeId}`, retryable: false };
       }
       const launcher = this.options.byokLauncher;
@@ -232,6 +251,23 @@ export class PiAdapter implements RuntimeAdapter {
         return { kind: 'reject', reason: 'pi BYOK selection requires a configured credential-custody launcher', retryable: false };
       }
       command = launcher.command;
+      const providerProfile = pinnedSelection.lane === 'byok-profile'
+        ? pinnedSelection.providerProfile
+        : undefined;
+      if (providerProfile !== undefined) {
+        try {
+          await (this.options.validateProviderProfileBinding ?? validateProviderProfileBindingWithLauncher)(
+            providerProfile,
+            launcher,
+          );
+        } catch (error) {
+          return {
+            kind: 'reject',
+            reason: `provider profile admission failed: ${errorMessage(error)}`,
+            retryable: false,
+          };
+        }
+      }
       launcherArgs = [
         ...(launcher.args ?? []),
         '--pi-bin',
@@ -247,9 +283,15 @@ export class PiAdapter implements RuntimeAdapter {
           ? ['--secret-service-prefix', launcher.secretServicePrefix]
           : []),
         '--provider',
-        pinnedSelection.providerId,
+        providerProfile?.profileRef ?? (pinnedSelection.lane === 'byok' ? pinnedSelection.providerId : ''),
         '--model',
-        pinnedSelection.modelId,
+        providerProfile?.modelId ?? (pinnedSelection.lane === 'byok' ? pinnedSelection.modelId : ''),
+        ...(providerProfile === undefined ? [] : [
+          '--profile-revision', providerProfile.profileRevision,
+          '--profile-hash', providerProfile.profileHash,
+          '--required-capabilities', JSON.stringify(providerProfile.requiredCapabilities),
+          '--validate-only', 'false',
+        ]),
       ];
     }
 
@@ -380,11 +422,61 @@ export class PiAdapter implements RuntimeAdapter {
   }
 }
 
+async function validateProviderProfileBindingWithLauncher(
+  binding: ProviderProfileBinding,
+  launcher: PiByokLauncherConfig,
+): Promise<void> {
+  await execFileAsync(launcher.command, [
+    ...(launcher.args ?? []),
+    '--pi-bin', process.execPath,
+    '--profile-db', launcher.profileDbPath,
+    '--session-dir', launcher.sessionDir,
+    '--provider', binding.profileRef,
+    '--model', binding.modelId,
+    '--profile-revision', binding.profileRevision,
+    '--profile-hash', binding.profileHash,
+    '--required-capabilities', JSON.stringify(binding.requiredCapabilities),
+    '--validate-only', 'true',
+    ...(launcher.macosKeychainPath !== undefined
+      ? ['--macos-keychain-path', launcher.macosKeychainPath]
+      : []),
+    ...(launcher.secretServicePrefix
+      ? ['--secret-service-prefix', launcher.secretServicePrefix]
+      : []),
+  ], { timeout: DETECT_TIMEOUT_MS });
+}
+
+/**
+ * Compare two dispatch selections field-for-field within their own lane.
+ *
+ * The lanes do not share an identity shape: `subscription` and `byok` pin a
+ * flat `providerId`/`modelId` pair, while `byok-profile` pins an exact local
+ * provider profile (ref, revision, hash, model, and the capabilities the task
+ * requires). Comparing only the fields one lane happens to expose would let a
+ * manifest carrying a *different* profile pass the start-time authority check,
+ * so each lane is compared on everything that lane seals — including
+ * `requiredCapabilities` in order, since the sealed array is the exact value
+ * the manifest froze rather than a set.
+ */
 function sameDispatchSelection(
   left: TaskOfferPayload['dispatchSelection'],
   right: TaskOfferPayload['dispatchSelection'],
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
+  if (left.lane === 'byok-profile' || right.lane === 'byok-profile') {
+    if (left.lane !== 'byok-profile' || right.lane !== 'byok-profile') return false;
+    if (left.runtimeId !== right.runtimeId) return false;
+    const leftProfile = left.providerProfile;
+    const rightProfile = right.providerProfile;
+    return leftProfile.profileRef === rightProfile.profileRef &&
+      leftProfile.profileRevision === rightProfile.profileRevision &&
+      leftProfile.profileHash === rightProfile.profileHash &&
+      leftProfile.modelId === rightProfile.modelId &&
+      leftProfile.requiredCapabilities.length === rightProfile.requiredCapabilities.length &&
+      leftProfile.requiredCapabilities.every(
+        (capability, index) => capability === rightProfile.requiredCapabilities[index],
+      );
+  }
   return left.lane === right.lane &&
     left.runtimeId === right.runtimeId &&
     left.providerId === right.providerId &&

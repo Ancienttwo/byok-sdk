@@ -8,6 +8,7 @@
     "approval-targeting",
     "result-document",
     "dispatch-selection",
+    "provider-profile-binding",
     "toolset-selection",
     "agent-home-contract",
     "strict-agent-only",
@@ -541,6 +542,68 @@
                 "modelId"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "byok-profile"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "const": "pi"
+                },
+                "providerProfile": {
+                  "type": "object",
+                  "properties": {
+                    "profileRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                    },
+                    "profileRevision": {
+                      "type": "string",
+                      "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                    },
+                    "profileHash": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160,
+                      "pattern": "^[^\\u0000\\r\\n]+$"
+                    },
+                    "requiredCapabilities": {
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "image-input"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "profileRef",
+                    "profileRevision",
+                    "profileHash",
+                    "modelId",
+                    "requiredCapabilities"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerProfile"
+              ],
+              "additionalProperties": false
             }
           ]
         },
@@ -730,6 +793,68 @@
                 "runtimeId",
                 "providerId",
                 "modelId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "byok-profile"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "const": "pi"
+                },
+                "providerProfile": {
+                  "type": "object",
+                  "properties": {
+                    "profileRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                    },
+                    "profileRevision": {
+                      "type": "string",
+                      "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                    },
+                    "profileHash": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160,
+                      "pattern": "^[^\\u0000\\r\\n]+$"
+                    },
+                    "requiredCapabilities": {
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "image-input"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "profileRef",
+                    "profileRevision",
+                    "profileHash",
+                    "modelId",
+                    "requiredCapabilities"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerProfile"
               ],
               "additionalProperties": false
             }
@@ -973,6 +1098,68 @@
                 "runtimeId",
                 "providerId",
                 "modelId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "byok-profile"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "const": "pi"
+                },
+                "providerProfile": {
+                  "type": "object",
+                  "properties": {
+                    "profileRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                    },
+                    "profileRevision": {
+                      "type": "string",
+                      "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                    },
+                    "profileHash": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160,
+                      "pattern": "^[^\\u0000\\r\\n]+$"
+                    },
+                    "requiredCapabilities": {
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "image-input"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "profileRef",
+                    "profileRevision",
+                    "profileHash",
+                    "modelId",
+                    "requiredCapabilities"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerProfile"
               ],
               "additionalProperties": false
             }
@@ -1239,6 +1426,68 @@
                 "runtimeId",
                 "providerId",
                 "modelId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "byok-profile"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "const": "pi"
+                },
+                "providerProfile": {
+                  "type": "object",
+                  "properties": {
+                    "profileRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                    },
+                    "profileRevision": {
+                      "type": "string",
+                      "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                    },
+                    "profileHash": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160,
+                      "pattern": "^[^\\u0000\\r\\n]+$"
+                    },
+                    "requiredCapabilities": {
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "image-input"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "profileRef",
+                    "profileRevision",
+                    "profileHash",
+                    "modelId",
+                    "requiredCapabilities"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerProfile"
               ],
               "additionalProperties": false
             }
@@ -1752,6 +2001,68 @@
                 "runtimeId",
                 "providerId",
                 "modelId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "lane": {
+                  "type": "string",
+                  "const": "byok-profile"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "const": "pi"
+                },
+                "providerProfile": {
+                  "type": "object",
+                  "properties": {
+                    "profileRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                    },
+                    "profileRevision": {
+                      "type": "string",
+                      "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                    },
+                    "profileHash": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160,
+                      "pattern": "^[^\\u0000\\r\\n]+$"
+                    },
+                    "requiredCapabilities": {
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "image-input"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "profileRef",
+                    "profileRevision",
+                    "profileHash",
+                    "modelId",
+                    "requiredCapabilities"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "lane",
+                "runtimeId",
+                "providerProfile"
               ],
               "additionalProperties": false
             }
@@ -4278,6 +4589,68 @@
                       "modelId"
                     ],
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "byok-profile"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "const": "pi"
+                      },
+                      "providerProfile": {
+                        "type": "object",
+                        "properties": {
+                          "profileRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                          },
+                          "profileHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "pattern": "^[^\\u0000\\r\\n]+$"
+                          },
+                          "requiredCapabilities": {
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "image-input"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "profileRef",
+                          "profileRevision",
+                          "profileHash",
+                          "modelId",
+                          "requiredCapabilities"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerProfile"
+                    ],
+                    "additionalProperties": false
                   }
                 ]
               },
@@ -4512,6 +4885,68 @@
                       "runtimeId",
                       "providerId",
                       "modelId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "byok-profile"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "const": "pi"
+                      },
+                      "providerProfile": {
+                        "type": "object",
+                        "properties": {
+                          "profileRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                          },
+                          "profileHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "pattern": "^[^\\u0000\\r\\n]+$"
+                          },
+                          "requiredCapabilities": {
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "image-input"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "profileRef",
+                          "profileRevision",
+                          "profileHash",
+                          "modelId",
+                          "requiredCapabilities"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerProfile"
                     ],
                     "additionalProperties": false
                   }
@@ -4800,6 +5235,68 @@
                       "runtimeId",
                       "providerId",
                       "modelId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "byok-profile"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "const": "pi"
+                      },
+                      "providerProfile": {
+                        "type": "object",
+                        "properties": {
+                          "profileRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                          },
+                          "profileHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "pattern": "^[^\\u0000\\r\\n]+$"
+                          },
+                          "requiredCapabilities": {
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "image-input"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "profileRef",
+                          "profileRevision",
+                          "profileHash",
+                          "modelId",
+                          "requiredCapabilities"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerProfile"
                     ],
                     "additionalProperties": false
                   }
@@ -5111,6 +5608,68 @@
                       "runtimeId",
                       "providerId",
                       "modelId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "byok-profile"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "const": "pi"
+                      },
+                      "providerProfile": {
+                        "type": "object",
+                        "properties": {
+                          "profileRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                          },
+                          "profileHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "pattern": "^[^\\u0000\\r\\n]+$"
+                          },
+                          "requiredCapabilities": {
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "image-input"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "profileRef",
+                          "profileRevision",
+                          "profileHash",
+                          "modelId",
+                          "requiredCapabilities"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerProfile"
                     ],
                     "additionalProperties": false
                   }
@@ -5669,6 +6228,68 @@
                       "runtimeId",
                       "providerId",
                       "modelId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "lane": {
+                        "type": "string",
+                        "const": "byok-profile"
+                      },
+                      "runtimeId": {
+                        "type": "string",
+                        "const": "pi"
+                      },
+                      "providerProfile": {
+                        "type": "object",
+                        "properties": {
+                          "profileRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                          },
+                          "profileHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "pattern": "^[^\\u0000\\r\\n]+$"
+                          },
+                          "requiredCapabilities": {
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "image-input"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "profileRef",
+                          "profileRevision",
+                          "profileHash",
+                          "modelId",
+                          "requiredCapabilities"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "lane",
+                      "runtimeId",
+                      "providerProfile"
                     ],
                     "additionalProperties": false
                   }
@@ -9832,6 +10453,68 @@
                               "modelId"
                             ],
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
+                            ],
+                            "additionalProperties": false
                           }
                         ]
                       },
@@ -10066,6 +10749,68 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
                             ],
                             "additionalProperties": false
                           }
@@ -10354,6 +11099,68 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
                             ],
                             "additionalProperties": false
                           }
@@ -10665,6 +11472,68 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
                             ],
                             "additionalProperties": false
                           }
@@ -11223,6 +12092,68 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
                             ],
                             "additionalProperties": false
                           }
@@ -14711,6 +15642,68 @@
                               "modelId"
                             ],
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
+                            ],
+                            "additionalProperties": false
                           }
                         ]
                       },
@@ -14945,6 +15938,68 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
                             ],
                             "additionalProperties": false
                           }
@@ -15233,6 +16288,68 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
                             ],
                             "additionalProperties": false
                           }
@@ -15544,6 +16661,68 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
                             ],
                             "additionalProperties": false
                           }
@@ -16102,6 +17281,68 @@
                               "runtimeId",
                               "providerId",
                               "modelId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "lane": {
+                                "type": "string",
+                                "const": "byok-profile"
+                              },
+                              "runtimeId": {
+                                "type": "string",
+                                "const": "pi"
+                              },
+                              "providerProfile": {
+                                "type": "object",
+                                "properties": {
+                                  "profileRef": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                                  },
+                                  "profileRevision": {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9][0-9]{0,19})$"
+                                  },
+                                  "profileHash": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[0-9a-f]{64}$"
+                                  },
+                                  "modelId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 160,
+                                    "pattern": "^[^\\u0000\\r\\n]+$"
+                                  },
+                                  "requiredCapabilities": {
+                                    "maxItems": 8,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "enum": [
+                                        "image-input"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "profileRef",
+                                  "profileRevision",
+                                  "profileHash",
+                                  "modelId",
+                                  "requiredCapabilities"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "lane",
+                              "runtimeId",
+                              "providerProfile"
                             ],
                             "additionalProperties": false
                           }

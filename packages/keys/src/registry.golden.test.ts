@@ -45,9 +45,11 @@ const OPENAI: ProviderConfiguration = {
   adapter: 'openai_compatible',
   auth_mode: 'bearer',
   base_url: 'https://api.openai.com/v1',
+  capabilities: [],
   display_name: 'OpenAI',
   model: 'gpt-5.2',
-  provider_id: 'openai',
+  profile_ref: 'openai',
+  provider_kind: 'openai',
 };
 
 const successfulCompletion = () =>
@@ -100,7 +102,7 @@ describe.skipIf(!sqliteReady)('BYOK registry golden parity (HANDOFF §4.3)', () 
     const status = await registry().configure(OPENAI, CANARY);
     expect(status).toMatchObject({
       model: 'gpt-5.2',
-      provider_id: 'openai',
+      profile_ref: 'openai',
       secret_configured: true,
     });
     expect(providerFetch).not.toHaveBeenCalled();

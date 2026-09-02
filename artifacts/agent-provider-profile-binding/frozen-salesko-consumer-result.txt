@@ -1,0 +1,3 @@
+{"status":"passed","consumer":"frozen-salesko-provider-profile-binding","profiles":["openrouter-primary","openrouter-backup"],"capability":["image-input"],"secretFree":true}
+CONSUMER_EXIT=0
+SOURCE_GIT_SHA=77dbe3d7c7440982bc0c131cd25f42710b75a2e3

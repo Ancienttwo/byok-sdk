@@ -113,6 +113,7 @@ export const CAPABILITY_FLAGS = [
   'approval-targeting',
   'result-document',
   'dispatch-selection',
+  PROVIDER_PROFILE_BINDING_CAPABILITY,
   'toolset-selection',
   'agent-home-contract',
   STRICT_AGENT_ONLY_CAPABILITY,
@@ -139,3 +140,4 @@ import {
 } from './agent-egress';
 import { AGENT_HOME_PROJECTION_CAPABILITY } from './agent-home-projection';
 import { TERMINAL_PROJECTION_SELECTION_CAPABILITY } from './terminal-projection';
+import { PROVIDER_PROFILE_BINDING_CAPABILITY } from './provider-profile-binding';

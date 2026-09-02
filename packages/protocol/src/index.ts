@@ -8,6 +8,23 @@ export { PermissionPolicySchema, PERMISSION_MODES } from './permission';
 export type { PermissionPolicy, PermissionMode } from './permission';
 
 export {
+  PROVIDER_PROFILE_BINDING_CAPABILITY,
+  PROVIDER_MODEL_CAPABILITIES,
+  ProviderProfileRefSchema,
+  ProviderProfileRevisionSchema,
+  ProviderProfileHashSchema,
+  ProviderModelCapabilitySchema,
+  ProviderProfileBindingSchema,
+} from './provider-profile-binding';
+export type {
+  ProviderProfileRef,
+  ProviderProfileRevision,
+  ProviderProfileHash,
+  ProviderModelCapability,
+  ProviderProfileBinding,
+} from './provider-profile-binding';
+
+export {
   AgentEventSchema,
   UnknownAgentEventSchema,
   AgentEventOrUnknownSchema,

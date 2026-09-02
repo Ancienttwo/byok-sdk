@@ -1,5 +1,18 @@
 # @byok-sdk/client
 
+## Exact provider-profile admission
+
+When `DaemonConfig.piByokLauncher` is configured, the daemon advertises the
+additive `provider-profile-binding` capability. A `byok-profile` dispatch
+selection carries only an opaque local `profileRef`, exact revision/hash,
+model, and bounded required capabilities. `PiAdapter.prepare()` asks the keys
+launcher to validate that binding before claim. Missing or stale local state,
+model mismatch, and unsupported capabilities decline without workspace or
+runtime side effects. The immutable operation manifest seals the nested
+binding, and the launcher revalidates it before credential access and spawn.
+
+The task offer and manifest never contain the provider Base URL or secret.
+
 The local BYOK daemon. It pairs a device, durably journals tasks, connects over
 WebSocket or long poll, dispatches to local Claude Code, Codex, or pi adapters,
 and exposes authenticated local diagnostics/control commands.

@@ -4,7 +4,6 @@ import { ByokKeysError } from './errors';
 import {
   DEFAULT_SECRET_SERVICE_PREFIX,
   InMemorySecretStore,
-  MODEL_PROVIDER_SECRET_NAMES,
   decodeStrictBase64Utf8,
   modelProviderSecretName,
 } from './secret-store';
@@ -12,27 +11,32 @@ import {
 const CANARY = 'sk-canary-secret-store-0001';
 const NUL = String.fromCodePoint(0);
 
-describe('MODEL_PROVIDER_SECRET_NAMES', () => {
-  it('maps every model provider id to its credential-store entry name', () => {
-    expect(MODEL_PROVIDER_SECRET_NAMES).toEqual({
-      anthropic: 'model-anthropic-api-key',
-      custom: 'model-custom-api-key',
-      deepseek: 'model-deepseek-api-key',
-      openai: 'model-openai-api-key',
-    });
+describe('modelProviderSecretName', () => {
+  it('derives the credential-store entry name from the profile ref', () => {
+    expect(modelProviderSecretName('anthropic')).toBe('model-anthropic-api-key');
+    expect(modelProviderSecretName('openrouter-primary')).toBe(
+      'model-openrouter-primary-api-key',
+    );
   });
 
-  it('exposes only names the fail-closed validator accepts', () => {
-    for (const id of Object.keys(MODEL_PROVIDER_SECRET_NAMES) as (keyof typeof MODEL_PROVIDER_SECRET_NAMES)[]) {
-      expect(modelProviderSecretName(id)).toBe(MODEL_PROVIDER_SECRET_NAMES[id]);
-      expect(MODEL_PROVIDER_SECRET_NAMES[id]).toMatch(
-        /^[a-z0-9][a-z0-9_-]{2,95}$/u,
-      );
+  it('gives two profiles of one provider kind two distinct entries', () => {
+    expect(modelProviderSecretName('openrouter-primary')).not.toBe(
+      modelProviderSecretName('openrouter-backup'),
+    );
+  });
+
+  it('produces only names the fail-closed validator accepts', () => {
+    for (const ref of ['openai', 'deepseek', 'anthropic', 'custom', 'a', 'x'.repeat(64)]) {
+      expect(modelProviderSecretName(ref)).toMatch(/^[a-z0-9][a-z0-9_-]{2,95}$/u);
     }
   });
 
-  it('resolves a provider id to its name', () => {
-    expect(modelProviderSecretName('anthropic')).toBe('model-anthropic-api-key');
+  it('fails closed on a ref that could address another entry', () => {
+    for (const ref of ['../escape', 'Upper', 'with.dot', '', 'x'.repeat(65)]) {
+      expect(() => modelProviderSecretName(ref)).toThrowError(
+        expect.objectContaining({ code: 'PROVIDER_PROFILE_INVALID' }),
+      );
+    }
   });
 });
 

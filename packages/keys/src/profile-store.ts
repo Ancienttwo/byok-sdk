@@ -1,7 +1,7 @@
 import { ByokKeysError } from './errors';
 import {
-  type ModelProviderId,
   type ModelProviderProfile,
+  type ProviderProfileRef,
   parseModelProviderProfile,
 } from './provider-profile';
 
@@ -28,30 +28,30 @@ import {
 export interface ProviderProfileStore {
   /** Release the underlying resource. Safe to call more than once. */
   close(): Promise<void>;
-  /** Remove `providerId`; `false` when it was not configured. */
-  delete(providerId: ModelProviderId): Promise<boolean>;
-  /** Read one provider's profile, configured or not enabled alike. */
-  get(providerId: ModelProviderId): Promise<ModelProviderProfile | undefined>;
+  /** Remove `profileRef`; `false` when it was not configured. */
+  delete(profileRef: ProviderProfileRef): Promise<boolean>;
+  /** Read one profile, configured or not enabled alike. */
+  get(profileRef: ProviderProfileRef): Promise<ModelProviderProfile | undefined>;
   /** The single enabled profile, or `undefined` when none is enabled. */
   getEnabled(): Promise<ModelProviderProfile | undefined>;
-  /** Every configured profile, ordered by provider id. */
+  /** Every configured profile, ordered by profile ref. */
   list(): Promise<ModelProviderProfile[]>;
   /** Insert or update `profile`, enforcing both invariants above. */
   save(profile: ModelProviderProfile): Promise<ModelProviderProfile>;
   /**
-   * Make `providerId` the enabled profile. Throws `PROVIDER_NOT_CONFIGURED`
+   * Make `profileRef` the enabled profile. Throws `PROVIDER_NOT_CONFIGURED`
    * when it has no profile — a fail-closed port of `providers.ts:1243-1250`.
    */
-  setEnabled(providerId: ModelProviderId): Promise<ModelProviderProfile>;
+  setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile>;
 }
 
 /** Shared by both implementations so their error text cannot drift apart. */
 export function providerNotConfigured(
-  providerId: ModelProviderId,
+  profileRef: ProviderProfileRef,
 ): ByokKeysError {
   return new ByokKeysError(
     'PROVIDER_NOT_CONFIGURED',
-    `${providerId} model provider is not configured`,
+    `${profileRef} model provider is not configured`,
   );
 }
 
@@ -64,18 +64,18 @@ export function providerNotConfigured(
  * SQLite store must match (`profile-store.test.ts` runs one suite against both).
  */
 export class InMemoryProviderProfileStore implements ProviderProfileStore {
-  readonly #profiles = new Map<ModelProviderId, ModelProviderProfile>();
+  readonly #profiles = new Map<ProviderProfileRef, ModelProviderProfile>();
 
   async close(): Promise<void> {
     this.#profiles.clear();
   }
 
-  async delete(providerId: ModelProviderId): Promise<boolean> {
-    return this.#profiles.delete(providerId);
+  async delete(profileRef: ProviderProfileRef): Promise<boolean> {
+    return this.#profiles.delete(profileRef);
   }
 
-  async get(providerId: ModelProviderId): Promise<ModelProviderProfile | undefined> {
-    return this.#profiles.get(providerId);
+  async get(profileRef: ProviderProfileRef): Promise<ModelProviderProfile | undefined> {
+    return this.#profiles.get(profileRef);
   }
 
   async getEnabled(): Promise<ModelProviderProfile | undefined> {
@@ -84,7 +84,7 @@ export class InMemoryProviderProfileStore implements ProviderProfileStore {
 
   async list(): Promise<ModelProviderProfile[]> {
     return [...this.#profiles.values()].sort((left, right) =>
-      left.provider_id.localeCompare(right.provider_id),
+      left.profile_ref.localeCompare(right.profile_ref),
     );
   }
 
@@ -92,23 +92,23 @@ export class InMemoryProviderProfileStore implements ProviderProfileStore {
     const validated = parseModelProviderProfile({
       ...profile,
       created_at:
-        this.#profiles.get(profile.provider_id)?.created_at ??
+        this.#profiles.get(profile.profile_ref)?.created_at ??
         profile.created_at,
     });
     if (validated.enabled) {
-      for (const [providerId, existing] of this.#profiles) {
-        if (providerId !== validated.provider_id && existing.enabled) {
-          this.#profiles.set(providerId, { ...existing, enabled: false });
+      for (const [profileRef, existing] of this.#profiles) {
+        if (profileRef !== validated.profile_ref && existing.enabled) {
+          this.#profiles.set(profileRef, { ...existing, enabled: false });
         }
       }
     }
-    this.#profiles.set(validated.provider_id, validated);
+    this.#profiles.set(validated.profile_ref, validated);
     return validated;
   }
 
-  async setEnabled(providerId: ModelProviderId): Promise<ModelProviderProfile> {
-    const existing = this.#profiles.get(providerId);
-    if (existing === undefined) throw providerNotConfigured(providerId);
+  async setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile> {
+    const existing = this.#profiles.get(profileRef);
+    if (existing === undefined) throw providerNotConfigured(profileRef);
     return this.save({ ...existing, enabled: true });
   }
 }

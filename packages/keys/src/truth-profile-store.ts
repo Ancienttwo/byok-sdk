@@ -14,9 +14,8 @@ import {
   providerNotConfigured,
 } from './profile-store';
 import {
-  MODEL_PROVIDER_IDS,
-  type ModelProviderId,
   type ModelProviderProfile,
+  type ProviderProfileRef,
   parseModelProviderProfile,
 } from './provider-profile';
 
@@ -27,14 +26,27 @@ const PROFILE_KEYS = [
   'adapter',
   'auth_mode',
   'base_url',
+  'capabilities',
   'created_at',
   'display_name',
   'enabled',
   'kind',
   'model',
-  'provider_id',
+  'profile_ref',
+  'provider_kind',
   'updated_at',
 ] as const;
+
+/**
+ * Upper bound on how many profiles one tenant's registry snapshot may carry.
+ *
+ * The former bound was `MODEL_PROVIDER_IDS.length`, which only held because the
+ * primary key was a four-value enum. Profile refs are open, so the CAS body
+ * needs an explicit ceiling of its own; a registry is device-local operator
+ * configuration, and 32 endpoints is far past any real local setup while
+ * keeping the single-record snapshot small.
+ */
+export const MAX_PROVIDER_PROFILES = 32;
 
 interface ProviderRegistrySnapshotV1 {
   readonly schema_version: 1;
@@ -72,21 +84,21 @@ export class TruthStoreProviderProfileStore implements ProviderProfileStore {
     // The host owns the injected TruthStore lifecycle.
   }
 
-  async delete(providerId: ModelProviderId): Promise<boolean> {
+  async delete(profileRef: ProviderProfileRef): Promise<boolean> {
     const current = await this.#load();
-    if (!current.profiles.some((profile) => profile.provider_id === providerId)) {
+    if (!current.profiles.some((profile) => profile.profile_ref === profileRef)) {
       return false;
     }
     await this.#write(
-      current.profiles.filter((profile) => profile.provider_id !== providerId),
+      current.profiles.filter((profile) => profile.profile_ref !== profileRef),
       current.rev,
     );
     return true;
   }
 
-  async get(providerId: ModelProviderId): Promise<ModelProviderProfile | undefined> {
+  async get(profileRef: ProviderProfileRef): Promise<ModelProviderProfile | undefined> {
     return (await this.#load()).profiles.find(
-      (profile) => profile.provider_id === providerId,
+      (profile) => profile.profile_ref === profileRef,
     );
   }
 
@@ -101,14 +113,14 @@ export class TruthStoreProviderProfileStore implements ProviderProfileStore {
   async save(profile: ModelProviderProfile): Promise<ModelProviderProfile> {
     const current = await this.#load();
     const existing = current.profiles.find(
-      (candidate) => candidate.provider_id === profile.provider_id,
+      (candidate) => candidate.profile_ref === profile.profile_ref,
     );
     const validated = parseModelProviderProfile({
       ...profile,
       created_at: existing?.created_at ?? profile.created_at,
     });
     const next = current.profiles
-      .filter((candidate) => candidate.provider_id !== validated.provider_id)
+      .filter((candidate) => candidate.profile_ref !== validated.profile_ref)
       .map((candidate) =>
         validated.enabled && candidate.enabled
           ? { ...candidate, enabled: false }
@@ -119,15 +131,15 @@ export class TruthStoreProviderProfileStore implements ProviderProfileStore {
     return validated;
   }
 
-  async setEnabled(providerId: ModelProviderId): Promise<ModelProviderProfile> {
+  async setEnabled(profileRef: ProviderProfileRef): Promise<ModelProviderProfile> {
     const current = await this.#load();
     const selected = current.profiles.find(
-      (profile) => profile.provider_id === providerId,
+      (profile) => profile.profile_ref === profileRef,
     );
-    if (selected === undefined) throw providerNotConfigured(providerId);
+    if (selected === undefined) throw providerNotConfigured(profileRef);
     const next = current.profiles.map((profile) => ({
       ...profile,
-      enabled: profile.provider_id === providerId,
+      enabled: profile.profile_ref === profileRef,
     }));
     await this.#write(next, current.rev);
     return { ...selected, enabled: true };
@@ -181,7 +193,7 @@ export class TruthStoreProviderProfileStore implements ProviderProfileStore {
 function encodeRegistry(profiles: readonly ModelProviderProfile[]): string {
   const normalized = profiles
     .map((profile) => parseModelProviderProfile(profile))
-    .sort((left, right) => left.provider_id.localeCompare(right.provider_id));
+    .sort((left, right) => left.profile_ref.localeCompare(right.profile_ref));
   assertRegistryInvariants(normalized);
   const snapshot: ProviderRegistrySnapshotV1 = {
     schema_version: 1,
@@ -189,12 +201,14 @@ function encodeRegistry(profiles: readonly ModelProviderProfile[]): string {
       adapter: profile.adapter,
       auth_mode: profile.auth_mode,
       base_url: profile.base_url,
+      capabilities: profile.capabilities,
       created_at: profile.created_at,
       display_name: profile.display_name,
       enabled: profile.enabled,
       kind: profile.kind,
       model: profile.model,
-      provider_id: profile.provider_id,
+      profile_ref: profile.profile_ref,
+      provider_kind: profile.provider_kind,
       updated_at: profile.updated_at,
     })),
   };
@@ -237,7 +251,7 @@ function decodeRegistryRecord(
   if (raw.schema_version !== 1 || !Array.isArray(raw.profiles)) {
     throw invalidTruth('Provider profile TruthStore body has an unsupported schema');
   }
-  if (raw.profiles.length > MODEL_PROVIDER_IDS.length) {
+  if (raw.profiles.length > MAX_PROVIDER_PROFILES) {
     throw invalidTruth('Provider profile TruthStore body exceeds the provider registry bound');
   }
   let profiles: ModelProviderProfile[];
@@ -264,13 +278,13 @@ function decodeRegistryRecord(
 function assertRegistryInvariants(
   profiles: readonly ModelProviderProfile[],
 ): void {
-  const seen = new Set<ModelProviderId>();
+  const seen = new Set<ProviderProfileRef>();
   let enabled = 0;
   for (const profile of profiles) {
-    if (seen.has(profile.provider_id)) {
-      throw invalidTruth(`Provider profile ${profile.provider_id} appears more than once`);
+    if (seen.has(profile.profile_ref)) {
+      throw invalidTruth(`Provider profile ${profile.profile_ref} appears more than once`);
     }
-    seen.add(profile.provider_id);
+    seen.add(profile.profile_ref);
     if (profile.enabled) enabled += 1;
   }
   if (enabled > 1) {

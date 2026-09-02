@@ -4,9 +4,11 @@ import { promises as fs } from 'node:fs';
 import { ByokKeysError } from './errors';
 import { PI_PROJECTED_KEY_ENV } from './pi-provider-projection';
 import {
-  MODEL_PROVIDER_IDS,
-  type ModelProviderId,
+  ProviderModelCapabilitySchema,
+  ProviderProfileRefSchema,
+  type ExactProviderProfileBinding,
   type ModelProviderProfile,
+  type ProviderProfileRef,
 } from './provider-profile';
 import { type SecretStore, modelProviderSecretName } from './secret-store';
 
@@ -45,8 +47,11 @@ const PI_CHILD_WINDOWS_ENV_NAMES = [
 export interface PiProviderLauncherOptions {
   piBin: string;
   profileDbPath: string;
-  providerId: ModelProviderId;
+  /** Carried by the `--provider` flag: the exact local profile to launch. */
+  profileRef: ProviderProfileRef;
   modelId: string;
+  expectedBinding?: ExactProviderProfileBinding;
+  validateOnly: boolean;
   sessionDir: string;
   secretServicePrefix?: string;
   macosKeychainPath?: string;
@@ -57,16 +62,18 @@ export function parsePiProviderLauncherOptions(
   args: string[],
 ): PiProviderLauncherOptions {
   const separator = args.indexOf('--');
-  if (separator < 0) throw new Error('launcher arguments must end with -- <pi args>');
-  const ownArgs = args.slice(0, separator);
-  const piArgs = args.slice(separator + 1);
-  if (piArgs.length === 0) throw new Error('launcher requires Pi arguments after --');
+  const ownArgs = separator < 0 ? args : args.slice(0, separator);
+  const piArgs = separator < 0 ? [] : args.slice(separator + 1);
 
   const allowedFlags = new Set([
     '--pi-bin',
     '--profile-db',
     '--provider',
     '--model',
+    '--profile-revision',
+    '--profile-hash',
+    '--required-capabilities',
+    '--validate-only',
     '--session-dir',
     '--secret-service-prefix',
     '--macos-keychain-path',
@@ -92,9 +99,10 @@ export function parsePiProviderLauncherOptions(
     return value;
   };
 
-  const rawProviderId = required('--provider');
-  if (!MODEL_PROVIDER_IDS.includes(rawProviderId as ModelProviderId)) {
-    throw new Error(`provider ${rawProviderId} is not configured by @byok-sdk/keys`);
+  const rawProfileRef = required('--provider');
+  const profileRef = ProviderProfileRefSchema.safeParse(rawProfileRef);
+  if (!profileRef.success) {
+    throw new Error(`provider profile ref ${rawProfileRef} is not a valid @byok-sdk/keys identifier`);
   }
 
   const modelId = required('--model');
@@ -111,11 +119,54 @@ export function parsePiProviderLauncherOptions(
   if (macosKeychainPath !== undefined && !path.posix.isAbsolute(macosKeychainPath)) {
     throw new Error('--macos-keychain-path must be an absolute path');
   }
+  const validateOnly = values.get('--validate-only') === 'true';
+  if (values.has('--validate-only') && !['true', 'false'].includes(values.get('--validate-only')!)) {
+    throw new Error('--validate-only must be true or false');
+  }
+  if (!validateOnly && piArgs.length === 0) {
+    throw new Error('launcher requires Pi arguments after --');
+  }
+  const exactValues = [
+    values.get('--profile-revision'),
+    values.get('--profile-hash'),
+    values.get('--required-capabilities'),
+  ];
+  if (exactValues.some((value) => value !== undefined) && exactValues.some((value) => value === undefined)) {
+    throw new Error('exact provider binding requires revision, hash, and required capabilities together');
+  }
+  let expectedBinding: ExactProviderProfileBinding | undefined;
+  if (exactValues[0] !== undefined) {
+    if (!/^(?:0|[1-9][0-9]{0,19})$/u.test(exactValues[0])) {
+      throw new Error('--profile-revision must be canonical decimal');
+    }
+    if (!/^sha256:[0-9a-f]{64}$/u.test(exactValues[1]!)) {
+      throw new Error('--profile-hash must be lowercase sha256');
+    }
+    let capabilities: unknown;
+    try {
+      capabilities = JSON.parse(exactValues[2]!);
+    } catch {
+      throw new Error('--required-capabilities must be a JSON array');
+    }
+    const parsedCapabilities = ProviderModelCapabilitySchema.array().max(8).safeParse(capabilities);
+    if (!parsedCapabilities.success || new Set(parsedCapabilities.data).size !== parsedCapabilities.data.length) {
+      throw new Error('--required-capabilities must contain unique supported capabilities');
+    }
+    expectedBinding = {
+      profileRef: profileRef.data,
+      profileRevision: exactValues[0],
+      profileHash: exactValues[1]!,
+      modelId,
+      requiredCapabilities: parsedCapabilities.data,
+    };
+  }
   return {
     piBin: required('--pi-bin'),
     profileDbPath,
-    providerId: rawProviderId as ModelProviderId,
+    profileRef: profileRef.data,
     modelId,
+    ...(expectedBinding === undefined ? {} : { expectedBinding }),
+    validateOnly,
     sessionDir,
     ...(secretServicePrefix ? { secretServicePrefix } : {}),
     ...(macosKeychainPath !== undefined ? { macosKeychainPath } : {}),
@@ -142,11 +193,11 @@ export async function resolvePiProviderSecret(
       `${secrets.providerLabel} is unavailable`,
     );
   }
-  const secret = await secrets.get(modelProviderSecretName(profile.provider_id));
+  const secret = await secrets.get(modelProviderSecretName(profile.profile_ref));
   if (!secret) {
     throw new ByokKeysError(
       'PROVIDER_SECRET_MISSING',
-      `${profile.provider_id} provider requires a secret in ${secrets.providerLabel}`,
+      `${profile.profile_ref} provider profile requires a secret in ${secrets.providerLabel}`,
     );
   }
   return secret;

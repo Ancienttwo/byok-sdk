@@ -24,11 +24,13 @@ function profile(authMode: 'bearer' | 'none') {
     adapter: 'openai_compatible',
     auth_mode: authMode,
     base_url: 'http://127.0.0.1:11434/v1',
+    capabilities: [],
     display_name: 'Local model',
     enabled: true,
     kind: 'model',
     model: 'local-model',
-    provider_id: 'custom',
+    profile_ref: 'custom',
+    provider_kind: 'custom',
   });
 }
 
@@ -56,9 +58,49 @@ describe('Pi provider launcher core', () => {
     ])).toMatchObject({
       profileDbPath,
       sessionDir,
-      providerId: 'custom',
+      profileRef: 'custom',
       macosKeychainPath,
     });
+
+    expect(parsePiProviderLauncherOptions([
+      '--pi-bin', '/opt/pi',
+      '--profile-db', profileDbPath,
+      '--session-dir', sessionDir,
+      '--provider', 'openrouter-primary',
+      '--model', 'anthropic/claude-sonnet-4',
+      '--profile-revision', '1787702400000',
+      '--profile-hash', `sha256:${'a'.repeat(64)}`,
+      '--required-capabilities', '["image-input"]',
+      '--validate-only', 'true',
+    ])).toMatchObject({
+      profileRef: 'openrouter-primary',
+      validateOnly: true,
+      expectedBinding: {
+        profileRef: 'openrouter-primary',
+        profileRevision: '1787702400000',
+        modelId: 'anthropic/claude-sonnet-4',
+        requiredCapabilities: ['image-input'],
+      },
+    });
+
+    expect(() => parsePiProviderLauncherOptions([
+      '--pi-bin', '/opt/pi',
+      '--profile-db', profileDbPath,
+      '--session-dir', sessionDir,
+      '--provider', 'openrouter-primary',
+      '--model', 'anthropic/claude-sonnet-4',
+      '--profile-revision', '1787702400001',
+      '--validate-only', 'true',
+    ])).toThrow(/requires revision, hash, and required capabilities together/);
+
+    expect(() => parsePiProviderLauncherOptions([
+      '--pi-bin', '/opt/pi',
+      '--profile-db', profileDbPath,
+      '--session-dir', sessionDir,
+      '--provider', '../escape',
+      '--model', 'local-model',
+      '--', '--mode', 'rpc',
+    ])).toThrow(/not a valid @byok-sdk\/keys identifier/);
 
     expect(() => parsePiProviderLauncherOptions([
       '--pi-bin', '/opt/pi',

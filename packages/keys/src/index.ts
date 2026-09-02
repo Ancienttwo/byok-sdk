@@ -2,18 +2,26 @@ export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
 export type { ByokKeysErrorCode } from './errors';
 
 export {
-  MODEL_PROVIDER_IDS,
   MODEL_PROVIDER_ADAPTERS,
+  MODEL_PROVIDER_KINDS,
   PROVIDER_AUTH_MODES,
+  PROVIDER_MODEL_CAPABILITIES,
   ModelProviderProfileSchema,
+  ProviderModelCapabilitySchema,
+  ProviderProfileRefSchema,
   parseModelProviderProfile,
+  exactProviderProfileBinding,
+  assertExactProviderProfileBinding,
 } from './provider-profile';
 export type {
   ModelProviderAdapter,
-  ModelProviderId,
+  ModelProviderKind,
   ModelProviderProfile,
   ModelProviderProfileInput,
+  ExactProviderProfileBinding,
   ProviderAuthMode,
+  ProviderModelCapability,
+  ProviderProfileRef,
 } from './provider-profile';
 
 export { providerHeaders, requiredProviderSecret } from './headers';
@@ -66,7 +74,6 @@ export {
 export {
   DEFAULT_SECRET_SERVICE_PREFIX,
   InMemorySecretStore,
-  MODEL_PROVIDER_SECRET_NAMES,
   assertSharedSecretValue,
   decodeStrictBase64Utf8,
   modelProviderSecretName,

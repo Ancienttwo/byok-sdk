@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY_FLAGS, PROTOCOL_VERSION } from '../index';
+import { CAPABILITY_FLAGS, PROTOCOL_VERSION, PROVIDER_PROFILE_BINDING_CAPABILITY } from '../index';
 
 describe('protocol version and capability flags', () => {
   it('PROTOCOL_VERSION is 1', () => {
@@ -18,5 +18,6 @@ describe('protocol version and capability flags', () => {
   it('includes the dispatch-selection correctness gate', () => {
     expect(CAPABILITY_FLAGS).toContain('dispatch-selection');
     expect(CAPABILITY_FLAGS).toContain('toolset-selection');
+    expect(CAPABILITY_FLAGS).toContain(PROVIDER_PROFILE_BINDING_CAPABILITY);
   });
 });

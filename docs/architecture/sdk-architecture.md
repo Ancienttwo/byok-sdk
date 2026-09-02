@@ -727,7 +727,7 @@ flowchart LR
 
 | 模块 | 已实现功能 |
 | --- | --- |
-| `provider-profile.ts` | provider kind、adapter、auth mode 组合验证；custom URL normalization |
+| `provider-profile.ts` | provider kind、adapter、auth mode 组合验证；custom URL normalization；从 runtime-relevant non-secret record 派生 exact revision/hash binding |
 | `registry.ts` | configure/remove/status/resolve；profile 与 secret 的唯一汇合点 |
 | `secret-store.ts` | generic async port、memory store、secret name/value validation |
 | `macos-keychain.ts` / `windows-credential-manager.ts` | OS-native secret persistence |
@@ -743,7 +743,7 @@ flowchart LR
 
 `ProviderRegistry.configure()` 的顺序是先写 secret，再验证 secret 已存在，最后写 profile；status 只暴露 `secret_configured` boolean，不返回 secret。`resolve()` 只对 enabled、valid、secret-complete 的 profile 构造 transport。
 
-`@byok-sdk/keys` 不是 daemon 进程内的 runtime credential source，且仍没有任何 `client/server/protocol` import edge。BYOK Pi 的组合点是显式配置的 launcher executable：client 只传 provider/model 与非秘密路径；launcher 才读取 profile/keychain，生成 process-scoped projection 并 spawn Pi。这个进程边界保留 dependency graph 的零边，也让 dispatch 进程无法取得 key value。
+`@byok-sdk/keys` 不是 daemon 进程内的 runtime credential source，且仍没有任何 `client/server/protocol` import edge。BYOK Pi 的组合点是显式配置的 launcher executable：`byok-profile` offer 只传 opaque profile ref、exact revision/hash、model、required capabilities 与非秘密路径；launcher 在 claim 前只读验证，spawn 前再次验证后才读取 profile/keychain、生成 process-scoped projection 并启动 Pi。这个进程边界保留 dependency graph 的零边，也让 dispatch 进程无法取得 key value。
 
 ## 8. P2：端到端数据流
 

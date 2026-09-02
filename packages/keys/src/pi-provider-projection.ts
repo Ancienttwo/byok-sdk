@@ -3,13 +3,22 @@ import type { ModelProviderProfile } from './provider-profile';
 export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
 
 /** Keep projected providers disjoint from Pi built-ins so composition can never fall back to one. */
-export function piProjectionProviderId(profileProviderId: string): string {
-  return `byok-sdk-${profileProviderId}`;
+export function piProjectionProviderId(profileRef: string): string {
+  return `byok-sdk-${profileRef}`;
 }
 
-/** Credential-blind Pi configuration derived from one validated local profile. */
+/**
+ * Credential-blind Pi configuration derived from one validated local profile.
+ *
+ * The projected provider is namespaced by the profile's own ref, not by its
+ * provider kind, so two independently configured endpoints of the same kind
+ * project to two distinct Pi providers instead of colliding on one. Model
+ * `input` modalities are projected from the profile's declared capabilities —
+ * declared local configuration is the only authority; nothing is inferred from
+ * the model name or base URL.
+ */
 export function buildPiProviderProjection(profile: ModelProviderProfile): object {
-  const projectedProviderId = piProjectionProviderId(profile.provider_id);
+  const projectedProviderId = piProjectionProviderId(profile.profile_ref);
   return {
     providers: {
       [projectedProviderId]: {
@@ -26,6 +35,10 @@ export function buildPiProviderProjection(profile: ModelProviderProfile): object
           {
             id: profile.model,
             name: profile.display_name,
+            input: [
+              'text',
+              ...(profile.capabilities.includes('image-input') ? ['image'] : []),
+            ],
           },
         ],
       },
@@ -67,7 +80,7 @@ export function buildPiProviderArgs(
   return [
     ...delegatedArgs,
     '--provider',
-    piProjectionProviderId(profile.provider_id),
+    piProjectionProviderId(profile.profile_ref),
     '--model',
     profile.model,
   ];

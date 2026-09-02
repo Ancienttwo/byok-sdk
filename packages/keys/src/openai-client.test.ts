@@ -17,12 +17,14 @@ const profile = (
   adapter: 'openai_compatible',
   auth_mode: 'bearer',
   base_url: 'https://api.openai.com/v1',
+  capabilities: [],
   created_at: '2026-08-05T00:00:00.000Z',
   display_name: 'OpenAI',
   enabled: true,
   kind: 'model',
   model: 'gpt-4o-mini',
-  provider_id: 'openai',
+  profile_ref: 'openai',
+  provider_kind: 'openai',
   updated_at: '2026-08-05T00:00:00.000Z',
   ...overrides,
 });
@@ -141,7 +143,8 @@ describe('OpenAiCompatibleChatClient', () => {
       profile: profile({
         auth_mode: 'none',
         base_url: 'http://localhost:11434/v1',
-        provider_id: 'custom',
+        profile_ref: 'local-ollama',
+        provider_kind: 'custom',
       }),
       secret: undefined,
     }).createChatCompletion({ messages: [{ content: 'hi', role: 'user' }] });
@@ -257,7 +260,8 @@ describe('OpenAiCompatibleChatClient', () => {
         profile: profile({
           auth_mode: 'none',
           base_url: 'http://localhost:11434/v1',
-          provider_id: 'custom',
+          profile_ref: 'local-ollama',
+          provider_kind: 'custom',
         }),
         secret: undefined,
       }).remoteDataTransfer,

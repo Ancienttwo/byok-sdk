@@ -13,12 +13,14 @@ const openAiProfile = (
   adapter: 'openai_compatible',
   auth_mode: 'bearer',
   base_url: 'https://api.openai.com/v1',
+  capabilities: [],
   created_at: '2026-08-05T00:00:00.000Z',
   display_name: 'OpenAI',
   enabled: true,
   kind: 'model',
   model: 'gpt-4o-mini',
-  provider_id: 'openai',
+  profile_ref: 'openai',
+  provider_kind: 'openai',
   updated_at: '2026-08-05T00:00:00.000Z',
   ...overrides,
 });
@@ -32,7 +34,8 @@ const anthropicProfile = (
     base_url: 'https://api.anthropic.com/v1',
     display_name: 'Anthropic',
     model: 'claude-sonnet-4-5',
-    provider_id: 'anthropic',
+    profile_ref: 'anthropic',
+    provider_kind: 'anthropic',
     ...overrides,
   });
 
@@ -57,12 +60,14 @@ describe('ModelProviderProfileSchema', () => {
       adapter: 'openai_compatible',
       auth_mode: 'bearer',
       base_url: 'https://api.openai.com/v1',
+      capabilities: [],
       created_at: '2026-08-05T00:00:00.000Z',
       display_name: 'OpenAI',
       enabled: true,
       kind: 'model',
       model: 'gpt-4o-mini',
-      provider_id: 'openai',
+      profile_ref: 'openai',
+      provider_kind: 'openai',
       updated_at: '2026-08-05T00:00:00.000Z',
     });
   });
@@ -78,7 +83,8 @@ describe('ModelProviderProfileSchema', () => {
       openAiProfile({
         auth_mode: 'none',
         base_url: 'http://localhost:11434/v1',
-        provider_id: 'custom',
+        profile_ref: 'local-ollama',
+        provider_kind: 'custom',
       }),
     );
     expect(parsed.auth_mode).toBe('none');
@@ -107,8 +113,44 @@ describe('ModelProviderProfileSchema', () => {
     );
   });
 
-  it('rejects an unknown provider id', () => {
-    expectRejected(openAiProfile({ provider_id: 'mistral' as never }));
+  it('rejects an unknown provider kind', () => {
+    expectRejected(openAiProfile({ provider_kind: 'mistral' as never }));
+  });
+
+  it('accepts two independent custom profiles under one provider kind', () => {
+    const primary = parseModelProviderProfile(
+      openAiProfile({
+        base_url: 'https://openrouter.ai/api/v1',
+        profile_ref: 'openrouter-primary',
+        provider_kind: 'custom',
+      }),
+    );
+    const backup = parseModelProviderProfile(
+      openAiProfile({
+        base_url: 'https://openrouter.ai/api/v1',
+        profile_ref: 'openrouter-backup',
+        provider_kind: 'custom',
+      }),
+    );
+    expect([primary.profile_ref, backup.profile_ref]).toEqual([
+      'openrouter-primary',
+      'openrouter-backup',
+    ]);
+    expect(primary.provider_kind).toBe(backup.provider_kind);
+  });
+
+  it('rejects a profile ref that is not a lowercase portable identifier', () => {
+    expectRejected(openAiProfile({ profile_ref: '../escape' }));
+    expectRejected(openAiProfile({ profile_ref: 'Upper' }));
+    expectRejected(openAiProfile({ profile_ref: 'a'.repeat(65) }));
+  });
+
+  it('rejects an unknown or repeated capability', () => {
+    expectRejected(openAiProfile({ capabilities: ['video-input'] as never }));
+    const error = expectRejected(
+      openAiProfile({ capabilities: ['image-input', 'image-input'] }),
+    );
+    expect(error.message).toBe('Provider capabilities cannot repeat');
   });
 
   it('rejects an unknown auth mode', () => {
@@ -163,12 +205,14 @@ describe('ModelProviderProfileSchema', () => {
       'adapter',
       'auth_mode',
       'base_url',
+      'capabilities',
       'created_at',
       'display_name',
       'enabled',
       'kind',
       'model',
-      'provider_id',
+      'profile_ref',
+      'provider_kind',
       'updated_at',
     ]);
   });

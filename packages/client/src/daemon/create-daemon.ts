@@ -16,6 +16,7 @@ import {
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
+  PROVIDER_PROFILE_BINDING_CAPABILITY,
   AgentContentReceiptPayloadSchema,
 } from '@byok-sdk/protocol';
 import type {
@@ -881,6 +882,7 @@ function computeCapabilities(
   agentHomeProjectionConfigured = false,
   agentEgressConfigured = false,
   contentReadPolicies?: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
+  providerProfileBindingConfigured = false,
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
@@ -895,6 +897,12 @@ function computeCapabilities(
     selectionAdapters.every((adapter) => adapter.descriptor.supportsDispatchSelection === true)
   ) {
     flags.push('dispatch-selection');
+  }
+  if (
+    providerProfileBindingConfigured &&
+    adapters.some((adapter) => adapter.descriptor.id === 'pi' && adapter.descriptor.supportsDispatchSelection)
+  ) {
+    flags.push(PROVIDER_PROFILE_BINDING_CAPABILITY);
   }
   if (adapters.some((adapter) => adapter.descriptor.capabilities.mcpToolsets === true)) {
     flags.push('toolset-selection');
@@ -1736,6 +1744,7 @@ export function buildDaemonWithAdapters(
       agentHomeManager?.supportsTaskFreeProjection() === true,
       config.agentEgress !== undefined,
       agentContentReadPolicies,
+      config.piByokLauncher !== undefined,
     );
     const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
       ? new AgentHomeProjectionCompletionClient({
