@@ -19,6 +19,7 @@
 --   deploy/sql/0015_device_machine_identity.sql (nullable client-hashed machine identity + partial active-machine uniqueness)
 --   deploy/sql/0016_mailbox_delivery_watermark.sql (server-owned delivery bound for mailbox acknowledgements)
 --   deploy/sql/0017_agent_message_admission.sql (live-task first-message reservation)
+--   deploy/sql/0018_task_attempt_claimed_runtime.sql (nullable write-once claim-time runtime snapshot columns)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has

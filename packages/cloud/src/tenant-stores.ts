@@ -48,6 +48,7 @@ import {
   type StorageReservationInput,
   type TenantId,
 } from '@byok-sdk/core';
+import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type {
   ApprovalTimelineAppendInput,
@@ -140,7 +141,12 @@ export interface TenantBoundTaskAttempts {
   }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
   get(taskId: string): Promise<TaskAttempt | undefined>;
   getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
-  claim(input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt | undefined>;
+  claim(input: {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly runtime?: RuntimeId;
+    readonly capabilities?: RuntimeCapabilities;
+  }): Promise<TaskAttempt | undefined>;
   recordStatus(input: {
     readonly taskId: string;
     readonly status: TaskAttemptStatus;

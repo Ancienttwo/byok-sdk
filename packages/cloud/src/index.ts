@@ -184,6 +184,12 @@ export type {
 export { StaleApprovalError, pendingApproval } from './approval-control';
 export type { PendingApproval } from './approval-control';
 
+// Host steering. The error is exported with its code union because a host that
+// renders a steer control needs to explain a refusal in its own UI, and the
+// three codes are the whole vocabulary for that.
+export { SteerRejectedError } from './steer-control';
+export type { SteerRejectionCode } from './steer-control';
+
 export {
   DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_ACTIVITY_CAPACITY,
