@@ -526,7 +526,20 @@ async function applyLifecycle(
 ): Promise<void> {
   switch (envelope.type) {
     case 'task.claim':
-      await stores.tasks.claim({ taskId, deviceId });
+      // The claiming adapter's own self-report, carried straight through as
+      // the write-once claim snapshot. Nothing is read from the durable
+      // connection-level capability list here (`DeviceRecord.capabilities`,
+      // written by `conn.hello` above): that describes a device build, not the
+      // adapter that took THIS task, and letting it reach the snapshot is the
+      // exact scope defect the steer gate exists to forbid.
+      await stores.tasks.claim({
+        taskId,
+        deviceId,
+        ...(envelope.payload.runtime === undefined ? {} : { runtime: envelope.payload.runtime }),
+        ...(envelope.payload.capabilities === undefined
+          ? {}
+          : { capabilities: envelope.payload.capabilities }),
+      });
       return;
     case 'task.started':
       await stores.tasks.recordStatus({

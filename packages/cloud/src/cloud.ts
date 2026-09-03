@@ -96,11 +96,13 @@ import {
   type AgentMemoryProjectionCommitResponse,
   type AgentMemoryProjectionEraseResult,
   type TaskOfferPayload,
+  type TaskSteerPayload,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
+import { SteerRejectedError } from './steer-control';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
 import type { TokenSigner } from './auth/tokens';
 import { CLOUD_CAPABILITIES, declares } from './capabilities';
@@ -494,6 +496,36 @@ export interface ByokCloud {
     tenant: TenantId,
     taskId: string,
     opts?: RejectTaskOptions,
+  ): Promise<EnqueuedAgentControl>;
+  /**
+   * Host control plane: inject steering text into a RUNNING task, by enqueueing
+   * `task.steer` to the device that claimed it.
+   *
+   * Gated on the claim-time capability snapshot and on nothing else — see
+   * `steer-control.ts` for why that is the only admissible input and why an
+   * absent snapshot refuses. Gate order mirrors the reference server
+   * (`ConnectionHub.steerTask`, `packages/server/src/hub.ts`), and every gate is
+   * evaluated in full before a mailbox row is allocated, so a refused call has
+   * zero side effects:
+   *
+   *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});
+   *   2. terminal attempt -> {@link SteerRejectedError} `task_terminal`,
+   *      checked BEFORE the running check so a steer racing a terminal
+   *      transition always resolves terminal-first;
+   *   3. not running (or running with no owning device) ->
+   *      {@link SteerRejectedError} `task_not_running`;
+   *   4. the claim snapshot does not positively say `steer: true` ->
+   *      {@link SteerRejectedError} `steer_unsupported_runtime`, including when
+   *      there is no snapshot at all.
+   *
+   * Delivery is the same best-effort notification every control message has:
+   * the enqueued envelope is durable, and whether the runtime acted on it is
+   * observable only through that task's own later messages.
+   */
+  steerTask(
+    tenant: TenantId,
+    taskId: string,
+    payload: TaskSteerPayload,
   ): Promise<EnqueuedAgentControl>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
@@ -1031,6 +1063,46 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     );
   }
 
+  /**
+   * The steer gate. See {@link ByokCloud.steerTask} for the order and
+   * `steer-control.ts` for why the claim snapshot is the only input.
+   */
+  async function steerTask(
+    tenant: TenantId,
+    taskId: string,
+    payload: TaskSteerPayload,
+  ): Promise<EnqueuedAgentControl> {
+    const stores = tenantStoresFor(controlPlane(tenant), root);
+    const attempt = await stores.tasks.get(taskId);
+    if (attempt === undefined) {
+      throw new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
+    }
+    if (isTerminalAttemptStatus(attempt.status)) {
+      throw new SteerRejectedError(taskId, 'task_terminal', attempt.status, attempt.claimedRuntime);
+    }
+    // The owner check rides the same gate as the status check rather than
+    // getting a fourth code: an attempt with no owning device has no runtime
+    // paused on a turn, which is exactly what `task_not_running` says. It is
+    // also unreachable while `running` implies a prior claim — this is the
+    // narrowing, not a second contract.
+    const ownerDeviceId = attempt.ownerDeviceId;
+    if (attempt.status !== 'running' || ownerDeviceId === undefined) {
+      throw new SteerRejectedError(taskId, 'task_not_running', attempt.status, attempt.claimedRuntime);
+    }
+    if (attempt.claimedRuntimeCapabilities?.steer !== true) {
+      throw new SteerRejectedError(
+        taskId,
+        'steer_unsupported_runtime',
+        attempt.status,
+        attempt.claimedRuntime,
+      );
+    }
+    const messageId = options.crypto.randomUuid();
+    return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
+      createEnvelope('task.steer', { text: payload.text }, { id: messageId, taskId, seq }),
+    );
+  }
+
   async function getAgentHomeProjectionStatus(
     tenant: TenantId,
     deviceId: string,
@@ -1439,6 +1511,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     rejectTask(tenant, taskId, opts) {
       return resolveApproval(tenant, taskId, 'reject', opts);
     },
+
+    steerTask,
 
     async cancelTask(tenant, taskId, reason) {
       const stores = tenantStoresFor(controlPlane(tenant), root);

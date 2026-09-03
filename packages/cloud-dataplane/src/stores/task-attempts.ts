@@ -22,6 +22,7 @@ import {
   type TaskAttemptStore,
 } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
+import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
 
 export interface TaskRow {
@@ -36,11 +37,13 @@ export interface TaskRow {
   readonly cancel_requested_at: Date | null;
   readonly cancel_reason: string | null;
   readonly cancel_message_id: string | null;
+  readonly claimed_runtime: string | null;
+  readonly claimed_runtime_capabilities: RuntimeCapabilities | null;
   readonly updated_at: Date;
 }
 
 export const TASK_SELECT_COLUMNS =
-  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, updated_at';
+  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_runtime_capabilities, updated_at';
 
 interface AgentMessageAdmissionRow {
   readonly message_id: string;
@@ -77,6 +80,12 @@ export function taskRowToAttempt(row: TaskRow): TaskAttempt {
     // former.
     ...(row.owner_device_id === null ? {} : { ownerDeviceId: row.owner_device_id }),
     status: row.status as TaskAttemptStatus,
+    // `claimed_runtime` is written only by the guarded claim UPDATE below, so a
+    // non-null value here is always the winning claim's own self-report.
+    ...(row.claimed_runtime === null ? {} : { claimedRuntime: row.claimed_runtime as RuntimeId }),
+    ...(row.claimed_runtime_capabilities === null
+      ? {}
+      : { claimedRuntimeCapabilities: row.claimed_runtime_capabilities }),
     ...(row.terminal_cause == null ? {} : { terminalCause: row.terminal_cause }),
     ...(row.cancel_requested_at === null
       ? {}
@@ -265,15 +274,35 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
 
   async claim(
     tenant: TenantId,
-    input: { readonly taskId: string; readonly deviceId: string },
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly runtime?: RuntimeId;
+      readonly capabilities?: RuntimeCapabilities;
+    },
   ): Promise<TaskAttempt | undefined> {
+    // The claim snapshot rides the SAME guarded statement as the ownership CAS,
+    // so it is written exactly when (and only when) this claim wins. A losing
+    // or retried claim never reaches the SET clause and therefore cannot
+    // restamp the snapshot with a stale or absent value.
     const claimed = await this.#pool.query<TaskRow>(
       `UPDATE task
-          SET owner_device_id = $3, status = 'claimed', updated_at = $4
+          SET owner_device_id = $3,
+              status = 'claimed',
+              claimed_runtime = $5,
+              claimed_runtime_capabilities = $6::jsonb,
+              updated_at = $4
         WHERE tenant_id = $1 AND task_id = $2 AND owner_device_id IS NULL
           AND cancel_requested_at IS NULL AND status = 'offered'
       RETURNING ${TASK_SELECT_COLUMNS}`,
-      [tenant, input.taskId, input.deviceId, this.#now()],
+      [
+        tenant,
+        input.taskId,
+        input.deviceId,
+        this.#now(),
+        input.runtime ?? null,
+        input.capabilities === undefined ? null : JSON.stringify(input.capabilities),
+      ],
     );
     const won = claimed.rows[0];
     if (won !== undefined) return taskRowToAttempt(won);

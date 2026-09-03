@@ -122,5 +122,67 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         expect(await stores.tasks.get(TENANT_A, 'guessed')).toBeUndefined();
       });
     });
+
+    /**
+     * The claim-time runtime snapshot is WRITE-ONCE, and this is the assertion
+     * that says so across every composition. The steer gate
+     * (`ByokCloud.steerTask`) reads nothing else, so a store that let a
+     * redelivered claim restamp the snapshot would let a late, stale, or absent
+     * self-report reopen or close the gate on an already-running task.
+     */
+    it('snapshots the claiming runtime once and never lets a re-claim restamp it', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.tasks.open(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });
+
+        const claimed = await stores.tasks.claim(TENANT_A, {
+          taskId: 'task-1',
+          deviceId: 'device-1',
+          runtime: 'pi',
+          capabilities: { steer: true },
+        });
+        expect(claimed).toMatchObject({
+          ownerDeviceId: 'device-1',
+          claimedRuntime: 'pi',
+          claimedRuntimeCapabilities: { steer: true },
+        });
+
+        // The owner's own idempotent re-claim, reporting something else: the
+        // first claim is the fact.
+        const repeat = await stores.tasks.claim(TENANT_A, {
+          taskId: 'task-1',
+          deviceId: 'device-1',
+          runtime: 'codex',
+          capabilities: { steer: false },
+        });
+        expect(repeat?.claimedRuntime).toBe('pi');
+        expect(repeat?.claimedRuntimeCapabilities).toEqual({ steer: true });
+
+        // ...and a losing claim from another device cannot write it either.
+        await stores.tasks.claim(TENANT_A, {
+          taskId: 'task-1',
+          deviceId: 'device-2',
+          runtime: 'claude',
+        });
+
+        const stored = await stores.tasks.get(TENANT_A, 'task-1');
+        expect(stored?.claimedRuntime).toBe('pi');
+        expect(stored?.claimedRuntimeCapabilities).toEqual({ steer: true });
+      });
+    });
+
+    it('records no snapshot for a claim that carried none: absent, not defaulted', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        await stores.tasks.open(TENANT_A, { taskId: 'task-1', deviceId: 'device-1' });
+        const claimed = await stores.tasks.claim(TENANT_A, {
+          taskId: 'task-1',
+          deviceId: 'device-1',
+        });
+        expect(claimed?.claimedRuntime).toBeUndefined();
+        expect(claimed?.claimedRuntimeCapabilities).toBeUndefined();
+        const stored = await stores.tasks.get(TENANT_A, 'task-1');
+        expect(stored?.claimedRuntime).toBeUndefined();
+        expect(stored?.claimedRuntimeCapabilities).toBeUndefined();
+      });
+    });
   });
 }

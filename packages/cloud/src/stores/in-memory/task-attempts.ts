@@ -16,6 +16,7 @@
  * unfalsifiable.
  */
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
+import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import {
   type AgentMessageAdmission,
   type AgentRef,
@@ -153,7 +154,15 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     });
   }
 
-  async claim(tenant: TenantId, input: { taskId: string; deviceId: string }): Promise<TaskAttempt | undefined> {
+  async claim(
+    tenant: TenantId,
+    input: {
+      taskId: string;
+      deviceId: string;
+      runtime?: RuntimeId;
+      capabilities?: RuntimeCapabilities;
+    },
+  ): Promise<TaskAttempt | undefined> {
     const key = tenantKey(tenant, input.taskId);
     return this.#state.mutate(key, () => {
       const existing = this.#state.attempts.get(key);
@@ -163,9 +172,16 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
         existing.cancellation !== undefined ||
         existing.status !== 'offered'
       ) return existing;
+      // The claim snapshot is written here and nowhere else: this branch is
+      // reached only by the claim that actually takes the ownership, so a
+      // re-claim (which returned above) can never restamp it.
       const claimed: TaskAttempt = {
         ...existing,
         ownerDeviceId: input.deviceId,
+        ...(input.runtime === undefined ? {} : { claimedRuntime: input.runtime }),
+        ...(input.capabilities === undefined
+          ? {}
+          : { claimedRuntimeCapabilities: { ...input.capabilities } }),
         status: 'claimed',
         updatedAt: this.#now(),
       };

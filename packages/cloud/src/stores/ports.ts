@@ -40,7 +40,12 @@ import type {
   TenantId,
   TenantReadiness,
 } from '@byok-sdk/core';
-import type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
+import type {
+  AgentEgressReliablePayload,
+  AgentRef,
+  RuntimeCapabilities,
+  RuntimeId,
+} from '@byok-sdk/protocol';
 export type { AgentEgressReliablePayload, AgentRef } from '@byok-sdk/protocol';
 import type { ActivityStore } from '../activity';
 import type { ApprovalTimelineStore } from '../approval-timeline';
@@ -258,6 +263,40 @@ export interface TaskAttempt {
   /** Set by `task.claim`, and only by the first one. Legacy attempts remain claimable by any tenant device until then; strict Agent attempts are target-device bound before this field is consulted. */
   readonly ownerDeviceId?: string;
   readonly status: TaskAttemptStatus;
+  /**
+   * The runtime the CLAIMING daemon reported for itself on its own
+   * `task.claim` (`TaskClaimPayload.runtime`), snapshotted at the
+   * `offered -> claimed` transition and never written again — a redelivered or
+   * losing claim leaves it exactly as the winning claim left it.
+   *
+   * ADR-028 forbids cloud holding EXECUTION state (a live `running`/`thinking`
+   * phase, a turn, a PID, the current tool call) — quantities that keep
+   * changing while an attempt runs. This is not one: it is written once, at
+   * the moment ownership is decided, and is an attribution fact about the
+   * attempt. Byte-for-byte the same semantics as the reference server's
+   * `TaskSnapshot.claimedRuntime` (`packages/server/src/types.ts`).
+   *
+   * Absent for a daemon whose `task.claim` carried no `runtime` at all.
+   */
+  readonly claimedRuntime?: RuntimeId;
+  /**
+   * The capability block the CLAIMING adapter reported for ITSELF on that same
+   * `task.claim` (`TaskClaimPayload.capabilities`), snapshotted under exactly
+   * the same write-once rule as {@link TaskAttempt.claimedRuntime}.
+   *
+   * This is the ONLY input to the steer gate (`steer-control.ts`,
+   * `ByokCloud.steerTask`). The connection-level snapshot cloud keeps —
+   * `DeviceRecord.capabilities`, written from `conn.hello`
+   * (`inbound.ts`) — describes a device BUILD and never feeds it: a device can
+   * reconnect later with a different adapter set, while a task that is already
+   * running must keep being judged against what was true when it was claimed.
+   * Same single-source rule the reference server pins
+   * (`packages/server/src/__tests__/steer-runtime-capability-gate.test.ts`).
+   *
+   * Absent for a daemon that predates the field, which the gate reads as
+   * "unknown" and refuses — unknown is not supported.
+   */
+  readonly claimedRuntimeCapabilities?: RuntimeCapabilities;
   /** Runtime-reported terminal cause from the first winning terminal. */
   readonly terminalCause?: string;
   /** Durable host cancellation authority. Its presence outranks later device terminal receipts. */
@@ -329,8 +368,25 @@ export interface TaskAttemptStore {
   get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Batch lookup used by mailbox projection; implementations must not turn one poll into N queries. */
   getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
-  /** First claim wins the ownership; a later claim by the same device is idempotent. No-op (returns `undefined`) for a task this tenant never offered. */
-  claim(tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string }): Promise<TaskAttempt | undefined>;
+  /**
+   * First claim wins the ownership; a later claim by the same device is
+   * idempotent. No-op (returns `undefined`) for a task this tenant never
+   * offered.
+   *
+   * `runtime`/`capabilities` are the claiming daemon's self-report, written
+   * ONLY by the claim that actually wins the ownership CAS — an idempotent
+   * re-claim (and a losing one) must leave the recorded snapshot untouched,
+   * including when it carries a different or absent value.
+   */
+  claim(
+    tenant: TenantId,
+    input: {
+      readonly taskId: string;
+      readonly deviceId: string;
+      readonly runtime?: RuntimeId;
+      readonly capabilities?: RuntimeCapabilities;
+    },
+  ): Promise<TaskAttempt | undefined>;
   /** Record a lifecycle transition. No-op (returns `undefined`) for an unknown task — same shape as the reference server's per-type handlers. */
   recordStatus(
     tenant: TenantId,
