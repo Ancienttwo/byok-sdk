@@ -62,6 +62,7 @@ export type {
   AgentHomeBinding,
   AgentHomeExecutionLease,
   AgentHomeExecutionBinding,
+  AgentHomeExecutionStatus,
 } from './agent-home';
 export {
   localStateRelocation,

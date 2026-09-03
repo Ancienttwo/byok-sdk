@@ -961,6 +961,27 @@ export declare class AgentHomeLayout {
     constructor(hostStorageRoot: string);
     resolve(agentRefInput: AgentRef): Promise<AgentHomeResolution>;
     /**
+     * Pure canonical-home derivation for read-only callers, such as the
+     * pre-admission single-writer count. It validates the AgentRef and joins
+     * exactly the same `<hostStorageRoot>/agents/<agentId>` segments
+     * {@link AgentHomeLayout.resolve} would, canonicalizing only the components
+     * that already exist.
+     *
+     * It deliberately creates no directory, takes no cross-process mutation
+     * gate and records no Agent binding, so an offer the host vetoes after the
+     * count leaves nothing behind on disk. `resolve()` stays the only path that
+     * may materialize a home or bind it to an Agent identity.
+     *
+     * An `agents` root or `agents/<agentId>` leaf that already exists but is a
+     * symlink (or any non-directory) is rejected here with the same error class
+     * and message `resolve()` raises for it, so an in-root `two -> one` link
+     * fails closed instead of silently keying the count of `one`. A leaf that
+     * does not exist yet is not an error: this derivation runs before the home
+     * is materialized. A home canonicalizing outside the `agents` root stays
+     * rejected as before.
+     */
+    canonicalHomePath(agentRefInput: AgentRef): Promise<string>;
+    /**
      * Prove the canonical root is materializable and writable before the daemon
      * advertises Agent-home capability. No Agent identity or persistent Agent
      * file is created by this preflight.
@@ -988,9 +1009,32 @@ export declare class AgentHomeLeaseManager {
     private openLeaseMarker;
 }
 /**
+ * WP0: counts-only readback of the per-canonical-Agent-home Attempt cap and
+ * what one daemon currently holds against it. Deliberately carries no home
+ * path, agentId or taskId: it exists so an operator can see that a home is
+ * still busy — including the fail-closed case where a failed `Session.close()`
+ * keeps the slot held after the task itself is gone — not to enumerate Agents.
+ * Projected into both `Daemon.status()` and the authenticated local control
+ * status (`create-daemon.ts`).
+ */
+export interface AgentHomeExecutionStatus {
+    /** Effective `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` for this daemon. */
+    maxConcurrentMutableSessionsPerAgentHome: number;
+    /** Canonical Agent homes this daemon currently holds at least one execution lease in. */
+    activeHomes: number;
+    /** Total Attempts holding an execution lease across those homes. */
+    activeAttempts: number;
+}
+/**
  * Session-scoped execution leases share one process-owned home marker. The
  * marker remains until the final session exits, so relocation still sees the
  * Agent home as active, while different sessions no longer exclude each other.
+ *
+ * This layer counts; it does not cap. How many Attempts may be active in one
+ * canonical home is a daemon admission decision made once, before any side
+ * effect, by `TaskRunner.handleOffer`'s per-home busy gate reading
+ * {@link AgentHomeExecutionLeaseManager.activeAttemptCount} against
+ * `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` (default 1).
  */
 export declare class AgentHomeExecutionLeaseManager {
     private readonly manager;
@@ -1001,6 +1045,36 @@ export declare class AgentHomeExecutionLeaseManager {
         readonly taskId: string;
         readonly sessionRef?: string;
     }): Promise<AgentHomeExecutionLease>;
+    /**
+     * WP0: Attempts currently holding an execution lease on this exact
+     * canonical home, across every lane and every session. This is the number
+     * the daemon's admission gate reads before any side effect — see
+     * `TaskRunner.handleOffer`'s per-home busy gate.
+     *
+     * Derived from the one lease registry above rather than a second tally, so
+     * it inherits the lease lifecycle exactly: an entry appears at `acquire()`,
+     * survives `bindSession()` (which rekeys in place), and disappears only at
+     * `release()`, which the task runner calls after the attempt is terminal
+     * AND `Session.close()` resolved. A failed disposal never reaches
+     * `release()`, so the slot stays held — fail closed, the same posture as
+     * `runtime-disposal-failed`. Crash residue needs nothing extra here: a
+     * restarted daemon starts with an empty registry and reclaims the on-disk
+     * marker only under the same stable owner identity (`openLeaseMarker`).
+     *
+     * Counted regardless of which lease manager owns the group: the invariant
+     * being protected is the filesystem path (`MEMORY.md`, `notes/`, `.git`),
+     * not the owner identity.
+     */
+    activeAttemptCount(canonicalHome: string): number;
+    /**
+     * Counts-only readback for daemon/control status. Scoped to this manager's
+     * own leases, so the number describes this daemon rather than every home
+     * any manager in the process happens to hold. Never exposes a home path.
+     */
+    activeAttemptSummary(): {
+        readonly homes: number;
+        readonly attempts: number;
+    };
     mutate<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T>;
     private exclusive;
 }
@@ -2265,6 +2339,7 @@ import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
+import type { AgentHomeExecutionStatus } from '../agent-home';
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
  * (`control-server.ts`) and the CLI's control client (`bin/control-client.ts`)
@@ -2536,6 +2611,12 @@ export interface ControlStatusResult {
     operationalHealth: OperationalHealthSnapshot;
     /** Redacted content-addressed status from the daemon's single local registry. */
     toolsets: McpToolsetRegistryStatus;
+    /**
+     * WP0: per-canonical-Agent-home execution serialization, counts only —
+     * see {@link AgentHomeExecutionStatus}. Absent only for an older control
+     * peer that predates the cap.
+     */
+    agentHomeExecution?: AgentHomeExecutionStatus;
 }
 export interface ToolsetsReloadParams {
     expectedRevision: string;
@@ -2724,7 +2805,7 @@ export declare function parseTeamMessageInspectParams(value: unknown): TeamMessa
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
-import { type AgentHomeProjection } from '../agent-home';
+import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import type { BackoffOptions, LivenessOptions } from './ws-transport';
@@ -2855,6 +2936,26 @@ export interface DaemonConfig {
      * after the SDK-owned Agent home has passed construction-time preflight.
      */
     strictAgentOnly?: boolean;
+    /**
+     * WP0: how many Attempts this daemon lets execute CONCURRENTLY in one
+     * canonical Agent home, across every lane and every session. Default
+     * {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME} (1).
+     *
+     * The canonical home is every Agent session's cwd, so each concurrent
+     * Attempt in it is another writer of the same `MEMORY.md`, `notes/` and
+     * `.git`. At the default, a second offer for a home that already has an
+     * active Attempt is declined retryably before adapter preparation, the
+     * claim, or any process side effect — the busy-home contract downstream
+     * hosts already depend on.
+     *
+     * Raising it above 1 is an explicit host choice that re-enables the
+     * 0.12.0 concurrent-session behaviour, including its co-writing exposure;
+     * the SDK never falls back to it on its own. Validated up front, the same
+     * way `maxTaskOutputBytes` is: a positive safe integer, so `0`, a negative
+     * number, `NaN` and a non-integer are construction errors rather than a
+     * silently reinterpreted "unlimited".
+     */
+    maxConcurrentMutableSessionsPerAgentHome?: number;
     /**
      * Explicit Agent-local/cloud egress selection. Omission still enforces the
      * SDK metadata/status projection, but does not advertise or admit the new
@@ -3212,6 +3313,8 @@ export interface DaemonStatus {
     toolsets: McpToolsetRegistryStatus;
     /** Content-free egress lane watermarks and typed last-drop facts. */
     egress: AgentEgressStatus;
+    /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
+    agentHomeExecution: AgentHomeExecutionStatus;
 }
 export interface Daemon {
     /** Pairing result is intentionally credential-blind. */
@@ -5884,6 +5987,15 @@ export type ResultDocumentExtractor = (finalOutput: string, task: ResultDocument
  * opt-out pin.
  */
 export declare const DEFAULT_MAX_TASK_OUTPUT_BYTES: number;
+/**
+ * WP0: default number of Attempts allowed to execute concurrently in one
+ * canonical Agent home. One — the canonical home is every Agent session's
+ * cwd, so a second concurrent Attempt is a second writer of the same
+ * `MEMORY.md`, `notes/` and `.git`. Raising it is an explicit host choice
+ * (`DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`) that re-enables
+ * the 0.12.0 co-writing exposure; there is no implicit fallback to it.
+ */
+export declare const DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME = 1;
 export interface TaskRunnerDeps {
     adapters: RuntimeAdapter[];
     runtimeAllowlist?: string[];
@@ -5911,6 +6023,13 @@ export interface TaskRunnerDeps {
     agentHome?: AgentHomeManager;
     /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
     strictAgentOnly?: boolean;
+    /**
+     * WP0: how many Attempts may execute concurrently in ONE canonical Agent
+     * home — see `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`'s own
+     * doc comment (`create-daemon.ts`) for the validated contract. Unset
+     * defaults to {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}.
+     */
+    maxConcurrentMutableSessionsPerAgentHome?: number;
     /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
     agentEgressPolicy?: Readonly<AgentEgressPolicy>;
     /** Always-present projection/sanitizer consumer; it defaults to metadata-only. */
@@ -6260,6 +6379,8 @@ export declare class TaskRunner {
     usesAgentEgress(taskId: string): boolean;
     /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
     private get maxTaskOutputBytes();
+    /** WP0: effective per-canonical-Agent-home Attempt cap — see {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}. */
+    private get maxConcurrentMutableSessionsPerAgentHome();
     /**
      * M4 Phase 4 (part B.3, observability): per-active-task queue watermarks
      * for the control socket's `status` result — see
@@ -7427,7 +7548,7 @@ export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
 export type { AgentSessionHandoff, AgentSessionHandoffMatch, AgentTaskTerminalEvidence, AgentTaskTerminalMatch, AgentTerminalCause, } from './daemon/agent-session-handoff-store';
-export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionFunction, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, } from './agent-home';
+export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionFunction, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home';
 export { localStateRelocation, LocalStateRelocationError, LocalStateRelocationBusyError, LocalStateRelocationIntegrityError, } from './local-state-relocation';
 export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './local-state-relocation';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';

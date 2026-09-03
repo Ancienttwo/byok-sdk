@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking (Agent home execution):** the default returns to one active
+  Attempt per canonical Agent home; 0.12.0-style concurrent sessions in one
+  home require explicit
+  `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome > 1`.
+
 ## 0.12.0 / @byok-sdk/keys 0.3.9 — 2026-09-02
 
 `@byok-sdk/keys` advances independently because npm already owns immutable

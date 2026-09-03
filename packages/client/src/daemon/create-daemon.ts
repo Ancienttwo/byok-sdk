@@ -41,6 +41,7 @@ import {
   AgentHomeLeaseManager,
   AgentHomeManager,
   stableAgentHomeOwnerId,
+  type AgentHomeExecutionStatus,
   type AgentHomeProjection,
 } from '../agent-home';
 import type { AgentRef } from '../agent-home';
@@ -120,6 +121,7 @@ import {
   type LocalStoragePolicyInput,
 } from './journal/storage-policy';
 import {
+  DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME,
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
   TaskRunner,
   type ResultDocumentExtractor,
@@ -287,6 +289,26 @@ export interface DaemonConfig {
    * after the SDK-owned Agent home has passed construction-time preflight.
    */
   strictAgentOnly?: boolean;
+  /**
+   * WP0: how many Attempts this daemon lets execute CONCURRENTLY in one
+   * canonical Agent home, across every lane and every session. Default
+   * {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME} (1).
+   *
+   * The canonical home is every Agent session's cwd, so each concurrent
+   * Attempt in it is another writer of the same `MEMORY.md`, `notes/` and
+   * `.git`. At the default, a second offer for a home that already has an
+   * active Attempt is declined retryably before adapter preparation, the
+   * claim, or any process side effect — the busy-home contract downstream
+   * hosts already depend on.
+   *
+   * Raising it above 1 is an explicit host choice that re-enables the
+   * 0.12.0 concurrent-session behaviour, including its co-writing exposure;
+   * the SDK never falls back to it on its own. Validated up front, the same
+   * way `maxTaskOutputBytes` is: a positive safe integer, so `0`, a negative
+   * number, `NaN` and a non-integer are construction errors rather than a
+   * silently reinterpreted "unlimited".
+   */
+  maxConcurrentMutableSessionsPerAgentHome?: number;
   /**
    * Explicit Agent-local/cloud egress selection. Omission still enforces the
    * SDK metadata/status projection, but does not advertise or admit the new
@@ -645,6 +667,8 @@ export interface DaemonStatus {
   toolsets: McpToolsetRegistryStatus;
   /** Content-free egress lane watermarks and typed last-drop facts. */
   egress: AgentEgressStatus;
+  /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
+  agentHomeExecution: AgentHomeExecutionStatus;
 }
 
 export interface Daemon {
@@ -1160,6 +1184,25 @@ export function buildDaemonWithAdapters(
   if (config.strictAgentOnly === true && config.agentHome === undefined) {
     throw new Error('DaemonConfig.strictAgentOnly requires DaemonConfig.agentHome');
   }
+  // WP0: same up-front discipline as `maxTaskOutputBytes` above. A cap that
+  // governs how many writers may share one Agent home is a correctness
+  // control, so an unusable value is a construction error rather than
+  // something the first offer discovers — and there is no
+  // `Number.POSITIVE_INFINITY` opt-out here: "no cap" is exactly the
+  // co-writing state this exists to prevent.
+  if (
+    config.maxConcurrentMutableSessionsPerAgentHome !== undefined
+    && !(Number.isSafeInteger(config.maxConcurrentMutableSessionsPerAgentHome)
+      && config.maxConcurrentMutableSessionsPerAgentHome > 0)
+  ) {
+    throw new Error(
+      `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome must be a positive safe integer (or omitted to use the default of ${DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}) — got ${config.maxConcurrentMutableSessionsPerAgentHome}. Raising it above 1 lets that many Attempts co-write one canonical Agent home; 0, a negative number, NaN, or a non-integer is rejected rather than silently treated as "uncapped".`,
+    );
+  }
+  // Resolved exactly once so the admission gate and the status readback below
+  // can never report different numbers.
+  const agentHomeAttemptLimit = config.maxConcurrentMutableSessionsPerAgentHome
+    ?? DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME;
   const egressPolicy = resolveAgentEgressPolicy(config.agentEgress?.policy);
   const egressBatcherOptions: ProgressBatcherOptions | undefined = egressPolicy.activity.mode === 'contentful-trajectory'
     ? {
@@ -1839,6 +1882,8 @@ export function buildDaemonWithAdapters(
       workspaceRoot: config.workspaceRoot,
       ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
       ...(config.strictAgentOnly === true ? { strictAgentOnly: true } : {}),
+      // WP0: already validated up front — see `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`.
+      maxConcurrentMutableSessionsPerAgentHome: agentHomeAttemptLimit,
       ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
       deviceId: record.deviceId,
       // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
@@ -2730,6 +2775,8 @@ export function buildDaemonWithAdapters(
       ...(storageStatus === undefined ? {} : { storage: storageStatus }),
       operationalHealth: operationalHealth.snapshot(),
       toolsets: toolsetRegistry.status(),
+      // WP0: same counts `Daemon.status()` reports, from the same reader.
+      agentHomeExecution: agentHomeExecutionStatus(),
     };
   }
 
@@ -3211,6 +3258,22 @@ export function buildDaemonWithAdapters(
     }
   }
 
+  /**
+   * WP0: the one place both status surfaces read the per-home Attempt counts
+   * from, so `Daemon.status()` and the authenticated control status can never
+   * disagree. A daemon with no Agent home configured reports the limit and
+   * zeroes rather than omitting the section — "capped, nothing active" is a
+   * fact worth stating.
+   */
+  function agentHomeExecutionStatus(): AgentHomeExecutionStatus {
+    const summary = agentHomeManager?.executionLeaseManager.activeAttemptSummary();
+    return {
+      maxConcurrentMutableSessionsPerAgentHome: agentHomeAttemptLimit,
+      activeHomes: summary?.homes ?? 0,
+      activeAttempts: summary?.attempts ?? 0,
+    };
+  }
+
   function status(): DaemonStatus {
     return {
       localAgentRelease,
@@ -3224,6 +3287,7 @@ export function buildDaemonWithAdapters(
       operationalHealth: operationalHealth.snapshot(),
       toolsets: toolsetRegistry.status(),
       egress: agentEgress.status(),
+      agentHomeExecution: agentHomeExecutionStatus(),
     };
   }
 

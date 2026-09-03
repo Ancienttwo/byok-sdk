@@ -7,6 +7,7 @@ import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
+import type { AgentHomeExecutionStatus } from '../agent-home';
 
 /**
  * M4 Phase 2: shared local-IPC contract between the daemon's control server
@@ -446,6 +447,12 @@ export interface ControlStatusResult {
   operationalHealth: OperationalHealthSnapshot;
   /** Redacted content-addressed status from the daemon's single local registry. */
   toolsets: McpToolsetRegistryStatus;
+  /**
+   * WP0: per-canonical-Agent-home execution serialization, counts only —
+   * see {@link AgentHomeExecutionStatus}. Absent only for an older control
+   * peer that predates the cap.
+   */
+  agentHomeExecution?: AgentHomeExecutionStatus;
 }
 
 export interface ToolsetsReloadParams {

@@ -182,6 +182,26 @@ async function canonicalPath(inputPath: string): Promise<string> {
   return path.resolve(canonical, ...tail);
 }
 
+/**
+ * Non-mutating counterpart to the per-component check in
+ * {@link ensureDirectoryNoSymlink}: a component that does not exist yet is
+ * fine, but one that exists must already be a real directory. Rejects with the
+ * exact message shape `resolve()` uses so both derivations fail identically.
+ */
+async function assertRealDirectoryIfPresent(target: string): Promise<void> {
+  let stat: Awaited<ReturnType<typeof fs.lstat>>;
+  try {
+    stat = await fs.lstat(target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return;
+    throw error;
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new AgentHomeResolutionError(`Agent home path component is not a real directory: ${target}`);
+  }
+}
+
 async function materializeDirectory(inputPath: string): Promise<string> {
   const { canonical, tail } = await resolveExistingAncestor(inputPath);
   let cursor = canonical;
@@ -288,6 +308,40 @@ export class AgentHomeLayout {
     } finally {
       await gate.release();
     }
+  }
+
+  /**
+   * Pure canonical-home derivation for read-only callers, such as the
+   * pre-admission single-writer count. It validates the AgentRef and joins
+   * exactly the same `<hostStorageRoot>/agents/<agentId>` segments
+   * {@link AgentHomeLayout.resolve} would, canonicalizing only the components
+   * that already exist.
+   *
+   * It deliberately creates no directory, takes no cross-process mutation
+   * gate and records no Agent binding, so an offer the host vetoes after the
+   * count leaves nothing behind on disk. `resolve()` stays the only path that
+   * may materialize a home or bind it to an Agent identity.
+   *
+   * An `agents` root or `agents/<agentId>` leaf that already exists but is a
+   * symlink (or any non-directory) is rejected here with the same error class
+   * and message `resolve()` raises for it, so an in-root `two -> one` link
+   * fails closed instead of silently keying the count of `one`. A leaf that
+   * does not exist yet is not an error: this derivation runs before the home
+   * is materialized. A home canonicalizing outside the `agents` root stays
+   * rejected as before.
+   */
+  async canonicalHomePath(agentRefInput: AgentRef): Promise<string> {
+    const agentRef = validateAgentRef(agentRefInput);
+    const hostStorageRoot = this.canonicalRoot ?? await canonicalPath(this.hostStorageRootInput);
+    const agentsRoot = path.join(hostStorageRoot, AGENT_HOME_DIRECTORY);
+    await assertRealDirectoryIfPresent(agentsRoot);
+    const lexicalHome = path.join(agentsRoot, agentRef.agentId);
+    await assertRealDirectoryIfPresent(lexicalHome);
+    const canonicalHome = await canonicalPath(lexicalHome);
+    if (canonicalHome === agentsRoot || !isWithin(agentsRoot, canonicalHome)) {
+      throw new AgentHomeResolutionError(`Agent home resolves outside the Agent home root: ${canonicalHome}`);
+    }
+    return canonicalHome;
   }
 
   /**
@@ -551,6 +605,24 @@ export class AgentHomeLeaseManager {
   }
 }
 
+/**
+ * WP0: counts-only readback of the per-canonical-Agent-home Attempt cap and
+ * what one daemon currently holds against it. Deliberately carries no home
+ * path, agentId or taskId: it exists so an operator can see that a home is
+ * still busy — including the fail-closed case where a failed `Session.close()`
+ * keeps the slot held after the task itself is gone — not to enumerate Agents.
+ * Projected into both `Daemon.status()` and the authenticated local control
+ * status (`create-daemon.ts`).
+ */
+export interface AgentHomeExecutionStatus {
+  /** Effective `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` for this daemon. */
+  maxConcurrentMutableSessionsPerAgentHome: number;
+  /** Canonical Agent homes this daemon currently holds at least one execution lease in. */
+  activeHomes: number;
+  /** Total Attempts holding an execution lease across those homes. */
+  activeAttempts: number;
+}
+
 interface AgentHomeExecutionGroup {
   readonly manager: AgentHomeLeaseManager;
   readonly baseLease: AgentHomeLease;
@@ -571,6 +643,12 @@ function executionKey(input: { readonly taskId: string; readonly sessionRef?: st
  * Session-scoped execution leases share one process-owned home marker. The
  * marker remains until the final session exits, so relocation still sees the
  * Agent home as active, while different sessions no longer exclude each other.
+ *
+ * This layer counts; it does not cap. How many Attempts may be active in one
+ * canonical home is a daemon admission decision made once, before any side
+ * effect, by `TaskRunner.handleOffer`'s per-home busy gate reading
+ * {@link AgentHomeExecutionLeaseManager.activeAttemptCount} against
+ * `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` (default 1).
  */
 export class AgentHomeExecutionLeaseManager {
   private static readonly groups = new Map<string, AgentHomeExecutionGroup>();
@@ -653,6 +731,46 @@ export class AgentHomeExecutionLeaseManager {
         },
       });
     });
+  }
+
+  /**
+   * WP0: Attempts currently holding an execution lease on this exact
+   * canonical home, across every lane and every session. This is the number
+   * the daemon's admission gate reads before any side effect — see
+   * `TaskRunner.handleOffer`'s per-home busy gate.
+   *
+   * Derived from the one lease registry above rather than a second tally, so
+   * it inherits the lease lifecycle exactly: an entry appears at `acquire()`,
+   * survives `bindSession()` (which rekeys in place), and disappears only at
+   * `release()`, which the task runner calls after the attempt is terminal
+   * AND `Session.close()` resolved. A failed disposal never reaches
+   * `release()`, so the slot stays held — fail closed, the same posture as
+   * `runtime-disposal-failed`. Crash residue needs nothing extra here: a
+   * restarted daemon starts with an empty registry and reclaims the on-disk
+   * marker only under the same stable owner identity (`openLeaseMarker`).
+   *
+   * Counted regardless of which lease manager owns the group: the invariant
+   * being protected is the filesystem path (`MEMORY.md`, `notes/`, `.git`),
+   * not the owner identity.
+   */
+  activeAttemptCount(canonicalHome: string): number {
+    return AgentHomeExecutionLeaseManager.groups.get(canonicalHome)?.leasesByKey.size ?? 0;
+  }
+
+  /**
+   * Counts-only readback for daemon/control status. Scoped to this manager's
+   * own leases, so the number describes this daemon rather than every home
+   * any manager in the process happens to hold. Never exposes a home path.
+   */
+  activeAttemptSummary(): { readonly homes: number; readonly attempts: number } {
+    let homes = 0;
+    let attempts = 0;
+    for (const group of AgentHomeExecutionLeaseManager.groups.values()) {
+      if (group.manager !== this.manager) continue;
+      homes += 1;
+      attempts += group.leasesByKey.size;
+    }
+    return { homes, attempts };
   }
 
   async mutate<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T> {

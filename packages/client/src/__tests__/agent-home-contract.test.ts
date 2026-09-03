@@ -360,7 +360,7 @@ describe('SDK-owned Agent home contract', () => {
     })).resolves.toMatchObject({ terminalCause: 'complete' });
   });
 
-  it('runs different sessions for the same Agent concurrently while retaining one canonical home', async () => {
+  it('runs different sessions for the same Agent concurrently while retaining one canonical home, once the host raises the per-home cap', async () => {
     const hostStorageRoot = await makeRoot();
     const storeDir = await makeRoot();
     const adapter = new StubRuntimeAdapter('pi');
@@ -370,6 +370,11 @@ describe('SDK-owned Agent home contract', () => {
       workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
+      // WP0: concurrent sessions in ONE canonical home are no longer the
+      // default — a host that wants them raises the per-home Attempt cap
+      // explicitly and takes the co-writing exposure with it. Without this,
+      // the second offer is declined retryably as `agent home busy`.
+      maxConcurrentMutableSessionsPerAgentHome: 2,
       deviceId: 'device-1',
       send: (envelope) => sent.push(envelope),
       blobClient: {

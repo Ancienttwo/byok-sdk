@@ -548,19 +548,28 @@ Agent dispatch requires an explicit device and its durable authenticated
 `agent-home-contract` declaration before task creation or mailbox enqueue.
 Claim, decline, and every terminal message echo exact AgentRef. Resume requires
 exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
-fails closed. Within one daemon process, execution is serialized by
-`(agentId, sessionRef)`, not by Agent home: different sessions of one Agent may
-run concurrently in the same canonical home, while a duplicate execution for
-the same session is busy. A
-fresh task is task-keyed until its runtime creates the durable session, then
+fails closed. Within one daemon process, execution is serialized per canonical
+Agent home: at most `maxConcurrentMutableSessionsPerAgentHome` Attempts, default
+one, may execute in a home at a time, across every lane and every session. A
+further offer for a home already at that limit is declined retryably before
+adapter preparation, claim, workspace or process side effects, and its reason
+carries counts only. The slot is surrendered only when the Attempt is terminal
+and its runtime session closed; a failed disposal keeps the home busy. Raising
+the limit above one is an explicit host choice that permits concurrent sessions
+of one Agent to co-write that home's shared content (`MEMORY.md`, `notes/`,
+`.git`); the SDK never selects it implicitly. Underneath that cap, execution
+leases remain keyed by `(agentId, sessionRef)`, so a duplicate execution for
+the same session is busy regardless of the limit. A fresh task is task-keyed
+until its runtime creates the durable session, then
 the SDK atomically binds the lease to that `sessionRef`. SDK-reserved shared
 metadata mutations remain short and serialized per home. Agent-memory hosted
 projection is the bounded exception: concurrent closing sessions serialize one
 complete open/replay/snapshot/redact/append/replay transaction per home because
 its durable outbox is one compare-and-swap authority; its publish wait retains
-the existing timeout. Runtime execution remains session-parallel during that
-close-time transaction. The process-owned home activity marker remains until
-the final session exits, so relocation and any other operation that requires a
+the existing timeout. Runtime execution stays session-parallel during that
+close-time transaction whenever the host has raised the per-home limit. The
+process-owned home activity marker remains until the final session exits, so
+relocation and any other operation that requires a
 quiescent home still fail closed while an execution is active. A second daemon
 process remains excluded by that marker; cross-process session multiplexing is
 not provided. Another Agent home remains independent. Crash residue is
