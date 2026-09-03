@@ -141,6 +141,9 @@ export interface TenantBoundTaskAttempts {
   }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
   get(taskId: string): Promise<TaskAttempt | undefined>;
   getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
+  list(
+    query: import('./stores/ports').TaskAttemptListQuery,
+  ): Promise<import('./stores/ports').TaskAttemptPage>;
   claim(input: {
     readonly taskId: string;
     readonly deviceId: string;
@@ -277,6 +280,7 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       finalizeAgentMessage: (input) => cloud.tasks.finalizeAgentMessage(tenant, input),
       get: (taskId) => cloud.tasks.get(tenant, taskId),
       getMany: (taskIds) => cloud.tasks.getMany(tenant, taskIds),
+      list: (query) => cloud.tasks.list(tenant, query),
       claim: (input) => cloud.tasks.claim(tenant, input),
       recordStatus: (input) => cloud.tasks.recordStatus(tenant, input),
     },

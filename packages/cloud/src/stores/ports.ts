@@ -307,6 +307,45 @@ export interface TaskAttempt {
   readonly updatedAt: string;
 }
 
+/**
+ * One bounded page request over a tenant's task attempts.
+ *
+ * Keyset-paged by `taskId` ASCENDING, deliberately, and NOT chronologically: an
+ * attempt carries no monotonic sequence, and `updatedAt` moves under an
+ * in-flight page (a status transition would re-order rows mid-walk and let a
+ * caller skip or repeat one). `taskId` is `task_<uuid>` — stable, unique per
+ * tenant, and never rewritten — so it is the only column that gives a walk the
+ * exactly-once property. The order is therefore arbitrary but TOTAL, which is
+ * what a paged read model needs; a caller that wants recency sorts a page
+ * itself.
+ *
+ * Adding a sequence column to get chronological order was rejected: it is a
+ * migration across every composition to serve a read-model nicety, and a second
+ * ordering authority to keep consistent with the row it decorates.
+ */
+export interface TaskAttemptListQuery {
+  /** Maximum attempts in the page. Required and fail-closed: a non-positive or non-integer limit is rejected, never silently defaulted or clamped. */
+  readonly limit: number;
+  /**
+   * The `nextCursor` from the previous page — opaque to the caller, and an
+   * EXCLUSIVE lower bound on `taskId`. Absent starts at the beginning. A cursor
+   * naming a task that has since been deleted still resolves: it is a bound,
+   * not a lookup.
+   */
+  readonly cursor?: string;
+}
+
+export interface TaskAttemptPage {
+  readonly attempts: readonly TaskAttempt[];
+  /**
+   * Pass as the next request's `cursor`. ABSENT means this page is the end of
+   * the walk — not "start over" — so a caller stops on absence rather than on
+   * an empty page, and a page that exactly fills `limit` with nothing after it
+   * still terminates.
+   */
+  readonly nextCursor?: string;
+}
+
 export interface TaskAttemptStore {
   /** Called when an offer is enqueued: records the pending attempt with no owner yet. */
   open(
@@ -368,6 +407,13 @@ export interface TaskAttemptStore {
   get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Batch lookup used by mailbox projection; implementations must not turn one poll into N queries. */
   getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
+  /**
+   * One bounded page of this tenant's attempts, keyset-paged by `taskId` — see
+   * {@link TaskAttemptListQuery} for why that key and not a timestamp.
+   * Implementations must read one page in one query (`taskId > cursor ORDER BY
+   * taskId LIMIT limit + 1`), never the whole tenant filtered in memory.
+   */
+  list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
   /**
    * First claim wins the ownership; a later claim by the same device is
    * idempotent. No-op (returns `undefined`) for a task this tenant never

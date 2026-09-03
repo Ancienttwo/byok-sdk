@@ -15,9 +15,12 @@
  * and return `undefined`.
  */
 import {
+  assertTaskAttemptListLimit,
   type AgentMessageAdmission,
   type AgentRef,
   type TaskAttempt,
+  type TaskAttemptListQuery,
+  type TaskAttemptPage,
   type TaskAttemptStatus,
   type TaskAttemptStore,
 } from '@byok-sdk/cloud';
@@ -270,6 +273,31 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
       [tenant, [...new Set(taskIds)]],
     );
     return result.rows.map(taskRowToAttempt);
+  }
+
+  async list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage> {
+    assertTaskAttemptListLimit(query.limit);
+    // Keyset, not OFFSET: the bound is carried in the WHERE clause, so page N
+    // costs the same as page 1 and a row inserted behind the cursor cannot
+    // shift the walk. One row over the limit answers "is there more" without a
+    // second query; the tenant-first `(tenant_id, task_id)` primary key already
+    // orders exactly this way, so no extra index is needed.
+    const result = await this.#pool.query<TaskRow>(
+      `SELECT ${TASK_SELECT_COLUMNS}
+         FROM task
+        WHERE tenant_id = $1 AND ($2::text IS NULL OR task_id > $2)
+        ORDER BY task_id
+        LIMIT $3`,
+      [tenant, query.cursor ?? null, query.limit + 1],
+    );
+    const rows = result.rows.slice(0, query.limit);
+    const attempts = rows.map(taskRowToAttempt);
+    const hasMore = result.rows.length > rows.length;
+    const last = attempts.at(-1);
+    return {
+      attempts,
+      ...(hasMore && last !== undefined ? { nextCursor: last.taskId } : {}),
+    };
   }
 
   async claim(
