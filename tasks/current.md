@@ -1,13 +1,13 @@
 # Current Status Snapshot
 
 <!-- generated-by: repo-harness refresh-current-status v1 -->
-<!-- updated_at: 2026-09-03T08:39:54+0800 -->
+<!-- updated_at: 2026-09-03T08:43:37+0800 -->
 <!-- stale_after: 24h -->
 
 > **Status**: ManualClearedWithActiveWork
-> **Updated At**: 2026-09-03T08:39:54+0800
-> **Source Branch**: codex/domain-model-adr
-> **Source Commit**: 5cffb29
+> **Updated At**: 2026-09-03T08:43:37+0800
+> **Source Branch**: codex/api-surface-golden
+> **Source Commit**: ed39e49
 > **Target Branch**: main
 > **Stale After**: 24h
 > **Reason**: archive-workflow
@@ -33,8 +33,6 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 
 - linked-worktree-f1e0ca263dd8: plans/plan-20260903-0436-agent-home-single-writer.md
 - linked-worktree-f1e0ca263dd8: active-worktree owner -> self
-- linked-worktree-e486b4a6a7ea: plans/plan-20260903-0410-api-surface-golden.md
-- linked-worktree-e486b4a6a7ea: active-worktree owner -> self
 ## Active Sprint
 
 - Sprint: (none)
@@ -54,16 +52,16 @@ This file is a tracked mainline snapshot derived from repo artifacts. It is not 
 - Summary: 10 changed/untracked path(s)
 
 ```
- D plans/plan-20260903-0442-domain-model-adr.md
- D tasks/contracts/20260903-0442-domain-model-adr.contract.md
- D tasks/notes/20260903-0442-domain-model-adr.notes.md
- D tasks/reviews/20260903-0442-domain-model-adr.review.md
+ D plans/plan-20260903-0410-api-surface-golden.md
+ D tasks/contracts/20260903-0410-api-surface-golden.contract.md
+ D tasks/notes/20260903-0410-api-surface-golden.notes.md
+ D tasks/reviews/20260903-0410-api-surface-golden.review.md
  M tasks/todos.md
-?? plans/archive/plan-20260903-0442-domain-model-adr.md
-?? tasks/archive/contract-20260903-0839-domain-model-adr.md
-?? tasks/archive/notes-20260903-0839-domain-model-adr.md
-?? tasks/archive/review-20260903-0839-domain-model-adr.md
-?? tasks/archive/todo-20260903-0839-domain-model-adr.md
+?? plans/archive/plan-20260903-0410-api-surface-golden.md
+?? tasks/archive/contract-20260903-0843-api-surface-golden.md
+?? tasks/archive/notes-20260903-0843-api-surface-golden.md
+?? tasks/archive/review-20260903-0843-api-surface-golden.md
+?? tasks/archive/todo-20260903-0843-api-surface-golden.md
 ```
 
 ## Source Artifacts

@@ -1,3 +1,9 @@
+> **Archived**: 2026-09-03 08:43
+> **Related Plan**: plans/archive/plan-20260903-0410-api-surface-golden.md
+> **Outcome**: Completed
+> **Lifecycle**: contract
+> **Parent Run ID**: run-20260903-0843
+
 # Task Contract: api-surface-golden
 
 > **Status**: Partial

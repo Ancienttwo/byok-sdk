@@ -1,3 +1,9 @@
+> **Archived**: 2026-09-03 08:43
+> **Related Plan**: plans/archive/plan-20260903-0410-api-surface-golden.md
+> **Outcome**: Completed
+> **Lifecycle**: review
+> **Parent Run ID**: run-20260903-0843
+
 # Task Review: api-surface-golden
 
 > **Status**: Accepted
@@ -10,7 +16,7 @@
 > **Review Rubric Version**: 2
 > **Reviewed Subject SHA256**: sha256:fac5377e6a94f44ef3c6f48dfd227935e519869437511b8c95cfcdf5c2f8827d
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 4cc765fe1bf0509496f298a50188476329b440cb
+> **Reviewed Target Revision**: 2e01c9af990a2b0b5fe43e2ad2fac27f0128c593
 
 ## Human Review Card
 
@@ -55,9 +61,9 @@ screenshot/artifact path, or reviewer observation.
 > **Actor**: kito
 > **Reviewed Subject SHA256**: sha256:fac5377e6a94f44ef3c6f48dfd227935e519869437511b8c95cfcdf5c2f8827d
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: 4cc765fe1bf0509496f298a50188476329b440cb
-> **Verification Evidence SHA256**: sha256:951f022cf1a077fc00ef8326ad5dcfea0087d2a56a263903fb8e83efaf602654
-> **Issued At**: 2026-09-02T20:53:53.495Z
+> **Reviewed Target Revision**: 2e01c9af990a2b0b5fe43e2ad2fac27f0128c593
+> **Verification Evidence SHA256**: sha256:5e3e03e38895b1f916cb783ae09d694daacb5e21f3f40d06eaa4c7864788735a
+> **Issued At**: 2026-09-03T00:43:34.717Z
 
 - Summary: gatekeeper PASS 2026-09-03: 27/27 exit criteria; closure re-derived for 9 packages; red tests proved both gates go red
 - Findings: none

@@ -1,6 +1,6 @@
 # Plan: Integration-surface golden and version authority gate
 
-> **Status**: Executing
+> **Status**: Archived
 > **Created**: 20260903-0410
 > **Slug**: api-surface-golden
 > **Artifact Level**: work-package
