@@ -294,5 +294,73 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         expect(page.messages).toHaveLength(0);
       });
     });
+
+    it('moves the recoverable floor past rows lost to expiry', async () => {
+      await withComposition(factory, async (handle) => {
+        const { stores } = handle;
+        // A mailbox nobody has written to has lost nothing, so a fresh device's
+        // cursor 0 is inside the window rather than behind a floor it could
+        // never have met.
+        expect(
+          (await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 })).recoverableFrom,
+        ).toBe(1);
+
+        await stores.mailbox.append(TENANT_A, offer(1));
+        await stores.mailbox.append(TENANT_A, offer(2));
+        await handle.advanceTime(1_000);
+        const cutoff = handle.now();
+        await stores.mailbox.append(TENANT_A, offer(3));
+        await stores.mailbox.append(TENANT_A, offer(4));
+
+        expect(
+          (await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 })).recoverableFrom,
+        ).toBe(1);
+
+        // Dead-letters 1 and 2 (appended before the cutoff), leaves 3 and 4.
+        const swept = await stores.mailbox.collectRetired(TENANT_A, {
+          deviceId: DEVICE,
+          ackedBefore: cutoff,
+          expireUnackedBefore: cutoff,
+        });
+        expect(swept).toMatchObject({ deletedCount: 0, expiredCount: 2 });
+
+        const page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
+        expect(page.messages.map((message) => message.seq)).toEqual([3, 4]);
+        expect(page.recoverableFrom).toBe(3);
+
+        // The floor is a property of the mailbox, not of the query: reading
+        // from further along reports the same floor, and a reader at exactly
+        // `recoverableFrom - 1` is still handed the first retained row.
+        const atFloor = await stores.mailbox.readAfter(TENANT_A, {
+          deviceId: DEVICE,
+          afterSeq: page.recoverableFrom - 1,
+        });
+        expect(atFloor.recoverableFrom).toBe(3);
+        expect(atFloor.messages.map((message) => message.seq)).toEqual([3, 4]);
+      });
+    });
+
+    it('leaves the recoverable floor where it is when acked rows are retired', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await stores.mailbox.append(TENANT_A, offer(1));
+        await stores.mailbox.append(TENANT_A, offer(2));
+        await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 2 });
+        await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 2 });
+
+        const swept = await stores.mailbox.collectRetired(TENANT_A, {
+          deviceId: DEVICE,
+          ackedBefore: '2999-01-01T00:00:00.000Z',
+          expireUnackedBefore: '2999-01-01T00:00:00.000Z',
+        });
+        expect(swept).toMatchObject({ deletedCount: 2, expiredCount: 0 });
+
+        // Consumed is not lost. The device acked these rows before they were
+        // deleted, so nothing about that sweep may turn a re-poll from an old
+        // cursor — which at-least-once explicitly permits — into a gap.
+        const page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
+        expect(page.messages).toHaveLength(0);
+        expect(page.recoverableFrom).toBe(1);
+      });
+    });
   });
 }

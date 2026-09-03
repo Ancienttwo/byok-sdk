@@ -78,7 +78,9 @@ export class InMemoryMailboxStore implements MailboxStore {
     const device = this.#devices.get(tenantKey(tenant, query.deviceId));
     const limit = query.limit ?? DEFAULT_READ_LIMIT;
     if (device === undefined) {
-      return { messages: [], nextSeq: query.afterSeq, hasMore: false };
+      // A device with no mailbox has lost nothing, so cursor 0 is inside its
+      // (empty) window rather than behind a floor it could never have met.
+      return { messages: [], nextSeq: query.afterSeq, hasMore: false, recoverableFrom: 1 };
     }
     const pending = device.messages
       .filter((message) => message.state === 'pending' && message.seq > query.afterSeq)
@@ -91,6 +93,10 @@ export class InMemoryMailboxStore implements MailboxStore {
       // Nothing above was mutated, so an identical call replays the same page.
       nextSeq: last?.seq ?? query.afterSeq,
       hasMore: pending.length > page.length,
+      // Computed over the WHOLE mailbox, not the queried slice: the floor is a
+      // property of the device's history, and reporting it relative to
+      // `afterSeq` would make every cursor look recoverable from itself.
+      recoverableFrom: this.#recoverableFrom(device),
     };
   }
 
@@ -218,6 +224,23 @@ export class InMemoryMailboxStore implements MailboxStore {
     };
     this.#devices.set(key, created);
     return created;
+  }
+
+  /**
+   * One past the highest row this device lost, which is exactly the highest
+   * `expired` seq: dead-lettered rows are kept rather than deleted (§12.7.5),
+   * so the loss stays observable and needs no column of its own to remember it.
+   *
+   * `acked` is deliberately not counted. A consumed row is not a lost one, and
+   * counting it would turn a daemon re-polling from an old cursor — which the
+   * at-least-once contract explicitly allows — into a hard failure.
+   */
+  #recoverableFrom(device: DeviceMailbox): number {
+    let lost = 0;
+    for (const message of device.messages) {
+      if (message.state === 'expired' && message.seq > lost) lost = message.seq;
+    }
+    return lost + 1;
   }
 
   #cursorState(
