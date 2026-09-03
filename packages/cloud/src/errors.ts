@@ -44,6 +44,15 @@ export const CLOUD_ERROR_CODES = {
   activity_batch_too_large: 'activity_batch_too_large',
   /** Host control-plane task lookup is tenant-closed and found no task. */
   task_not_found: 'task_not_found',
+  /**
+   * A host `approveTask`/`rejectTask` names a task with no approval to
+   * resolve: the durable timeline holds no unresolved `approval_requested`
+   * (including a tail that has expired or was never written), the attempt has
+   * already reached a terminal status, or no device ever claimed it so there
+   * is nothing to notify. Fail-closed by construction — cloud never invents a
+   * pending approval to make the call succeed.
+   */
+  task_not_awaiting_approval: 'task_not_awaiting_approval',
   /** Durable target-device capability is absent, revoked, or unavailable. */
   agent_capability_missing: 'agent_capability_missing',
   /** Inbound Agent identity did not exactly match the offered identity. */

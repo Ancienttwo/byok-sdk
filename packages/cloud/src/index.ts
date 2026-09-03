@@ -31,8 +31,10 @@ export type {
   AgentContentReadInput,
   AgentHomeProjectionInput,
   AgentHomeProjectionStatusInput,
+  ApproveTaskOptions,
   EnqueueOfferInput,
   EnqueueToolsetOfferInput,
+  RejectTaskOptions,
   EnqueuedAgentControl,
   EnqueuedAgentHomeProjection,
   EnqueuedOffer,
@@ -174,6 +176,13 @@ export type {
   ApprovalTimelineStore,
   ApprovalTimelineTail,
 } from './approval-timeline';
+
+// Host approval resolution. `pendingApproval` is exported alongside the error
+// because it IS the rule the two host calls are gated on — a host that renders
+// an approval prompt reads the same derived fact the kernel enforces, instead
+// of re-deriving a second, drifting answer from the raw timeline.
+export { StaleApprovalError, pendingApproval } from './approval-control';
+export type { PendingApproval } from './approval-control';
 
 export {
   DEFAULT_ACTIVITY_BOUNDS,
