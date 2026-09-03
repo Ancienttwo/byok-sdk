@@ -46,26 +46,14 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
   let daemon: Daemon | undefined;
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     await daemon?.stop();
     await real.close();
   });
 
-  // 2d gap: the WP3B Step 2 façade delegates delivery to the cloud kernel's
-  // mailbox, whose ack is IRREVERSIBLE (`packages/core/src/in-memory/mailbox.ts`
-  // `readAfter` returns only `pending` rows; `advanceCursor` marks everything at
-  // or below the cursor `acked` and the old hub's 500-entry replay ring is gone —
-  // see the case 7 ruling in
-  // `tasks/notes/20260903-1505-wp3b-step2-facade-fold.notes.md`). The long-poll
-  // client acks OPTIMISTICALLY: `ConnectionManager.dedupWatermark()` returns the
-  // delivered high-water while unstalled, so the poll issued immediately after a
-  // batch is delivered carries that seq as its cursor and acks the envelope
-  // BEFORE its handler has settled. Observed against this server: poll
-  // `cursor=1` -> `[[2,'task.steer']]`, next poll `cursor=2` (ack), and every
-  // later poll at the rolled-back `cursor=1` returns `[]` forever. A stalled
-  // handler's envelope is therefore never redelivered, so the fact this case
-  // pins cannot be produced end-to-end any more. Skipped rather than loosened:
-  // the client-side optimistic ack is a real gap, not a test artifact.
-  it.skip('a persistently-throwing steer handler retries at a bounded, delay-spaced rate instead of a tight RTT-bound loop', async () => {
+  // Step 4 regression: a failed handler leaves the kernel ack behind, so
+  // re-reads happen and must use the configured retry cadence.
+  it('a persistently-throwing steer handler retries at a bounded, delay-spaced rate instead of a tight RTT-bound loop', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
@@ -118,31 +106,27 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     expect(elapsedMs).toBeGreaterThanOrEqual(extraAttemptsToObserve * retryDelayMs * 0.5);
   }, 15000);
 
-  // 2d gap: the WP3B Step 2 façade delegates delivery to the cloud kernel's
-  // mailbox, whose ack is IRREVERSIBLE (`packages/core/src/in-memory/mailbox.ts`
-  // `readAfter` returns only `pending` rows; `advanceCursor` marks everything at
-  // or below the cursor `acked` and the old hub's 500-entry replay ring is gone —
-  // see the case 7 ruling in
-  // `tasks/notes/20260903-1505-wp3b-step2-facade-fold.notes.md`). The long-poll
-  // client acks OPTIMISTICALLY: `ConnectionManager.dedupWatermark()` returns the
-  // delivered high-water while unstalled, so the poll issued immediately after a
-  // batch is delivered carries that seq as its cursor and acks the envelope
-  // BEFORE its handler has settled. Observed against this server: poll
-  // `cursor=1` -> `[[2,'task.steer']]`, next poll `cursor=2` (ack), and every
-  // later poll at the rolled-back `cursor=1` returns `[]` forever. A stalled
-  // handler's envelope is therefore never redelivered, so the fact this case
-  // pins cannot be produced end-to-end any more. Skipped rather than loosened:
-  // the client-side optimistic ack is a real gap, not a test artifact.
-  // Additionally vacuous rather than merely unprovable: with no redelivery,
-  // the offer under test is delivered exactly once, so the case would pass
-  // without ever exercising the dedup guard it is named for.
-  it.skip('a task.offer redelivered while its adapter.start() is still in flight (stalled behind an unrelated failing seq) never starts a second adapter session', async () => {
+  // The response counter below proves the same offer is actually re-read
+  // while its first handler is in flight, so the dedup assertion is non-vacuous.
+  it('a task.offer redelivered while its adapter.start() is still in flight (stalled behind an unrelated failing seq) never starts a second adapter session', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
     const retryDelayMs = 30;
+    const nativeFetch = globalThis.fetch;
+    let taskBId: string | undefined;
+    let taskBOfferReads = 0;
+    vi.stubGlobal('fetch', (async (input: string | URL | Request, init?: RequestInit) => {
+      const response = await nativeFetch(input, init);
+      const url = input instanceof Request ? input.url : String(input);
+      if (taskBId !== undefined && url.includes('/byok/events') && response.ok) {
+        const body = await response.clone().json() as { events?: Array<{ type?: string; task_id?: string }> };
+        taskBOfferReads += body.events?.filter((event) => event.type?.startsWith('task.offer') && event.task_id === taskBId).length ?? 0;
+      }
+      return response;
+    }) as typeof fetch);
 
     daemon = createDaemonWithAdapters(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
@@ -179,12 +163,14 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     // the running total to 2 — that's the count to synchronize on, not 1.
     const releaseB = adapter.blockStart();
     const handleB = await real.byok.dispatch({ instruction: 'task B (redelivered while in flight)', policy: { mode: 'auto' } });
+    taskBId = handleB.taskId;
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(2));
 
     // Let several stalled re-poll cycles land while B's start() is blocked —
     // long enough for a pre-fix build to have piled up multiple queued
     // duplicate deliveries of B's own offer behind the first.
     await new Promise((resolve) => setTimeout(resolve, 10 * retryDelayMs));
+    expect(taskBOfferReads).toBeGreaterThanOrEqual(2);
 
     releaseB();
     sessionA.steerErrorPersistent = undefined; // let A recover too, for clean teardown
@@ -210,22 +196,9 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     expect(resultB.summary).toBe('B finished cleanly');
   }, 15000);
 
-  // 2d gap: the WP3B Step 2 façade delegates delivery to the cloud kernel's
-  // mailbox, whose ack is IRREVERSIBLE (`packages/core/src/in-memory/mailbox.ts`
-  // `readAfter` returns only `pending` rows; `advanceCursor` marks everything at
-  // or below the cursor `acked` and the old hub's 500-entry replay ring is gone —
-  // see the case 7 ruling in
-  // `tasks/notes/20260903-1505-wp3b-step2-facade-fold.notes.md`). The long-poll
-  // client acks OPTIMISTICALLY: `ConnectionManager.dedupWatermark()` returns the
-  // delivered high-water while unstalled, so the poll issued immediately after a
-  // batch is delivered carries that seq as its cursor and acks the envelope
-  // BEFORE its handler has settled. Observed against this server: poll
-  // `cursor=1` -> `[[2,'task.steer']]`, next poll `cursor=2` (ack), and every
-  // later poll at the rolled-back `cursor=1` returns `[]` forever. A stalled
-  // handler's envelope is therefore never redelivered, so the fact this case
-  // pins cannot be produced end-to-end any more. Skipped rather than loosened:
-  // the client-side optimistic ack is a real gap, not a test artifact.
-  it.skip('a stalled seq that succeeds on retry executes exactly once, even if another redelivery of it piles up while the retry is still resolving', async () => {
+  // Step 4 regression: repeated reads during a successful retry must not
+  // append the same seq to the handler FIFO twice.
+  it('a stalled seq that succeeds on retry executes exactly once, even if another redelivery of it piles up while the retry is still resolving', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
     const workspaceRoot = await tmpDir('byok-e2e-workspace-');
