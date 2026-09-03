@@ -335,3 +335,7 @@ Promote a candidate to `tasks/lessons.md`, `docs/researches/`, or harness asset 
 - Promote to `tasks/lessons.md` only after a repeated correction or failure pattern.
 - Promote to `docs/researches/` only when it is durable repo knowledge with evidence.
 - Promote to harness asset files only after verification across more than one task or fixture.
+
+## Closeout marker (2026-09-03)
+
+`c3c9ccc` regenerated `api-surface/{cloud,core,cloud-dataplane}.d.ts`; `bun run check:api-surface` passes from that commit on. Per-sub-step "check:api-surface fails additively" notes above describe the state before closeout.

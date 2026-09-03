@@ -160,4 +160,4 @@ exit_criteria:
 ## Rollback Point
 
 - Commit / checkpoint: origin/main 5cfc8c7
-- Revert strategy: `git revert` any single sub-step commit (PR is rebase-merged, not squashed); 0018 migration delete-before-apply or forward `0019` reverse.
+- Revert strategy: PR is rebase-merged (not squashed) so the six sub-step commits stay linear. 1e, 1c, 1d revert cleanly alone; 1a and 1b share `cloud.ts`/`index.ts` and `ports.ts`/`tenant-stores.ts`/task-attempts stores with later sub-steps, so revert them in reverse order or expect a manual resolution in those files (textual adjacency only, no semantic dependency). 0018 migration: delete before any environment applies it, else a forward `0019` reverse migration.
