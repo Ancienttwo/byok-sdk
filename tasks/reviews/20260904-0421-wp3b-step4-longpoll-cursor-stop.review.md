@@ -1,6 +1,6 @@
 # Task Review: wp3b-step4-longpoll-cursor-stop
 
-> **Status**: Ready for gate
+> **Status**: Accepted
 > **Plan**: plans/plan-20260904-0421-wp3b-step4-longpoll-cursor-stop.md
 > **Contract**: tasks/contracts/20260904-0421-wp3b-step4-longpoll-cursor-stop.contract.md
 > **Notes File**: tasks/notes/20260904-0421-wp3b-step4-longpoll-cursor-stop.notes.md
@@ -8,9 +8,9 @@
 > **Last Updated**: 2026-09-04 04:36
 > **Recommendation**: pass
 > **Review Rubric Version**: 2
-> **Reviewed Subject SHA256**: pending exact commit
+> **Reviewed Subject SHA256**: sha256:5dbb9838e3b0b41fa4a1bd3a80fe4295d5a95bf767ea984e6268bdd6e88155c5
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: `10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1`
+> **Reviewed Target Revision**: 10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1
 
 ## Human Review Card
 
@@ -39,18 +39,18 @@
 
 ## Acceptance Receipt Projection
 
-> **Disposition**: unavailable
-> **Reviewer**: unavailable
-> **Source**: unavailable
+> **Disposition**: external_pass
+> **Reviewer**: Codex
+> **Source**: codex-review
 > **Actor**: not-applicable
-> **Reviewed Subject SHA256**: pending
+> **Reviewed Subject SHA256**: sha256:5dbb9838e3b0b41fa4a1bd3a80fe4295d5a95bf767ea984e6268bdd6e88155c5
 > **Reviewed Subject Scope**: normalized-final-content
-> **Reviewed Target Revision**: `10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1`
-> **Verification Evidence SHA256**: pending
-> **Issued At**: pending
+> **Reviewed Target Revision**: 10bb9fc76b0a1ee3a533f50a42e869235c5c7bd1
+> **Verification Evidence SHA256**: sha256:ba3645137d021255ed439aef5251921c9b4102bde81ee32f13b3b17f467b6b49
+> **Issued At**: 2026-09-03T21:00:14.956Z
 
-- Summary: no exact-subject AcceptanceReceipt has been recorded yet.
-- Findings: none before the final gate.
+- Summary: WP3B Step 4a accepted after published-base rebase; durable long-poll acknowledgement, bounded local dedup, and cancellable stop passed exact-subject review.
+- Findings: none
 
 ## Behavior Diff Notes
 
