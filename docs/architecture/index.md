@@ -15,5 +15,5 @@
 ## Pending Requests
 
 <!-- BEGIN ARCHITECTURE PENDING REQUESTS -->
-- [ ] 2026-08-29T20:31:44+0800 [high] `packages/client/src/__tests__/agent-memory-entry-constraints.test.ts` -> [root](requests/root.md)
+- [ ] 2026-09-03T12:16:59+0800 [high] `packages/client/src/__tests__/fixtures/process-tree-descendant.mjs` -> [root](requests/root.md)
 <!-- END ARCHITECTURE PENDING REQUESTS -->
