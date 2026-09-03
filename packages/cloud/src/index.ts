@@ -134,7 +134,7 @@ export type { CloudCrypto } from './crypto/port';
 
 // Inbound gate
 export { handleInboundEnvelope, terminalReceiptKey } from './inbound';
-export type { InboundOutcome } from './inbound';
+export type { ByokCloudObserver, InboundCommitted, InboundOutcome } from './inbound';
 
 // Typed terminal read model (the receipt `readTerminalReceipt` hands back raw)
 export { projectTerminalResult } from './terminal-result';

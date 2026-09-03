@@ -27,7 +27,7 @@ import {
   type AgentMessagePublishPayload,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
-import { handleInboundEnvelope, readAgentMessageDisposition } from '../inbound';
+import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObserver } from '../inbound';
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
@@ -64,6 +64,12 @@ export interface MessagesRouteDeps extends DeviceRouteDeps {
     taskId: string,
     payload: AgentMessageDispositionPayload,
   ) => Promise<void>;
+  /**
+   * Post-commit relay. Batch order IS notification order: the loop below
+   * awaits one envelope's gate before starting the next, so an observer sees
+   * committed envelopes in the order the device sent them.
+   */
+  readonly observer?: ByokCloudObserver;
 }
 
 export function messagesHandler(deps: MessagesRouteDeps) {
@@ -86,6 +92,7 @@ export function messagesHandler(deps: MessagesRouteDeps) {
         envelope,
         deps.activityBounds,
         envelope.type === 'agent.message.publish' ? deps.agentMessage?.consume : undefined,
+        deps.observer,
       );
       if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);
       if (envelope.type === 'agent.message.publish') {

@@ -156,7 +156,7 @@ import {
   truthPutHandler,
 } from './handlers/truth';
 import { CloudRouteRegistry, type RouteDescriptor } from './router/registry';
-import { terminalReceiptKey } from './inbound';
+import { terminalReceiptKey, type ByokCloudObserver } from './inbound';
 import {
   agentHomeProjectionRequestKey,
   readAgentHomeProjectionStatus,
@@ -255,6 +255,14 @@ export interface ByokCloudOptions {
       readonly payload: AgentMessagePublishPayload;
     }): Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>;
   };
+  /**
+   * Post-commit relay for envelopes this cloud durably accepted. Read-only by
+   * construction: it is told after the write, it returns `void`, and a throw
+   * from it is swallowed — the outcome is already fixed. Distinct from
+   * {@link ByokCloudOptions.agentMessage}, which is admission and runs BEFORE
+   * a write, deciding whether it happens at all.
+   */
+  readonly observer?: ByokCloudObserver;
   /** Embedder-owned grant and consent authority for optional hosted Agent-memory projection. */
   readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
   /** Durable snapshot + immutable metering receipt authority for optional hosted Agent-memory projection. */
@@ -611,6 +619,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         appendContentReceiptAck: enqueueContentReceiptAck,
         agentMessage: options.agentMessage,
         appendAgentMessageDisposition: enqueueAgentMessageDisposition,
+        observer: options.observer,
       }),
     );
   }

@@ -4,7 +4,7 @@
 > **Plan**: plans/plan-20260903-1330-wp3b-step1-kernel-increments.md
 > **Contract**: tasks/contracts/20260903-1330-wp3b-step1-kernel-increments.contract.md
 > **Review**: tasks/reviews/20260903-1330-wp3b-step1-kernel-increments.review.md
-> **Last Updated**: 2026-09-03 13:50
+> **Last Updated**: 2026-09-03 14:15
 > **Lifecycle**: notes
 
 ## Design Decisions
@@ -94,10 +94,116 @@ git diff --stat origin/main..HEAD -- packages/server  -> empty
 - `bun run check:api-surface` fails on `@byok-sdk/cloud` only, with an **additive-only** diff (no removed lines): `approval-control.d.ts` (`StaleApprovalError`, `PendingApproval`, `pendingApproval`), `ApproveTaskOptions`/`RejectTaskOptions`, `approveTask`/`rejectTask`, `task_not_awaiting_approval`, and `instanceProductId` on `ByokCloudOptions`/`BearerAuthDeps`. Goldens are regenerated once at the end of the slice, per the plan's T2 — deliberately not touched here.
 - `packages/cloud-dataplane/src/__tests__/worker-packaging.test.ts > dry-runs wrangler deploy over worker-smoke` failed once under the full parallel run and passed on isolated re-run and on the full re-run. Pre-existing flake, unrelated to this slice; not touched.
 
+## Sub-step 1c — `cursor_too_old` (GAP-3)
+
+Commit `b14b6e3` — `feat(core,cloud): MailboxPage.recoverableFrom and 409 cursor_too_old`
+
+Files touched:
+
+- `packages/core/src/mailbox.ts` — `MailboxPage.recoverableFrom: number` (core port change; the design packet mis-cited this file as living in cloud).
+- `packages/core/src/in-memory/mailbox.ts` — `#recoverableFrom(device)`; unknown device answers `1`.
+- `packages/cloud-dataplane/src/stores/core/mailbox.ts` — `#recoverableFrom(tenant, deviceId)`, one extra `SELECT` issued after the page.
+- `packages/cloud/src/handlers/events.ts` — the 409 gate, plus a fourth bullet in the file header.
+- `packages/conformance/src/core/mailbox.ts` — 2 new cases (in-memory + Postgres run the same file).
+- `packages/cloud/src/__tests__/events-cursor-too-old.test.ts` — new, 4 tests.
+
+### The load-bearing decision: what counts as LOST
+
+The floor is `max(seq of rows in state 'expired') + 1`, and `1` when nothing expired. Only `expired` counts.
+
+The first implementation used "earliest retained (`pending`) row" instead, which also folds `acked` into the floor. That went red on an existing cloud assertion — `mailbox-cursor.test.ts > does not treat a cursor at or below the ack position as an ack attempt`, whose comment is explicit: *"A daemon that lost its journal and polls from zero must not crash the route with a cursor regression — and must not un-ack what it acked."* The existing behaviour is right and the first rule was wrong: a consumed row is not a lost one, and §8.3 stall recovery has a daemon re-polling from an old cursor as a normal event, not a fault.
+
+That also matches the server exactly. `hub.ts:2505-2519` moves `recoverableFrom` only on ring **eviction** — the outbox ring never drops a row because it was acked — so "loss only" is the reference semantics, not a cloud-local softening.
+
+Consequences worth stating:
+
+- Retiring **acked** rows (`collectRetired`'s delete leg) does not move the floor. Pinned by conformance `leaves the recoverable floor where it is when acked rows are retired` and by the route-level `never refuses a cursor merely because the rows past it were acked and retired`.
+- Expiring **unacked** rows does. Pinned by conformance `moves the recoverable floor past rows lost to expiry` and the route-level 409 test.
+- Empty/never-retired mailbox → `1`, so a fresh device at cursor 0 keeps today's 200. Asserted at both layers.
+
+### No migration (0018 stays free for 1b)
+
+`collectRetired` **never deletes an unacked row** — §12.7.5 requires the dead letter to stay visible — so the loss is already durable in `outbox` and `MAX(seq) WHERE state='expired'` reads it directly. A stored floor column would be a second authority free to drift from the sweep that moved it. Recorded constraint for whoever implements dead-letter reaping (S4B / O-009): that change is the one that has to carry the floor forward into a column, because it is the first thing that would delete the rows this derivation reads.
+
+### Other decisions
+
+- **Read the floor AFTER the page** (Postgres). A sweep landing between the two reads can then only report a floor HIGHER than the page it accompanies — the caller fails closed over a page that may already be missing rows. Reading the floor first would report one too low and serve that gap silently.
+- **Gate compares `cursor`, never `scanCursor`.** The handler advances `scanCursor` within a request while scanning past filtered cancelled offers; the floor is about the caller's own position.
+- **Gate runs on every read inside the hold loop**, not once at entry, mirroring the server's second `assertReplayAvailable` in the hold's timeout path (`hub.ts:776`): a sweep landing mid-hold ends the hold with the 409 the caller now deserves rather than an empty 200. Zero extra queries — it rides the reads the loop already does.
+- **Body is `{ error: 'cursor_too_old', recoverableFrom }`, 409**, byte-equal to `packages/server/src/http.ts:386` and inside every bound `packages/client/src/daemon/long-poll-transport.ts:567-578` checks (`Number.isSafeInteger`, `>= 0`). Client untouched.
+- A 409 performs no ack; asserted directly.
+
+Falsifier runs: forcing the route gate to `false` reds `refuses a cursor below rows lost to expiry…` (1 failed / 288); forcing the in-memory expiry branch to `false` (with core rebuilt) reds conformance `moves the recoverable floor past rows lost to expiry` (1 failed / 149). Both restored.
+
+Command tails:
+
+```
+bun run build            -> byok-sdk build: Exited with code 0
+bun run typecheck        -> 15 packages, 0 errors
+bun run test             -> cloud 32 files / 288 tests; server 37 files / 289 tests; all packages green
+bun run --cwd packages/conformance test -> 4 files / 149 tests
+bun run check:version-authority -> byok-sdk@0.12.0, @byok-sdk/keys@0.3.9 agree
+git diff --check         -> clean
+git diff --stat origin/main..HEAD -- packages/server  -> empty
+```
+
+### Known, out of scope (1c)
+
+- **The Postgres `#recoverableFrom` SQL is not runtime-verified here.** Docker is unavailable in this environment (`docker info` fails), so `BYOK_TEST_POSTGRES_URL` is unset and all 25 dataplane suites — including `core-conformance.test.ts`, the file that would run the two new conformance cases against Postgres — skip. The statement is typechecked and the in-memory sibling is green; the Postgres leg needs the substrate (`docker compose -f docker-compose.test.yml up -d --wait`) or the CI dataplane job (`BYOK_REQUIRE_DATAPLANE=1`) to be proven.
+- No migration added, so `deploy/sql/0018_*` remains free for sub-step 1b as planned; `bun run check:deploy-sql` was not run (no SQL touched).
+
+## Sub-step 1f — observer post-commit hook
+
+Commit: this commit — `feat(cloud): ByokCloudOptions.observer.onInboundCommitted post-commit hook` (it carries these notes, so its own SHA cannot appear inside them; the handoff reports it).
+
+Files touched:
+
+- `packages/cloud/src/inbound.ts` — `InboundCommitted`, `ByokCloudObserver`; `handleInboundEnvelope` becomes a thin wrapper over the renamed private `applyInboundGate`; step 5 added to the file header.
+- `packages/cloud/src/handlers/messages.ts` — `MessagesRouteDeps.observer?`, passed as the gate's 6th argument.
+- `packages/cloud/src/cloud.ts` — `ByokCloudOptions.observer?`, wired into `messagesHandler`.
+- `packages/cloud/src/composition/in-memory.ts` — option passthrough (this is how `createHarness({ observer })` reaches it).
+- `packages/cloud/src/index.ts` — exports `ByokCloudObserver`, `InboundCommitted`.
+- `packages/cloud/src/__tests__/inbound-observer.test.ts` — new, 9 tests.
+
+### One exit, not seven
+
+`handleInboundEnvelope` had ~10 `return` points. Firing from each would have to be repeated at every one and would be one edit away from firing twice or not at all, so the whole gate body was renamed to a private `applyInboundGate` and the exported function became a wrapper with a single exit that fires there. The diff is a rename plus 25 lines; no gate logic moved.
+
+### `duplicate` does NOT fire (the decision the brief asked to record)
+
+A `duplicate` re-ran nothing: the dedup store already held the envelope id, so no lifecycle write happened on this delivery. The wire is at-least-once (§9) and redelivery is the normal event, not the exception — a relay that fired on duplicates would count retries as work, which is precisely the over-count `TaskHandle` fan-out must not have. `rejected` and `rate_limited` wrote nothing at all. So `accepted` is the only firing outcome, and `InboundCommitted.outcome` is typed `Extract<InboundOutcome, 'accepted'>` rather than `InboundOutcome`: a consumer that could branch on values that never arrive would be reading a lie from the type.
+
+The field is carried anyway, per the brief, because it names the fact in the gate's own vocabulary instead of leaving the reader to infer it from the hook's name.
+
+### Other decisions
+
+- **Synchronous, `void`, throw swallowed.** Fired after the gate returns, inside `try/catch`, with the outcome already fixed. `packages/cloud` has no logger of any kind (grepped: no `logger`, no `console.`), so the catch is silent rather than inventing a logging seam this slice did not ask for. Documented on the interface as "cheap by contract — it runs inline on the request path".
+- **Async observers are out of contract.** The hook returns `void`; a consumer returning a promise that rejects would surface as an unhandled rejection in the host. Not defended against, because doing so would be defensive code for a shape the type already forbids.
+- **Distinct from `agentMessage.consume`.** That one is admission: it runs BEFORE a write and decides whether the write happens. This one runs after and decides nothing. Both facts are on the `ByokCloudObserver` doc comment so the next reader cannot confuse them.
+- **Batch order is notification order** because `messagesHandler` awaits one envelope's gate before starting the next. Asserted end to end over `POST /byok/messages`.
+- **Tenant comes from `stores.tenant`**, the closure the route already authenticated into — the observer never sees a tenant the caller did not prove.
+
+Falsifier runs: dropping the `outcome === 'accepted'` guard reds the three silence tests (3 failed / 297); replacing the `try/catch` with a bare call reds both throw tests (2 failed / 297). Both restored.
+
+Command tails:
+
+```
+bun run build            -> byok-sdk build: Exited with code 0
+bun run typecheck        -> 15 packages, 0 errors
+bun run test             -> cloud 33 files / 297 tests; server 37 files / 289 tests; conformance 149; all packages green
+bun run --cwd packages/conformance test -> 4 files / 149 tests
+git diff --check         -> clean
+git diff --stat origin/main..HEAD -- packages/server  -> empty
+```
+
+### Known, out of scope (1c + 1f)
+
+- `bun run check:api-surface` fails on `@byok-sdk/cloud` and `@byok-sdk/core`, **additive-only** (0 removed lines across both diffs): core gains `MailboxPage.recoverableFrom`; cloud gains `ByokCloudObserver`, `InboundCommitted`, `ByokCloudOptions.observer`, on top of 1a/1e's additions. `@byok-sdk/cloud-dataplane` is unaffected — `#recoverableFrom` is a private method. Goldens are regenerated once at the end of the slice per the plan's T2; deliberately not touched here.
 
 ## Deviations From Plan Or Spec
 
-- None recorded.
+- **1c adds no `deploy/sql` migration** (the brief allowed one "if the dataplane store needs schema to know the floor"). It does not: dead-lettered rows are retained by contract, so the floor is derivable from `outbox` alone. `0018_task_attempt_claimed_runtime.sql` therefore remains sub-step 1b's number and the next worker uses 0018, not 0019.
+- **1c's floor semantics are loss-only, not retention-only.** The brief phrased the floor as "lost rows to retirement/expiry"; retirement of *acked* rows is excluded, because counting it contradicts both the reference server (`hub.ts` moves the floor on eviction only) and an existing cloud assertion. Reasoning under "The load-bearing decision" above.
 
 ## Tradeoffs Considered
 
